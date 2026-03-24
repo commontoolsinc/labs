@@ -11,16 +11,15 @@ import {
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
   JsScript,
+  type MappedPosition,
   Program,
   ProgramResolver,
   Source,
   TypeScriptCompiler,
 } from "@commonfabric/js-compiler";
-import { MappedPosition } from "./eval-runtime.ts";
 import {
   CommonFabricTransformerPipeline,
   OpaqueRefErrorTransformer,
-} from "@commonfabric/ts-transformers";
 } from "@commonfabric/ts-transformers";
 import { Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";

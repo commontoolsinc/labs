@@ -7,9 +7,9 @@ import {
   TypeScriptCompiler,
   type TypeScriptCompilerOptions,
 } from "@commonfabric/js-compiler";
-import { UnsafeEvalRuntime } from "../src/harness/eval-runtime.ts";
 import { StaticCacheFS } from "@commonfabric/static";
 import { CommonFabricTransformerPipeline } from "@commonfabric/ts-transformers";
+import { SESRuntime } from "../src/sandbox/mod.ts";
 
 const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
 
@@ -58,9 +58,9 @@ function execute(
   bundled: JsScript,
 ): {
   main: Record<string, unknown>;
-  runtime: UnsafeEvalRuntime;
+  runtime: SESRuntime;
 } {
-  const runtime = new UnsafeEvalRuntime();
+  const runtime = new SESRuntime({ lockdown: true });
   const isolate = runtime.getIsolate("");
   const evaledBundle = isolate.execute(bundled);
   const result = evaledBundle.invoke().inner();
@@ -74,6 +74,14 @@ function execute(
     };
   }
   throw new Error("Unexpected evaluation result.");
+}
+
+function invokeInRuntime<TArgs extends unknown[], TResult>(
+  runtime: SESRuntime,
+  fn: (...args: TArgs) => TResult,
+  ...args: TArgs
+): TResult {
+  return runtime.getIsolate("").value(fn).invoke(...args).inner() as TResult;
 }
 
 describe("Stack trace source mapping", () => {
@@ -131,11 +139,11 @@ describe("Stack trace source mapping", () => {
       val: number,
     ) => number;
 
-    expect(riskyOperation(5)).toBe(10);
+    expect(invokeInRuntime(runtime, riskyOperation, 5)).toBe(10);
 
     let thrown: Error | undefined;
     try {
-      riskyOperation(-1);
+      invokeInRuntime(runtime, riskyOperation, -1);
     } catch (e) {
       thrown = e as Error;
     }
@@ -176,7 +184,7 @@ describe("Stack trace source mapping", () => {
 
     let thrown: Error | undefined;
     try {
-      processData("");
+      invokeInRuntime(runtime, processData, "");
     } catch (e) {
       thrown = e as Error;
     }
@@ -207,7 +215,7 @@ describe("Stack trace source mapping", () => {
 
     let thrown: Error | undefined;
     try {
-      fn(0);
+      invokeInRuntime(runtime, fn, 0);
     } catch (e) {
       thrown = e as Error;
     }
@@ -237,7 +245,7 @@ describe("Stack trace source mapping", () => {
 
     let thrown: Error | undefined;
     try {
-      await asyncBoom();
+      await invokeInRuntime(runtime, asyncBoom);
     } catch (e) {
       thrown = e as Error;
     }
@@ -251,7 +259,7 @@ describe("Stack trace source mapping", () => {
   });
 
   it("returns stack unchanged when no source map is loaded", () => {
-    const runtime = new UnsafeEvalRuntime();
+    const runtime = new SESRuntime({ lockdown: true });
 
     const stack = `Error: something broke
     at someFunction (unknown-file.js:10:5)
@@ -285,11 +293,11 @@ describe("Stack trace source mapping with CTS transformer", () => {
     const { main, runtime } = execute(compiled);
     const validate = (main as any).validate as (x: number) => number;
 
-    expect(validate(5)).toBe(10);
+    expect(invokeInRuntime(runtime, validate, 5)).toBe(10);
 
     let thrown: Error | undefined;
     try {
-      validate(-1);
+      invokeInRuntime(runtime, validate, -1);
     } catch (e) {
       thrown = e as Error;
     }

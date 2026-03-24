@@ -42,14 +42,15 @@ class SESInternals {
 
   exec<T>(callback: () => T): T {
     try {
-      return callback();
-    } catch (e: unknown) {
-      const error = e as Error;
-      materializeHostVisibleStack(error);
-      if (error.stack) {
-        error.stack = this.sourceMaps.parse(error.stack);
+      const result = callback();
+      if (isPromiseLike(result)) {
+        return result.catch((error: unknown) => {
+          throw this.mapThrownError(error);
+        }) as T;
       }
-      throw error;
+      return result;
+    } catch (e: unknown) {
+      throw this.mapThrownError(e);
     }
   }
 
@@ -71,6 +72,17 @@ class SESInternals {
 
   clear(): void {
     this.sourceMaps.clear();
+  }
+
+  private mapThrownError(error: unknown): unknown {
+    if (!(error instanceof Error)) {
+      return error;
+    }
+    materializeHostVisibleStack(error);
+    if (error.stack) {
+      error.stack = this.sourceMaps.parse(error.stack);
+    }
+    return error;
   }
 }
 
@@ -270,4 +282,10 @@ function materializeHostVisibleStack(error: Error): void {
     return;
   }
   error.stack = `${error}${frames.startsWith("\n") ? frames : `\n${frames}`}`;
+}
+
+function isPromiseLike(
+  value: unknown,
+): value is Promise<unknown> {
+  return !!value && typeof (value as { catch?: unknown }).catch === "function";
 }

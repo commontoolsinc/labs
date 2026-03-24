@@ -61,15 +61,13 @@ The current execution pipeline:
 Pattern Source (.tsx)
     ↓ ts-transformers (compile-time)
     ↓ js-compiler (TypeScript → AMD bundle)
-    ↓ UnsafeEvalIsolate (direct eval())
+    ↓ verified SES module Compartment
     ↓ instantiateJavaScriptNode() → fn(argument)
 ```
 
-**Security Gap**: Pattern code currently runs with full access to the JavaScript environment via `eval()`. There are no restrictions on:
-- Global access
-- Closure creation
-- Module imports
-- Side effects
+The legacy `UnsafeEvalIsolate` authored-module path has been removed. The
+remaining security work is about tightening the verified SES boundary and the
+callback rehydration path, not replacing `eval()` anymore.
 
 ### 2.2 Why SES?
 
@@ -1277,13 +1275,13 @@ Implementation guidance:
 
 - keep `SourceMapParser` ownership on the runtime / isolate / sandbox instance,
   not on individual errors
-- if the current `UnsafeEvalIsolate` / `IsolateInternals` abstraction is
-  generalized or extracted, SES should use that shared helper rather than
-  re-specifying stack parsing and source-map caching behavior
+- keep the source-map and stack-materialization helper shared across the SES
+  module runtime and the narrower callback-compartment runtime, rather than
+  duplicating parsing/caching behavior in each call path
 - source maps are loaded by filename into the shared mapper and do not need to
   live on every `PatternCompartment`
 - the same mapper supports direct `parseStack()` and `mapPosition()` calls for
-  both the existing harness and the SES runtime
+  both the module-load and lazy-callback SES paths
 
 #### 8.4.2 ErrorMappingOptions and MappedError
 
@@ -1896,7 +1894,7 @@ private instantiateJavaScriptNode(
 **Files to modify:**
 - `packages/runner/src/runner.ts`
 
-#### 4.2 Remove UnsafeEvalIsolate Usage
+#### 4.2 Remove Legacy UnsafeEvalIsolate Usage
 
 The runtime no longer exposes a live `unsafe-eval` authored-module path.
 `harness.getInvocation()` still exists as an internal seam, but it now
@@ -1916,9 +1914,11 @@ fn = this.runtime.harness.getInvocation(module.implementation);
 fn = evaluateInCallbackCompartment(module.implementation);
 ```
 
-**Files to modify:**
-- `packages/runner/src/harness/engine.ts` (deprecate or remove)
-- `packages/runner/src/harness/eval-runtime.ts` (deprecate or remove)
+**Implemented in:**
+- `packages/runner/src/harness/engine.ts`
+- `packages/runner/src/sandbox/ses-runtime.ts`
+- `packages/runner/test/runtime.test.ts`
+- `packages/runner/test/stack-trace.test.ts`
 
 ### Phase 5: Dynamic Imports (Deferred)
 

@@ -6,8 +6,8 @@ import {
   JsScript,
   TypeScriptCompiler,
 } from "@commonfabric/js-compiler";
-import { UnsafeEvalRuntime } from "../src/harness/eval-runtime.ts";
 import { StaticCacheFS } from "@commonfabric/static";
+import { SESRuntime } from "../src/sandbox/mod.ts";
 
 const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
 
@@ -127,7 +127,7 @@ function execute(
   main: Record<string, unknown>;
   exportMap: Record<string, Record<string, unknown>>;
 } {
-  const runtime = new UnsafeEvalRuntime();
+  const runtime = new SESRuntime({ lockdown: true });
   const isolate = runtime.getIsolate("");
   const evaledBundle = isolate.execute(bundled);
   const result = rtBundle !== undefined
