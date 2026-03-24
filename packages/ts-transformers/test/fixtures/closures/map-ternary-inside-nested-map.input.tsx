@@ -31,7 +31,7 @@ interface PatternInput {
 //   outer ternary → ifElse(hasItems, items.mapWithPattern(...), <p>No items</p>)
 //   outer .map(fn) → .mapWithPattern(pattern(...), {showInactive})
 //   inner .map(fn) → .mapWithPattern(pattern(...), {showInactive})
-//   inner ternary → ifElse(tag.active, tag.name, derive(... ifElse(showInactive, ...)))
+//   inner ternary → ifElse(tag.active, tag.name, ifElse(showInactive, `(${tag.name})`, ""))
 // Context: Nested maps with ternaries at both levels; captures showInactive through both map layers
 export default pattern<PatternInput>(({ items, showInactive }) => {
   const hasItems = computed(() => items.get().length > 0);

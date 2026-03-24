@@ -284,44 +284,21 @@ export default pattern((state) => {
                                             title: section.key("title")
                                         },
                                         tag: tag
-                                    }, ({ section, tag }) => `${section.title}:${tag}`), __ctHelpers.derive({
-                                        type: "object",
-                                        properties: {
-                                            state: {
-                                                type: "object",
-                                                properties: {
-                                                    showCompleted: {
-                                                        type: "boolean"
-                                                    }
-                                                },
-                                                required: ["showCompleted"]
-                                            },
-                                            task: {
-                                                type: "object",
-                                                properties: {
-                                                    done: {
-                                                        type: "boolean"
-                                                    }
-                                                },
-                                                required: ["done"]
-                                            },
-                                            tag: {
-                                                type: "string"
-                                            }
-                                        },
-                                        required: ["state", "task", "tag"]
+                                    }, ({ section, tag }) => `${section.title}:${tag}`), __ctHelpers.ifElse({
+                                        type: "boolean"
                                     } as const satisfies __ctHelpers.JSONSchema, {
                                         type: "string"
                                     } as const satisfies __ctHelpers.JSONSchema, {
-                                        state: {
-                                            showCompleted: state.key("showCompleted")
-                                        },
-                                        task: {
-                                            done: task.key("done")
-                                        },
-                                        tag: tag
-                                    }, ({ state, task, tag }) => state.showCompleted || !task.done
-                                        ? tag : ""))}
+                                        type: "string"
+                                    } as const satisfies __ctHelpers.JSONSchema, {
+                                        type: "string"
+                                    } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.unless({
+                                        type: "boolean"
+                                    } as const satisfies __ctHelpers.JSONSchema, {
+                                        type: "boolean"
+                                    } as const satisfies __ctHelpers.JSONSchema, {
+                                        type: "boolean"
+                                    } as const satisfies __ctHelpers.JSONSchema, state.key("showCompleted"), !task.key("done")), tag, ""))}
                           </span>);
                             }, {
                                 type: "object",

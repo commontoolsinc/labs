@@ -87,8 +87,20 @@ function isLogicalBinaryExpression(
     );
 }
 
+function getControlFlowRewriteExpression(
+  expr: ts.Expression,
+): ts.Expression | undefined {
+  const current = unwrapExpression(expr);
+  if (
+    ts.isConditionalExpression(current) || isLogicalBinaryExpression(current)
+  ) {
+    return current;
+  }
+  return undefined;
+}
+
 function isControlFlowRewriteExpression(expr: ts.Expression): boolean {
-  return ts.isConditionalExpression(expr) || isLogicalBinaryExpression(expr);
+  return !!getControlFlowRewriteExpression(expr);
 }
 
 function isPostClosureWrapperRewriteExpression(
@@ -344,13 +356,18 @@ function requiresLegacyJsxControlFlowHandling(
       containsReactiveArrayMethodSubexpression(branch, context, analyze);
   };
 
-  if (ts.isConditionalExpression(expression)) {
-    const branches = [expression.whenTrue, expression.whenFalse];
+  const current = getControlFlowRewriteExpression(expression);
+  if (!current) {
+    return false;
+  }
+
+  if (ts.isConditionalExpression(current)) {
+    const branches = [current.whenTrue, current.whenFalse];
     return branches.some(branchRequiresLegacyHandling);
   }
 
-  if (isLogicalBinaryExpression(expression)) {
-    return branchRequiresLegacyHandling(expression.right);
+  if (isLogicalBinaryExpression(current)) {
+    return branchRequiresLegacyHandling(current.right);
   }
 
   return false;

@@ -28,7 +28,7 @@ interface PatternInput {
 //   outer ternary → ifElse(hasItems, items.mapWithPattern(...), <p>No items</p>)
 //   outer .map(fn) → .mapWithPattern(pattern(...), {showInactive})
 //   inner .map(fn) → .mapWithPattern(pattern(...), {showInactive})
-//   inner ternary → ifElse(tag.active, tag.name, derive(... ifElse(showInactive, ...)))
+//   inner ternary → ifElse(tag.active, tag.name, ifElse(showInactive, `(${tag.name})`, ""))
 // Context: Nested maps with ternaries at both levels; captures showInactive through both map layers
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
@@ -151,12 +151,9 @@ export default pattern((__ct_pattern_input) => {
                         type: "string"
                     } as const satisfies __ctHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, tag.key("active"), tag.key("name"), __ctHelpers.derive({
+                    } as const satisfies __ctHelpers.JSONSchema, tag.key("active"), tag.key("name"), showInactive ? __ctHelpers.derive({
                         type: "object",
                         properties: {
-                            showInactive: {
-                                type: "boolean"
-                            },
                             tag: {
                                 type: "object",
                                 properties: {
@@ -167,15 +164,12 @@ export default pattern((__ct_pattern_input) => {
                                 required: ["name"]
                             }
                         },
-                        required: ["showInactive", "tag"]
+                        required: ["tag"]
                     } as const satisfies __ctHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, {
-                        showInactive: showInactive,
-                        tag: {
+                    } as const satisfies __ctHelpers.JSONSchema, { tag: {
                             name: tag.key("name")
-                        }
-                    }, ({ showInactive, tag }) => showInactive ? `(${tag.name})` : ""))}
+                        } }, ({ tag }) => `(${tag.name})`) : "")}
                   </li>);
                 }, {
                     type: "object",

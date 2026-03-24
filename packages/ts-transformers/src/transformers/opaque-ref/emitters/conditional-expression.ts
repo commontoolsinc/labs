@@ -17,14 +17,16 @@ import {
   findPendingComputeWrapCandidate,
   isJsxLocalRewriteContainer,
 } from "./compute-wrap-invariants.ts";
+import { unwrapExpression } from "../../../utils/expression.ts";
 
 function isControlFlowBranchExpression(expr: ts.Expression): boolean {
-  return ts.isConditionalExpression(expr) ||
+  const current = unwrapExpression(expr);
+  return ts.isConditionalExpression(current) ||
     (
-      ts.isBinaryExpression(expr) &&
+      ts.isBinaryExpression(current) &&
       (
-        expr.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
-        expr.operatorToken.kind === ts.SyntaxKind.BarBarToken
+        current.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+        current.operatorToken.kind === ts.SyntaxKind.BarBarToken
       )
     );
 }

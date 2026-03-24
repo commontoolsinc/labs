@@ -797,6 +797,77 @@ Deno.test(
 );
 
 Deno.test(
+  "Expression site policy: parenthesized nested ternary branches use the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>
+          {state.isActive
+            ? (state.isPremium ? "Premium Active" : "Regular Active")
+            : "Inactive"}
+        </div>
+      ));
+    `);
+
+    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyJsxExpressionSiteRoute(conditional, context, analyze),
+      {
+        route: "shared-post-closure",
+      },
+    );
+  },
+);
+
+Deno.test(
+  "Expression site policy: parenthesized nested logical branches use the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>
+          {state.isAdult && (state.name || "Anonymous Adult")}
+        </div>
+      ));
+    `);
+
+    const logical = findFirstNode(
+      sourceFile,
+      (node): node is ts.BinaryExpression =>
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken,
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyJsxExpressionSiteRoute(logical, context, analyze),
+      {
+        route: "shared-post-closure",
+      },
+    );
+  },
+);
+
+Deno.test(
   "Expression site policy: whole-branch compute-wrap ternaries stay on the legacy JSX seam",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
