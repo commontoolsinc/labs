@@ -29,7 +29,7 @@ export const NATIVE_TAGS = Object.freeze(
     RegExp: "RegExp",
     EpochNsec: "EpochNsec",
     EpochDays: "EpochDays",
-    ContentId: "ContentId",
+    ContentHash: "ContentHash",
     HasToJSON: "HasToJSON",
     FabricInstance: "FabricInstance",
     Primitive: "Primitive",
@@ -84,7 +84,7 @@ export function tagFromNativeClass(
     case FabricEpochDays:
       return NATIVE_TAGS.EpochDays;
     case FabricHash:
-      return NATIVE_TAGS.ContentId;
+      return NATIVE_TAGS.ContentHash;
 
     default:
       // Catch exotic Error subclasses (e.g. custom subclasses with

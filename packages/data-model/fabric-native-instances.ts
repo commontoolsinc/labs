@@ -21,7 +21,7 @@ import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
  * subclasses or `FabricInstance` types by the conversion layer.
  *
  * Arrays, plain objects, objects with `toJSON()`, and system-defined special
- * primitives (EpochNsec, EpochDays, ContentId) are recognized by
+ * primitives (EpochNsec, EpochDays, ContentHash) are recognized by
  * `tagFromNativeValue()` but are NOT convertible native instances -- they
  * have their own handling paths in the conversion layer.
  */

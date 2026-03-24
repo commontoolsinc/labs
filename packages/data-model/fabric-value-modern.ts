@@ -56,7 +56,7 @@ export function shallowFabricFromNativeValueModern(
     // pass through as-is regardless of the `freeze` argument.
     case NATIVE_TAGS.EpochNsec:
     case NATIVE_TAGS.EpochDays:
-    case NATIVE_TAGS.ContentId:
+    case NATIVE_TAGS.ContentHash:
       return value as FabricValueLayer;
 
     case NATIVE_TAGS.Error: {
@@ -654,7 +654,7 @@ function cloneHelper(
     case NATIVE_TAGS.Primitive:
     case NATIVE_TAGS.EpochNsec:
     case NATIVE_TAGS.EpochDays:
-    case NATIVE_TAGS.ContentId:
+    case NATIVE_TAGS.ContentHash:
       return value;
 
     case NATIVE_TAGS.FabricInstance:
