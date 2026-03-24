@@ -178,6 +178,26 @@ export class XAppView extends BaseView {
     this.pieceTitle = event.detail ?? "";
   };
 
+  #handleRecreatePattern = async () => {
+    if (!this.rt) return;
+    try {
+      await this.rt.recreateSpaceRootPattern();
+      this._spaceRootPattern.run();
+    } catch (err) {
+      console.error("[AppView] Failed to recreate pattern:", err);
+    }
+  };
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this.addEventListener("recreate-pattern", this.#handleRecreatePattern);
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    this.removeEventListener("recreate-pattern", this.#handleRecreatePattern);
+  }
+
   override updated(changedProperties: Map<string, unknown>) {
     super.updated(changedProperties);
 

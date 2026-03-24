@@ -876,6 +876,9 @@ export class XDebuggerView extends LitElement {
   private openDropdowns = new Set<TopicKey>();
 
   @state()
+  private _isRecreatingPattern = false;
+
+  @state()
   private searchText = "";
 
   @state()
@@ -1026,6 +1029,20 @@ export class XDebuggerView extends LitElement {
     } else {
       // None selected, select all
       this.initializeAllSubtopics();
+    }
+  }
+
+  private async recreatePattern() {
+    this._isRecreatingPattern = true;
+    try {
+      this.dispatchEvent(
+        new CustomEvent("recreate-pattern", {
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    } finally {
+      this._isRecreatingPattern = false;
     }
   }
 
@@ -2854,6 +2871,17 @@ export class XDebuggerView extends LitElement {
                   <span class="stat-label">Filters:</span>
                   <span class="stat-value">${this.activeSubtopics.size}</span>
                 </div>
+                <button
+                  type="button"
+                  class="action-button"
+                  style="background-color: #dc2626; color: white;"
+                  @click="${this.recreatePattern}"
+                  ?disabled="${this._isRecreatingPattern}"
+                >
+                  ${this._isRecreatingPattern
+                    ? "Recreating..."
+                    : "Recreate Pattern"}
+                </button>
               </div>
             </div>
 
