@@ -6,7 +6,7 @@
 - AI-assisted specification
 
 ## Last Updated
-2026-03-23
+2026-03-24
 
 This document is the sole authoritative SES sandboxing specification for the
 current reimplementation effort. It supersedes prior divergence notes and
@@ -1816,6 +1816,11 @@ In the current implementation this splits into two canonical paths:
 
 The compiled-bundle verifier treats the `__ctHardenFn(...)` helper declaration
 and its direct call sites as part of the accepted canonical wrapper grammar.
+It also treats TypeScript's canonical import-normalization rebindings as part
+of that grammar, including `local = __importStar(local)` and
+`local = __importDefault(local)` when `local` is already the AMD factory's
+import binding for that dependency. These statements are normalization steps
+over an already-verified import edge, not new capability acquisition.
 
 #### 2.4 Enforce import policy at verification time (Priority: High)
 

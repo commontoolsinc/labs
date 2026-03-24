@@ -69,4 +69,19 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
+
+  it("accepts compiled default-import normalization", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "./dep"], function (require, exports, dep_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    dep_1 = __importDefault(dep_1);
+    exports.default = dep_1.default;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
 });

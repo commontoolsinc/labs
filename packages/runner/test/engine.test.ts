@@ -69,6 +69,28 @@ describe("Engine.compile()", () => {
     expect(result.jsScript.js).toContain("double");
   });
 
+  it("accepts default-import normalization in compiled SES bundles", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/dep.ts",
+          contents: "const value = 21; export default value;",
+        },
+        {
+          name: "/main.ts",
+          contents: "import value from './dep.ts'; export default value;",
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(jsScript.js).toContain("__importDefault");
+    expect(main?.default).toBe(21);
+  });
+
   it("produces a source map", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",

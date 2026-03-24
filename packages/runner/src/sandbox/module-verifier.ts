@@ -1492,7 +1492,7 @@ function verifyCompiledAuthoredFactory(
       continue;
     }
 
-    if (isCompiledImportStarRebinding(statement, env)) {
+    if (isCompiledImportNormalizationRebinding(statement, env)) {
       continue;
     }
 
@@ -1706,7 +1706,7 @@ function isCompiledEsModuleMarker(statement: ts.Statement): boolean {
     expr.arguments[1].text === "__esModule";
 }
 
-function isCompiledImportStarRebinding(
+function isCompiledImportNormalizationRebinding(
   statement: ts.Statement,
   env: Map<string, BindingInfo>,
 ): boolean {
@@ -1725,7 +1725,8 @@ function isCompiledImportStarRebinding(
   const right = unwrapExpression(expr.right);
   return ts.isCallExpression(right) &&
     ts.isIdentifier(right.expression) &&
-    right.expression.text === "__importStar" &&
+    (right.expression.text === "__importStar" ||
+      right.expression.text === "__importDefault") &&
     right.arguments.length === 1 &&
     ts.isIdentifier(right.arguments[0]) &&
     right.arguments[0].text === expr.left.text;
