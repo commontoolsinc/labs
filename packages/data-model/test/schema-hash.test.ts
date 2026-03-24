@@ -252,32 +252,32 @@ describe("schema-hash dispatch", () => {
       assertStrictEquals(sah1, sah2);
     });
 
-    it("returns consistent hash for same object schema", () => {
+    it("returns same instance for same frozen object schema", () => {
       const schema = toDeepFrozenSchema({ type: "number" }) as JSONSchemaObj;
       const sah1 = internSchema(schema);
       const sah2 = internSchema(schema);
-      assertEquals(sah1.hashString, sah2.hashString);
+      assertStrictEquals(sah1, sah2);
     });
 
-    it("same schema produces the same hashString", () => {
+    it("returns same instance for repeated unfrozen schema", () => {
       const sah1 = internSchema({ type: "number" });
       const sah2 = internSchema({ type: "number" });
-      assertEquals(sah1.hashString, sah2.hashString);
+      assertStrictEquals(sah1, sah2);
     });
 
-    it("different schemas produce different hashStrings", () => {
+    it("different schemas produce different instances", () => {
       const sah1 = internSchema({ type: "number" });
       const sah2 = internSchema({ type: "string" });
-      assertNotStrictEquals(sah1.hashString, sah2.hashString);
+      assertNotStrictEquals(sah1, sah2);
     });
 
-    it("property order does not affect hash", () => {
+    it("property order does not affect interning", () => {
       const sah1 = internSchema({ type: "object", title: "foo" });
       const sah2 = internSchema({ title: "foo", type: "object" });
-      assertEquals(sah1.hashString, sah2.hashString);
+      assertStrictEquals(sah1, sah2);
     });
 
-    it("structurally-equal but identity-different schemas intern the same", () => {
+    it("structurally-equal but identity-different schemas return same instance", () => {
       const a: JSONSchemaObj = {
         type: "object",
         properties: { x: { type: "number" } },
@@ -289,7 +289,7 @@ describe("schema-hash dispatch", () => {
       assertNotStrictEquals(a, b); // different objects
       const sahA = internSchema(a);
       const sahB = internSchema(b);
-      assertEquals(sahA.hashString, sahB.hashString);
+      assertStrictEquals(sahA, sahB);
     });
   });
 
@@ -297,8 +297,7 @@ describe("schema-hash dispatch", () => {
     it("finds a previously interned schema by FabricHash", () => {
       const sah = internSchema({ type: "array", items: { type: "string" } });
       const found = findInternedSchema(sah.hash);
-      assert(found !== undefined);
-      assertEquals(found!.hashString, sah.hashString);
+      assertStrictEquals(found, sah);
     });
 
     it("finds a previously interned schema by hash string", () => {
@@ -307,24 +306,19 @@ describe("schema-hash dispatch", () => {
         properties: { z: { type: "boolean" } },
       });
       const found = findInternedSchema(sah.hashString);
-      assert(found !== undefined);
-      assertEquals(found!.hashString, sah.hashString);
+      assertStrictEquals(found, sah);
     });
 
     it("returns undefined for unknown hash", () => {
       const unknown = new FabricHash(new Uint8Array(32), "fid1");
-      assertEquals(findInternedSchema(unknown), undefined);
+      assertStrictEquals(findInternedSchema(unknown), undefined);
     });
 
     it("finds interned boolean schemas", () => {
       const sahTrue = internSchema(true);
       const sahFalse = internSchema(false);
-      const foundTrue = findInternedSchema(sahTrue.hash);
-      const foundFalse = findInternedSchema(sahFalse.hash);
-      assert(foundTrue !== undefined);
-      assert(foundFalse !== undefined);
-      assertStrictEquals(foundTrue!.schema, true);
-      assertStrictEquals(foundFalse!.schema, false);
+      assertStrictEquals(findInternedSchema(sahTrue.hash), sahTrue);
+      assertStrictEquals(findInternedSchema(sahFalse.hash), sahFalse);
     });
   });
 });

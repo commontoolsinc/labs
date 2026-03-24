@@ -88,12 +88,13 @@ export function hashSchemaItem(item: FabricValue): FabricHash {
  * - `schemaFinalizer`: FinalizationRegistry that removes stale `hashToSah`
  *   entries when interned schemas are garbage-collected.
  * - `booleanInterns`: prefab SchemaAndHash for `true` and `false` (boolean
- *   schemas are primitives — initialized at module load).
+ *   schemas are primitives — initialized at module load and seeded into
+ *   `hashToSah` as permanent entries with no WeakRef).
  */
 const schemaToSah = new WeakMap<JSONSchemaObj, SchemaAndHash>();
 const hashToSah = new Map<
   string,
-  { sah: SchemaAndHash; ref: WeakRef<JSONSchemaObj> }
+  { sah: SchemaAndHash; ref?: WeakRef<JSONSchemaObj> }
 >();
 
 const booleanInterns = {
@@ -101,12 +102,16 @@ const booleanInterns = {
   false: new SchemaAndHash(false, hashSchema(false)),
 } as const;
 
+// Seed the hash map with boolean interns (permanent entries, no WeakRef needed).
+hashToSah.set(booleanInterns.true.hashString, { sah: booleanInterns.true });
+hashToSah.set(booleanInterns.false.hashString, { sah: booleanInterns.false });
+
 /** Removes dead `hashToSah` entries when interned schemas are GC'd. */
 const schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
   const entry = hashToSah.get(hashStr);
   // Only delete if the entry still points to a dead ref — a new schema with
   // the same hash may have replaced it.
-  if (entry && entry.ref.deref() === undefined) {
+  if (entry && entry.ref && entry.ref.deref() === undefined) {
     hashToSah.delete(hashStr);
   }
 });
@@ -146,7 +151,8 @@ export function internSchema(schema: JSONSchema): SchemaAndHash {
 
   const entry = hashToSah.get(hashStr);
   if (entry) {
-    if (entry.ref.deref() !== undefined) {
+    // Permanent entries (booleans) have no ref; WeakRef entries need a liveness check.
+    if (!entry.ref || entry.ref.deref() !== undefined) {
       // Still alive — reuse the cached SchemaAndHash.
       schemaToSah.set(schema, entry.sah);
       return entry.sah;
@@ -175,12 +181,11 @@ export function findInternedSchema(
 ): SchemaAndHash | undefined {
   const hashStr = typeof hash === "string" ? hash : hash.toString();
 
-  // Check boolean interns first.
-  if (booleanInterns.true.hashString === hashStr) return booleanInterns.true;
-  if (booleanInterns.false.hashString === hashStr) return booleanInterns.false;
-
   const entry = hashToSah.get(hashStr);
   if (!entry) return undefined;
+
+  // Permanent entries (booleans) have no ref.
+  if (!entry.ref) return entry.sah;
 
   if (entry.ref.deref() === undefined) {
     // WeakRef is dead — clean up.
