@@ -389,7 +389,10 @@ function requiresLegacyJsxControlFlowHandling(
   context: TransformationContext,
   analyze: AnalyzeFn,
 ): boolean {
-  const branchRequiresLegacyHandling = (branch: ts.Expression): boolean => {
+  const branchRequiresLegacyHandling = (
+    branch: ts.Expression,
+    allowWholeBranchValueWrap: boolean,
+  ): boolean => {
     if (isJsxLocalRewriteContainer(branch)) {
       return false;
     }
@@ -405,8 +408,22 @@ function requiresLegacyJsxControlFlowHandling(
       }
     }
 
-    return !!findPendingComputeWrapCandidate(branch, analyze, context) ||
-      containsReactiveArrayMethodSubexpression(branch, context, analyze);
+    if (containsReactiveArrayMethodSubexpression(branch, context, analyze)) {
+      return true;
+    }
+
+    if (isPostClosureWrapperRewriteExpression(branch, context)) {
+      return false;
+    }
+
+    if (
+      allowWholeBranchValueWrap &&
+      !ts.isCallExpression(unwrapExpression(branch))
+    ) {
+      return false;
+    }
+
+    return !!findPendingComputeWrapCandidate(branch, analyze, context);
   };
 
   const current = getControlFlowRewriteExpression(expression);
@@ -416,11 +433,13 @@ function requiresLegacyJsxControlFlowHandling(
 
   if (ts.isConditionalExpression(current)) {
     const branches = [current.whenTrue, current.whenFalse];
-    return branches.some(branchRequiresLegacyHandling);
+    return branches.some((branch) =>
+      branchRequiresLegacyHandling(branch, true)
+    );
   }
 
   if (isLogicalBinaryExpression(current)) {
-    return branchRequiresLegacyHandling(current.right);
+    return branchRequiresLegacyHandling(current.right, false);
   }
 
   return false;

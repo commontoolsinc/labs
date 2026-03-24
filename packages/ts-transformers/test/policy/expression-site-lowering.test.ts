@@ -990,6 +990,143 @@ Deno.test(
 );
 
 Deno.test(
+  "Expression site policy: logical JSX branches with non-JSX wrapper roots use the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          p: any;
+        }
+      }
+
+      declare function cell<T>(value: T): { get(): T };
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((_state: any) => {
+        const user = cell<{ name: string; age: number }>({ name: "", age: 0 });
+        return (
+          <div>
+            <p>{user.get().name.length > 0 && \`Hello, \${user.get().name}!\`}</p>
+            <p>{user.get().age > 18 && user.get().age}</p>
+          </div>
+        );
+      });
+    `);
+
+    const logicalBranches: ts.BinaryExpression[] = [];
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+      ) {
+        logicalBranches.push(node);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+    const analyze = createDataFlowAnalyzer(checker);
+
+    for (const logical of logicalBranches) {
+      assertEquals(
+        classifyJsxExpressionSiteRoute(logical, context, analyze),
+        {
+          route: "shared-post-closure",
+        },
+      );
+    }
+  },
+);
+
+Deno.test(
+  "Expression site policy: ternary JSX branches with non-JSX wrapper roots use the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          p: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>
+          <p>{state.arr[state.a]! > 10 ? state.items[state.b]! : state.items[0]!}</p>
+          <p>{state.user.settings.notifications
+            ? state.user.name + " has notifications on with " + state.user.settings.theme + " theme"
+            : state.user.name + " has notifications off"}</p>
+        </div>
+      ));
+    `);
+
+    const conditionals: ts.ConditionalExpression[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isConditionalExpression(node)) {
+        conditionals.push(node);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+
+    const analyze = createDataFlowAnalyzer(checker);
+
+    for (const conditional of conditionals) {
+      assertEquals(
+        classifyJsxExpressionSiteRoute(conditional, context, analyze),
+        {
+          route: "shared-post-closure",
+        },
+      );
+    }
+  },
+);
+
+Deno.test(
+  "Expression site policy: logical JSX fallbacks that are still opaque path-terminal call roots stay on the legacy JSX seam",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      declare function cell<T>(value: T): { get(): T };
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((_state: any) => {
+        const user = cell<{ name: string }>({ name: "" });
+        const defaultMessage = cell("Guest");
+        return (
+          <div>
+            <span>{(user.get().name.length > 0 && user.get().name) || defaultMessage.get()}</span>
+          </div>
+        );
+      });
+    `);
+
+    const logical = findFirstNode(
+      sourceFile,
+      (node): node is ts.BinaryExpression =>
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.BarBarToken,
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyJsxExpressionSiteRoute(logical, context, analyze),
+      {
+        route: "legacy-jsx",
+        reason: "legacy-control-flow-branch-local",
+      },
+    );
+  },
+);
+
+Deno.test(
   "Expression site policy: whole-branch compute-wrap ternaries stay on the legacy JSX seam",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
