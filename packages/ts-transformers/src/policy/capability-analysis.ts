@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { isWildcardTraversalCall } from "../ast/mod.ts";
 import type {
   CapabilityParamSummary,
   FunctionCapabilitySummary,
@@ -44,7 +45,6 @@ const PARAMETER_SUMMARY_PREFIX = "__param";
 
 const WRITER_METHODS = new Set(["set", "update"]);
 const READER_METHODS = new Set(["get"]);
-const WILDCARD_OBJECT_METHODS = new Set(["keys", "values", "entries"]);
 const ASSIGNMENT_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.EqualsToken,
   ts.SyntaxKind.PlusEqualsToken,
@@ -994,24 +994,7 @@ export function analyzeFunctionCapabilities(
         }
 
         // Full-shape operations.
-        if (
-          ts.isPropertyAccessExpression(node.expression) &&
-          ts.isIdentifier(node.expression.expression) &&
-          node.expression.expression.text === "Object" &&
-          WILDCARD_OBJECT_METHODS.has(node.expression.name.text)
-        ) {
-          const firstArg = node.arguments[0];
-          if (firstArg) {
-            markWildcardFromExpression(firstArg);
-          }
-        }
-
-        if (
-          ts.isPropertyAccessExpression(node.expression) &&
-          ts.isIdentifier(node.expression.expression) &&
-          node.expression.expression.text === "JSON" &&
-          node.expression.name.text === "stringify"
-        ) {
+        if (isWildcardTraversalCall(node, checker)) {
           const firstArg = node.arguments[0];
           if (firstArg) {
             markWildcardFromExpression(firstArg);

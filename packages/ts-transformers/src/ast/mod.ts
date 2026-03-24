@@ -1,11 +1,13 @@
 export {
   type CallKind,
+  classifyWildcardTraversalCall,
   detectCallKind,
   detectDirectBuilderCall,
   isReactiveOriginCall,
   isReactiveValueExpression,
   isReactiveValueSymbol,
   isSimpleReactiveAccessExpression,
+  isWildcardTraversalCall,
 } from "./call-kind.ts";
 export * from "./dataflow.ts";
 export {

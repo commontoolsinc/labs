@@ -505,10 +505,10 @@ Deno.test(
         const source = `/// <cts-enable />
       import { pattern } from "commontools";
 
-      const wrap = <T,>(value: T) => value;
+      const identity = <T,>(value: T) => value;
 
       export default pattern<{ done: boolean }>((state) => {
-        const label = wrap(state.done ? "Done" : "Pending");
+        const label = identity(state.done ? "Done" : "Pending");
         return { label };
       });
     `;
@@ -544,10 +544,10 @@ Deno.test(
         const source = `/// <cts-enable />
       import { pattern } from "commontools";
 
-      const wrap = <T,>(value: T) => value;
+      const identity = <T,>(value: T) => value;
 
       export default pattern<{ user: { name: string } }>((state) => {
-        const label = wrap(state.user.name);
+        const label = identity(state.user.name);
         return { label };
       });
     `;
@@ -601,10 +601,10 @@ Deno.test(
         const source = `/// <cts-enable />
       import { pattern } from "commontools";
 
-      const wrap = <T,>(value: T) => value;
+      const identity = <T,>(value: T) => value;
 
       export default pattern<{ user?: { name: string } }>((state) => {
-        const label = wrap(state.user?.name);
+        const label = identity(state.user?.name);
         return { label };
       });
     `;

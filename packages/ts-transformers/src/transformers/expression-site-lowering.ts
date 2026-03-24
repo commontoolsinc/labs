@@ -6,6 +6,7 @@ import {
   findEnclosingCallbackContext,
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
+  isWildcardTraversalCall,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
@@ -20,6 +21,7 @@ import {
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
 import type {
   ExpressionContainerKind,
+  ExpressionSiteCallRootKind,
   ExpressionSiteHelperBoundaryKind,
   ExpressionSitePolicyInfo,
 } from "./expression-site-types.ts";
@@ -141,6 +143,105 @@ export function isPostClosureJsxWrapperRewriteExpression(
   context: TransformationContext,
 ): boolean {
   return isPostClosureWrapperRewriteExpression(expr, context);
+}
+
+function isLocalValueReference(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  const symbol = checker.getSymbolAtLocation(expression);
+  if (!symbol) {
+    return false;
+  }
+
+  const declarations = symbol.getDeclarations() ?? [];
+  return declarations.some((declaration) =>
+    !declaration.getSourceFile().isDeclarationFile && declaration.pos >= 0
+  );
+}
+
+function getLeftmostMemberBase(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+export function classifyCallExpressionRoot(
+  expression: ts.CallExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): ExpressionSiteCallRootKind {
+  if (expression.questionDotToken) {
+    return "optional-call";
+  }
+
+  if (isWildcardTraversalCall(expression, context.checker)) {
+    return "other";
+  }
+
+  const callKind = detectCallKind(expression, context.checker);
+  switch (callKind?.kind) {
+    case "ifElse":
+    case "when":
+    case "unless":
+      return "conditional-helper";
+    case "array-method":
+      return "array-method";
+    case "builder":
+    case "derive":
+    case "cell-factory":
+    case "cell-for":
+    case "wish":
+    case "generate-text":
+    case "generate-object":
+    case "pattern-tool":
+      return "reactive-origin";
+    case "runtime-call":
+      return callKind.reactiveOrigin ? "reactive-origin" : "other";
+  }
+
+  const callee = expression.expression;
+  if (ts.isIdentifier(callee)) {
+    return isLocalValueReference(callee, context.checker)
+      ? "other"
+      : "free-function";
+  }
+
+  if (
+    ts.isPropertyAccessExpression(callee) ||
+    ts.isElementAccessExpression(callee)
+  ) {
+    const receiverAnalysis = analyze(callee.expression);
+    if (receiverAnalysis.containsOpaqueRef) {
+      return "receiver-method";
+    }
+
+    const base = getLeftmostMemberBase(callee);
+    if (!ts.isIdentifier(base)) {
+      return "other";
+    }
+
+    return isLocalValueReference(base, context.checker)
+      ? "other"
+      : "free-function";
+  }
+
+  return "other";
+}
+
+function isSharedPostClosureCallRoot(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  return ts.isCallExpression(expression) &&
+    classifyCallExpressionRoot(expression, context, analyze) ===
+      "free-function";
 }
 
 function isDirectDeriveCall(
@@ -436,6 +537,9 @@ export function getExpressionSitePolicyInfo(
     ),
     arrayMethodOwned: isArrayMethodOwnedExpressionSite(expression, context),
     helperBoundaryKind: getHelperBoundaryKind(expression, context),
+    callRootKind: ts.isCallExpression(expression)
+      ? classifyCallExpressionRoot(expression, context, analyze)
+      : undefined,
     syntheticComputeOwned: context.isSyntheticComputeOwnedNode(expression),
     deferredJsxArrayMethod: containerKind === "jsx-expression" &&
       isDeferredJsxArrayMethodExpression(expression, context, analyze),
@@ -480,6 +584,10 @@ export function classifyJsxExpressionSiteRoute(
     return requiresLegacyJsxControlFlowHandling(expression, context, analyze)
       ? { route: "legacy-jsx", reason: "legacy-control-flow-branch-local" }
       : { route: "shared-post-closure" };
+  }
+
+  if (siteInfo.callRootKind === "free-function") {
+    return { route: "shared-post-closure" };
   }
 
   if (!isPostClosureJsxWrapperRewriteExpression(expression, context)) {
@@ -547,6 +655,7 @@ function canRewriteExpressionSite(
   if (
     containerKind !== "jsx-expression" &&
     !siteInfo.controlFlowRewriteRoot &&
+    !isSharedPostClosureCallRoot(expression, context, analyze) &&
     !isPostClosureWrapperRewriteExpression(expression, context)
   ) {
     return false;
@@ -555,6 +664,7 @@ function canRewriteExpressionSite(
   if (
     containerKind !== "jsx-expression" &&
     !siteInfo.controlFlowRewriteRoot &&
+    !isSharedPostClosureCallRoot(expression, context, analyze) &&
     !isEligiblePatternOwnedWrapperCallbackSite(expression, context, analyze)
   ) {
     return false;

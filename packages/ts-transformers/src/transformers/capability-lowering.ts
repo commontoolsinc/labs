@@ -4,6 +4,7 @@ import {
   detectCallKind,
   getTypeAtLocationWithFallback,
   isFunctionLikeExpression,
+  isWildcardTraversalCall,
   normalizeDataFlows,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
@@ -52,8 +53,6 @@ const KNOWN_PATH_TERMINAL_METHODS = new Set([
   "filterWithPattern",
   "flatMapWithPattern",
 ]);
-
-const WILDCARD_OBJECT_METHODS = new Set(["keys", "values", "entries"]);
 
 function isSelfPathSegment(
   segment: PathSegment,
@@ -635,38 +634,7 @@ function rewritePatternBody(
         }
       }
 
-      if (
-        ts.isPropertyAccessExpression(visited.expression) &&
-        ts.isIdentifier(visited.expression.expression) &&
-        visited.expression.expression.text === "Object" &&
-        WILDCARD_OBJECT_METHODS.has(visited.expression.name.text)
-      ) {
-        const firstArg = visited.arguments[0];
-        if (firstArg) {
-          const info = getOpaqueAccessInfo(firstArg, context);
-          if (
-            isOpaqueRootInfo(
-              info,
-              activeOpaqueRoots,
-              opaqueRootSymbols,
-              context,
-            )
-          ) {
-            reportOnce(
-              firstArg,
-              "computation",
-              "Wildcard object traversal is not lowerable in pattern context. Move this expression into computed().",
-            );
-          }
-        }
-      }
-
-      if (
-        ts.isPropertyAccessExpression(visited.expression) &&
-        ts.isIdentifier(visited.expression.expression) &&
-        visited.expression.expression.text === "JSON" &&
-        visited.expression.name.text === "stringify"
-      ) {
+      if (isWildcardTraversalCall(visited, context.checker)) {
         const firstArg = visited.arguments[0];
         if (firstArg) {
           const info = getOpaqueAccessInfo(firstArg, context);

@@ -1,13 +1,13 @@
 import * as __ctHelpers from "commontools";
 import { pattern } from "commontools";
-const wrap = <T,>(value: T) => value;
+const identity = <T,>(value: T) => value;
 // FIXTURE: pattern-call-arg-conditional
 // Verifies: top-level non-JSX ternary in a call argument is lowered after
 //   closure normalization rather than being left as raw JS truthiness.
-//   const label = wrap(state.done ? "Done" : "Pending")
-//   → const label = wrap(ifElse(state.done, "Done", "Pending"))
+//   const label = identity(state.done ? "Done" : "Pending")
+//   → const label = identity(ifElse(state.done, "Done", "Pending"))
 export default pattern((state) => {
-    const label = wrap(__ctHelpers.ifElse({
+    const label = identity(__ctHelpers.ifElse({
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string"

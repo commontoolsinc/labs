@@ -116,12 +116,12 @@ Deno.test(
   "Expression site policy: array-method callback call arguments are tracked separately from helper-owned branches",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
-      declare function wrap<T>(value: T): T;
+      declare function identity<T>(value: T): T;
 
       const callback = (__ct_pattern_input: any) => {
         const row = __ct_pattern_input.key("element");
-        const wrapped = wrap(row.done ? "Done" : "Pending");
-        return wrapped;
+        const label = identity(row.done ? "Done" : "Pending");
+        return label;
       };
     `);
 
@@ -272,6 +272,144 @@ Deno.test(
         route: "shared-post-closure",
       },
     );
+  },
+);
+
+Deno.test(
+  "Expression site policy: JSX free-function call roots defer to the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => <div>{Math.max(state.a, state.b)}</div>);
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "max",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      call,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.callRootKind, "free-function");
+    assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
+      route: "shared-post-closure",
+    });
+  },
+);
+
+Deno.test(
+  "Expression site policy: JSX receiver-method call roots stay on the legacy JSX seam",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => <div>{state.name.toUpperCase()}</div>);
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "toUpperCase",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      call,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.callRootKind, "receiver-method");
+    assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
+      route: "skip",
+      reason: "not-shared-jsx-root-kind",
+    });
+  },
+);
+
+Deno.test(
+  "Expression site policy: local helper calls stay out of the shared free-function slice",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare function pattern<T>(fn: (state: any) => T): T;
+      const identity = <T,>(value: T) => value;
+
+      const view = pattern((state: any) => ({
+        label: identity(state.name),
+      }));
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "identity",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      call,
+      "object-property",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.callRootKind, "other");
+  },
+);
+
+Deno.test(
+  "Expression site policy: wildcard traversal calls stay out of the shared free-function slice",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => ({
+        serialized: JSON.stringify(state),
+      }));
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        node.expression.expression.text === "JSON" &&
+        node.expression.name.text === "stringify",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      call,
+      "object-property",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.callRootKind, "other");
   },
 );
 

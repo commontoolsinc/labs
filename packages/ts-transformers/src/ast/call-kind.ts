@@ -73,6 +73,7 @@ const CELL_LIKE_CLASSES = new Set([
 const CELL_FACTORY_NAMES = new Set(["of"]);
 const CELL_FOR_NAMES = new Set(["for"]);
 const COMMONTOOLS_CALL_NAMES = COMMONTOOLS_CALL_EXPORT_NAMES;
+const WILDCARD_OBJECT_METHOD_NAMES = new Set(["keys", "values", "entries"]);
 
 export type CallKind =
   | { kind: "ifElse"; symbol?: ts.Symbol }
@@ -93,6 +94,10 @@ export type CallKind =
     exportName: string;
     reactiveOrigin: boolean;
   };
+
+export type WildcardTraversalCallKind =
+  | "object-wildcard-traversal"
+  | "json-stringify";
 
 export function detectCallKind(
   call: ts.CallExpression,
@@ -120,6 +125,67 @@ export function isReactiveOriginCall(
 ): boolean {
   const callKind = detectCallKind(call, checker);
   return !!callKind && isReactiveOriginKind(callKind);
+}
+
+export function classifyWildcardTraversalCall(
+  call: ts.CallExpression,
+  checker?: ts.TypeChecker,
+): WildcardTraversalCallKind | undefined {
+  const target = stripWrappers(call.expression);
+  if (!ts.isPropertyAccessExpression(target)) {
+    return undefined;
+  }
+
+  if (checker) {
+    const symbol = checker.getSymbolAtLocation(target.name);
+    const resolved = symbol
+      ? (resolveAlias(symbol, checker, new Set()) ?? symbol)
+      : undefined;
+
+    for (const declaration of resolved?.getDeclarations() ?? []) {
+      if (!hasIdentifierName(declaration)) continue;
+
+      const owner = findOwnerName(declaration);
+      if (!owner) continue;
+
+      const name = declaration.name.text;
+      if (
+        owner === "ObjectConstructor" &&
+        WILDCARD_OBJECT_METHOD_NAMES.has(name)
+      ) {
+        return "object-wildcard-traversal";
+      }
+
+      if (owner === "JSON" && name === "stringify") {
+        return "json-stringify";
+      }
+    }
+  }
+
+  if (
+    ts.isIdentifier(target.expression) &&
+    target.expression.text === "Object" &&
+    WILDCARD_OBJECT_METHOD_NAMES.has(target.name.text)
+  ) {
+    return "object-wildcard-traversal";
+  }
+
+  if (
+    ts.isIdentifier(target.expression) &&
+    target.expression.text === "JSON" &&
+    target.name.text === "stringify"
+  ) {
+    return "json-stringify";
+  }
+
+  return undefined;
+}
+
+export function isWildcardTraversalCall(
+  call: ts.CallExpression,
+  checker?: ts.TypeChecker,
+): boolean {
+  return !!classifyWildcardTraversalCall(call, checker);
 }
 
 function isReactiveOriginKind(callKind: CallKind): boolean {

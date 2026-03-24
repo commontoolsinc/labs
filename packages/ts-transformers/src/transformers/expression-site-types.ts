@@ -16,6 +16,15 @@ export type ExpressionSiteHelperBoundaryKind =
   | "derive"
   | "pattern-tool";
 
+export type ExpressionSiteCallRootKind =
+  | "conditional-helper"
+  | "reactive-origin"
+  | "array-method"
+  | "free-function"
+  | "receiver-method"
+  | "optional-call"
+  | "other";
+
 export interface ExpressionSitePolicyInfo {
   readonly containerKind: ExpressionContainerKind;
   readonly reactiveContext: ReactiveContextInfo;
@@ -23,6 +32,7 @@ export interface ExpressionSitePolicyInfo {
   readonly withinEventHandlerJsxAttribute: boolean;
   readonly arrayMethodOwned: boolean;
   readonly helperBoundaryKind?: ExpressionSiteHelperBoundaryKind;
+  readonly callRootKind?: ExpressionSiteCallRootKind;
   readonly syntheticComputeOwned: boolean;
   readonly deferredJsxArrayMethod: boolean;
   readonly controlFlowRewriteRoot: boolean;

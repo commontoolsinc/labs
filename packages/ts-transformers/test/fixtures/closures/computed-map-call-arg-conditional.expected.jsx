@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { computed, pattern, UI } from "commontools";
-const wrap = (x: string) => x;
+const identity = (x: string) => x;
 interface Item {
     done: boolean;
 }
@@ -10,8 +10,8 @@ interface State {
 // FIXTURE: computed-map-call-arg-conditional
 // Verifies: nested ternary inside a callback-local call argument within a
 //   computed-array .map() callback is lowered to ifElse().
-//   const label = wrap(row.done ? "Done" : "Pending")
-//   → const label = wrap(ifElse(row.done, "Done", "Pending"))
+//   const label = identity(row.done ? "Done" : "Pending")
+//   → const label = identity(ifElse(row.done, "Done", "Pending"))
 export default pattern((state) => {
     const rows = __ctHelpers.derive({
         type: "object",
@@ -64,7 +64,7 @@ export default pattern((state) => {
         [UI]: (<div>
         {rows.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const row = __ct_pattern_input.key("element");
-                const label = wrap(__ctHelpers.ifElse({
+                const label = identity(__ctHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __ctHelpers.JSONSchema, {
                     type: "string"

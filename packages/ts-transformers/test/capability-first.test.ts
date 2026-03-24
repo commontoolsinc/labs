@@ -522,10 +522,10 @@ Deno.test(
     const source = `/// <cts-enable />
 import { pattern } from "commontools";
 
-const wrap = <T,>(value: T) => value;
+const identity = <T,>(value: T) => value;
 
 export default pattern<{ done: boolean }>((state) => {
-  const label = wrap(state.done ? "Done" : "Pending");
+  const label = identity(state.done ? "Done" : "Pending");
   return { label };
 });
 `;
@@ -541,9 +541,9 @@ export default pattern<{ done: boolean }>((state) => {
     );
 
     assertEquals(computationDiagnostics.length, 0);
-    assertStringIncludes(output, "wrap(__ctHelpers.ifElse(");
+    assertStringIncludes(output, "identity(__ctHelpers.ifElse(");
     assert(
-      !output.includes('wrap(state.key("done") ? "Done" : "Pending")'),
+      !output.includes('identity(state.key("done") ? "Done" : "Pending")'),
       "expected top-level call-argument ternary to lower to ifElse()",
     );
   },
@@ -585,10 +585,10 @@ Deno.test(
     const source = `/// <cts-enable />
 import { pattern } from "commontools";
 
-const wrap = <T,>(value: T) => value;
+const identity = <T,>(value: T) => value;
 
 export default pattern<{ user: { name: string } }>((state) => {
-  const label = wrap(state.user.name);
+  const label = identity(state.user.name);
   return { label };
 });
 `;
@@ -604,9 +604,9 @@ export default pattern<{ user: { name: string } }>((state) => {
     );
 
     assertEquals(computationDiagnostics.length, 0);
-    assertStringIncludes(output, 'wrap(state.key("user", "name"))');
+    assertStringIncludes(output, 'identity(state.key("user", "name"))');
     assert(
-      !output.includes("wrap(state.user.name)"),
+      !output.includes("identity(state.user.name)"),
       "expected top-level call-argument property access to lower out of raw dot access",
     );
   },
@@ -638,6 +638,68 @@ export default pattern<{ count: number }>((state) => ({
     assert(
       !output.includes('next: state.key("count") + 1'),
       "expected top-level object-property arithmetic to lower to derive()",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: top-level object-property Math.max call lowers outside JSX",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+export default pattern<{ a: number; b: number }>((state) => ({
+  value: Math.max(state.a, state.b),
+}));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, "__ctHelpers.derive(");
+    assertStringIncludes(output, "Math.max(state.a, state.b)");
+    assert(
+      !output.includes('Math.max(state.key("a"), state.key("b"))'),
+      "expected top-level Math.max call root to lower through derive() rather than raw key() args",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: top-level object-property parseInt call lowers outside JSX",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+export default pattern<{ float: string }>((state) => ({
+  value: parseInt(state.float),
+}));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, "__ctHelpers.derive(");
+    assertStringIncludes(output, "parseInt(state.float)");
+    assert(
+      !output.includes('parseInt(state.key("float"))'),
+      "expected top-level parseInt call root to lower through derive() rather than raw key() args",
     );
   },
 );
@@ -708,10 +770,10 @@ Deno.test(
     const source = `/// <cts-enable />
 import { pattern } from "commontools";
 
-const wrap = <T,>(value: T) => value;
+const identity = <T,>(value: T) => value;
 
 export default pattern<{ user?: { name: string } }>((state) => {
-  const label = wrap(state.user?.name);
+  const label = identity(state.user?.name);
   return { label };
 });
 `;
@@ -727,7 +789,7 @@ export default pattern<{ user?: { name: string } }>((state) => {
     );
 
     assertEquals(optionalDiagnostics.length, 0);
-    assertStringIncludes(output, 'wrap(state.key("user", "name"))');
+    assertStringIncludes(output, 'identity(state.key("user", "name"))');
     assert(
       !output.includes("state.user?.name"),
       "expected top-level optional property access to lower out of raw optional chaining",
