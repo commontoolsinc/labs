@@ -14,14 +14,8 @@ import type { JSONSchema, JSONSchemaObj } from "@commontools/api";
 import { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
 import { SchemaAndHash } from "./schema-and-hash.ts";
-import {
-  hashSchemaItemLegacy,
-  hashSchemaLegacy,
-} from "./schema-hash-legacy.ts";
-import {
-  hashSchemaItemModern,
-  hashSchemaModern,
-} from "./schema-hash-modern.ts";
+import { hashSchemaItemLegacy } from "./schema-hash-legacy.ts";
+import { hashSchemaItemModern } from "./schema-hash-modern.ts";
 import { toDeepFrozenSchema } from "./schema-utils.ts";
 
 // ---------------------------------------------------------------------------
@@ -55,16 +49,6 @@ export function resetSchemaHashConfig(): void {
 // ---------------------------------------------------------------------------
 // Flag-dispatched public API
 // ---------------------------------------------------------------------------
-
-/**
- * Compute a deterministic hash of a JSONSchema.
- * Structurally-equal schemas always produce the same hash.
- */
-export function hashSchema(schema: JSONSchema): FabricHash {
-  return modernSchemaHashEnabled
-    ? hashSchemaModern(schema)
-    : hashSchemaLegacy(schema);
-}
 
 /**
  * Compute a deterministic hash of a schema-related item (e.g. a
@@ -114,8 +98,8 @@ let booleanSentinels = {
   false: Object.freeze({ cacheSentinel: false }) as JSONSchemaObj,
 };
 let booleanInterns = {
-  true: new SchemaAndHash(true, hashSchema(true)),
-  false: new SchemaAndHash(false, hashSchema(false)),
+  true: new SchemaAndHash(true, hashSchemaItem(true)),
+  false: new SchemaAndHash(false, hashSchemaItem(false)),
 };
 let schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
   const ref = hashToRef.get(hashStr);
@@ -158,8 +142,8 @@ function resetInternCache(): void {
     false: Object.freeze({ cacheSentinel: false }) as JSONSchemaObj,
   };
   booleanInterns = {
-    true: new SchemaAndHash(true, hashSchema(true)),
-    false: new SchemaAndHash(false, hashSchema(false)),
+    true: new SchemaAndHash(true, hashSchemaItem(true)),
+    false: new SchemaAndHash(false, hashSchemaItem(false)),
   };
   seedBooleanInterns();
 }
@@ -194,7 +178,7 @@ export function internSchema(schema: JSONSchema): SchemaAndHash {
   const frozen = toDeepFrozenSchema(schema) as JSONSchemaObj;
 
   // Check the hash-keyed reverse map (structurally-equal but different object).
-  const hash = hashSchema(frozen);
+  const hash = hashSchemaItem(frozen);
   const hashStr = hash.toString();
 
   const ref = hashToRef.get(hashStr);
@@ -241,4 +225,12 @@ export function findInternedSchema(
   }
 
   return schemaToSah.get(schema);
+}
+
+/**
+ * Compute a deterministic hash of a JSONSchema.
+ * Structurally-equal schemas always produce the same hash.
+ */
+export function hashSchema(schema: JSONSchema): FabricHash {
+  return internSchema(schema).hash;
 }

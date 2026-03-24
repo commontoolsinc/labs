@@ -14,11 +14,6 @@ import { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
 import { hashOfModern } from "./value-hash-modern.ts";
 
-/** Modern hash of a JSONSchema. */
-export function hashSchemaModern(schema: JSONSchema): FabricHash {
-  return hashOfModern(schema);
-}
-
 /** Modern hash of a schema-related item. */
 export function hashSchemaItemModern(
   item: FabricValue,

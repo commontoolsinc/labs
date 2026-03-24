@@ -60,11 +60,6 @@ function makeLegacyFabricHash(s: string): FabricHash {
   return new FabricHash(bytes, "legacy");
 }
 
-/** Legacy hash of a JSONSchema. */
-export function hashSchemaLegacy(schema: JSONSchema): FabricHash {
-  return makeLegacyFabricHash(stableStringify(schema));
-}
-
 /** Legacy hash of a schema-related item. */
 export function hashSchemaItemLegacy(item: FabricValue): FabricHash {
   return makeLegacyFabricHash(stableStringify(item));
