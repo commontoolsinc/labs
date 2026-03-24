@@ -1,34 +1,34 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CTMarkdown } from "./ct-markdown.ts";
+import { CFMarkdown } from "./cf-markdown.ts";
 
-describe("ct-markdown", () => {
+describe("cf-markdown", () => {
   it("should be defined", () => {
-    expect(CTMarkdown).toBeDefined();
+    expect(CFMarkdown).toBeDefined();
   });
 
   it("should create element instance", () => {
-    const element = new CTMarkdown();
-    expect(element).toBeInstanceOf(CTMarkdown);
+    const element = new CFMarkdown();
+    expect(element).toBeInstanceOf(CFMarkdown);
   });
 
   it("should have default empty content", () => {
-    const element = new CTMarkdown();
+    const element = new CFMarkdown();
     expect(element.content).toBe("");
   });
 
   it("should have default variant", () => {
-    const element = new CTMarkdown();
+    const element = new CFMarkdown();
     expect(element.variant).toBe("default");
   });
 
   it("should have streaming disabled by default", () => {
-    const element = new CTMarkdown();
+    const element = new CFMarkdown();
     expect(element.streaming).toBe(false);
   });
 
   it("should render basic markdown", () => {
-    const el = new CTMarkdown();
+    const el = new CFMarkdown();
     const markdown = "Hello **world**";
 
     const rendered = (el as any)._renderMarkdown(markdown);
@@ -37,7 +37,7 @@ describe("ct-markdown", () => {
   });
 
   it("should replace LLM-friendly links with ct-cell-link", () => {
-    const el = new CTMarkdown();
+    const el = new CFMarkdown();
     const link = "/of:bafyabc123/path";
     const markdown = `Check this [Link](${link})`;
 
@@ -49,7 +49,7 @@ describe("ct-markdown", () => {
   });
 
   it("should wrap code blocks with copy buttons", () => {
-    const el = new CTMarkdown();
+    const el = new CFMarkdown();
     const markdown = "```js\nconsole.log('hello');\n```";
 
     const rendered = (el as any)._renderMarkdown(markdown);
@@ -59,7 +59,7 @@ describe("ct-markdown", () => {
   });
 
   it("should get content value from string", () => {
-    const el = new CTMarkdown();
+    const el = new CFMarkdown();
     el.content = "test content";
 
     const value = (el as any)._getContentValue();
@@ -68,7 +68,7 @@ describe("ct-markdown", () => {
   });
 
   it("should handle null/undefined content gracefully", () => {
-    const el = new CTMarkdown();
+    const el = new CFMarkdown();
     el.content = null as any;
 
     const value = (el as any)._getContentValue();
@@ -82,12 +82,12 @@ describe("ct-markdown", () => {
     // subscription management logic with manual _unsubscribe manipulation.
 
     it("should have null _unsubscribe by default", () => {
-      const el = new CTMarkdown();
+      const el = new CFMarkdown();
       expect((el as any)._unsubscribe).toBeNull();
     });
 
     it("should cleanup subscription on disconnect", () => {
-      const el = new CTMarkdown();
+      const el = new CFMarkdown();
 
       // Simulate having a subscription
       let cleaned = false;
@@ -103,7 +103,7 @@ describe("ct-markdown", () => {
     });
 
     it("should cleanup old subscription when willUpdate is called with changed content", () => {
-      const el = new CTMarkdown();
+      const el = new CFMarkdown();
 
       // Simulate having an old subscription
       let oldCleaned = false;
@@ -124,7 +124,7 @@ describe("ct-markdown", () => {
 
   describe("variant", () => {
     it("should accept inverse variant", () => {
-      const el = new CTMarkdown();
+      const el = new CFMarkdown();
       el.variant = "inverse";
       expect(el.variant).toBe("inverse");
     });
@@ -132,7 +132,7 @@ describe("ct-markdown", () => {
 
   describe("streaming", () => {
     it("should accept streaming prop", () => {
-      const el = new CTMarkdown();
+      const el = new CFMarkdown();
       el.streaming = true;
       expect(el.streaming).toBe(true);
     });
@@ -140,7 +140,7 @@ describe("ct-markdown", () => {
 
   describe("entity decoding", () => {
     it("should decode basic HTML entities", () => {
-      const el = new CTMarkdown();
+      const el = new CFMarkdown();
 
       const decoded = (el as any)._decodeHtmlEntities("&lt;div&gt;&amp;&quot;");
 
@@ -148,7 +148,7 @@ describe("ct-markdown", () => {
     });
 
     it("should decode numeric entities in fallback mode", () => {
-      const el = new CTMarkdown();
+      const el = new CFMarkdown();
 
       // Force fallback mode (test environment has no document)
       const decoded = (el as any)._decodeHtmlEntities("&#60;&#62;");
@@ -157,7 +157,7 @@ describe("ct-markdown", () => {
     });
 
     it("should decode hex entities in fallback mode", () => {
-      const el = new CTMarkdown();
+      const el = new CFMarkdown();
 
       const decoded = (el as any)._decodeHtmlEntities("&#x3C;&#x3E;");
 

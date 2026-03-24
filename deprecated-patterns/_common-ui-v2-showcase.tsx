@@ -408,7 +408,7 @@ export default pattern(
               Expandable content area
             </p>
 
-            <ct-collapsible>
+            <cf-collapsible>
               <cf-button slot="trigger" variant="outline">
                 Toggle Content
               </cf-button>
@@ -416,7 +416,7 @@ export default pattern(
                 <p>This content can be toggled open and closed.</p>
                 <p>It's useful for showing/hiding additional information.</p>
               </div>
-            </ct-collapsible>
+            </cf-collapsible>
           </section>
 
           {/* Skeleton Component */}

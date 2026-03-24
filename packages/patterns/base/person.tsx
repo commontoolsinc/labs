@@ -717,7 +717,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                       borderTop: "1px solid #e5e7eb",
                     }}
                   >
-                    <ct-autocomplete
+                    <cf-autocomplete
                       items={sameAsItems}
                       placeholder="Search contacts..."
                       oncf-select={selectSameAs({ person, showPicker })}

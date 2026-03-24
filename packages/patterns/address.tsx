@@ -68,7 +68,7 @@ export const AddressModule = pattern<AddressModuleInput, AddressModuleInput>(
         <cf-vstack style={{ gap: "12px" }}>
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Label</label>
-            <ct-autocomplete
+            <cf-autocomplete
               $value={label}
               items={labelItems}
               placeholder="Select or type label..."

@@ -2,7 +2,7 @@
 /**
  * Emoji Picker Pattern - Reusable pattern for emoji selection
  *
- * Uses ct-autocomplete for efficient searching through ~250 emojis.
+ * Uses cf-autocomplete for efficient searching through ~250 emojis.
  * Each emoji has comprehensive search aliases including slang terms.
  */
 import {
@@ -2705,7 +2705,7 @@ export const EmojiPicker = pattern<EmojiPickerInput, EmojiPickerInput>(
           >
             {selectedEmoji || "\u{2754}"}
           </div>
-          <ct-autocomplete
+          <cf-autocomplete
             items={EMOJI_ITEMS}
             placeholder="Search emojis..."
             oncf-select={onSelectEmoji({ selectedEmoji })}

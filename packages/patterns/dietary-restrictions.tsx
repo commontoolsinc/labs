@@ -1220,7 +1220,7 @@ function _getContextualLabel(name: string, level: RestrictionLevel): string {
 }
 
 // ===== Autocomplete Items =====
-// Build items for ct-autocomplete with searchAliases for bidirectional search
+// Build items for cf-autocomplete with searchAliases for bidirectional search
 
 interface AutocompleteItem {
   value: string;
@@ -1344,7 +1344,7 @@ const _selectSuggestion = handler<
   input.set("");
 });
 
-// Handler for ct-autocomplete's cf-select event
+// Handler for cf-autocomplete's cf-select event
 const onSelectRestriction = handler<
   CustomEvent<{ value: string; label: string; isCustom?: boolean }>,
   {
@@ -1487,7 +1487,7 @@ export const DietaryRestrictionsModule = pattern<
       <cf-vstack gap="4">
         {/* Input row */}
         <cf-hstack gap="2" align="center">
-          <ct-autocomplete
+          <cf-autocomplete
             items={getAutocompleteItems()}
             placeholder="Search allergies, diets, intolerances..."
             allowCustom

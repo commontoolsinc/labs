@@ -43,9 +43,9 @@ export default pattern<Input, Result>(
 
           <cf-card>
             <h4>
-              <code>ct-autocomplete</code>
+              <code>cf-autocomplete</code>
             </h4>
-            <ct-autocomplete
+            <cf-autocomplete
               items={[
                 { label: "Option 1", value: "opt_1" },
                 { label: "Option 2", value: "opt_2" },

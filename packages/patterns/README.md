@@ -24,7 +24,7 @@ keywords/features.
 
 - aside.tsx: Full-screen layout demonstration with header, footer, and sidebars
   - **Data types**: none (layout only)
-  - **Keywords**: cf-screen, ct-autolayout, slots (left/right/header/footer),
+  - **Keywords**: cf-screen, cf-autolayout, slots (left/right/header/footer),
     tabNames
 
 - system/backlinks-index.tsx: Backlinks computation system for bi-directional
@@ -47,7 +47,7 @@ keywords/features.
   - **Data types**: array of objects (CharmEntry with ID and piece), selected
     piece object
   - **Keywords**: lift, handler, navigateTo, cf-select, ct-render,
-    ct-autolayout, wish, [ID]
+    cf-autolayout, wish, [ID]
 
 - chatbot.tsx: Full-featured chatbot with LLM integration and attachments
   - **Data types**: array of LLM messages, array of attachments (objects), array

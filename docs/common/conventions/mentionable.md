@@ -161,7 +161,7 @@ The system uses two link formats for mentions, depending on context:
 
 | Format | Example | Used by |
 |--------|---------|---------|
-| Markdown link | `[Note](/of:bafyabc123)` | `ct-prompt-input`, LLM dialog, `ct-markdown` |
+| Markdown link | `[Note](/of:bafyabc123)` | `ct-prompt-input`, LLM dialog, `cf-markdown` |
 | Wiki-link | `[[Note (bafyabc123)]]` | `ct-code-editor`, `note-md.tsx` |
 
 ### Markdown links (`/of:...`)
@@ -170,7 +170,7 @@ These follow the LLM-friendly link format from `link-types.ts`. Path
 segments are encoded per RFC 6901 (JSON Pointer): `~` becomes `~0`, `/`
 becomes `~1`.
 
-`ct-markdown` converts rendered `<a href="/of:...">` elements into
+`cf-markdown` converts rendered `<a href="/of:...">` elements into
 interactive `<ct-cell-link>` components.
 
 ### Wiki-links (`[[Name (id)]]`)
@@ -212,6 +212,6 @@ wish("#mentionable")  ──►  $mentionable prop    ──►  @link array
              in user message  to [Name](/of:id)
                                   │
                                   ▼
-                              ct-markdown renders
+                              cf-markdown renders
                               as ct-cell-link
 ```

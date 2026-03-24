@@ -34,7 +34,7 @@ const AutocompleteItemArraySchema = {
 } as const satisfies JSONSchema;
 
 /**
- * AutocompleteItem - Item format for ct-autocomplete
+ * AutocompleteItem - Item format for cf-autocomplete
  */
 export interface AutocompleteItem {
   /** Value returned when selected */
@@ -121,11 +121,11 @@ function processItem(item: AutocompleteItem): ProcessedItem {
 }
 
 /**
- * CTAutocomplete - Search input with filterable dropdown and optional value binding
+ * CFAutocomplete - Search input with filterable dropdown and optional value binding
  *
  * Supports both single-select and multi-select modes, with bidirectional Cell binding.
  *
- * @element ct-autocomplete
+ * @element cf-autocomplete
  *
  * @attr {string} placeholder - Placeholder text for the input
  * @attr {number} maxVisible - Maximum items to show in dropdown (default: 8)
@@ -136,15 +136,15 @@ function processItem(item: AutocompleteItem): ProcessedItem {
  * @prop {CellHandle<AutocompleteItem[]> | AutocompleteItem[]} items - Items to choose from
  * @prop {CellHandle<string>|CellHandle<string[]>|string|string[]} value - Selected value(s) - supports Cell binding
  *
- * @fires ct-change - Fired when value changes: { value, oldValue }
+ * @fires cf-change - Fired when value changes: { value, oldValue }
  * @fires cf-select - Fired when an item is selected: { value, label, group?, isCustom, data? }
  *                   Note: Cell refs in `data` become link representations; use Cell.equals() to compare
- * @fires ct-open - Fired when dropdown opens
- * @fires ct-close - Fired when dropdown closes
+ * @fires cf-open - Fired when dropdown opens
+ * @fires cf-close - Fired when dropdown closes
  *
  * @example Single-select with $value binding
  * const selected = cell<string | undefined>(undefined);
- * <ct-autocomplete
+ * <cf-autocomplete
  *   items={relationshipTypes}
  *   $value={selected}
  *   placeholder="Search..."
@@ -152,7 +152,7 @@ function processItem(item: AutocompleteItem): ProcessedItem {
  *
  * @example Multi-select with $value binding
  * const selected = cell<string[]>([]);
- * <ct-autocomplete
+ * <cf-autocomplete
  *   items={relationshipTypes}
  *   $value={selected}
  *   multiple={true}
@@ -160,13 +160,13 @@ function processItem(item: AutocompleteItem): ProcessedItem {
  * />
  *
  * @example Event-only API (no value binding)
- * <ct-autocomplete
+ * <cf-autocomplete
  *   items={items}
  *   oncf-select={(e) => console.log('Selected:', e.detail)}
  *   placeholder="Search..."
  * />
  */
-export class CTAutocomplete extends BaseElement {
+export class CFAutocomplete extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -377,7 +377,7 @@ export class CTAutocomplete extends BaseElement {
     private _cellController = createCellController<string | string[]>(this, {
       timing: { strategy: "debounce", delay: 50 },
       onChange: (newValue, oldValue) => {
-        this.emit("ct-change", { value: newValue, oldValue });
+        this.emit("cf-change", { value: newValue, oldValue });
       },
     });
 
@@ -893,7 +893,7 @@ export class CTAutocomplete extends BaseElement {
       this._debounceTimer = setTimeout(() => {
         if (!this._isOpen && newValue) {
           this._isOpen = true;
-          this.emit("ct-open", {});
+          this.emit("cf-open", {});
         }
         this._query = newValue;
         this._highlightedIndex = 0;
@@ -1110,7 +1110,7 @@ export class CTAutocomplete extends BaseElement {
 
       this._isOpen = true;
       this._highlightedIndex = 0;
-      this.emit("ct-open", {});
+      this.emit("cf-open", {});
     }
 
     private _close() {
@@ -1118,7 +1118,7 @@ export class CTAutocomplete extends BaseElement {
       // Clear query so display reverts to selected value (in single mode)
       // or empty (in multi mode)
       this._query = "";
-      this.emit("ct-close", {});
+      this.emit("cf-close", {});
     }
 
     // Dropdown positioning
@@ -1169,4 +1169,4 @@ export class CTAutocomplete extends BaseElement {
     }
   }
 
-  globalThis.customElements.define("ct-autocomplete", CTAutocomplete);
+  globalThis.customElements.define("cf-autocomplete", CFAutocomplete);

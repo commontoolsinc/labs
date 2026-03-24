@@ -11,7 +11,7 @@ interface CollapsibleStoryOutput {
 
 export default pattern<CollapsibleStoryInput, CollapsibleStoryOutput>(() => {
   return {
-    [NAME]: "ct-collapsible Story",
+    [NAME]: "cf-collapsible Story",
     [UI]: (
       <div
         style={{
@@ -20,7 +20,7 @@ export default pattern<CollapsibleStoryInput, CollapsibleStoryOutput>(() => {
         }}
       >
         <cf-vstack gap="2">
-          <ct-collapsible>
+          <cf-collapsible>
             <cf-button
               slot="trigger"
               variant="ghost"
@@ -31,8 +31,8 @@ export default pattern<CollapsibleStoryInput, CollapsibleStoryOutput>(() => {
             <div style="padding: 12px; font-size: 13px; color: #666;">
               Hidden content revealed on expand. Animated height transition.
             </div>
-          </ct-collapsible>
-          <ct-collapsible open>
+          </cf-collapsible>
+          <cf-collapsible open>
             <cf-button
               slot="trigger"
               variant="ghost"
@@ -43,7 +43,7 @@ export default pattern<CollapsibleStoryInput, CollapsibleStoryOutput>(() => {
             <div style="padding: 12px; font-size: 13px; color: #666;">
               This section starts open.
             </div>
-          </ct-collapsible>
+          </cf-collapsible>
         </cf-vstack>
       </div>
     ),

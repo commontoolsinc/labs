@@ -25,10 +25,10 @@ import ChipStory from "./ct-chip-story.tsx";
 import BadgeStory from "./ct-badge-story.tsx";
 import AlertStory from "./ct-alert-story.tsx";
 import SeparatorStory from "./ct-separator-story.tsx";
-import MarkdownStory from "./ct-markdown-story.tsx";
+import MarkdownStory from "./cf-markdown-story.tsx";
 import LoaderStory from "./ct-loader-story.tsx";
 import SkeletonStory from "./ct-skeleton-story.tsx";
-import CollapsibleStory from "./ct-collapsible-story.tsx";
+import CollapsibleStory from "./cf-collapsible-story.tsx";
 import TabsStory from "./ct-tabs-story.tsx";
 import ChartStory from "./ct-chart-story.tsx";
 

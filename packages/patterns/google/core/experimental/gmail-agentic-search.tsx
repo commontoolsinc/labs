@@ -1978,9 +1978,9 @@ When you're done searching, STOP calling tools and produce your final structured
                     textAlign: "center",
                   }}
                 >
-                  <ct-markdown>
+                  <cf-markdown>
                     {derive(agentResult, (r: any) => r?.summary || "")}
-                  </ct-markdown>
+                  </cf-markdown>
                 </div>
                 <cf-button
                   onClick={boundCompleteScan}

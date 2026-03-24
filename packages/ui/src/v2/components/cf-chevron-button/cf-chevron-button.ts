@@ -5,7 +5,7 @@ import { BaseElement } from "../../core/base-element.ts";
 /**
  * A minimal chevron button that rotates between up/down states
  *
- * @element ct-chevron-button
+ * @element cf-chevron-button
  *
  * @attr {boolean} expanded - Whether the chevron is in expanded (down) state
  * @attr {boolean} loading - Whether to show loading animation instead of chevron
@@ -14,13 +14,13 @@ import { BaseElement } from "../../core/base-element.ts";
  * @fires cf-toggle - Fired when button is clicked
  *
  * @example
- * <ct-chevron-button
+ * <cf-chevron-button
  *   ?expanded=${showContent}
  *   ?loading=${isPending}
  *   @cf-toggle=${handleToggle}
- * ></ct-chevron-button>
+ * ></cf-chevron-button>
  */
-export class CTChevronButton extends BaseElement {
+export class CFChevronButton extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -187,6 +187,6 @@ export class CTChevronButton extends BaseElement {
   }
 }
 
-if (!globalThis.customElements.get("ct-chevron-button")) {
-  globalThis.customElements.define("ct-chevron-button", CTChevronButton);
+if (!globalThis.customElements.get("cf-chevron-button")) {
+  globalThis.customElements.define("cf-chevron-button", CFChevronButton);
 }

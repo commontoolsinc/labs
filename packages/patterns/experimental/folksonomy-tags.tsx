@@ -88,7 +88,7 @@ interface FolksonomyTagsOutput {
 }
 
 /**
- * Autocomplete item structure for ct-autocomplete.
+ * Autocomplete item structure for cf-autocomplete.
  */
 interface AutocompleteItem {
   value: string;
@@ -356,7 +356,7 @@ export const FolksonomyTags = pattern<
               instead of oncf-select (runtime bug: CustomEvent.detail not passed through ct-render)
               onct-change triggers telemetry posting for additions */
           }
-          <ct-autocomplete
+          <cf-autocomplete
             items={autocompleteItems}
             placeholder="Add a tag..."
             allowCustom

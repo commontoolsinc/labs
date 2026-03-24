@@ -4,9 +4,9 @@ import { BaseElement } from "../../core/base-element.ts";
 import { collapsibleStyles } from "./styles.ts";
 
 /**
- * CTCollapsible - Single collapsible section with trigger and content
+ * CFCollapsible - Single collapsible section with trigger and content
  *
- * @element ct-collapsible
+ * @element cf-collapsible
  *
  * @attr {boolean} open - Whether the collapsible is open
  * @attr {boolean} disabled - Whether the collapsible is disabled
@@ -17,12 +17,12 @@ import { collapsibleStyles } from "./styles.ts";
  * @fires cf-toggle - Fired on open/close with detail: { open }
  *
  * @example
- * <ct-collapsible>
+ * <cf-collapsible>
  *   <button slot="trigger">Click to expand</button>
  *   <div>Hidden content revealed here</div>
- * </ct-collapsible>
+ * </cf-collapsible>
  */
-export class CTCollapsible extends BaseElement {
+export class CFCollapsible extends BaseElement {
   static override properties = {
     open: { type: Boolean, reflect: true },
     disabled: { type: Boolean, reflect: true },
@@ -256,4 +256,4 @@ export class CTCollapsible extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-collapsible", CTCollapsible);
+globalThis.customElements.define("cf-collapsible", CFCollapsible);

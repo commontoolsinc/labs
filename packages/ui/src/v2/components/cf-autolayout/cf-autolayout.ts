@@ -3,23 +3,23 @@ import { classMap } from "lit/directives/class-map.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTAutoLayout - Responsive multi-panel layout component
+ * CFAutoLayout - Responsive multi-panel layout component
  *
  * Automatically arranges children:
  * - Desktop: Optional left/right sidebars and center content grid
  * - Mobile: Degrades to a tabbed interface (left | content | right)
  *
- * @element ct-autolayout
+ * @element cf-autolayout
  *
  * @example
- * <ct-autolayout tabNames={["Chat", "Tools", "Lists"]}>
+ * <cf-autolayout tabNames={["Chat", "Tools", "Lists"]}>
  *   <div>Messages</div>
  *   <div>Calculator results</div>
  *   <div>Todo items</div>
- * </ct-autolayout>
+ * </cf-autolayout>
  *
  * @example With sidebars
- * <ct-autolayout
+ * <cf-autolayout
  *   tabNames={["Chat", "Tools"]}
  *   leftTabName="Outline"
  *   rightTabName="Details"
@@ -28,9 +28,9 @@ import { BaseElement } from "../../core/base-element.ts";
  *   <div>Chat</div>
  *   <div>Tools</div>
  *   <aside slot="right">Extra details</aside>
- * </ct-autolayout>
+ * </cf-autolayout>
  */
-export class CTAutoLayout extends BaseElement {
+export class CFAutoLayout extends BaseElement {
   static override properties = {
     tabNames: { type: Array, attribute: false },
     leftTabName: { type: String, attribute: false },
@@ -676,4 +676,4 @@ export class CTAutoLayout extends BaseElement {
     }
   }
 
-  globalThis.customElements.define("ct-autolayout", CTAutoLayout);
+  globalThis.customElements.define("cf-autolayout", CFAutoLayout);

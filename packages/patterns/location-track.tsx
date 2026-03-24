@@ -259,7 +259,7 @@ export const LocationTrackModule = pattern<
         {/* Points list (collapsible for many points) */}
         {ifElse(
           hasMultiplePoints,
-          <ct-collapsible>
+          <cf-collapsible>
             <span slot="trigger" style={{ fontSize: "12px", color: "#6b7280" }}>
               View all points
             </span>
@@ -336,7 +336,7 @@ export const LocationTrackModule = pattern<
                 </cf-hstack>
               ))}
             </cf-vstack>
-          </ct-collapsible>,
+          </cf-collapsible>,
           null,
         )}
       </cf-vstack>

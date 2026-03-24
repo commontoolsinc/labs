@@ -186,19 +186,19 @@ In practice we often use a specific set of properties if dealing with a "chat vi
 
 Here `flex` will force the `vscroll` to expand without a fixed height. `snapToBottom` will automatically scroll to the bottom when new content is added.
 
-## ct-autolayout
+## cf-autolayout
 
 Will attempt to lay out the children provided as best it can. Provides two slots for `left` and `right` sidebars (that can be toggled open/shut). On a wide view, items stack horizontally, on a medium view thet stack vertically and on mobile it converts to a tabbed view.
 
-```{figure} ./images/diagrams/ct-autolayout-wide.svg
+```{figure} ./images/diagrams/cf-autolayout-wide.svg
 :name: layout-example
 ```
 
-```{figure} ./images/diagrams/ct-autolayout-mid.svg
+```{figure} ./images/diagrams/cf-autolayout-mid.svg
 :name: layout-example
 ```
 
-```{figure} ./images/diagrams/ct-autolayout-narrow.svg
+```{figure} ./images/diagrams/cf-autolayout-narrow.svg
 :name: layout-example
 ```
 
@@ -209,10 +209,10 @@ Will attempt to lay out the children provided as best it can. Provides two slots
     <h2>Header Section</h2>
   </div>
 
-  <!-- ct-autolayout creates responsive multi-panel layout with optional sidebars -->
+  <!-- cf-autolayout creates responsive multi-panel layout with optional sidebars -->
   <!-- tabNames: Labels for main content panels (shown as tabs on mobile) -->
   <!-- Shows all panels side-by-side in a grid -->
-  <ct-autolayout tabNames={["Main", "Second"]}>
+  <cf-autolayout tabNames={["Main", "Second"]}>
     <!-- Left sidebar - use slot="left" -->
     <aside slot="left">
       <h3>Left Sidebar</h3>
@@ -240,7 +240,7 @@ Will attempt to lay out the children provided as best it can. Provides two slots
       <p>Right content</p>
       <cf-button>Right Button</cf-button>
     </aside>
-  </ct-autolayout>
+  </cf-autolayout>
 
   <!-- Footer slot - fixed at bottom -->
   <div slot="footer">
@@ -266,7 +266,7 @@ You can mix-and-match the above components to achieve practically any (standard)
     <ct-toolbar slot="top">
         <cf-button>hello</cf-button>
     </ct-toolbar>
-    <ct-autolayout>
+    <cf-autolayout>
         <cf-vstack slot="left">
             <cf-hstack gap="1">
                 <icon>question</icon>
@@ -294,7 +294,7 @@ You can mix-and-match the above components to achieve practically any (standard)
                 <li>Imagine this was long</li>
             </ul>
         </cf-vscroll>
-    </ct-autolayout>
+    </cf-autolayout>
 </cf-screen>
 ```
 
@@ -340,7 +340,7 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Interactive / Complex Components
 
-- interactive: `ct-collapsible`, `ct-tab-list`, `ct-canvas`
+- interactive: `cf-collapsible`, `ct-tab-list`, `ct-canvas`
 
 - complex/integrated (cell interop): `ct-code-editor`, `ct-outliner`
 	- gap: editable table rows

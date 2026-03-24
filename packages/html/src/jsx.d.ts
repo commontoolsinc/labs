@@ -2866,19 +2866,19 @@ interface CTFileInputElement extends CTHTMLElement {}
 interface CTImageInputElement extends CTHTMLElement {}
 interface CFInputLegacyElement extends CTHTMLElement {}
 interface CFCheckboxElement extends CTHTMLElement {}
-interface CTAutocompleteElement extends CTHTMLElement {}
+interface CFAutocompleteElement extends CTHTMLElement {}
 interface CFSelectElement extends CTHTMLElement {}
 interface CFRadioGroupElement extends CTHTMLElement {}
 interface CTPickerElement extends CTHTMLElement {}
 interface CTToolsChipElement extends CTHTMLElement {}
 interface CFHeadingElement extends CTHTMLElement {}
-interface CTCollapsibleElement extends CTHTMLElement {}
+interface CFCollapsibleElement extends CTHTMLElement {}
 interface CTThemeElement extends CTHTMLElement {}
 interface CTCodeEditorElement extends CTHTMLElement {}
 interface CTCodeEditorLegacyElement extends CTHTMLElement {}
 interface CFScreenElement extends CTHTMLElement {}
 interface CTAutostartElement extends CTHTMLElement {}
-interface CTAutoLayoutElement extends CTHTMLElement {}
+interface CFAutoLayoutElement extends CTHTMLElement {}
 interface CFButtonElement extends CTHTMLElement {}
 interface CTCopyButtonElement extends CTHTMLElement {}
 interface CTFileDownloadElement extends CTHTMLElement {}
@@ -2887,7 +2887,7 @@ interface CFHStackElement extends CTHTMLElement {}
 interface CTFabElement extends CTHTMLElement {}
 interface CTModalElement extends CTHTMLElement {}
 interface CTModalProviderElement extends CTHTMLElement {}
-interface CTChevronButtonElement extends CTHTMLElement {}
+interface CFChevronButtonElement extends CTHTMLElement {}
 interface CFCardElement extends CTHTMLElement {}
 interface CTCalendarElement extends CTHTMLElement {}
 interface CTQuestionElement extends CTHTMLElement {}
@@ -2902,7 +2902,7 @@ interface CFCellContextElement extends CTHTMLElement {}
 interface CTDragSourceElement extends CTHTMLElement {}
 interface CTDropZoneElement extends CTHTMLElement {}
 interface CTChatMessageElement extends CTHTMLElement {}
-interface CTMarkdownElement extends CTHTMLElement {}
+interface CFMarkdownElement extends CTHTMLElement {}
 interface CTSvgElement extends CTHTMLElement {}
 interface CFVScrollElement extends CTHTMLElement {}
 interface CTSendMessageElement extends CTHTMLElement {}
@@ -3304,12 +3304,13 @@ interface CTChatMessageAttributes<T> extends CTHTMLAttributes<T> {
   "pending"?: boolean;
 }
 
-interface CTMarkdownAttributes<T> extends CTHTMLAttributes<T> {
+interface CFMarkdownAttributes<T> extends CTHTMLAttributes<T> {
   "content"?: string;
   "$content"?: CellLike<string>;
   "variant"?: "default" | "inverse";
   "streaming"?: boolean;
   "compact"?: boolean;
+  "oncf-checkbox-change"?: EventHandler<{ index: number; checked: boolean }>;
 }
 
 interface CTSvgAttributes<T> extends CTHTMLAttributes<T> {
@@ -3494,9 +3495,10 @@ interface CTModalAttributes<T> extends CTHTMLAttributes<T> {
 
 interface CTModalProviderAttributes<T> extends CTHTMLAttributes<T> {}
 
-interface CTChevronButtonAttributes<T> extends CTHTMLAttributes<T> {
+interface CFChevronButtonAttributes<T> extends CTHTMLAttributes<T> {
   "expanded"?: boolean;
   "loading"?: boolean;
+  "oncf-toggle"?: EventHandler<void>;
 }
 
 interface CFInputAttributes<T> extends CTHTMLAttributes<T> {
@@ -3667,7 +3669,7 @@ interface CFCheckboxAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-change"?: EventHandler<any>;
 }
 
-interface CTAutocompleteAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAutocompleteAttributes<T> extends CTHTMLAttributes<T> {
   "$value"?: CellLike<string | string[]>;
   "items": {
     value: string;
@@ -3680,14 +3682,20 @@ interface CTAutocompleteAttributes<T> extends CTHTMLAttributes<T> {
   "allowCustom"?: boolean;
   "multiple"?: boolean;
   "disabled"?: boolean;
-  "onct-change"?: EventHandler<
+  "oncf-change"?: EventHandler<
     { value: string | string[]; oldValue: string | string[] }
   >;
   "oncf-select"?: EventHandler<
-    { value: string; label: string; group?: string; isCustom: boolean }
+    {
+      value: string;
+      label: string;
+      group?: string;
+      isCustom: boolean;
+      data?: unknown;
+    }
   >;
-  "onct-open"?: EventHandler<any>;
-  "onct-close"?: EventHandler<any>;
+  "oncf-open"?: EventHandler<void>;
+  "oncf-close"?: EventHandler<void>;
 }
 
 interface CFSelectAttributes<T> extends CTHTMLAttributes<T> {
@@ -3754,10 +3762,10 @@ interface CFHeadingAttributes<T> extends CTHTMLAttributes<T> {
   "no-margin"?: boolean;
 }
 
-interface CTCollapsibleAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCollapsibleAttributes<T> extends CTHTMLAttributes<T> {
   "open"?: boolean;
   "disabled"?: boolean;
-  "oncf-toggle"?: any;
+  "oncf-toggle"?: EventHandler<{ open: boolean }>;
 }
 
 interface CTThemeAttributes<T> extends CTHTMLAttributes<T> {
@@ -3815,10 +3823,12 @@ interface CTAutostartAttributes<T> extends CTHTMLAttributes<T> {
   "onstart"?: any;
 }
 
-interface CTAutoLayoutAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAutoLayoutAttributes<T> extends CTHTMLAttributes<T> {
   "tabNames"?: string[];
   "leftOpen"?: boolean;
   "rightOpen"?: boolean;
+  "oncf-toggle-left"?: EventHandler<{ open: boolean }>;
+  "oncf-toggle-right"?: EventHandler<{ open: boolean }>;
 }
 
 // Tab component attributes
@@ -4631,9 +4641,9 @@ declare global {
         CFCheckboxAttributes<CFCheckboxElement>,
         CFCheckboxElement
       >;
-      "ct-autocomplete": CTDOM.DetailedHTMLProps<
-        CTAutocompleteAttributes<CTAutocompleteElement>,
-        CTAutocompleteElement
+      "cf-autocomplete": CTDOM.DetailedHTMLProps<
+        CFAutocompleteAttributes<CFAutocompleteElement>,
+        CFAutocompleteElement
       >;
       "cf-select": CTDOM.DetailedHTMLProps<
         CFSelectAttributes<CFSelectElement>,
@@ -4655,9 +4665,9 @@ declare global {
         CFHeadingAttributes<CFHeadingElement>,
         CFHeadingElement
       >;
-      "ct-collapsible": CTDOM.DetailedHTMLProps<
-        CTCollapsibleAttributes<CTCollapsibleElement>,
-        CTCollapsibleElement
+      "cf-collapsible": CTDOM.DetailedHTMLProps<
+        CFCollapsibleAttributes<CFCollapsibleElement>,
+        CFCollapsibleElement
       >;
       "ct-theme": CTDOM.DetailedHTMLProps<
         CTThemeAttributes<CTThemeElement>,
@@ -4675,9 +4685,9 @@ declare global {
         CTAutostartAttributes<CTAutostartElement>,
         CTAutostartElement
       >;
-      "ct-autolayout": CTDOM.DetailedHTMLProps<
-        CTAutoLayoutAttributes<CTAutoLayoutElement>,
-        CTAutoLayoutElement
+      "cf-autolayout": CTDOM.DetailedHTMLProps<
+        CFAutoLayoutAttributes<CFAutoLayoutElement>,
+        CFAutoLayoutElement
       >;
       "cf-button": CTDOM.DetailedHTMLProps<
         CFButtonAttributes<CFButtonElement>,
@@ -4703,9 +4713,9 @@ declare global {
         CTFileDownloadAttributes<CTFileDownloadElement>,
         CTFileDownloadElement
       >;
-      "ct-chevron-button": CTDOM.DetailedHTMLProps<
-        CTChevronButtonAttributes<CTChevronButtonElement>,
-        CTChevronButtonElement
+      "cf-chevron-button": CTDOM.DetailedHTMLProps<
+        CFChevronButtonAttributes<CFChevronButtonElement>,
+        CFChevronButtonElement
       >;
       "cf-message-input": CTDOM.DetailedHTMLProps<
         CFMessageInputAttributes<CFMessageInputElement>,
@@ -4715,9 +4725,9 @@ declare global {
         CTChatMessageAttributes<CTChatMessageElement>,
         CTChatMessageElement
       >;
-      "ct-markdown": CTDOM.DetailedHTMLProps<
-        CTMarkdownAttributes<CTMarkdownElement>,
-        CTMarkdownElement
+      "cf-markdown": CTDOM.DetailedHTMLProps<
+        CFMarkdownAttributes<CFMarkdownElement>,
+        CFMarkdownElement
       >;
       "cf-card": CTDOM.DetailedHTMLProps<
         CFCardAttributes<CFCardElement>,

@@ -12,7 +12,7 @@
 ### Form/Input Components (5)
 
 1. **ct-aspect-ratio** - Maintains aspect ratio for content
-2. **ct-collapsible** - Expandable/collapsible content section
+2. **cf-collapsible** - Expandable/collapsible content section
 3. **ct-progress** - Progress bar with determinate/indeterminate states
 4. **ct-input-otp** - One-time password input with individual digits
 5. **cf-radio-group** - Radio button group container

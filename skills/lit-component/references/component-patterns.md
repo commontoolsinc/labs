@@ -11,7 +11,7 @@ Common UI components fall into distinct categories, each with specific patterns:
 
 Components that arrange other components without providing content themselves.
 
-**Examples:** `cf-vstack`, `cf-hstack`, `cf-screen`, `ct-autolayout`
+**Examples:** `cf-vstack`, `cf-hstack`, `cf-screen`, `cf-autolayout`
 
 **Characteristics:**
 

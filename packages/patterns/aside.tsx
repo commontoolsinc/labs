@@ -14,10 +14,10 @@ export default pattern(() => {
           <h2>Header Section</h2>
         </div>
 
-        {/* ct-autolayout creates responsive multi-panel layout with optional sidebars */}
+        {/* cf-autolayout creates responsive multi-panel layout with optional sidebars */}
         {/* tabNames: Labels for main content panels (shown as tabs on mobile) */}
         {/* Shows all panels side-by-side in a grid */}
-        <ct-autolayout tabNames={["Main", "Second"]}>
+        <cf-autolayout tabNames={["Main", "Second"]}>
           {/* Left sidebar - use slot="left" */}
           <aside slot="left">
             <h3>Left Sidebar</h3>
@@ -45,7 +45,7 @@ export default pattern(() => {
             <p>Right content</p>
             <cf-button>Right Button</cf-button>
           </aside>
-        </ct-autolayout>
+        </cf-autolayout>
 
         {/* Footer slot - fixed at bottom */}
         <div slot="footer">

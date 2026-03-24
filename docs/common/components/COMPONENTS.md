@@ -26,10 +26,10 @@ Use camelCase for `ct-*` component properties. Kebab-case JSX attributes don't m
 
 ```tsx
 // ❌ Kebab-case won't work
-<ct-autocomplete allow-custom={true} />  // Sets element["allow-custom"], not allowCustom
+<cf-autocomplete allow-custom={true} />  // Sets element["allow-custom"], not allowCustom
 
 // ✅ CamelCase works
-<ct-autocomplete allowCustom={true} />  // Sets element.allowCustom correctly
+<cf-autocomplete allowCustom={true} />  // Sets element.allowCustom correctly
 ```
 
 ---
@@ -284,7 +284,7 @@ Rich text editor with wiki-link mentions. **Uses `[[` for completions, not `@`.*
 **To trigger completions:** Type `[[` (double brackets), not `@`.
 
 Mentions are inserted as wiki-links: `[[Name (entityId)]]` where `entityId`
-is the bare CID. For rendering in `ct-markdown`, convert to markdown links
+is the bare CID. For rendering in `cf-markdown`, convert to markdown links
 with `/of:` prefix (see [mentionable](../conventions/mentionable.md)).
 
 ---

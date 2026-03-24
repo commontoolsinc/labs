@@ -20,7 +20,7 @@ export default pattern<AutocompleteStoryInput, AutocompleteStoryOutput>(() => {
   ];
 
   return {
-    [NAME]: "ct-autocomplete Story",
+    [NAME]: "cf-autocomplete Story",
     [UI]: (
       <div style={{ padding: "1rem", maxWidth: "400px" }}>
         <div
@@ -33,7 +33,7 @@ export default pattern<AutocompleteStoryInput, AutocompleteStoryOutput>(() => {
         >
           Autocomplete with grouped items
         </div>
-        <ct-autocomplete
+        <cf-autocomplete
           items={items}
           placeholder="Search fruits or vegetables..."
         />

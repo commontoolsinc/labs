@@ -271,7 +271,7 @@ Be matter-of-fact. Prefer action to explanation.`;
               <div style="width: 100%; display: flex; flex-direction: column; max-height: 580px;">
                 {/* Chevron to expand chat history */}
                 <div style="display: flex; justify-content: center; flex-shrink: 0;">
-                  <ct-chevron-button
+                  <cf-chevron-button
                     expanded={showHistory}
                     loading={omnibot.pending}
                     oncf-toggle={toggle({ value: showHistory })}

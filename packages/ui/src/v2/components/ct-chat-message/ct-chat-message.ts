@@ -5,7 +5,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import "../ct-tool-call/ct-tool-call.ts";
 import "../cf-button/cf-button.ts";
 import "../ct-copy-button/ct-copy-button.ts";
-import "../ct-markdown/ct-markdown.ts";
+import "../cf-markdown/cf-markdown.ts";
 import type {
   BuiltInLLMContent,
   BuiltInLLMTextPart,
@@ -121,8 +121,8 @@ export class CTChatMessage extends BaseElement {
         color: var(--ct-theme-color-text, #111827);
       }
 
-      /* ct-markdown inherits color from parent */
-      ct-markdown {
+      /* cf-markdown inherits color from parent */
+      cf-markdown {
         color: inherit;
         line-height: 1.5;
       }
@@ -386,12 +386,12 @@ export class CTChatMessage extends BaseElement {
         ${this._renderAvatar()}
         <div class="message-bubble">
           <div class="${messageClass}">
-            <ct-markdown
+            <cf-markdown
               .content="${textContent}"
               .variant="${variant}"
               ?streaming="${this.streaming}"
               ?compact="${this.compact}"
-            ></ct-markdown>
+            ></cf-markdown>
           </div>
           ${this._renderToolAttachments()} ${this._renderMessageActions()}
         </div>

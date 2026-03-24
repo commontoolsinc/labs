@@ -58,7 +58,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
     const hasBacklinks = computed(() => (note?.backlinks?.length ?? 0) > 0);
 
     // Convert [[Name (id)]] wiki-links to markdown links [Name](/of:id)
-    // ct-markdown will then convert these to clickable ct-cell-link components
+    // cf-markdown will then convert these to clickable ct-cell-link components
     // Use content prop if provided, otherwise fall back to note.content
     const processedContent = computed(() => {
       const raw = content?.get?.() ?? note?.content ?? "";
@@ -129,7 +129,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
       <cf-vscroll flex showScrollbar fadeEdges>
         <div style={{ padding: "1rem", minHeight: "100%" }}>
           {/* Markdown content with wiki-links converted to clickable links */}
-          <ct-markdown
+          <cf-markdown
             content={processedContent}
             oncf-checkbox-change={handleCheckboxToggle}
           />

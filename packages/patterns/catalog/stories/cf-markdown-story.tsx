@@ -18,14 +18,14 @@ This component renders **bold**, *italic*, and \`inline code\`.
 - With multiple items
 
 \`\`\`js
-const greeting = "Hello from ct-markdown";
+const greeting = "Hello from cf-markdown";
 console.log(greeting);
 \`\`\`
 
 > Blockquotes are supported too.`;
 
   return {
-    [NAME]: "ct-markdown Story",
+    [NAME]: "cf-markdown Story",
     [UI]: (
       <div
         style={{
@@ -33,7 +33,7 @@ console.log(greeting);
           maxWidth: "480px",
         }}
       >
-        <ct-markdown content={content} />
+        <cf-markdown content={content} />
       </div>
     ),
     controls: (

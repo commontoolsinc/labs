@@ -52,6 +52,6 @@ describe("ct-chat-message", () => {
     expect(text).toBe("");
   });
 
-  // Note: Markdown rendering is now tested in ct-markdown.test.ts
-  // ct-chat-message delegates to ct-markdown component
+  // Note: Markdown rendering is now tested in cf-markdown.test.ts
+  // ct-chat-message delegates to cf-markdown component
 });

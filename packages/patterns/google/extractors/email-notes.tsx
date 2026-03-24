@@ -559,7 +559,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                       </div>
 
                       {/* Note content - rendered as markdown */}
-                      <ct-markdown
+                      <cf-markdown
                         content={derive(note, (n) => n.content)}
                         compact
                         style="font-size: 14px; line-height: 1.5; color: #374151;"

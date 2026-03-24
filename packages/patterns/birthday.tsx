@@ -112,7 +112,7 @@ export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 Month
               </label>
-              <ct-autocomplete
+              <cf-autocomplete
                 $value={birthMonth}
                 items={MONTH_ITEMS}
                 placeholder="Month"
@@ -123,7 +123,7 @@ export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
 
             <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>Day</label>
-              <ct-autocomplete
+              <cf-autocomplete
                 $value={birthDay}
                 items={DAY_ITEMS}
                 placeholder="Day"
@@ -134,7 +134,7 @@ export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
 
             <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>Year</label>
-              <ct-autocomplete
+              <cf-autocomplete
                 $value={birthYear}
                 items={YEAR_ITEMS}
                 placeholder="Year"

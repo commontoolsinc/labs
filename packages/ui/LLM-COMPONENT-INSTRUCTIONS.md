@@ -310,9 +310,9 @@ shadcn/ui design system. All components:
 - `trigger` - Clickable header
 - `content` - Collapsible content
 
-### 20. ct-collapsible
+### 20. cf-collapsible
 
-**Purpose**: Single collapsible section **Tag**: `<ct-collapsible>`
+**Purpose**: Single collapsible section **Tag**: `<cf-collapsible>`
 **Attributes**:
 
 - `open` - boolean

@@ -17,9 +17,9 @@ import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 export type MarkdownVariant = "default" | "inverse";
 
 /**
- * CTMarkdown - Renders markdown content with syntax highlighting and copy buttons
+ * CFMarkdown - Renders markdown content with syntax highlighting and copy buttons
  *
- * @element ct-markdown
+ * @element cf-markdown
  *
  * @attr {string} content - The markdown content to render (string or CellHandle<string>)
  * @attr {string} variant - Visual variant: "default" or "inverse" (for light text on dark bg)
@@ -30,24 +30,24 @@ export type MarkdownVariant = "default" | "inverse";
  *
  * @fires cf-checkbox-change - Fired when a task list checkbox is toggled. Detail: { index: number, checked: boolean }
  *
- * @cssprop [--ct-markdown-inverse-border=rgba(255,255,255,0.3)] - Border color for inverse variant
- * @cssprop [--ct-markdown-inverse-surface=rgba(255,255,255,0.2)] - Surface color for inverse variant (code blocks)
- * @cssprop [--ct-markdown-inverse-surface-subtle=rgba(255,255,255,0.1)] - Subtle surface for inverse (table headers)
- * @cssprop [--ct-markdown-inverse-accent=rgba(255,255,255,0.6)] - Accent color for inverse (blockquote border)
+ * @cssprop [--cf-markdown-inverse-border=rgba(255,255,255,0.3)] - Border color for inverse variant
+ * @cssprop [--cf-markdown-inverse-surface=rgba(255,255,255,0.2)] - Surface color for inverse variant (code blocks)
+ * @cssprop [--cf-markdown-inverse-surface-subtle=rgba(255,255,255,0.1)] - Subtle surface for inverse (table headers)
+ * @cssprop [--cf-markdown-inverse-accent=rgba(255,255,255,0.6)] - Accent color for inverse (blockquote border)
  *
  * @example
- * <ct-markdown content="# Hello World\n\nThis is **bold** text."></ct-markdown>
+ * <cf-markdown content="# Hello World\n\nThis is **bold** text."></cf-markdown>
  *
  * @example
- * <ct-markdown content="```js\nconsole.log('hello');\n```"></ct-markdown>
+ * <cf-markdown content="```js\nconsole.log('hello');\n```"></cf-markdown>
  *
  * @example
- * <ct-markdown .content=${myCell} streaming></ct-markdown>
+ * <cf-markdown .content=${myCell} streaming></cf-markdown>
  *
  * @example
- * <ct-markdown .content=${myCell} compact></ct-markdown>
+ * <cf-markdown .content=${myCell} compact></cf-markdown>
  */
-export class CTMarkdown extends BaseElement {
+export class CFMarkdown extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -148,7 +148,7 @@ export class CTMarkdown extends BaseElement {
       .markdown-content.inverse h1,
       .markdown-content.inverse h2 {
         border-bottom-color: var(
-          --ct-markdown-inverse-border,
+          --cf-markdown-inverse-border,
           rgba(255, 255, 255, 0.3)
         );
       }
@@ -223,7 +223,7 @@ export class CTMarkdown extends BaseElement {
       /* Inverse variant inline code */
       .markdown-content.inverse code {
         background-color: var(
-          --ct-markdown-inverse-surface,
+          --cf-markdown-inverse-surface,
           rgba(255, 255, 255, 0.2)
         );
         color: inherit;
@@ -248,7 +248,7 @@ export class CTMarkdown extends BaseElement {
       /* Inverse variant code blocks */
       .markdown-content.inverse pre {
         background-color: var(
-          --ct-markdown-inverse-surface,
+          --cf-markdown-inverse-surface,
           rgba(255, 255, 255, 0.2)
         );
         border: none;
@@ -292,7 +292,7 @@ export class CTMarkdown extends BaseElement {
       /* Inverse variant blockquotes */
       .markdown-content.inverse blockquote {
         border-left-color: var(
-          --ct-markdown-inverse-accent,
+          --cf-markdown-inverse-accent,
           rgba(255, 255, 255, 0.6)
         );
         color: inherit;
@@ -308,7 +308,7 @@ export class CTMarkdown extends BaseElement {
 
       .markdown-content.inverse hr {
         border-top-color: var(
-          --ct-markdown-inverse-border,
+          --cf-markdown-inverse-border,
           rgba(255, 255, 255, 0.3)
         );
       }
@@ -336,14 +336,14 @@ export class CTMarkdown extends BaseElement {
       .markdown-content.inverse th,
       .markdown-content.inverse td {
         border-color: var(
-          --ct-markdown-inverse-border,
+          --cf-markdown-inverse-border,
           rgba(255, 255, 255, 0.3)
         );
       }
 
       .markdown-content.inverse th {
         background-color: var(
-          --ct-markdown-inverse-surface-subtle,
+          --cf-markdown-inverse-surface-subtle,
           rgba(255, 255, 255, 0.1)
         );
       }
@@ -615,4 +615,4 @@ export class CTMarkdown extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-markdown", CTMarkdown);
+globalThis.customElements.define("cf-markdown", CFMarkdown);
