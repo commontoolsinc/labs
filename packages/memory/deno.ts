@@ -112,7 +112,8 @@ export const open = async (
           const { socket, response } = Deno.upgradeWebSocket(request);
           const consumer = Socket.from<string, string>(socket);
           if (stitch && hub) {
-            const spaceDid = new URL(request.url).searchParams.get("space") ?? "";
+            const spaceDid = new URL(request.url).searchParams.get("space") ??
+              "";
             const session = hub.createSession(spaceDid);
             consumer.readable.pipeTo(session.writable);
             session.readable.pipeTo(consumer.writable);

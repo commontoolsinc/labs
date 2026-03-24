@@ -73,7 +73,11 @@ describe("StitchDb", () => {
     });
 
     it("applies set ops to stitch_docs atomically", () => {
-      db.acceptCommit("user1", [op("doc:a", { x: 1 }), op("doc:b", { y: 2 })], "sig");
+      db.acceptCommit(
+        "user1",
+        [op("doc:a", { x: 1 }), op("doc:b", { y: 2 })],
+        "sig",
+      );
 
       const a = db.getDoc("doc:a");
       const b = db.getDoc("doc:b");

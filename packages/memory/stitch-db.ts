@@ -87,7 +87,11 @@ export class StitchDb {
    * Append a commit to canonical history and return the assigned server_seq.
    * The caller must apply the ops to stitch_docs in the same logical step.
    */
-  CreateinsertCommit(userId: string, ops: CommitOp[], signature: string): number {
+  CreateinsertCommit(
+    userId: string,
+    ops: CommitOp[],
+    signature: string,
+  ): number {
     this.#db.run(
       `INSERT INTO stitch_commits (user_id, ops, signature)
        VALUES (:userId, :ops, :signature)`,

@@ -218,7 +218,9 @@ class SpaceHub {
    * The floor is derived from session.echoedServerSeq, not stored separately.
    */
   trackSubscription(session: StitchSession, docId: string): void {
-    this.#docSubscribers.getOrInsertComputed(docId, () => new Set()).add(session);
+    this.#docSubscribers.getOrInsertComputed(docId, () => new Set()).add(
+      session,
+    );
     this.#sessionDocs.getOrInsertComputed(session, () => new Set()).add(docId);
     this.#gcWindow(docId);
   }
@@ -276,7 +278,9 @@ class SpaceHub {
     const w = this.#docWindows.get(docId);
     if (!subscribers || !w) return;
 
-    const newFloor = Math.min(...[...subscribers].map((s) => s.echoedServerSeq));
+    const newFloor = Math.min(
+      ...[...subscribers].map((s) => s.echoedServerSeq),
+    );
     if (newFloor > w.floor) {
       w.floor = newFloor;
       for (const seq of w.revisions.keys()) {
@@ -481,8 +485,16 @@ class StitchSession {
     }
     this.#integratedSeqs.set(`${msg.clientSeq}:${msg.serverSeq}`, newServerSeq);
 
-    this.#send({ type: "accepted", clientSeq: msg.clientSeq, serverSeq: newServerSeq });
-    this.#hub.broadcast(this, { type: "update", serverSeq: newServerSeq, ops: msg.ops });
+    this.#send({
+      type: "accepted",
+      clientSeq: msg.clientSeq,
+      serverSeq: newServerSeq,
+    });
+    this.#hub.broadcast(this, {
+      type: "update",
+      serverSeq: newServerSeq,
+      ops: msg.ops,
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -538,8 +550,9 @@ const createSession = (
     },
   });
 
-  const session = new StitchSession(space, (msg: ServerMessage) =>
-    enqueue(JSON.stringify(msg))
+  const session = new StitchSession(
+    space,
+    (msg: ServerMessage) => enqueue(JSON.stringify(msg)),
   );
 
   const writable = new WritableStream<string>({
