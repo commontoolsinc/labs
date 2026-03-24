@@ -42,7 +42,7 @@ const TAG_BYTES = 0x25;
 const TAG_BIGINT = 0x26;
 const TAG_EPOCH_NSEC = 0x27;
 const TAG_EPOCH_DAYS = 0x28;
-const TAG_CONTENT_ID = 0x29;
+const TAG_CONTENT_HASH = 0x29;
 
 // ---------------------------------------------------------------------------
 // Pre-allocated tag byte arrays (avoids per-call allocation)
@@ -63,7 +63,7 @@ const TAG_BYTES_BYTES = new Uint8Array([TAG_BYTES]);
 const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
 const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
-const TAG_CONTENT_ID_BYTES = new Uint8Array([TAG_CONTENT_ID]);
+const TAG_CONTENT_HASH_BYTES = new Uint8Array([TAG_CONTENT_HASH]);
 
 // ---------------------------------------------------------------------------
 // Shared scratch buffer (safe in single-threaded synchronous JS -- see
@@ -193,7 +193,7 @@ function feedObjectValue(
 
     case NATIVE_TAGS.ContentHash: {
       const cid = value as FabricHash;
-      hasher.update(TAG_CONTENT_ID_BYTES);
+      hasher.update(TAG_CONTENT_HASH_BYTES);
       const algTagUtf8 = encoder.encode(cid.algorithmTag);
       feedLength(hasher, algTagUtf8.length);
       hasher.update(algTagUtf8);
