@@ -53,12 +53,14 @@ export class CTHStack extends BaseElement {
       --ct-hstack-padding-24: 6rem;
 
       display: block;
+      overflow: hidden;
     }
 
     .stack {
       display: flex;
       flex-direction: row;
       box-sizing: border-box;
+      height: 100%;
     }
 
     /* Gap utilities */
@@ -190,9 +192,10 @@ export class CTHStack extends BaseElement {
       padding: var(--ct-hstack-padding-24);
     }
 
-    /* Direct children styling */
+    /* Direct children styling - allow flex children to shrink by default
+      so scroll containers like ct-vscroll can be height-constrained */
     ::slotted(*) {
-      flex-shrink: 0;
+      min-height: 0;
     }
   `;
 

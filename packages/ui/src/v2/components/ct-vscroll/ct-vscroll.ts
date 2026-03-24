@@ -51,15 +51,16 @@ export class CTVScroll extends BaseElement {
       display: block;
       position: relative;
       overflow: hidden;
+      min-height: 0;
     }
 
     :host([flex]) {
       flex: 1;
-      min-height: 0;
     }
 
     .scroll-wrapper {
       position: relative;
+      overflow: hidden;
       width: 100%;
       height: 100%;
     }
