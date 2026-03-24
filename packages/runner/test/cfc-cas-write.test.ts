@@ -7,6 +7,7 @@ import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
 import {
   cfcLabelsAddress,
   normalizePersistedLabels,
+  resolveObservationLabel,
 } from "../src/cfc/shared.ts";
 import {
   cfcCasLabelBindingsAddress,
@@ -274,7 +275,9 @@ describe("CFC direct CAS write substrate", () => {
     const preparedLabels = normalizePersistedLabels(
       tx.readOrThrow(cfcLabelsAddress(link)),
     );
-    expect(preparedLabels["/secret"]?.label).toEqual(aliceLabel);
+    expect(
+      resolveObservationLabel(preparedLabels, "/secret", "value"),
+    ).toEqual(aliceLabel);
 
     const { blobHash } = writeCfcCasBlobFromPreparedPath(tx, {
       space,
