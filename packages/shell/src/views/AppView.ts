@@ -190,12 +190,18 @@ export class XAppView extends BaseView {
 
   override connectedCallback() {
     super.connectedCallback();
-    this.addEventListener("recreate-space-root-pattern", this.#handleRecreateSpaceRootPattern);
+    this.addEventListener(
+      "recreate-space-root-pattern",
+      this.#handleRecreateSpaceRootPattern,
+    );
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    this.removeEventListener("recreate-space-root-pattern", this.#handleRecreateSpaceRootPattern);
+    this.removeEventListener(
+      "recreate-space-root-pattern",
+      this.#handleRecreateSpaceRootPattern,
+    );
   }
 
   override updated(changedProperties: Map<string, unknown>) {
