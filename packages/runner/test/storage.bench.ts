@@ -368,7 +368,7 @@ Deno.bench(
           type: "application/json",
           path: [],
         },
-        i,
+        { value: i },
       );
       if (result.error) throw new Error("Write failed");
     }
