@@ -299,4 +299,4 @@ function sanitizeInternalFrames(stack: string): string {
 
 const CT_INTERNAL = "    at <CT_INTERNAL>";
 const RUNNER_INTERNAL_FRAME_PATTERN =
-  /^\s*at(?: .*?)? \(?(?:file:\/\/)?[^)\n]*\/packages\/runner\/src\/[^)\n]+:\d+:\d+\)?$/;
+  /^\s*at(?: .*?)? \(?(?:file:\/\/)?(?:[^)\n]*\/)?packages\/runner\/src\/[^)\n]+:\d+:\d+\)?$/;
