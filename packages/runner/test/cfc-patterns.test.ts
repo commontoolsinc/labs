@@ -9,6 +9,7 @@ import {
   resetCfcDebugCounters,
 } from "../src/cfc/debug-counters.ts";
 import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
+import { normalizePersistedLabels } from "../src/cfc/shared.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Labels, URI } from "../src/storage/interface.ts";
 
@@ -118,12 +119,14 @@ describe("CFC pattern integration", () => {
       type: "application/json",
       path: ["cfc", "schemaHash"],
     });
-    const labelsByPath = tx.readOrThrow({
-      space,
-      id,
-      type: "application/json",
-      path: ["cfc", "labels"],
-    });
+    const labelsByPath = normalizePersistedLabels(
+      tx.readOrThrow({
+        space,
+        id,
+        type: "application/json",
+        path: ["cfc", "labels"],
+      }),
+    );
     tx.abort("inspection-complete");
     return { schemaHash, labelsByPath };
   }
@@ -178,7 +181,8 @@ describe("CFC pattern integration", () => {
     );
     expect(typeof metadata.schemaHash).toBe("string");
     expect(
-      ((metadata.labelsByPath as Record<string, Labels>)["/result"] ?? {})
+      ((metadata.labelsByPath as Record<string, { label?: Labels }>)["/result"]
+        ?.label ?? {})
         .classification,
     ).toContainEqual(["secret"]);
     expect(getCfcDebugCounters().cfcPreparedTx).toBeGreaterThan(0);

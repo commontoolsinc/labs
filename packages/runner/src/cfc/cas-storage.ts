@@ -12,7 +12,12 @@ import {
   normalizeConfidentialityLabel,
   normalizeIntegrityLabel,
 } from "./label-algebra.ts";
-import { cfcLabelsAddress, normalizePersistedLabels, toHex } from "./shared.ts";
+import {
+  cfcLabelsAddress,
+  normalizePersistedLabels,
+  resolveObservationLabel,
+  toHex,
+} from "./shared.ts";
 
 const CFC_CAS_BLOB_MEDIA_TYPE = "application/json";
 const CFC_CAS_LABEL_BINDING_MEDIA_TYPE = "application/json";
@@ -172,7 +177,11 @@ export function writeCfcCasBlobFromPreparedPath(
   const labelsByPath = normalizePersistedLabels(
     tx.readOrThrow(cfcLabelsAddress(options.source)),
   );
-  const effectiveLabel = labelsByPath[sourcePath];
+  const effectiveLabel = resolveObservationLabel(
+    labelsByPath,
+    sourcePath,
+    "value",
+  );
   if (!effectiveLabel) {
     throw new Error(
       `No prepared CFC label found for CAS source path ${sourcePath}`,

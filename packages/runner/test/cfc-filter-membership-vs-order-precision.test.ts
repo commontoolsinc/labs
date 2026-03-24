@@ -198,8 +198,13 @@ describe("CFC filter membership vs order precision", () => {
 
     expect(result.error).toBeUndefined();
     expect(result.labels).toEqual({
-      "/": { classification: [["secret"]] },
-      "/*": { classification: [["confidential"]] },
+      "/": {
+        iterate: {
+          order: { classification: [["secret"]] },
+          count: { classification: [["secret"]] },
+        },
+      },
+      "/*": { label: { classification: [["confidential"]] } },
     });
   });
 

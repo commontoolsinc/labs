@@ -4,6 +4,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
+import { normalizePersistedLabels } from "../src/cfc/shared.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { CfcTrustContext } from "../src/cfc/integrity-trust.ts";
 import type { URI } from "../src/storage/interface.ts";
@@ -126,17 +127,14 @@ describe("CFC policy concept guard trust closure", () => {
     );
 
     const tx = runtime.edit();
-    const labels = tx.readOrThrow({
-      space,
-      id: targetId,
-      type: "application/json",
-      path: ["cfc", "labels"],
-    }) as {
-      "/": {
-        classification?: readonly (readonly string[])[];
-        integrity?: readonly string[];
-      };
-    };
+    const labels = normalizePersistedLabels(
+      tx.readOrThrow({
+        space,
+        id: targetId,
+        type: "application/json",
+        path: ["cfc", "labels"],
+      }),
+    );
 
     expect(labels["/"]?.label?.classification).toEqual([["confidential"]]);
     expect(labels["/"]?.label?.integrity).toEqual(["runtime-attested-source"]);
