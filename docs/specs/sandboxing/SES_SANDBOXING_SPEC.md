@@ -829,18 +829,24 @@ Ambient Compartment globals for authored modules must stay intentionally narrow:
 - sandboxed `console`
 - `harden`
 - verifier/runtime helper bindings needed to realize canonical wrappers
+- temporary compatibility forwarding for `fetch` and adjacent web request
+  globals (`URL`, `URLSearchParams`, `Headers`, `Request`, `Response`) used by
+  legacy importer/auth code paths
 
 Ambient globals available to authored module code in v1 MUST NOT include:
 
-- direct `fetch`
 - `Temporal`
 - `secureRandom`
 - `randomUUID`
 - any host object that performs network, time, randomness, navigation, storage,
   or compilation effects immediately when called
 
-This keeps module-load execution aligned with the rule that sandboxed `console`
-output is the only tolerated module-load side effect.
+The current implementation still forwards ambient `fetch` plus the adjacent web
+request globals needed to use it as a migration shim. That shim is transitional
+and should be removed once importer/auth flows are fully routed through
+runtime-managed capabilities. The verifier continues to reject direct top-level
+module-load `fetch(...)` execution; the shim is for authored callbacks and
+other deferred code paths.
 
 #### 5.3.2 Trusted Runtime Modules via `runtimeDeps`
 
@@ -2182,7 +2188,7 @@ await runner.start(resultCell);
 | Closure-based data leakage | No surviving mutable module bindings; function hardening plus verified environments |
 | State leakage via modules | Verified immutable top-level bindings; dynamic imports rejected in v1 |
 | Resource exhaustion | Future: Add CPU/memory limits (not in this spec) |
-| Ambient network/time/random authority at module load | Narrow Compartment globals; no ambient `fetch`, `Temporal`, `secureRandom`, or `randomUUID` in v1 |
+| Ambient network/time/random authority at module load | Narrow Compartment globals; temporary compatibility web-fetch shim only, no `Temporal`, `secureRandom`, or `randomUUID` |
 
 ### 11.2 Known Limitations
 
@@ -2208,10 +2214,11 @@ module surface in v1. Reintroducing them requires separate scoped work.
    future exposure of `Temporal`, `secureRandom()`, or `randomUUID()` to
    authored code requires explicit call-site restrictions.
 
-2. **Direct `fetch()`**: Verified authored modules should use runtime-managed
-   graph constructors such as `fetchData()` instead. Any legacy migration shim
-   that still exposes ambient `fetch()` elsewhere in the runtime is outside this
-   sandbox spec.
+2. **Direct `fetch()`**: A temporary compatibility shim currently exposes
+   ambient `fetch()` and the adjacent web request globals it depends on inside
+   SES compartments because existing importer/auth flows still rely on them.
+   This should be deprecated in favor of runtime-managed graph constructors
+   such as `fetchData()` plus an explicit egress policy.
 
 ### 11.4 Escape Hatch Analysis
 
@@ -2223,7 +2230,7 @@ Potential escape routes and their status:
 | `Function()` | Blocked | SES removes `Function` constructor |
 | `import()` | Rejected in v1 | Dynamic imports are deferred and verifier-rejected |
 | Prototype access | Blocked | Frozen prototypes |
-| ambient `fetch` | Blocked in v1 | Not injected into authored module Compartment globals |
+| ambient web-fetch globals | Temporarily allowed | Compatibility shim in authored SES compartments; planned deprecation |
 | `globalThis` | Controlled | Custom minimal Compartment globals |
 
 ---

@@ -93,10 +93,14 @@ const GoogleAuthManagerDescriptor: AuthManagerDescriptor = {
   hasAvatarSupport: true,
 };
 
-export const GoogleAuthManager = createAuthManager(
-  GoogleAuthManagerDescriptor,
-  GoogleAuth,
-);
+export function GoogleAuthManager(
+  input: import("../../../auth/create-auth-manager.tsx").AuthManagerInput,
+) {
+  return createAuthManager(
+    GoogleAuthManagerDescriptor,
+    GoogleAuth,
+  )(input);
+}
 
 export default GoogleAuthManager;
 

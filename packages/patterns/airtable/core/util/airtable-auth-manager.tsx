@@ -76,9 +76,13 @@ const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
   hasAvatarSupport: false,
 };
 
-export const AirtableAuthManager = createAuthManager(
-  AirtableAuthManagerDescriptor,
-  AirtableAuth,
-);
+export function AirtableAuthManager(
+  input: import("../../../auth/create-auth-manager.tsx").AuthManagerInput,
+) {
+  return createAuthManager(
+    AirtableAuthManagerDescriptor,
+    AirtableAuth,
+  )(input);
+}
 
 export default AirtableAuthManager;

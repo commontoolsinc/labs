@@ -49,7 +49,7 @@ describe("SES security regressions", () => {
     );
   });
 
-  it("does not expose host globals inside module compartments", async () => {
+  it("exposes compatibility fetch without exposing other host globals", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
@@ -73,7 +73,7 @@ describe("SES security regressions", () => {
 
     expect(main?.default()).toEqual({
       hasProcess: false,
-      hasFetch: false,
+      hasFetch: true,
     });
   });
 
@@ -101,7 +101,7 @@ describe("SES security regressions", () => {
     await expect(engine.compile(program)).rejects.toThrow();
   });
 
-  it("keeps the callback compartment narrower than module load", () => {
+  it("exposes compatibility fetch in callback compartments without host internals", () => {
     const probe = engine.getInvocation(`
       function probe() {
         return {
@@ -118,7 +118,7 @@ describe("SES security regressions", () => {
 
     expect(probe()).toEqual({
       hasProcess: false,
-      hasFetch: false,
+      hasFetch: true,
       hasConsoleHook: false,
     });
   });
