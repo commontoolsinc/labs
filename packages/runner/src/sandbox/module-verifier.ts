@@ -9,6 +9,7 @@ interface BindingInfo {
   namespaceImport?: boolean;
   captureSafe?: boolean;
   functionNode?: ts.FunctionLikeDeclaration;
+  hardeningHelper?: boolean;
 }
 
 const TRUSTED_BUILDERS = new Set([
@@ -252,6 +253,7 @@ function predeclareFunctions(
       env.set(statement.name.text, {
         kind: "function",
         functionNode: statement,
+        hardeningHelper: isFunctionHardeningHelperDeclaration(statement),
       });
     }
   }
@@ -335,7 +337,10 @@ function verifyTopLevelStatement(
 
   if (
     ts.isExpressionStatement(statement) &&
-    isAllowedHelperMutationStatement(statement.expression, sourceFile, env)
+    (
+      isAllowedHelperMutationStatement(statement.expression, sourceFile, env) ||
+      isAllowedFunctionHardeningStatement(statement.expression, sourceFile, env)
+    )
   ) {
     return;
   }
@@ -353,6 +358,14 @@ function verifyTopLevelFunction(
   pendingCaptureChecks: PendingCaptureCheck[],
 ): void {
   if (!statement.name || !statement.body) return;
+  if (isFunctionHardeningHelperDeclaration(statement)) {
+    env.set(statement.name.text, {
+      kind: "function",
+      functionNode: statement,
+      hardeningHelper: true,
+    });
+    return;
+  }
   env.set(statement.name.text, {
     kind: "function",
     functionNode: statement,
@@ -473,6 +486,15 @@ function classifyCallExpression(
   env: Map<string, BindingInfo>,
   pendingCaptureChecks: PendingCaptureCheck[],
 ): BindingInfo {
+  if (isFunctionHardeningHelperCall(expression.expression, env)) {
+    return verifyFunctionHardeningCall(
+      expression,
+      sourceFile,
+      env,
+      pendingCaptureChecks,
+    );
+  }
+
   const trustedName = resolveTrustedCallName(expression.expression, env);
   if (trustedName) {
     if (trustedName === "schema") {
@@ -515,7 +537,47 @@ function classifyCallExpression(
   throw verificationError(
     sourceFile,
     expression.expression,
-    "Only trusted builder calls and schema() are allowed at module scope in SES mode",
+    "Only trusted builder calls, schema(), and canonical function hardening are allowed at module scope in SES mode",
+  );
+}
+
+function verifyFunctionHardeningCall(
+  expression: ts.CallExpression,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  pendingCaptureChecks: PendingCaptureCheck[],
+): BindingInfo {
+  if (expression.arguments.length !== 1) {
+    throw verificationError(
+      sourceFile,
+      expression,
+      "Function hardening helpers must receive exactly one function value",
+    );
+  }
+
+  const target = unwrapExpression(expression.arguments[0]);
+  if (ts.isArrowFunction(target) || ts.isFunctionExpression(target)) {
+    pendingCaptureChecks.push({
+      fn: target,
+      nodeForError: target,
+    });
+    return {
+      kind: "function",
+      functionNode: target,
+    };
+  }
+
+  if (ts.isIdentifier(target)) {
+    const binding = env.get(target.text);
+    if (binding?.kind === "function" && !binding.hardeningHelper) {
+      return cloneBindingInfo(binding);
+    }
+  }
+
+  throw verificationError(
+    sourceFile,
+    expression.arguments[0],
+    "Function hardening helpers only accept direct functions or previously declared top-level functions",
   );
 }
 
@@ -1461,7 +1523,18 @@ function verifyCompiledAuthoredFactory(
 
     if (
       ts.isExpressionStatement(statement) &&
-      isAllowedHelperMutationStatement(statement.expression, sourceFile, env)
+      (
+        isAllowedHelperMutationStatement(
+          statement.expression,
+          sourceFile,
+          env,
+        ) ||
+        isAllowedFunctionHardeningStatement(
+          statement.expression,
+          sourceFile,
+          env,
+        )
+      )
     ) {
       continue;
     }
@@ -1549,6 +1622,7 @@ function predeclareFunctionsFromStatements(
       env.set(statement.name.text, {
         kind: "function",
         functionNode: statement,
+        hardeningHelper: isFunctionHardeningHelperDeclaration(statement),
       });
     }
   }
@@ -1832,6 +1906,131 @@ function isFunctionLikeExpression(
     (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression));
 }
 
+function isFunctionHardeningHelperDeclaration(
+  statement: ts.FunctionDeclaration,
+): boolean {
+  if (!statement.body || statement.parameters.length !== 1) {
+    return false;
+  }
+
+  const parameter = statement.parameters[0];
+  if (!ts.isIdentifier(parameter.name) || parameter.dotDotDotToken) {
+    return false;
+  }
+
+  const fnName = parameter.name.text;
+  const body = statement.body.statements;
+  if (body.length !== 4) {
+    return false;
+  }
+
+  if (!isObjectFreezeCallStatement(body[0], fnName)) {
+    return false;
+  }
+
+  const prototypeName = getHardeningPrototypeBindingName(body[1], fnName);
+  if (!prototypeName) {
+    return false;
+  }
+
+  if (!isPrototypeFreezeGuard(body[2], prototypeName)) {
+    return false;
+  }
+
+  return ts.isReturnStatement(body[3]) &&
+    !!body[3].expression &&
+    ts.isIdentifier(body[3].expression) &&
+    body[3].expression.text === fnName;
+}
+
+function isObjectFreezeCallStatement(
+  statement: ts.Statement,
+  argumentName: string,
+): boolean {
+  if (!ts.isExpressionStatement(statement)) {
+    return false;
+  }
+
+  const expr = unwrapExpression(statement.expression);
+  return ts.isCallExpression(expr) &&
+    expr.arguments.length === 1 &&
+    ts.isIdentifier(expr.arguments[0]) &&
+    expr.arguments[0].text === argumentName &&
+    ts.isPropertyAccessExpression(expr.expression) &&
+    ts.isIdentifier(expr.expression.expression) &&
+    expr.expression.expression.text === "Object" &&
+    expr.expression.name.text === "freeze";
+}
+
+function getHardeningPrototypeBindingName(
+  statement: ts.Statement,
+  fnName: string,
+): string | undefined {
+  if (!ts.isVariableStatement(statement)) {
+    return undefined;
+  }
+
+  if (!(statement.declarationList.flags & ts.NodeFlags.Const)) {
+    return undefined;
+  }
+
+  if (statement.declarationList.declarations.length !== 1) {
+    return undefined;
+  }
+
+  const declaration = statement.declarationList.declarations[0];
+  if (
+    !ts.isIdentifier(declaration.name) ||
+    !declaration.initializer ||
+    !ts.isPropertyAccessExpression(declaration.initializer) ||
+    !ts.isIdentifier(declaration.initializer.expression) ||
+    declaration.initializer.expression.text !== fnName ||
+    declaration.initializer.name.text !== "prototype"
+  ) {
+    return undefined;
+  }
+
+  return declaration.name.text;
+}
+
+function isPrototypeFreezeGuard(
+  statement: ts.Statement,
+  prototypeName: string,
+): boolean {
+  if (!ts.isIfStatement(statement) || !statement.thenStatement) {
+    return false;
+  }
+
+  const condition = unwrapExpression(statement.expression);
+  if (
+    !ts.isBinaryExpression(condition) ||
+    condition.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken ||
+    !ts.isIdentifier(condition.left) ||
+    condition.left.text !== prototypeName
+  ) {
+    return false;
+  }
+
+  const right = unwrapExpression(condition.right);
+  if (
+    !ts.isBinaryExpression(right) ||
+    right.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsEqualsToken ||
+    !ts.isTypeOfExpression(right.left) ||
+    !ts.isIdentifier(right.left.expression) ||
+    right.left.expression.text !== prototypeName ||
+    !ts.isStringLiteral(right.right) ||
+    right.right.text !== "object"
+  ) {
+    return false;
+  }
+
+  const thenStatement = ts.isBlock(statement.thenStatement)
+    ? statement.thenStatement.statements[0]
+    : statement.thenStatement;
+  return !!thenStatement &&
+    isObjectFreezeCallStatement(thenStatement, prototypeName);
+}
+
 function isAllowedHelperMutationStatement(
   expression: ts.Expression,
   sourceFile: ts.SourceFile,
@@ -1863,6 +2062,50 @@ function isAllowedHelperMutationStatement(
   } catch {
     return false;
   }
+}
+
+function isAllowedFunctionHardeningStatement(
+  expression: ts.Expression,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+): boolean {
+  if (!ts.isCallExpression(expression)) {
+    return false;
+  }
+
+  if (!isFunctionHardeningHelperCall(expression.expression, env)) {
+    return false;
+  }
+
+  if (expression.arguments.length !== 1) {
+    return false;
+  }
+
+  const target = unwrapExpression(expression.arguments[0]);
+  if (!ts.isIdentifier(target)) {
+    return false;
+  }
+
+  const binding = env.get(target.text);
+  if (!binding || binding.kind !== "function" || binding.hardeningHelper) {
+    return false;
+  }
+
+  try {
+    verifyFunctionHardeningCall(expression, sourceFile, env, []);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isFunctionHardeningHelperCall(
+  expression: ts.LeftHandSideExpression,
+  env: Map<string, BindingInfo>,
+): boolean {
+  const callee = normalizeCallTarget(expression);
+  return ts.isIdentifier(callee) &&
+    env.get(callee.text)?.hardeningHelper === true;
 }
 
 function isLocalCallableExpression(

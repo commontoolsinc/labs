@@ -47,4 +47,26 @@ describe("verifyCompiledBundleModuleFactories()", () => {
       "Dynamic import() is not allowed in SES mode",
     );
   });
+
+  it("accepts canonical compiled function hardening", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    function __ctHardenFn(fn) {
+      Object.freeze(fn);
+      const prototype = fn.prototype;
+      if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+      }
+      return fn;
+    }
+    const step = __ctHardenFn(() => 42);
+    exports.default = step;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
 });

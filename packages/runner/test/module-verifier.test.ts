@@ -70,4 +70,32 @@ describe("verifyProgramModuleScope()", () => {
       "Dynamic import() is not allowed in SES mode",
     );
   });
+
+  it("accepts canonical top-level function hardening", () => {
+    const program: Program = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "function __ctHardenFn(fn: Function) {",
+            "  Object.freeze(fn);",
+            "  const prototype = fn.prototype;",
+            '  if (prototype && typeof prototype === "object") {',
+            "    Object.freeze(prototype);",
+            "  }",
+            "  return fn;",
+            "}",
+            "function step() {",
+            "  return 1;",
+            "}",
+            "__ctHardenFn(step);",
+            "export default step;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).not.toThrow();
+  });
 });

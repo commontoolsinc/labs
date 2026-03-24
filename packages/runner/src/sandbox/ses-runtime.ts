@@ -6,6 +6,7 @@ import {
 } from "@commontools/js-compiler";
 import "ses";
 import { createCallbackCompartmentGlobals } from "./compartment-globals.ts";
+import { hardenVerifiedFunction } from "./function-hardening.ts";
 
 export interface SESRuntimeOptions {
   globals?: Record<string, unknown>;
@@ -200,10 +201,13 @@ export function evaluateFunctionSourceInSES(
 export function evaluateCallbackSourceInSES(
   source: string,
 ): unknown {
-  return evaluateFunctionSourceInSES(source, {
+  const value = evaluateFunctionSourceInSES(source, {
     globals: createCallbackCompartmentGlobals(),
     lockdown: true,
   });
+  return typeof value === "function"
+    ? hardenVerifiedFunction(value as (...args: any[]) => unknown)
+    : value;
 }
 
 let sesInitialized = false;

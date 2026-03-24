@@ -23,6 +23,9 @@ import { moduleToJSON } from "./json-utils.ts";
 import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 
 const sourceLocationLogger = getLogger("builder.source-location", {
   enabled: false,
@@ -54,33 +57,8 @@ export function createNodeFactory<T = any, R = any>(
 ): ModuleFactory<T, R> {
   // Attach source location and preview to function implementations for debugging
   if (typeof moduleSpec.implementation === "function") {
-    const { location, sample } = getExternalSourceLocation();
-    if (location) {
-      Object.defineProperty(moduleSpec.implementation, "name", {
-        value: location,
-        configurable: true,
-      });
-      // Also set .src as backup (name can be finicky)
-      (
-        moduleSpec.implementation as {
-          src?: string;
-          sourceLocationSample?: Record<string, unknown>;
-        }
-      ).src = location;
-      if (sample) {
-        (
-          moduleSpec.implementation as {
-            sourceLocationSample?: Record<string, unknown>;
-          }
-        ).sourceLocationSample = sample;
-      }
-    }
-    // Store function body preview for hover tooltips
-    const fnStr = moduleSpec.implementation.toString();
-    (moduleSpec.implementation as { preview?: string }).preview = fnStr.slice(
-      0,
-      200,
-    );
+    annotateFunctionDebugMetadata(moduleSpec.implementation);
+    hardenVerifiedFunction(moduleSpec.implementation);
   }
 
   const module: Module & toJSON = {
@@ -311,30 +289,8 @@ function handlerInternal<E, T>(
 
   // Attach source location and preview to handler function for debugging
   if (typeof handler === "function") {
-    const { location, sample } = getExternalSourceLocation();
-    if (location) {
-      Object.defineProperty(handler, "name", {
-        value: location,
-        configurable: true,
-      });
-      // Also set .src as backup (name can be finicky)
-      (
-        handler as {
-          src?: string;
-          sourceLocationSample?: Record<string, unknown>;
-        }
-      ).src = location;
-      if (sample) {
-        (
-          handler as {
-            sourceLocationSample?: Record<string, unknown>;
-          }
-        ).sourceLocationSample = sample;
-      }
-    }
-    // Store function body preview for hover tooltips
-    const fnStr = handler.toString();
-    (handler as { preview?: string }).preview = fnStr.slice(0, 200);
+    annotateFunctionDebugMetadata(handler);
+    hardenVerifiedFunction(handler);
   }
 
   const schema = generateHandlerSchema(
@@ -496,4 +452,34 @@ export function action<T>(_event: (event?: T) => void): Stream<T> {
   throw new Error(
     "action() must be used with CTS enabled - add /// <cts-enable /> to your file",
   );
+}
+
+function annotateFunctionDebugMetadata(
+  fn: (...args: any[]) => unknown,
+): void {
+  if (!Object.isExtensible(fn)) {
+    return;
+  }
+
+  const { location, sample } = getExternalSourceLocation();
+  if (location) {
+    Object.defineProperty(fn, "name", {
+      value: location,
+      configurable: true,
+    });
+    // Also set .src as backup (name can be finicky)
+    (fn as {
+      src?: string;
+      sourceLocationSample?: Record<string, unknown>;
+    }).src = location;
+    if (sample) {
+      (fn as {
+        sourceLocationSample?: Record<string, unknown>;
+      }).sourceLocationSample = sample;
+    }
+  }
+
+  // Store function body preview for hover tooltips
+  const fnStr = fn.toString();
+  (fn as { preview?: string }).preview = fnStr.slice(0, 200);
 }

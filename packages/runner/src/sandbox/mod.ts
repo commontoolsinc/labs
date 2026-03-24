@@ -6,6 +6,7 @@ export {
   createCallbackCompartmentGlobals,
   createModuleCompartmentGlobals,
 } from "./compartment-globals.ts";
+export { hardenVerifiedFunction } from "./function-hardening.ts";
 export {
   evaluateCallbackSourceInSES,
   evaluateFunctionSourceInSES,

@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { Cell, cell, ComparableCell } from "commonfabric";
 // FIXTURE: cell-of-no-value
@@ -42,6 +50,7 @@ export default function TestCellOfNoValue() {
     } as const satisfies __cfHelpers.JSONSchema); // no value
     return null;
 }
+__ctHardenFn(TestCellOfNoValue);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

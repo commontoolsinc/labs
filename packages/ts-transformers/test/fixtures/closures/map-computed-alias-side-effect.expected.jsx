@@ -1,9 +1,18 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { pattern, UI } from "commonfabric";
 let keyCounter = 0;
 function nextKey() {
     return `value-${keyCounter++}`;
 }
+__ctHardenFn(nextKey);
 interface State {
     items: Array<Record<string, number>>;
 }

@@ -74,6 +74,27 @@ export { model, lookup, tags, proxied, passthrough };
       "top-level builder calls should not be wrapped",
     );
   });
+
+  it("hardens direct top-level functions with a canonical helper", async () => {
+    const source = `
+const step = (value: number) => value + 1;
+export default function next(value: number) {
+  return step(value);
+}
+`;
+
+    const output = await transformFiles({
+      "/main.ts": source,
+    });
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(main, "function __ctHardenFn");
+    assertStringIncludes(
+      main,
+      "const step = __ctHardenFn((value: number) => value + 1);",
+    );
+    assertStringIncludes(main, "__ctHardenFn(next);");
+  });
 });
 
 describe("CFHelpers handling", () => {

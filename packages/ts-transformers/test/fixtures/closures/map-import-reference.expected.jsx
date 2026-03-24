@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { pattern, UI } from "commonfabric";
 // Module-level constant - should NOT be captured
@@ -6,6 +14,7 @@ const TAX_RATE = 0.08;
 function formatPrice(price: number): string {
     return `$${price.toFixed(2)}`;
 }
+__ctHardenFn(formatPrice);
 interface Item {
     id: number;
     price: number;

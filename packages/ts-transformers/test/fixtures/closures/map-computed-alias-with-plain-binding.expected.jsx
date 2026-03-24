@@ -1,8 +1,17 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { pattern, UI } from "commonfabric";
 function dynamicKey(): "value" {
     return "value";
 }
+__ctHardenFn(dynamicKey);
 interface Item {
     foo: number;
     value: number;

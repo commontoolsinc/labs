@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { Cell, pattern, UI } from "commonfabric";
 interface State {
@@ -8,6 +16,7 @@ function nextKey(): string {
     counter += 1;
     return `key-${counter}`;
 }
+__ctHardenFn(nextKey);
 // FIXTURE: handler-computed-key
 // Verifies: handler capturing a Record with computed (dynamic) key access is transformed correctly
 //   onClick={() => recordMap[nextKey()]!.set(counter)) → handler(false, { recordMap: { additionalProperties, asOpaque } }, ...)({ recordMap })

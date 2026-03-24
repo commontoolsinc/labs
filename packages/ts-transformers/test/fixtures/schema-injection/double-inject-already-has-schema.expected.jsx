@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { cell } from "commonfabric";
 const existingSchema = __cfHelpers.__ct_data({ type: "number" } as const);
@@ -13,6 +21,7 @@ export default function TestDoubleInjectAlreadyHasSchema() {
     const _c3 = cell(true, { type: "boolean" } as const);
     return null;
 }
+__ctHardenFn(TestDoubleInjectAlreadyHasSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

@@ -474,7 +474,7 @@ describe("Engine in SES mode", () => {
     };
 
     await expect(engine.compile(program)).rejects.toThrow(
-      "Only trusted builder calls and schema() are allowed at module scope in SES mode",
+      "Only trusted builder calls",
     );
   });
 
@@ -515,8 +515,58 @@ describe("Engine in SES mode", () => {
     };
 
     await expect(engine.compile(program)).rejects.toThrow(
-      "Only trusted builder calls and schema() are allowed at module scope in SES mode",
+      "Only trusted builder calls",
     );
+  });
+
+  it("hardens direct top-level functions against hidden mutable state", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "function next() {",
+            "  const self = next as typeof next & { count?: number };",
+            "  self.count = (self.count ?? 0) + 1;",
+            "  return self.count;",
+            "}",
+            "export default next;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    expect(() => (main?.default as () => number)()).toThrow();
+  });
+
+  it("hardens trusted builder callbacks against hidden mutable state", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { lift } from "commontools";',
+            "export default lift(function step() {",
+            "  const self = step as typeof step & { count?: number };",
+            "  self.count = (self.count ?? 0) + 1;",
+            "  return self.count;",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const implementation = (main?.default as {
+      implementation: () => number;
+    }).implementation;
+
+    expect(() => implementation()).toThrow();
   });
 
   it("reconstructs stringified functions without raw eval", () => {

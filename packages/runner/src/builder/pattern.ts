@@ -42,6 +42,7 @@ import {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "../storage/interface.ts";
+import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 
 /** Declare a pattern
  *
@@ -110,6 +111,8 @@ export function pattern<T, R>(
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
 ): PatternFactory<T, R> {
+  hardenVerifiedFunction(fn);
+
   // The pattern graph is created by calling `fn` which populates for `inputs`
   // and `outputs` with Value<> (which containts OpaqueRef<>) and/or default
   // values.

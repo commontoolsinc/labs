@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { cell } from "commonfabric";
 // FIXTURE: collections-array-of-objects
@@ -29,6 +37,7 @@ export default function TestCollectionsArrayOfObjects() {
     } as const satisfies __cfHelpers.JSONSchema);
     return _arrayOfObjects;
 }
+__ctHardenFn(TestCollectionsArrayOfObjects);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
