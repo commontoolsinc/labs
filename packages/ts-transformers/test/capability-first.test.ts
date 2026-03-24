@@ -643,6 +643,66 @@ export default pattern<{ count: number }>((state) => ({
 );
 
 Deno.test(
+  "Capability-first: top-level object-property nullish coalescing lowers outside JSX",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+export default pattern<{ label?: string | null }>((state) => ({
+  label: state.label ?? "Pending",
+}));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, "__ctHelpers.derive(");
+    assert(
+      !output.includes('label: state.key("label") ?? "Pending"'),
+      "expected top-level object-property nullish coalescing to lower to derive()",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: top-level JSX nullish coalescing lowers post-closure",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+export default pattern<{ label?: string | null }>((state) => ({
+  [UI]: <div>{state.label ?? "Pending"}</div>,
+}));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, "__ctHelpers.derive(");
+    assert(
+      !output.includes('state.key("label") ?? "Pending"'),
+      "expected top-level JSX nullish coalescing root to lower through derive()",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: interface defaults keep non-default sibling fields in pattern input schema",
   async () => {
     const source = `/// <cts-enable />

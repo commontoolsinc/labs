@@ -11,6 +11,7 @@ import {
 import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { rewriteExpression } from "./opaque-ref/mod.ts";
+import { shouldDeferFallbackMapReceiverRewrite } from "./opaque-ref/fallback-rewrite.ts";
 import type { AnalyzeFn } from "./opaque-ref/types.ts";
 import {
   findPendingComputeWrapCandidate,
@@ -115,9 +116,21 @@ function isPostClosureWrapperRewriteExpression(
 
   if (ts.isBinaryExpression(expression)) {
     const operator = expression.operatorToken.kind;
-    return operator !== ts.SyntaxKind.AmpersandAmpersandToken &&
-      operator !== ts.SyntaxKind.BarBarToken &&
-      operator !== ts.SyntaxKind.QuestionQuestionToken;
+    if (
+      operator === ts.SyntaxKind.AmpersandAmpersandToken ||
+      operator === ts.SyntaxKind.BarBarToken
+    ) {
+      return false;
+    }
+
+    if (operator === ts.SyntaxKind.QuestionQuestionToken) {
+      return !shouldDeferFallbackMapReceiverRewrite(
+        expression,
+        context.checker,
+      );
+    }
+
+    return true;
   }
 
   return false;

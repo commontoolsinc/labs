@@ -5,6 +5,7 @@ import {
   createReactiveWrapperForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
+import { shouldDeferFallbackMapReceiverRewrite } from "../fallback-rewrite.ts";
 import {
   assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
@@ -17,40 +18,6 @@ import {
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
 import { shouldLowerLogicalExpression } from "../../../policy/mod.ts";
-import { unwrapExpression } from "../../../utils/expression.ts";
-import { isFallbackOperator } from "../../../utils/reactive-keys.ts";
-
-/**
- * Check if an expression is JSX (element, fragment, or self-closing).
- * Also handles parenthesized JSX like `(<div>...</div>)`.
- */
-function isMapReceiverBinary(expression: ts.BinaryExpression): boolean {
-  let current: ts.Node = expression;
-
-  while (
-    ts.isParenthesizedExpression(current.parent) ||
-    ts.isPartiallyEmittedExpression(current.parent)
-  ) {
-    current = current.parent;
-  }
-
-  const parent = current.parent;
-  return ts.isPropertyAccessExpression(parent) &&
-    parent.expression === current &&
-    parent.name.text === "map";
-}
-
-function canDeferFallbackMapReceiverDerive(
-  expression: ts.BinaryExpression,
-  checker: ts.TypeChecker,
-): boolean {
-  if (!isFallbackOperator(expression.operatorToken.kind)) {
-    return false;
-  }
-
-  const left = unwrapExpression(expression.left);
-  return isSimpleReactiveAccessExpression(left, checker);
-}
 
 export const emitBinaryExpression: Emitter = ({
   expression,
@@ -203,8 +170,7 @@ export const emitBinaryExpression: Emitter = ({
 
   if (
     reactiveContextKind === "pattern" &&
-    isMapReceiverBinary(expression) &&
-    canDeferFallbackMapReceiverDerive(expression, context.checker)
+    shouldDeferFallbackMapReceiverRewrite(expression, context.checker)
   ) {
     return undefined;
   }

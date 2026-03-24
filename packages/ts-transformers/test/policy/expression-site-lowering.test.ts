@@ -196,10 +196,12 @@ Deno.test(
       const view = <div>{rows.map((row: any) => row.done ? "Done" : "Pending")}</div>;
     `);
 
-    const mapCall = findFirstNode(sourceFile, (node): node is ts.CallExpression =>
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      node.expression.name.text === "map"
+    const mapCall = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "map",
     );
     const analyze = createDataFlowAnalyzer(checker);
     const siteInfo = getExpressionSitePolicyInfo(
@@ -258,12 +260,18 @@ Deno.test(
       const view = pattern((state: any) => <div>{state.user.name}</div>);
     `);
 
-    const propertyAccess = findFirstNode(sourceFile, ts.isPropertyAccessExpression);
+    const propertyAccess = findFirstNode(
+      sourceFile,
+      ts.isPropertyAccessExpression,
+    );
     const analyze = createDataFlowAnalyzer(checker);
 
-    assertEquals(classifyJsxExpressionSiteRoute(propertyAccess, context, analyze), {
-      route: "shared-post-closure",
-    });
+    assertEquals(
+      classifyJsxExpressionSiteRoute(propertyAccess, context, analyze),
+      {
+        route: "shared-post-closure",
+      },
+    );
   },
 );
 
@@ -342,5 +350,29 @@ Deno.test(
         reason: "contains-reactive-array-method-subexpression",
       },
     );
+  },
+);
+
+Deno.test(
+  "Expression site policy: JSX nullish-coalescing roots defer to the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => <div>{state.label ?? "Pending"}</div>);
+    `);
+
+    const binary = findFirstNode(sourceFile, ts.isBinaryExpression);
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(classifyJsxExpressionSiteRoute(binary, context, analyze), {
+      route: "shared-post-closure",
+    });
   },
 );

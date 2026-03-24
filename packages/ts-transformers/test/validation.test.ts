@@ -576,6 +576,24 @@ Deno.test(
         assertEquals(errors.length, 0);
       },
     );
+
+    await t.step(
+      "allows top-level object-property nullish coalescing in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ label?: string | null }>((state) => ({
+        label: state.label ?? "Pending",
+      }));
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
   },
 );
 
