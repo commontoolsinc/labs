@@ -61,13 +61,13 @@ export class CTCopyButton extends BaseElement {
     BaseElement.baseStyles,
     css`
       /* Ensure icon-only buttons maintain square aspect ratio */
-      :host([icon-only]) ct-button {
+      :host([icon-only]) cf-button {
         min-width: 2.25rem;
         display: inline-flex;
       }
 
       /* Adjust for different sizes when icon-only */
-      :host([icon-only]) ct-button::part(button) {
+      :host([icon-only]) cf-button::part(button) {
         aspect-ratio: 1;
         min-width: fit-content;
       }
@@ -175,7 +175,7 @@ export class CTCopyButton extends BaseElement {
       : "Copy to clipboard";
 
     return html`
-      <ct-button
+      <cf-button
         variant="${this.variant || "secondary"}"
         size="${this.size || "default"}"
         ?disabled="${this.disabled}"
@@ -192,7 +192,7 @@ export class CTCopyButton extends BaseElement {
               ${this._copied ? "✓ Copied!" : "📋 Copy"}
             </slot>
           `}
-      </ct-button>
+      </cf-button>
     `;
   }
 }

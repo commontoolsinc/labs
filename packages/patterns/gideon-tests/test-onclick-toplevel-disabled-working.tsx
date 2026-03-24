@@ -94,12 +94,12 @@ export default pattern<State>(({ count, pending, isProcessing }) => {
         </div>
 
         {/* WORKING: Button always rendered at top level */}
-        <ct-button
+        <cf-button
           onClick={incrementHandler({ count, pending, isProcessing })}
           disabled={isDisabled}
         >
           {buttonText}
-        </ct-button>
+        </cf-button>
 
         <p style={{ color: "green", marginTop: "16px" }}>
           This pattern works correctly! Button always rendered, uses disabled

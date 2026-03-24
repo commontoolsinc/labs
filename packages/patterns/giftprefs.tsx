@@ -144,14 +144,14 @@ export const GiftPrefsModule = pattern<
               Favorites / Likes
             </label>
             <cf-hstack style={{ gap: "8px" }}>
-              <ct-input
+              <cf-input
                 $value={favoriteInput}
                 placeholder="Add favorite..."
                 style={{ flex: "1" }}
               />
-              <ct-button onClick={addFavorite({ favorites, favoriteInput })}>
+              <cf-button onClick={addFavorite({ favorites, favoriteInput })}>
                 +
-              </ct-button>
+              </cf-button>
             </cf-hstack>
             <cf-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
               {favorites.map((item: string, index: number) => (
@@ -193,12 +193,12 @@ export const GiftPrefsModule = pattern<
               Avoid / Dislikes
             </label>
             <cf-hstack style={{ gap: "8px" }}>
-              <ct-input
+              <cf-input
                 $value={avoidInput}
                 placeholder="Add item to avoid..."
                 style={{ flex: "1" }}
               />
-              <ct-button onClick={addAvoid({ avoid, avoidInput })}>+</ct-button>
+              <cf-button onClick={addAvoid({ avoid, avoidInput })}>+</cf-button>
             </cf-hstack>
             <cf-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
               {avoid.map((item: string, index: number) => (

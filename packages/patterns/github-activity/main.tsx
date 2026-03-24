@@ -86,7 +86,7 @@ export default pattern<{
     [UI]: (
       <div>
         <div style="margin-bottom: 16px;">
-          <ct-input
+          <cf-input
             $value={state.repoUrl}
             placeholder="https://github.com/owner/repo"
             customStyle="width: 100%; padding: 8px; font-size: 14px;"

@@ -319,12 +319,12 @@ const Event = pattern<Input, Output>(
                   marginRight: "12px",
                 }}
               >
-                <ct-input
+                <cf-input
                   $value={title}
                   placeholder="Event title..."
                   style={{ flex: 1 }}
-                  onct-blur={stopEditingTitle({ isEditingTitle })}
-                  onct-keydown={handleTitleKeydown({ isEditingTitle })}
+                  oncf-blur={stopEditingTitle({ isEditingTitle })}
+                  oncf-keydown={handleTitleKeydown({ isEditingTitle })}
                 />
               </div>
             </cf-hstack>
@@ -347,7 +347,7 @@ const Event = pattern<Input, Output>(
             {/* Date Input */}
             <div>
               <label style={STYLES.label}>Date</label>
-              <ct-input
+              <cf-input
                 $value={date}
                 type="date"
                 style={{ width: "100%" }}
@@ -358,16 +358,16 @@ const Event = pattern<Input, Output>(
             <div style={{ display: "flex", gap: "8px" }}>
               <div style={{ flex: 1 }}>
                 <label style={STYLES.label}>Start Time</label>
-                <ct-input
+                <cf-input
                   $value={startTime}
                   type="time"
                   style={{ width: "100%" }}
-                  onct-change={onStartTimeChange({ startTime, endTime })}
+                  oncf-change={onStartTimeChange({ startTime, endTime })}
                 />
               </div>
               <div style={{ flex: 1 }}>
                 <label style={STYLES.label}>End Time</label>
-                <ct-input
+                <cf-input
                   $value={endTime}
                   type="time"
                   style={{ width: "100%" }}
@@ -399,7 +399,7 @@ const Event = pattern<Input, Output>(
             {/* Notes */}
             <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
               <label style={STYLES.label}>Notes</label>
-              <ct-textarea
+              <cf-textarea
                 $value={notes}
                 placeholder="Add notes about this event..."
                 style={{ flex: 1, minHeight: "100px" }}
@@ -431,14 +431,14 @@ const Event = pattern<Input, Output>(
               Linked from:
             </span>
             {backlinks.map((piece) => (
-              <ct-button
+              <cf-button
                 variant="ghost"
                 size="sm"
                 onClick={handleBacklinkClick({ piece })}
                 style={{ fontSize: "12px" }}
               >
                 {piece?.[NAME]}
-              </ct-button>
+              </cf-button>
             ))}
           </cf-hstack>
         </cf-screen>

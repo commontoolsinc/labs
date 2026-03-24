@@ -34,9 +34,9 @@ export default pattern<Input>(({ value }) => {
     [NAME]: computed(() => \`Counter: \${value}\`),
     [UI]: (
       <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-        <ct-button onClick={decrement({ value })}>-</ct-button>
+        <cf-button onClick={decrement({ value })}>-</cf-button>
         <span>{value}</span>
-        <ct-button onClick={increment({ value })}>+</ct-button>
+        <cf-button onClick={increment({ value })}>+</cf-button>
       </div>
     ),
     value,
@@ -51,7 +51,7 @@ IMPORTANT RULES:
 2. Import from "commonfabric": Writable, Default, computed, handler, NAME, pattern, UI, ifElse
 3. Use the pattern<Input>() or pattern<Input, Output>() API
 4. For arrays that need mutation, use Writable<T[]> in the interface
-5. Use $checked, $value for bidirectional binding on ct-checkbox, ct-input
+5. Use $checked, $value for bidirectional binding on ct-checkbox, cf-input
 6. Use inline handlers for simple operations, handler() for complex ones
 7. Always return [NAME] and [UI] from the pattern
 8. Use computed() for derived values and data transformations
@@ -131,9 +131,9 @@ export default pattern<Input, Output>(({ prompt }) => {
           Describe a pattern and I'll generate, compile, and run it.
         </p>
 
-        <ct-message-input
+        <cf-message-input
           placeholder="Describe the pattern you want..."
-          onct-send={updatePrompt({ prompt })}
+          oncf-send={updatePrompt({ prompt })}
         />
 
         <div
@@ -153,9 +153,9 @@ export default pattern<Input, Output>(({ prompt }) => {
               </div>,
               ifElse(
                 isReady,
-                <ct-button onClick={visit({ result: compiled.result })}>
+                <cf-button onClick={visit({ result: compiled.result })}>
                   Open Generated Pattern
-                </ct-button>,
+                </cf-button>,
                 <span style={{ opacity: 0.6 }}>
                   Enter a prompt to generate a pattern
                 </span>,

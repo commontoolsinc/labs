@@ -12,9 +12,9 @@ import {
 } from "../theme-context.ts";
 
 /**
- * CTButton - Interactive button element with multiple variants and sizes
+ * CFButton - Interactive button element with multiple variants and sizes
  *
- * @element ct-button
+ * @element cf-button
  *
  * @attr {string} variant - Visual style variant: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link"
  * @attr {string} size - Button size: "default" | "sm" | "lg" | "icon"
@@ -24,7 +24,7 @@ import {
  * @slot - Default slot for button content
  *
  * @example
- * <ct-button variant="primary" size="lg" @click=${() => console.log('Button clicked')}>Click Me</ct-button>
+ * <cf-button variant="primary" size="lg" @click=${() => console.log('Button clicked')}>Click Me</cf-button>
  */
 
 export type ButtonVariant =
@@ -38,7 +38,7 @@ export type ButtonVariant =
 
 export type ButtonSize = "default" | "sm" | "lg" | "icon";
 
-export class CTButton extends BaseElement {
+export class CFButton extends BaseElement {
   static override styles = [BaseElement.baseStyles, styles];
 
   static override properties = {
@@ -116,7 +116,7 @@ export class CTButton extends BaseElement {
         type="${this.type}"
         @click="${this._handleClick}"
         part="button"
-        data-ct-button
+        data-cf-button
       >
         <slot></slot>
       </button>
@@ -151,4 +151,4 @@ export class CTButton extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-button", CTButton);
+globalThis.customElements.define("cf-button", CFButton);

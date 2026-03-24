@@ -412,7 +412,7 @@ simpler. Here's how the editing section would look using `$value`:
 // No edit handler needed!
 
 <li>
-  <ct-input $value={state.names[index]} />
+  <cf-input $value={state.names[index]} />
   <button type="button" onclick={removeItem({ names: state.names, index })}>
     Delete
   </button>

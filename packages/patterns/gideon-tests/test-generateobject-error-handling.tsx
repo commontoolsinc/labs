@@ -68,7 +68,7 @@ export default pattern<Input, Input>(({ userInput }) => {
 
         <div style={{ marginBottom: "1rem" }}>
           <label>Product idea prompt:</label>
-          <ct-input $value={userInput} placeholder="Enter a product idea..." />
+          <cf-input $value={userInput} placeholder="Enter a product idea..." />
         </div>
 
         <h3>Result (with proper error handling):</h3>

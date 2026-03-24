@@ -63,17 +63,17 @@ export default pattern<InputSchema>(({ title, items }) => {
               key={index}
               style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
             >
-              <ct-button
+              <cf-button
                 variant="destructive"
                 size="sm"
                 onClick={removeItem({ items, item })}
               >
                 Remove
-              </ct-button>
+              </cf-button>
               <div style={{ flex: 1 }}>
-                <ct-input
+                <cf-input
                   value={item.text}
-                  onct-change={updateItem({ items, index })}
+                  oncf-change={updateItem({ items, index })}
                   placeholder="Enter text..."
                 />
               </div>
@@ -81,11 +81,11 @@ export default pattern<InputSchema>(({ title, items }) => {
           ))}
         </div>
         <div style={{ marginTop: "1rem" }}>
-          <ct-message-input
+          <cf-message-input
             name="Send"
             placeholder="Type a message..."
             appearance="rounded"
-            onct-send={addItem({ items })}
+            oncf-send={addItem({ items })}
           />
         </div>
       </div>

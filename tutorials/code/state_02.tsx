@@ -23,10 +23,10 @@ export default pattern(() => {
     [UI]: (
       <div>
         <h2>Character name: {characterName}</h2>
-        <ct-message-input
+        <cf-message-input
           name="Update"
           placeholder="Update Name"
-          onct-send={updateName({ characterName })}
+          oncf-send={updateName({ characterName })}
         />
         <li>DEX: {dex}</li>
         <li>DEX Modifier: {Math.floor((dex - 10) / 2)}</li>

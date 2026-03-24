@@ -42,7 +42,7 @@ export const LinkModule = pattern<LinkModuleInput, LinkModuleInput>(
         <cf-vstack style={{ gap: "12px" }}>
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>URL</label>
-            <ct-input
+            <cf-input
               type="url"
               $value={url}
               placeholder="https://example.com"
@@ -50,13 +50,13 @@ export const LinkModule = pattern<LinkModuleInput, LinkModuleInput>(
           </cf-vstack>
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Title</label>
-            <ct-input $value={linkTitle} placeholder="Link title" />
+            <cf-input $value={linkTitle} placeholder="Link title" />
           </cf-vstack>
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Description
             </label>
-            <ct-textarea
+            <cf-textarea
               $value={description}
               placeholder="Brief description..."
               rows={2}

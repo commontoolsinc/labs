@@ -1271,35 +1271,35 @@ export default pattern(
             <cf-vstack gap="1">
               <div>
                 <label>Import Limit</label>
-                <ct-input
+                <cf-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.limit}
                   placeholder="number of contacts to import"
-                  onct-input={updateLimit({ limit: settings.limit })}
+                  oncf-input={updateLimit({ limit: settings.limit })}
                 />
               </div>
 
               <div>
                 <label>Person Fields</label>
-                <ct-input
+                <cf-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.personFields}
                   placeholder="names,emailAddresses,phoneNumbers,photos"
-                  onct-input={updatePersonFields({
+                  oncf-input={updatePersonFields({
                     personFields: settings.personFields,
                   })}
                 />
               </div>
-              <ct-button
+              <cf-button
                 onClick={peopleUpdater({ contacts, auth, settings })}
               >
                 Fetch Contacts
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 onClick={clearContacts({ contacts })}
               >
                 Clear Contacts
-              </ct-button>
+              </cf-button>
             </cf-vstack>
           </cf-hstack>
           <common-google-oauth

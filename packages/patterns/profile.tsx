@@ -442,14 +442,14 @@ const Profile = pattern<ProfileInput, Output>(
                     <cf-hstack style={{ gap: "8px" }}>
                       <cf-vstack style={{ gap: "4px", flex: 1 }}>
                         <label style={labelStyle}>Your Name</label>
-                        <ct-input
+                        <cf-input
                           $value={self.key("name")}
                           placeholder="Your full name"
                         />
                       </cf-vstack>
                       <cf-vstack style={{ gap: "4px", width: "150px" }}>
                         <label style={labelStyle}>Nickname</label>
-                        <ct-input
+                        <cf-input
                           $value={self.key("nickname")}
                           placeholder="Nickname"
                         />
@@ -458,17 +458,17 @@ const Profile = pattern<ProfileInput, Output>(
                     <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Birthday</label>
                       <cf-hstack style={{ gap: "8px" }}>
-                        <ct-input
+                        <cf-input
                           $value={self.key("birthday", "month")}
                           placeholder="Month"
                           style={{ width: "80px" }}
                         />
-                        <ct-input
+                        <cf-input
                           $value={self.key("birthday", "day")}
                           placeholder="Day"
                           style={{ width: "60px" }}
                         />
-                        <ct-input
+                        <cf-input
                           $value={self.key("birthday", "year")}
                           placeholder="Year"
                           style={{ width: "80px" }}
@@ -477,7 +477,7 @@ const Profile = pattern<ProfileInput, Output>(
                     </cf-vstack>
                     <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Notes</label>
-                      <ct-textarea
+                      <cf-textarea
                         $value={self.key("notes")}
                         placeholder="Notes..."
                         rows={2}
@@ -512,7 +512,7 @@ const Profile = pattern<ProfileInput, Output>(
                     <cf-hstack style={{ gap: "8px" }}>
                       <cf-vstack style={{ gap: "4px", flex: 1 }}>
                         <label style={labelStyle}>Name</label>
-                        <ct-input
+                        <cf-input
                           $value={partner.key("name")}
                           placeholder="Partner's name"
                         />
@@ -527,7 +527,7 @@ const Profile = pattern<ProfileInput, Output>(
                     </cf-hstack>
                     <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Notes</label>
-                      <ct-textarea
+                      <cf-textarea
                         $value={partner.key("notes")}
                         placeholder="Notes..."
                         rows={2}
@@ -578,14 +578,14 @@ const Profile = pattern<ProfileInput, Output>(
                           >
                             <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Name</label>
-                              <ct-input
+                              <cf-input
                                 $value={child.name}
                                 placeholder="Child's name"
                               />
                             </cf-vstack>
                             <cf-vstack style={{ gap: "4px", width: "120px" }}>
                               <label style={labelStyle}>Nickname</label>
-                              <ct-input
+                              <cf-input
                                 $value={child.nickname}
                                 placeholder="Nickname"
                               />
@@ -601,14 +601,14 @@ const Profile = pattern<ProfileInput, Output>(
                           <cf-hstack style={{ gap: "8px" }}>
                             <cf-vstack style={{ gap: "4px", flex: 2 }}>
                               <label style={labelStyle}>School</label>
-                              <ct-input
+                              <cf-input
                                 $value={child.school.name}
                                 placeholder="School name"
                               />
                             </cf-vstack>
                             <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Grade</label>
-                              <ct-input
+                              <cf-input
                                 $value={child.school.gradeLevel}
                                 placeholder="Grade"
                               />
@@ -616,7 +616,7 @@ const Profile = pattern<ProfileInput, Output>(
                           </cf-hstack>
                           <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
-                            <ct-textarea
+                            <cf-textarea
                               $value={child.notes}
                               placeholder="Notes..."
                               rows={2}
@@ -677,7 +677,7 @@ const Profile = pattern<ProfileInput, Output>(
                           >
                             <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Name</label>
-                              <ct-input
+                              <cf-input
                                 $value={person.name}
                                 placeholder="Name"
                               />
@@ -699,7 +699,7 @@ const Profile = pattern<ProfileInput, Output>(
                           </cf-hstack>
                           <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
-                            <ct-textarea
+                            <cf-textarea
                               $value={person.notes}
                               placeholder="Notes..."
                               rows={2}
@@ -760,7 +760,7 @@ const Profile = pattern<ProfileInput, Output>(
                           >
                             <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Name</label>
-                              <ct-input
+                              <cf-input
                                 $value={person.name}
                                 placeholder="Name"
                               />
@@ -782,7 +782,7 @@ const Profile = pattern<ProfileInput, Output>(
                           </cf-hstack>
                           <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
-                            <ct-textarea
+                            <cf-textarea
                               $value={person.notes}
                               placeholder="Notes..."
                               rows={2}
@@ -851,7 +851,7 @@ const Profile = pattern<ProfileInput, Output>(
                             </cf-vstack>
                             <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Street</label>
-                              <ct-input
+                              <cf-input
                                 $value={addr.street}
                                 placeholder="123 Main St"
                               />
@@ -867,15 +867,15 @@ const Profile = pattern<ProfileInput, Output>(
                           <cf-hstack style={{ gap: "8px" }}>
                             <cf-vstack style={{ gap: "4px", flex: 2 }}>
                               <label style={labelStyle}>City</label>
-                              <ct-input $value={addr.city} placeholder="City" />
+                              <cf-input $value={addr.city} placeholder="City" />
                             </cf-vstack>
                             <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>State</label>
-                              <ct-input $value={addr.state} placeholder="CA" />
+                              <cf-input $value={addr.state} placeholder="CA" />
                             </cf-vstack>
                             <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>ZIP</label>
-                              <ct-input $value={addr.zip} placeholder="12345" />
+                              <cf-input $value={addr.zip} placeholder="12345" />
                             </cf-vstack>
                           </cf-hstack>
                         </cf-vstack>
@@ -933,15 +933,15 @@ const Profile = pattern<ProfileInput, Output>(
                           >
                             <cf-vstack style={{ gap: "4px", width: "80px" }}>
                               <label style={labelStyle}>Year</label>
-                              <ct-input $value={v.year} placeholder="2024" />
+                              <cf-input $value={v.year} placeholder="2024" />
                             </cf-vstack>
                             <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Make</label>
-                              <ct-input $value={v.make} placeholder="Toyota" />
+                              <cf-input $value={v.make} placeholder="Toyota" />
                             </cf-vstack>
                             <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Model</label>
-                              <ct-input $value={v.model} placeholder="Camry" />
+                              <cf-input $value={v.model} placeholder="Camry" />
                             </cf-vstack>
                             <button
                               type="button"
@@ -954,19 +954,19 @@ const Profile = pattern<ProfileInput, Output>(
                           <cf-hstack style={{ gap: "8px" }}>
                             <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>License Plate</label>
-                              <ct-input
+                              <cf-input
                                 $value={v.licensePlate}
                                 placeholder="ABC 1234"
                               />
                             </cf-vstack>
                             <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>VIN</label>
-                              <ct-input $value={v.vin} placeholder="VIN" />
+                              <cf-input $value={v.vin} placeholder="VIN" />
                             </cf-vstack>
                           </cf-hstack>
                           <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
-                            <ct-textarea
+                            <cf-textarea
                               $value={v.notes}
                               placeholder="Notes..."
                               rows={2}
@@ -1030,14 +1030,14 @@ const Profile = pattern<ProfileInput, Output>(
                           >
                             <cf-vstack style={{ gap: "4px", flex: 2 }}>
                               <label style={labelStyle}>Program</label>
-                              <ct-input
+                              <cf-input
                                 $value={m.program}
                                 placeholder="United MileagePlus"
                               />
                             </cf-vstack>
                             <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Member #</label>
-                              <ct-input
+                              <cf-input
                                 $value={m.memberNumber}
                                 placeholder="12345678"
                               />
@@ -1052,7 +1052,7 @@ const Profile = pattern<ProfileInput, Output>(
                           </cf-hstack>
                           <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
-                            <ct-textarea
+                            <cf-textarea
                               $value={m.notes}
                               placeholder="Notes..."
                               rows={2}
@@ -1115,7 +1115,7 @@ const Profile = pattern<ProfileInput, Output>(
                           >
                             <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Bank Name</label>
-                              <ct-input
+                              <cf-input
                                 $value={b.name}
                                 placeholder="Chase, Wells Fargo..."
                               />
@@ -1138,7 +1138,7 @@ const Profile = pattern<ProfileInput, Output>(
                           </cf-hstack>
                           <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
-                            <ct-textarea
+                            <cf-textarea
                               $value={b.notes}
                               placeholder="Notes..."
                               rows={2}
@@ -1184,14 +1184,14 @@ const Profile = pattern<ProfileInput, Output>(
                     <cf-hstack style={{ gap: "8px" }}>
                       <cf-vstack style={{ gap: "4px", flex: 1 }}>
                         <label style={labelStyle}>Employer</label>
-                        <ct-input
+                        <cf-input
                           $value={employment.key("employer")}
                           placeholder="Company name"
                         />
                       </cf-vstack>
                       <cf-vstack style={{ gap: "4px", flex: 1 }}>
                         <label style={labelStyle}>Title</label>
-                        <ct-input
+                        <cf-input
                           $value={employment.key("title")}
                           placeholder="Job title"
                         />
@@ -1200,17 +1200,17 @@ const Profile = pattern<ProfileInput, Output>(
                     <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Work Address</label>
                       <cf-hstack style={{ gap: "8px" }}>
-                        <ct-input
+                        <cf-input
                           $value={employment.key("street")}
                           placeholder="Street"
                           style={{ flex: 2 }}
                         />
-                        <ct-input
+                        <cf-input
                           $value={employment.key("city")}
                           placeholder="City"
                           style={{ flex: 1 }}
                         />
-                        <ct-input
+                        <cf-input
                           $value={employment.key("state")}
                           placeholder="State"
                           style={{ width: "60px" }}
@@ -1219,7 +1219,7 @@ const Profile = pattern<ProfileInput, Output>(
                     </cf-vstack>
                     <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Notes</label>
-                      <ct-textarea
+                      <cf-textarea
                         $value={employment.key("notes")}
                         placeholder="Notes..."
                         rows={2}
@@ -1664,7 +1664,7 @@ const Profile = pattern<ProfileInput, Output>(
                 >
                   📝 General Notes
                 </label>
-                <ct-textarea
+                <cf-textarea
                   $value={notes}
                   placeholder="Any other notes or information..."
                   rows={4}

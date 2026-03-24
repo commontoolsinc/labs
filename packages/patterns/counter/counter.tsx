@@ -95,21 +95,21 @@ const Counter = pattern<CounterInput, CounterOutput>(({ value }) => {
 
           <cf-hstack gap="2">
             {/* onClick can take a Stream directly - runtime calls .send() */}
-            <ct-button
+            <cf-button
               id="counter-decrement"
               variant="secondary"
               onClick={decrement}
             >
               - Decrement
-            </ct-button>
+            </cf-button>
             {/* onClick can also take a function that calls .send() explicitly */}
-            <ct-button
+            <cf-button
               id="counter-increment"
               variant="primary"
               onClick={() => boundIncrement.send()}
             >
               + Increment
-            </ct-button>
+            </cf-button>
           </cf-hstack>
         </cf-vstack>
       </cf-screen>

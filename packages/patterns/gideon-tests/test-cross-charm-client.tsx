@@ -147,12 +147,12 @@ export default pattern<Input, Output>(
                   : "Mode A: Wish Only (no ct.render)"}
               </strong>
             </div>
-            <ct-button
+            <cf-button
               onClick={toggleMode({ useCtRender })}
               style="margin-top: 8px;"
             >
               Toggle Mode
-            </ct-button>
+            </cf-button>
             <p style={{ fontSize: "12px", marginTop: "8px", marginBottom: 0 }}>
               In Mode A, server piece should NOT execute. In Mode B, it should
               execute.
@@ -208,7 +208,7 @@ export default pattern<Input, Output>(
             <div style={{ marginBottom: "8px" }}>
               <strong>Last Invocation Status:</strong> {lastInvocationStatus}
             </div>
-            <ct-button
+            <cf-button
               onClick={invokeServerStream({
                 stream: serverStream!,
                 lastInvocationStatus,
@@ -217,7 +217,7 @@ export default pattern<Input, Output>(
               style="margin-top: 8px;"
             >
               Invoke Server Stream
-            </ct-button>
+            </cf-button>
             <p style={{ fontSize: "12px", marginTop: "8px", marginBottom: 0 }}>
               Click to invoke the incrementCounter stream from the server piece.
               Check the server piece to see if the counter incremented.

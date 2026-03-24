@@ -48,7 +48,7 @@ const VoiceNoteSimple = pattern<Input, Output>(
       [UI]: (
         <cf-screen>
           <div slot="header">
-            <ct-input
+            <cf-input
               $value={title}
               placeholder="Voice Note Test"
             />

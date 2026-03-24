@@ -45,7 +45,7 @@ export default pattern((state) => {
     return {
         [NAME]: str `Simple counter: ${state.key("value")}`,
         [UI]: (<div>
-        <ct-button onClick={decrement(state)}>-</ct-button>
+        <cf-button onClick={decrement(state)}>-</cf-button>
         <ul>
           <li>next number: {__ctHelpers.ifElse({
             type: "number"
@@ -75,7 +75,7 @@ export default pattern((state) => {
                 value: state.key("value")
             } }, ({ state }) => state.value + 1), "unknown")}</li>
         </ul>
-        <ct-button onClick={increment({ value: state.key("value") })}>+</ct-button>
+        <cf-button onClick={increment({ value: state.key("value") })}>+</cf-button>
       </div>),
         value: state.key("value"),
     };

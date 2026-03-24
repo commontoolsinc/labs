@@ -611,15 +611,15 @@ Report memberships as you find them. Don't wait until the end.`,
                     Scan Mode
                   </div>
                   <div style={{ display: "flex", gap: "8px" }}>
-                    <ct-button
+                    <cf-button
                       onClick={startFullScan}
                       size="lg"
                       style="flex: 1;"
                       disabled={buttonsDisabled}
                     >
                       {fullScanLabel}
-                    </ct-button>
-                    <ct-button
+                    </cf-button>
+                    <cf-button
                       onClick={startRecentScan}
                       variant="secondary"
                       size="lg"
@@ -627,7 +627,7 @@ Report memberships as you find them. Don't wait until the end.`,
                       disabled={buttonsDisabled}
                     >
                       📅 Check Recent
-                    </ct-button>
+                    </cf-button>
                   </div>
                   <div
                     style={{
@@ -646,14 +646,14 @@ Report memberships as you find them. Don't wait until the end.`,
               {/* Stop button when scanning */}
               {ifElse(
                 isScanning,
-                <ct-button
+                <cf-button
                   onClick={searcher.stopScan}
                   variant="secondary"
                   size="lg"
                   style="width: 100%;"
                 >
                   ⏹ Stop Scan
-                </ct-button>,
+                </cf-button>,
                 null,
               )}
 

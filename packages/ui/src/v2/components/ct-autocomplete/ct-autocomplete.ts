@@ -188,7 +188,7 @@ export class CTAutocomplete extends BaseElement {
         width: 100%;
       }
 
-      /* Input styling - matches ct-input */
+      /* Input styling - matches cf-input */
       input {
         display: block;
         width: 100%;

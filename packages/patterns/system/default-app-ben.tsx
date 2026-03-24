@@ -367,7 +367,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
           </ct-cell-link>
 
           <div slot="end">
-            <ct-button
+            <cf-button
               variant="ghost"
               onClick={toggleMenu({ menuOpen })}
               style={{
@@ -377,7 +377,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
               }}
             >
               Notes ▾
-            </ct-button>
+            </cf-button>
 
             {/* Backdrop to close menu when clicking outside */}
             <div
@@ -407,34 +407,34 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                 padding: "4px",
               }}
             >
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={menuNewNote({ menuOpen })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📝 New Note
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="ghost"
                 onClick={menuNewNotebook({ menuOpen })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📓 New Notebook
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="ghost"
                 onClick={menuQuickCapture({ menuOpen, quickCapture })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}⚡ Quick Capture
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="ghost"
                 onClick={menuDailyJournal({ menuOpen, allPieces })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📅 Daily Journal
-              </ct-button>
+              </cf-button>
               <div
                 style={{
                   height: "1px",
@@ -522,13 +522,13 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                             )}
                           </td>
                           <td>
-                            <ct-button
+                            <cf-button
                               size="sm"
                               variant="ghost"
                               onClick={removePiece({ piece, allPieces })}
                             >
                               🗑️
-                            </ct-button>
+                            </cf-button>
                           </td>
                         </tr>
                       );

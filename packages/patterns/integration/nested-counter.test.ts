@@ -86,7 +86,7 @@ describe("nested counter integration test", () => {
 
     // Click increment button (second button - first is decrement)
     // Use retry logic to handle unstable box model during page settling
-    await clickNthButton(page, "[data-ct-button]", 1);
+    await clickNthButton(page, "[data-cf-button]", 1);
 
     // Wait for piece result update
     await waitFor(async () => {

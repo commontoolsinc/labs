@@ -212,18 +212,18 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
                         </span>
                       )}
                     </cf-vstack>
-                    <ct-button
+                    <cf-button
                       variant="secondary"
                       onClick={() => navigateTo(item)}
                     >
                       Edit
-                    </ct-button>
-                    <ct-button
+                    </cf-button>
+                    <cf-button
                       variant="ghost"
                       onClick={() => removeItem.send({ item })}
                     >
                       ×
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
                 </cf-card>
               ));
@@ -241,12 +241,12 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
 
         <cf-vstack slot="footer" gap="2" style="padding: 1rem;">
           <cf-hstack gap="2">
-            <ct-input
+            <cf-input
               $value={newTitle}
               placeholder="Title..."
               style="flex: 1;"
             />
-            <ct-input
+            <cf-input
               $value={newAuthor}
               placeholder="Author..."
               style="width: 150px;"
@@ -261,7 +261,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
               ]}
               style="width: 120px;"
             />
-            <ct-button
+            <cf-button
               variant="primary"
               onClick={() =>
                 addItem.send({
@@ -271,7 +271,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
                 })}
             >
               Add
-            </ct-button>
+            </cf-button>
           </cf-hstack>
         </cf-vstack>
       </cf-screen>

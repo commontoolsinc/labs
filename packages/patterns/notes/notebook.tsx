@@ -993,7 +993,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                   }}
                 />
 
-                <ct-button
+                <cf-button
                   variant="ghost"
                   onClick={goToAllNotesAction}
                   style={{
@@ -1004,7 +1004,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                   }}
                 >
                   📁 All Notes
-                </ct-button>
+                </cf-button>
               </div>
 
               <cf-card>
@@ -1057,12 +1057,12 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                           marginRight: "12px",
                         }}
                       >
-                        <ct-input
+                        <cf-input
                           $value={title}
                           placeholder="Notebook name..."
                           style={{ flex: 1 }}
-                          onct-blur={stopEditingTitleAction}
-                          onct-keydown={handleTitleKeydownAction}
+                          oncf-blur={stopEditingTitleAction}
+                          oncf-keydown={handleTitleKeydownAction}
                         />
                       </div>
                       <div
@@ -1072,7 +1072,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                           gap: "8px",
                         }}
                       >
-                        <ct-button
+                        <cf-button
                           size="sm"
                           variant="ghost"
                           title="New Note"
@@ -1083,8 +1083,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                           <span style={{ fontSize: "13px", fontWeight: "500" }}>
                             New
                           </span>
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="ghost"
                           title="New Notebook"
@@ -1095,7 +1095,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                           <span style={{ fontSize: "13px", fontWeight: "500" }}>
                             New
                           </span>
-                        </ct-button>
+                        </cf-button>
                       </div>
                     </div>
                   </ct-drop-zone>
@@ -1210,13 +1210,13 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                                 verticalAlign: "middle",
                               }}
                             >
-                              <ct-button
+                              <cf-button
                                 size="sm"
                                 variant="ghost"
                                 onClick={removeFromNotebook({ note, notes })}
                               >
                                 ✕
-                              </ct-button>
+                              </cf-button>
                             </td>
                           </tr>
                         ))}
@@ -1297,14 +1297,14 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                         pendingNotebookAction,
                       })}
                     />
-                    <ct-button
+                    <cf-button
                       size="sm"
                       variant="ghost"
                       onClick={doDuplicateSelectedNotes}
                     >
                       Duplicate
-                    </ct-button>
-                    <ct-button
+                    </cf-button>
+                    <cf-button
                       size="sm"
                       variant="ghost"
                       onClick={deleteSelectedNotes({
@@ -1316,7 +1316,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                       style={{ color: "var(--ct-color-danger, #dc3545)" }}
                     >
                       Delete
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
                 </cf-vstack>
               </cf-card>
@@ -1333,7 +1333,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             label="New Notebook"
           >
             <span slot="header">New Notebook</span>
-            <ct-input
+            <cf-input
               $value={newNotebookName}
               placeholder="Enter notebook name..."
             />
@@ -1342,13 +1342,13 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               gap="2"
               style={{ justifyContent: "flex-end" }}
             >
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={cancelNewNotebookPromptAction}
               >
                 Cancel
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="primary"
                 onClick={createNotebookFromPrompt({
                   newNotebookName,
@@ -1361,7 +1361,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                 })}
               >
                 Create
-              </ct-button>
+              </cf-button>
             </cf-hstack>
           </ct-modal>
 
@@ -1373,7 +1373,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             label="New Note"
           >
             <span slot="header">New Note</span>
-            <ct-input
+            <cf-input
               $value={newNoteTitle}
               placeholder="Enter note title..."
             />
@@ -1382,24 +1382,24 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               gap="2"
               style={{ justifyContent: "flex-end" }}
             >
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={cancelNewNotePromptAction}
               >
                 Cancel
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="ghost"
                 onClick={createAnotherNoteAction}
               >
                 Create Another
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="primary"
                 onClick={createNoteAction}
               >
                 Create
-              </ct-button>
+              </cf-button>
             </cf-hstack>
           </ct-modal>
 
@@ -1411,7 +1411,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             label="New Notebook"
           >
             <span slot="header">New Notebook</span>
-            <ct-input
+            <cf-input
               $value={newNestedNotebookTitle}
               placeholder="Enter notebook title..."
             />
@@ -1420,24 +1420,24 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               gap="2"
               style={{ justifyContent: "flex-end" }}
             >
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={cancelNewNestedNotebookPromptAction}
               >
                 Cancel
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="ghost"
                 onClick={createAnotherNestedNotebookAction}
               >
                 Create Another
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="primary"
                 onClick={createNestedNotebookAction}
               >
                 Create
-              </ct-button>
+              </cf-button>
             </cf-hstack>
           </ct-modal>
 
@@ -1463,14 +1463,14 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               Linked from:
             </span>
             {backlinks.map((piece) => (
-              <ct-button
+              <cf-button
                 variant="ghost"
                 size="sm"
                 onClick={handleBacklinkClick({ piece })}
                 style={{ fontSize: "12px" }}
               >
                 {piece?.[NAME]}
-              </ct-button>
+              </cf-button>
             ))}
           </cf-hstack>
         </cf-screen>

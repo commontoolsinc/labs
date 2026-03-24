@@ -33,14 +33,14 @@ import {
  * ```html
  * <ct-form method="POST" action="/api/submit">
  *   <ct-label for="name">Name</ct-label>
- *   <ct-input id="name" name="name" required></ct-input>
+ *   <cf-input id="name" name="name" required></cf-input>
  *
  *   <ct-label for="email">Email</ct-label>
- *   <ct-input id="email" name="email" type="email" required></ct-input>
+ *   <cf-input id="email" name="email" type="email" required></cf-input>
  *
  *   <div class="form-actions">
- *     <ct-button type="submit">Submit</ct-button>
- *     <ct-button type="button" variant="outline">Cancel</ct-button>
+ *     <cf-button type="submit">Submit</cf-button>
+ *     <cf-button type="button" variant="outline">Cancel</cf-button>
  *   </div>
  * </ct-form>
  * ```
@@ -129,8 +129,8 @@ export class CTForm extends BaseElement {
         flex-direction: column;
       }
 
-      ::slotted(.form-actions) ct-button,
-      ::slotted(.form-buttons) ct-button {
+      ::slotted(.form-actions) cf-button,
+      ::slotted(.form-buttons) cf-button {
         width: 100%;
       }
     }

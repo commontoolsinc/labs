@@ -1262,10 +1262,10 @@ interface BookmarksOutput {
 ## `link-preview.tsx`
 
 A simple pattern that renders a rich link preview for a single URL. Uses
-ct-input for URL entry and ct-link-preview to display the preview card with
+cf-input for URL entry and ct-link-preview to display the preview card with
 metadata and screenshot.
 
-**Keywords:** link, preview, url, ct-link-preview, ct-input
+**Keywords:** link, preview, url, ct-link-preview, cf-input
 
 ### Input Schema
 

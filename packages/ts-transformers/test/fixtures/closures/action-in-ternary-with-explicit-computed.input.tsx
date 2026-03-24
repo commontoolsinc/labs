@@ -42,7 +42,7 @@ export default pattern<Input>(({ card }) => {
             {computed(() => (
               <div>
                 <span>{card.description}</span>
-                <ct-button onClick={startEditing}>Edit</ct-button>
+                <cf-button onClick={startEditing}>Edit</cf-button>
               </div>
             ))}
           </div>

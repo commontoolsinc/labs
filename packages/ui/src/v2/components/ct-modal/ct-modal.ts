@@ -39,7 +39,7 @@
  * <ct-modal $open={isModalOpen} dismissable>
  *   <span slot="header">Edit Item</span>
  *   <p>Modal content here</p>
- *   <ct-button slot="footer" onClick={save}>Save</ct-button>
+ *   <cf-button slot="footer" onClick={save}>Save</cf-button>
  * </ct-modal>
  *
  * <!-- Plain boolean (controlled) -->

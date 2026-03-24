@@ -16,7 +16,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @example
  * <cf-vgroup gap="1">
  *   <ct-label>Name</ct-label>
- *   <ct-input placeholder="Enter your name" />
+ *   <cf-input placeholder="Enter your name" />
  * </cf-vgroup>
  */
 export class CFVGroup extends BaseElement {

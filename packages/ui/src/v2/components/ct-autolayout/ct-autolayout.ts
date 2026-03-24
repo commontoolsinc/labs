@@ -613,7 +613,7 @@ export class CTAutoLayout extends BaseElement {
           <div class="mobile-bar ${classMap({
             top: this.tabsPosition === "top",
           })}">
-            <ct-button
+            <cf-button
               size="icon"
               variant="secondary"
               aria-label="Toggle left sidebar"
@@ -621,7 +621,7 @@ export class CTAutoLayout extends BaseElement {
                 this._toggleLeft(e.currentTarget as Element)}"
             >
               ←
-            </ct-button>
+            </cf-button>
             <div class="tabs">
               ${contentTabs.map((name, index) =>
                 html`
@@ -637,7 +637,7 @@ export class CTAutoLayout extends BaseElement {
                 `
               )}
             </div>
-            <ct-button
+            <cf-button
               size="icon"
               variant="secondary"
               aria-label="Toggle right sidebar"
@@ -645,12 +645,12 @@ export class CTAutoLayout extends BaseElement {
                 this._toggleRight(e.currentTarget as Element)}"
             >
               →
-            </ct-button>
+            </cf-button>
           </div>
 
           <!-- Desktop floating toggles -->
           <div class="desktop-toggle desktop-toggle-left">
-            <ct-button
+            <cf-button
               size="icon"
               variant="secondary"
               aria-label="Toggle left sidebar"
@@ -658,10 +658,10 @@ export class CTAutoLayout extends BaseElement {
                 this._toggleLeft(e.currentTarget as Element)}"
             >
               ←
-            </ct-button>
+            </cf-button>
           </div>
           <div class="desktop-toggle desktop-toggle-right">
-            <ct-button
+            <cf-button
               size="icon"
               variant="secondary"
               aria-label="Toggle right sidebar"
@@ -669,7 +669,7 @@ export class CTAutoLayout extends BaseElement {
                 this._toggleRight(e.currentTarget as Element)}"
             >
               →
-            </ct-button>
+            </cf-button>
           </div>
         </div>
       `;

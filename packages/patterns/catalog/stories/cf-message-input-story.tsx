@@ -11,7 +11,7 @@ interface MessageInputStoryOutput {
 
 export default pattern<MessageInputStoryInput, MessageInputStoryOutput>(() => {
   return {
-    [NAME]: "ct-message-input Story",
+    [NAME]: "cf-message-input Story",
     [UI]: (
       <div
         style={{
@@ -22,7 +22,7 @@ export default pattern<MessageInputStoryInput, MessageInputStoryOutput>(() => {
           maxWidth: "400px",
         }}
       >
-        <ct-message-input placeholder="Type a message..." button-text="Send" />
+        <cf-message-input placeholder="Type a message..." button-text="Send" />
       </div>
     ),
     controls: (

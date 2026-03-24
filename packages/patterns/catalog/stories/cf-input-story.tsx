@@ -17,11 +17,11 @@ export default pattern<InputStoryInput, InputStoryOutput>(() => {
   const value = Writable.of("");
 
   return {
-    [NAME]: "ct-input Story",
+    [NAME]: "cf-input Story",
     [UI]: (
       <div style={{ padding: "1rem" }}>
         <div style={{ padding: "2rem 0" }}>
-          <ct-input
+          <cf-input
             $value={value}
             placeholder={placeholder}
             disabled={disabled}

@@ -34,9 +34,9 @@ export default pattern<Record<string, never>>((_) => {
       <div>
         <ct-checkbox $checked={searchHome}>Search Home</ct-checkbox>
         <ct-checkbox $checked={searchSpace}>Search Space</ct-checkbox>
-        <ct-input $value={arbitraryDID} placeholder="did:key:..." />
+        <cf-input $value={arbitraryDID} placeholder="did:key:..." />
         <hr />
-        <ct-textarea $value={wishText} />
+        <cf-textarea $value={wishText} />
         <hr />
         {wishResult[UI]}
       </div>

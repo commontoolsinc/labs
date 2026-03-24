@@ -378,7 +378,7 @@ export class CTPlaidLink extends BaseElement {
           <button
             @click="${this.handleConnectClick}"
             ?disabled="${this.isLoading || !this.plaidScriptLoaded}"
-            class="connect-button"
+            class="connecf-button"
           >
             ${this.isLoading
               ? "Processing..."
@@ -583,7 +583,7 @@ export class CTPlaidLink extends BaseElement {
           gap: var(--ct-theme-spacing-normal, 1rem);
         }
 
-        .connect-button {
+        .connecf-button {
           background-color: #1db954;
           color: white;
           border: none;
@@ -600,11 +600,11 @@ export class CTPlaidLink extends BaseElement {
           transition: background-color var(--ct-theme-animation-duration, 0.2s) ease;
         }
 
-        .connect-button:hover {
+        .connecf-button:hover {
           background-color: #1aa34a;
         }
 
-        .connect-button:disabled {
+        .connecf-button:disabled {
           background-color: var(
             --ct-theme-color-border,
             var(--ct-color-gray-300, #d1d5db)

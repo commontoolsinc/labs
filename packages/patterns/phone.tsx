@@ -69,7 +69,7 @@ export const PhoneModule = pattern<PhoneModuleInput, PhoneModuleInput>(
           </cf-vstack>
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Phone</label>
-            <ct-input
+            <cf-input
               type="tel"
               $value={number}
               placeholder="+1 (555) 123-4567"

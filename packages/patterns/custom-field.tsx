@@ -205,7 +205,7 @@ export const CustomFieldModule = pattern<
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Field Name
             </label>
-            <ct-input $value={name} placeholder="e.g., Employee ID..." />
+            <cf-input $value={name} placeholder="e.g., Employee ID..." />
           </cf-vstack>
           <cf-vstack style={{ width: "110px", gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Type</label>
@@ -220,14 +220,14 @@ export const CustomFieldModule = pattern<
           {/* Text input */}
           {ifElse(
             isText,
-            <ct-input $value={value} placeholder="Enter text..." />,
+            <cf-input $value={value} placeholder="Enter text..." />,
             null,
           )}
 
           {/* Number input */}
           {ifElse(
             isNumber,
-            <ct-input
+            <cf-input
               type="number"
               $value={value}
               placeholder="Enter number..."
@@ -236,7 +236,7 @@ export const CustomFieldModule = pattern<
           )}
 
           {/* Date input */}
-          {ifElse(isDate, <ct-input type="date" $value={value} />, null)}
+          {ifElse(isDate, <cf-input type="date" $value={value} />, null)}
 
           {/* Boolean checkbox */}
           {ifElse(
@@ -259,7 +259,7 @@ export const CustomFieldModule = pattern<
           {ifElse(
             isUrl,
             <cf-vstack style={{ gap: "8px" }}>
-              <ct-input $value={value} placeholder="https://..." />
+              <cf-input $value={value} placeholder="https://..." />
               {ifElse(
                 computed(() => !!safeUrl),
                 <a
@@ -283,7 +283,7 @@ export const CustomFieldModule = pattern<
           {/* Fallback for invalid valueType */}
           {ifElse(
             isFallback,
-            <ct-input $value={value} placeholder="Enter value..." />,
+            <cf-input $value={value} placeholder="Enter value..." />,
             null,
           )}
         </cf-vstack>

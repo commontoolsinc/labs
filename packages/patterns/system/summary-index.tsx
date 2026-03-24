@@ -103,7 +103,7 @@ const SummaryIndex = pattern<Input, Output>(() => {
         </ct-toolbar>
 
         <cf-vstack gap="4" padding="6">
-          <ct-input $value={query} placeholder="Search summaries..." />
+          <cf-input $value={query} placeholder="Search summaries..." />
           <span
             style={{
               fontSize: "13px",

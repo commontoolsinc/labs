@@ -42,7 +42,7 @@ export default pattern((state) => {
         // This template literal SHOULD be transformed (builder function context)
         [NAME]: str `Simple counter: ${state.key("value")}`,
         [UI]: (<div>
-        <ct-button onClick={decrement(state)}>-</ct-button>
+        <cf-button onClick={decrement(state)}>-</cf-button>
         <p>
           {/* These SHOULD be transformed (JSX expression context) */}
           Current: {state.key("value")}
@@ -135,7 +135,7 @@ export default pattern((state) => {
                 value: state.key("value")
             } }, ({ state }) => state.value > 10), "High", "Low")}
         </p>
-        <ct-button onClick={increment({ value: state.key("value") })}>+</ct-button>
+        <cf-button onClick={increment({ value: state.key("value") })}>+</cf-button>
       </div>),
         // Direct property access - no transformation needed
         value: state.key("value"),

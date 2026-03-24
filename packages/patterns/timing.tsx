@@ -71,7 +71,7 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
                 Prep Time
               </label>
               <cf-hstack style={{ alignItems: "center", gap: "4px" }}>
-                <ct-input
+                <cf-input
                   type="number"
                   $value={prepTime}
                   placeholder="0"
@@ -87,7 +87,7 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
                 Cook Time
               </label>
               <cf-hstack style={{ alignItems: "center", gap: "4px" }}>
-                <ct-input
+                <cf-input
                   type="number"
                   $value={cookTime}
                   placeholder="0"
@@ -103,7 +103,7 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
                 Rest Time
               </label>
               <cf-hstack style={{ alignItems: "center", gap: "4px" }}>
-                <ct-input
+                <cf-input
                   type="number"
                   $value={restTime}
                   placeholder="0"

@@ -232,7 +232,7 @@ export default pattern<ChatInput, ChatOutput>(
           <ct-attachments-bar pinnedCells={pinnedCells} />
         </cf-cell-context>
         <ct-tools-chip $tools={flattenedTools} />
-        <ct-button
+        <cf-button
           variant="pill"
           type="button"
           title="Clear chat"
@@ -242,7 +242,7 @@ export default pattern<ChatInput, ChatOutput>(
           })}
         >
           Clear
-        </ct-button>
+        </cf-button>
       </cf-hstack>
     );
 

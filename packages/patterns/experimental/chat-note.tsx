@@ -528,12 +528,12 @@ const ChatNote = pattern<Input, Output>(
                   marginRight: "12px",
                 }}
               >
-                <ct-input
+                <cf-input
                   $value={title}
                   placeholder="Chat note title..."
                   style={{ flex: 1 }}
-                  onct-blur={stopEditingTitle({ isEditingTitle })}
-                  onct-keydown={handleTitleKeydown({ isEditingTitle })}
+                  oncf-blur={stopEditingTitle({ isEditingTitle })}
+                  oncf-keydown={handleTitleKeydown({ isEditingTitle })}
                 />
               </div>
 
@@ -555,7 +555,7 @@ const ChatNote = pattern<Input, Output>(
               </select>
 
               {/* Generate button - shown when not generating */}
-              <ct-button
+              <cf-button
                 variant="primary"
                 size="sm"
                 onClick={handleGenerate({
@@ -573,7 +573,7 @@ const ChatNote = pattern<Input, Output>(
                 title="Generate (Cmd+Enter)"
               >
                 Generate
-              </ct-button>
+              </cf-button>
 
               {/* Generation status / Cancel button - shown when generating */}
               <cf-hstack
@@ -585,7 +585,7 @@ const ChatNote = pattern<Input, Output>(
                 }}
               >
                 <ct-loader show-elapsed style={{ flexShrink: 0 }} />
-                <ct-button
+                <cf-button
                   variant="secondary"
                   size="sm"
                   onClick={handleCancelGeneration({
@@ -595,7 +595,7 @@ const ChatNote = pattern<Input, Output>(
                   style={{ flexShrink: 0 }}
                 >
                   Cancel
-                </ct-button>
+                </cf-button>
               </cf-hstack>
             </cf-hstack>
           </cf-vstack>
@@ -647,9 +647,9 @@ const ChatNote = pattern<Input, Output>(
 
           <cf-hstack slot="footer">
             {backlinks?.map((piece) => (
-              <ct-button onClick={handlePieceLinkClicked({ piece })}>
+              <cf-button onClick={handlePieceLinkClicked({ piece })}>
                 {piece?.[NAME]}
-              </ct-button>
+              </cf-button>
             ))}
           </cf-hstack>
         </cf-screen>

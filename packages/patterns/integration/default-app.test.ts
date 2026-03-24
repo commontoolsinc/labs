@@ -1519,8 +1519,8 @@ async function clickButtonWithText(
   searchText: string,
 ): Promise<boolean> {
   try {
-    // Search ct-button, button, and a elements with piercing selector
-    const buttons = await page.$$("ct-button, button, a", {
+    // Search cf-button, button, and a elements with piercing selector
+    const buttons = await page.$$("cf-button, button, a", {
       strategy: "pierce",
     });
     for (const button of buttons) {

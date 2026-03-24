@@ -296,7 +296,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 First Name
               </label>
-              <ct-input
+              <cf-input
                 $value={member.key("firstName")}
                 placeholder="First name"
               />
@@ -305,7 +305,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 Last Name
               </label>
-              <ct-input
+              <cf-input
                 $value={member.key("lastName")}
                 placeholder="Last name"
               />
@@ -347,7 +347,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Birthday
                     </label>
-                    <ct-input $value={member.key("birthday")} type="date" />
+                    <cf-input $value={member.key("birthday")} type="date" />
                   </cf-vstack>
                 </cf-vstack>
               );
@@ -407,7 +407,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
               if (!showNotes.get()) return null;
               return (
                 <cf-vstack style={{ gap: "4px" }}>
-                  <ct-input
+                  <cf-input
                     $value={member.key("notes")}
                     placeholder="Notes about this family member..."
                     multiple
@@ -476,14 +476,14 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
                     borderTop: "1px solid #e5e7eb",
                   }}
                 >
-                  <ct-button
+                  <cf-button
                     variant="ghost"
                     size="sm"
                     onClick={togglePicker({ showPicker })}
                     style={{ fontSize: "12px", color: "#6b7280" }}
                   >
                     Link to another contact...
-                  </ct-button>
+                  </cf-button>
                 </cf-hstack>
               );
             })}

@@ -191,7 +191,7 @@ const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
         </ct-toolbar>
 
         <cf-vstack gap="4" padding="6">
-          <ct-input $value={query} placeholder="Filter by name..." />
+          <cf-input $value={query} placeholder="Filter by name..." />
           <span
             style={{
               fontSize: "13px",

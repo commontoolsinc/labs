@@ -22,7 +22,7 @@ export default pattern(() => {
     [UI]: (
       <div>
         <div>
-          <ct-input $value={expression} />
+          <cf-input $value={expression} />
         </div>
         <div>
           <h2>Text Generation</h2>

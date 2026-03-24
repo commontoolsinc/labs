@@ -577,7 +577,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               {/* Title Input */}
               <div>
                 <label style={STYLES.label}>Title</label>
-                <ct-input
+                <cf-input
                   $value={newEventTitle}
                   placeholder="Event title..."
                   style={{ width: "100%" }}
@@ -587,7 +587,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               {/* Date Input */}
               <div>
                 <label style={STYLES.label}>Date</label>
-                <ct-input
+                <cf-input
                   $value={newEventDate}
                   type="date"
                   style={{ width: "100%" }}
@@ -598,16 +598,16 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               <div style={{ display: "flex", gap: "8px" }}>
                 <div style={{ flex: 1 }}>
                   <label style={STYLES.label}>Start</label>
-                  <ct-input
+                  <cf-input
                     $value={newEventStartTime}
                     type="time"
                     style={{ width: "100%" }}
-                    onct-change={onStartTimeChange}
+                    oncf-change={onStartTimeChange}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={STYLES.label}>End</label>
-                  <ct-input
+                  <cf-input
                     $value={newEventEndTime}
                     type="time"
                     style={{ width: "100%" }}
@@ -710,7 +710,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               {/* Title Input */}
               <div>
                 <label style={STYLES.label}>Title</label>
-                <ct-input
+                <cf-input
                   $value={editEventTitle}
                   placeholder="Event title..."
                   style={{ width: "100%" }}
@@ -720,7 +720,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               {/* Date Input */}
               <div>
                 <label style={STYLES.label}>Date</label>
-                <ct-input
+                <cf-input
                   $value={editEventDate}
                   type="date"
                   style={{ width: "100%" }}
@@ -731,16 +731,16 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               <div style={{ display: "flex", gap: "8px" }}>
                 <div style={{ flex: 1 }}>
                   <label style={STYLES.label}>Start</label>
-                  <ct-input
+                  <cf-input
                     $value={editEventStartTime}
                     type="time"
                     style={{ width: "100%" }}
-                    onct-change={onEditStartTimeChange}
+                    oncf-change={onEditStartTimeChange}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={STYLES.label}>End</label>
-                  <ct-input
+                  <cf-input
                     $value={editEventEndTime}
                     type="time"
                     style={{ width: "100%" }}

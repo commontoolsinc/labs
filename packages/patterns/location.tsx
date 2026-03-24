@@ -48,7 +48,7 @@ export const LocationModule = pattern<LocationModuleInput, LocationModuleInput>(
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Location Name
             </label>
-            <ct-input
+            <cf-input
               $value={locationName}
               placeholder="e.g., Home, Office, Cafe"
             />
@@ -57,7 +57,7 @@ export const LocationModule = pattern<LocationModuleInput, LocationModuleInput>(
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Address
             </label>
-            <ct-textarea
+            <cf-textarea
               $value={locationAddress}
               placeholder="Full address..."
               rows={2}
@@ -67,7 +67,7 @@ export const LocationModule = pattern<LocationModuleInput, LocationModuleInput>(
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Coordinates (optional)
             </label>
-            <ct-input
+            <cf-input
               $value={coordinates}
               placeholder="lat,lng (e.g., 37.7749,-122.4194)"
             />

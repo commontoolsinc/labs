@@ -1,5 +1,5 @@
 /**
- * Styles for ct-textarea component
+ * Styles for cf-textarea component
  */
 
 export const textareaStyles = `

@@ -67,7 +67,7 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
     [UI]: (
       <cf-screen>
         <div slot="header">
-          <ct-input
+          <cf-input
             $value={title}
             placeholder="Voice Note"
             readonly
@@ -155,7 +155,7 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                               {note.duration.toFixed(1)}s
                             </small>
                           </div>
-                          <ct-button
+                          <cf-button
                             variant="ghost"
                             size="sm"
                             onClick={handleDeleteNote({
@@ -164,7 +164,7 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                             })}
                           >
                             ×
-                          </ct-button>
+                          </cf-button>
                         </div>
                       </div>
                     ))}

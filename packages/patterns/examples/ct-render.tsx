@@ -51,16 +51,16 @@ export const Counter = pattern<PatternState>((state) => {
           /* Even though we could end up passing extra data to decrement, our schema prevents that actually reaching the handler.
           In fact, we are passing `value` as an OpaqueRef<number> here but it becomes a Writable<number> at invocation time */
         }
-        <ct-button onClick={decrement(state)}>
+        <cf-button onClick={decrement(state)}>
           dec to {previous(state.value)}
-        </ct-button>
+        </cf-button>
         <span id="counter-result">
           {/* <cts-enable /> transforms pure functions (like nth) into the `derive(c, nth)` equivalent */}
           Counter is the {nth(state.value)} number
         </span>
-        <ct-button onClick={increment({ value: state.value })}>
+        <cf-button onClick={increment({ value: state.value })}>
           inc to {state.value + 1}
-        </ct-button>
+        </cf-button>
       </div>
     ),
     value: state.value,

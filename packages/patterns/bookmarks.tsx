@@ -73,17 +73,17 @@ export const Bookmarks = pattern<BookmarksInput, BookmarksOutput>(
       [UI]: (
         <cf-vstack gap="4">
           {/* Add URL input */}
-          <ct-message-input
+          <cf-message-input
             placeholder="Add a URL..."
             button-text="Add"
-            onct-send={(e: { detail?: { message?: string } }) => {
+            oncf-send={(e: { detail?: { message?: string } }) => {
               const url = e.detail?.message;
               if (url) addBookmark.send({ url });
             }}
           />
 
           {/* Search */}
-          <ct-input
+          <cf-input
             $value={searchQuery}
             placeholder="Search bookmarks..."
             style={{ fontSize: "14px" }}

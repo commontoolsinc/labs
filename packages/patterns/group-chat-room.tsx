@@ -932,22 +932,22 @@ export default pattern<RoomInput, RoomOutput>(
                   </div>
 
                   <div style={{ display: "flex", gap: "0.5rem" }}>
-                    <ct-input
+                    <cf-input
                       $value={contentInput}
                       placeholder="Type your message..."
                       style="flex: 1;"
                       timingStrategy="immediate"
-                      onct-submit={sendMessage({
+                      oncf-submit={sendMessage({
                         messages,
                         myName,
                         contentInput,
                       })}
                     />
-                    <ct-button
+                    <cf-button
                       onClick={sendMessage({ messages, myName, contentInput })}
                     >
                       Send
-                    </ct-button>
+                    </cf-button>
                   </div>
                 </div>
               </div>

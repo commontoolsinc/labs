@@ -26,7 +26,7 @@ export default pattern(
       [UI]: (
         <div style="padding: 1rem; max-width: 1200px; margin: 0 auto;">
           <div style="margin-bottom: 1rem;">
-            <ct-input
+            <cf-input
               $value={title}
               placeholder="Enter research report title..."
               style="width: 100%; font-size: 1.2rem; font-weight: bold;"

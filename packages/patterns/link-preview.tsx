@@ -11,7 +11,7 @@ export const LinkPreview = pattern<LinkPreviewInput, LinkPreviewInput>(
       [NAME]: computed(() => `Link Preview: ${url}`),
       [UI]: (
         <cf-vstack style={{ gap: "12px" }}>
-          <ct-input
+          <cf-input
             $value={url}
             placeholder="Enter a URL..."
           />

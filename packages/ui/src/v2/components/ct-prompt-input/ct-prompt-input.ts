@@ -15,7 +15,7 @@ import {
 } from "../../core/mentionable.ts";
 import { MentionController } from "../../core/mention-controller.ts";
 import { createCellController } from "../../core/cell-controller.ts";
-import "../ct-button/ct-button.ts";
+import "../cf-button/cf-button.ts";
 import "../ct-chip/ct-chip.ts";
 import "../ct-voice-input/ct-voice-input.ts";
 
@@ -39,7 +39,7 @@ export interface ModelItem {
 
 /**
  * CTPromptInput - Enhanced textarea input component with @-mentions and attachments support
- * Based on ct-message-input but with multiline support and prompt-specific features
+ * Based on cf-message-input but with multiline support and prompt-specific features
  *
  * @element ct-prompt-input
  *
@@ -57,7 +57,7 @@ export interface ModelItem {
  *
  * @fires ct-send - Fired when send button is clicked or Enter is pressed. detail: { text: string, attachments: PromptAttachment[], mentions: [] }
  * @fires ct-stop - Fired when stop button is clicked during pending state
- * @fires ct-input - Fired when textarea value changes. detail: { value: string }
+ * @fires cf-input - Fired when textarea value changes. detail: { value: string }
  * @fires ct-attachment-add - Fired when an attachment is added (file uploaded, clipboard). detail: { attachment: PromptAttachment }
  * @fires ct-attachment-remove - Fired when an attachment is removed from the composer. detail: { id: string }
  *
@@ -175,7 +175,7 @@ export class CTPromptInput extends BaseElement {
             gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
           }
 
-          ct-button {
+          cf-button {
             white-space: nowrap;
             min-width: auto;
             height: 2rem;
@@ -573,7 +573,7 @@ export class CTPromptInput extends BaseElement {
           this.mentionController.handleInput(event);
 
           // Emit input event for external listeners
-          this.emit("ct-input", { value: this.value });
+          this.emit("cf-input", { value: this.value });
         }
 
         /**
@@ -701,7 +701,7 @@ export class CTPromptInput extends BaseElement {
                     <div class="send-button-wrapper">
                       ${this.pending
                         ? html`
-                          <ct-button
+                          <cf-button
                             id="ct-prompt-input-stop-button"
                             variant="secondary"
                             size="${this.size === "sm"
@@ -714,10 +714,10 @@ export class CTPromptInput extends BaseElement {
                             part="stop-button"
                           >
                             Stop
-                          </ct-button>
+                          </cf-button>
                         `
                         : html`
-                          <ct-button
+                          <cf-button
                             id="ct-prompt-input-send-button"
                             variant="primary"
                             size="${this.size === "sm"
@@ -730,7 +730,7 @@ export class CTPromptInput extends BaseElement {
                             part="send-button"
                           >
                             ${this.buttonText}
-                          </ct-button>
+                          </cf-button>
                         `}
                     </div>
                   </div>
@@ -911,7 +911,7 @@ export class CTPromptInput extends BaseElement {
             }px`;
           }
 
-          this.emit("ct-input", { value: this.value });
+          this.emit("cf-input", { value: this.value });
           textarea.focus();
         }
 

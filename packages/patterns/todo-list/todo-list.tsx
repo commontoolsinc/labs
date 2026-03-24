@@ -52,14 +52,14 @@ export const TodoItemPiece = pattern<
       <cf-card>
         <cf-hstack gap="2" align="center">
           <ct-checkbox $checked={item.done} />
-          <ct-input
+          <cf-input
             $value={item.title}
             style="flex: 1;"
             placeholder="Todo item..."
           />
-          <ct-button variant="ghost" onClick={() => removeItem.send({ item })}>
+          <cf-button variant="ghost" onClick={() => removeItem.send({ item })}>
             x
-          </ct-button>
+          </cf-button>
         </cf-hstack>
       </cf-card>
     ),
@@ -160,14 +160,14 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
                 <cf-vstack gap="2" style="padding-top: 0.5rem;">
                   {completedCards}
                   <cf-hstack justify="end">
-                    <ct-button
+                    <cf-button
                       variant="ghost"
                       size="sm"
                       style="font-size: 0.8rem; color: var(--ct-color-gray-500);"
                       onClick={() => archiveCompleted.send()}
                     >
                       Archive all
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
                 </cf-vstack>
               </details>,
@@ -177,10 +177,10 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
         </cf-vscroll>
 
         <cf-hstack slot="footer" gap="2" style="padding: 1rem;">
-          <ct-message-input
+          <cf-message-input
             placeholder="Add a todo item..."
             style="flex: 1;"
-            onct-send={(e: { detail?: { message?: string } }) => {
+            oncf-send={(e: { detail?: { message?: string } }) => {
               const title = e.detail?.message?.trim();
               if (title) {
                 addItem.send({ title });

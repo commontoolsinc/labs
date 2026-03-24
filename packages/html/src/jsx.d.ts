@@ -2859,12 +2859,12 @@ interface CTOutlinerElement extends CTHTMLElement {}
 interface CTCellLinkElement extends CTHTMLElement {}
 interface CTSpaceLinkElement extends CTHTMLElement {}
 interface CTLoaderElement extends CTHTMLElement {}
-interface CTInputElement extends CTHTMLElement {}
+interface CFInputElement extends CTHTMLElement {}
 interface CTLinkPreviewElement extends CTHTMLElement {}
-interface CTTextAreaElement extends CTHTMLElement {}
+interface CFTextAreaElement extends CTHTMLElement {}
 interface CTFileInputElement extends CTHTMLElement {}
 interface CTImageInputElement extends CTHTMLElement {}
-interface CTInputLegacyElement extends CTHTMLElement {}
+interface CFInputLegacyElement extends CTHTMLElement {}
 interface CTCheckboxElement extends CTHTMLElement {}
 interface CTAutocompleteElement extends CTHTMLElement {}
 interface CTSelectElement extends CTHTMLElement {}
@@ -2879,7 +2879,7 @@ interface CTCodeEditorLegacyElement extends CTHTMLElement {}
 interface CFScreenElement extends CTHTMLElement {}
 interface CTAutostartElement extends CTHTMLElement {}
 interface CTAutoLayoutElement extends CTHTMLElement {}
-interface CTButtonElement extends CTHTMLElement {}
+interface CFButtonElement extends CTHTMLElement {}
 interface CTCopyButtonElement extends CTHTMLElement {}
 interface CTFileDownloadElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
@@ -2893,7 +2893,7 @@ interface CTCalendarElement extends CTHTMLElement {}
 interface CTQuestionElement extends CTHTMLElement {}
 interface CTAlertElement extends CTHTMLElement {}
 interface CFVStackElement extends CTHTMLElement {}
-interface CTMessageInputElement extends CTHTMLElement {}
+interface CFMessageInputElement extends CTHTMLElement {}
 interface CTToolbarElement extends CTHTMLElement {}
 interface CTKbdElement extends CTHTMLElement {}
 interface CTKeybindElement extends CTHTMLElement {}
@@ -3254,10 +3254,11 @@ interface CTStackLegacyAttributes<T> extends CTHTMLAttributes<T> {
   "pad"?: "md" | "lg" | "xl" | "2xl";
 }
 
-interface CTMessageInputAttributes<T> extends CTHTMLAttributes<T> {
+interface CFMessageInputAttributes<T> extends CTHTMLAttributes<T> {
   "name"?: string;
   "placeholder"?: string;
   "appearance"?: "rounded";
+  "oncf-send"?: EventHandler<{ message: string }>;
 }
 
 interface CTSendMessageAttributes<T> extends CTHTMLAttributes<T> {
@@ -3265,7 +3266,7 @@ interface CTSendMessageAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: any;
   "placeholder"?: string;
   "appearance"?: "rounded";
-  "onct-send"?: EventHandler<{ message: string }>;
+  "oncf-send"?: EventHandler<{ message: string }>;
   "inline"?: Booleanish;
 }
 
@@ -3353,7 +3354,7 @@ interface CTQuestionAttributes<T> extends CTHTMLAttributes<T> {
   "onct-answer"?: EventHandler<{ answer: string }>;
 }
 
-interface CTButtonAttributes<T> extends CTHTMLAttributes<T> {
+interface CFButtonAttributes<T> extends CTHTMLAttributes<T> {
   "variant"?:
     | "default"
     | "primary"
@@ -3498,7 +3499,7 @@ interface CTChevronButtonAttributes<T> extends CTHTMLAttributes<T> {
   "loading"?: boolean;
 }
 
-interface CTInputAttributes<T> extends CTHTMLAttributes<T> {
+interface CFInputAttributes<T> extends CTHTMLAttributes<T> {
   "$value"?: CellLike<string | number | null | undefined>;
   "customStyle"?: string; // bf: I think this is going to go away one day soon
   "type"?:
@@ -3543,19 +3544,20 @@ interface CTInputAttributes<T> extends CTHTMLAttributes<T> {
   "showValidation"?: boolean;
   "timingStrategy"?: string;
   "timingDelay"?: number | string;
-  "onct-change"?: any;
-  "onct-focus"?: any;
-  "onct-blur"?: any;
-  "onct-keydown"?: any;
-  "onct-submit"?: any;
-  "onct-invalid"?: any;
+  "oncf-input"?: any;
+  "oncf-change"?: any;
+  "oncf-focus"?: any;
+  "oncf-blur"?: any;
+  "oncf-keydown"?: any;
+  "oncf-submit"?: any;
+  "oncf-invalid"?: any;
 }
 
 interface CTLinkPreviewAttributes<T> extends CTHTMLAttributes<T> {
   "url"?: CellLike<string> | string;
 }
 
-interface CTTextAreaAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTextAreaAttributes<T> extends CTHTMLAttributes<T> {
   "$value"?: CellLike<string | undefined>;
   "value"?: CellLike<string> | string;
   "placeholder"?: string;
@@ -3576,15 +3578,15 @@ interface CTTextAreaAttributes<T> extends CTHTMLAttributes<T> {
   "auto-resize"?: boolean;
   "timing-strategy"?: "immediate" | "debounce" | "throttle" | "blur";
   "timing-delay"?: number;
-  "onct-input"?: EventHandler<
+  "oncf-input"?: EventHandler<
     { value: string; oldValue: string; name: string }
   >;
-  "onct-change"?: EventHandler<
+  "oncf-change"?: EventHandler<
     { value: string; oldValue: string; name: string }
   >;
-  "onct-focus"?: EventHandler<{ value: string; name: string }>;
-  "onct-blur"?: EventHandler<{ value: string; name: string }>;
-  "onct-keydown"?: EventHandler<{
+  "oncf-focus"?: EventHandler<{ value: string; name: string }>;
+  "oncf-blur"?: EventHandler<{ value: string; name: string }>;
+  "oncf-keydown"?: EventHandler<{
     key: string;
     value: string;
     shiftKey: boolean;
@@ -3593,10 +3595,10 @@ interface CTTextAreaAttributes<T> extends CTHTMLAttributes<T> {
     altKey: boolean;
     name: string;
   }>;
-  "onct-submit"?: EventHandler<{ value: string; name: string }>;
+  "oncf-submit"?: EventHandler<{ value: string; name: string }>;
 }
 
-interface CTInputLegacyAttributes<T> extends CTHTMLAttributes<T> {
+interface CFInputLegacyAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: CellLike<string>;
   "placeholder"?: string;
   "appearance"?: string;
@@ -4603,17 +4605,17 @@ declare global {
         CTLoaderAttributes<CTLoaderElement>,
         CTLoaderElement
       >;
-      "ct-input": CTDOM.DetailedHTMLProps<
-        CTInputAttributes<CTInputElement>,
-        CTInputElement
+      "cf-input": CTDOM.DetailedHTMLProps<
+        CFInputAttributes<CFInputElement>,
+        CFInputElement
       >;
       "ct-link-preview": CTDOM.DetailedHTMLProps<
         CTLinkPreviewAttributes<CTLinkPreviewElement>,
         CTLinkPreviewElement
       >;
-      "ct-textarea": CTDOM.DetailedHTMLProps<
-        CTTextAreaAttributes<CTTextAreaElement>,
-        CTTextAreaElement
+      "cf-textarea": CTDOM.DetailedHTMLProps<
+        CFTextAreaAttributes<CFTextAreaElement>,
+        CFTextAreaElement
       >;
       "ct-file-input": CTDOM.DetailedHTMLProps<
         CTFileInputAttributes<CTFileInputElement>,
@@ -4675,9 +4677,9 @@ declare global {
         CTAutoLayoutAttributes<CTAutoLayoutElement>,
         CTAutoLayoutElement
       >;
-      "ct-button": CTDOM.DetailedHTMLProps<
-        CTButtonAttributes<CTButtonElement>,
-        CTButtonElement
+      "cf-button": CTDOM.DetailedHTMLProps<
+        CFButtonAttributes<CFButtonElement>,
+        CFButtonElement
       >;
       "ct-copy-button": CTDOM.DetailedHTMLProps<
         CTCopyButtonAttributes<CTCopyButtonElement>,
@@ -4703,9 +4705,9 @@ declare global {
         CTChevronButtonAttributes<CTChevronButtonElement>,
         CTChevronButtonElement
       >;
-      "ct-message-input": CTDOM.DetailedHTMLProps<
-        CTMessageInputAttributes<CTMessageInputElement>,
-        CTMessageInputElement
+      "cf-message-input": CTDOM.DetailedHTMLProps<
+        CFMessageInputAttributes<CFMessageInputElement>,
+        CFMessageInputElement
       >;
       "ct-chat-message": CTDOM.DetailedHTMLProps<
         CTChatMessageAttributes<CTChatMessageElement>,

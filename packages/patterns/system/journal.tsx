@@ -112,12 +112,12 @@ export default pattern<Record<string, never>>((_) => {
         >
           <h2 style={{ margin: "0" }}>Activity Journal</h2>
           {entryCount > 0 && (
-            <ct-button
+            <cf-button
               onClick={clearJournal({ journal: journalResult.result! })}
               variant="secondary"
             >
               Clear Journal
-            </ct-button>
+            </cf-button>
           )}
         </div>
 

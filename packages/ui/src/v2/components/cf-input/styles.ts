@@ -1,5 +1,5 @@
 /**
- * Styles for ct-input component
+ * Styles for cf-input component
  */
 
 export const inputStyles = `

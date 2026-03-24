@@ -43,7 +43,7 @@ export const NicknameModule = pattern<NicknameModuleInput, NicknameModuleInput>(
       [UI]: (
         <cf-vstack style={{ gap: "4px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>Nickname</label>
-          <ct-input
+          <cf-input
             $value={nickname}
             placeholder="Enter nickname..."
           />

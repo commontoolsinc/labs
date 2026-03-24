@@ -32,14 +32,14 @@ export default pattern<Input, Result>(
           <h3>ct-picker Component Demo</h3>
 
           <cf-card>
-            <ct-button
+            <cf-button
               onClick={() => {
                 selectedIndex.set(Math.max(0, selectedIndex.get() - 1));
               }}
             >
               Prev
-            </ct-button>
-            <ct-button
+            </cf-button>
+            <cf-button
               onClick={() => {
                 selectedIndex.set(
                   Math.min(items.length - 1, selectedIndex.get() + 1),
@@ -47,7 +47,7 @@ export default pattern<Input, Result>(
               }}
             >
               Next
-            </ct-button>
+            </cf-button>
             <div>
               {selection}
             </div>

@@ -36,11 +36,11 @@ export default pattern<InputSchema>(({ title, items }) => {
         <ul>
           {items.map((item) => <li>{item.text}</li>)}
         </ul>
-        <ct-message-input
+        <cf-message-input
           name="Send"
           placeholder="Type a message..."
           appearance="rounded"
-          onct-send={addItem({ items })}
+          oncf-send={addItem({ items })}
         />
       </div>
     ),

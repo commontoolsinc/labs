@@ -31,7 +31,7 @@ const createNote = action(() => {
 });
 
 return {
-  [UI]: <ct-button onClick={createNote}>New Note</ct-button>,
+  [UI]: <cf-button onClick={createNote}>New Note</cf-button>,
 };
 ```
 

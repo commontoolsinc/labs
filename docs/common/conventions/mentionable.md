@@ -31,7 +31,7 @@ const create = handler((_, { createdPieces }) => {
 });
 
 return {
-  [UI]: <ct-button onClick={create({ createdPieces })}>Create</ct-button>,
+  [UI]: <cf-button onClick={create({ createdPieces })}>Create</cf-button>,
   mentionable: createdPieces,
 };
 ```

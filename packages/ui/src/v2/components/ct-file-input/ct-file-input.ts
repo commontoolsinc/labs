@@ -1,7 +1,7 @@
 import { css, html, type TemplateResult } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import type { ButtonSize, ButtonVariant } from "../ct-button/ct-button.ts";
+import type { ButtonSize, ButtonVariant } from "../cf-button/cf-button.ts";
 import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 import type { Schema } from "@commonfabric/api/schema";
 import { createArrayCellController } from "../../core/cell-controller.ts";
@@ -13,7 +13,7 @@ import {
   themeContext,
 } from "../theme-context.ts";
 import { formatFileSize } from "../../utils/image-compression.ts";
-import "../ct-button/ct-button.ts";
+import "../cf-button/cf-button.ts";
 
 // Schema for FileData array
 const FileDataArraySchema = {
@@ -366,14 +366,14 @@ export class CTFileInput extends BaseElement {
 
   protected renderButton(): TemplateResult {
     return html`
-      <ct-button
+      <cf-button
         variant="${this.variant}"
         size="${this.size}"
         ?disabled="${this.disabled || this.loading}"
         @click="${this._handleButtonClick}"
       >
         ${this.loading ? "Loading..." : this.buttonText}
-      </ct-button>
+      </cf-button>
     `;
   }
 

@@ -133,10 +133,10 @@ export default pattern<Input>(({ items }) => {
         </div>
 
         <div style={{ margin: "20px 0" }}>
-          <ct-message-input
+          <cf-message-input
             placeholder="Enter text to analyze sentiment (e.g., 'I love this!', 'This is terrible')..."
             appearance="rounded"
-            onct-send={addItem({ items })}
+            oncf-send={addItem({ items })}
           />
         </div>
 
@@ -240,9 +240,9 @@ export default pattern<Input>(({ items }) => {
               )}
 
               <div style={{ marginTop: "12px" }}>
-                <ct-button onClick={removeItem({ items, itemId: item.itemId })}>
+                <cf-button onClick={removeItem({ items, itemId: item.itemId })}>
                   Remove
-                </ct-button>
+                </cf-button>
               </div>
             </div>
           ))}

@@ -25,20 +25,20 @@ export default pattern(
             </p>
 
             <div style="display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
-              <ct-button>Default</ct-button>
-              <ct-button variant="secondary">Secondary</ct-button>
-              <ct-button variant="destructive">Destructive</ct-button>
-              <ct-button variant="outline">Outline</ct-button>
-              <ct-button variant="ghost">Ghost</ct-button>
-              <ct-button variant="link">Link</ct-button>
+              <cf-button>Default</cf-button>
+              <cf-button variant="secondary">Secondary</cf-button>
+              <cf-button variant="destructive">Destructive</cf-button>
+              <cf-button variant="outline">Outline</cf-button>
+              <cf-button variant="ghost">Ghost</cf-button>
+              <cf-button variant="link">Link</cf-button>
             </div>
 
             <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-              <ct-button size="sm">Small</ct-button>
-              <ct-button>Default Size</ct-button>
-              <ct-button size="lg">Large</ct-button>
-              <ct-button size="icon">🎯</ct-button>
-              <ct-button disabled>Disabled</ct-button>
+              <cf-button size="sm">Small</cf-button>
+              <cf-button>Default Size</cf-button>
+              <cf-button size="lg">Large</cf-button>
+              <cf-button size="icon">🎯</cf-button>
+              <cf-button disabled>Disabled</cf-button>
             </div>
           </section>
 
@@ -52,44 +52,44 @@ export default pattern(
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
               <div>
                 <ct-label for="text-input">Text Input</ct-label>
-                <ct-input
+                <cf-input
                   id="text-input"
                   type="text"
                   placeholder="Enter text..."
                 >
-                </ct-input>
+                </cf-input>
               </div>
 
               <div>
                 <ct-label for="email-input" required>Email Input</ct-label>
-                <ct-input
+                <cf-input
                   id="email-input"
                   type="email"
                   placeholder="you@example.com"
                 >
-                </ct-input>
+                </cf-input>
               </div>
 
               <div>
                 <ct-label for="password-input">Password Input</ct-label>
-                <ct-input
+                <cf-input
                   id="password-input"
                   type="password"
                   placeholder="Enter password..."
                 >
-                </ct-input>
+                </cf-input>
               </div>
 
               <div>
                 <ct-label for="number-input">Number Input</ct-label>
-                <ct-input
+                <cf-input
                   id="number-input"
                   type="number"
                   placeholder="0"
                   min="0"
                   max="100"
                 >
-                </ct-input>
+                </cf-input>
               </div>
             </div>
           </section>
@@ -104,23 +104,23 @@ export default pattern(
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">
               <div>
                 <ct-label for="basic-textarea">Basic Textarea</ct-label>
-                <ct-textarea
+                <cf-textarea
                   id="basic-textarea"
                   placeholder="Enter your message..."
                   rows="4"
                 >
-                </ct-textarea>
+                </cf-textarea>
               </div>
 
               <div>
                 <ct-label for="auto-textarea">Auto-resize Textarea</ct-label>
-                <ct-textarea
+                <cf-textarea
                   id="auto-textarea"
                   placeholder="This grows as you type..."
                   auto-resize
                   rows="2"
                 >
-                </ct-textarea>
+                </cf-textarea>
               </div>
             </div>
           </section>
@@ -145,7 +145,7 @@ export default pattern(
                   </p>
                 </div>
                 <div slot="footer">
-                  <ct-button size="sm">Action</ct-button>
+                  <cf-button size="sm">Action</cf-button>
                 </div>
               </cf-card>
 
@@ -409,9 +409,9 @@ export default pattern(
             </p>
 
             <ct-collapsible>
-              <ct-button slot="trigger" variant="outline">
+              <cf-button slot="trigger" variant="outline">
                 Toggle Content
-              </ct-button>
+              </cf-button>
               <div slot="content" style="margin-top: 1rem;">
                 <p>This content can be toggled open and closed.</p>
                 <p>It's useful for showing/hiding additional information.</p>
@@ -454,41 +454,41 @@ export default pattern(
               <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
                 <div>
                   <ct-label for="form-name" required>Name</ct-label>
-                  <ct-input
+                  <cf-input
                     id="form-name"
                     name="name"
                     type="text"
                     placeholder="John Doe"
                     required
                   >
-                  </ct-input>
+                  </cf-input>
                 </div>
 
                 <div>
                   <ct-label for="form-email" required>Email</ct-label>
-                  <ct-input
+                  <cf-input
                     id="form-email"
                     name="email"
                     type="email"
                     placeholder="john@example.com"
                     required
                   >
-                  </ct-input>
+                  </cf-input>
                 </div>
               </div>
 
               <div style="margin-bottom: 1rem;">
                 <ct-label for="form-message">Message</ct-label>
-                <ct-textarea
+                <cf-textarea
                   id="form-message"
                   name="message"
                   placeholder="Your message..."
                   rows="4"
                 >
-                </ct-textarea>
+                </cf-textarea>
               </div>
 
-              <ct-button type="submit">Submit Form</ct-button>
+              <cf-button type="submit">Submit Form</cf-button>
             </ct-form>
           </section>
 

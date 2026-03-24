@@ -116,8 +116,8 @@ Stack several actions into a horizontal bar, typically at the top of `<cf-screen
 ```{code-block} html
 <cf-screen>
   <ct-toolbar slot="header">
-      <ct-button>A</ct-button>
-      <ct-button>B</ct-button>
+      <cf-button>A</cf-button>
+      <cf-button>B</cf-button>
   </ct-toolbar>
 </cf-screen>
 ```
@@ -217,7 +217,7 @@ Will attempt to lay out the children provided as best it can. Provides two slots
     <aside slot="left">
       <h3>Left Sidebar</h3>
       <p>Left content</p>
-      <ct-button>Left Button</ct-button>
+      <cf-button>Left Button</cf-button>
     </aside>
 
     <!-- Main content panels - no slot attribute needed -->
@@ -225,20 +225,20 @@ Will attempt to lay out the children provided as best it can. Provides two slots
     <div>
       <h1>Main Content Area</h1>
       <p>This is the main content with sidebars</p>
-      <ct-button>Main Button</ct-button>
+      <cf-button>Main Button</cf-button>
     </div>
 
     <div>
       <h1>Second Content Area</h1>
       <p>This is the second content with sidebars</p>
-      <ct-button>Second Button</ct-button>
+      <cf-button>Second Button</cf-button>
     </div>
 
     <!-- Right sidebar - use slot="right" -->
     <aside slot="right">
       <h3>Right Sidebar</h3>
       <p>Right content</p>
-      <ct-button>Right Button</ct-button>
+      <cf-button>Right Button</cf-button>
     </aside>
   </ct-autolayout>
 
@@ -264,7 +264,7 @@ You can mix-and-match the above components to achieve practically any (standard)
 ```{code-block} html
 <cf-screen>
     <ct-toolbar slot="top">
-        <ct-button>hello</ct-button>
+        <cf-button>hello</cf-button>
     </ct-toolbar>
     <ct-autolayout>
         <cf-vstack slot="left">
@@ -312,16 +312,16 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Input Components
 
-- input: `ct-button`, `ct-select`, `ct-input`, `ct-textarea`, `ct-checkbox`, `ct-tags`
+- input: `cf-button`, `ct-select`, `cf-input`, `cf-textarea`, `ct-checkbox`, `ct-tags`
 	- gap: `ct-search` which has an autocomplete menu
 	- gap: `ct-file-picker`
-	- redundant: common-send-message, ct-message-input (?)
+	- redundant: common-send-message, cf-message-input (?)
 	    - this is JUST a button and an input
 		- the "right" way is:
       - ```{code-block} html
         <ct-form onSubmit={handler({ ... })}>
-          <ct-input></ct-input>
-          <ct-button type="submit">Submit</ct-button>
+          <cf-input></cf-input>
+          <cf-button type="submit">Submit</cf-button>
         </ct-form>
         ```
 
@@ -329,8 +329,8 @@ You can mix-and-match the above components to achieve practically any (standard)
         const EnterToSubmit = pattern(({ myHandler }) => {
           return {
               [UI]: <ct-form onSubmit={myHandler}>
-                <ct-input></ct-input>
-                <ct-button type="submit">Submit</ct-button>
+                <cf-input></cf-input>
+                <cf-button type="submit">Submit</cf-button>
               </ct-form>
           }
         })
@@ -351,5 +351,5 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Unused/Unproven Components
 
-- stale: `ct-aspect-ratio`, `ct-draggable`, `ct-form`, `ct-grid`, `cf-hgroup`, `ct-input-otp`, `ct-message-input`, `ct-progress`, `ct-radio`, `ct-radio-group`, `ct-slider`, `ct-switch`, `ct-tile`, `ct-toggle`, `ct-toggle-group`, `cf-vgroup`
+- stale: `ct-aspect-ratio`, `ct-draggable`, `ct-form`, `ct-grid`, `cf-hgroup`, `ct-input-otp`, `cf-message-input`, `ct-progress`, `ct-radio`, `ct-radio-group`, `ct-slider`, `ct-switch`, `ct-tile`, `ct-toggle`, `ct-toggle-group`, `cf-vgroup`
 - superfluous: `ct-resizeable-handle`, `ct-resizable-panel`, `ct-resizeable-panel-group`, `ct-scroll-area`, `ct-tabs`/`ct-tab-list`/`ct-tab-panel`

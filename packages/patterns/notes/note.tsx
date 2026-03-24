@@ -428,42 +428,42 @@ const Note = pattern<NoteInput, NoteOutput>(
                   marginRight: "12px",
                 }}
               >
-                <ct-input
+                <cf-input
                   $value={title}
                   placeholder="Note title..."
                   style={{ flex: 1 }}
-                  onct-blur={stopEditingTitle}
-                  onct-keydown={handleTitleKeydown}
+                  oncf-blur={stopEditingTitle}
+                  oncf-keydown={handleTitleKeydown}
                 />
               </div>
 
               {/* View Mode button */}
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={goToViewer}
                 style={headerButtonStyle}
                 title="View as markdown"
               >
                 View
-              </ct-button>
+              </cf-button>
 
               {/* New Note button */}
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={createNewNote}
                 style={{ ...headerButtonStyle, gap: "4px" }}
                 title="Create new note"
               >
                 📝 New
-              </ct-button>
+              </cf-button>
 
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={toggleMenu}
                 style={{ ...headerButtonStyle, padding: "8px 16px" }}
               >
                 Notebooks ▾
-              </ct-button>
+              </cf-button>
 
               {/* Backdrop to close menu */}
               <div
@@ -494,14 +494,20 @@ const Note = pattern<NoteInput, NoteOutput>(
                 }}
               >
                 {notebooks.map((notebook) => (
-                  <ct-button
+                  <cf-button
                     variant="ghost"
                     onClick={menuGoToNotebook({ menuOpen, notebook })}
                     style={{ justifyContent: "flex-start" }}
                   >
                     {"  "}
                     {notebook?.[NAME] ?? "Untitled"}
-                  </ct-button>
+                    {computed(() => {
+                      return containingNotebooks
+                          .find((nb) => equals(nb, notebook))
+                        ? " ✓"
+                        : "";
+                    })}
+                  </cf-button>
                 ))}
 
                 {/* Divider + All Notes - only show if All Notes piece exists */}
@@ -514,7 +520,7 @@ const Note = pattern<NoteInput, NoteOutput>(
                   }}
                 />
 
-                <ct-button
+                <cf-button
                   variant="ghost"
                   onClick={menuAllNotebooks}
                   style={{
@@ -523,7 +529,7 @@ const Note = pattern<NoteInput, NoteOutput>(
                   }}
                 >
                   {"  "}📁 All Notes
-                </ct-button>
+                </cf-button>
               </cf-vstack>
             </cf-hstack>
           </cf-vstack>
@@ -532,9 +538,9 @@ const Note = pattern<NoteInput, NoteOutput>(
 
           <cf-hstack slot="footer">
             {backlinks?.map((piece) => (
-              <ct-button onClick={handleBacklinkClick({ piece })}>
+              <cf-button onClick={handleBacklinkClick({ piece })}>
                 {piece?.[NAME]}
-              </ct-button>
+              </cf-button>
             ))}
           </cf-hstack>
         </cf-screen>

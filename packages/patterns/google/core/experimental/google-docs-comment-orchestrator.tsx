@@ -788,14 +788,14 @@ export default pattern<Input, Output>(
                   Google Doc URL
                 </label>
                 <cf-hstack gap={1}>
-                  <ct-input
+                  <cf-input
                     $value={docUrl}
                     placeholder="https://docs.google.com/document/d/..."
                     style="flex: 1;"
                   />
                   {ifElse(
                     isAuthenticated,
-                    <ct-button
+                    <cf-button
                       variant="primary"
                       type="button"
                       disabled={isFetchingCell}
@@ -816,7 +816,7 @@ export default pattern<Input, Output>(
                         </cf-hstack>,
                         "Fetch Comments",
                       )}
-                    </ct-button>,
+                    </cf-button>,
                     null,
                   )}
                 </cf-hstack>
@@ -872,7 +872,7 @@ export default pattern<Input, Output>(
               {ifElse(
                 showGlobalPrompt,
                 <div style={{ marginTop: "12px" }}>
-                  <ct-input
+                  <cf-input
                     $value={globalPrompt}
                     placeholder="E.g., Be concise. Use formal language. Always acknowledge valid concerns before disagreeing."
                     style="width: 100%;"
@@ -1132,7 +1132,7 @@ export default pattern<Input, Output>(
                     >
                       AI Suggested Response
                     </span>
-                    <ct-button
+                    <cf-button
                       variant="pill"
                       type="button"
                       title="Generate a new response"
@@ -1144,7 +1144,7 @@ export default pattern<Input, Output>(
                       })}
                     >
                       Regenerate
-                    </ct-button>
+                    </cf-button>
                   </div>
 
                   {/* Response content - reads aiResponse directly at pattern body level */}
@@ -1174,7 +1174,7 @@ export default pattern<Input, Output>(
                   <div
                     style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}
                   >
-                    <ct-button
+                    <cf-button
                       variant="primary"
                       type="button"
                       disabled={computed(() => aiResponse.pending ||
@@ -1194,8 +1194,8 @@ export default pattern<Input, Output>(
                       })}
                     >
                       Reply
-                    </ct-button>
-                    <ct-button
+                    </cf-button>
+                    <cf-button
                       variant="secondary"
                       type="button"
                       disabled={computed(() =>
@@ -1216,8 +1216,8 @@ export default pattern<Input, Output>(
                       })}
                     >
                       Reply + Resolve
-                    </ct-button>
-                    <ct-button
+                    </cf-button>
+                    <cf-button
                       variant="ghost"
                       type="button"
                       onClick={skipComment({
@@ -1229,7 +1229,7 @@ export default pattern<Input, Output>(
                       })}
                     >
                       Skip
-                    </ct-button>
+                    </cf-button>
                   </div>
                 </div>,
                 <div
@@ -1363,15 +1363,15 @@ export default pattern<Input, Output>(
 
                 {/* Action buttons */}
                 <cf-hstack gap={2} justify="end">
-                  <ct-button
+                  <cf-button
                     variant="secondary"
                     type="button"
                     disabled={isExecutingCell}
                     onClick={cancelAction({ action: pendingActionCell })}
                   >
                     Cancel
-                  </ct-button>
-                  <ct-button
+                  </cf-button>
+                  <cf-button
                     variant="primary"
                     type="button"
                     disabled={isExecutingCell}
@@ -1390,7 +1390,7 @@ export default pattern<Input, Output>(
                       "Posting...",
                       <span>✓ Post {actionDetails?.typeLabel}</span>,
                     )}
-                  </ct-button>
+                  </cf-button>
                 </cf-hstack>
               </cf-card>,
               null,

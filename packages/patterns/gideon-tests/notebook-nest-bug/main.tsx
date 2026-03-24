@@ -119,7 +119,7 @@ export default pattern<
         </span>
 
         {/* Idle: show button */}
-        <ct-button
+        <cf-button
           variant="primary"
           onClick={requestCreate}
           style={{
@@ -129,7 +129,7 @@ export default pattern<
           }}
         >
           Create Nested Notebooks
-        </ct-button>
+        </cf-button>
 
         {/* Creating: indicator */}
         <cf-hstack

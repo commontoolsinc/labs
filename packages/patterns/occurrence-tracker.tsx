@@ -297,7 +297,7 @@ export const OccurrenceTrackerModule = pattern<
     [UI]: (
       <cf-vstack gap="3">
         {/* Label input */}
-        <ct-input
+        <cf-input
           $value={label}
           placeholder="What are you tracking? (e.g., Headache, Coffee)"
           style={{
@@ -306,7 +306,7 @@ export const OccurrenceTrackerModule = pattern<
         />
 
         {/* Big Record Button */}
-        <ct-button
+        <cf-button
           variant="primary"
           onClick={recordNow({ occurrences })}
           style={{
@@ -316,7 +316,7 @@ export const OccurrenceTrackerModule = pattern<
           }}
         >
           Record Now
-        </ct-button>
+        </cf-button>
 
         {/* Last occurrence display */}
         {computed(() => {
@@ -362,14 +362,14 @@ export const OccurrenceTrackerModule = pattern<
                 {formatAbsoluteTime(last.timestamp)}
               </span>
               {/* Note for last occurrence */}
-              <ct-input
+              <cf-input
                 value={last.note || ""}
                 placeholder="Add note..."
                 style={{
                   fontSize: "0.875rem",
                   marginTop: "0.5rem",
                 }}
-                onct-input={(e: { detail?: { value?: string } }) => {
+                oncf-input={(e: { detail?: { value?: string } }) => {
                   const newNote = e.detail?.value?.trim() || "";
                   const current = occurrences.get() || [];
                   const idx = current.findIndex(
@@ -474,7 +474,7 @@ export const OccurrenceTrackerModule = pattern<
                         }`
                       )}
                     </span>
-                    <ct-input
+                    <cf-input
                       $value={occ.note}
                       placeholder="Add note..."
                       style={{
@@ -484,7 +484,7 @@ export const OccurrenceTrackerModule = pattern<
                       }}
                     />
                   </cf-vstack>
-                  <ct-button
+                  <cf-button
                     variant="ghost"
                     onClick={deleteOccurrence({
                       occurrences,
@@ -499,7 +499,7 @@ export const OccurrenceTrackerModule = pattern<
                     title="Delete"
                   >
                     ×
-                  </ct-button>
+                  </cf-button>
                 </cf-hstack>
               ))}
             </cf-vstack>

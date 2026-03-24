@@ -23,10 +23,10 @@ export default pattern<TodoListState>((state) => {
     [UI]: (
       <div>
         <h2>My Todos</h2>
-        <ct-message-input
+        <cf-message-input
           name="Add"
           placeholder="Add a todo..."
-          onct-send={addItem({ items: state.items })}
+          oncf-send={addItem({ items: state.items })}
         />
         <ul>
           {/* Note: key is not needed for Common Tools but linters require it */}

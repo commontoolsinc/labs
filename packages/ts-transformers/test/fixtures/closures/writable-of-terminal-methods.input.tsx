@@ -32,7 +32,7 @@ export default pattern<State>(({ title }) => {
     [UI]: (
       <div>
         <span>{title} {label}: {counter}</span>
-        <ct-button onClick={reset}>Reset</ct-button>
+        <cf-button onClick={reset}>Reset</cf-button>
       </div>
     ),
     counter,

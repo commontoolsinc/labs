@@ -253,7 +253,7 @@ For reusable component behaviors, use reactive controllers. Example:
 ```typescript
 import { InputTimingController } from "../../core/input-timing-controller.ts";
 
-export class CTInput extends BaseElement {
+export class CFInput extends BaseElement {
   @property()
   timingStrategy: "immediate" | "debounce" | "throttle" | "blur" = "debounce";
 
@@ -331,18 +331,18 @@ return html`
 Colocate tests with components:
 
 ```typescript
-// ct-button.test.ts
+// cf-button.test.ts
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CTButton } from "./ct-button.ts";
+import { CFButton } from "./cf-button.ts";
 
-describe("CTButton", () => {
+describe("CFButton", () => {
   it("should be defined", () => {
-    expect(CTButton).toBeDefined();
+    expect(CFButton).toBeDefined();
   });
 
   it("should have default properties", () => {
-    const element = new CTButton();
+    const element = new CFButton();
     expect(element.variant).toBe("primary");
   });
 });
@@ -356,8 +356,8 @@ Components are exported from `@commonfabric/ui/v2`:
 
 ```typescript
 // packages/ui/src/v2/index.ts
-export { CTButton } from "./components/ct-button/index.ts";
-export type { ButtonVariant } from "./components/ct-button/index.ts";
+export { CFButton } from "./components/cf-button/index.ts";
+export type { ButtonVariant } from "./components/cf-button/index.ts";
 ```
 
 ## Reference Documentation
@@ -410,7 +410,7 @@ Study these components to understand architectural patterns:
 
 - **Simple visual:** `ct-separator` - Minimal component, CSS parts, ARIA
 - **Layout:** `cf-vstack` - Flexbox abstraction, utility classes with `classMap`
-- **Themed input:** `ct-button` - Theme consumption, event emission, variants
+- **Themed input:** `cf-button` - Theme consumption, event emission, variants
 
 **Advanced patterns:**
 

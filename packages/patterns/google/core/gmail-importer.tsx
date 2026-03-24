@@ -1232,7 +1232,7 @@ export default pattern<
                 >
                   Import Limit
                 </label>
-                <ct-input
+                <cf-input
                   type="number"
                   $value={settings.limit}
                   placeholder="count of emails to import"
@@ -1249,7 +1249,7 @@ export default pattern<
                 >
                   Gmail Filter Query
                 </label>
-                <ct-input
+                <cf-input
                   type="text"
                   $value={settings.gmailFilterQuery}
                   placeholder="in:INBOX"
@@ -1311,7 +1311,7 @@ export default pattern<
               </div>
               {ifElse(
                 isReady,
-                <ct-button
+                <cf-button
                   type="button"
                   onClick={googleUpdaterStream}
                   disabled={fetching}
@@ -1330,7 +1330,7 @@ export default pattern<
                     </span>,
                     "Fetch Emails",
                   )}
-                </ct-button>,
+                </cf-button>,
                 null,
               )}
             </cf-vstack>

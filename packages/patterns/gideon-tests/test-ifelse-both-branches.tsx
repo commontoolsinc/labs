@@ -130,9 +130,9 @@ export default pattern<Input, Output>(({ condition, toggleCount }) => {
           <p>
             <strong>Toggle Count:</strong> {toggleCount}
           </p>
-          <ct-button onClick={toggle({ condition, toggleCount })}>
+          <cf-button onClick={toggle({ condition, toggleCount })}>
             Toggle Condition
-          </ct-button>
+          </cf-button>
         </div>
 
         {/* The ifElse - if BOTH branches are evaluated, both counters increment */}

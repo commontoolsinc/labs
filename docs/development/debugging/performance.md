@@ -8,12 +8,12 @@ For lists with 100+ items that feel slow, apply these optimizations.
 // Creates handler per item per render
 {items.map(item => {
   const remove = handler(() => { ... });
-  return <ct-button onClick={remove}>x</ct-button>;
+  return <cf-button onClick={remove}>x</cf-button>;
 })}
 
 // Create once, reuse
 const removeItem = handler((_, { items, item }) => { ... });
-{items.map(item => <ct-button onClick={removeItem({ items, item })}>x</ct-button>)}
+{items.map(item => <cf-button onClick={removeItem({ items, item })}>x</cf-button>)}
 ```
 
 ## Pre-compute Outside Loops

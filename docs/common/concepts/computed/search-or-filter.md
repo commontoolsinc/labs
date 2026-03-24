@@ -18,7 +18,7 @@ export default pattern<Input>(({ items }) => {
   return {
     [UI]: (
       <div>
-        <ct-input $value={searchQuery} placeholder="Search..." />
+        <cf-input $value={searchQuery} placeholder="Search..." />
         {filteredItems.map(item => <div>{item.title}</div>)}
       </div>
     ),

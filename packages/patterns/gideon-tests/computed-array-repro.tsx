@@ -65,7 +65,7 @@ export default pattern<Input, Output>(({ items }) => {
 
         <cf-vscroll flex>
           <cf-vstack gap="2" style="padding: 1rem;">
-            <ct-button
+            <cf-button
               variant="secondary"
               onClick={() => {
                 const c = counter.get();
@@ -74,7 +74,7 @@ export default pattern<Input, Output>(({ items }) => {
               }}
             >
               Add Pending Item
-            </ct-button>
+            </cf-button>
 
             <p>
               Filter: {filter} | Total: {computed(() => items.get().length)}

@@ -2,25 +2,25 @@ import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTMessageInput - Input component with send button for messages/chat interfaces
+ * CFMessageInput - Input component with send button for messages/chat interfaces
  *
- * @element ct-message-input
+ * @element cf-message-input
  *
  * @attr {string} placeholder - Placeholder text for the input
  * @attr {string} buttonText - Text for the send button (default: "Send")
  * @attr {boolean} disabled - Whether the input and button are disabled
  * @attr {string} value - Current input value
  *
- * @fires ct-send - Fired when send button is clicked or Enter is pressed. detail: { message: string }
+ * @fires cf-send - Fired when send button is clicked or Enter is pressed. detail: { message: string }
  *
  * @example
- * <ct-message-input
+ * <cf-message-input
  *   placeholder="Type a message..."
  *   button-text="Send"
- *   @ct-send="${(e) => console.log(e.detail.message)}"
- * ></ct-message-input>
+ *   @cf-send="${(e) => console.log(e.detail.message)}"
+ * ></cf-message-input>
  */
-export class CTMessageInput extends BaseElement {
+export class CFMessageInput extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -36,24 +36,24 @@ export class CTMessageInput extends BaseElement {
         align-items: center;
       }
 
-      ct-input {
+      cf-input {
         width: 100%;
       }
 
-      ct-button {
+      cf-button {
         white-space: nowrap;
       }
 
       /* Allow customization via CSS variables */
       .container {
-        --input-height: var(--ct-message-input-height, 2.5rem);
+        --input-height: var(--cf-message-input-height, 2.5rem);
       }
 
-      ct-input::part(input) {
+      cf-input::part(input) {
         height: var(--input-height);
       }
 
-      ct-button {
+      cf-button {
         height: var(--input-height);
       }
     `,
@@ -83,7 +83,7 @@ export class CTMessageInput extends BaseElement {
 
   override firstUpdated() {
     this._inputElement = this.shadowRoot?.querySelector(
-      "ct-input",
+      "cf-input",
     ) as HTMLElement;
   }
 
@@ -100,7 +100,7 @@ export class CTMessageInput extends BaseElement {
     this.value = "";
 
     // Emit the send event
-    this.emit("ct-send", { message });
+    this.emit("cf-send", { message });
 
     // Restore focus to input for rapid entry (chat, list-building workflows)
     input.focus();
@@ -120,27 +120,27 @@ export class CTMessageInput extends BaseElement {
   override render() {
     return html`
       <div class="container">
-        <ct-input
+        <cf-input
           type="text"
           .placeholder="${this.placeholder}"
           .value="${this.value}"
           ?disabled="${this.disabled}"
-          @ct-change="${this._handleInput}"
+          @cf-change="${this._handleInput}"
           @keydown="${this._handleKeyDown}"
           part="input"
           timingStrategy="immediate"
-        ></ct-input>
-        <ct-button
-          id="ct-message-input-send-button"
+        ></cf-input>
+        <cf-button
+          id="cf-message-input-send-button"
           ?disabled="${this.disabled}"
           @click="${this._handleSend}"
           part="button"
         >
           ${this.buttonText}
-        </ct-button>
+        </cf-button>
       </div>
     `;
   }
 }
 
-globalThis.customElements.define("ct-message-input", CTMessageInput);
+globalThis.customElements.define("cf-message-input", CFMessageInput);

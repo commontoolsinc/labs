@@ -188,7 +188,7 @@ export const PhotoModule = pattern<PhotoModuleInput, PhotoModuleOutput>(
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Photo Label
             </label>
-            <ct-input
+            <cf-input
               $value={label}
               placeholder="e.g., Profile Photo, Headshot..."
             />

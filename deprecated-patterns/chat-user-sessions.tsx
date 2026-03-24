@@ -46,7 +46,7 @@ type UserSessionResult = {
   user: User;
 };
 
-// Event payload type for ct-message-input's ct-send event
+// Event payload type for cf-message-input's ct-send event
 type InputEventType = {
   detail: {
     message: string;
@@ -110,11 +110,11 @@ export const UserSession = pattern<
           </div>
           <div>
             <h4>Set your display name</h4>
-            <ct-message-input
+            <cf-message-input
               name="Set"
               placeholder="Choose a display name"
               appearance="rounded"
-              onct-send={setUsername({
+              oncf-send={setUsername({
                 user,
               })}
             />
@@ -140,11 +140,11 @@ export const UserSession = pattern<
             </div>
           </div>
           <div>
-            <ct-message-input
+            <cf-message-input
               name="Send"
               placeholder="Type your message..."
               appearance="rounded"
-              onct-send={sendMessage({
+              oncf-send={sendMessage({
                 messages,
                 user,
               })}
@@ -187,9 +187,9 @@ export default pattern<MainPatternInput>(
           <p>This charm stores the shared chat state.</p>
           <p>Messages: {messages.length}</p>
           <p>Click below to create your personal chat session:</p>
-          <ct-button onClick={createUserSession({ messages })}>
+          <cf-button onClick={createUserSession({ messages })}>
             Generate User Session
-          </ct-button>
+          </cf-button>
         </div>
       ),
       messages,

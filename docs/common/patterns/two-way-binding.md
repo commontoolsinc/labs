@@ -25,16 +25,16 @@ export default pattern<Input, Input>(({ items }) => ({
               {item.title}
             </span>
           </ct-checkbox>
-          <ct-button onClick={() => {
+          <cf-button onClick={() => {
             const current = items.get();
             const index = current.findIndex((el) => equals(item, el));
             if (index >= 0) items.set(current.toSpliced(index, 1));
-          }}>×</ct-button>
+          }}>×</cf-button>
         </div>
       ))}
-      <ct-message-input
+      <cf-message-input
         placeholder="Add item..."
-        onct-send={(e: { detail: { message: string } }) => {
+        oncf-send={(e: { detail: { message: string } }) => {
           const text = e.detail.message?.trim();
           if (text) items.push({ title: text, done: false });
         }}

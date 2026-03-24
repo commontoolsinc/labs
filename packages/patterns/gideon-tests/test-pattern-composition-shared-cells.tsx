@@ -109,14 +109,14 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
                   {item.title} ({item.category})
                 </span>
               </ct-checkbox>
-              <ct-button onClick={removeItem({ items, item })}>x</ct-button>
+              <cf-button onClick={removeItem({ items, item })}>x</cf-button>
             </div>
           ))}
         </div>
 
-        <ct-message-input
+        <cf-message-input
           placeholder="Add item (e.g., Apples:Produce)..."
-          onct-send={addItem({ items })}
+          oncf-send={addItem({ items })}
         />
       </div>
     ),
@@ -179,7 +179,7 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
                       {item.title}
                     </span>
                   </ct-checkbox>
-                  <ct-button onClick={removeItem({ items, item })}>x</ct-button>
+                  <cf-button onClick={removeItem({ items, item })}>x</cf-button>
                 </div>,
                 null,
               )

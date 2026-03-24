@@ -222,7 +222,7 @@ const removeSpaceHandler = handler<
 });
 
 // Handler to submit an answer to a question (reads question from learned state)
-// Uses ct-message-input event format: { detail: { message: string } }
+// Uses cf-message-input event format: { detail: { message: string } }
 const submitAnswerHandler = handler<
   { detail: { message: string } },
   { learned: Writable<LearnedSection> }
@@ -737,7 +737,7 @@ IMPORTANT:
 
               {/* Editable Summary */}
               <cf-vstack gap="1">
-                <ct-textarea
+                <cf-textarea
                   $value={learned.key("summary")}
                   placeholder="Your profile summary will appear here as I learn about you from your activity..."
                   rows={6}
@@ -774,10 +774,10 @@ IMPORTANT:
                   <p style={{ margin: 0, fontSize: "14px" }}>
                     {computed(() => topQuestion?.question || "")}
                   </p>
-                  <ct-message-input
+                  <cf-message-input
                     placeholder="Type your answer..."
                     appearance="rounded"
-                    onct-send={submitAnswer}
+                    oncf-send={submitAnswer}
                   />
                   <span style={{ fontSize: "11px", color: "#92400e" }}>
                     Category: {computed(() => topQuestion?.category || "")}
@@ -1015,13 +1015,13 @@ IMPORTANT:
                         spaceDid={space.did}
                       />
                     </div>
-                    <ct-button
+                    <cf-button
                       size="sm"
                       variant="ghost"
                       onClick={removeSpaceHandler({ name: space.name, spaces })}
                     >
                       ✕
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
                 ))}
                 {computed(() => spaces.get().length === 0) && (
@@ -1043,10 +1043,10 @@ IMPORTANT:
                 <h3 style={{ margin: 0, fontSize: "14px" }}>
                   Add or Create Space
                 </h3>
-                <ct-message-input
+                <cf-message-input
                   placeholder="Space name..."
                   appearance="rounded"
-                  onct-send={addSpaceHandler({ spaces })}
+                  oncf-send={addSpaceHandler({ spaces })}
                 />
                 <span style={{ fontSize: "11px", color: "#888" }}>
                   Type a name and press enter. Click the link to navigate.
@@ -1066,7 +1066,7 @@ IMPORTANT:
                 <label style={{ fontSize: "13px", color: "#666" }}>
                   Default App Pattern URL
                 </label>
-                <ct-input
+                <cf-input
                   $value={defaultAppUrl}
                   placeholder="/api/patterns/system/default-app.tsx"
                   style={{

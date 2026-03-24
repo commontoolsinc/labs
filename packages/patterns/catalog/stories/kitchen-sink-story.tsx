@@ -1,10 +1,10 @@
 /// <cts-enable />
 import { NAME, pattern, UI, type VNode } from "commonfabric";
 
-import ButtonStory from "./ct-button-story.tsx";
+import ButtonStory from "./cf-button-story.tsx";
 import CheckboxStory from "./ct-checkbox-story.tsx";
 import CodeEditorStory from "./ct-code-editor-story.tsx";
-import InputStory from "./ct-input-story.tsx";
+import InputStory from "./cf-input-story.tsx";
 import SelectStory from "./ct-select-story.tsx";
 import SwitchStory from "./ct-switch-story.tsx";
 import CardStory from "./cf-card-story.tsx";
@@ -16,8 +16,8 @@ import VGroupStory from "./cf-vgroup-story.tsx";
 import HGroupStory from "./cf-hgroup-story.tsx";
 import VScrollStory from "./cf-vscroll-story.tsx";
 import HScrollStory from "./ct-hscroll-story.tsx";
-import TextareaStory from "./ct-textarea-story.tsx";
-import MessageInputStory from "./ct-message-input-story.tsx";
+import TextareaStory from "./cf-textarea-story.tsx";
+import MessageInputStory from "./cf-message-input-story.tsx";
 import ToolbarStory from "./ct-toolbar-story.tsx";
 import HeadingStory from "./cf-heading-story.tsx";
 import LabelStory from "./ct-label-story.tsx";

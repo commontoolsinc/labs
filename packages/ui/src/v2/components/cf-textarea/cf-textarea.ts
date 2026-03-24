@@ -17,9 +17,9 @@ import { createFormFieldController } from "../../core/form-field-controller.ts";
 export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
 
 /**
- * CTTextarea - Multi-line text input with support for auto-resize, various states, and reactive data binding
+ * CFTextarea - Multi-line text input with support for auto-resize, various states, and reactive data binding
  *
- * @element ct-textarea
+ * @element cf-textarea
  *
  * @attr {string} placeholder - Placeholder text
  * @attr {string|CellHandle<string>} value - Textarea value (supports both plain string and CellHandle<string>)
@@ -34,26 +34,26 @@ export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
  * @attr {string} timingStrategy - Input timing strategy: "immediate" | "debounce" | "throttle" | "blur"
  * @attr {number} timingDelay - Delay in milliseconds for debounce/throttle (default: 300)
  *
- * @fires ct-input - Fired on input with detail: { value, oldValue, name }
- * @fires ct-change - Fired on change with detail: { value, oldValue, name }
- * @fires ct-focus - Fired on focus with detail: { value, name }
- * @fires ct-blur - Fired on blur with detail: { value, name }
- * @fires ct-keydown - Fired on keydown with detail: { key, value, shiftKey, ctrlKey, metaKey, altKey, name }
- * @fires ct-submit - Fired on Ctrl/Cmd+Enter with detail: { value, name }
+ * @fires cf-input - Fired on input with detail: { value, oldValue, name }
+ * @fires cf-change - Fired on change with detail: { value, oldValue, name }
+ * @fires cf-focus - Fired on focus with detail: { value, name }
+ * @fires cf-blur - Fired on blur with detail: { value, name }
+ * @fires cf-keydown - Fired on keydown with detail: { key, value, shiftKey, ctrlKey, metaKey, altKey, name }
+ * @fires cf-submit - Fired on Ctrl/Cmd+Enter with detail: { value, name }
  *
  * @example
- * <ct-textarea rows="4" placeholder="Enter message" auto-resize></ct-textarea>
+ * <cf-textarea rows="4" placeholder="Enter message" auto-resize></cf-textarea>
  *
  * @example
  * <!-- With Cell binding for two-way reactive updates -->
- * <ct-textarea .value="${myCell}" placeholder="Type here..."></ct-textarea>
+ * <cf-textarea .value="${myCell}" placeholder="Type here..."></cf-textarea>
  *
  * @example
  * <!-- Debounced input - waits 500ms after user stops typing -->
- * <ct-textarea timingStrategy="debounce" timingDelay="500" placeholder="Search..."></ct-textarea>
+ * <cf-textarea timingStrategy="debounce" timingDelay="500" placeholder="Search..."></cf-textarea>
  */
 
-export class CTTextarea extends BaseElement {
+export class CFTextarea extends BaseElement {
   static override properties = {
     placeholder: { type: String },
     value: { type: String },
@@ -97,34 +97,34 @@ export class CTTextarea extends BaseElement {
 
   static override styles = css`
     :host {
-      --ct-textarea-color-background: var(--ct-theme-color-background, #ffffff);
-      --ct-textarea-color-text: var(--ct-theme-color-text, #0f172a);
-      --ct-textarea-color-border: var(--ct-theme-color-border, #e2e8f0);
-      --ct-textarea-color-primary: var(--ct-theme-color-primary, #3b82f6);
-      --ct-textarea-color-error: var(--ct-theme-color-error, #dc2626);
-      --ct-textarea-color-surface: var(--ct-theme-color-surface, #f1f5f9);
-      --ct-textarea-color-text-muted: var(--ct-theme-color-text-muted, #64748b);
-      --ct-textarea-color-placeholder: #94a3b8;
-      --ct-textarea-border-radius: var(--ct-theme-border-radius, 0.375rem);
-      --ct-textarea-font-family: var(--ct-theme-font-family, inherit);
-      --ct-textarea-animation-duration: var(--ct-theme-animation-duration, 150ms);
+      --cf-textarea-color-background: var(--ct-theme-color-background, #ffffff);
+      --cf-textarea-color-text: var(--ct-theme-color-text, #0f172a);
+      --cf-textarea-color-border: var(--ct-theme-color-border, #e2e8f0);
+      --cf-textarea-color-primary: var(--ct-theme-color-primary, #3b82f6);
+      --cf-textarea-color-error: var(--ct-theme-color-error, #dc2626);
+      --cf-textarea-color-surface: var(--ct-theme-color-surface, #f1f5f9);
+      --cf-textarea-color-text-muted: var(--ct-theme-color-text-muted, #64748b);
+      --cf-textarea-color-placeholder: #94a3b8;
+      --cf-textarea-border-radius: var(--ct-theme-border-radius, 0.375rem);
+      --cf-textarea-font-family: var(--ct-theme-font-family, inherit);
+      --cf-textarea-animation-duration: var(--ct-theme-animation-duration, 150ms);
 
       /* Default color values if not provided */
-      --background: var(--ct-textarea-color-background, #ffffff);
-      --foreground: var(--ct-textarea-color-text, #0f172a);
-      --border: var(--ct-textarea-color-border, #e2e8f0);
-      --ring: var(--ct-textarea-color-primary, #3b82f6);
-      --destructive: var(--ct-textarea-color-error, #dc2626);
-      --muted: var(--ct-textarea-color-surface, #f1f5f9);
-      --muted-foreground: var(--ct-textarea-color-text-muted, #64748b);
-      --placeholder: var(--ct-textarea-color-placeholder, #94a3b8);
+      --background: var(--cf-textarea-color-background, #ffffff);
+      --foreground: var(--cf-textarea-color-text, #0f172a);
+      --border: var(--cf-textarea-color-border, #e2e8f0);
+      --ring: var(--cf-textarea-color-primary, #3b82f6);
+      --destructive: var(--cf-textarea-color-error, #dc2626);
+      --muted: var(--cf-textarea-color-surface, #f1f5f9);
+      --muted-foreground: var(--cf-textarea-color-text-muted, #64748b);
+      --placeholder: var(--cf-textarea-color-placeholder, #94a3b8);
 
       /* Textarea dimensions */
       --textarea-padding-x: 0.75rem;
       --textarea-padding-y: 0.5rem;
       --textarea-font-size: 0.875rem;
       --textarea-line-height: 1.25rem;
-      --textarea-border-radius: var(--ct-textarea-border-radius, 0.375rem);
+      --textarea-border-radius: var(--cf-textarea-border-radius, 0.375rem);
       --textarea-min-height: 5rem;
 
       display: block;
@@ -139,12 +139,12 @@ export class CTTextarea extends BaseElement {
       padding: var(--textarea-padding-y) var(--textarea-padding-x);
       font-size: var(--textarea-font-size);
       line-height: var(--textarea-line-height);
-      font-family: var(--ct-textarea-font-family, inherit);
+      font-family: var(--cf-textarea-font-family, inherit);
       color: var(--foreground);
       background-color: var(--background);
       border: 1px solid var(--border);
       border-radius: var(--textarea-border-radius);
-      transition: all var(--ct-textarea-animation-duration, 150ms)
+      transition: all var(--cf-textarea-animation-duration, 150ms)
         var(--ct-transition-timing-ease);
       display: block;
       overflow: auto;
@@ -196,7 +196,7 @@ export class CTTextarea extends BaseElement {
       outline-offset: 2px;
       border-color: var(--ring);
       box-shadow: 0 0 0 3px
-        var(--ct-textarea-color-primary, rgba(59, 130, 246, 0.15));
+        var(--cf-textarea-color-primary, rgba(59, 130, 246, 0.15));
       }
 
       textarea:focus-visible {
@@ -204,7 +204,7 @@ export class CTTextarea extends BaseElement {
         outline-offset: 2px;
         border-color: var(--ring);
         box-shadow: 0 0 0 3px
-          var(--ct-textarea-color-primary, rgba(59, 130, 246, 0.15));
+          var(--cf-textarea-color-primary, rgba(59, 130, 246, 0.15));
         }
 
         /* Disabled state */
@@ -230,7 +230,7 @@ export class CTTextarea extends BaseElement {
         textarea.error:focus-visible {
           border-color: var(--destructive);
           box-shadow: 0 0 0 3px
-            var(--ct-textarea-color-error, rgba(220, 38, 38, 0.1));
+            var(--cf-textarea-color-error, rgba(220, 38, 38, 0.1));
           }
 
           /* Scrollbar styling */
@@ -247,7 +247,7 @@ export class CTTextarea extends BaseElement {
           textarea::-webkit-scrollbar-thumb {
             background-color: var(--border);
             border-radius: calc(var(--textarea-border-radius) * 0.5);
-            transition: background-color var(--ct-textarea-animation-duration, 150ms);
+            transition: background-color var(--cf-textarea-animation-duration, 150ms);
           }
 
           textarea::-webkit-scrollbar-thumb:hover {
@@ -484,7 +484,7 @@ export class CTTextarea extends BaseElement {
           }
 
           // Emit custom input event
-          this.emit("ct-input", {
+          this.emit("cf-input", {
             value: textarea.value,
             oldValue,
             name: this.name,
@@ -496,7 +496,7 @@ export class CTTextarea extends BaseElement {
           const oldValue = this.getValue();
 
           // Emit custom change event
-          this.emit("ct-change", {
+          this.emit("cf-change", {
             value: textarea.value,
             oldValue,
             name: this.name,
@@ -505,7 +505,7 @@ export class CTTextarea extends BaseElement {
 
         private _handleFocus(_event: Event) {
           this._cellController.onFocus();
-          this.emit("ct-focus", {
+          this.emit("cf-focus", {
             value: this.getValue(),
             name: this.name,
           });
@@ -513,14 +513,14 @@ export class CTTextarea extends BaseElement {
 
         private _handleBlur(_event: Event) {
           this._cellController.onBlur();
-          this.emit("ct-blur", {
+          this.emit("cf-blur", {
             value: this.getValue(),
             name: this.name,
           });
         }
 
         private _handleKeyDown(event: KeyboardEvent) {
-          this.emit("ct-keydown", {
+          this.emit("cf-keydown", {
             key: event.key,
             value: this.getValue(),
             shiftKey: event.shiftKey,
@@ -532,7 +532,7 @@ export class CTTextarea extends BaseElement {
 
           // Special handling for Enter key with modifiers
           if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-            this.emit("ct-submit", {
+            this.emit("cf-submit", {
               value: this.getValue(),
               name: this.name,
             });
@@ -625,4 +625,4 @@ export class CTTextarea extends BaseElement {
         }
       }
 
-      globalThis.customElements.define("ct-textarea", CTTextarea);
+      globalThis.customElements.define("cf-textarea", CFTextarea);

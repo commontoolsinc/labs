@@ -313,7 +313,7 @@ Be matter-of-fact. Prefer action to explanation.`;
                       assistantMessageCount !== dismissedIdx;
                   }),
                   <div style="margin: 4px 8px 0; padding: 0; flex-shrink: 0; position: relative;">
-                    <ct-button
+                    <cf-button
                       variant="ghost"
                       size="icon"
                       onClick={dismissPeek({
@@ -324,7 +324,7 @@ Be matter-of-fact. Prefer action to explanation.`;
                       title="Dismiss"
                     >
                       ×
-                    </ct-button>
+                    </cf-button>
                     <div
                       onClick={toggle({ value: showHistory })}
                       style="cursor: pointer;"

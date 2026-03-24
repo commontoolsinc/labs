@@ -176,18 +176,18 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
                           </span>
                         )}
                       </cf-vstack>
-                      <ct-button
+                      <cf-button
                         variant="secondary"
                         onClick={() => navigateTo(event)}
                       >
                         Edit
-                      </ct-button>
-                      <ct-button
+                      </cf-button>
+                      <cf-button
                         variant="ghost"
                         onClick={() => removeEvent.send({ event })}
                       >
                         ×
-                      </ct-button>
+                      </cf-button>
                     </cf-hstack>
                   </cf-card>,
                 );
@@ -200,14 +200,14 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
 
         <cf-vstack slot="footer" gap="2" style="padding: 1rem;">
           <cf-hstack gap="2">
-            <ct-input
+            <cf-input
               $value={newTitle}
               placeholder="Event title..."
               style="flex: 1;"
             />
-            <ct-input $value={newDate} type="date" style="width: 140px;" />
-            <ct-input $value={newTime} type="time" style="width: 100px;" />
-            <ct-button
+            <cf-input $value={newDate} type="date" style="width: 140px;" />
+            <cf-input $value={newTime} type="time" style="width: 100px;" />
+            <cf-button
               variant="primary"
               onClick={() =>
                 addEvent.send({
@@ -217,7 +217,7 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
                 })}
             >
               Add
-            </ct-button>
+            </cf-button>
           </cf-hstack>
         </cf-vstack>
       </cf-screen>

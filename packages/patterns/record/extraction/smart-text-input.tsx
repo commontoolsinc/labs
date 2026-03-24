@@ -423,7 +423,7 @@ export const SmartTextInput = pattern<
   // ===== UI Components =====
 
   const textArea = (
-    <ct-textarea
+    <cf-textarea
       $value={$value}
       placeholder={placeholder}
       rows={rows}

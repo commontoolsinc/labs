@@ -98,7 +98,7 @@ interface RecordPiece {
 /**
  * Coerce data types to match schema expectations
  * Handles common type mismatches (e.g., "1986" string → 1986 number)
- * Used by both export (to fix ct-input storing numbers as strings)
+ * Used by both export (to fix cf-input storing numbers as strings)
  * and import (to handle JSON that may have wrong types)
  */
 function coerceDataTypes(
@@ -163,7 +163,7 @@ function extractModuleData(
     }
   }
 
-  // Coerce types to match schema (fixes ct-input storing numbers as strings)
+  // Coerce types to match schema (fixes cf-input storing numbers as strings)
   return coerceDataTypes(type, data);
 }
 
@@ -721,7 +721,7 @@ export default pattern<Input, Output>(({ importJson }) => {
   "records": [...]
 }`}
                 />
-                <ct-button
+                <cf-button
                   onClick={importRecords({
                     importJson,
                     allPieces,
@@ -730,7 +730,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                   variant="primary"
                 >
                   Import Records
-                </ct-button>
+                </cf-button>
 
                 {/* Import Result Display */}
                 {ifElse(
@@ -746,13 +746,13 @@ export default pattern<Input, Output>(({ importJson }) => {
                     <cf-vstack gap="2">
                       <strong>{importResultTitle}</strong>
                       <p>{importResultMessage}</p>
-                      <ct-button
+                      <cf-button
                         size="sm"
                         variant="ghost"
                         onClick={clearImportResult({ importResult })}
                       >
                         Dismiss
-                      </ct-button>
+                      </cf-button>
                     </cf-vstack>
                   </div>,
                   null,

@@ -146,9 +146,9 @@ export default pattern<Input, Output>(({ leftText, rightText }) => {
           {leftText}
         </div>
 
-        <ct-button onClick={swapTexts({ leftText, rightText })}>
+        <cf-button onClick={swapTexts({ leftText, rightText })}>
           ⇄ Swap
-        </ct-button>
+        </cf-button>
 
         <div
           style={labelStyle}
@@ -179,7 +179,7 @@ export default pattern<Input, Output>(({ leftText, rightText }) => {
             >
               Text
             </label>
-            <ct-input
+            <cf-input
               $value={editValue}
               placeholder="Enter text..."
               style="width: 100%;"

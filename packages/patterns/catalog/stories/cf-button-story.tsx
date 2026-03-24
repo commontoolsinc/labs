@@ -30,7 +30,7 @@ export default pattern<ButtonStoryInput, ButtonStoryOutput>(() => {
   });
 
   return {
-    [NAME]: "ct-button Story",
+    [NAME]: "cf-button Story",
     [UI]: (
       <div style={{ padding: "1rem" }}>
         <div
@@ -42,14 +42,14 @@ export default pattern<ButtonStoryInput, ButtonStoryOutput>(() => {
             padding: "2rem 0",
           }}
         >
-          <ct-button
+          <cf-button
             variant={variant}
             disabled={disabled}
             size={size}
             onClick={handleClick}
           >
             {label}
-          </ct-button>
+          </cf-button>
           <span style={{ fontSize: "0.875rem", color: "#6b7280" }}>
             Clicked {clickCount} times
           </span>

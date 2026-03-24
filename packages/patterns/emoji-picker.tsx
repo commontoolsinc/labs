@@ -2711,9 +2711,9 @@ export const EmojiPicker = pattern<EmojiPickerInput, EmojiPickerInput>(
             onct-select={onSelectEmoji({ selectedEmoji })}
             style={{ flex: "1" }}
           />
-          <ct-button onClick={clearSelection({ selectedEmoji })}>
+          <cf-button onClick={clearSelection({ selectedEmoji })}>
             Clear
-          </ct-button>
+          </cf-button>
         </cf-hstack>
       ),
       selectedEmoji,

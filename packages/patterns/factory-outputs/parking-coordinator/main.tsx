@@ -961,7 +961,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
               <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
                 {todayFormatted}
               </span>
-              <ct-button
+              <cf-button
                 variant={computed(() =>
                   adminMode.get() ? "primary" : "secondary"
                 )}
@@ -969,7 +969,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                 onClick={() => toggleAdminMode.send()}
               >
                 {computed(() => `Admin: ${adminMode.get() ? "ON" : "OFF"}`)}
-              </ct-button>
+              </cf-button>
             </div>
           </div>
 
@@ -1035,7 +1035,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         <cf-hstack gap="1">
                           {stripReq && stripIsOwn
                             ? (
-                              <ct-button
+                              <cf-button
                                 variant="secondary"
                                 size="sm"
                                 onClick={() =>
@@ -1044,13 +1044,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   })}
                               >
                                 Cancel
-                              </ct-button>
+                              </cf-button>
                             )
                             : null}
 
                           {stripShowAdmin
                             ? (
-                              <ct-button
+                              <cf-button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() =>
@@ -1060,7 +1060,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   })}
                               >
                                 Assign
-                              </ct-button>
+                              </cf-button>
                             )
                             : null}
                         </cf-hstack>
@@ -1099,14 +1099,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                       <span style="font-size: 0.75rem; font-weight: 500;">
                         Date
                       </span>
-                      <ct-input
+                      <cf-input
                         $value={requestDate}
                         type="date"
                         style="width: 100%;"
                       />
                     </cf-vstack>
 
-                    <ct-button
+                    <cf-button
                       variant="primary"
                       disabled={requestDisabled}
                       onClick={() =>
@@ -1116,7 +1116,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         })}
                     >
                       Request Spot
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
 
                   {computed(() => {
@@ -1257,7 +1257,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     )
                                     : null}
                                   <cf-hstack gap="1">
-                                    <ct-button
+                                    <cf-button
                                       variant="primary"
                                       size="sm"
                                       onClick={() =>
@@ -1268,14 +1268,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         })}
                                     >
                                       OK
-                                    </ct-button>
-                                    <ct-button
+                                    </cf-button>
+                                    <cf-button
                                       variant="ghost"
                                       size="sm"
                                       onClick={() => cancelOverride.send()}
                                     >
                                       ×
-                                    </ct-button>
+                                    </cf-button>
                                   </cf-hstack>
                                 </cf-vstack>
                               )
@@ -1297,7 +1297,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   </span>
                                   {gridIsOwn
                                     ? (
-                                      <ct-button
+                                      <cf-button
                                         variant="ghost"
                                         size="sm"
                                         style="padding: 0; font-size: 0.625rem; line-height: 1; min-height: unset; color: var(--ct-color-red-500);"
@@ -1307,7 +1307,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           })}
                                       >
                                         ×
-                                      </ct-button>
+                                      </cf-button>
                                     )
                                     : null}
                                   {gridIsManual
@@ -1332,7 +1332,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   </span>
                                   {gridShowAdmin
                                     ? (
-                                      <ct-button
+                                      <cf-button
                                         variant="ghost"
                                         size="sm"
                                         style="font-size: 0.625rem; opacity: 0.6; padding: 0;"
@@ -1343,7 +1343,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           })}
                                       >
                                         +
-                                      </ct-button>
+                                      </cf-button>
                                     )
                                     : null}
                                 </>
@@ -1364,13 +1364,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     <cf-vstack gap="2">
                       <cf-hstack justify="between" align="center">
                         <cf-heading level={6}>People</cf-heading>
-                        <ct-button
+                        <cf-button
                           variant="primary"
                           size="sm"
                           onClick={() => toggleAddPersonForm.send()}
                         >
                           + Add Person
-                        </ct-button>
+                        </cf-button>
                       </cf-hstack>
 
                       {people.get().length === 0
@@ -1439,7 +1439,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       <span style="font-size: 0.75rem; font-weight: 500;">
                                         Name *
                                       </span>
-                                      <ct-input
+                                      <cf-input
                                         $value={editName}
                                         placeholder="Full name"
                                         style="width: 100%;"
@@ -1452,7 +1452,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       <span style="font-size: 0.75rem; font-weight: 500;">
                                         Email *
                                       </span>
-                                      <ct-input
+                                      <cf-input
                                         $value={editEmail}
                                         placeholder="email@company.com"
                                         style="width: 100%;"
@@ -1477,7 +1477,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       <span style="font-size: 0.75rem; font-weight: 500;">
                                         Priority *
                                       </span>
-                                      <ct-input
+                                      <cf-input
                                         $value={editPriorityRank}
                                         type="number"
                                         style="width: 5rem;"
@@ -1501,14 +1501,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     <span style="font-size: 0.75rem; font-weight: 500;">
                                       Preferences (comma-separated spot numbers)
                                     </span>
-                                    <ct-input
+                                    <cf-input
                                       $value={editPreferences}
                                       placeholder="e.g. 1, 5, 12"
                                       style="width: 100%;"
                                     />
                                   </cf-vstack>
                                   <cf-hstack gap="2">
-                                    <ct-button
+                                    <cf-button
                                       variant="primary"
                                       size="sm"
                                       onClick={() =>
@@ -1517,14 +1517,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         })}
                                     >
                                       Save
-                                    </ct-button>
-                                    <ct-button
+                                    </cf-button>
+                                    <cf-button
                                       variant="secondary"
                                       size="sm"
                                       onClick={() => cancelEditPerson.send()}
                                     >
                                       Cancel
-                                    </ct-button>
+                                    </cf-button>
                                   </cf-hstack>
                                 </cf-vstack>
                               )
@@ -1561,7 +1561,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     </cf-vstack>
 
                                     <cf-hstack gap="1" align="center">
-                                      <ct-button
+                                      <cf-button
                                         variant="ghost"
                                         size="sm"
                                         disabled={isFirst}
@@ -1571,8 +1571,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           })}
                                       >
                                         ↑
-                                      </ct-button>
-                                      <ct-button
+                                      </cf-button>
+                                      <cf-button
                                         variant="ghost"
                                         size="sm"
                                         disabled={isLast}
@@ -1582,8 +1582,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           })}
                                       >
                                         ↓
-                                      </ct-button>
-                                      <ct-button
+                                      </cf-button>
+                                      <cf-button
                                         variant="ghost"
                                         size="sm"
                                         onClick={() =>
@@ -1592,8 +1592,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           })}
                                       >
                                         Edit
-                                      </ct-button>
-                                      <ct-button
+                                      </cf-button>
+                                      <cf-button
                                         variant="ghost"
                                         size="sm"
                                         onClick={() =>
@@ -1602,7 +1602,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           })}
                                       >
                                         Remove
-                                      </ct-button>
+                                      </cf-button>
                                     </cf-hstack>
                                   </cf-hstack>
 
@@ -1626,7 +1626,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                             anyway?
                                           </span>
                                           <cf-hstack gap="2">
-                                            <ct-button
+                                            <cf-button
                                               variant="primary"
                                               size="sm"
                                               onClick={() =>
@@ -1635,15 +1635,15 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                                 })}
                                             >
                                               Remove
-                                            </ct-button>
-                                            <ct-button
+                                            </cf-button>
+                                            <cf-button
                                               variant="ghost"
                                               size="sm"
                                               onClick={() =>
                                                 cancelRemovePerson.send()}
                                             >
                                               Cancel
-                                            </ct-button>
+                                            </cf-button>
                                           </cf-hstack>
                                         </cf-vstack>
                                       </cf-card>
@@ -1668,7 +1668,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <span style="font-size: 0.75rem; font-weight: 500;">
                                     Name *
                                   </span>
-                                  <ct-input
+                                  <cf-input
                                     $value={newPersonName}
                                     placeholder="Full name"
                                     style="width: 100%;"
@@ -1681,7 +1681,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <span style="font-size: 0.75rem; font-weight: 500;">
                                     Email *
                                   </span>
-                                  <ct-input
+                                  <cf-input
                                     $value={newPersonEmail}
                                     placeholder="email@company.com"
                                     style="width: 100%;"
@@ -1703,7 +1703,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <span style="font-size: 0.75rem; font-weight: 500;">
                                     Priority *
                                   </span>
-                                  <ct-input
+                                  <cf-input
                                     $value={newPersonPriority}
                                     type="number"
                                     placeholder="1"
@@ -1733,7 +1733,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 <span style="font-size: 0.75rem; font-weight: 500;">
                                   Preferences (comma-separated)
                                 </span>
-                                <ct-input
+                                <cf-input
                                   $value={newPersonPreferences}
                                   placeholder="e.g. 1, 5"
                                   style="width: 100%;"
@@ -1749,21 +1749,21 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 );
                               })}
                               <cf-hstack gap="2">
-                                <ct-button
+                                <cf-button
                                   variant="primary"
                                   size="sm"
                                   disabled={addPersonDisabled}
                                   onClick={() => submitAddPerson.send()}
                                 >
                                   Add Person
-                                </ct-button>
-                                <ct-button
+                                </cf-button>
+                                <cf-button
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => toggleAddPersonForm.send()}
                                 >
                                   Cancel
-                                </ct-button>
+                                </cf-button>
                               </cf-hstack>
                             </cf-vstack>
                           </cf-card>
@@ -1775,13 +1775,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     <cf-vstack gap="2">
                       <cf-hstack justify="between" align="center">
                         <cf-heading level={6}>Parking Spots</cf-heading>
-                        <ct-button
+                        <cf-button
                           variant="primary"
                           size="sm"
                           onClick={() => toggleAddSpotForm.send()}
                         >
                           + Add Spot
-                        </ct-button>
+                        </cf-button>
                       </cf-hstack>
 
                       {adminSpotsData.map((spot) => {
@@ -1806,7 +1806,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       <span style="font-size: 0.75rem; font-weight: 500;">
                                         Number *
                                       </span>
-                                      <ct-input
+                                      <cf-input
                                         $value={editSpotNum}
                                         placeholder="e.g. 12"
                                         style="width: 4rem;"
@@ -1816,7 +1816,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       <span style="font-size: 0.75rem; font-weight: 500;">
                                         Label
                                       </span>
-                                      <ct-input
+                                      <cf-input
                                         $value={editSpotLabel}
                                         placeholder="e.g. Near entrance"
                                         style="width: 100%;"
@@ -1827,7 +1827,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     <span style="font-size: 0.75rem; font-weight: 500;">
                                       Notes
                                     </span>
-                                    <ct-input
+                                    <cf-input
                                       $value={editSpotNotes}
                                       placeholder="e.g. Tight, no large vehicles"
                                       style="width: 100%;"
@@ -1847,7 +1847,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       : null}
                                   </cf-hstack>
                                   <cf-hstack gap="2">
-                                    <ct-button
+                                    <cf-button
                                       variant="primary"
                                       size="sm"
                                       onClick={() =>
@@ -1856,14 +1856,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         })}
                                     >
                                       Save
-                                    </ct-button>
-                                    <ct-button
+                                    </cf-button>
+                                    <cf-button
                                       variant="secondary"
                                       size="sm"
                                       onClick={() => cancelEditSpot.send()}
                                     >
                                       Cancel
-                                    </ct-button>
+                                    </cf-button>
                                   </cf-hstack>
                                 </cf-vstack>
                               )
@@ -1916,7 +1916,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         : null}
                                     </cf-hstack>
                                     <cf-hstack gap="1">
-                                      <ct-button
+                                      <cf-button
                                         variant="ghost"
                                         size="sm"
                                         onClick={() =>
@@ -1925,8 +1925,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           })}
                                       >
                                         Edit
-                                      </ct-button>
-                                      <ct-button
+                                      </cf-button>
+                                      <cf-button
                                         variant="ghost"
                                         size="sm"
                                         onClick={() =>
@@ -1935,7 +1935,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           })}
                                       >
                                         Remove
-                                      </ct-button>
+                                      </cf-button>
                                     </cf-hstack>
                                   </cf-hstack>
                                   {isRemoveSpotConfirm
@@ -1948,7 +1948,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                             be preserved. Remove anyway?
                                           </span>
                                           <cf-hstack gap="2">
-                                            <ct-button
+                                            <cf-button
                                               variant="primary"
                                               size="sm"
                                               onClick={() =>
@@ -1957,15 +1957,15 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                                 })}
                                             >
                                               Remove
-                                            </ct-button>
-                                            <ct-button
+                                            </cf-button>
+                                            <cf-button
                                               variant="ghost"
                                               size="sm"
                                               onClick={() =>
                                                 cancelRemoveSpot.send()}
                                             >
                                               Cancel
-                                            </ct-button>
+                                            </cf-button>
                                           </cf-hstack>
                                         </cf-vstack>
                                       </cf-card>
@@ -1987,7 +1987,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <span style="font-size: 0.75rem; font-weight: 500;">
                                     Number *
                                   </span>
-                                  <ct-input
+                                  <cf-input
                                     $value={newSpotNumber}
                                     placeholder="e.g. 12"
                                     style="width: 4rem;"
@@ -1997,7 +1997,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <span style="font-size: 0.75rem; font-weight: 500;">
                                     Label
                                   </span>
-                                  <ct-input
+                                  <cf-input
                                     $value={newSpotLabel}
                                     placeholder="e.g. Near entrance"
                                     style="width: 100%;"
@@ -2008,7 +2008,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 <span style="font-size: 0.75rem; font-weight: 500;">
                                   Notes
                                 </span>
-                                <ct-input
+                                <cf-input
                                   $value={newSpotNotes}
                                   placeholder="e.g. Compact only"
                                   style="width: 100%;"
@@ -2024,21 +2024,21 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 );
                               })}
                               <cf-hstack gap="2">
-                                <ct-button
+                                <cf-button
                                   variant="primary"
                                   size="sm"
                                   disabled={addSpotDisabled}
                                   onClick={() => submitAddSpot.send()}
                                 >
                                   Add Spot
-                                </ct-button>
-                                <ct-button
+                                </cf-button>
+                                <cf-button
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => toggleAddSpotForm.send()}
                                 >
                                   Cancel
-                                </ct-button>
+                                </cf-button>
                               </cf-hstack>
                             </cf-vstack>
                           </cf-card>

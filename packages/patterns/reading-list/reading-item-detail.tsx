@@ -91,21 +91,21 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                     <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                       Title
                     </label>
-                    <ct-input $value={title} placeholder="Title" />
+                    <cf-input $value={title} placeholder="Title" />
                   </cf-vstack>
 
                   <cf-vstack gap="1">
                     <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                       Author
                     </label>
-                    <ct-input $value={author} placeholder="Author name" />
+                    <cf-input $value={author} placeholder="Author name" />
                   </cf-vstack>
 
                   <cf-vstack gap="1">
                     <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                       URL
                     </label>
-                    <ct-input
+                    <cf-input
                       $value={url}
                       placeholder="https://..."
                       type="url"
@@ -168,7 +168,7 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                   <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                     Notes
                   </label>
-                  <ct-textarea
+                  <cf-textarea
                     $value={notes}
                     placeholder="Your thoughts, highlights, quotes..."
                     rows={8}

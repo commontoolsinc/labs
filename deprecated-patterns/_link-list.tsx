@@ -155,10 +155,10 @@ export default pattern(
       [NAME]: title,
       [UI]: (
         <os-container>
-          <ct-input
+          <cf-input
             value={title}
             placeholder="List title"
-            onct-input={updateTitle({ title })}
+            oncf-input={updateTitle({ title })}
             customStyle="font-size: 20px; font-family: monospace; text-decoration: underline;"
           />
           <cf-vstack gap="1">
@@ -175,22 +175,22 @@ export default pattern(
                     {title}
                   </blockquote>
                   <ct-alert>{question}</ct-alert>
-                  <ct-button
+                  <cf-button
                     outline
                     variant="danger"
                     onclick={deleteItem({ item, items })}
                   >
                     Delete
-                  </ct-button>
+                  </cf-button>
                 </cf-vstack>
               </li>
             ))}
           </cf-vstack>
-          <ct-message-input
+          <cf-message-input
             name="Add"
             placeholder="New question"
             appearance="rounded"
-            onct-send={addTask({ items })}
+            oncf-send={addTask({ items })}
           />
         </os-container>
       ),

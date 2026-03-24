@@ -82,7 +82,7 @@ When iterating with `.map()`, you have a reference to each item. Use that refere
 {items.map((item) => (
   <cf-card>
     <span>{item.name}</span>
-    <ct-button onClick={() => {
+    <cf-button onClick={() => {
       // Use the reference you already have
       const allItems = items.get(); // If items is a Writable<Item[]>, otherwise use directly
       const idx = allItems.findIndex(i => equals(item, i));
@@ -91,7 +91,7 @@ When iterating with `.map()`, you have a reference to each item. Use that refere
       }
     }}>
       Select
-    </ct-button>
+    </cf-button>
   </cf-card>
 ))}
 ```

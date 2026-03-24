@@ -76,7 +76,7 @@ describe("LLM pattern test", () => {
       assertEquals(titleText?.trim(), "LLM Test");
 
       // Check for the message input
-      const messageInput = await page.waitForSelector("ct-message-input", {
+      const messageInput = await page.waitForSelector("cf-message-input", {
         strategy: "pierce",
       });
       assert(messageInput, "Should find message input element");
@@ -90,7 +90,7 @@ describe("LLM pattern test", () => {
       const page = shell.page();
 
       // Find the message input component
-      const messageInput = await page.waitForSelector("ct-message-input", {
+      const messageInput = await page.waitForSelector("cf-message-input", {
         strategy: "pierce",
       });
       assert(messageInput, "Should find message input");
@@ -106,7 +106,7 @@ describe("LLM pattern test", () => {
       await inputElement.type(testQuestion);
 
       // Find and click the send button
-      const sendButton = await page.waitForSelector("[data-ct-button]", {
+      const sendButton = await page.waitForSelector("[data-cf-button]", {
         strategy: "pierce",
       });
       assert(sendButton, "Should find send button");
@@ -176,7 +176,7 @@ describe("LLM pattern test", () => {
       const secondQuestion = "What is the capital of France?";
       await inputElement.type(secondQuestion);
 
-      const sendButton = await page.waitForSelector("[data-ct-button]", {
+      const sendButton = await page.waitForSelector("[data-cf-button]", {
         strategy: "pierce",
       });
       await sendButton.click();

@@ -862,26 +862,26 @@ export default pattern<{
             <cf-vstack gap="1">
               <div>
                 <label>Import Limit</label>
-                <ct-input
+                <cf-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={String(settings.limit)}
                   placeholder="count of emails to import"
-                  onct-input={updateLimit({ limit: settings.limit })}
+                  oncf-input={updateLimit({ limit: settings.limit })}
                 />
               </div>
 
               <div>
                 <label>Gmail Filter Query</label>
-                <ct-input
+                <cf-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.gmailFilterQuery}
                   placeholder="in:INBOX"
-                  onct-input={updateGmailFilterQuery({
+                  oncf-input={updateGmailFilterQuery({
                     gmailFilterQuery: settings.gmailFilterQuery,
                   })}
                 />
               </div>
-              <ct-button
+              <cf-button
                 type="button"
                 onClick={googleUpdater({
                   emails,
@@ -890,7 +890,7 @@ export default pattern<{
                 })}
               >
                 Fetch Emails
-              </ct-button>
+              </cf-button>
             </cf-vstack>
           </cf-hstack>
 

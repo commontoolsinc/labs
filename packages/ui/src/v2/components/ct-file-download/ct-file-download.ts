@@ -121,13 +121,13 @@ export class CTFileDownload extends BaseElement {
       }
 
       /* Ensure icon-only buttons maintain square aspect ratio */
-      :host([icon-only]) ct-button {
+      :host([icon-only]) cf-button {
         min-width: 2.25rem;
         display: inline-flex;
       }
 
       /* Adjust for different sizes when icon-only */
-      :host([icon-only]) ct-button::part(button) {
+      :host([icon-only]) cf-button::part(button) {
         aspect-ratio: 1;
         min-width: fit-content;
       }
@@ -795,7 +795,7 @@ export class CTFileDownload extends BaseElement {
           <span class="autosave-tooltip">${tooltipText}</span>
         `
         : null}
-      <ct-button
+      <cf-button
         variant="${this.variant || "secondary"}"
         size="${this.size || "default"}"
         ?disabled="${this.disabled || !hasData || this._downloading}"
@@ -810,7 +810,7 @@ export class CTFileDownload extends BaseElement {
           : html`
             <slot>${buttonText}</slot>
           `}
-      </ct-button>
+      </cf-button>
     `;
   }
 }

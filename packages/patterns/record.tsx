@@ -1083,7 +1083,7 @@ const Record = pattern<RecordInput, RecordOutput>(
               alignItems: "center",
             }}
           >
-            <ct-input
+            <cf-input
               $value={title}
               placeholder="Record title..."
               style={{ flex: "1", fontWeight: "600", fontSize: "16px" }}
@@ -2145,7 +2145,7 @@ const Record = pattern<RecordInput, RecordOutput>(
             })}
           >
             <span slot="header">Module Note</span>
-            <ct-textarea
+            <cf-textarea
               $value={editingNoteText}
               placeholder="Add notes about this module... (visible to LLM reads)"
               rows={6}
@@ -2177,7 +2177,7 @@ const Record = pattern<RecordInput, RecordOutput>(
               gap="3"
               style={{ justifyContent: "flex-end" }}
             >
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={closeNoteEditor({
                   editingNoteIndex,
@@ -2185,8 +2185,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                 })}
               >
                 Cancel
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="primary"
                 onClick={saveNote({
                   subPieces,
@@ -2195,7 +2195,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 })}
               >
                 Save Note
-              </ct-button>
+              </cf-button>
             </cf-hstack>
           </ct-modal>
 
@@ -2216,12 +2216,12 @@ const Record = pattern<RecordInput, RecordOutput>(
               gap="3"
               style={{ justifyContent: "flex-end" }}
             >
-              <ct-button
+              <cf-button
                 variant="primary"
                 onClick={closeSettings({ settingsModuleIndex })}
               >
                 Done
-              </ct-button>
+              </cf-button>
             </cf-hstack>
           </ct-modal>
 

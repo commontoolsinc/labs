@@ -194,13 +194,13 @@ export class CTWebhook extends BaseElement {
     if (!hasWebhook) {
       return html`
         <div class="webhook-setup">
-          <ct-button
+          <cf-button
             variant="secondary"
             @click="${this._handleCreate}"
             ?disabled="${this._isLoading}"
           >
             ${this._isLoading ? "Creating..." : `Create Webhook`}
-          </ct-button>
+          </cf-button>
           ${this._error
             ? html`
               <div class="error" role="alert">${this._error}</div>
@@ -214,14 +214,14 @@ export class CTWebhook extends BaseElement {
       <div class="webhook-card">
         <div class="header">
           <span class="name">${this.name}</span>
-          <ct-button
+          <cf-button
             variant="ghost"
             size="sm"
             @click="${this._handleDelete}"
             ?disabled="${this._isLoading}"
           >
             ${this._isLoading ? "..." : "Delete"}
-          </ct-button>
+          </cf-button>
         </div>
         <ct-secret-viewer
           label="Webhook URL"

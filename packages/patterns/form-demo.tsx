@@ -112,7 +112,7 @@ export const EditPerson = pattern<
               <label style="font-weight: 500; font-size: 0.875rem;">
                 Name *
               </label>
-              <ct-input
+              <cf-input
                 name="name"
                 $value={formData.key("name")}
                 placeholder="Enter full name"
@@ -125,7 +125,7 @@ export const EditPerson = pattern<
               <label style="font-weight: 500; font-size: 0.875rem;">
                 Email *
               </label>
-              <ct-input
+              <cf-input
                 name="email"
                 $value={formData.key("email")}
                 type="email"
@@ -151,21 +151,21 @@ export const EditPerson = pattern<
 
             {/* Form actions */}
             <cf-hstack gap="2" style="margin-top: 1rem;">
-              <ct-button
+              <cf-button
                 type="reset"
                 variant="secondary"
                 onClick={handleCancel}
                 style="flex: 1;"
               >
                 Cancel
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 type="submit"
                 variant="primary"
                 style="flex: 1;"
               >
                 {isEditMode ? "Save" : "Create"}
-              </ct-button>
+              </cf-button>
             </cf-hstack>
           </cf-vstack>
         </ct-form>
@@ -288,12 +288,12 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                       {person.role}
                     </span>
                   </cf-vstack>
-                  <ct-button
+                  <cf-button
                     variant="ghost"
                     onClick={deletePerson({ person, people })}
                   >
                     ×
-                  </ct-button>
+                  </cf-button>
                 </cf-hstack>
               </cf-card>
             ))}
@@ -310,13 +310,13 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
 
         {/* Footer - Add button */}
         <cf-hstack slot="footer" gap="2" style="padding: 1rem;">
-          <ct-button
+          <cf-button
             variant="primary"
             onClick={startCreate}
             style="flex: 1;"
           >
             + Add Person
-          </ct-button>
+          </cf-button>
         </cf-hstack>
 
         {/* Modal form */}

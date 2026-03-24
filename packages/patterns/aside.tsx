@@ -22,7 +22,7 @@ export default pattern(() => {
           <aside slot="left">
             <h3>Left Sidebar</h3>
             <p>Left content</p>
-            <ct-button>Left Button</ct-button>
+            <cf-button>Left Button</cf-button>
           </aside>
 
           {/* Main content panels - no slot attribute needed */}
@@ -30,20 +30,20 @@ export default pattern(() => {
           <div>
             <h1>Main Content Area</h1>
             <p>This is the main content with sidebars</p>
-            <ct-button>Main Button</ct-button>
+            <cf-button>Main Button</cf-button>
           </div>
 
           <div>
             <h1>Second Content Area</h1>
             <p>This is the second content with sidebars</p>
-            <ct-button>Second Button</ct-button>
+            <cf-button>Second Button</cf-button>
           </div>
 
           {/* Right sidebar - use slot="right" */}
           <aside slot="right">
             <h3>Right Sidebar</h3>
             <p>Right content</p>
-            <ct-button>Right Button</ct-button>
+            <cf-button>Right Button</cf-button>
           </aside>
         </ct-autolayout>
 

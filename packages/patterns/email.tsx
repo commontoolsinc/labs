@@ -69,7 +69,7 @@ export const EmailModule = pattern<EmailModuleInput, EmailModuleInput>(
           </cf-vstack>
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Email</label>
-            <ct-input
+            <cf-input
               type="email"
               $value={address}
               placeholder="email@example.com"

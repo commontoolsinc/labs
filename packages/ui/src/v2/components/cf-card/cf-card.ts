@@ -17,7 +17,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * <cf-card>
  *   <h3 slot="header">Card Title</h3>
  *   <p slot="content">Card content goes here</p>
- *   <ct-button slot="footer">Action</ct-button>
+ *   <cf-button slot="footer">Action</cf-button>
  * </cf-card>
  *
  * Uses JS to detect empty slots (CSS :has() can't distinguish assigned vs fallback content).

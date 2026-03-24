@@ -14,12 +14,12 @@ keywords/features.
 - array-in-cell-with-remove-ast-nocomponents.tsx: List with add and remove
   operations on array
   - **Data types**: array of objects (text strings)
-  - **Keywords**: handler, map, array operations, get/set, ct-button
+  - **Keywords**: handler, map, array operations, get/set, cf-button
 
 - array-in-cell-with-remove-editable.tsx: Editable list with add, remove, and
   update operations
   - **Data types**: array of objects (text strings)
-  - **Keywords**: handler, map, array operations, ct-input, ct-button,
+  - **Keywords**: handler, map, array operations, cf-input, cf-button,
     onct-change
 
 - aside.tsx: Full-screen layout demonstration with header, footer, and sidebars
@@ -66,7 +66,7 @@ keywords/features.
 
 - counter.tsx: Basic counter with increment/decrement operations
   - **Data types**: number
-  - **Keywords**: handler, str template, derive (via pure function), ct-button,
+  - **Keywords**: handler, str template, derive (via pure function), cf-button,
     Stream
 
 - examples/ct-checkbox-cell.tsx: Checkbox component with bidirectional binding
@@ -95,16 +95,16 @@ keywords/features.
 - system/default-app.tsx: Default application with piece management and
   navigation
   - **Data types**: array of pieces (MentionableCharm objects)
-  - **Keywords**: wish, derive, navigateTo, handler, ct-table, ct-button,
+  - **Keywords**: wish, derive, navigateTo, handler, ct-table, cf-button,
     multiple pattern instantiation
 
 - dice.tsx: Dice roller with random number generation
   - **Data types**: number
-  - **Keywords**: handler, random values, ct-button, Stream
+  - **Keywords**: handler, random values, cf-button, Stream
 
 - fetch-data.tsx: GitHub repository data fetcher
   - **Data types**: complex API response object, string (URL)
-  - **Keywords**: fetchData, lift, derive, ct-input, $value, string parsing
+  - **Keywords**: fetchData, lift, derive, cf-input, $value, string parsing
 
 - instantiate-pattern.tsx: Factory pattern for creating counter instances
   - **Data types**: number, piece references
@@ -127,7 +127,7 @@ keywords/features.
 
 - examples/llm.tsx: Simple LLM question/answer interface
   - **Data types**: string (question), LLM response content, array of messages
-  - **Keywords**: llm, cell, derive, handler, ct-message-input, onct-send
+  - **Keywords**: llm, cell, derive, handler, cf-message-input, oncf-send
 
 - nested-counter.tsx: Counter with nested sub-counter instances
   - **Data types**: number
@@ -142,4 +142,4 @@ keywords/features.
 
 - output_schema.tsx: Demonstrates explicit output schema typing
   - **Data types**: number, VNode
-  - **Keywords**: handler, output schema, type safety, ct-button
+  - **Keywords**: handler, output schema, type safety, cf-button

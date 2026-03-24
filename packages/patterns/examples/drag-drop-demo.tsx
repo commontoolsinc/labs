@@ -145,9 +145,9 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
                       }}
                     >
                       <span>{item.title}</span>
-                      <ct-button onClick={removeItem({ droppedItems, item })}>
+                      <cf-button onClick={removeItem({ droppedItems, item })}>
                         ×
-                      </ct-button>
+                      </cf-button>
                     </div>
                   ))}
                 </div>,

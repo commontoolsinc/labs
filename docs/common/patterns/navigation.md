@@ -23,9 +23,9 @@ export default pattern<Input>(({ items }) => ({
       {items.map((item) => (
         <cf-card>
           {item.name}
-          <ct-button onClick={() => navigateTo(ItemDetail({ item }))}>
+          <cf-button onClick={() => navigateTo(ItemDetail({ item }))}>
             Edit
-          </ct-button>
+          </cf-button>
         </cf-card>
       ))}
     </cf-screen>
@@ -53,7 +53,7 @@ interface Input {
 export default pattern<Input>(({ item }) => ({
   [UI]: (
     <cf-screen>
-      <ct-input $value={item.key("name")} placeholder="Name" />
+      <cf-input $value={item.key("name")} placeholder="Name" />
       <ct-select
         $value={item.key("status")}
         items={[

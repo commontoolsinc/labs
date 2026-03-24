@@ -61,11 +61,11 @@ Write content personalized to the user when appropriate.`;
         </cf-card>
 
         <div>
-          <ct-message-input
+          <cf-message-input
             name="Write"
             placeholder="Enter a topic to write about..."
             appearance="rounded"
-            onct-send={handleSend({ topic })}
+            oncf-send={handleSend({ topic })}
           />
         </div>
 

@@ -75,9 +75,9 @@ export default pattern<State>(({ count, showButton }) => {
         {/* WORKING: ifElse with plain cell (not derived) */}
         {ifElse(
           showButton,
-          <ct-button onClick={incrementHandler({ count })}>
+          <cf-button onClick={incrementHandler({ count })}>
             Increment (WORKING with ifElse)
-          </ct-button>,
+          </cf-button>,
           <p style={{ color: "gray" }}>Button hidden by ifElse condition</p>,
         )}
 

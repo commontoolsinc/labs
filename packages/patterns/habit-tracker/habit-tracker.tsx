@@ -139,19 +139,19 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
                           Streak: {streak} days
                         </span>
                       </cf-vstack>
-                      <ct-button
+                      <cf-button
                         variant={isCompletedToday ? "primary" : "secondary"}
                         onClick={() =>
                           toggleHabit.send({ habitName: habit.name })}
                       >
                         {isCompletedToday ? "✓" : "○"}
-                      </ct-button>
-                      <ct-button
+                      </cf-button>
+                      <cf-button
                         variant="ghost"
                         onClick={() => deleteHabit.send({ habit })}
                       >
                         ×
-                      </ct-button>
+                      </cf-button>
                     </cf-hstack>
 
                     {/* Last 7 days indicator */}
@@ -205,17 +205,17 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
           </cf-vscroll>
 
           <cf-hstack slot="footer" gap="2" style="padding: 1rem;" align="end">
-            <ct-input
+            <cf-input
               $value={newHabitIcon}
               placeholder="Icon"
               style="width: 60px;"
             />
-            <ct-input
+            <cf-input
               $value={newHabitName}
               placeholder="New habit name..."
               style="flex: 1;"
             />
-            <ct-button
+            <cf-button
               variant="primary"
               onClick={() =>
                 addHabit.send({
@@ -224,7 +224,7 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
                 })}
             >
               Add Habit
-            </ct-button>
+            </cf-button>
           </cf-hstack>
         </cf-screen>
       ),

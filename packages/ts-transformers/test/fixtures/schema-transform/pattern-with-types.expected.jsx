@@ -190,7 +190,7 @@ export default pattern((__ct_pattern_input) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {})}
         </ul>
-        <ct-message-input name="Send" placeholder="Type a message..." appearance="rounded" onct-send={addItem({ items })}/>
+        <cf-message-input name="Send" placeholder="Type a message..." appearance="rounded" oncf-send={addItem({ items })}/>
       </div>),
         title,
         items,

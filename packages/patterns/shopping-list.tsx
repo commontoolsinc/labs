@@ -422,7 +422,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
             >
               {statsText}
             </span>
-            <ct-button
+            <cf-button
               variant={ifElse(
                 computed(() => viewMode.get() === "quick"),
                 "primary",
@@ -432,8 +432,8 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
               onClick={() => viewMode.set("quick")}
             >
               Quick
-            </ct-button>
-            <ct-button
+            </cf-button>
+            <cf-button
               variant={ifElse(
                 computed(() => viewMode.get() === "sorted"),
                 "primary",
@@ -443,14 +443,14 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
               onClick={() => viewMode.set("sorted")}
             >
               📍 Sorted
-            </ct-button>
-            <ct-button
+            </cf-button>
+            <cf-button
               variant="secondary"
               size="sm"
               onClick={openStoreMapper({})}
             >
               🗺️ Store
-            </ct-button>
+            </cf-button>
           </cf-hstack>
         </cf-vstack>
 
@@ -459,10 +459,10 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
           <cf-vstack gap="2" style="padding: 1rem; max-width: 800px;">
             {/* Input field at top - with right padding to avoid FAB */}
             <div style={{ paddingRight: "60px" }}>
-              <ct-message-input
+              <cf-message-input
                 placeholder="Type to add item, or ask omnibot..."
                 appearance="rounded"
-                onct-send={addItem({ items })}
+                oncf-send={addItem({ items })}
               />
             </div>
 
@@ -490,7 +490,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                   <cf-card>
                     <cf-hstack gap="2" align="center">
                       <ct-checkbox $checked={item.done} />
-                      <ct-input
+                      <cf-input
                         $value={item.title}
                         placeholder="Enter item..."
                         style={{
@@ -505,12 +505,12 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                           opacity: ifElse(item.done, 0.6, 1),
                         }}
                       />
-                      <ct-button
+                      <cf-button
                         variant="ghost"
                         onClick={removeItem({ items, item })}
                       >
                         ×
-                      </ct-button>
+                      </cf-button>
                     </cf-hstack>
                   </cf-card>
                 ))}
@@ -606,7 +606,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                         ),
                       )}
                       {/* Correction button */}
-                      <ct-button
+                      <cf-button
                         variant="ghost"
                         onClick={openCorrection({
                           items,
@@ -617,7 +617,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                         style="font-size: 12px; padding: 4px;"
                       >
                         ✏️
-                      </ct-button>
+                      </cf-button>
                     </cf-hstack>
                   </cf-card>
                 ))}
@@ -670,12 +670,12 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                 <span style={{ fontWeight: 500 }}>
                   Where is "{correctionTitle}" actually located?
                 </span>
-                <ct-button
+                <cf-button
                   variant="ghost"
                   onClick={closeCorrection({ correctionIndex })}
                 >
                   ✕ Cancel
-                </ct-button>
+                </cf-button>
               </cf-hstack>
               <div
                 style={{
@@ -688,7 +688,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                   // Extract raw location string for handler
                   const locationStr = derive(location, (l: string) => l);
                   return (
-                    <ct-button
+                    <cf-button
                       variant="secondary"
                       onClick={selectAisle({
                         items,
@@ -697,7 +697,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                       })}
                     >
                       {location}
-                    </ct-button>
+                    </cf-button>
                   );
                 })}
               </div>

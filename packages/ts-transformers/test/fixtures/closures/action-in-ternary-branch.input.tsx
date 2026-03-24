@@ -46,7 +46,7 @@ export default pattern<Input>(({ card }) => {
             {/* Nested ternary with computed - lowers locally inside JSX */}
             {hasDescription ? <span>{card.description}</span> : null}
             {/* Action in SAME branch stays direct while JSX-local rewrites handle the computed value */}
-            <ct-button onClick={startEditing}>Edit</ct-button>
+            <cf-button onClick={startEditing}>Edit</cf-button>
           </div>
         )}
       </cf-card>

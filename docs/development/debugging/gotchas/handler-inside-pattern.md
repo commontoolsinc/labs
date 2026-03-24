@@ -16,7 +16,7 @@ export default pattern<Input, Input>(({ items }) => {
   });
 
   return {
-    [UI]: <ct-button onClick={addItem}>Add</ct-button>,
+    [UI]: <cf-button onClick={addItem}>Add</cf-button>,
     items,
   };
 });
@@ -54,7 +54,7 @@ const addItem = handler<unknown, { items: Writable<Item[]> }>(
 const formatDate = (d: string): string => new Date(d).toLocaleDateString();
 
 export default pattern<Input, Input>(({ items }) => ({
-  [UI]: <ct-button onClick={addItem({ items })}>Add</ct-button>,
+  [UI]: <cf-button onClick={addItem({ items })}>Add</cf-button>,
   items,
 }));
 ```

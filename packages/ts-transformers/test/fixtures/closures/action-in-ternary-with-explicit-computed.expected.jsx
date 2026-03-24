@@ -106,7 +106,7 @@ export default pattern((__ct_pattern_input) => {
                 startEditing: startEditing
             }, ({ card, startEditing }) => (<div>
                 <span>{card.description}</span>
-                <ct-button onClick={startEditing}>Edit</ct-button>
+                <cf-button onClick={startEditing}>Edit</cf-button>
               </div>))}
           </div>)}
       </cf-card>),

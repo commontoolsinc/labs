@@ -46,17 +46,17 @@ export default pattern<WritableInput>(({ count, items, title }) => {
         <div>Count: {count}</div>
 
         {/* Can also mutate */}
-        <ct-button onClick={() => count.set(count.get() + 1)}>
+        <cf-button onClick={() => count.set(count.get() + 1)}>
           Increment
-        </ct-button>
+        </cf-button>
 
         {/* Bidirectional binding */}
-        <ct-input $value={title} />
+        <cf-input $value={title} />
 
         {/* Can also mutate */}
-        <ct-button onClick={() => items.push({ title: "New" })}>
+        <cf-button onClick={() => items.push({ title: "New" })}>
           Add Item
-        </ct-button>
+        </cf-button>
       </div>
     ),
   };

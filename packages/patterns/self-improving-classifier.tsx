@@ -2066,10 +2066,10 @@ Each suggestion should have:
         <cf-screen>
           <cf-vstack slot="header" gap="2">
             <cf-heading level={4}>{displayName}</cf-heading>
-            <ct-input
+            <cf-input
               value={computed(() => config.get()?.question ?? "")}
               placeholder="Enter your classification question (e.g., 'Is this email a bill?')"
-              onct-input={(e: { detail?: { value?: string } }) => {
+              oncf-input={(e: { detail?: { value?: string } }) => {
                 const q = e.detail?.value || "";
                 const current = config.get() || DEFAULT_CONFIG;
                 config.set({ ...current, question: q });
@@ -2151,18 +2151,18 @@ Each suggestion should have:
                             <span style="font-weight: 500; min-width: 80px;">
                               {getFieldKey(entry)}:
                             </span>
-                            <ct-input
+                            <cf-input
                               value={getFieldValue(entry)}
                               placeholder={computed(() =>
                                 `Enter ${entry.key}`
                               )}
                               style="flex: 1;"
-                              onct-input={updateFieldHandler({
+                              oncf-input={updateFieldHandler({
                                 fieldKey: getFieldKey(entry),
                                 newItemFields,
                               })}
                             />
-                            <ct-button
+                            <cf-button
                               variant="ghost"
                               onClick={removeFieldHandler({
                                 entry,
@@ -2170,7 +2170,7 @@ Each suggestion should have:
                               })}
                             >
                               x
-                            </ct-button>
+                            </cf-button>
                           </cf-hstack>
                         ),
                       )}
@@ -2179,22 +2179,22 @@ Each suggestion should have:
 
                   {/* Add field */}
                   <cf-hstack gap="2">
-                    <ct-input
+                    <cf-input
                       $value={newFieldKey}
                       placeholder="Field name"
                       style="width: 120px;"
                     />
-                    <ct-input
+                    <cf-input
                       $value={newFieldValue}
                       placeholder="Field value"
                       style="flex: 1;"
                     />
-                    <ct-button variant="secondary" onClick={addFieldToNewItem}>
+                    <cf-button variant="secondary" onClick={addFieldToNewItem}>
                       Add
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
 
-                  <ct-button
+                  <cf-button
                     variant="primary"
                     disabled={computed(() => {
                       const fields = newItemFields.get();
@@ -2206,7 +2206,7 @@ Each suggestion should have:
                     onClick={submitNewItem}
                   >
                     Classify
-                  </ct-button>
+                  </cf-button>
                 </cf-vstack>
               </cf-card>
 
@@ -2276,13 +2276,13 @@ Each suggestion should have:
                         </span>
 
                         <cf-hstack gap="2">
-                          <ct-button
+                          <cf-button
                             variant="primary"
                             onClick={acceptCurrentClassification}
                           >
                             Accept
-                          </ct-button>
-                          <ct-button
+                          </cf-button>
+                          <cf-button
                             variant="secondary"
                             onClick={correctCurrentClassification}
                           >
@@ -2294,13 +2294,13 @@ Each suggestion should have:
                               "NO",
                               "YES",
                             )}
-                          </ct-button>
-                          <ct-button
+                          </cf-button>
+                          <cf-button
                             variant="ghost"
                             onClick={dismissCurrentItem}
                           >
                             Dismiss
-                          </ct-button>
+                          </cf-button>
                         </cf-hstack>
                       </cf-vstack>,
                       // Still loading
@@ -2371,13 +2371,13 @@ Each suggestion should have:
                     </span>
 
                     <cf-hstack gap="2">
-                      <ct-button
+                      <cf-button
                         variant="primary"
                         onClick={acceptUndoneClassification}
                       >
                         Accept
-                      </ct-button>
-                      <ct-button
+                      </cf-button>
+                      <cf-button
                         variant="secondary"
                         onClick={correctUndoneClassification}
                       >
@@ -2386,10 +2386,10 @@ Each suggestion should have:
                           "NO",
                           "YES",
                         )}
-                      </ct-button>
-                      <ct-button variant="ghost" onClick={dismissUndoneItem}>
+                      </cf-button>
+                      <cf-button variant="ghost" onClick={dismissUndoneItem}>
                         Dismiss
-                      </ct-button>
+                      </cf-button>
                     </cf-hstack>
                   </cf-vstack>
                 </cf-card>,
@@ -2441,7 +2441,7 @@ Each suggestion should have:
                           </span>
 
                           <cf-hstack gap="2">
-                            <ct-button
+                            <cf-button
                               variant="primary"
                               onClick={confirmPendingClassification({
                                 pending,
@@ -2450,8 +2450,8 @@ Each suggestion should have:
                               })}
                             >
                               Confirm
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               variant="secondary"
                               onClick={correctPendingClassification({
                                 pending,
@@ -2464,8 +2464,8 @@ Each suggestion should have:
                                 "NO",
                                 "YES",
                               )}
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               variant="ghost"
                               onClick={dismissPendingClassification({
                                 pending,
@@ -2473,7 +2473,7 @@ Each suggestion should have:
                               })}
                             >
                               Dismiss
-                            </ct-button>
+                            </cf-button>
                           </cf-hstack>
                         </cf-vstack>
                       </cf-card>
@@ -2530,12 +2530,12 @@ Each suggestion should have:
                             )}
                           </span>
                         </cf-vstack>
-                        <ct-button
+                        <cf-button
                           variant="ghost"
                           onClick={removeRuleHandler({ rule, rules })}
                         >
                           x
-                        </ct-button>
+                        </cf-button>
                       </cf-hstack>
                     ))}
                   </cf-vstack>
@@ -2550,9 +2550,9 @@ Each suggestion should have:
                   <cf-vstack gap="2">
                     <cf-hstack gap="2" align="center" justify="between">
                       <cf-heading level={5}>Suggested Rules</cf-heading>
-                      <ct-button variant="ghost" onClick={refreshSuggestions}>
+                      <cf-button variant="ghost" onClick={refreshSuggestions}>
                         Refresh
-                      </ct-button>
+                      </cf-button>
                     </cf-hstack>
                     {visibleSuggestions.map(({ suggestion, originalIndex }) => (
                       <cf-card style="background: var(--ct-color-success-50);">
@@ -2571,7 +2571,7 @@ Each suggestion should have:
                             {suggestion.reasoning}
                           </span>
                           <cf-hstack gap="2">
-                            <ct-button
+                            <cf-button
                               variant="primary"
                               onClick={acceptSuggestionHandler({
                                 suggestion,
@@ -2581,8 +2581,8 @@ Each suggestion should have:
                               })}
                             >
                               Accept
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               variant="ghost"
                               onClick={rejectSuggestionHandler({
                                 originalIndex,
@@ -2590,7 +2590,7 @@ Each suggestion should have:
                               })}
                             >
                               Reject
-                            </ct-button>
+                            </cf-button>
                           </cf-hstack>
                         </cf-vstack>
                       </cf-card>
@@ -2657,7 +2657,7 @@ Each suggestion should have:
                               : "(empty)";
                           })}
                         </span>
-                        <ct-button
+                        <cf-button
                           variant="secondary"
                           size="sm"
                           onClick={undoAutoClassificationHandler({
@@ -2669,7 +2669,7 @@ Each suggestion should have:
                           })}
                         >
                           Undo
-                        </ct-button>
+                        </cf-button>
                       </cf-hstack>
                     ))}
                   </cf-vstack>
@@ -2872,7 +2872,7 @@ Each suggestion should have:
 
                               {/* Action buttons */}
                               <cf-hstack gap="2" style="margin-top: 0.5rem;">
-                                <ct-button
+                                <cf-button
                                   variant="secondary"
                                   size="sm"
                                   disabled={computed(() =>
@@ -2886,8 +2886,8 @@ Each suggestion should have:
                                   })}
                                 >
                                   Reclassify
-                                </ct-button>
-                                <ct-button
+                                </cf-button>
+                                <cf-button
                                   variant="ghost"
                                   size="sm"
                                   onClick={removeExampleHandler({
@@ -2897,7 +2897,7 @@ Each suggestion should have:
                                   })}
                                 >
                                   Remove
-                                </ct-button>
+                                </cf-button>
                               </cf-hstack>
                             </cf-vstack>
                           </cf-card>,

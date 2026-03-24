@@ -12,7 +12,7 @@ Use `$` prefix for automatic two-way sync. No handler needed for simple updates.
 
 ```tsx
 <ct-checkbox $checked={item.done} />    // Auto-syncs checkbox state
-<ct-input $value={title} />             // Auto-syncs text input
+<cf-input $value={title} />             // Auto-syncs text input
 <ct-select $value={category} items={[...]} />
 ```
 
@@ -34,33 +34,33 @@ Use camelCase for `ct-*` component properties. Kebab-case JSX attributes don't m
 
 ---
 
-## ct-button
+## cf-button
 
 ```tsx
 // Simple inline handler
-<ct-button onClick={() => count.set(count.get() + 1)}>Increment</ct-button>
+<cf-button onClick={() => count.set(count.get() + 1)}>Increment</cf-button>
 
 // action() for more complex logic (preferred)
 const increment = action(() => {
   count.set(count.get() + 1);
   lastUpdated.set(Date.now());
 });
-<ct-button onClick={increment}>Increment</ct-button>
+<cf-button onClick={increment}>Increment</cf-button>
 ```
 
 ---
 
-## ct-input
+## cf-input
 
 ```tsx
 // Bidirectional binding (preferred)
-<ct-input $value={title} />
+<cf-input $value={title} />
 
 // With placeholder
-<ct-input $value={searchQuery} placeholder="Search..." />
+<cf-input $value={searchQuery} placeholder="Search..." />
 
 // Manual handler for side effects
-<ct-input value={title} onct-input={(e) => {
+<cf-input value={title} oncf-input={(e) => {
   title.set(e.detail.value);
   console.log("Changed:", e.detail.value);
 }} />
@@ -114,14 +114,14 @@ Uses `items` attribute with `{ label, value }` objects. **Do not use `<option>` 
 
 ---
 
-## ct-message-input
+## cf-message-input
 
 Input + button combo for adding items.
 
 ```tsx
-<ct-message-input
+<cf-message-input
   placeholder="New item"
-  onct-send={(e) => {
+  oncf-send={(e) => {
     const text = e.detail?.message?.trim();
     if (text) items.push({ title: text, done: false });
   }}
@@ -298,7 +298,7 @@ Multiline textarea with `@`-mention autocomplete, attachments, and voice input.
   $mentionable={mentionable}
   placeholder="Type @ to mention..."
   buttonText="Send"
-  onct-send={handleSend}
+  oncf-send={handleSend}
 />
 ```
 

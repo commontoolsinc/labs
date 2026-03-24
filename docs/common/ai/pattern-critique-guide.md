@@ -72,7 +72,7 @@ Ternaries are valid in JSX. The transformer auto-converts them to `ifElse()`.
 | `checked={item.done}` | `$checked={item.done}` |
 | `value={title}` | `$value={title}` |
 | `$checked={item}` | `$checked={item.done}` |
-| wrong event name | Use `onct-send`, `onct-input`, or `onct-change` |
+| wrong event name | Use `oncf-send`, `oncf-input`, or `onct-change` |
 
 ### 6. Custom component props
 

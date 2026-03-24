@@ -136,7 +136,7 @@ export default pattern((_) => {
               <h2 style={{ margin: 0, fontSize: "16px" }}>Profile Summary</h2>
 
               <cf-vstack gap="1">
-                <ct-textarea
+                <cf-textarea
                   $value={learned.key("summary")}
                   placeholder="Write a short profile summary about yourself..."
                   rows={6}
@@ -170,13 +170,13 @@ export default pattern((_) => {
                         spaceDid={space.did}
                       />
                     </div>
-                    <ct-button
+                    <cf-button
                       size="sm"
                       variant="ghost"
                       onClick={removeSpaceHandler({ name: space.name, spaces })}
                     >
                       ✕
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
                 ))}
                 {computed(() => spaces.get().length === 0) && (
@@ -198,10 +198,10 @@ export default pattern((_) => {
                 <h3 style={{ margin: 0, fontSize: "14px" }}>
                   Add or Create Space
                 </h3>
-                <ct-message-input
+                <cf-message-input
                   placeholder="Space name..."
                   appearance="rounded"
-                  onct-send={addSpaceHandler({ spaces })}
+                  oncf-send={addSpaceHandler({ spaces })}
                 />
                 <span style={{ fontSize: "11px", color: "#888" }}>
                   Type a name and press enter. Click the link to navigate.
@@ -221,7 +221,7 @@ export default pattern((_) => {
                 <label style={{ fontSize: "13px", color: "#666" }}>
                   Default App Pattern URL
                 </label>
-                <ct-input
+                <cf-input
                   $value={defaultAppUrl}
                   placeholder="/api/patterns/system/default-app.tsx"
                   style={{

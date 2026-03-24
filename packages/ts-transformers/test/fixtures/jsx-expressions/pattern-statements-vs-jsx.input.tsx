@@ -26,7 +26,7 @@ export default pattern<PatternState>((state) => {
 
     [UI]: (
       <div>
-        <ct-button onClick={decrement(state)}>-</ct-button>
+        <cf-button onClick={decrement(state)}>-</cf-button>
         <p>
           {/* These SHOULD be transformed (JSX expression context) */}
           Current: {state.value}
@@ -39,7 +39,7 @@ export default pattern<PatternState>((state) => {
           <br />
           Status: {state.value > 10 ? "High" : "Low"}
         </p>
-        <ct-button onClick={increment({ value: state.value })}>+</ct-button>
+        <cf-button onClick={increment({ value: state.value })}>+</cf-button>
       </div>
     ),
 

@@ -74,12 +74,12 @@ export const TagsModule = pattern<TagsModuleInput, TagsModuleInput>(
         <cf-vstack style={{ gap: "12px" }}>
           {/* Tag input */}
           <cf-hstack style={{ gap: "8px" }}>
-            <ct-input
+            <cf-input
               $value={tagInput}
               placeholder="Add a tag..."
               style={{ flex: "1" }}
             />
-            <ct-button onClick={addTag({ tags, tagInput })}>Add</ct-button>
+            <cf-button onClick={addTag({ tags, tagInput })}>Add</cf-button>
           </cf-hstack>
 
           {/* Tag chips */}

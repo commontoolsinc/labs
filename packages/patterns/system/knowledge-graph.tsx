@@ -328,18 +328,18 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
           <div slot="end">
             {ifElse(
               hasBeenBuilt,
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={triggerRebuild({ addMessage, messages })}
               >
                 Rebuild
-              </ct-button>,
-              <ct-button
+              </cf-button>,
+              <cf-button
                 variant="primary"
                 onClick={triggerBuild({ addMessage })}
               >
                 Build Graph
-              </ct-button>,
+              </cf-button>,
             )}
           </div>
         </ct-toolbar>

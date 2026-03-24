@@ -131,12 +131,12 @@ export default pattern<Input>(({ runCount, logs }) => {
         </div>
 
         <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
-          <ct-button onClick={browserTrigger({ runCount, logs })}>
+          <cf-button onClick={browserTrigger({ runCount, logs })}>
             Browser Trigger (click me)
-          </ct-button>
-          <ct-button onClick={clearLogs({ runCount, logs })}>
+          </cf-button>
+          <cf-button onClick={clearLogs({ runCount, logs })}>
             Clear Logs
-          </ct-button>
+          </cf-button>
         </div>
 
         <div

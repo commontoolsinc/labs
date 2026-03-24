@@ -5894,10 +5894,10 @@ export default pattern<Input, Output>(
                     <label style="font-size: 0.875rem; font-weight: 500; color: #1d1d1f;">
                       Calendar Name
                     </label>
-                    <ct-message-input
+                    <cf-message-input
                       placeholder={name}
                       button-text="Save"
-                      onct-send={updateName({ name, showSettings })}
+                      oncf-send={updateName({ name, showSettings })}
                     />
                   </cf-vstack>
                   <cf-vstack gap="2">
@@ -6011,12 +6011,12 @@ export default pattern<Input, Output>(
                     gap="2"
                     style="justify-content: flex-end; margin-top: 8px;"
                   >
-                    <ct-button
+                    <cf-button
                       onClick={closeSettings({ showSettings })}
                       size="sm"
                     >
                       Close
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
                 </cf-vstack>
               </div>
@@ -6187,7 +6187,7 @@ export default pattern<Input, Output>(
                         <div></div>,
                       )}
                     </cf-vstack>
-                    <ct-button
+                    <cf-button
                       onClick={cancelScopeConfirmation({
                         scheduleConfirmingScopeCell,
                       })}
@@ -6196,13 +6196,13 @@ export default pattern<Input, Output>(
                       style="margin-top: 8px;"
                     >
                       Cancel
-                    </ct-button>
+                    </cf-button>
                   </cf-vstack>,
                   // Normal edit UI
                   <cf-vstack gap="4">
                     <div className="modal-section">
                       <div className="modal-label">Note</div>
-                      <ct-input
+                      <cf-input
                         type="text"
                         $value={scheduleTextCell}
                         onChange={onNoteChange({
@@ -6228,7 +6228,7 @@ export default pattern<Input, Output>(
                     <div className="modal-section">
                       <div className="modal-label">Start Date & Time</div>
                       <cf-hstack gap="2" style="align-items: center;">
-                        <ct-input
+                        <cf-input
                           type="date"
                           $value={scheduleStartDateCell}
                           style="flex: 1.2;"
@@ -6480,7 +6480,7 @@ export default pattern<Input, Output>(
                           derive(scheduleRepeatEndsCell, (endsType: any) =>
                             endsType === "on"),
                           <div style="margin-top: 12px;">
-                            <ct-input
+                            <cf-input
                               type="date"
                               $value={scheduleRepeatUntilCell}
                               style="width: 100%;"
@@ -6506,7 +6506,7 @@ export default pattern<Input, Output>(
                       <div className="modal-section">
                         <div className="modal-label">Notify me</div>
                         <cf-hstack gap="2" style="align-items: center;">
-                          <ct-input
+                          <cf-input
                             type="number"
                             $value={scheduleNotifValueCell}
                             style="width: 80px;"
@@ -6556,7 +6556,7 @@ export default pattern<Input, Output>(
                       >
                         🗑️
                       </button>
-                      <ct-button
+                      <cf-button
                         onClick={feelingLucky({
                           entries,
                           recurringSeries,
@@ -6576,8 +6576,8 @@ export default pattern<Input, Output>(
                         style={{ flex: "1 1 auto" }}
                       >
                         I'm Feeling Lucky
-                      </ct-button>
-                      <ct-button
+                      </cf-button>
+                      <cf-button
                         onClick={saveSchedule({
                           scheduleModalState,
                           scheduleConfirmingScopeCell,
@@ -6605,7 +6605,7 @@ export default pattern<Input, Output>(
                         style={{ flex: "0 0 auto" }}
                       >
                         Save
-                      </ct-button>
+                      </cf-button>
                     </div>
                   </cf-vstack>,
                 )}
@@ -6702,7 +6702,7 @@ export default pattern<Input, Output>(
                       </div>
                     </div>
                   </cf-vstack>
-                  <ct-button
+                  <cf-button
                     onClick={cancelDeletionConfirmation({
                       deletionConfirmingScopeCell,
                       deletionPendingCell,
@@ -6712,7 +6712,7 @@ export default pattern<Input, Output>(
                     style="margin-top: 12px;"
                   >
                     Cancel
-                  </ct-button>
+                  </cf-button>
                 </cf-vstack>
               </div>
             </div>,
@@ -6740,30 +6740,30 @@ export default pattern<Input, Output>(
 
               <div className="column-section">
                 <div className="date-nav">
-                  <ct-button
+                  <cf-button
                     onClick={previousDay({ currentDate })}
                     size="sm"
                     variant="ghost"
                   >
                     ←
-                  </ct-button>
+                  </cf-button>
                   <h2>
                     {formattedDate}
                   </h2>
-                  <ct-button
+                  <cf-button
                     onClick={nextDay({ currentDate })}
                     size="sm"
                     variant="ghost"
                   >
                     →
-                  </ct-button>
-                  <ct-button
+                  </cf-button>
+                  <cf-button
                     onClick={goToToday({ currentDate, viewedYearMonth })}
                     size="sm"
                     variant="ghost"
                   >
                     Today
-                  </ct-button>
+                  </cf-button>
                 </div>
               </div>
 
@@ -7000,13 +7000,13 @@ export default pattern<Input, Output>(
               showMonthView,
               <div className="right-column">
                 <div className="month-header">
-                  <ct-button
+                  <cf-button
                     onClick={previousMonth({ currentDate, viewedYearMonth })}
                     size="sm"
                     variant="ghost"
                   >
                     ←
-                  </ct-button>
+                  </cf-button>
                   {derive(
                     { currentMonth, currentYear },
                     ({ currentMonth, currentYear }: any) => (
@@ -7015,13 +7015,13 @@ export default pattern<Input, Output>(
                       </h3>
                     ),
                   )}
-                  <ct-button
+                  <cf-button
                     onClick={nextMonth({ currentDate, viewedYearMonth })}
                     size="sm"
                     variant="ghost"
                   >
                     →
-                  </ct-button>
+                  </cf-button>
                 </div>
 
                 <div className="calendar-grid">

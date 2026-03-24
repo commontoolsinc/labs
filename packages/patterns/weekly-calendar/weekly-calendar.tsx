@@ -606,7 +606,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 {/* Title Input */}
                 <div>
                   <label style={STYLES.label}>Title</label>
-                  <ct-input
+                  <cf-input
                     $value={newEventTitle}
                     placeholder="Event title..."
                     style={{ width: "100%" }}
@@ -616,7 +616,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 {/* Date Input */}
                 <div>
                   <label style={STYLES.label}>Date</label>
-                  <ct-input
+                  <cf-input
                     $value={newEventDate}
                     type="date"
                     style={{ width: "100%" }}
@@ -627,16 +627,16 @@ const WeeklyCalendar = pattern<Input, Output>(
                 <div style={{ display: "flex", gap: "8px" }}>
                   <div style={{ flex: 1 }}>
                     <label style={STYLES.label}>Start</label>
-                    <ct-input
+                    <cf-input
                       $value={newEventStartTime}
                       type="time"
                       style={{ width: "100%" }}
-                      onct-change={onStartTimeChange}
+                      oncf-change={onStartTimeChange}
                     />
                   </div>
                   <div style={{ flex: 1 }}>
                     <label style={STYLES.label}>End</label>
-                    <ct-input
+                    <cf-input
                       $value={newEventEndTime}
                       type="time"
                       style={{ width: "100%" }}
@@ -741,7 +741,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 {/* Title Input */}
                 <div>
                   <label style={STYLES.label}>Title</label>
-                  <ct-input
+                  <cf-input
                     $value={editEventTitle}
                     placeholder="Event title..."
                     style={{ width: "100%" }}
@@ -751,7 +751,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 {/* Date Input */}
                 <div>
                   <label style={STYLES.label}>Date</label>
-                  <ct-input
+                  <cf-input
                     $value={editEventDate}
                     type="date"
                     style={{ width: "100%" }}
@@ -762,16 +762,16 @@ const WeeklyCalendar = pattern<Input, Output>(
                 <div style={{ display: "flex", gap: "8px" }}>
                   <div style={{ flex: 1 }}>
                     <label style={STYLES.label}>Start</label>
-                    <ct-input
+                    <cf-input
                       $value={editEventStartTime}
                       type="time"
                       style={{ width: "100%" }}
-                      onct-change={onEditStartTimeChange}
+                      oncf-change={onEditStartTimeChange}
                     />
                   </div>
                   <div style={{ flex: 1 }}>
                     <label style={STYLES.label}>End</label>
-                    <ct-input
+                    <cf-input
                       $value={editEventEndTime}
                       type="time"
                       style={{ width: "100%" }}
@@ -1259,14 +1259,14 @@ const WeeklyCalendar = pattern<Input, Output>(
               Linked from:
             </span>
             {backlinks.map((piece) => (
-              <ct-button
+              <cf-button
                 variant="ghost"
                 size="sm"
                 onClick={handleBacklinkClick({ piece })}
                 style={{ fontSize: "12px" }}
               >
                 {piece?.[NAME]}
-              </ct-button>
+              </cf-button>
             ))}
           </cf-hstack>
         </cf-screen>

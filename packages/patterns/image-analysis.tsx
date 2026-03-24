@@ -90,7 +90,7 @@ export default pattern<ImageChatInput, ImageChatOutput>(
               <cf-card>
                 <cf-vstack gap="2">
                   <cf-heading level={5}>Your Question</cf-heading>
-                  <ct-input
+                  <cf-input
                     $value={prompt}
                     placeholder="Ask about the images..."
                   />

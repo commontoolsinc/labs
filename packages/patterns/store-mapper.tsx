@@ -504,7 +504,7 @@ export default pattern<Input, Output>(
             <cf-hstack justify="between" align="center">
               <cf-hstack gap="2" align="center">
                 <span style={{ fontSize: "1.5rem" }}>🗺️</span>
-                <ct-input
+                <cf-input
                   $value={storeName}
                   placeholder="Store name..."
                   customStyle="font-size: 1.25rem; font-weight: bold; background: transparent; border: none; color: white;"
@@ -1097,7 +1097,7 @@ export default pattern<Input, Output>(
                         >
                           Front:
                         </span>
-                        <ct-button
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-front"
@@ -1111,8 +1111,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Left
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-front"
@@ -1126,8 +1126,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Center
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-front"
@@ -1141,7 +1141,7 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Right
-                        </ct-button>
+                        </cf-button>
                       </div>
 
                       {/* Back wall buttons */}
@@ -1163,7 +1163,7 @@ export default pattern<Input, Output>(
                         >
                           Back:
                         </span>
-                        <ct-button
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-back"
@@ -1177,8 +1177,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Left
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-back"
@@ -1192,8 +1192,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Center
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-back"
@@ -1207,7 +1207,7 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Right
-                        </ct-button>
+                        </cf-button>
                       </div>
 
                       {/* Left wall buttons */}
@@ -1229,7 +1229,7 @@ export default pattern<Input, Output>(
                         >
                           Left:
                         </span>
-                        <ct-button
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-left"
@@ -1243,8 +1243,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Front
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-left"
@@ -1258,8 +1258,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Center
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-left"
@@ -1273,7 +1273,7 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Back
-                        </ct-button>
+                        </cf-button>
                       </div>
 
                       {/* Right wall buttons */}
@@ -1295,7 +1295,7 @@ export default pattern<Input, Output>(
                         >
                           Right:
                         </span>
-                        <ct-button
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-right"
@@ -1309,8 +1309,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Front
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-right"
@@ -1324,8 +1324,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Center
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-right"
@@ -1339,7 +1339,7 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Back
-                        </ct-button>
+                        </cf-button>
                       </div>
 
                       {/* Show added entrances */}
@@ -1377,7 +1377,7 @@ export default pattern<Input, Output>(
                                 }}
                               >
                                 🚪 {entrance.position}
-                                <ct-button
+                                <cf-button
                                   size="sm"
                                   variant="ghost"
                                   onClick={removeEntrance({
@@ -1387,7 +1387,7 @@ export default pattern<Input, Output>(
                                   style="padding: 2px 4px; min-height: 0;"
                                 >
                                   ×
-                                </ct-button>
+                                </cf-button>
                               </div>
                             ))}
                           </div>
@@ -1399,20 +1399,20 @@ export default pattern<Input, Output>(
 
                   {/* Quick Actions */}
                   <cf-hstack gap="2">
-                    <ct-button
+                    <cf-button
                       variant="secondary"
                       onClick={() => currentSection.set("aisles")}
                       style="flex: 1;"
                     >
                       + Add Aisles
-                    </ct-button>
-                    <ct-button
+                    </cf-button>
+                    <cf-button
                       variant="secondary"
                       onClick={() => currentSection.set("departments")}
                       style="flex: 1;"
                     >
                       + Add Departments
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
                 </cf-vstack>
               </cf-vscroll>
@@ -1451,19 +1451,19 @@ export default pattern<Input, Output>(
                           Aisle {aisle.name}
                         </div>
                         <cf-vstack gap="1" style="flex: 1;">
-                          <ct-textarea
+                          <cf-textarea
                             $value={aisle.description}
                             placeholder="Description (e.g., Bread & Cereal)"
                             rows={3}
                             auto-resize
                           />
                         </cf-vstack>
-                        <ct-button
+                        <cf-button
                           variant="ghost"
                           onClick={removeAisle({ aisles, aisle })}
                         >
                           ×
-                        </ct-button>
+                        </cf-button>
                       </cf-hstack>
                     </cf-card>
                   ))}
@@ -1484,10 +1484,10 @@ export default pattern<Input, Output>(
                   )}
 
                   {/* Add aisle input */}
-                  <ct-message-input
+                  <cf-message-input
                     placeholder="Enter aisle number (e.g., 1, 2, 5A)..."
                     appearance="rounded"
-                    onct-send={addAisle({ aisles })}
+                    oncf-send={addAisle({ aisles })}
                   />
 
                   {/* AI Photo Import Section */}
@@ -1548,7 +1548,7 @@ export default pattern<Input, Output>(
                               >
                                 📷 {extraction.photoName}
                               </span>
-                              <ct-button
+                              <cf-button
                                 size="sm"
                                 variant="ghost"
                                 onClick={hidePhoto({
@@ -1557,7 +1557,7 @@ export default pattern<Input, Output>(
                                 })}
                               >
                                 ×
-                              </ct-button>
+                              </cf-button>
                             </cf-hstack>
 
                             {ifElse(
@@ -1627,7 +1627,7 @@ export default pattern<Input, Output>(
                                     <cf-vstack gap="1">
                                       {/* Batch add button */}
                                       {newCount > 0 && (
-                                        <ct-button
+                                        <cf-button
                                           size="sm"
                                           variant="primary"
                                           onClick={addAllExtractedAisles({
@@ -1639,7 +1639,7 @@ export default pattern<Input, Output>(
                                           style="margin-bottom: 0.5rem;"
                                         >
                                           + Add All {newCount} New Aisles
-                                        </ct-button>
+                                        </cf-button>
                                       )}
 
                                       {/* Individual aisle results */}
@@ -1684,7 +1684,7 @@ export default pattern<Input, Output>(
                                               </div>
                                               {exists
                                                 ? (
-                                                  <ct-button
+                                                  <cf-button
                                                     size="sm"
                                                     variant="secondary"
                                                     onClick={mergeExtractedAisle(
@@ -1696,10 +1696,10 @@ export default pattern<Input, Output>(
                                                     )}
                                                   >
                                                     Merge
-                                                  </ct-button>
+                                                  </cf-button>
                                                 )
                                                 : (
-                                                  <ct-button
+                                                  <cf-button
                                                     size="sm"
                                                     variant="primary"
                                                     onClick={addExtractedAisle(
@@ -1711,7 +1711,7 @@ export default pattern<Input, Output>(
                                                     )}
                                                   >
                                                     Add
-                                                  </ct-button>
+                                                  </cf-button>
                                                 )}
                                             </cf-hstack>
                                           );
@@ -1794,7 +1794,7 @@ export default pattern<Input, Output>(
                             >
                               Front:
                             </span>
-                            <ct-button
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1809,8 +1809,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Left
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1825,8 +1825,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Center
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1841,7 +1841,7 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Right
-                            </ct-button>
+                            </cf-button>
                           </div>
                           {/* Back wall */}
                           <div
@@ -1862,7 +1862,7 @@ export default pattern<Input, Output>(
                             >
                               Back:
                             </span>
-                            <ct-button
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1877,8 +1877,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Left
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1893,8 +1893,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Center
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1909,7 +1909,7 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Right
-                            </ct-button>
+                            </cf-button>
                           </div>
                           {/* Left wall */}
                           <div
@@ -1930,7 +1930,7 @@ export default pattern<Input, Output>(
                             >
                               Left:
                             </span>
-                            <ct-button
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1945,8 +1945,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Front
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1961,8 +1961,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Center
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1977,7 +1977,7 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Back
-                            </ct-button>
+                            </cf-button>
                           </div>
                           {/* Right wall */}
                           <div
@@ -1998,7 +1998,7 @@ export default pattern<Input, Output>(
                             >
                               Right:
                             </span>
-                            <ct-button
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -2013,8 +2013,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Front
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -2029,8 +2029,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Center
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -2045,7 +2045,7 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Back
-                            </ct-button>
+                            </cf-button>
                           </div>
                           {/* Special locations */}
                           <div
@@ -2066,7 +2066,7 @@ export default pattern<Input, Output>(
                             >
                               Other:
                             </span>
-                            <ct-button
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -2082,8 +2082,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Normal Aisle
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -2097,10 +2097,10 @@ export default pattern<Input, Output>(
                               })}
                             >
                               N/A
-                            </ct-button>
+                            </cf-button>
                           </div>
                         </cf-vstack>
-                        <ct-input
+                        <cf-input
                           $value={dept.description}
                           placeholder="Description (optional)"
                         />
@@ -2129,15 +2129,15 @@ export default pattern<Input, Output>(
                         Record where items are actually located for future
                         reference.
                       </p>
-                      <ct-input
+                      <cf-input
                         $value={newCorrectionItem}
                         placeholder="Item name (e.g., coffee)"
                       />
-                      <ct-input
+                      <cf-input
                         $value={newCorrectionAisle}
                         placeholder="Correct location (e.g., Aisle 9 or Bakery)"
                       />
-                      <ct-button
+                      <cf-button
                         variant="primary"
                         onClick={() => {
                           const item = newCorrectionItem.get().trim();
@@ -2161,7 +2161,7 @@ export default pattern<Input, Output>(
                         }}
                       >
                         Save Correction
-                      </ct-button>
+                      </cf-button>
                     </cf-vstack>
                   </cf-card>
 
@@ -2183,7 +2183,7 @@ export default pattern<Input, Output>(
                               <strong>{loc.itemName}</strong> →{" "}
                               {loc.correctAisle}
                             </span>
-                            <ct-button
+                            <cf-button
                               variant="ghost"
                               onClick={() => {
                                 const current = itemLocations.get();
@@ -2197,7 +2197,7 @@ export default pattern<Input, Output>(
                               }}
                             >
                               ×
-                            </ct-button>
+                            </cf-button>
                           </cf-hstack>
                         ))}
                       </cf-vstack>

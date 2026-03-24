@@ -144,7 +144,7 @@ export const SimpleListModule = pattern<
               <ct-checkbox $checked={item.done} style={{ flexShrink: "0" }} />
 
               {/* Editable text with Cmd+[ / Cmd+] for indent */}
-              <ct-input
+              <cf-input
                 $value={item.text}
                 placeholder="..."
                 style={{
@@ -157,7 +157,7 @@ export const SimpleListModule = pattern<
                   opacity: item.done ? "0.5" : "1",
                   color: "inherit",
                 }}
-                onct-keydown={(e: {
+                oncf-keydown={(e: {
                   detail?: {
                     key: string;
                     metaKey?: boolean;
@@ -219,13 +219,13 @@ export const SimpleListModule = pattern<
         </cf-vstack>
 
         {/* Add item input - at bottom for natural list growth */}
-        <ct-message-input
+        <cf-message-input
           placeholder="Add item..."
           button-text="+"
           style={{
             fontSize: "14px",
           }}
-          onct-send={(e: { detail?: { message?: string } }) => {
+          oncf-send={(e: { detail?: { message?: string } }) => {
             const text = e.detail?.message;
             if (text) {
               addItem.send({ text });

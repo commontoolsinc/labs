@@ -609,22 +609,22 @@ export default pattern(
             <cf-vstack gap="1">
               <div>
                 <label>Import Limit</label>
-                <ct-input
+                <cf-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={String(settings.limit)}
                   placeholder="count of events to import"
-                  onct-input={updateLimit({ limit: settings.limit })}
+                  oncf-input={updateLimit({ limit: settings.limit })}
                 />
               </div>
 
               <div>
                 <label>
                   Calendars
-                  <ct-button
+                  <cf-button
                     onClick={getCalendars({ auth, calendars })}
                   >
                     Fetch Calendar List
-                  </ct-button>
+                  </cf-button>
                 </label>
                 <table>
                   <thead>
@@ -650,16 +650,16 @@ export default pattern(
 
               <div>
                 <label>Calendar ID</label>
-                <ct-input
+                <cf-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.calendarId}
                   placeholder="Calendar ID (e.g. primary)"
-                  onct-input={updateCalendarId({
+                  oncf-input={updateCalendarId({
                     calendarId: settings.calendarId,
                   })}
                 />
               </div>
-              <ct-button
+              <cf-button
                 onClick={calendarUpdater({
                   events,
                   auth,
@@ -667,12 +667,12 @@ export default pattern(
                 })}
               >
                 Fetch Events
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 onClick={clearEvents({ events })}
               >
                 Clear Events
-              </ct-button>
+              </cf-button>
             </cf-vstack>
           </cf-hstack>
           <ct-google-oauth

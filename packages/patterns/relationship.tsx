@@ -163,7 +163,7 @@ export const RelationshipModule = pattern<
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               How We Met
             </label>
-            <ct-textarea
+            <cf-textarea
               $value={howWeMet}
               placeholder="How did you meet?"
               rows={2}

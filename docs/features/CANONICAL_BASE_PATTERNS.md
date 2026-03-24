@@ -693,9 +693,9 @@ export default pattern<{ contact: Writable<Default<Contact, { name: "" }>> }, { 
     [UI]: (
       <cf-screen>
         <cf-vstack gap="md">
-          <ct-input $value={contact.key("name")} placeholder="Name" />
-          <ct-input $value={contact.key("email")} placeholder="Email" />
-          <ct-input $value={contact.key("phone")} placeholder="Phone" />
+          <cf-input $value={contact.key("name")} placeholder="Name" />
+          <cf-input $value={contact.key("email")} placeholder="Email" />
+          <cf-input $value={contact.key("phone")} placeholder="Phone" />
         </cf-vstack>
       </cf-screen>
     ),
@@ -729,12 +729,12 @@ export default pattern<{ member: Writable<Default<FamilyMember, { name: "", rela
     [UI]: (
       <cf-screen>
         <cf-vstack gap="md">
-          <ct-input $value={member.key("name")} placeholder="Name" />
+          <cf-input $value={member.key("name")} placeholder="Name" />
           <ct-picker
             $value={member.key("relationship")}
             options={["spouse", "child", "parent", "sibling", "grandparent"]}
           />
-          <ct-input $value={member.key("birthday")} type="date" placeholder="Birthday" />
+          <cf-input $value={member.key("birthday")} type="date" placeholder="Birthday" />
           <ct-tags tags={member.key("dietaryRestrictions")} placeholder="Dietary restrictions" />
           <ct-tags tags={member.key("giftPreferences")} placeholder="Gift ideas" />
         </cf-vstack>

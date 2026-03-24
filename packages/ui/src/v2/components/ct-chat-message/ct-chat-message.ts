@@ -3,7 +3,7 @@ import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-tool-call/ct-tool-call.ts";
-import "../ct-button/ct-button.ts";
+import "../cf-button/cf-button.ts";
 import "../ct-copy-button/ct-copy-button.ts";
 import "../ct-markdown/ct-markdown.ts";
 import type {

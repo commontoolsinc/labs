@@ -47,10 +47,10 @@ export default pattern<
             Update Counter
           </button>
           <p>If error is set, the update function will throw an error</p>
-          <ct-input
+          <cf-input
             value={error}
             placeholder="Error"
-            onct-input={updateError({ error })}
+            oncf-input={updateError({ error })}
           />
           <ct-updater
             id="registerBgCounter"

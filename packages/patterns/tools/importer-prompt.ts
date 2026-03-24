@@ -2095,9 +2095,9 @@ Use \`ct-*\` custom elements:
 
 - \`<ct-oauth $auth={auth} scopes={scopes} provider="..." providerLabel="..." brandColor="..." loginEndpoint="..." tokenField="...">\` — OAuth flow component
 - \`<ct-checkbox $checked={cell}>Label</ct-checkbox>\` — Checkbox with bidirectional binding
-- \`<ct-input $value={cell} placeholder="..." />\` — Text input with bidirectional binding
+- \`<cf-input $value={cell} placeholder="..." />\` — Text input with bidirectional binding
 - \`<ct-select $value={cell} items={[{label, value}]} />\` — Select dropdown
-- \`<ct-button onClick={handler}>Label</ct-button>\` — Button
+- \`<cf-button onClick={handler}>Label</cf-button>\` — Button
 - \`<cf-card>...</cf-card>\` — Styled card container
 - \`<cf-vstack gap={N}>...</cf-vstack>\` — Vertical stack layout
 - \`<cf-render $cell={patternInstance} />\` — Render a sub-pattern

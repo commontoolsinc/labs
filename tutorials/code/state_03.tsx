@@ -35,16 +35,16 @@ export default pattern(() => {
     [UI]: (
       <div>
         <h2>Character name: {characterName}</h2>
-        <ct-message-input
+        <cf-message-input
           name="Update"
           placeholder="Update Name"
-          onct-send={updateName({ characterName })}
+          oncf-send={updateName({ characterName })}
         />
         <li>
           DEX: {dex}{" "}
-          <ct-button onClick={rollDex(dex)}>
+          <cf-button onClick={rollDex(dex)}>
             Roll
-          </ct-button>
+          </cf-button>
         </li>
         <li>DEX Modifier: {Math.floor((dex - 10) / 2)}</li>
         <li>AC: {ac}</li>

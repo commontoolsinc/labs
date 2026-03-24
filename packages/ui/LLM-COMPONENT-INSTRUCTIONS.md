@@ -15,9 +15,9 @@ shadcn/ui design system. All components:
 
 ## Component Reference
 
-### 1. ct-button
+### 1. cf-button
 
-**Purpose**: Interactive button element **Tag**: `<ct-button>` **Attributes**:
+**Purpose**: Interactive button element **Tag**: `<cf-button>` **Attributes**:
 
 - `variant` - "default" | "destructive" | "outline" | "secondary" | "ghost" |
   "link"
@@ -28,12 +28,12 @@ shadcn/ui design system. All components:
   Default slot for button content **Example**:
 
 ```html
-<ct-button variant="primary" size="lg">Click Me</ct-button>
+<cf-button variant="primary" size="lg">Click Me</cf-button>
 ```
 
-### 2. ct-input
+### 2. cf-input
 
-**Purpose**: Text input field **Tag**: `<ct-input>` **Attributes**:
+**Purpose**: Text input field **Tag**: `<cf-input>` **Attributes**:
 
 - `type` - "text" | "email" | "password" | "number" | "search" | "tel" | "url" |
   "date" | "time" | "datetime-local"
@@ -48,18 +48,18 @@ shadcn/ui design system. All components:
 - `step` - string/number
 - `pattern` - string
 - `autocomplete` - string **Events**:
-- `ct-input` - Fired on input with detail: `{ value, name }`
+- `cf-input` - Fired on input with detail: `{ value, name }`
 - `ct-change` - Fired on change with detail: `{ value, name }`
 - `ct-focus` - Fired on focus
 - `ct-blur` - Fired on blur **Example**:
 
 ```html
-<ct-input type="email" placeholder="Enter email" required></ct-input>
+<cf-input type="email" placeholder="Enter email" required></cf-input>
 ```
 
-### 3. ct-textarea
+### 3. cf-textarea
 
-**Purpose**: Multi-line text input **Tag**: `<ct-textarea>` **Attributes**:
+**Purpose**: Multi-line text input **Tag**: `<cf-textarea>` **Attributes**:
 
 - `placeholder` - string
 - `value` - string
@@ -71,11 +71,11 @@ shadcn/ui design system. All components:
 - `cols` - number
 - `maxlength` - number
 - `auto-resize` - boolean **Events**:
-- `ct-input` - Fired on input with detail: `{ value, name }`
+- `cf-input` - Fired on input with detail: `{ value, name }`
 - `ct-change` - Fired on change with detail: `{ value, name }` **Example**:
 
 ```html
-<ct-textarea rows="4" placeholder="Enter message" auto-resize></ct-textarea>
+<cf-textarea rows="4" placeholder="Enter message" auto-resize></cf-textarea>
 ```
 
 ### 4. ct-checkbox
@@ -195,7 +195,7 @@ shadcn/ui design system. All components:
 
 ```html
 <ct-label for="email" required>Email Address</ct-label>
-<ct-input id="email" type="email"></ct-input>
+<cf-input id="email" type="email"></cf-input>
 ```
 
 ### 12. cf-card
@@ -211,7 +211,7 @@ shadcn/ui design system. All components:
 <cf-card>
   <h3 slot="header">Card Title</h3>
   <p slot="content">Card content goes here</p>
-  <ct-button slot="footer">Action</ct-button>
+  <cf-button slot="footer">Action</cf-button>
 </cf-card>
 ```
 
@@ -462,8 +462,8 @@ Default slot for ct-tab elements
 
 ```html
 <cf-hstack gap="4" align="center" justify="between">
-  <ct-button>Left</ct-button>
-  <ct-button>Right</ct-button>
+  <cf-button>Left</cf-button>
+  <cf-button>Right</cf-button>
 </cf-hstack>
 ```
 
@@ -577,22 +577,22 @@ Same as cf-hstack **Example**:
   <cf-vstack gap="4">
     <cf-vgroup gap="1">
       <ct-label for="name" required>Full Name</ct-label>
-      <ct-input id="name" name="name" required></ct-input>
+      <cf-input id="name" name="name" required></cf-input>
     </cf-vgroup>
 
     <cf-vgroup gap="1">
       <ct-label for="email" required>Email</ct-label>
-      <ct-input id="email" name="email" type="email" required></ct-input>
+      <cf-input id="email" name="email" type="email" required></cf-input>
     </cf-vgroup>
 
     <cf-vgroup gap="1">
       <ct-label for="message">Message</ct-label>
-      <ct-textarea id="message" name="message" rows="4"></ct-textarea>
+      <cf-textarea id="message" name="message" rows="4"></cf-textarea>
     </cf-vgroup>
 
     <cf-hstack gap="3" justify="end">
-      <ct-button variant="outline" type="reset">Cancel</ct-button>
-      <ct-button type="submit">Submit</ct-button>
+      <cf-button variant="outline" type="reset">Cancel</cf-button>
+      <cf-button type="submit">Submit</cf-button>
     </cf-hstack>
   </cf-vstack>
 </ct-form>
@@ -635,11 +635,11 @@ All components emit custom events with the `ct-` prefix. Event details are
 always in the `detail` property:
 
 ```javascript
-document.querySelector("ct-button").addEventListener("ct-click", (e) => {
+document.querySelector("cf-button").addEventListener("ct-click", (e) => {
   console.log("Button clicked:", e.detail);
 });
 
-document.querySelector("ct-input").addEventListener("ct-change", (e) => {
+document.querySelector("cf-input").addEventListener("ct-change", (e) => {
   console.log("Input value:", e.detail.value);
 });
 
@@ -655,13 +655,13 @@ Components expose CSS custom properties and parts for styling:
 
 ```css
 /* Custom properties */
-ct-button {
+cf-button {
   --background: #3b82f6;
   --foreground: white;
 }
 
 /* CSS parts */
-ct-input::part(input) {
+cf-input::part(input) {
   font-family: monospace;
 }
 

@@ -283,7 +283,7 @@ export default pattern<Input, Output>(
                 </span>
               </cf-hstack>
             </cf-hstack>
-            <ct-input $value={tripName} placeholder="Trip name..." />
+            <cf-input $value={tripName} placeholder="Trip name..." />
           </cf-vstack>
 
           <cf-vscroll flex showScrollbar fadeEdges>
@@ -298,9 +298,9 @@ export default pattern<Input, Output>(
                       Get started with demo data or click on the map to add your
                       first stop.
                     </p>
-                    <ct-button variant="primary" onClick={initializeDemo}>
+                    <cf-button variant="primary" onClick={initializeDemo}>
                       Load Demo Data
-                    </ct-button>
+                    </cf-button>
                   </cf-vstack>
                 </cf-card>,
                 null,
@@ -330,15 +330,15 @@ export default pattern<Input, Output>(
                 <cf-vstack gap="2">
                   <cf-heading level={5}>Map Controls</cf-heading>
                   <cf-hstack gap="2" wrap>
-                    <ct-button
+                    <cf-button
                       variant="secondary"
                       onClick={() => {
                         fitBoundsTrigger.set(fitBoundsTrigger.get() + 1);
                       }}
                     >
                       Fit to All Stops
-                    </ct-button>
-                    <ct-button
+                    </cf-button>
+                    <cf-button
                       variant="secondary"
                       onClick={() => {
                         center.set({ lat: 37.6, lng: -122.2 });
@@ -346,7 +346,7 @@ export default pattern<Input, Output>(
                       }}
                     >
                       Reset View
-                    </ct-button>
+                    </cf-button>
                     <ct-checkbox $checked={showRoute}>Show Route</ct-checkbox>
                   </cf-hstack>
                   <cf-hstack gap="3">
@@ -396,7 +396,7 @@ export default pattern<Input, Output>(
                         {index + 1}
                       </span>
                       <cf-vstack gap="0" style="flex: 1;">
-                        <ct-input
+                        <cf-input
                           $value={stop.title}
                           style="font-weight: 500;"
                         />
@@ -409,7 +409,7 @@ export default pattern<Input, Output>(
                           )}
                         </span>
                       </cf-vstack>
-                      <ct-button
+                      <cf-button
                         variant="ghost"
                         onClick={() => {
                           center.set(stop.position);
@@ -417,13 +417,13 @@ export default pattern<Input, Output>(
                         }}
                       >
                         Go
-                      </ct-button>
-                      <ct-button
+                      </cf-button>
+                      <cf-button
                         variant="ghost"
                         onClick={removeStopHandler({ stops, index })}
                       >
                         x
-                      </ct-button>
+                      </cf-button>
                     </cf-hstack>
                   ))}
 
@@ -442,7 +442,7 @@ export default pattern<Input, Output>(
                 <cf-vstack gap="2">
                   <cf-hstack justify="between" align="center">
                     <cf-heading level={5}>Areas of Interest</cf-heading>
-                    <ct-button
+                    <cf-button
                       variant="secondary"
                       size="sm"
                       onClick={addAreaHandler({
@@ -451,7 +451,7 @@ export default pattern<Input, Output>(
                       })}
                     >
                       + Add Area
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
 
                   {areasOfInterest.map((area) => (
@@ -466,7 +466,7 @@ export default pattern<Input, Output>(
                         }}
                       />
                       <cf-vstack gap="0" style="flex: 1;">
-                        <ct-input
+                        <cf-input
                           $value={area.title}
                           style="font-weight: 500;"
                         />
@@ -474,7 +474,7 @@ export default pattern<Input, Output>(
                           Radius: {area.radius}m
                         </span>
                       </cf-vstack>
-                      <ct-button
+                      <cf-button
                         variant="ghost"
                         onClick={() => {
                           center.set(area.center);
@@ -482,8 +482,8 @@ export default pattern<Input, Output>(
                         }}
                       >
                         Go
-                      </ct-button>
-                      <ct-button
+                      </cf-button>
+                      <cf-button
                         variant="ghost"
                         onClick={() => {
                           const current = areasOfInterest.get();
@@ -496,7 +496,7 @@ export default pattern<Input, Output>(
                         }}
                       >
                         x
-                      </ct-button>
+                      </cf-button>
                     </cf-hstack>
                   ))}
 
@@ -561,7 +561,7 @@ export default pattern<Input, Output>(
           </cf-vscroll>
 
           <cf-hstack slot="footer" gap="2" style="padding: 1rem;">
-            <ct-button
+            <cf-button
               variant="secondary"
               style="flex: 1;"
               onClick={() => {
@@ -571,8 +571,8 @@ export default pattern<Input, Output>(
               }}
             >
               Clear All
-            </ct-button>
-            <ct-button
+            </cf-button>
+            <cf-button
               variant="primary"
               style="flex: 1;"
               onClick={() => {
@@ -583,7 +583,7 @@ export default pattern<Input, Output>(
               }}
             >
               Reset Demo
-            </ct-button>
+            </cf-button>
           </cf-hstack>
         </cf-screen>
       ),

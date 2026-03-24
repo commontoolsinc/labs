@@ -1,26 +1,26 @@
 /**
- * Tests for CTButton component
+ * Tests for CFButton component
  */
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { CTButton } from "./ct-button.ts";
+import { CFButton } from "./cf-button.ts";
 
-describe("CTButton", () => {
+describe("CFButton", () => {
   it("should be defined", () => {
-    expect(CTButton).toBeDefined();
+    expect(CFButton).toBeDefined();
   });
 
   it("should have customElement definition", () => {
-    expect(customElements.get("ct-button")).toBe(CTButton);
+    expect(customElements.get("cf-button")).toBe(CFButton);
   });
 
   it("should create element instance", () => {
-    const element = new CTButton();
-    expect(element).toBeInstanceOf(CTButton);
+    const element = new CFButton();
+    expect(element).toBeInstanceOf(CFButton);
   });
 
   it("should have default properties", () => {
-    const element = new CTButton();
+    const element = new CFButton();
     expect(element.variant).toBe("primary");
     expect(element.size).toBe("default");
     expect(element.disabled).toBe(false);
@@ -28,7 +28,7 @@ describe("CTButton", () => {
   });
 
   it("should suppress click events when disabled via host listener", () => {
-    const element = new CTButton();
+    const element = new CFButton();
     element.disabled = true;
 
     // Verify the element has a capture-phase click listener that stops propagation
@@ -46,7 +46,7 @@ describe("CTButton", () => {
   });
 
   it("should allow click events when not disabled", () => {
-    const element = new CTButton();
+    const element = new CFButton();
     element.disabled = false;
 
     let listenerCalled = false;

@@ -21,25 +21,25 @@ export default pattern<CollapsibleStoryInput, CollapsibleStoryOutput>(() => {
       >
         <cf-vstack gap="2">
           <ct-collapsible>
-            <ct-button
+            <cf-button
               slot="trigger"
               variant="ghost"
               style="width: 100%; text-align: left;"
             >
               Click to expand
-            </ct-button>
+            </cf-button>
             <div style="padding: 12px; font-size: 13px; color: #666;">
               Hidden content revealed on expand. Animated height transition.
             </div>
           </ct-collapsible>
           <ct-collapsible open>
-            <ct-button
+            <cf-button
               slot="trigger"
               variant="ghost"
               style="width: 100%; text-align: left;"
             >
               Already open
-            </ct-button>
+            </cf-button>
             <div style="padding: 12px; font-size: 13px; color: #666;">
               This section starts open.
             </div>

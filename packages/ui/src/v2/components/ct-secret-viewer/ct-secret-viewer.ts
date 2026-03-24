@@ -146,13 +146,13 @@ export class CTSecretViewer extends BaseElement {
             ? "revealed"
             : ""}" part="value">${displayValue}</code>
           <div class="actions">
-            <ct-button
+            <cf-button
               variant="ghost"
               size="sm"
               @click="${this._toggleReveal}"
             >
               ${this._revealed ? "Hide" : "Reveal"}
-            </ct-button>
+            </cf-button>
             <ct-copy-button
               .text="${this.value}"
               variant="ghost"

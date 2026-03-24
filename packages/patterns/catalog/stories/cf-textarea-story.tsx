@@ -14,7 +14,7 @@ export default pattern<TextareaStoryInput, TextareaStoryOutput>(() => {
   const disabled = Writable.of(false);
 
   return {
-    [NAME]: "ct-textarea Story",
+    [NAME]: "cf-textarea Story",
     [UI]: (
       <div
         style={{
@@ -25,13 +25,13 @@ export default pattern<TextareaStoryInput, TextareaStoryOutput>(() => {
           maxWidth: "400px",
         }}
       >
-        <ct-textarea
+        <cf-textarea
           placeholder="Default textarea"
           rows={3}
           disabled={disabled}
         />
-        <ct-textarea placeholder="Auto-resize textarea" rows={2} auto-resize />
-        <ct-textarea placeholder="Disabled" disabled rows={2} />
+        <cf-textarea placeholder="Auto-resize textarea" rows={2} auto-resize />
+        <cf-textarea placeholder="Disabled" disabled rows={2} />
       </div>
     ),
     controls: (

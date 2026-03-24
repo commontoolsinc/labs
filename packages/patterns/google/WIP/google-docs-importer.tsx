@@ -287,14 +287,14 @@ export default pattern<Input, Output>(
                   Google Doc URL
                 </label>
                 <cf-hstack gap={1}>
-                  <ct-input
+                  <cf-input
                     $value={docUrl}
                     placeholder="https://docs.google.com/document/d/..."
                     style="flex: 1;"
                   />
                   {ifElse(
                     isAuthenticated,
-                    <ct-button
+                    <cf-button
                       variant="primary"
                       type="button"
                       disabled={isFetchingCell}
@@ -317,7 +317,7 @@ export default pattern<Input, Output>(
                         </cf-hstack>,
                         "Import",
                       )}
-                    </ct-button>,
+                    </cf-button>,
                     null,
                   )}
                 </cf-hstack>
@@ -402,7 +402,7 @@ export default pattern<Input, Output>(
                     <ct-copy-button text={markdownCell} variant="secondary">
                       Copy to Clipboard
                     </ct-copy-button>
-                    <ct-button
+                    <cf-button
                       variant="primary"
                       type="button"
                       onClick={saveAsNote({
@@ -411,7 +411,7 @@ export default pattern<Input, Output>(
                       })}
                     >
                       Save as Note
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
                 </cf-hstack>
 

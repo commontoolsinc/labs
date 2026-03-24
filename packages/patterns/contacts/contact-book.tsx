@@ -101,7 +101,7 @@ export default pattern<ContactBookInput, ContactBookOutput>(
             <cf-hstack justify="between" align="center">
               <cf-heading level={4}>Contacts ({contactCount})</cf-heading>
             </cf-hstack>
-            <ct-input
+            <cf-input
               $value={searchQuery}
               placeholder="Search contacts..."
             />
@@ -168,12 +168,12 @@ export default pattern<ContactBookInput, ContactBookOutput>(
                           </span>
                         ))}
                       </cf-vstack>
-                      <ct-button
+                      <cf-button
                         variant="ghost"
                         onClick={onDelete}
                       >
                         ×
-                      </ct-button>
+                      </cf-button>
                     </cf-hstack>
                   </cf-card>,
                   null,
@@ -192,12 +192,12 @@ export default pattern<ContactBookInput, ContactBookOutput>(
 
           <cf-vstack slot="footer" gap="2" style="padding: 1rem;">
             <cf-hstack gap="2">
-              <ct-button
+              <cf-button
                 variant="primary"
                 onClick={onAddContact}
               >
                 Add Contact
-              </ct-button>
+              </cf-button>
             </cf-hstack>
 
             <cf-hstack gap="2">
@@ -213,16 +213,16 @@ export default pattern<ContactBookInput, ContactBookOutput>(
                 placeholder="To..."
                 style="flex: 1;"
               />
-              <ct-input
+              <cf-input
                 $value={newRelationLabel}
                 placeholder="Label..."
                 style="width: 100px;"
               />
-              <ct-button
+              <cf-button
                 onClick={onNewRelation}
               >
                 Link
-              </ct-button>
+              </cf-button>
             </cf-hstack>
           </cf-vstack>
         </cf-screen>

@@ -15,7 +15,7 @@ const TAG_NAME = "cf-piece";
  *
  * @example
  * <cf-piece piece-id="abc123" space-name="my-space">
- *   <ct-button>Click Me</ct-button>
+ *   <cf-button>Click Me</cf-button>
  * </cf-piece>
  */
 export class CFPiece extends BaseElement {

@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
-import { CTInput, INPUT_PATTERNS } from "./ct-input.ts";
+import { CFInput, INPUT_PATTERNS } from "./cf-input.ts";
 
 // NOTE: Full DOM interaction tests (input events, Cell two-way binding,
 // timing strategy integration, validation UI) require Lit's rendering
@@ -10,22 +10,22 @@ import { CTInput, INPUT_PATTERNS } from "./ct-input.ts";
 // patterns, Cell property acceptance, and basic configuration.
 // For full integration tests, use a browser-based test harness.
 
-describe("CTInput", () => {
+describe("CFInput", () => {
   it("should be defined", () => {
-    expect(CTInput).toBeDefined();
+    expect(CFInput).toBeDefined();
   });
 
   it("should have customElement definition", () => {
-    expect(customElements.get("ct-input")).toBe(CTInput);
+    expect(customElements.get("cf-input")).toBe(CFInput);
   });
 
   it("should create element instance", () => {
-    const element = new CTInput();
-    expect(element).toBeInstanceOf(CTInput);
+    const element = new CFInput();
+    expect(element).toBeInstanceOf(CFInput);
   });
 
   it("should have correct default properties", () => {
-    const el = new CTInput();
+    const el = new CFInput();
     expect(el.type).toBe("text");
     expect(el.placeholder).toBe("");
     expect(el.value).toBe("");
@@ -40,20 +40,20 @@ describe("CTInput", () => {
   });
 
   it("should accept a CellHandle as value property", () => {
-    const el = new CTInput();
+    const el = new CFInput();
     const cell = createMockCellHandle("hello");
     el.value = cell;
     expect(el.value).toBe(cell);
   });
 
   it("should accept a plain string as value property", () => {
-    const el = new CTInput();
+    const el = new CFInput();
     el.value = "world";
     expect(el.value).toBe("world");
   });
 
   it("should accept all input types", () => {
-    const el = new CTInput();
+    const el = new CFInput();
     const types = [
       "text",
       "password",
@@ -78,7 +78,7 @@ describe("CTInput", () => {
   });
 
   it("should accept timing strategy options", () => {
-    const el = new CTInput();
+    const el = new CFInput();
     el.timingStrategy = "immediate";
     expect(el.timingStrategy).toBe("immediate");
 
@@ -90,7 +90,7 @@ describe("CTInput", () => {
   });
 });
 
-describe("CTInput — INPUT_PATTERNS", () => {
+describe("CFInput — INPUT_PATTERNS", () => {
   it("should have email pattern", () => {
     const re = new RegExp(`^${INPUT_PATTERNS.email}$`);
     expect(re.test("user@example.com")).toBe(true);

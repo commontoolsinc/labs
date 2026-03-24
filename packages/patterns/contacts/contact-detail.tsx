@@ -33,7 +33,7 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
               <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                 Name
               </label>
-              <ct-input
+              <cf-input
                 $value={contact.key("name")}
                 placeholder="Full name"
               />
@@ -43,7 +43,7 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
               <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                 Email
               </label>
-              <ct-input
+              <cf-input
                 $value={contact.key("email")}
                 placeholder="email@example.com"
                 type="email"
@@ -54,7 +54,7 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
               <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                 Phone
               </label>
-              <ct-input
+              <cf-input
                 $value={contact.key("phone")}
                 placeholder="+1 (555) 123-4567"
                 type="tel"
@@ -65,7 +65,7 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
               <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                 Company
               </label>
-              <ct-input
+              <cf-input
                 $value={contact.key("company")}
                 placeholder="Company name"
               />

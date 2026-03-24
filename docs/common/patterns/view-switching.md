@@ -30,9 +30,9 @@ export default pattern<{ activeView: Writable<string> }>(({ activeView }) => {
     [UI]: (
       <div>
         <div>
-          <ct-button onClick={setView({ id: "edit", activeView })}>Edit</ct-button>
-          <ct-button onClick={setView({ id: "preview", activeView })}>Preview</ct-button>
-          <ct-button onClick={setView({ id: "settings", activeView })}>Settings</ct-button>
+          <cf-button onClick={setView({ id: "edit", activeView })}>Edit</cf-button>
+          <cf-button onClick={setView({ id: "preview", activeView })}>Preview</cf-button>
+          <cf-button onClick={setView({ id: "settings", activeView })}>Settings</cf-button>
         </div>
         <>{view}</>
       </div>

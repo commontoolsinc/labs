@@ -41,9 +41,9 @@ export default pattern<State, Output>((state) => {
         <p data-testid="counter-display">Counter: {state.counter}</p>
 
         <div style="display: flex; gap: 10px; margin-top: 20px;">
-          <ct-button data-testid="update-btn" onClick={updateData(state)}>
+          <cf-button data-testid="update-btn" onClick={updateData(state)}>
             Update Data
-          </ct-button>
+          </cf-button>
 
           <ct-file-download
             data-testid="autosave-btn"

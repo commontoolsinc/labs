@@ -64,13 +64,13 @@ describe("Chat pattern test", () => {
       });
 
       // Check for the message input
-      const messageInput = await page.waitForSelector("ct-message-input", {
+      const messageInput = await page.waitForSelector("cf-message-input", {
         strategy: "pierce",
       });
       assert(messageInput, "Should find message input element");
 
       // Check for clear chat button
-      const clearButton = await page.waitForSelector("ct-button", {
+      const clearButton = await page.waitForSelector("cf-button", {
         strategy: "pierce",
       });
       assert(clearButton, "Should find clear chat button");
@@ -90,7 +90,7 @@ describe("Chat pattern test", () => {
       const page = shell.page();
 
       // Find the message input component
-      const messageInput = await page.waitForSelector("ct-message-input", {
+      const messageInput = await page.waitForSelector("cf-message-input", {
         strategy: "pierce",
       });
       assert(messageInput, "Should find message input");
@@ -111,7 +111,7 @@ describe("Chat pattern test", () => {
 
       // Click the send button by ID
       const sendButton = await page.waitForSelector(
-        "#ct-message-input-send-button",
+        "#cf-message-input-send-button",
         {
           strategy: "pierce",
         },
@@ -211,7 +211,7 @@ describe("Chat pattern test", () => {
 
       // Click the send button by ID
       const sendButton = await page.waitForSelector(
-        "#ct-message-input-send-button",
+        "#cf-message-input-send-button",
         {
           strategy: "pierce",
         },

@@ -754,7 +754,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   >
                     Days Back
                   </label>
-                  <ct-input
+                  <cf-input
                     type="number"
                     $value={settings.daysBack}
                     placeholder="7"
@@ -771,7 +771,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   >
                     Days Forward
                   </label>
-                  <ct-input
+                  <cf-input
                     type="number"
                     $value={settings.daysForward}
                     placeholder="30"
@@ -788,7 +788,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   >
                     Max Results per Calendar
                   </label>
-                  <ct-input
+                  <cf-input
                     type="number"
                     $value={settings.maxResults}
                     placeholder="100"
@@ -814,7 +814,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                 </div>
                 {ifElse(
                   isReady,
-                  <ct-button
+                  <cf-button
                     type="button"
                     onClick={calendarUpdater({
                       events,
@@ -840,7 +840,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                       </span>,
                       "Fetch Calendar Events",
                     )}
-                  </ct-button>,
+                  </cf-button>,
                   null,
                 )}
               </cf-vstack>

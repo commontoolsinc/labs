@@ -242,7 +242,7 @@ describe("RuntimeClient", () => {
 
     it("late subscribers receive initial value from existing subscription", async () => {
       // Regression test for bug where text interpolation {value} would show blank
-      // when used alongside ct-input bound to the same cell. The issue was that
+      // when used alongside cf-input bound to the same cell. The issue was that
       // late subscribers (those joining an existing subscription) would miss the
       // initial value that was already sent to earlier subscribers.
       //
@@ -269,7 +269,7 @@ describe("RuntimeClient", () => {
 
       // Create two CellHandles with the SAME schema - this produces the same
       // subscription key (space:id:path:schema). In the real bug, this happens
-      // when ct-input and text interpolation both call asSchema(stringSchema).
+      // when cf-input and text interpolation both call asSchema(stringSchema).
       const cellA = cell.asSchema<{ message: string }>(schema);
       const cellB = cell.asSchema<{ message: string }>(schema);
 

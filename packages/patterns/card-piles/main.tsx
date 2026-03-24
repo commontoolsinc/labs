@@ -169,7 +169,7 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
     [UI]: (
       <cf-screen>
         <div style={{ padding: "1rem" }}>
-          <ct-button onClick={shuffle}>Shuffle</ct-button>
+          <cf-button onClick={shuffle}>Shuffle</cf-button>
         </div>
         <div
           style={{

@@ -1514,7 +1514,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                   flexWrap: "wrap",
                 }}
               >
-                <ct-button
+                <cf-button
                   onClick={submitTurn({
                     allRacksJson,
                     allPlacedJson,
@@ -1529,8 +1529,8 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                   style={{ backgroundColor: "#22c55e" }}
                 >
                   Submit Word
-                </ct-button>
-                <ct-button
+                </cf-button>
+                <cf-button
                   onClick={clearBoard({
                     allRacksJson,
                     allPlacedJson,
@@ -1539,7 +1539,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                   })}
                 >
                   Clear Board
-                </ct-button>
+                </cf-button>
               </div>
               <div
                 style={{

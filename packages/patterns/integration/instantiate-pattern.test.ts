@@ -61,13 +61,13 @@ describe("instantiate-pattern integration test", () => {
       });
 
       // Wait for piece to load by waiting for first interactive element
-      await page.waitForSelector("[data-ct-input]", { strategy: "pierce" });
+      await page.waitForSelector("[data-cf-input]", { strategy: "pierce" });
 
       // Store the current URL before any action
       const urlBefore = await page.evaluate(() => globalThis.location.href);
       console.log("URL before action:", urlBefore);
 
-      const input = await page.waitForSelector("[data-ct-input]", {
+      const input = await page.waitForSelector("[data-cf-input]", {
         strategy: "pierce",
       });
 
@@ -76,7 +76,7 @@ describe("instantiate-pattern integration test", () => {
       // Quick wait for input processing
       await sleep(100);
 
-      const button = await page.waitForSelector("[data-ct-button]", {
+      const button = await page.waitForSelector("[data-cf-button]", {
         strategy: "pierce",
       });
 

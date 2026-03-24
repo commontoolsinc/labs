@@ -113,7 +113,7 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
                       <span style="color: var(--ct-color-text-secondary); font-size: 0.85rem;">
                         $
                       </span>
-                      <ct-input
+                      <cf-input
                         $value={item.amount}
                         style="width: 5rem; text-align: right;"
                       />

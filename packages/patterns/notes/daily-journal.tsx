@@ -373,7 +373,7 @@ ${notesXml}
               <div style={{ width: "320px", flexShrink: "0" }}>
                 <cf-vstack gap="4">
                   {/* Go to Today */}
-                  <ct-button
+                  <cf-button
                     variant="primary"
                     onClick={handleGoToToday({
                       entries,
@@ -389,7 +389,7 @@ ${notesXml}
                     }}
                   >
                     Go to Today's Note
-                  </ct-button>
+                  </cf-button>
 
                   {/* Mini calendar */}
                   <cf-card>
@@ -415,9 +415,9 @@ ${notesXml}
                       }}
                     >
                       <h3 style={{ margin: 0, fontSize: "16px" }}>Entries</h3>
-                      <ct-button variant="ghost" onClick={toggleSettings}>
+                      <cf-button variant="ghost" onClick={toggleSettings}>
                         Settings
-                      </ct-button>
+                      </cf-button>
                     </div>
                     {sortedEntries.map((entry: any) => (
                       <ct-cell-link $cell={entry} />
@@ -442,7 +442,7 @@ ${notesXml}
                         <h3 style={{ margin: 0, fontSize: "14px" }}>
                           Weekly Rollup
                         </h3>
-                        <ct-button
+                        <cf-button
                           variant="ghost"
                           size="sm"
                           onClick={triggerRollup({
@@ -450,7 +450,7 @@ ${notesXml}
                           })}
                         >
                           Refresh
-                        </ct-button>
+                        </cf-button>
                       </div>
 
                       <ct-autostart
@@ -660,9 +660,9 @@ ${notesXml}
                 wordWrap
                 style={{ minHeight: "300px" }}
               />
-              <ct-button variant="primary" onClick={toggleSettings}>
+              <cf-button variant="primary" onClick={toggleSettings}>
                 Done
-              </ct-button>
+              </cf-button>
             </cf-vstack>
           </div>
         </cf-screen>

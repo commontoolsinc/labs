@@ -29,8 +29,8 @@ export default pattern<State>(({ label }) => {
     [UI]: (
       <div>
         <span>{label}: {count}</span>
-        <ct-button onClick={increment}>+</ct-button>
-        <ct-button onClick={decrement}>-</ct-button>
+        <cf-button onClick={increment}>+</cf-button>
+        <cf-button onClick={decrement}>-</cf-button>
       </div>
     ),
     count,

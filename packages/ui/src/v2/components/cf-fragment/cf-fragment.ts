@@ -11,8 +11,8 @@
  *
  * @example
  * <cf-fragment>
- *   <ct-button>Button 1</ct-button>
- *   <ct-button>Button 2</ct-button>
+ *   <cf-button>Button 1</cf-button>
+ *   <cf-button>Button 2</cf-button>
  * </cf-fragment>
  */
 export class CFFragment extends HTMLElement {

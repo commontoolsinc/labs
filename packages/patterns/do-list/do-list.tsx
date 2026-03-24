@@ -281,17 +281,17 @@ const DoItemCard = pattern<
         <cf-card style={`margin-left: ${(item.indent ?? 0) * 24}px;`}>
           <cf-hstack gap="2" align="center">
             <ct-checkbox $checked={item.done} />
-            <ct-input
+            <cf-input
               $value={item.title}
               style="flex: 1;"
               placeholder="Item..."
             />
-            <ct-button
+            <cf-button
               variant="ghost"
               onClick={() => removeItem.send({ item })}
             >
               x
-            </ct-button>
+            </cf-button>
           </cf-hstack>
 
           {ifElse(
@@ -303,14 +303,14 @@ const DoItemCard = pattern<
               {attachments.map((att: any) => (
                 <cf-hstack gap="0" align="center">
                   <ct-cell-link $cell={att} />
-                  <ct-button
+                  <cf-button
                     variant="ghost"
                     size="sm"
                     style="font-size: 0.7rem; padding: 0 2px;"
                     onClick={removeAttachment({ item, attachment: att, items })}
                   >
                     ×
-                  </ct-button>
+                  </cf-button>
                 </cf-hstack>
               ))}
             </cf-hstack>,
@@ -412,21 +412,21 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
       {ifElse(
         hasCompleted,
         <cf-hstack justify="end" style="padding: 0 0.5rem;">
-          <ct-button
+          <cf-button
             variant="ghost"
             size="sm"
             style="font-size: 0.8rem; color: var(--ct-color-gray-500);"
             onClick={() => archiveCompleted.send({})}
           >
             Archive completed
-          </ct-button>
+          </cf-button>
         </cf-hstack>,
         null,
       )}
 
-      <ct-message-input
+      <cf-message-input
         placeholder="Add an item..."
-        onct-send={(e: { detail?: { message?: string } }) => {
+        oncf-send={(e: { detail?: { message?: string } }) => {
           const title = e.detail?.message?.trim();
           if (title) {
             addItem.send({ title });
@@ -470,14 +470,14 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
                 <cf-vstack gap="2" style="padding-top: 0.5rem;">
                   {completedCards}
                   <cf-hstack justify="end">
-                    <ct-button
+                    <cf-button
                       variant="ghost"
                       size="sm"
                       style="font-size: 0.8rem; color: var(--ct-color-gray-500);"
                       onClick={() => archiveCompleted.send({})}
                     >
                       Archive all
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
                 </cf-vstack>
               </details>,
@@ -487,10 +487,10 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
         </cf-vscroll>
 
         <cf-hstack slot="footer" gap="2" style="padding: 1rem;">
-          <ct-message-input
+          <cf-message-input
             placeholder="Add an item..."
             style="flex: 1;"
-            onct-send={(e: { detail?: { message?: string } }) => {
+            oncf-send={(e: { detail?: { message?: string } }) => {
               const title = e.detail?.message?.trim();
               if (title) {
                 addItem.send({ title });

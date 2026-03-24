@@ -30,11 +30,11 @@ export default pattern<PatternState>((state) => {
     [NAME]: str`Simple counter: ${state.value}`,
     [UI]: (
       <div>
-        <ct-button onClick={decrement(state)}>-</ct-button>
+        <cf-button onClick={decrement(state)}>-</cf-button>
         <ul>
           <li>next number: {state.value ? state.value + 1 : "unknown"}</li>
         </ul>
-        <ct-button onClick={increment({ value: state.value })}>+</ct-button>
+        <cf-button onClick={increment({ value: state.value })}>+</cf-button>
       </div>
     ),
     value: state.value,

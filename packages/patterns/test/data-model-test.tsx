@@ -114,12 +114,12 @@ export default pattern<Input, Output>(
       [UI]: (
         <cf-vstack gap={1} style="padding: 1rem; max-width: 500px;">
           <h3>Data Model Test</h3>
-          <ct-textarea
+          <cf-textarea
             $value={inputText}
             placeholder='JS expression, e.g. 42, "hello", undefined, {a: [1,2]}'
           />
-          <ct-button onClick={boundEvalAndStore}>Evaluate & Store</ct-button>
-          <ct-button onClick={boundRerenderDisplay}>Rerender Display</ct-button>
+          <cf-button onClick={boundEvalAndStore}>Evaluate & Store</cf-button>
+          <cf-button onClick={boundRerenderDisplay}>Rerender Display</cf-button>
           <pre
             style={{
               padding: "12px",

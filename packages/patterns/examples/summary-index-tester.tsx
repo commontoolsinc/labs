@@ -40,7 +40,7 @@ export default pattern<Record<string, never>>((_) => {
             <strong>
               Index: {entryCount} entries
             </strong>
-            <ct-input
+            <cf-input
               $value={query}
               placeholder="Search summaries..."
             />

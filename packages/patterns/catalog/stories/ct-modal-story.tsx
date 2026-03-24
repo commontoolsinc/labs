@@ -27,9 +27,9 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
     [NAME]: "ct-modal Story",
     [UI]: (
       <div style={{ padding: "1rem" }}>
-        <ct-button variant="primary" onClick={showModal}>
+        <cf-button variant="primary" onClick={showModal}>
           Open Modal
-        </ct-button>
+        </cf-button>
 
         <ct-modal $open={open} size={size} dismissable={dismissable}>
           <div slot="header">
@@ -43,12 +43,12 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
           </cf-vstack>
           <div slot="footer">
             <cf-hstack gap="2" justify="end">
-              <ct-button variant="secondary" onClick={closeModal}>
+              <cf-button variant="secondary" onClick={closeModal}>
                 Cancel
-              </ct-button>
-              <ct-button variant="primary" onClick={closeModal}>
+              </cf-button>
+              <cf-button variant="primary" onClick={closeModal}>
                 Confirm
-              </ct-button>
+              </cf-button>
             </cf-hstack>
           </div>
         </ct-modal>

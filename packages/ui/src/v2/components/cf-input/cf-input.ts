@@ -16,9 +16,9 @@ import { createStringCellController } from "../../core/cell-controller.ts";
 import { createFormFieldController } from "../../core/form-field-controller.ts";
 
 /**
- * CTInput - Enhanced input field with support for various types, validation patterns, and reactive data binding
+ * CFInput - Enhanced input field with support for various types, validation patterns, and reactive data binding
  *
- * @element ct-input
+ * @element cf-input
  *
  * @attr {string} type - Input type: "text" | "email" | "password" | "number" | "search" | "tel" | "url" | "date" | "time" | "datetime-local" | "month" | "week" | "color" | "file" | "range" | "hidden"
  * @attr {string} placeholder - Placeholder text
@@ -44,29 +44,29 @@ import { createFormFieldController } from "../../core/form-field-controller.ts";
  * @attr {string} timingStrategy - Input timing strategy: "immediate" | "debounce" | "throttle" | "blur"
  * @attr {number} timingDelay - Delay in milliseconds for debounce/throttle (default: 300)
  *
- * @fires ct-change - Fired when value changes (timing depends on strategy) with detail: { value, oldValue, name, files? }
- * @fires ct-focus - Fired on focus with detail: { value, name }
- * @fires ct-blur - Fired on blur with detail: { value, name }
- * @fires ct-keydown - Fired on keydown with detail: { key, value, shiftKey, ctrlKey, metaKey, altKey, name }
- * @fires ct-submit - Fired on Enter key with detail: { value, name }
- * @fires ct-invalid - Fired on validation failure with detail: { value, name, validationMessage, validity }
+ * @fires cf-change - Fired when value changes (timing depends on strategy) with detail: { value, oldValue, name, files? }
+ * @fires cf-focus - Fired on focus with detail: { value, name }
+ * @fires cf-blur - Fired on blur with detail: { value, name }
+ * @fires cf-keydown - Fired on keydown with detail: { key, value, shiftKey, ctrlKey, metaKey, altKey, name }
+ * @fires cf-submit - Fired on Enter key with detail: { value, name }
+ * @fires cf-invalid - Fired on validation failure with detail: { value, name, validationMessage, validity }
  *
  * @example
- * <ct-input type="email" placeholder="Enter email" required showValidation></ct-input>
+ * <cf-input type="email" placeholder="Enter email" required showValidation></cf-input>
  *
  * @example
- * <ct-input type="tel" validationPattern="tel-us" placeholder="(123) 456-7890"></ct-input>
+ * <cf-input type="tel" validationPattern="tel-us" placeholder="(123) 456-7890"></cf-input>
  *
  * @example
- * <ct-input type="number" min="0" max="100" step="5"></ct-input>
+ * <cf-input type="number" min="0" max="100" step="5"></cf-input>
  *
  * @example
  * <!-- Debounced input - waits 500ms after user stops typing -->
- * <ct-input timingStrategy="debounce" timingDelay="500" placeholder="Search..."></ct-input>
+ * <cf-input timingStrategy="debounce" timingDelay="500" placeholder="Search..."></cf-input>
  *
  * @example
  * <!-- Only emit events when input loses focus -->
- * <ct-input timingStrategy="blur" placeholder="Enter value"></ct-input>
+ * <cf-input timingStrategy="blur" placeholder="Enter value"></cf-input>
  */
 
 export type InputType =
@@ -122,26 +122,26 @@ export const INPUT_PATTERNS = {
   numbers: "[0-9]+",
 } as const;
 
-export class CTInput extends BaseElement {
+export class CFInput extends BaseElement {
   static override styles = css`
     :host {
-      --ct-input-color-text: var(--ct-theme-color-text, #111827);
-      --ct-input-color-background: var(--ct-theme-color-background, #ffffff);
-      --ct-input-color-border: var(--ct-theme-color-border, #e5e7eb);
-      --ct-input-color-border-hover: var(--ct-theme-color-border-muted, #d1d5db);
-      --ct-input-color-primary: var(--ct-theme-color-primary, #3b82f6);
-      --ct-input-color-ring: rgba(59, 130, 246, 0.15);
-      --ct-input-color-surface: var(--ct-theme-color-surface, #f1f5f9);
-      --ct-input-color-text-muted: var(--ct-theme-color-text-muted, #6b7280);
-      --ct-input-color-error: var(--ct-theme-color-error, #dc2626);
-      --ct-input-color-error-ring: rgba(220, 38, 38, 0.15);
-      --ct-input-color-success: var(--ct-theme-color-success, #16a34a);
-      --ct-input-border-radius: var(
+      --cf-input-color-text: var(--ct-theme-color-text, #111827);
+      --cf-input-color-background: var(--ct-theme-color-background, #ffffff);
+      --cf-input-color-border: var(--ct-theme-color-border, #e5e7eb);
+      --cf-input-color-border-hover: var(--ct-theme-color-border-muted, #d1d5db);
+      --cf-input-color-primary: var(--ct-theme-color-primary, #3b82f6);
+      --cf-input-color-ring: rgba(59, 130, 246, 0.15);
+      --cf-input-color-surface: var(--ct-theme-color-surface, #f1f5f9);
+      --cf-input-color-text-muted: var(--ct-theme-color-text-muted, #6b7280);
+      --cf-input-color-error: var(--ct-theme-color-error, #dc2626);
+      --cf-input-color-error-ring: rgba(220, 38, 38, 0.15);
+      --cf-input-color-success: var(--ct-theme-color-success, #16a34a);
+      --cf-input-border-radius: var(
         --ct-theme-border-radius,
         var(--ct-border-radius-md, 0.375rem)
       );
-      --ct-input-animation-duration: var(--ct-theme-animation-duration, 150ms);
-      --ct-input-font-family: var(--ct-theme-font-family, inherit);
+      --cf-input-animation-duration: var(--ct-theme-animation-duration, 150ms);
+      --cf-input-font-family: var(--ct-theme-font-family, inherit);
 
       display: block;
       box-sizing: border-box;
@@ -159,50 +159,50 @@ export class CTInput extends BaseElement {
       padding: 0.5rem 0.75rem;
       font-size: 0.875rem;
       line-height: 1.25rem;
-      color: var(--ct-input-color-text, #111827);
-      background-color: var(--ct-input-color-background, #ffffff);
-      border: 1px solid var(--ct-input-color-border, #e5e7eb);
+      color: var(--cf-input-color-text, #111827);
+      background-color: var(--cf-input-color-background, #ffffff);
+      border: 1px solid var(--cf-input-color-border, #e5e7eb);
       border-radius: var(
-        --ct-input-border-radius,
+        --cf-input-border-radius,
         var(--ct-border-radius-md, 0.375rem)
       );
-      transition: all var(--ct-input-animation-duration, 150ms)
+      transition: all var(--cf-input-animation-duration, 150ms)
         var(--ct-transition-timing-ease);
-      font-family: var(--ct-input-font-family, inherit);
+      font-family: var(--cf-input-font-family, inherit);
     }
 
     input::placeholder {
-      color: var(--ct-input-color-text-muted, #6b7280);
+      color: var(--cf-input-color-text-muted, #6b7280);
     }
 
     input:hover:not(:disabled):not(:focus) {
-      border-color: var(--ct-input-color-border-hover, #d1d5db);
+      border-color: var(--cf-input-color-border-hover, #d1d5db);
     }
 
     input:focus {
       outline: none;
-      border-color: var(--ct-input-color-primary, #3b82f6);
-      box-shadow: 0 0 0 3px var(--ct-input-color-ring, rgba(59, 130, 246, 0.15));
+      border-color: var(--cf-input-color-primary, #3b82f6);
+      box-shadow: 0 0 0 3px var(--cf-input-color-ring, rgba(59, 130, 246, 0.15));
     }
 
     input:disabled {
       cursor: not-allowed;
       opacity: 0.5;
-      background-color: var(--ct-input-color-surface, #f1f5f9);
+      background-color: var(--cf-input-color-surface, #f1f5f9);
     }
 
     input[readonly] {
-      background-color: var(--ct-input-color-surface, #f1f5f9);
+      background-color: var(--cf-input-color-surface, #f1f5f9);
     }
 
     input.error {
-      border-color: var(--ct-input-color-error, #dc2626);
+      border-color: var(--cf-input-color-error, #dc2626);
     }
 
     input.error:focus {
-      border-color: var(--ct-input-color-error, #dc2626);
+      border-color: var(--cf-input-color-error, #dc2626);
       box-shadow: 0 0 0 3px
-        var(--ct-input-color-error-ring, rgba(220, 38, 38, 0.15));
+        var(--cf-input-color-error-ring, rgba(220, 38, 38, 0.15));
       }
 
       /* Remove spinner buttons from number inputs in Chrome/Safari/Edge */
@@ -228,11 +228,11 @@ export class CTInput extends BaseElement {
         padding: 0.125rem 0.5rem;
         font-size: 0.75rem;
         font-weight: 500;
-        color: var(--ct-input-color-background, hsl(0, 0%, 100%));
-        background-color: var(--ct-input-color-primary, hsl(212, 100%, 47%));
+        color: var(--cf-input-color-background, hsl(0, 0%, 100%));
+        background-color: var(--cf-input-color-primary, hsl(212, 100%, 47%));
         border: none;
         border-radius: var(
-          --ct-input-border-radius,
+          --cf-input-border-radius,
           var(--ct-border-radius-sm, 0.25rem)
         );
         cursor: pointer;
@@ -272,7 +272,7 @@ export class CTInput extends BaseElement {
       input[type="range"]::-webkit-slider-track {
         width: 100%;
         height: 4px;
-        background: var(--ct-input-color-surface, #f1f5f9);
+        background: var(--cf-input-color-surface, #f1f5f9);
         border-radius: 2px;
       }
 
@@ -281,7 +281,7 @@ export class CTInput extends BaseElement {
         appearance: none;
         width: 16px;
         height: 16px;
-        background: var(--ct-input-color-primary, #3b82f6);
+        background: var(--cf-input-color-primary, #3b82f6);
         border-radius: 50%;
         cursor: pointer;
       }
@@ -289,14 +289,14 @@ export class CTInput extends BaseElement {
       input[type="range"]::-moz-range-track {
         width: 100%;
         height: 4px;
-        background: var(--ct-input-color-surface, #f1f5f9);
+        background: var(--cf-input-color-surface, #f1f5f9);
         border-radius: 2px;
       }
 
       input[type="range"]::-moz-range-thumb {
         width: 16px;
         height: 16px;
-        background: var(--ct-input-color-primary, #3b82f6);
+        background: var(--cf-input-color-primary, #3b82f6);
         border-radius: 50%;
         border: none;
         cursor: pointer;
@@ -309,13 +309,13 @@ export class CTInput extends BaseElement {
 
       /* Valid state (when showValidation is true) */
       input:valid:not(:placeholder-shown) {
-        border-color: var(--ct-input-color-success, #16a34a);
+        border-color: var(--cf-input-color-success, #16a34a);
       }
 
       input:valid:not(:placeholder-shown):focus {
-        border-color: var(--ct-input-color-success, #16a34a);
+        border-color: var(--cf-input-color-success, #16a34a);
         box-shadow: 0 0 0 3px
-          var(--ct-input-color-success, rgba(22, 163, 74, 0.15));
+          var(--cf-input-color-success, rgba(22, 163, 74, 0.15));
         }
       `;
 
@@ -382,8 +382,8 @@ export class CTInput extends BaseElement {
           delay: 300,
         },
         onChange: (newValue: string, oldValue: string) => {
-          // ct-change is emitted via timing controller to honor timingStrategy
-          this.emit("ct-change", {
+          // cf-change is emitted via timing controller to honor timingStrategy
+          this.emit("cf-change", {
             value: newValue,
             oldValue,
             name: this.name,
@@ -588,7 +588,7 @@ export class CTInput extends BaseElement {
         return html`
           <input
             type="${this.type}"
-            data-ct-input
+            data-cf-input
             class="${validationClass}"
             placeholder="${ifDefined(this.placeholder || undefined)}"
             .value="${ifDefined(inputValue)}"
@@ -634,8 +634,8 @@ export class CTInput extends BaseElement {
           this.setValue("");
         }
 
-        // Emit ct-input event directly for non-cell interop
-        this.emit("ct-input", {
+        // Emit cf-input event directly for non-cell interop
+        this.emit("cf-input", {
           value: this.type === "file" ? "" : input.value,
           oldValue,
           name: this.name,
@@ -647,7 +647,7 @@ export class CTInput extends BaseElement {
         const input = event.target as HTMLInputElement;
 
         // Update value through form field controller
-        // ct-change is emitted by the cell controller's onChange callback
+        // cf-change is emitted by the cell controller's onChange callback
         // which honors the configured timingStrategy (debounce/throttle/blur)
         if (this.type !== "file") {
           this.setValue(input.value);
@@ -658,7 +658,7 @@ export class CTInput extends BaseElement {
 
       private _handleFocus(_event: Event) {
         this._cellController.onFocus();
-        this.emit("ct-focus", {
+        this.emit("cf-focus", {
           value: this.getValue(),
           name: this.name,
         });
@@ -666,14 +666,14 @@ export class CTInput extends BaseElement {
 
       private _handleBlur(_event: Event) {
         this._cellController.onBlur();
-        this.emit("ct-blur", {
+        this.emit("cf-blur", {
           value: this.getValue(),
           name: this.name,
         });
       }
 
       private _handleKeyDown(event: KeyboardEvent) {
-        this.emit("ct-keydown", {
+        this.emit("cf-keydown", {
           key: event.key,
           value: this.getValue(),
           shiftKey: event.shiftKey,
@@ -685,7 +685,7 @@ export class CTInput extends BaseElement {
 
         // Special handling for Enter key
         if (event.key === "Enter") {
-          this.emit("ct-submit", {
+          this.emit("cf-submit", {
             value: this.getValue(),
             name: this.name,
           });
@@ -696,7 +696,7 @@ export class CTInput extends BaseElement {
         event.preventDefault(); // Prevent browser's default validation UI
 
         const input = event.target as HTMLInputElement;
-        this.emit("ct-invalid", {
+        this.emit("cf-invalid", {
           value: this.getValue(),
           name: this.name,
           validationMessage: input.validationMessage,
@@ -777,4 +777,4 @@ export class CTInput extends BaseElement {
       }
     }
 
-    globalThis.customElements.define("ct-input", CTInput);
+    globalThis.customElements.define("cf-input", CFInput);

@@ -34,7 +34,7 @@ The `<ct-theme>` component wraps children and provides theme context using
 ```typescript
 // Wrap any subtree to theme it
 <ct-theme .theme=${{ accentColor: cell("#3b82f6") }}>
-  <ct-button>Themed Button</ct-button>
+  <cf-button>Themed Button</cf-button>
 </ct-theme>
 
 // Nest providers for refinement

@@ -53,7 +53,7 @@ export const TextControl = pattern<TextControlInput, TextControlOutput>(
           <div style={styles.colDescription}>{description}</div>
           <div style={styles.colDefault}>{defaultValue}</div>
           <div style={styles.colControl}>
-            <ct-input $value={value} style="width: 100%;" />
+            <cf-input $value={value} style="width: 100%;" />
           </div>
         </div>
       ),

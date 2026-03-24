@@ -158,9 +158,9 @@ export default pattern<TestInput>(({ count, user, items }) => {
           </div>
         </div>
 
-        <ct-button onClick={updateAllValues({ count, user, items })}>
+        <cf-button onClick={updateAllValues({ count, user, items })}>
           Update All Values
-        </ct-button>
+        </cf-button>
 
         <div
           style={{

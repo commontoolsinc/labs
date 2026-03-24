@@ -50,7 +50,7 @@ export default pattern<Record<string, never>>((_) => {
             <cf-vstack gap="2">
               <cf-hstack gap="2" align="center">
                 <ct-cell-link $cell={item.cell} spaceName={item.spaceName} />
-                <ct-button
+                <cf-button
                   variant="destructive"
                   size="sm"
                   onClick={onRemoveFavorite({
@@ -59,7 +59,7 @@ export default pattern<Record<string, never>>((_) => {
                   })}
                 >
                   Remove
-                </ct-button>
+                </cf-button>
               </cf-hstack>
               <ct-tags
                 tags={item.userTags}

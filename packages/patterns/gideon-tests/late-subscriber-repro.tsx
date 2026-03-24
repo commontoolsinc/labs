@@ -9,7 +9,7 @@ import { NAME, pattern, UI, Writable } from "commonfabric";
  * because the subscription was already established, so no new backend request
  * was made, and the late subscriber's CellHandle never received the cached value.
  *
- * Example: ct-input binds to a cell with stringSchema, creating a new CellHandle.
+ * Example: cf-input binds to a cell with stringSchema, creating a new CellHandle.
  * Text interpolation {value} also subscribes to the same cell with the same schema.
  * On initial page load, the text interpolation would show blank because it subscribed
  * after the initial value was already sent to the first subscriber.
@@ -42,8 +42,8 @@ export default pattern<Record<string, never>, Output>(() => {
         <cf-vstack gap="4" style="padding: 1rem;">
           <cf-card>
             <cf-vstack gap="2">
-              <cf-heading level={4}>ct-input</cf-heading>
-              <ct-input $value={textValue} placeholder="Type here..." />
+              <cf-heading level={4}>cf-input</cf-heading>
+              <cf-input $value={textValue} placeholder="Type here..." />
               <p>
                 <strong>Interpolated:</strong> {textValue}
               </p>
@@ -52,8 +52,8 @@ export default pattern<Record<string, never>, Output>(() => {
 
           <cf-card>
             <cf-vstack gap="2">
-              <cf-heading level={4}>ct-textarea</cf-heading>
-              <ct-textarea $value={textareaValue} placeholder="Type here..." />
+              <cf-heading level={4}>cf-textarea</cf-heading>
+              <cf-textarea $value={textareaValue} placeholder="Type here..." />
               <p>
                 <strong>Interpolated:</strong> {textareaValue}
               </p>

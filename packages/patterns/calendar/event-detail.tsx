@@ -74,7 +74,7 @@ export default pattern<EventDetailInput, EventDetailOutput>(
                     <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                       Title
                     </label>
-                    <ct-input $value={title} placeholder="Event title" />
+                    <cf-input $value={title} placeholder="Event title" />
                   </cf-vstack>
 
                   <cf-hstack gap="2">
@@ -82,14 +82,14 @@ export default pattern<EventDetailInput, EventDetailOutput>(
                       <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                         Date
                       </label>
-                      <ct-input $value={date} type="date" />
+                      <cf-input $value={date} type="date" />
                     </cf-vstack>
 
                     <cf-vstack gap="1" style="flex: 1;">
                       <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                         Time
                       </label>
-                      <ct-input $value={time} type="time" />
+                      <cf-input $value={time} type="time" />
                     </cf-vstack>
                   </cf-hstack>
                 </cf-vstack>
@@ -100,7 +100,7 @@ export default pattern<EventDetailInput, EventDetailOutput>(
                   <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                     Notes
                   </label>
-                  <ct-textarea
+                  <cf-textarea
                     $value={notes}
                     placeholder="Add details about this event..."
                     rows={6}

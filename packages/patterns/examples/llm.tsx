@@ -46,11 +46,11 @@ export default pattern<LLMTestInput>(({ title }) => {
         <h2>{title}</h2>
 
         <div>
-          <ct-message-input
+          <cf-message-input
             name="Ask"
             placeholder="Ask the LLM a question..."
             appearance="rounded"
-            onct-send={askQuestion({ question })}
+            oncf-send={askQuestion({ question })}
           />
         </div>
 

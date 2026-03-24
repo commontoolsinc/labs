@@ -69,7 +69,7 @@ export default pattern<
             <cf-vstack gap="1">
               <div>
                 <label>Feed URL</label>
-                <ct-input
+                <cf-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   $value={settings.feedUrl}
                   placeholder="https://example.com/feed.xml or https://example.com/atom.xml"

@@ -33,7 +33,7 @@ src/
 
 ```typescript
 // Import v2 components (default)
-import { CTButton, CFCard, CTInput } from "@commonfabric/ui";
+import { CFButton, CFCard, CFInput } from "@commonfabric/ui";
 
 // Or import specific versions
 import { v2 } from "@commonfabric/ui";
@@ -47,8 +47,8 @@ registerAllComponents();
 
 ```html
 <!-- V2 Components (ct- prefix) -->
-<ct-button variant="primary">Click Me</ct-button>
-<ct-input type="email" placeholder="Enter email"></ct-input>
+<cf-button variant="primary">Click Me</cf-button>
+<cf-input type="email" placeholder="Enter email"></cf-input>
 <cf-card>
   <h3 slot="header">Card Title</h3>
   <p slot="content">Card content</p>
@@ -59,7 +59,7 @@ registerAllComponents();
 
 ### Core UI Components (23)
 
-- **Forms**: `ct-button`, `ct-input`, `ct-textarea`, `ct-checkbox`, `ct-radio`,
+- **Forms**: `cf-button`, `cf-input`, `cf-textarea`, `ct-checkbox`, `ct-radio`,
   `ct-switch`, `ct-toggle`, `ct-slider`
 - **Layout**: `cf-card`, `ct-separator`, `ct-accordion`, `ct-collapsible`,
   `ct-tabs`, `ct-scroll-area`
@@ -150,17 +150,17 @@ packages/ui/
   <cf-vstack gap="4">
     <cf-vgroup gap="1">
       <ct-label for="email" required>Email</ct-label>
-      <ct-input id="email" type="email" name="email" required></ct-input>
+      <cf-input id="email" type="email" name="email" required></cf-input>
     </cf-vgroup>
 
     <cf-vgroup gap="1">
       <ct-label for="message">Message</ct-label>
-      <ct-textarea id="message" name="message" rows="4"></ct-textarea>
+      <cf-textarea id="message" name="message" rows="4"></cf-textarea>
     </cf-vgroup>
 
     <cf-hstack gap="3" justify="end">
-      <ct-button variant="outline" type="reset">Cancel</ct-button>
-      <ct-button type="submit">Submit</ct-button>
+      <cf-button variant="outline" type="reset">Cancel</cf-button>
+      <cf-button type="submit">Submit</cf-button>
     </cf-hstack>
   </cf-vstack>
 </ct-form>
@@ -190,7 +190,7 @@ packages/ui/
 
 ```javascript
 // V2 events (ct- prefix)
-document.querySelector("ct-button").addEventListener("ct-click", (e) => {
+document.querySelector("cf-button").addEventListener("ct-click", (e) => {
   console.log("Button clicked:", e.detail);
 });
 
@@ -206,13 +206,13 @@ Components support CSS custom properties and parts:
 
 ```css
 /* Custom properties */
-ct-button {
+cf-button {
   --background: #3b82f6;
   --foreground: white;
 }
 
 /* CSS parts */
-ct-input::part(input) {
+cf-input::part(input) {
   font-family: monospace;
 }
 
@@ -229,7 +229,7 @@ For React/TypeScript projects, add type definitions:
 // types/jsx.d.ts
 declare namespace JSX {
   interface IntrinsicElements {
-    "ct-button": {
+    "cf-button": {
       variant?:
         | "default"
         | "destructive"

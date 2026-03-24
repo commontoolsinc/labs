@@ -187,25 +187,25 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
           <cf-hstack style="justify-content: space-between; align-items: center;">
             <cf-heading level={4}>Contacts</cf-heading>
             <cf-hstack style="gap: 8px;">
-              <ct-button
+              <cf-button
                 variant="primary"
                 onClick={addPerson({ contacts, selectedIndex })}
               >
                 + Person
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="secondary"
                 onClick={addFamilyMember({ contacts, selectedIndex })}
               >
                 + Family
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="ghost"
                 size="sm"
                 onClick={addGroup({ groups })}
               >
                 + Group
-              </ct-button>
+              </cf-button>
             </cf-hstack>
           </cf-hstack>
         </cf-vstack>
@@ -252,7 +252,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
 
                       <span style={{ flex: "1" }}>{charm[NAME]}</span>
 
-                      <ct-button
+                      <cf-button
                         variant="ghost"
                         size="sm"
                         onClick={removeContact({
@@ -263,7 +263,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
                         })}
                       >
                         ×
-                      </ct-button>
+                      </cf-button>
                     </cf-hstack>
                   </cf-card>
                 ))}
@@ -292,13 +292,13 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
               return (
                 <cf-vstack style="height: 100%;">
                   <cf-hstack style="padding: 8px 16px; border-bottom: 1px solid #e5e7eb; justify-content: flex-end;">
-                    <ct-button
+                    <cf-button
                       variant="outline"
                       size="sm"
                       onClick={openInNewView}
                     >
                       Open ↗
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
 
                   <cf-render $cell={piece} />

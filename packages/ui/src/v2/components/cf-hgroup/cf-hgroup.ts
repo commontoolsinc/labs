@@ -16,8 +16,8 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @example
  * <cf-hgroup gap="2">
- *   <ct-button>Save</ct-button>
- *   <ct-button variant="outline">Cancel</ct-button>
+ *   <cf-button>Save</cf-button>
+ *   <cf-button variant="outline">Cancel</cf-button>
  * </cf-hgroup>
  */
 export class CFHGroup extends BaseElement {

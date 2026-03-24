@@ -355,7 +355,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 First Name
               </label>
-              <ct-input
+              <cf-input
                 $value={person.key("firstName")}
                 placeholder="First name"
               />
@@ -364,7 +364,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 Last Name
               </label>
-              <ct-input
+              <cf-input
                 $value={person.key("lastName")}
                 placeholder="Last name"
               />
@@ -376,7 +376,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Pronouns
             </label>
-            <ct-input
+            <cf-input
               $value={person.key("pronouns")}
               placeholder="e.g. he/him, she/her, they/them"
             />
@@ -403,7 +403,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                       <label style={{ fontSize: "12px", color: "#6b7280" }}>
                         Prefix
                       </label>
-                      <ct-input
+                      <cf-input
                         $value={person.key("prefix")}
                         placeholder="Dr., Mr., Prof."
                       />
@@ -412,7 +412,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                       <label style={{ fontSize: "12px", color: "#6b7280" }}>
                         Suffix
                       </label>
-                      <ct-input
+                      <cf-input
                         $value={person.key("suffix")}
                         placeholder="Jr., III, Ph.D."
                       />
@@ -422,7 +422,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Middle Name
                     </label>
-                    <ct-input
+                    <cf-input
                       $value={person.key("middleName")}
                       placeholder="Middle name"
                     />
@@ -431,7 +431,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Nickname
                     </label>
-                    <ct-input
+                    <cf-input
                       $value={person.key("nickname")}
                       placeholder="Preferred name / what they go by"
                     />
@@ -455,7 +455,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                 $value={person.key("birthday").key("day")}
                 items={DAY_OPTIONS}
               />
-              <ct-input
+              <cf-input
                 $value={person.key("birthday").key("year")}
                 placeholder="Year"
                 style={{ width: "80px" }}
@@ -483,7 +483,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Photo URL
             </label>
-            <ct-input
+            <cf-input
               $value={person.key("photo")}
               placeholder="https://..."
               type="url"
@@ -507,7 +507,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Email
                     </label>
-                    <ct-input
+                    <cf-input
                       $value={person.key("email")}
                       placeholder="Email"
                       type="email"
@@ -517,7 +517,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Phone
                     </label>
-                    <ct-input
+                    <cf-input
                       $value={person.key("phone")}
                       placeholder="Phone"
                       type="tel"
@@ -552,15 +552,15 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                               .key("label")}
                             items={ADDRESS_LABEL_OPTIONS}
                           />
-                          <ct-button
+                          <cf-button
                             variant="ghost"
                             size="sm"
                             onClick={removeAddress({ person, index: i })}
                           >
                             ×
-                          </ct-button>
+                          </cf-button>
                         </cf-hstack>
-                        <ct-input
+                        <cf-input
                           $value={person
                             .key("addresses")
                             .key(i)
@@ -568,7 +568,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                           placeholder="Street"
                         />
                         <cf-hstack style={{ gap: "4px" }}>
-                          <ct-input
+                          <cf-input
                             $value={person
                               .key("addresses")
                               .key(i)
@@ -576,7 +576,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                             placeholder="City"
                             style={{ flex: "1" }}
                           />
-                          <ct-input
+                          <cf-input
                             $value={person
                               .key("addresses")
                               .key(i)
@@ -584,13 +584,13 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                             placeholder="State"
                             style={{ width: "60px" }}
                           />
-                          <ct-input
+                          <cf-input
                             $value={person.key("addresses").key(i).key("zip")}
                             placeholder="Zip"
                             style={{ width: "80px" }}
                           />
                         </cf-hstack>
-                        <ct-input
+                        <cf-input
                           $value={person
                             .key("addresses")
                             .key(i)
@@ -600,13 +600,13 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                       </cf-vstack>
                     </cf-card>
                   ))}
-                  <ct-button
+                  <cf-button
                     variant="ghost"
                     size="sm"
                     onClick={addAddress({ person })}
                   >
                     + Add Address
-                  </ct-button>
+                  </cf-button>
                 </cf-vstack>
               );
             })}
@@ -629,7 +629,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                           .key("platform")}
                         items={SOCIAL_PLATFORM_OPTIONS}
                       />
-                      <ct-input
+                      <cf-input
                         $value={person
                           .key("socialProfiles")
                           .key(i)
@@ -637,22 +637,22 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                         placeholder="URL"
                         style={{ flex: "1" }}
                       />
-                      <ct-button
+                      <cf-button
                         variant="ghost"
                         size="sm"
                         onClick={removeSocialProfile({ person, index: i })}
                       >
                         ×
-                      </ct-button>
+                      </cf-button>
                     </cf-hstack>
                   ))}
-                  <ct-button
+                  <cf-button
                     variant="ghost"
                     size="sm"
                     onClick={addSocialProfile({ person })}
                   >
                     + Add Profile
-                  </ct-button>
+                  </cf-button>
                 </cf-vstack>
               );
             })}
@@ -665,7 +665,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
               if (!showNotes.get()) return null;
               return (
                 <cf-vstack style={{ gap: "4px" }}>
-                  <ct-input
+                  <cf-input
                     $value={person.key("notes")}
                     placeholder="Notes about this person..."
                     multiple
@@ -734,14 +734,14 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
                     borderTop: "1px solid #e5e7eb",
                   }}
                 >
-                  <ct-button
+                  <cf-button
                     variant="ghost"
                     size="sm"
                     onClick={togglePicker({ showPicker })}
                     style={{ fontSize: "12px", color: "#6b7280" }}
                   >
                     Link to another contact...
-                  </ct-button>
+                  </cf-button>
                 </cf-hstack>
               );
             })}

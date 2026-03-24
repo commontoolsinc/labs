@@ -203,7 +203,7 @@ export const LocationTrackModule = pattern<
           <label style={{ fontSize: "12px", color: "#6b7280" }}>
             Track Label (optional)
           </label>
-          <ct-input
+          <cf-input
             $value={label}
             placeholder="e.g., Morning walk, Commute..."
           />
@@ -239,7 +239,7 @@ export const LocationTrackModule = pattern<
           </span>
           {ifElse(
             hasPoints,
-            <ct-button
+            <cf-button
               variant="ghost"
               size="sm"
               onClick={clearLocations({ locations })}
@@ -251,7 +251,7 @@ export const LocationTrackModule = pattern<
               }}
             >
               Clear All
-            </ct-button>,
+            </cf-button>,
             null,
           )}
         </cf-hstack>

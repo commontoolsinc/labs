@@ -167,7 +167,7 @@ describe("google calendar importer e2e", () => {
 
     // Step 7: Click "Fetch Calendar Events" button
     console.log("Clicking Fetch Calendar Events button...");
-    const fetchButton = await page.waitForSelector("ct-button", {
+    const fetchButton = await page.waitForSelector("cf-button", {
       strategy: "pierce",
       timeout: 10000,
     });

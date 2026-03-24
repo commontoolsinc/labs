@@ -146,9 +146,9 @@ export default pattern<Input, Output>(
           <cf-vscroll flex showScrollbar fadeEdges>
             <cf-vstack gap="2" style="padding: 1rem; max-width: 600px;">
               {/* Add todo */}
-              <ct-message-input
+              <cf-message-input
                 placeholder="Add a todo..."
-                onct-send={onCreate({ todos, edits })}
+                oncf-send={onCreate({ todos, edits })}
               />
 
               {/* Empty state */}
@@ -174,10 +174,10 @@ export default pattern<Input, Output>(
                       checked={todo.done}
                       onct-change={onToggle({ todo, edits })}
                     />
-                    <ct-input
+                    <cf-input
                       $value={todo.description}
-                      onct-submit={onUpdate({ todo, edits })}
-                      onct-blur={onUpdate({ todo, edits })}
+                      oncf-submit={onUpdate({ todo, edits })}
+                      oncf-blur={onUpdate({ todo, edits })}
                       style={{ flex: "1" }}
                     />
                     <span
@@ -188,12 +188,12 @@ export default pattern<Input, Output>(
                     >
                       {todo.id}
                     </span>
-                    <ct-button
+                    <cf-button
                       variant="ghost"
                       onClick={onDelete({ todo, todos, edits })}
                     >
                       ×
-                    </ct-button>
+                    </cf-button>
                   </cf-hstack>
                 </cf-card>
               ))}

@@ -92,13 +92,13 @@ export const SocialModule = pattern<SocialModuleInput, SocialModuleInput>(
           </cf-vstack>
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Handle</label>
-            <ct-input $value={handle} placeholder="@username" />
+            <cf-input $value={handle} placeholder="@username" />
           </cf-vstack>
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Profile URL
             </label>
-            <ct-input
+            <cf-input
               type="url"
               $value={profileUrl}
               placeholder="https://..."

@@ -21,7 +21,7 @@ The form system enables modal forms where:
 │ ct-form (provides FormContext)                              │
 │                                                             │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │ ct-input    │  │ ct-select   │  │ ct-checkbox │         │
+│  │ cf-input    │  │ ct-select   │  │ ct-checkbox │         │
 │  │             │  │             │  │             │         │
 │  │ FormField   │  │ FormField   │  │ FormField   │         │
 │  │ Controller  │  │ Controller  │  │ Controller  │         │
@@ -45,8 +45,8 @@ The form wrapper that coordinates field buffering and validation.
 
 ```tsx
 <ct-form onct-submit={handleSubmit}>
-  <ct-input name="email" $value={data.key("email")} required />
-  <ct-button type="submit">Save</ct-button>
+  <cf-input name="email" $value={data.key("email")} required />
+  <cf-button type="submit">Save</cf-button>
 </ct-form>
 ```
 
@@ -59,7 +59,7 @@ The form wrapper that coordinates field buffering and validation.
 
 ### Form Fields
 
-All form-compatible fields (ct-input, ct-select, ct-checkbox, ct-textarea) share
+All form-compatible fields (cf-input, ct-select, ct-checkbox, cf-textarea) share
 the same behavior:
 
 **Outside ct-form:** Writes to bound cell immediately (existing behavior)
@@ -83,9 +83,9 @@ const formData = Writable.of({ name: "", email: "" });
     collection.push({ ...formData.get() });
   }, { formData, collection })}
 >
-  <ct-input name="name" $value={formData.key("name")} required />
-  <ct-input name="email" $value={formData.key("email")} type="email" />
-  <ct-button type="submit">Create</ct-button>
+  <cf-input name="name" $value={formData.key("name")} required />
+  <cf-input name="email" $value={formData.key("email")} type="email" />
+  <cf-button type="submit">Create</cf-button>
 </ct-form>;
 ```
 
@@ -99,10 +99,10 @@ export const EditPerson = pattern<{ person: Writable<Person> }, { [UI]: VNode }>
   ({ person }) => ({
     [UI]: (
       <ct-form onct-submit={closeModal}>
-        <ct-input name="name" $value={person.key("name")} required />
-        <ct-input name="email" $value={person.key("email")} type="email" />
-        <ct-button type="submit">Save</ct-button>
-        <ct-button type="reset">Cancel</ct-button>
+        <cf-input name="name" $value={person.key("name")} required />
+        <cf-input name="email" $value={person.key("email")} type="email" />
+        <cf-button type="submit">Save</cf-button>
+        <cf-button type="reset">Cancel</cf-button>
       </ct-form>
     ),
   }),
@@ -196,7 +196,7 @@ the same object reference would cause all items to share the same data.
 - Use a staging cell for create/edit flows and copy on submit to avoid shared references.
 - When using `ct-modal`, bind `$open` to a `Writable<boolean>` (not a `computed`)
   so the modal can update state correctly.
-- Use `ct-button type="reset"` (or call `form.reset()`) to discard buffered changes.
+- Use `cf-button type="reset"` (or call `form.reset()`) to discard buffered changes.
 
 ## Creating Form-Compatible Components
 

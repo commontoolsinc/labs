@@ -241,14 +241,14 @@ ${profileSection}`;
             {ifElse(
               hasMessages,
               <cf-hstack align="center" gap="1" style="padding-bottom: 0.5rem;">
-                <ct-button
+                <cf-button
                   variant="pill"
                   type="button"
                   title="Clear chat"
                   onClick={clearChat({ messages, pending })}
                 >
                   Clear
-                </ct-button>
+                </cf-button>
               </cf-hstack>,
               <span />,
             )}

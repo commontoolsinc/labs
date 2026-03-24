@@ -16,7 +16,7 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @example
  * <ct-label for="email" required>Email Address</ct-label>
- * <ct-input id="email" type="email"></ct-input>
+ * <cf-input id="email" type="email"></cf-input>
  */
 
 export class CTLabel extends BaseElement {

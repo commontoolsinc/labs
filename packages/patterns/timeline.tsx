@@ -60,19 +60,19 @@ export const TimelineModule = pattern<TimelineModuleInput, TimelineModuleInput>(
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Start Date
             </label>
-            <ct-input type="date" $value={startDate} />
+            <cf-input type="date" $value={startDate} />
           </cf-vstack>
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Target Date
             </label>
-            <ct-input type="date" $value={targetDate} />
+            <cf-input type="date" $value={targetDate} />
           </cf-vstack>
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Completed Date
             </label>
-            <ct-input type="date" $value={completedDate} />
+            <cf-input type="date" $value={completedDate} />
           </cf-vstack>
         </cf-vstack>
       ),

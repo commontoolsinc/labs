@@ -46,13 +46,13 @@ export default pattern(() => {
         {/* Same logic bound to different state */}
         <div>
           Counter A: {counterA}
-          <ct-button onClick={increment({ count: counterA })}>+</ct-button>
-          <ct-button onClick={decrement({ count: counterA })}>-</ct-button>
+          <cf-button onClick={increment({ count: counterA })}>+</cf-button>
+          <cf-button onClick={decrement({ count: counterA })}>-</cf-button>
         </div>
         <div>
           Counter B: {counterB}
-          <ct-button onClick={increment({ count: counterB })}>+</ct-button>
-          <ct-button onClick={decrement({ count: counterB })}>-</ct-button>
+          <cf-button onClick={increment({ count: counterB })}>+</cf-button>
+          <cf-button onClick={decrement({ count: counterB })}>-</cf-button>
         </div>
       </div>
     ),
@@ -71,7 +71,7 @@ const addItem = handler<{ title: string }, { items: Writable<Item[]> }>(
 );
 
 export default pattern(({ items }) => ({
-  [UI]: <ct-button onClick={addItem({ items })}>Add</ct-button>,
+  [UI]: <cf-button onClick={addItem({ items })}>Add</cf-button>,
   items,
 }));
 

@@ -122,54 +122,54 @@ export default pattern<ListInput, ListOutput>(
       [UI]: (
         <cf-vstack gap="2">
           <cf-card>
-            <ct-button
+            <cf-button
               id="reset-demo"
               onClick={resetList({ items })}
             >
               Reset Demo
-            </ct-button>
+            </cf-button>
 
-            <ct-button
+            <cf-button
               id="delete-first"
               onClick={deleteFirstItem({ items })}
             >
               Delete First Item
-            </ct-button>
+            </cf-button>
 
-            <ct-button
+            <cf-button
               id="delete-last"
               onClick={deleteLastItem({ items })}
             >
               Delete Last Item
-            </ct-button>
+            </cf-button>
 
-            <ct-button
+            <cf-button
               id="delete-all"
               onClick={deleteAllItems({ items })}
             >
               Delete All Items
-            </ct-button>
+            </cf-button>
 
-            <ct-button
+            <cf-button
               id="insert-start"
               onClick={insertItemAtStart({ items })}
             >
               Insert Item at Start
-            </ct-button>
+            </cf-button>
 
-            <ct-button
+            <cf-button
               id="insert-end"
               onClick={insertItemAtEnd({ items })}
             >
               Insert Item at End
-            </ct-button>
+            </cf-button>
 
-            <ct-button
+            <cf-button
               id="shuffle"
               onClick={shuffleItems({ items })}
             >
               Shuffle Items
-            </ct-button>
+            </cf-button>
 
             <pre id="main-list">{show(items)}</pre>
             <pre id="lowercase-list">{lowerCase}</pre>

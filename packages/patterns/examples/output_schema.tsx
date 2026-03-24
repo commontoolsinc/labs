@@ -25,9 +25,9 @@ export default pattern<Input, Output>(({ value }) => {
   return {
     [NAME]: "pattern output issue",
     [UI]: (
-      <ct-button onClick={increment({ value: value })}>
+      <cf-button onClick={increment({ value: value })}>
         {value}
-      </ct-button>
+      </cf-button>
     ),
     value,
   };

@@ -93,7 +93,7 @@ export class CTSeparator extends BaseElement {
 
 Components that capture user input.
 
-**Examples:** `ct-button`, `ct-input`, `ct-checkbox`, `ct-textarea`
+**Examples:** `cf-button`, `cf-input`, `ct-checkbox`, `cf-textarea`
 
 **Characteristics:**
 
@@ -105,7 +105,7 @@ Components that capture user input.
 **Pattern:**
 
 ```typescript
-export class CTButton extends BaseElement {
+export class CFButton extends BaseElement {
   @consume({ context: themeContext, subscribe: true })
   @property({ attribute: false })
   declare theme?: CTTheme;
@@ -174,14 +174,14 @@ ct-component-name/
 ### Component Implementation File
 
 ```typescript
-// ct-button.ts
+// cf-button.ts
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 export type ButtonVariant = "primary" | "secondary" | "destructive";
 
-export class CTButton extends BaseElement {
+export class CFButton extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -207,20 +207,20 @@ export class CTButton extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-button", CTButton);
+globalThis.customElements.define("cf-button", CFButton);
 ```
 
 ### Index File
 
 ```typescript
 // index.ts
-import { ButtonVariant, CTButton } from "./ct-button.ts";
+import { ButtonVariant, CFButton } from "./cf-button.ts";
 
-if (!customElements.get("ct-button")) {
-  customElements.define("ct-button", CTButton);
+if (!customElements.get("cf-button")) {
+  customElements.define("cf-button", CFButton);
 }
 
-export { CTButton };
+export { CFButton };
 export type { ButtonVariant };
 ```
 
@@ -439,9 +439,9 @@ Provide comprehensive JSDoc:
 
 ```typescript
 /**
- * CTButton - Interactive button element with multiple variants
+ * CFButton - Interactive button element with multiple variants
  *
- * @element ct-button
+ * @element cf-button
  *
  * @attr {string} variant - Visual style: "primary" | "secondary" | "destructive"
  * @attr {string} size - Button size: "default" | "sm" | "lg" | "icon"
@@ -452,7 +452,7 @@ Provide comprehensive JSDoc:
  * @fires ct-click - Fired when button is clicked
  *
  * @example
- * <ct-button variant="primary" size="lg">Click Me</ct-button>
+ * <cf-button variant="primary" size="lg">Click Me</cf-button>
  */
 ```
 
@@ -472,20 +472,20 @@ ct-component/
 ```typescript
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CTButton } from "./ct-button.ts";
+import { CFButton } from "./cf-button.ts";
 
-describe("CTButton", () => {
+describe("CFButton", () => {
   it("should be defined", () => {
-    expect(CTButton).toBeDefined();
+    expect(CFButton).toBeDefined();
   });
 
   it("should create element instance", () => {
-    const element = new CTButton();
-    expect(element).toBeInstanceOf(CTButton);
+    const element = new CFButton();
+    expect(element).toBeInstanceOf(CFButton);
   });
 
   it("should have default properties", () => {
-    const element = new CTButton();
+    const element = new CFButton();
     expect(element.variant).toBe("primary");
     expect(element.disabled).toBe(false);
   });

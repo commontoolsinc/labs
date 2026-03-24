@@ -1605,22 +1605,22 @@ When you're done searching, STOP calling tools and produce your final structured
               {derive(wishedAuthPiece, (piece: any) =>
                 piece
                   ? (
-                    <ct-button
+                    <cf-button
                       onClick={() => navigateTo(piece)}
                       size="sm"
                       variant="secondary"
                     >
                       Re-authenticate Gmail
-                    </ct-button>
+                    </cf-button>
                   )
                   : (
-                    <ct-button
+                    <cf-button
                       onClick={createGoogleAuth}
                       size="sm"
                       variant="secondary"
                     >
                       Connect Gmail
-                    </ct-button>
+                    </cf-button>
                   ))}
             </div>
           </div>,
@@ -1654,13 +1654,13 @@ When you're done searching, STOP calling tools and produce your final structured
                 {derive(wishedAuthPiece, (piece: any) =>
                   piece
                     ? (
-                      <ct-button
+                      <cf-button
                         onClick={() => navigateTo(piece)}
                         size="sm"
                         variant="secondary"
                       >
                         Re-authenticate Gmail
-                      </ct-button>
+                      </cf-button>
                     )
                     : null)}
               </div>
@@ -1746,7 +1746,7 @@ When you're done searching, STOP calling tools and produce your final structured
         {/* Scan Button */}
         {ifElse(
           isAuthenticated,
-          <ct-button
+          <cf-button
             onClick={boundStartScan}
             size="lg"
             style="width: 100%;"
@@ -1764,21 +1764,21 @@ When you're done searching, STOP calling tools and produce your final structured
                   ? scanButtonLabel
                   : "⚠️ No Goal Set",
             )}
-          </ct-button>,
+          </cf-button>,
           null,
         )}
 
         {/* Stop Button */}
         {ifElse(
           isScanning,
-          <ct-button
+          <cf-button
             onClick={boundStopScan}
             variant="secondary"
             size="lg"
             style="width: 100%; margin-top: 8px;"
           >
             ⏹ Stop Scan
-          </ct-button>,
+          </cf-button>,
           null,
         )}
       </div>
@@ -1982,13 +1982,13 @@ When you're done searching, STOP calling tools and produce your final structured
                     {derive(agentResult, (r: any) => r?.summary || "")}
                   </ct-markdown>
                 </div>
-                <ct-button
+                <cf-button
                   onClick={boundCompleteScan}
                   size="lg"
                   style="width: 100%; margin-top: 12px;"
                 >
                   ✓ Done
-                </ct-button>
+                </cf-button>
               </div>
             )
             : null)}
@@ -2259,7 +2259,7 @@ When you're done searching, STOP calling tools and produce your final structured
                           </div>
                           <div style={{ display: "flex", gap: "4px" }}>
                             {query.shareStatus === "private" && (
-                              <ct-button
+                              <cf-button
                                 onClick={flagForShareHandler({
                                   queryId: query.id,
                                   localQueries,
@@ -2270,9 +2270,9 @@ When you're done searching, STOP calling tools and produce your final structured
                                 style="color: #3b82f6; font-size: 11px;"
                               >
                                 Share
-                              </ct-button>
+                              </cf-button>
                             )}
-                            <ct-button
+                            <cf-button
                               onClick={deleteLocalQueryHandler({
                                 queryId: query.id,
                                 localQueries,
@@ -2283,7 +2283,7 @@ When you're done searching, STOP calling tools and produce your final structured
                               style="color: #dc2626; font-size: 12px;"
                             >
                               ×
-                            </ct-button>
+                            </cf-button>
                           </div>
                         </div>
                       </div>
@@ -2704,7 +2704,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 justifyContent: "flex-end",
                               }}
                             >
-                              <ct-button
+                              <cf-button
                                 onClick={() => {
                                   // Reject
                                   const pendingWritable =
@@ -2739,8 +2739,8 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 style="color: #64748b;"
                               >
                                 Keep Private
-                              </ct-button>
-                              <ct-button
+                              </cf-button>
+                              <cf-button
                                 onClick={() => {
                                   // Approve
                                   const pendingWritable =
@@ -2768,7 +2768,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 {submission.userApproved
                                   ? "✓ Approved"
                                   : "Approve for Sharing"}
-                              </ct-button>
+                              </cf-button>
                             </div>
                           </div>
                         ))}
@@ -2796,7 +2796,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                     textAlign: "center",
                                   }}
                                 >
-                                  <ct-button
+                                  <cf-button
                                     variant="default"
                                     disabled={!hasRegistry}
                                     onClick={() => {
@@ -2868,7 +2868,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                     {approvedCount === 1 ? "Query" : "Queries"}
                                     {" "}
                                     to Community
-                                  </ct-button>
+                                  </cf-button>
                                   {!hasRegistry && (
                                     <div
                                       style={{
@@ -2901,13 +2901,13 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                         current space. After creation, favorite
                                         it with tag #gmailSearchRegistry.
                                       </div>
-                                      <ct-button
+                                      <cf-button
                                         onClick={boundCreateSearchRegistry}
                                         variant="secondary"
                                         size="sm"
                                       >
                                         Create Registry
-                                      </ct-button>
+                                      </cf-button>
                                     </div>
                                   )}
                                 </div>

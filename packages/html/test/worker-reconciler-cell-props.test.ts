@@ -385,7 +385,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     });
     const rootCell = new MockCell({
       type: "vnode",
-      name: "ct-input",
+      name: "cf-input",
       props: propsCell,
       children: [],
     });
@@ -577,7 +577,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     });
     const rootCell = new MockCell({
       type: "vnode",
-      name: "ct-input",
+      name: "cf-input",
       props: propsCell,
       children: [],
     });

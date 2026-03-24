@@ -78,7 +78,7 @@ export const AddressModule = pattern<AddressModuleInput, AddressModuleInput>(
           </cf-vstack>
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Street</label>
-            <ct-input $value={street} placeholder="123 Main St" />
+            <cf-input $value={street} placeholder="123 Main St" />
           </cf-vstack>
           <div
             style={{
@@ -89,17 +89,17 @@ export const AddressModule = pattern<AddressModuleInput, AddressModuleInput>(
           >
             <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>City</label>
-              <ct-input $value={city} placeholder="City" />
+              <cf-input $value={city} placeholder="City" />
             </cf-vstack>
             <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 State
               </label>
-              <ct-input $value={state} placeholder="CA" />
+              <cf-input $value={state} placeholder="CA" />
             </cf-vstack>
             <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>ZIP</label>
-              <ct-input $value={zip} placeholder="12345" />
+              <cf-input $value={zip} placeholder="12345" />
             </cf-vstack>
           </div>
         </cf-vstack>

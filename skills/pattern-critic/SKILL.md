@@ -34,8 +34,8 @@ export default pattern<MyInput, MyOutput>(({ items, title }) => {
   return {
     [UI]: (
       <>
-        <ct-button onClick={toggleMenu}>Menu</ct-button>
-        <ct-button onClick={addItem}>Add</ct-button>
+        <cf-button onClick={toggleMenu}>Menu</cf-button>
+        <cf-button onClick={addItem}>Add</cf-button>
       </>
     ),
     items,
@@ -64,7 +64,7 @@ export default pattern<MyInput, MyOutput>(({ items }) => ({
         <li>
           {item.name}
           {/* Each item gets its own binding */}
-          <ct-button onClick={deleteItem({ item, items })}>Delete</ct-button>
+          <cf-button onClick={deleteItem({ item, items })}>Delete</cf-button>
         </li>
       ))}
     </ul>

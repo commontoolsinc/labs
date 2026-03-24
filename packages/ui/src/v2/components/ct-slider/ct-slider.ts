@@ -16,7 +16,7 @@ export type SliderOrientation = "horizontal" | "vertical";
  * @attr {SliderOrientation} orientation - Slider orientation ("horizontal" | "vertical")
  *
  * @fires ct-change - Fired when value changes with detail: { value, oldValue }
- * @fires ct-input - Fired during dragging with detail: { value, oldValue }
+ * @fires cf-input - Fired during dragging with detail: { value, oldValue }
  *
  * @example
  * <ct-slider min="0" max="100" value="50"></ct-slider>
@@ -529,7 +529,7 @@ export class CTSlider extends BaseElement {
           if (this.value !== snappedValue) {
             const oldValue = this.value;
             this.value = snappedValue;
-            this.emit("ct-input", { value: snappedValue, oldValue });
+            this.emit("cf-input", { value: snappedValue, oldValue });
             this.emit("ct-change", { value: snappedValue, oldValue });
           }
         }

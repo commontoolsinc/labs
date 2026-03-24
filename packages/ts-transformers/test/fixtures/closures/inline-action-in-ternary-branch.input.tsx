@@ -21,7 +21,7 @@ interface State {
 
 // FIXTURE: inline-action-in-ternary-branch
 // Verifies: inline arrow handler inside explicit computed() in a ternary branch is extracted and captured in derive
-//   computed(() => <ct-button onClick={() => state.isEditing.set(true)} />) → derive({ state: { isEditing: asCell } }, ..., handler(...)(...))
+//   computed(() => <cf-button onClick={() => state.isEditing.set(true)} />) → derive({ state: { isEditing: asCell } }, ..., handler(...)(...))
 // Context: Regression -- inline handler inside computed() must have its Cell ref captured in the derive wrapper
 export default pattern<State>((state) => {
   return {
@@ -35,7 +35,7 @@ export default pattern<State>((state) => {
             {/* Explicit computed() wrapping a button with inline handler */}
             {/* The Cell ref in the handler must be captured in the derive */}
             {computed(() => (
-              <ct-button onClick={() => state.isEditing.set(true)}>Edit</ct-button>
+              <cf-button onClick={() => state.isEditing.set(true)}>Edit</cf-button>
             ))}
           </div>
         )}
