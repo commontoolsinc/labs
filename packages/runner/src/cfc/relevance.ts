@@ -4,6 +4,7 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
+import { ignoreReadForSchedulingMarker } from "../storage/read-metadata.ts";
 import { canonicalizeStoragePath } from "./canonical-activity.ts";
 import { internalVerifierReadAnnotations } from "./internal-markers.ts";
 import {
@@ -11,6 +12,10 @@ import {
   normalizePersistedPathLabels,
   resolveObservationLabel,
 } from "./shared.ts";
+
+const ignoreReadForSchedulingMeta = {
+  [ignoreReadForSchedulingMarker]: true,
+} as const;
 
 function hasIfcInObjectSchema(
   schema: Record<string, unknown>,
@@ -159,6 +164,7 @@ export function markCfcRelevantForEffectiveLabels(
   }
 
   const labelsValue = tx.readOrThrow(cfcLabelsAddress(readAddress), {
+    meta: ignoreReadForSchedulingMeta,
     cfc: internalVerifierReadAnnotations,
   });
   const labelsByPath = normalizePersistedPathLabels(labelsValue);

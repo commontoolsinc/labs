@@ -4,7 +4,12 @@ import type {
   IMemorySpaceAddress,
   IReadOptions,
 } from "../storage/interface.ts";
+import { ignoreReadForSchedulingMarker } from "../storage/read-metadata.ts";
 import { markCfcRelevantForEffectiveLabels } from "./relevance.ts";
+
+const ignoreReadForSchedulingMeta = {
+  [ignoreReadForSchedulingMarker]: true,
+} as const;
 
 export function withInternalVerifierRead(
   options: IReadOptions = {},
@@ -34,6 +39,7 @@ export function recordCfcReadObservation(
   );
   tx.readOrThrow(address, {
     trackReadWithoutLoad: true,
+    meta: ignoreReadForSchedulingMeta,
     cfc,
   });
 }
