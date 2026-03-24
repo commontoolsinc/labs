@@ -703,6 +703,69 @@ export default pattern<{ label?: string | null }>((state) => ({
 );
 
 Deno.test(
+  "Capability-first: top-level call-argument optional property access lowers outside JSX",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+const wrap = <T,>(value: T) => value;
+
+export default pattern<{ user?: { name: string } }>((state) => {
+  const label = wrap(state.user?.name);
+  return { label };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const optionalDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:optional-chaining"
+    );
+
+    assertEquals(optionalDiagnostics.length, 0);
+    assertStringIncludes(output, 'wrap(state.key("user", "name"))');
+    assert(
+      !output.includes("state.user?.name"),
+      "expected top-level optional property access to lower out of raw optional chaining",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: top-level object-property optional element access lowers outside JSX",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+export default pattern<{ items?: string[] }>((state) => ({
+  first: state.items?.[0],
+}));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const optionalDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:optional-chaining"
+    );
+
+    assertEquals(optionalDiagnostics.length, 0);
+    assertStringIncludes(output, 'state.key("items", "0")');
+    assert(
+      !output.includes("state.items?.[0]"),
+      "expected top-level optional element access to lower out of raw optional chaining",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: interface defaults keep non-default sibling fields in pattern input schema",
   async () => {
     const source = `/// <cts-enable />

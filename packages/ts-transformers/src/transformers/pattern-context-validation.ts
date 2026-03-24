@@ -41,9 +41,9 @@ import {
   detectCallKind,
   detectDirectBuilderCall,
   isInRestrictedReactiveContext,
-  isReactiveArrayMethodCall,
   isInsideRestrictedContext,
   isInsideSafeCallbackWrapper,
+  isReactiveArrayMethodCall,
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
 import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
@@ -96,10 +96,16 @@ export class PatternContextValidationTransformer extends Transformer {
       // Note: isInRestrictedReactiveContext returns false for JSX expressions,
       // so this won't flag optional chaining inside JSX like <div>{user?.name}</div>
       if (
-        ts.isPropertyAccessExpression(node) &&
+        (
+          ts.isPropertyAccessExpression(node) ||
+          ts.isElementAccessExpression(node)
+        ) &&
         node.questionDotToken
       ) {
-        if (isInRestrictedReactiveContext(node, checker, context)) {
+        if (
+          isInRestrictedReactiveContext(node, checker, context) &&
+          !findLowerableExpressionSite(node, context, analyze)
+        ) {
           context.reportDiagnostic({
             severity: "error",
             type: "pattern-context:optional-chaining",
@@ -449,7 +455,8 @@ export class PatternContextValidationTransformer extends Transformer {
       }
 
       if (ts.isReturnStatement(node)) {
-        const isTerminalReturn = node.parent === func.body && node === lastStatement;
+        const isTerminalReturn = node.parent === func.body &&
+          node === lastStatement;
         if (!isTerminalReturn) {
           reportOnce(
             node,
@@ -469,7 +476,9 @@ export class PatternContextValidationTransformer extends Transformer {
             `let declarations are not supported in pattern-owned callback bodies. ` +
               `Use const, or move mutable logic into computed(), derive(), or a helper.`,
           );
-        } else if ((node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0) {
+        } else if (
+          (node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0
+        ) {
           reportOnce(
             node,
             "pattern-context:var-declaration",
@@ -523,7 +532,10 @@ export class PatternContextValidationTransformer extends Transformer {
     checker: ts.TypeChecker,
   ): boolean {
     const parent = func.parent;
-    if (!parent || !ts.isCallExpression(parent) || !parent.arguments.includes(func)) {
+    if (
+      !parent || !ts.isCallExpression(parent) ||
+      !parent.arguments.includes(func)
+    ) {
       return false;
     }
 

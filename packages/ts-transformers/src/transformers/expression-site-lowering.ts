@@ -646,6 +646,68 @@ function canRewriteHelperOwnedExpressionSite(
   return analysis.containsOpaqueRef && analysis.requiresRewrite;
 }
 
+function isOptionalAccessExpression(
+  expression: ts.Expression,
+): expression is ts.PropertyAccessExpression | ts.ElementAccessExpression {
+  return (
+    ts.isPropertyAccessExpression(expression) ||
+    ts.isElementAccessExpression(expression)
+  ) && !!expression.questionDotToken;
+}
+
+function isOptionalCallTarget(expression: ts.Expression): boolean {
+  return ts.isCallExpression(expression.parent) &&
+    expression.parent.expression === expression;
+}
+
+function canLowerOptionalAccessExpressionSite(
+  expression: ts.Expression,
+  containerKind: ExpressionContainerKind,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  if (!isOptionalAccessExpression(expression)) {
+    return false;
+  }
+
+  if (isOptionalCallTarget(expression)) {
+    return false;
+  }
+
+  const siteInfo = getExpressionSitePolicyInfo(
+    expression,
+    containerKind,
+    context,
+    analyze,
+  );
+
+  if (
+    !siteInfo.hasAuthoredSourceSite || siteInfo.withinEventHandlerJsxAttribute
+  ) {
+    return false;
+  }
+
+  if (siteInfo.reactiveContext.kind !== "pattern") {
+    return false;
+  }
+
+  if (containerKind === "jsx-expression") {
+    return classifyJsxExpressionSiteRoute(expression, context, analyze)
+      .route !==
+      "skip";
+  }
+
+  if (siteInfo.deferredJsxArrayMethod || siteInfo.arrayMethodOwned) {
+    return false;
+  }
+
+  return isEligiblePatternOwnedWrapperCallbackSite(
+    expression,
+    context,
+    analyze,
+  );
+}
+
 export function findLowerableExpressionSite(
   expression: ts.Expression,
   context: TransformationContext,
@@ -672,6 +734,12 @@ export function findLowerableExpressionSite(
         const analysis = analyze(current);
         if (
           canRewriteExpressionSite(current, containerKind, context, analyze) ||
+          canLowerOptionalAccessExpressionSite(
+            current,
+            containerKind,
+            context,
+            analyze,
+          ) ||
           canDeferExpressionSiteToHelperBoundary(siteInfo, analysis)
         ) {
           return {
