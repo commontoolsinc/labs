@@ -587,9 +587,12 @@ export class CellImpl<T extends StorableValue>
       resolvedToValueLink = resolveLink(this.runtime, tx, this.link);
     }
 
-    const value = tx.readValueOrThrow(resolvedToValueLink, {
-      meta: ignoreReadForScheduling,
-    });
+    const value = tx.readValueOrThrow(
+      resolvedToValueLink,
+      withInternalVerifierRead({
+        meta: ignoreReadForScheduling,
+      }),
+    );
     return isStreamValue(value);
   }
 
@@ -1301,10 +1304,15 @@ export class CellImpl<T extends StorableValue>
     | undefined;
   getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    let sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
-      { ...this.link, path: ["source"] },
-    ) as string | undefined;
+    const tx = this.runtime.readTx(this.tx);
+    const sourceAddress = { ...this.link, path: ["source"] };
+    let sourceCellId = tx.readOrThrow(
+      sourceAddress,
+      withInternalVerifierRead(),
+    ) as string | Record<string, unknown> | undefined;
+    recordCfcReadObservation(tx, sourceAddress, { op: "shape" });
     if (!sourceCellId) return undefined;
+    recordCfcReadObservation(tx, sourceAddress, { op: "followRef" });
     if (isRecord(sourceCellId)) {
       sourceCellId = toURI(sourceCellId);
     } else if (
@@ -1848,9 +1856,12 @@ function maybeConvertArrayPathToDataURILink(
 
   let rootValue: unknown;
   try {
-    rootValue = tx.readValueOrThrow({ ...link, path: [] }, {
-      meta: ignoreReadForScheduling,
-    });
+    rootValue = tx.readValueOrThrow(
+      { ...link, path: [] },
+      withInternalVerifierRead({
+        meta: ignoreReadForScheduling,
+      }),
+    );
   } catch {
     return link;
   }

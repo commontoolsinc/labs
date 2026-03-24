@@ -118,4 +118,71 @@ describe("CFC cell.getRaw observations", () => {
       reads.some((read) => read.path === "/items" && read.op === "value"),
     ).toBe(true);
   });
+
+  it("records source-cell dereferences on the source metadata path", () => {
+    const sourceCell = runtime.getCell<{ process: string }>(
+      space,
+      "cfc-cell-source-target",
+      undefined,
+      tx,
+    );
+    sourceCell.set({ process: "gmail" });
+
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "cfc-cell-source-owner",
+      undefined,
+      tx,
+    );
+    resultCell.setSourceCell(sourceCell);
+
+    const beforeReads =
+      canonicalizeBoundaryActivity(tx.journal.activity()).reads
+        .length;
+
+    const resolvedSource = resultCell.getSourceCell();
+
+    expect(resolvedSource?.entityId).toEqual(sourceCell.entityId);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .slice(beforeReads)
+      .filter((read) => !read.internalVerifierRead);
+    expect(
+      reads.some((read) => read.path === "/source" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/source" && read.op === "followRef"),
+    ).toBe(true);
+    expect(
+      reads.some((read) =>
+        read.id === sourceCell.getAsNormalizedFullLink().id &&
+        (read.op === "shape" || read.op === "value")
+      ),
+    ).toBe(false);
+  });
+
+  it("records only source-path shape when no source cell is present", () => {
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "cfc-cell-source-missing",
+      undefined,
+      tx,
+    );
+
+    const beforeReads =
+      canonicalizeBoundaryActivity(tx.journal.activity()).reads
+        .length;
+
+    expect(resultCell.getSourceCell()).toBeUndefined();
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .slice(beforeReads)
+      .filter((read) => !read.internalVerifierRead);
+    expect(
+      reads.some((read) => read.path === "/source" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/source" && read.op === "followRef"),
+    ).toBe(false);
+  });
 });
