@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
+import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 import { sanitizeSvg } from "./sanitize-svg.ts";
 
 // TODO(v2-token-migration): Migrate this component to component-level tokens,

@@ -6,7 +6,7 @@ import {
   derive,
   OpaqueRef,
   pattern,
-} from "commontools";
+} from "commonfabric";
 
 describe("derive type inference", () => {
   // These tests are not meant to run, the test is that they compile correctly.

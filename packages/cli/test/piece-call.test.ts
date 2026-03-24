@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { JSONSchema } from "@commontools/api";
-import { CT_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
+import type { JSONSchema } from "@commonfabric/api";
+import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
 import { executePieceCallable } from "../lib/piece.ts";
 
 describe("executePieceCallable", () => {
@@ -438,10 +438,10 @@ describe("executePieceCallable", () => {
     );
 
     expect(result.helpText).toContain(
-      "ct piece call ... search --help",
+      "cf piece call ... search --help",
     );
     expect(result.helpText).toContain(
-      "ct piece call ... search -- [run] --query <string>",
+      "cf piece call ... search -- [run] --query <string>",
     );
     expect(result.helpText).toContain("JSON input:");
     expect(result.helpText).toContain("Pass inline JSON as the next argument");
@@ -451,9 +451,9 @@ describe("executePieceCallable", () => {
       "Read the full input object from stdin.",
     );
     expect(result.helpText).not.toContain(
-      "ct piece call ... search -- [run] --help",
+      "cf piece call ... search -- [run] --help",
     );
-    expect(result.helpText).not.toContain("ct exec");
+    expect(result.helpText).not.toContain("cf exec");
   });
 
   it("surfaces handler transaction failures as errors", async () => {
@@ -613,7 +613,7 @@ function createPieceCallableHarness(options: {
     getSpace: () => "home",
     synced: async () => {},
     runtime: {
-      [CT_RUNTIME_ERROR_LOG]: runtimeErrors,
+      [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
       edit: () => ({
         commit: async () => {},
       }),

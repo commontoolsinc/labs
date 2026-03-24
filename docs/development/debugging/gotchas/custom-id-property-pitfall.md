@@ -28,7 +28,7 @@ interface Deck {
 ## The Fix: Use `equals()` Instead of ID Lookups
 
 ```typescript
-import { equals } from 'commontools';
+import { equals } from 'commonfabric';
 
 // CORRECT - No id property needed
 interface Deck {

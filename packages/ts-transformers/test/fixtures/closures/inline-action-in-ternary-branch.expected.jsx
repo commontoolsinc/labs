@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * Regression test: inline arrow function inside explicit computed() in JSX
  *
@@ -7,7 +7,7 @@ import * as __ctHelpers from "commontools";
  * to a handler, and the Cell reference (state.isEditing) must be properly
  * captured in the derive wrapper created for the computed.
  */
-import { Cell, computed, pattern, UI } from "commontools";
+import { Cell, computed, pattern, UI } from "commonfabric";
 interface Card {
     title: string;
     description: string;

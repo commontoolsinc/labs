@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-collision-shorthand
 // Verifies: shorthand property `{ multiplier }` expands correctly when the capture is renamed
 //   derive(multiplier, fn) → derive(schema, schema, { multiplier, multiplier_1 }, fn)

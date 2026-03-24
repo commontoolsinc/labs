@@ -1,5 +1,5 @@
-import { isDID } from "@commontools/identity";
-import { isRecord } from "@commontools/utils/types";
+import { isDID } from "@commonfabric/identity";
+import { isRecord } from "@commonfabric/utils/types";
 import {
   CellRef,
   CellUpdateNotification,

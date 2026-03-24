@@ -1,7 +1,7 @@
 /**
  * Debug utilities for inspecting cell values from the browser console.
  *
- * Exposed on `globalThis.commontools` as:
+ * Exposed on `globalThis.commonfabric` as:
  *   - readCell(options?)
  *   - readArgumentCell(options?)
  *   - subscribeToCell(options?)
@@ -10,16 +10,16 @@
  *   - explainTriggerTrace(options?)
  */
 
-import { CellHandle } from "@commontools/runtime-client";
+import { CellHandle } from "@commonfabric/runtime-client";
 import type {
   CellRef,
   RuntimeClient,
   TriggerTraceEntry,
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
-} from "@commontools/runtime-client";
-import type { DID } from "@commontools/identity";
-import { isRecord } from "@commontools/utils/types";
+} from "@commonfabric/runtime-client";
+import type { DID } from "@commonfabric/identity";
+import { isRecord } from "@commonfabric/utils/types";
 
 interface DebugCellOptions {
   /** Space DID — defaults to current shell space */

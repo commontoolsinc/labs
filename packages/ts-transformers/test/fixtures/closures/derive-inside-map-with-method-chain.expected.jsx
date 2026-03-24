@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { derive, pattern, UI } from "commonfabric";
 interface SubItem {
     id: number;
     name: string;

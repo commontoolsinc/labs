@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-no-captures
 // Verifies: derive with no closed-over variables is NOT closure-transformed
 //   derive(value, fn) → derive(schema, schema, value, fn) (no capture object created)

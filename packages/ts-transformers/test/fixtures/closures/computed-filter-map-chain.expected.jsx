@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, pattern } from "commonfabric";
 interface Preference {
     ingredient: string;
     preference: "liked" | "disliked";

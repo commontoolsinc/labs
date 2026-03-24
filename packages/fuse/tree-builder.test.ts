@@ -694,7 +694,7 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
   assertEquals(parsed.search, { "/tool": "search" });
 });
 
-Deno.test("callable scripts begin with a ct exec shebang and shell fallback", () => {
+Deno.test("callable scripts begin with a cf exec shebang and shell fallback", () => {
   const tree = new FsTree();
   const resultIno = tree.addDir(tree.rootIno, "result", "object");
   const callableIno = tree.addCallable(

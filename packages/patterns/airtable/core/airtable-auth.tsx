@@ -9,7 +9,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Secret<T> = T;
 

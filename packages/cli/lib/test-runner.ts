@@ -25,19 +25,19 @@
  * use the --root option to specify a common ancestor directory.
  */
 
-import { Identity } from "@commontools/identity";
-import { Engine, Runtime } from "@commontools/runner";
+import { Identity } from "@commonfabric/identity";
+import { Engine, Runtime } from "@commonfabric/runner";
 import type {
   Cell,
   ErrorWithContext,
   Pattern,
   SettleStats,
   Stream,
-} from "@commontools/runner";
-import type { OpaqueRef } from "@commontools/api";
-import { FileSystemProgramResolver } from "@commontools/js-compiler";
+} from "@commonfabric/runner";
+import type { OpaqueRef } from "@commonfabric/api";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { basename } from "@std/path";
-import { timeout } from "@commontools/utils/sleep";
+import { timeout } from "@commonfabric/utils/sleep";
 import { experimentalOptionsFromEnv } from "./utils.ts";
 import {
   type CDFPoint,
@@ -45,7 +45,7 @@ import {
   getTimingStatsBreakdown,
   resetAllCountBaselines,
   resetAllTimingBaselines,
-} from "@commontools/utils/logger";
+} from "@commonfabric/utils/logger";
 
 /**
  * A test step is an object with either an 'assertion' or 'action' property.
@@ -551,7 +551,7 @@ export async function runTestPattern(
   const identity = await Identity.fromPassphrase("test-runner");
   const space = identity.did();
   const { StorageManager } = await import(
-    "@commontools/runner/storage/cache.deno"
+    "@commonfabric/runner/storage/cache.deno"
   );
   const storageManager = StorageManager.emulate({ as: identity });
 

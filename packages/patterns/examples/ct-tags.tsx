@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
+import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
 
 type Input = {
   tags: string[];

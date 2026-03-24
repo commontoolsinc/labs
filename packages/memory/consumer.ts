@@ -47,12 +47,12 @@ import type {
   URI,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   type HashObject,
   hashObjectFromJson,
   hashOf,
-} from "@commontools/data-model/value-hash";
+} from "@commonfabric/data-model/value-hash";
 import * as Socket from "./socket.ts";
 import {
   getSelectorRevision,
@@ -66,10 +66,10 @@ import * as Subscription from "./subscription.ts";
 import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
-import { fabricFromNativeValue } from "@commontools/data-model/fabric-value";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("memory-consumer", {
   enabled: true,

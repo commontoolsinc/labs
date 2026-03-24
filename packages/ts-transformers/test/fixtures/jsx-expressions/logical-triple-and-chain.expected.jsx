@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // Tests triple && chain: a && b && c
 // Should produce nested when calls or derive the entire chain
 // FIXTURE: logical-triple-and-chain

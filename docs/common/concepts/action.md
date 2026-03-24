@@ -5,7 +5,7 @@ Use `action()` to handle user events like button clicks, form submissions, and o
 ## Basic Usage
 
 ```tsx
-import { action, pattern, Writable, UI } from 'commontools';
+import { action, pattern, Writable, UI } from 'commonfabric';
 
 export default pattern(() => {
   const count = Writable.of(0);

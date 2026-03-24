@@ -7,7 +7,7 @@ import {
   SELF,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Piece = Writable<{ [NAME]?: string }>;
 

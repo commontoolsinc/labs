@@ -7,7 +7,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface State {
   data: Default<string, "Initial test data">;

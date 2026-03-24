@@ -8,7 +8,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * Type for pieces used in the mentionable/backlinks system.

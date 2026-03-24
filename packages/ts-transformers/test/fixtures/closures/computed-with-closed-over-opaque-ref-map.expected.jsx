@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, OpaqueRef } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, OpaqueRef } from "commonfabric";
 export default function TestComputedWithClosedOverOpaqueRefMap() {
     const items = [1, 2, 3] as OpaqueRef<number[]>;
     // Inside computed, we close over items (an OpaqueRef)

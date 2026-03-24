@@ -3,8 +3,8 @@ import type { JSONSchemaMutable, JSONSchemaObjMutable } from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { cloneSchemaDefinition, getNativeTypeSchema } from "../type-utils.ts";
-import { getLogger } from "@commontools/utils/logger";
-import { isRecord } from "@commontools/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isRecord } from "@commonfabric/utils/types";
 import { extractDocFromType } from "../doc-utils.ts";
 import { isCellType } from "../typescript/cell-brand.ts";
 

@@ -1,5 +1,5 @@
-import { unclaimed } from "@commontools/memory/fact";
-import { deepEqual } from "@commontools/utils/deep-equal";
+import { unclaimed } from "@commonfabric/memory/fact";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type {
   IMemoryAddress,
   IMemoryChange,

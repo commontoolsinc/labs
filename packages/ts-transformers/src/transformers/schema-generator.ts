@@ -4,7 +4,7 @@ import {
   HelpersOnlyTransformer,
   TransformationContext,
 } from "../core/mod.ts";
-import { createSchemaTransformerV2 } from "@commontools/schema-generator";
+import { createSchemaTransformerV2 } from "@commonfabric/schema-generator";
 import {
   getTypeFromTypeNodeWithFallback,
   visitEachChildWithJsx,

@@ -1,7 +1,7 @@
-import { Console } from "@commontools/runner";
-import { isDeno } from "@commontools/utils/env";
+import { Console } from "@commonfabric/runner";
+import { isDeno } from "@commonfabric/utils/env";
 
-// "@commontools/piece" logs status to console during activity.
+// "@commonfabric/piece" logs status to console during activity.
 // When running in a Deno service or CLI, the logs are cluttering and
 // prevent piping data.
 //

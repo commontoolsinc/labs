@@ -1,4 +1,4 @@
-import { transformCtDirective } from "@commontools/ts-transformers";
+import { transformCtDirective } from "@commonfabric/ts-transformers";
 import { RuntimeProgram } from "./types.ts";
 
 export function pretransformProgram(

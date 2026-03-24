@@ -7,7 +7,7 @@
  *
  * Expected: ReadOnlyAddressError when using $checked on computed().map()
  */
-import { computed, Default, NAME, pattern, UI } from "commontools";
+import { computed, Default, NAME, pattern, UI } from "commonfabric";
 
 interface Item {
   id: string;

@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * Regression: .map() on a destructured property from a computed result
  * inside another computed() should NOT be transformed to .mapWithPattern().
@@ -6,7 +6,7 @@ import * as __ctHelpers from "commontools";
  * Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
  * so destructured `tasks` is a plain array.
  */
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
 interface Item {
     name: string;
     done: boolean;

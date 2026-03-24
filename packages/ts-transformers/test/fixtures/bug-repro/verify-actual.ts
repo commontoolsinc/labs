@@ -22,7 +22,7 @@ const compilerOptions: ts.CompilerOptions = {
   noEmit: true,
   skipLibCheck: true,
   paths: {
-    "commontools": [join(projectRoot, "packages/api/index.ts")],
+    "commonfabric": [join(projectRoot, "packages/api/index.ts")],
   },
   baseUrl: projectRoot,
 };

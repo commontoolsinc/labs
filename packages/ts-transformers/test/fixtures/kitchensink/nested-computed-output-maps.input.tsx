@@ -23,7 +23,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Comment {
   id: string;

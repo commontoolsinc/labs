@@ -171,7 +171,7 @@ async function findPatternTests(
 }
 
 /**
- * Find and run all .test.tsx pattern tests via `ct test`.
+ * Find and run all .test.tsx pattern tests via `cf test`.
  * Captures per-test timing and optionally writes JUnit XML.
  */
 async function runPatternTests(
@@ -387,7 +387,7 @@ async function runPackageIntegration(
     return await runPatternTests(rootDir, filter, junitDir);
   } else if (pkg === "cli") {
     // CLI uses a special shell script
-    env.CT_CLI_INTEGRATION_USE_LOCAL = "1";
+    env.CF_CLI_INTEGRATION_USE_LOCAL = "1";
     result = await runCommand(
       ["bash", "./integration/integration.sh"],
       { cwd: packageDir, env, inheritStdio: true },

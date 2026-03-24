@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/ui",
+  "name": "@commonfabric/ui",
   "exports": {
     ".": "./src/index.ts"
   },

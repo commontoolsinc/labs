@@ -23,7 +23,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Types for store layout
 type WallPosition =

@@ -78,7 +78,7 @@ because TypeScript's type system can enforce the same boundaries more efficientl
 
 ## Type System Notes
 
-- Export capability-specific TypeScript types from `@commontools/api`:
+- Export capability-specific TypeScript types from `@commonfabric/api`:
   `OpaqueRef<T>`, `Cell<T>`, `ReadonlyCell<T>`, `WriteonlyCell<T>`, and
   `Stream<T>`.
 - All types extend a shared `CellLike<T>` base with branded capability flags.

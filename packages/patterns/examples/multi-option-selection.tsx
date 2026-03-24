@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Default, NAME, pattern, UI, Writable } from "commontools";
+import { Default, NAME, pattern, UI, Writable } from "commonfabric";
 
 type Input = {
   selected: Writable<Default<string, "opt_1">>;

@@ -18,7 +18,7 @@
  */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { OpaqueCell, OpaqueRef } from "@commontools/api";
+import type { OpaqueCell, OpaqueRef } from "@commonfabric/api";
 
 interface NormalizedItem {
   value: string;

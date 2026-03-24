@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   addMockResponse,
   clearMockResponses,
   enableMockMode,
-} from "@commontools/llm/client";
-import type { BuiltInLLMMessage } from "@commontools/api";
+} from "@commonfabric/llm/client";
+import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type Cell } from "../src/cell.ts";
@@ -23,10 +23,10 @@ describe("generateText", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let generateText: ReturnType<
     typeof createBuilder
-  >["commontools"]["generateText"];
+  >["commonfabric"]["generateText"];
 
   let dummyPattern: any;
 
@@ -39,8 +39,8 @@ describe("generateText", () => {
     });
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
-    ({ pattern, generateText } = commontools);
+    const { commonfabric } = createBuilder();
+    ({ pattern, generateText } = commonfabric);
     dummyPattern = pattern(() => ({}), { type: "object" });
   });
 
@@ -250,10 +250,10 @@ describe("generateText with queue", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let generateText: ReturnType<
     typeof createBuilder
-  >["commontools"]["generateText"];
+  >["commonfabric"]["generateText"];
 
   beforeEach(() => {
     clearMockResponses();
@@ -264,8 +264,8 @@ describe("generateText with queue", () => {
     });
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
-    ({ pattern, generateText } = commontools);
+    const { commonfabric } = createBuilder();
+    ({ pattern, generateText } = commonfabric);
   });
 
   afterEach(async () => {

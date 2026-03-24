@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
-import type { CellHandle } from "@commontools/runtime-client";
+import type { CellHandle } from "@commonfabric/runtime-client";
 import { CTRender } from "./ct-render.ts";
 
 // NOTE: Full rendering lifecycle tests (cell swap cleanup, subscription

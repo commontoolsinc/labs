@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, JSONSchema, NAME, pattern, str, UI } from "commontools";
+import { derive, JSONSchema, NAME, pattern, str, UI } from "commonfabric";
 
 // Reuse email schema from email-summarizer.tsx
 const EmailSchema = {

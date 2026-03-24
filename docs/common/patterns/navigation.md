@@ -5,7 +5,7 @@ Use `navigateTo()` for drilling into detail views from list patterns.
 ## List Pattern
 
 ```typescript
-import { navigateTo, pattern, UI, Writable } from "commontools";
+import { navigateTo, pattern, UI, Writable } from "commonfabric";
 import ItemDetail from "./item-detail.tsx";
 
 interface Item {
@@ -39,7 +39,7 @@ export default pattern<Input>(({ items }) => ({
 The detail pattern receives a `Writable<Item>` and uses `.key()` to access individual fields for editing:
 
 ```typescript
-import { pattern, UI, Writable } from "commontools";
+import { pattern, UI, Writable } from "commonfabric";
 
 interface Item {
   name: string;

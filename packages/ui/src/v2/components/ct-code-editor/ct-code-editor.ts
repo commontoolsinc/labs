@@ -62,8 +62,8 @@ import {
   type CellHandle,
   isCellHandle,
   NAME,
-} from "@commontools/runtime-client";
-import { stringSchema } from "@commontools/runner/schemas";
+} from "@commonfabric/runtime-client";
+import { stringSchema } from "@commonfabric/runner/schemas";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import {

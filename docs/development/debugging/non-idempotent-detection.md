@@ -194,7 +194,7 @@ The results section shows:
 For programmatic access (e.g. from tests or tooling):
 
 ```typescript
-import { RuntimeClient } from "@commontools/runtime-client";
+import { RuntimeClient } from "@commonfabric/runtime-client";
 
 const result = await runtimeClient.detectNonIdempotent(5000);
 if (result.nonIdempotent.length > 0) {

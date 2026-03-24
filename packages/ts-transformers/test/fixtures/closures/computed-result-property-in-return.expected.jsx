@@ -1,11 +1,11 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * computed() result property access in derive captures should use
  * .key("length"). The computed() return is an OpaqueRef, so
  * rewritePatternBody correctly rewrites summary.length to
  * summary.key("length").
  */
-import { computed, pattern } from "commontools";
+import { computed, pattern } from "commonfabric";
 interface State {
     items: string[];
 }

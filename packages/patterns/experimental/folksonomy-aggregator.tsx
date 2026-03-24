@@ -27,7 +27,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * Tag event posted by folksonomy-tags instances.

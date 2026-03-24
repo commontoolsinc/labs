@@ -14,7 +14,7 @@ import {
   pattern,
   str,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 // User object for better data modeling
 interface User {

@@ -5,7 +5,7 @@
  * of opaque classification — Writable.of() is an opaque origin and
  * .get()/.set() are terminal methods.
  */
-import { action, pattern, UI, Writable } from "commontools";
+import { action, pattern, UI, Writable } from "commonfabric";
 
 interface State {
   title: string;

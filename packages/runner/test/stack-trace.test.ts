@@ -6,10 +6,10 @@ import {
   JsScript,
   TypeScriptCompiler,
   type TypeScriptCompilerOptions,
-} from "@commontools/js-compiler";
+} from "@commonfabric/js-compiler";
 import { UnsafeEvalRuntime } from "../src/harness/eval-runtime.ts";
-import { StaticCacheFS } from "@commontools/static";
-import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
+import { StaticCacheFS } from "@commonfabric/static";
+import { CommonToolsTransformerPipeline } from "@commonfabric/ts-transformers";
 
 const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
 

@@ -28,7 +28,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import Event, { COLORS, generateId } from "./event.tsx";
 

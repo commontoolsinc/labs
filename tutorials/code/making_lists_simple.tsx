@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, pattern, UI } from "commontools";
+import { Default, pattern, UI } from "commonfabric";
 
 interface FriendListState {
   names: Default<

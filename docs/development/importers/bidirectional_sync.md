@@ -99,8 +99,8 @@ directory and keeps cells in sync with the filesystem.
 ### Daemon Setup
 
 ```typescript
-import { Runtime } from "@commontools/runner";
-import { popFrame, pushFrameFromCause } from "@commontools/runner/builder";
+import { Runtime } from "@commonfabric/runner";
+import { popFrame, pushFrameFromCause } from "@commonfabric/runner/builder";
 
 const runtime = new Runtime(/* storage config */);
 

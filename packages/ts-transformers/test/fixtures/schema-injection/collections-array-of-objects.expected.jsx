@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell } from "commonfabric";
 // FIXTURE: collections-array-of-objects
 // Verifies: schema injection generates array-of-objects schema with typed items and required keys
 //   cell([{id: 1, name: "Alice", ...}]) → cell([...], { type: "array", items: { type: "object", properties: {...}, required: [...] } })

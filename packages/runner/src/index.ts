@@ -61,7 +61,7 @@ export {
 } from "./link-utils.ts";
 export * from "./pattern-manager.ts";
 
-// Builder functionality (migrated from @commontools/builder package)
+// Builder functionality (migrated from @commonfabric/builder package)
 export { createBuilder } from "./builder/factory.ts";
 export type {
   BuilderFunctionsAndConstants as BuilderFunctions,
@@ -128,7 +128,7 @@ export {
 export { createNodeFactory } from "./builder/module.ts";
 export { opaqueRef as cell } from "./builder/opaque-ref.ts";
 export { Classification, ContextualFlowControl } from "./cfc.ts";
-export type { Mutable } from "@commontools/utils/types";
+export type { Mutable } from "@commonfabric/utils/types";
 export {
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
@@ -141,7 +141,7 @@ export {
 
 // Utility functions (split from utils.ts)
 export { createJsonSchema } from "./builder/json-utils.ts";
-export { deepEqual } from "@commontools/utils/deep-equal";
+export { deepEqual } from "@commonfabric/utils/deep-equal";
 export { getValueAtPath, setValueAtPath } from "./path-utils.ts";
 export { schemaToTypeString } from "./schema-format.ts";
 export type { SchemaFormatOptions } from "./schema-format.ts";

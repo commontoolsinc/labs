@@ -1,6 +1,6 @@
 /// <cts-enable />
-import { Writable, derive, pattern, type JSONSchema } from "commontools";
-import "commontools/schema";
+import { Writable, derive, pattern, type JSONSchema } from "commonfabric";
+import "commonfabric/schema";
 
 // FIXTURE: derive-4arg-form
 // Verifies: closure extraction works with explicit 4-arg derive(inputSchema, outputSchema, input, fn)

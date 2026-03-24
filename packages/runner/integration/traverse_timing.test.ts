@@ -1,6 +1,6 @@
-import type { JSONObject } from "@commontools/api";
-import type { MemorySpace, MIME } from "@commontools/memory/interface";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+import type { JSONObject } from "@commonfabric/api";
+import type { MemorySpace, MIME } from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { SchemaPathSelector, URI } from "../src/storage/interface.ts";
 import {
   type BaseMemoryAddress,

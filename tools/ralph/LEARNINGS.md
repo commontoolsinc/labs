@@ -24,7 +24,7 @@ with the Common Tools framework.
 ## Conditional Rendering with ifElse
 
 - Use `ifElse(condition, trueValue, falseValue)` for conditional rendering in UI
-- Import from commontools: `import { ifElse } from "commontools"`
+- Import from commontools: `import { ifElse } from "commonfabric"`
 - Works with cells directly - no need to call `.get()`
 - Examples:
   - Display text: `{ifElse(enabled, "ON", "OFF")}`

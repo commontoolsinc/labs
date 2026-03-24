@@ -1,4 +1,4 @@
-import { JSONSchema, NAME, pattern, UI } from "commontools";
+import { JSONSchema, NAME, pattern, UI } from "commonfabric";
 
 const InputSchema = {
   type: "object",

@@ -116,7 +116,7 @@ See [`examples/index.html`](/identity/examples/index.html) of an example
 authentication flow.
 
 ```js
-import { PassKey, RootKey } from "@commontools/identity";
+import { PassKey, RootKey } from "@commonfabric/identity";
 
 // First check if we've already stored a root key.
 let rootKey = await RootKey.fromStorage();

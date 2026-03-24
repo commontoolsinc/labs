@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, computed, pattern } from "commontools";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: computed-nested
 // Verifies: chained computed() calls where the second captures the result of the first

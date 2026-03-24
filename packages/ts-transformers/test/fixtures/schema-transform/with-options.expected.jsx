@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { toSchema } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { toSchema } from "commonfabric";
 interface Config {
     value: number;
 }

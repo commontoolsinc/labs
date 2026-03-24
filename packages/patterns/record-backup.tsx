@@ -24,7 +24,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import { createSubPiece, getDefinition } from "./record/registry.ts";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";

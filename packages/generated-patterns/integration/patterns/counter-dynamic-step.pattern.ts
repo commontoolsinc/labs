@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, pattern, str } from "commontools";
+import { Cell, Default, handler, pattern, str } from "commonfabric";
 
 interface DynamicStepArgs {
   value: Default<number, 0>;

@@ -14,7 +14,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import Note from "./note.tsx";
 import {

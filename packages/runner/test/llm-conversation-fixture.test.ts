@@ -8,19 +8,19 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   clearMockResponses,
   type ConversationFixture,
   loadConversationFixture,
   loadConversationFixtureFile,
-} from "@commontools/llm/client";
+} from "@commonfabric/llm/client";
 import type {
   BuiltInLLMMessage,
   BuiltInLLMTool,
   JSONSchema,
-} from "@commontools/api";
+} from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -50,15 +50,15 @@ describe("conversation fixtures", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let Cell: ReturnType<typeof createBuilder>["commontools"]["Cell"];
+  let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
   let patternTool: ReturnType<
     typeof createBuilder
-  >["commontools"]["patternTool"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  >["commonfabric"]["patternTool"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let generateObject: ReturnType<
     typeof createBuilder
-  >["commontools"]["generateObject"];
-  let llmDialog: ReturnType<typeof createBuilder>["commontools"]["llmDialog"];
+  >["commonfabric"]["generateObject"];
+  let llmDialog: ReturnType<typeof createBuilder>["commonfabric"]["llmDialog"];
 
   beforeEach(() => {
     clearMockResponses();
@@ -69,8 +69,8 @@ describe("conversation fixtures", () => {
     });
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
-    ({ pattern, generateObject, llmDialog, Cell, patternTool } = commontools);
+    const { commonfabric } = createBuilder();
+    ({ pattern, generateObject, llmDialog, Cell, patternTool } = commonfabric);
   });
 
   afterEach(async () => {

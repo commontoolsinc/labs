@@ -3,13 +3,13 @@ import { executeMountedCallableFile } from "../lib/exec.ts";
 
 export const exec = new Command()
   .name("exec")
-  .description("Execute a mounted callable file from a ct FUSE mount.")
+  .description("Execute a mounted callable file from a cf FUSE mount.")
   .example(
-    "ct exec /tmp/ct/home/pieces/notes/result/add.handler invoke --query milk",
+    "cf exec /tmp/cf/home/pieces/notes/result/add.handler invoke --query milk",
     "Invoke a mounted handler with schema-derived flags.",
   )
   .example(
-    "ct exec /tmp/ct/home/pieces/notes/result/search.tool --query milk",
+    "cf exec /tmp/cf/home/pieces/notes/result/search.tool --query milk",
     "Run a mounted tool using its default verb.",
   )
   .stopEarly()

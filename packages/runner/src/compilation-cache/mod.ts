@@ -1,4 +1,4 @@
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 import type { CompilationCacheStorage } from "./storage.ts";
 import type { CompileResult } from "../harness/types.ts";
 

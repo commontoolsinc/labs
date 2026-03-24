@@ -4,7 +4,7 @@
  * not plain property access. The computed() return value is an
  * OpaqueRef, so rewritePatternBody correctly treats it as opaque.
  */
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
 
 interface State {
   items: Array<{ name: string; done: boolean }>;

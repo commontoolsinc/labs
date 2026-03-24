@@ -13,9 +13,9 @@ The `ct` binary is the CLI for CommonTools. **Use `--help` for current
 commands:**
 
 ```bash
-deno task ct --help           # Top-level commands
-deno task ct piece --help     # Piece operations
-deno task ct check --help     # Type checking
+deno task cf --help           # Top-level commands
+deno task cf piece --help     # Piece operations
+deno task cf check --help     # Type checking
 ```
 
 ## Environment Setup
@@ -32,15 +32,15 @@ deno run -A packages/cli/mod.ts id derive "implicit trust" > ct.key
 deno run -A packages/cli/mod.ts id new > ct.key
 ```
 
-**IMPORTANT:** Do NOT use `deno task ct id new > file` — the `deno task` wrapper
+**IMPORTANT:** Do NOT use `deno task cf id new > file` — the `deno task` wrapper
 prints ANSI-colored preamble to stdout, which pollutes the key file. Always use
 `deno run -A packages/cli/mod.ts` when redirecting output.
 
 **Environment variables** (avoid repeating flags):
 
 ```bash
-export CT_API_URL=http://localhost:8000  # or https://toolshed.saga-castor.ts.net/
-export CT_IDENTITY=./ct.key
+export CF_API_URL=http://localhost:8000  # or https://toolshed.saga-castor.ts.net/
+export CF_IDENTITY=./ct.key
 ```
 
 **Experimental flags** (must be set on both servers AND CLI commands):
@@ -49,7 +49,7 @@ export CT_IDENTITY=./ct.key
 # Pass experiment env vars to CLI commands:
 EXPERIMENTAL_MODERN_HASH=true \
 EXPERIMENTAL_MODERN_DATA_MODEL=true \
-deno task ct piece new pattern.tsx ...
+deno task cf piece new pattern.tsx ...
 ```
 
 See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
@@ -60,20 +60,20 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 
 | Operation         | Command                                                                   |
 | ----------------- | ------------------------------------------------------------------------- |
-| Type check        | `deno task ct check pattern.tsx --no-run`                                 |
-| Deploy new        | `deno task ct piece new pattern.tsx -i key -a url -s space`               |
-| Update existing   | `deno task ct piece setsrc pattern.tsx --piece ID -i key -a url -s space` |
-| Inspect state     | `deno task ct piece inspect --piece ID ...`                               |
-| Get field         | `deno task ct piece get --piece ID fieldPath ...`                         |
-| Set field         | `echo '{"data":...}' \| deno task ct piece set --piece ID path ...`       |
-| Call handler      | `deno task ct piece call --piece ID handlerName ...`                      |
-| Trigger recompute | `deno task ct piece step --piece ID ...`                                  |
-| List pieces       | `deno task ct piece ls -i key -a url -s space`                            |
-| Visualize         | `deno task ct piece map ...`                                              |
+| Type check        | `deno task cf check pattern.tsx --no-run`                                 |
+| Deploy new        | `deno task cf piece new pattern.tsx -i key -a url -s space`               |
+| Update existing   | `deno task cf piece setsrc pattern.tsx --piece ID -i key -a url -s space` |
+| Inspect state     | `deno task cf piece inspect --piece ID ...`                               |
+| Get field         | `deno task cf piece get --piece ID fieldPath ...`                         |
+| Set field         | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`       |
+| Call handler      | `deno task cf piece call --piece ID handlerName ...`                      |
+| Trigger recompute | `deno task cf piece step --piece ID ...`                                  |
+| List pieces       | `deno task cf piece ls -i key -a url -s space`                            |
+| Visualize         | `deno task cf piece map ...`                                              |
 
 ## Check Command Flags
 
-`deno task ct check` compiles and evaluates patterns. Key flags:
+`deno task cf check` compiles and evaluates patterns. Key flags:
 
 | Flag                   | Purpose                                            |
 | ---------------------- | -------------------------------------------------- |
@@ -89,11 +89,11 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 Common usage:
 
 ```bash
-deno task ct check pattern.tsx              # Compile + execute (quiet on success)
-deno task ct check pattern.tsx --no-run     # Type check only (fast)
-deno task ct check pattern.tsx --no-check   # Skip types, just execute
-deno task ct check pattern.tsx --show-transformed  # Debug compiler transforms
-deno task ct check pattern.tsx --verbose-errors     # Detailed error context
+deno task cf check pattern.tsx              # Compile + execute (quiet on success)
+deno task cf check pattern.tsx --no-run     # Type check only (fast)
+deno task cf check pattern.tsx --no-check   # Skip types, just execute
+deno task cf check pattern.tsx --show-transformed  # Debug compiler transforms
+deno task cf check pattern.tsx --verbose-errors     # Detailed error context
 ```
 
 ## Core Workflow: setsrc vs new
@@ -102,11 +102,11 @@ deno task ct check pattern.tsx --verbose-errors     # Detailed error context
 
 ```bash
 # First time only
-deno task ct piece new pattern.tsx ...
+deno task cf piece new pattern.tsx ...
 # Output: Created piece bafyreia... <- Save this ID!
 
 # ALL subsequent iterations
-deno task ct piece setsrc pattern.tsx --piece bafyreia... ...
+deno task cf piece setsrc pattern.tsx --piece bafyreia... ...
 ```
 
 **Why:** `new` creates duplicate pieces. `setsrc` updates in-place.
@@ -117,13 +117,13 @@ All values to `set` and `call` must be valid JSON:
 
 ```bash
 # Strings need nested quotes
-echo '"hello world"' | deno task ct piece set ... title
+echo '"hello world"' | deno task cf piece set ... title
 
 # Numbers are bare
-echo '42' | deno task ct piece set ... count
+echo '42' | deno task cf piece set ... count
 
 # Objects
-echo '{"name": "John"}' | deno task ct piece set ... user
+echo '{"name": "John"}' | deno task cf piece set ... user
 ```
 
 ## Gotcha: Always `step` After `set` or `call`
@@ -133,27 +133,27 @@ Neither `piece set` nor `piece call` triggers recomputation automatically. You
 
 ```bash
 # After setting data:
-echo '[...]' | deno task ct piece set --piece ID expenses ...
-deno task ct piece step --piece ID ...  # Required!
-deno task ct piece get --piece ID totalSpent ...
+echo '[...]' | deno task cf piece set --piece ID expenses ...
+deno task cf piece step --piece ID ...  # Required!
+deno task cf piece get --piece ID totalSpent ...
 
 # After calling a handler:
-deno task ct piece call --piece ID addItem '{"title": "Test"}'
-deno task ct piece step --piece ID ...  # Required!
-deno task ct piece inspect --piece ID ...
+deno task cf piece call --piece ID addItem '{"title": "Test"}'
+deno task cf piece step --piece ID ...  # Required!
+deno task cf piece inspect --piece ID ...
 ```
 
 **Handler testing workflow** (deploy → call → step → inspect):
 
 ```bash
 # 1. Deploy
-deno task ct piece new pattern.tsx -i key -a url -s space
+deno task cf piece new pattern.tsx -i key -a url -s space
 # 2. Call a handler
-deno task ct piece call --piece ID handlerName '{"arg": "value"}' ...
+deno task cf piece call --piece ID handlerName '{"arg": "value"}' ...
 # 3. Step to process
-deno task ct piece step --piece ID ...
+deno task cf piece step --piece ID ...
 # 4. Inspect result
-deno task ct piece inspect --piece ID ...
+deno task cf piece inspect --piece ID ...
 # 5. Repeat 2-4 for each handler
 ```
 

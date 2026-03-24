@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, handler, NAME, pattern, str, UI } from "commontools";
+import { Cell, handler, NAME, pattern, str, UI } from "commonfabric";
 
 interface PatternState {
   value: number;

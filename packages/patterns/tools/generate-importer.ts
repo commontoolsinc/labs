@@ -340,8 +340,8 @@ Next steps:
   3. Add ${pascal.toUpperCase()}_CLIENT_ID and ${pascal.toUpperCase()}_CLIENT_SECRET to packages/toolshed/.env
   4. Register the OAuth route in packages/toolshed/routes/integrations/
   5. Deploy the patterns:
-       cd ../labs && CT_API_URL=http://localhost:8000 deno task ct piece new ${outputDir}/${providerName}-auth.tsx -s <space>
-       cd ../labs && CT_API_URL=http://localhost:8000 deno task ct piece new ${outputDir}/${providerName}-importer.tsx -s <space>
+       cd ../labs && CF_API_URL=http://localhost:8000 deno task cf piece new ${outputDir}/${providerName}-auth.tsx -s <space>
+       cd ../labs && CF_API_URL=http://localhost:8000 deno task cf piece new ${outputDir}/${providerName}-importer.tsx -s <space>
   6. Test the OAuth flow and importer in the shell
 `);
 }

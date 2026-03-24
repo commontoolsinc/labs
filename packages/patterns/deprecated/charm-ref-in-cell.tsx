@@ -11,7 +11,7 @@ import {
   toSchema,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // full pattern state
 interface PatternState {

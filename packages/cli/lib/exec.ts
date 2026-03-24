@@ -1,4 +1,4 @@
-import { PiecesController } from "@commontools/piece/ops";
+import { PiecesController } from "@commonfabric/piece/ops";
 import { dirname, join, relative, resolve } from "@std/path";
 import {
   type MountedCallablePath,
@@ -46,7 +46,7 @@ export interface ExecDependencies {
   timeoutMs?: number;
   uuid?: () => string;
   waitForResult?: (resultCell: any, timeoutMs: number) => Promise<unknown>;
-  invocationStyle?: "ct" | "direct";
+  invocationStyle?: "cf" | "direct";
   readJsonInput?: () => Promise<unknown>;
   readTextInput?: () => Promise<string>;
   readTextFile?: (path: string) => Promise<string>;
@@ -118,7 +118,7 @@ export async function resolveMountedCallableFile(
   const mount = await findMountForPath(absPath, deps.stateDir);
   if (!mount) {
     throw new Error(
-      `Path is not within a mounted ct fuse filesystem: ${absPath}`,
+      `Path is not within a mounted cf fuse filesystem: ${absPath}`,
     );
   }
 
@@ -171,7 +171,7 @@ export async function executeMountedCallableFile(
   );
   const parsed = invocation.parsed;
   const invocationStyle = deps.invocationStyle ??
-    (Deno.env.get("CT_EXEC_SHEBANG") === "1" ? "direct" : "ct");
+    (Deno.env.get("CF_EXEC_SHEBANG") === "1" ? "direct" : "cf");
 
   if (parsed.showHelp) {
     return {

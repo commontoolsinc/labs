@@ -16,7 +16,7 @@
  * />
  * ```
  */
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
 
 interface ProcessingStatusProps {
   totalCount: number;

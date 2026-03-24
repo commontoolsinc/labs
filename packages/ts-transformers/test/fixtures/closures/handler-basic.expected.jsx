@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, pattern, UI } from "commonfabric";
 interface State {
     counter: Cell<number>;
 }

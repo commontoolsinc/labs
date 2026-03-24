@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // FIXTURE: map-array-length-conditional
 // Verifies: length-guard && map pattern is transformed to when() wrapping mapWithPattern()
 //   list.get().length > 0 && (<div>{list.map(...)}</div>) → when(derive(...length), <div>{list.mapWithPattern(...)}</div>)

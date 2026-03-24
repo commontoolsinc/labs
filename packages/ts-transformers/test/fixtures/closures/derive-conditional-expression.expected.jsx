@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-conditional-expression
 // Verifies: captures used in both branches of a ternary are extracted
 //   derive(value, fn) → derive(schema, schema, { value, threshold, multiplier }, fn)

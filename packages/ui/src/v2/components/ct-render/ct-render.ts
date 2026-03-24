@@ -2,9 +2,9 @@ import { css, html, PropertyValues } from "lit";
 import { createRef, type Ref, ref } from "lit/directives/ref.js";
 import { state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { render } from "@commontools/html/client";
-import type { CellHandle } from "@commontools/runtime-client";
-import { type VNode } from "@commontools/runtime-client";
+import { render } from "@commonfabric/html/client";
+import type { CellHandle } from "@commonfabric/runtime-client";
+import { type VNode } from "@commonfabric/runtime-client";
 import "../ct-loader/ct-loader.ts";
 
 // Set to true to enable debug logging

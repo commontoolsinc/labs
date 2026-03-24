@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, ifElse, NAME, pattern, UI, Writable } from "commontools";
+import { Default, ifElse, NAME, pattern, UI, Writable } from "commonfabric";
 
 interface CheckboxSimpleInput {
   enabled: Writable<Default<boolean, false>>;

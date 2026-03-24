@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, handler, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, handler, pattern } from "commonfabric";
 // Updated 2025-09-03: String literal unions now generate correct JSON Schema
 // (enum instead of array) due to schema-generator UnionFormatter improvements
 interface UserEvent {

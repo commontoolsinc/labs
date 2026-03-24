@@ -8,7 +8,7 @@ import {
   UI,
   useCancelGroup,
   type VNode,
-} from "@commontools/runtime-client";
+} from "@commonfabric/runtime-client";
 
 import {
   cleanEventProp,
@@ -26,7 +26,7 @@ import {
   stringifyText,
   styleObjectToCssString,
 } from "./render-utils.ts";
-import { rendererVDOMSchema } from "@commontools/runner/schemas";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { VDomRenderer } from "./main/renderer.ts";
 //import { animate } from "./debug-element.ts";
 

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, Writable } from "commontools";
+import { NAME, pattern, UI, Writable } from "commonfabric";
 
 /**
  * Reproduction case for late subscriber initial value bug.

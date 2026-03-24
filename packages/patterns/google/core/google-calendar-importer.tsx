@@ -12,7 +12,7 @@ import {
   str,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Secret<T> = T;
 type Confidential<T> = T;
@@ -581,7 +581,7 @@ interface GoogleCalendarImporterInput {
     debugMode: false;
   }>;
   // Optional: Link auth directly from a Google Auth piece when wish() is unavailable
-  // Use: ct piece link googleAuthPiece/auth calendarImporterPiece/overrideAuth
+  // Use: cf piece link googleAuthPiece/auth calendarImporterPiece/overrideAuth
   overrideAuth?: Auth;
 }
 

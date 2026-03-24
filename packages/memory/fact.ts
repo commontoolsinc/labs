@@ -1,5 +1,5 @@
 import type { URI } from "./interface.ts";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   Assertion,
   Fact,
@@ -17,7 +17,7 @@ import {
   hashObjectFromString,
   hashOf,
   isHashObject,
-} from "@commontools/data-model/value-hash";
+} from "@commonfabric/data-model/value-hash";
 
 /**
  * Creates an unclaimed fact.

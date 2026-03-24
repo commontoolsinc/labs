@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { derive, pattern } from "commonfabric";
 interface Preference {
     ingredient: string;
     preference: "liked" | "disliked";

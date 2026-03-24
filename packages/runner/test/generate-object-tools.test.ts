@@ -9,16 +9,16 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   addMockObjectResponse,
   addMockResponse,
   clearMockResponses,
   enableMockMode,
   loadConversationFixture,
-} from "@commontools/llm/client";
-import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commontools/api";
+} from "@commonfabric/llm/client";
+import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -35,16 +35,16 @@ describe("generateObject with tools", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
-  let str: ReturnType<typeof createBuilder>["commontools"]["str"];
-  let Cell: ReturnType<typeof createBuilder>["commontools"]["Cell"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
+  let str: ReturnType<typeof createBuilder>["commonfabric"]["str"];
+  let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
   let patternTool: ReturnType<
     typeof createBuilder
-  >["commontools"]["patternTool"];
+  >["commonfabric"]["patternTool"];
   let generateObject: ReturnType<
     typeof createBuilder
-  >["commontools"]["generateObject"];
+  >["commonfabric"]["generateObject"];
   let dummyPattern: any;
 
   beforeEach(() => {
@@ -56,9 +56,9 @@ describe("generateObject with tools", () => {
     });
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
+    const { commonfabric } = createBuilder();
     ({ pattern, generateObject, handler, Cell, patternTool, str } =
-      commontools);
+      commonfabric);
     dummyPattern = pattern(() => ({}), { type: "object" });
   });
 

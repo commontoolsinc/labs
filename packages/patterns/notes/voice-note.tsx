@@ -8,7 +8,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Type definition for transcription data (from ct-voice-input component)
 interface TranscriptionChunk {

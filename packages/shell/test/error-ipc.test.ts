@@ -6,11 +6,11 @@ import {
   NotificationType,
   RuntimeConnection,
   type RuntimeTransport,
-} from "@commontools/runtime-client";
+} from "@commonfabric/runtime-client";
 import type {
   IPCClientMessage,
   IPCRemoteMessage,
-} from "@commontools/runtime-client";
+} from "@commonfabric/runtime-client";
 
 /**
  * Tests that error notifications sent from the worker (via IPC)

@@ -14,7 +14,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Type for backlinks (inline to work around CLI path resolution bug)
 type MentionablePiece = {

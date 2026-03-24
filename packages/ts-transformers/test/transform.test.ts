@@ -3,7 +3,7 @@ import { assert, assertRejects } from "@std/assert";
 import { transformFiles } from "./utils.ts";
 
 const fixture = `
-import { toSchema } from "commontools";
+import { toSchema } from "commonfabric";
 
 interface Config {
   value: number;

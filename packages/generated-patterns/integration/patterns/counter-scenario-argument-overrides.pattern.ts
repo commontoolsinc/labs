@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface ScenarioArgumentOverrideArgs {
   value: Default<number, 0>;

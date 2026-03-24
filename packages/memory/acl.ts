@@ -1,4 +1,4 @@
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import {
   ACL,
   ACLUser,

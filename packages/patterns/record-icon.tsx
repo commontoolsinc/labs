@@ -8,7 +8,7 @@
  *
  * Uses the emoji-picker pattern for the selection UI.
  */
-import { computed, type Default, NAME, pattern, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 import EmojiPicker from "./emoji-picker.tsx";
 

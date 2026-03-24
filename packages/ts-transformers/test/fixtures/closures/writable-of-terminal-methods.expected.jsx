@@ -1,11 +1,11 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * Writable.of() result accessed via .get()/.set() in action
  * callbacks. These are terminal methods handled correctly regardless
  * of opaque classification — Writable.of() is an opaque origin and
  * .get()/.set() are terminal methods.
  */
-import { action, pattern, UI, Writable } from "commontools";
+import { action, pattern, UI, Writable } from "commonfabric";
 interface State {
     title: string;
 }

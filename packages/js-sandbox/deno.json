@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/js-sandbox",
+  "name": "@commonfabric/js-sandbox",
   "tasks": {
     "test": {
       "dependencies": [

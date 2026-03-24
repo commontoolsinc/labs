@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
 
 // FIXTURE: computed-jsx-local-function
 // Verifies: computed() with a locally-defined function inside the callback is closure-extracted

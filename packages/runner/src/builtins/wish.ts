@@ -3,16 +3,16 @@ import {
   type WishParams,
   type WishState,
   type WishTag,
-} from "@commontools/api";
-import { h } from "@commontools/html";
-import { favoriteListSchema } from "@commontools/home-schemas";
-import { HttpProgramResolver } from "@commontools/js-compiler";
+} from "@commonfabric/api";
+import { h } from "@commonfabric/html";
+import { favoriteListSchema } from "@commonfabric/home-schemas";
+import { HttpProgramResolver } from "@commonfabric/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { NAME, type Pattern, UI } from "../builder/types.ts";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { getPatternEnvironment } from "../env.ts";
 import { getLogger } from "@commontools/utils/logger";
 

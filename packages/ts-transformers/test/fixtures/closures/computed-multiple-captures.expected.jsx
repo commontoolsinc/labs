@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, computed, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 // FIXTURE: computed-multiple-captures
 // Verifies: computed() with a multi-statement body capturing three cells is closure-extracted
 //   computed(() => { const sum = a.get() + b.get(); return sum * c.get() }) → derive(captureSchema, resultSchema, { a, b, c }, ({ a, b, c }) => { ... })

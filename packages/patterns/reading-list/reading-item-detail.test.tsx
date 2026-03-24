@@ -10,9 +10,9 @@
  * - Status transitions (want -> reading -> finished)
  * - Clearing rating (set to null)
  *
- * Run: deno task ct test packages/patterns/reading-list/reading-item-detail.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/reading-list/reading-item-detail.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commonfabric";
 import ReadingItemDetail from "./reading-item-detail.tsx";
 
 export default pattern(() => {

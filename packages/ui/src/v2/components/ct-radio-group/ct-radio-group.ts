@@ -68,7 +68,7 @@ import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import { radioGroupStyles } from "./styles.ts";
-import { type CellHandle } from "@commontools/runtime-client";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import {
   applyThemeToElement,

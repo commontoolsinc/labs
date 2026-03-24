@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // Test that all literal types are widened in closure captures
 // FIXTURE: derive-all-literal-types
 // Verifies: literal values (number, string, boolean, float) are captured and their types widened in schemas

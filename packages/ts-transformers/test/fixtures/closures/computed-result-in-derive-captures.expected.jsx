@@ -1,10 +1,10 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * computed() result used as derive capture should use .key("count"),
  * not plain property access. The computed() return value is an
  * OpaqueRef, so rewritePatternBody correctly treats it as opaque.
  */
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
 interface State {
     items: Array<{
         name: string;

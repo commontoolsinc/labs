@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
@@ -222,7 +222,7 @@ describe("Engine compile + evaluate", () => {
         {
           name: "/main.tsx",
           contents: [
-            "import { pattern, lift } from 'commontools';",
+            "import { pattern, lift } from 'commonfabric';",
             "const double = lift<number>((x) => x * 2);",
             "export default pattern<{ value: number }>(({ value }) => {",
             "  return { result: double(value) };",
@@ -266,7 +266,7 @@ describe("Engine compile + evaluate", () => {
         {
           name: "/main.tsx",
           contents: [
-            "import { pattern } from 'commontools';",
+            "import { pattern } from 'commonfabric';",
             "export default pattern<{ x: number }>(({ x }) => ({ doubled: x }));",
           ].join("\n"),
         },
@@ -308,7 +308,7 @@ describe("Engine compile + evaluate", () => {
         {
           name: "/main.tsx",
           contents: [
-            "import { pattern } from 'commontools';",
+            "import { pattern } from 'commonfabric';",
             "export const myPattern = pattern<{ x: number }>(({ x }) => ({ x }));",
           ].join("\n"),
         },

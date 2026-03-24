@@ -1,4 +1,4 @@
-import { decode } from "@commontools/utils/encoding";
+import { decode } from "@commonfabric/utils/encoding";
 import { join } from "@std/path/join";
 import { toFileUrl } from "@std/path/to-file-url";
 

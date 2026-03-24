@@ -1,7 +1,7 @@
 # TypeScript Transformers Current Behavior Specification
 
 **Status:** Implemented (current behavior)\
-**Package:** `@commontools/ts-transformers`\
+**Package:** `@commonfabric/ts-transformers`\
 **Effective date:** March 17, 2026\
 **Scope:** Compile-time behavior implemented in `packages/ts-transformers/src`
 and exercised by current tests/fixtures. **Related:**
@@ -31,7 +31,7 @@ Before AST transforms, `transformCtDirective()`:
 
 1. Requires the first source line to match `/// <cts-enable />`.
 2. Rewrites source by injecting:
-   - `import * as __ctHelpers from "commontools";`
+   - `import * as __ctHelpers from "commonfabric";`
    - helper `h(...)` forwarding to `__ctHelpers.h`.
 3. Rejects sources that contain identifier `__ctHelpers` anywhere in the AST.
 

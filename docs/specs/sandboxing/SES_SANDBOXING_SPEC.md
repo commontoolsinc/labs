@@ -146,7 +146,7 @@ Only these calls are permitted at module scope:
 
 ```typescript
 // ALLOWED at module scope
-import { pattern, pattern, lift, handler } from "@commontools/common-builder";
+import { pattern, pattern, lift, handler } from "@commonfabric/common-builder";
 
 // Pattern/Pattern definitions - these call their inner functions at load time
 // but user data is not available yet, so this is safe
@@ -412,8 +412,8 @@ function createPatternCompartment(
   // Execute the AMD bundle in the Compartment
   const moduleExports = compartment.evaluate(compiledAMD)({
     // Runtime dependencies injection
-    "@commontools/common-builder": harden(builderExports),
-    "@commontools/common-html": harden(htmlExports),
+    "@commonfabric/common-builder": harden(builderExports),
+    "@commonfabric/common-html": harden(htmlExports),
     // ... other runtime modules
   });
 

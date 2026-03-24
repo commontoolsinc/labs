@@ -4,15 +4,15 @@
  * These benches go through createBuilder() + runtime.run() so they exercise the
  * actual map/filter/flatMap machinery instead of synthetic scheduler actions.
  */
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   getTimingStatsBreakdown,
   resetAllTimingBaselines,
   resetAllTimingStats,
   setGlobalLogFloor,
   type TimingStats,
-} from "@commontools/utils/logger";
+} from "@commonfabric/utils/logger";
 import { createBuilder } from "../src/builder/factory.ts";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -145,8 +145,8 @@ let blackhole = 0;
 type BenchEnv = {
   runtime: Runtime;
   storageManager: ReturnType<typeof StorageManager.emulate>;
-  lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
-  pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
+  pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 };
 
 type ListScenario = {
@@ -345,8 +345,8 @@ function createEnv(pullMode: boolean): BenchEnv {
   if (pullMode) runtime.scheduler.enablePullMode();
   else runtime.scheduler.disablePullMode();
 
-  const { commontools } = createBuilder();
-  const { lift, pattern } = commontools;
+  const { commonfabric } = createBuilder();
+  const { lift, pattern } = commonfabric;
 
   return { runtime, storageManager, lift, pattern };
 }

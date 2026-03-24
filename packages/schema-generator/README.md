@@ -1,4 +1,4 @@
-# @commontools/schema-generator
+# @commonfabric/schema-generator
 
 Short notes on the JSON Schema generator and ref/definitions behavior.
 

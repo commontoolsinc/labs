@@ -1,5 +1,5 @@
-import { getLogger } from "@commontools/utils/logger";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+import { getLogger } from "@commonfabric/utils/logger";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   ChangeGroup,
   CommitError,

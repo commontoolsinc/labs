@@ -28,7 +28,7 @@ import {
   NAME,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 interface ProductIdea {
   name: string;

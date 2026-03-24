@@ -11,7 +11,7 @@ import type {
   BuiltInLLMTextPart,
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
-} from "@commontools/api";
+} from "@commonfabric/api";
 import {
   applyThemeToElement,
   type CTTheme,

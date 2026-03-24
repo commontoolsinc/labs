@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, Default, handler, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, Default, handler, pattern, UI } from "commonfabric";
 interface Item {
     text: Default<string, "">;
 }

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, pattern, UI } from "commontools";
+import { handler, pattern, UI } from "commonfabric";
 
 declare global {
   namespace JSX {

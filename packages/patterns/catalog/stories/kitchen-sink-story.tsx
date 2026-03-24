@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, type VNode } from "commontools";
+import { NAME, pattern, UI, type VNode } from "commonfabric";
 
 import ButtonStory from "./ct-button-story.tsx";
 import CheckboxStory from "./ct-checkbox-story.tsx";

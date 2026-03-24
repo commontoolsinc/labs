@@ -70,7 +70,7 @@ import {
   JSONSchema,
   pattern,
   Stream,
-} from "commontools";
+} from "commonfabric";
 import GmailImporter, { type Auth, type Email } from "./gmail-importer.tsx";
 import ProcessingStatus from "./processing-status.tsx";
 import {

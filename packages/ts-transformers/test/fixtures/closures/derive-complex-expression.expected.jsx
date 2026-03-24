@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-complex-expression
 // Verifies: multiple captured cells in an arithmetic expression are all extracted
 //   derive(a, fn) → derive(schema, schema, { a, b, c }, fn)

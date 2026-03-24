@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, UI, pattern } from "commontools";
+import { NAME, UI, pattern } from "commonfabric";
 
 interface Entry {
   [NAME]: string;

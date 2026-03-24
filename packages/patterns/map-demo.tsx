@@ -8,7 +8,7 @@ import {
   NAME,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * Trip Planner Demo - Comprehensive ct-map component demonstration

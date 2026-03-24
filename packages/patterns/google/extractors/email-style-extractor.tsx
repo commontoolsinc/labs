@@ -28,7 +28,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import GmailExtractor from "../core/gmail-extractor.tsx";
 import {
   createGoogleAuth,

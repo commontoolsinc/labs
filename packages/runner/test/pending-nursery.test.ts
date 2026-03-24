@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import type { JSONSchema } from "@commontools/runner";
+import { Identity } from "@commonfabric/identity";
+import type { JSONSchema } from "@commonfabric/runner";
 import { Runtime } from "../src/runtime.ts";
 import { type Provider, StorageManager } from "../src/storage/cache.deno.ts";
 

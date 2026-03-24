@@ -9,7 +9,7 @@ import {
   UI,
   VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * Image Chat - Simple image upload with LLM analysis

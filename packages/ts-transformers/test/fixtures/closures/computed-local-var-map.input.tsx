@@ -6,7 +6,7 @@
  * Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
  * so `localVar` is a plain array and .mapWithPattern() doesn't exist on it.
  */
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
 
 interface Item {
   name: string;

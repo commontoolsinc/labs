@@ -8,7 +8,7 @@
  * UPDATED: Now uses the elegant agentic-tools API (defineItemSchema + listTool)
  * which eliminates the 3x redundancy of interface + input type + schema.
  */
-import { computed, Default, NAME, pattern, UI } from "commontools";
+import { computed, Default, NAME, pattern, UI } from "commonfabric";
 import GmailAgenticSearch from "../core/experimental/gmail-agentic-search.tsx";
 import {
   defineItemSchema,

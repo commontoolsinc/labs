@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, derive, lift, pattern, Writable } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, derive, lift, pattern, Writable } from "commonfabric";
 const liftSummary = lift({
     type: "object",
     properties: {

@@ -1,5 +1,5 @@
-import { isRecord } from "@commontools/utils/types";
-import { getLogger } from "@commontools/utils/logger";
+import { isRecord } from "@commonfabric/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
 import { LINK_V1_TAG, type LinkV1Inner } from "./sigil-types.ts";
 import {
   type CellLink,

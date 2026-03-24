@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // FIXTURE: map-nested-conditional-no-name
 // Verifies: same nested conditional map transforms work when pattern param is typed as any
 //   showList && <div>{items.map(...)}</div> → when(showList, <div>{items.mapWithPattern(...)}</div>)

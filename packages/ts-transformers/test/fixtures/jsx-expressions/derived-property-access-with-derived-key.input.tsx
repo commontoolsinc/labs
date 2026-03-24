@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, derive, pattern, UI } from "commontools";
+import { Cell, derive, pattern, UI } from "commonfabric";
 
 interface Item {
   name: string;

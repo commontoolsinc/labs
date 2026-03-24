@@ -43,7 +43,7 @@ import {
   h,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 ```
 
 Now we define our state interface with `Default<>` to hold our list of friends:
@@ -139,7 +139,7 @@ import {
   handler,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 ```
 
 Next, we'll create a handler that removes an item from the array. Note we currently have a bug in the runtime and therefore we reconstruct the array.

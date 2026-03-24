@@ -1,6 +1,6 @@
-import * as __ctHelpers from "commontools";
-import { handler } from "commontools";
-import "commontools/schema";
+import * as __ctHelpers from "commonfabric";
+import { handler } from "commonfabric";
+import "commonfabric/schema";
 const eventSchema = {
     type: "object",
     properties: {

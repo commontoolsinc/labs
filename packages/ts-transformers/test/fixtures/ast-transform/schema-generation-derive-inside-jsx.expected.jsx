@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { derive } from "commonfabric";
 declare const value: number;
 // FIXTURE: schema-generation-derive-inside-jsx
 // Verifies: derive() inside a JSX expression still gets schemas injected

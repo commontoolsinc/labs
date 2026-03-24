@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 type MilestoneStatus = "planned" | "in_progress" | "completed";
 

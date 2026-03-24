@@ -31,7 +31,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import GmailExtractor, {
   type Auth,
   type Email,
@@ -45,7 +45,7 @@ import {
   type GmailLabel,
   GmailSendClient,
 } from "../core/util/gmail-send-client.ts";
-import type { Stream } from "commontools";
+import type { Stream } from "commonfabric";
 
 /** Email draft shape matching gmail-sender's expected input */
 type EmailDraft = {

@@ -17,7 +17,7 @@ import {
   UI,
   Writable,
   // wish,  // TEMPORARILY DISABLED - may cause self-referential loop
-} from "commontools";
+} from "commonfabric";
 import GmailAgenticSearch, {
   type SearchProgress,
 } from "../core/experimental/gmail-agentic-search.tsx";

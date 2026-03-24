@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/schema-generator",
+  "name": "@commonfabric/schema-generator",
   "version": "0.1.0",
   "exports": {
     ".": "./src/index.ts",

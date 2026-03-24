@@ -14,7 +14,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { readWebpage, searchWeb } from "./system/common-tools.tsx";
 
 type ResearchResult = {

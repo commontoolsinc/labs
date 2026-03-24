@@ -1,5 +1,5 @@
-import { deepEqual } from "@commontools/utils/deep-equal";
-import { isRecord } from "@commontools/utils/types";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isRecord } from "@commonfabric/utils/types";
 
 export function setValueAtPath(
   obj: any,

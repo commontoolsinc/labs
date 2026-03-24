@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, type Default, ifElse, NAME, pattern, UI } from "commontools";
+import { computed, type Default, ifElse, NAME, pattern, UI } from "commonfabric";
 
 type ImageInput = {
   url: Default<string, "">;

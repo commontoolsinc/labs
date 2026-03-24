@@ -1,7 +1,7 @@
-import { env, Page, waitFor } from "@commontools/integration";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env, Page, waitFor } from "@commonfabric/integration";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import { assert } from "@std/assert";
 
 type BrowserWriteTraceEntry = {

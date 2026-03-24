@@ -8,9 +8,9 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth email-pattern-dreamer/overrideAuth
+ * 3. Link: cf piece link google-auth/auth email-pattern-dreamer/overrideAuth
  */
-import { NAME, pattern, UI } from "commontools";
+import { NAME, pattern, UI } from "commonfabric";
 import GmailImporter, { type Auth } from "../core/gmail-importer.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";

@@ -53,7 +53,7 @@ written in Deno2, that provides the distributed runtime and storage.
 Lit Web Components for interacting with CommonTools spaces.
 
 **CLI (ct)**: Command-line interface for managing pieces, linking patterns, and
-deploying to spaces. Run `deno task ct --help` for command reference.
+deploying to spaces. Run `deno task cf --help` for command reference.
 
 **UI Components ([packages/ui](./packages/ui))**: Custom VDOM layer and `ct-`
 prefixed components for pattern UIs.

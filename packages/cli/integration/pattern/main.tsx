@@ -1,6 +1,6 @@
 /// <cts-enable />
-import { derive, NAME, pattern, str, UI } from "commontools";
-import "commontools/schema";
+import { derive, NAME, pattern, str, UI } from "commonfabric";
+import "commonfabric/schema";
 import { decrement, increment, model } from "./utils.ts";
 
 export const customPatternExport = pattern(

@@ -27,8 +27,8 @@
  *
  * STEPS TO REPRODUCE:
  * 1. Deploy this pattern:
- *    CT_API_URL=http://localhost:8000 CT_IDENTITY=./claude.key \
- *    deno task ct piece new packages/patterns/battleship/multiplayer/repro-minimal.tsx \
+ *    CF_API_URL=http://localhost:8000 CF_IDENTITY=./claude.key \
+ *    deno task cf piece new packages/patterns/battleship/multiplayer/repro-minimal.tsx \
  *    --root packages/patterns/battleship --space gideon
  *
  * 2. Open the piece URL in Browser Tab 1
@@ -52,7 +52,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // ============================================================================
 // Types - Nested structure similar to battleship's Ship type

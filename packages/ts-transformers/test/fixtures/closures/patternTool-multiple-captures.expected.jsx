@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive, pattern, patternTool, type PatternToolResult, Writable } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { derive, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
 const multiplier = Writable.of(2, {
     type: "number"
 } as const satisfies __ctHelpers.JSONSchema);

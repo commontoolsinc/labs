@@ -10,7 +10,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 export type SuggestionHistoryEntry = {
   result: Writable<any>;

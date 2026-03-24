@@ -8,7 +8,7 @@ import {
   VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 export default pattern<Record<string, never>>((_) => {
   const wishText = Writable.of("#note");

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { type Cell, Default, handler, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { type Cell, Default, handler, pattern } from "commonfabric";
 interface OptionalBranch {
     counter?: number;
     label?: string;

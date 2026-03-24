@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, ComparableCell, ReadonlyCell, WriteonlyCell } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, ComparableCell, ReadonlyCell, WriteonlyCell } from "commonfabric";
 // FIXTURE: cell-like-classes
 // Verifies: schema injection works for cell(), ComparableCell.of(), ReadonlyCell.of(), and WriteonlyCell.of()
 //   cell(100) → cell(100, { type: "number" })

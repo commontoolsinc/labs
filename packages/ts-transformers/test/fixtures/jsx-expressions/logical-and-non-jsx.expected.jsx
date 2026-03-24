@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // FIXTURE: logical-and-non-jsx
 // Verifies: && with non-JSX right side still lowers through when(), with predicate/value derived separately
 //   user.get().name.length > 0 && `Hello...` → when(derive(predicate), derive(template))

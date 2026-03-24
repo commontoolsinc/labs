@@ -9,7 +9,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import GroupChatRoom, { Message, User } from "./group-chat-room.tsx";
 
 /**

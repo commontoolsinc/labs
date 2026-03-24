@@ -7,7 +7,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * MINIMAL BUG REPRODUCTION

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, pattern } from "commonfabric";
 // FIXTURE: computed-no-captures
 // Verifies: computed(() => expr) with no external captures is transformed to derive() with empty captures
 //   computed(() => 42) → derive({ type: "object", properties: {} }, resultSchema, {}, () => 42)

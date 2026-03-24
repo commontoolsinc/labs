@@ -10,14 +10,14 @@
  * - User types → editor updates → hash stored → debounced Cell update (500ms)
  * - Cell echo fires → hash compared → if match, skip update → cursor stays
  */
-import { env, Page, waitFor } from "@commontools/integration";
-import { PieceController, PiecesController } from "@commontools/piece/ops";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env, Page, waitFor } from "@commonfabric/integration";
+import { PieceController, PiecesController } from "@commonfabric/piece/ops";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
-import { Identity } from "@commontools/identity";
-import { ANYONE_USER } from "@commontools/memory/acl";
+import { Identity } from "@commonfabric/identity";
+import { ANYONE_USER } from "@commonfabric/memory/acl";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 

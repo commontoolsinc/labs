@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell } from "commonfabric";
 // FIXTURE: literal-widen-string
 // Verifies: string literals (normal, empty, multiline, with spaces) are all widened to { type: "string" }
 //   cell("hello") → cell("hello", { type: "string" })

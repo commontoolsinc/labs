@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern, UI, NAME } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, pattern, UI, NAME } from "commonfabric";
 // Represents a question that may or may not exist
 type Question = {
     question: string;

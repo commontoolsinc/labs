@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * Edge case: derive with a .map() result as input, NO captures in derive callback,
  * and NO explicit type annotation on the callback parameter.
@@ -12,7 +12,7 @@ import * as __ctHelpers from "commontools";
  * Without proper typeRegistry lookup, the schema might fall back to `unknown`
  * because checker.getTypeAtLocation() doesn't know about synthetic nodes.
  */
-import { Cell, derive, pattern } from "commontools";
+import { Cell, derive, pattern } from "commonfabric";
 interface Item {
     id: number;
     value: string;

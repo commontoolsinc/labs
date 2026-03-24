@@ -11,7 +11,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Input = {
   title?: Default<string, "Profile-Aware Writer">;

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commontools";
+import { cell, pattern, UI } from "commonfabric";
 
 // FIXTURE: map-single-capture-no-name
 // Verifies: same map + length guard transforms work with _state: any parameter

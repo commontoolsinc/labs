@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, NAME, pattern, Stream, UI } from "commontools";
+import { Default, NAME, pattern, Stream, UI } from "commonfabric";
 import { getValue, roll } from "./dice-handlers.ts";
 
 interface PatternState {

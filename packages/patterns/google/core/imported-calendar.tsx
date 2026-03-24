@@ -24,7 +24,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Type matching CalendarEvent from google-calendar-importer.tsx
 type CalendarEvent = {

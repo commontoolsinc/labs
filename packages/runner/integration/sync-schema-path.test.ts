@@ -1,12 +1,12 @@
 #!/usr/bin/env -S deno run -A
 
 import { assertEquals } from "@std/assert/equals";
-import { type NormalizedLink, Runtime } from "@commontools/runner";
-import { Identity, type IdentityCreateConfig } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import type { JSONSchema, MemorySpace, URI } from "@commontools/runner";
+import { type NormalizedLink, Runtime } from "@commonfabric/runner";
+import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { JSONSchema, MemorySpace, URI } from "@commonfabric/runner";
 import { parseLink } from "../src/link-utils.ts";
-import { env } from "@commontools/integration";
+import { env } from "@commonfabric/integration";
 import { IStorageManager } from "../src/storage/interface.ts";
 const { API_URL } = env;
 

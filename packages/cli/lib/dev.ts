@@ -1,13 +1,13 @@
-import { type JsScript, Program } from "@commontools/js-compiler";
-import { FileSystemProgramResolver } from "@commontools/js-compiler";
-import { Identity } from "@commontools/identity";
-import { Engine, Runtime } from "@commontools/runner";
+import { type JsScript, Program } from "@commonfabric/js-compiler";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { Identity } from "@commonfabric/identity";
+import { Engine, Runtime } from "@commonfabric/runner";
 import { basename } from "@std/path";
 import { experimentalOptionsFromEnv } from "./utils.ts";
 
 async function createRuntime() {
   const { StorageManager } = await import(
-    "@commontools/runner/storage/cache.deno"
+    "@commonfabric/runner/storage/cache.deno"
   );
   const storageManager = StorageManager.emulate({
     as: await Identity.fromPassphrase("builder"),

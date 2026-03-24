@@ -16,7 +16,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import Note from "./note.tsx";
 import Suggestion from "../system/suggestion.tsx";
 import { type MentionablePiece, type NotePiece } from "./schemas.tsx";

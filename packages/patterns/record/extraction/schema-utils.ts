@@ -8,7 +8,7 @@
  * Falls back to manual registry for legacy entries that don't have stored schema.
  */
 
-import type { Writable } from "commontools";
+import type { Writable } from "commonfabric";
 import type { SubPieceEntry } from "../types.ts";
 import type { JSONSchema } from "./schema-utils-pure.ts";
 

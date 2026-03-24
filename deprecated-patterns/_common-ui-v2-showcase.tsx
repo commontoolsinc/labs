@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, schema, str, UI } from "commontools";
+import { NAME, pattern, schema, str, UI } from "commonfabric";
 
 const model = schema({
   type: "object",

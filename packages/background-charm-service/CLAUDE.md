@@ -113,9 +113,9 @@ Create a new file in `src/integrations/` named after your integration (e.g.,
 `myservice.ts`):
 
 ```typescript
-import { Charm } from "@commontools/piece";
-import { Cell } from "@commontools/runner";
-import type { DID } from "@commontools/identity";
+import { Charm } from "@commonfabric/piece";
+import { Cell } from "@commonfabric/runner";
+import type { DID } from "@commonfabric/identity";
 import { Integration, IntegrationCellConfig } from "../types.ts";
 import { log } from "../utils.ts";
 

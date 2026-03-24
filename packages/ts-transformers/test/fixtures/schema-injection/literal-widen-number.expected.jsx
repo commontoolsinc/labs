@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell } from "commonfabric";
 // FIXTURE: literal-widen-number
 // Verifies: numeric literals (int, negative, float, scientific, zero) are all widened to { type: "number" }
 //   cell(10) → cell(10, { type: "number" })

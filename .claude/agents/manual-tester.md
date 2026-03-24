@@ -59,7 +59,7 @@ Default URLs (no offset): Toolshed http://localhost:8000, Shell http://localhost
 If no piece ID is provided, deploy the pattern:
 
 ```bash
-deno task ct piece new {pattern-path}/main.tsx \
+deno task cf piece new {pattern-path}/main.tsx \
   --identity claude.key \
   --api-url {api-url} \
   --space {space-name}
@@ -74,11 +74,11 @@ without it, computed values remain stale.
 
 ```bash
 # Example: test addCard handler
-deno task ct piece call --piece {ID} addCard '{"columnIndex": 0, "title": "Test"}' \
+deno task cf piece call --piece {ID} addCard '{"columnIndex": 0, "title": "Test"}' \
   --identity claude.key --api-url {api-url} --space {space-name}
-deno task ct piece step --piece {ID} \
+deno task cf piece step --piece {ID} \
   --identity claude.key --api-url {api-url} --space {space-name}
-deno task ct piece inspect --piece {ID} \
+deno task cf piece inspect --piece {ID} \
   --identity claude.key --api-url {api-url} --space {space-name}
 ```
 

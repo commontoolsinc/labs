@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, type VNode, Writable } from "commontools";
+import { NAME, pattern, UI, type VNode, Writable } from "commonfabric";
 import {
   Controls,
   SelectControl,
@@ -89,10 +89,10 @@ export default pattern<CopyButtonStoryInput, CopyButtonStoryOutput>(() => {
             <code
               style={{ flex: "1", fontSize: "13px", fontFamily: "monospace" }}
             >
-              npm install @commontools/ui
+              npm install @commonfabric/ui
             </code>
             <ct-copy-button
-              text="npm install @commontools/ui"
+              text="npm install @commonfabric/ui"
               variant="ghost"
               icon-only
             />

@@ -1,8 +1,8 @@
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
-import type { Schema } from "@commontools/api/schema";
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import type { Schema } from "@commonfabric/api/schema";
 import { createCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {

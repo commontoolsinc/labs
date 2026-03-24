@@ -4,15 +4,15 @@ import {
   hashOf,
   resetModernHashConfig,
   setModernHashConfig,
-} from "@commontools/data-model/value-hash";
+} from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
   SchemaPathSelector,
   State,
   URI,
-} from "@commontools/memory/interface";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+} from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   canBranchMatch,
   CompoundCycleTracker,
@@ -28,8 +28,8 @@ import { StoreObjectManager } from "../src/storage/query.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { Immutable } from "@commontools/utils/types";
-import { ContextualFlowControl } from "@commontools/runner";
+import { Immutable } from "@commonfabric/utils/types";
+import { ContextualFlowControl } from "@commonfabric/runner";
 import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 
 // Helper function to get the SchemaObjectTraverser backed by a store map

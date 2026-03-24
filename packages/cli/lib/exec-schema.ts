@@ -1,4 +1,4 @@
-import type { JSONSchema } from "@commontools/api";
+import type { JSONSchema } from "@commonfabric/api";
 
 export interface ExecCommandSpec {
   callableKind: "handler" | "tool";
@@ -23,7 +23,7 @@ export interface ParsedExecArgs {
 
 export interface RenderExecHelpOptions {
   commandPrefix?: string;
-  invocationStyle?: "ct" | "direct";
+  invocationStyle?: "cf" | "direct";
 }
 
 export interface ExecInputResolverDeps {
@@ -758,7 +758,7 @@ function outputPropertyLines(schema: JSONSchema): string[] {
 
 function usageCommandPrefix(
   mountedFilePath: string,
-  invocationStyle: "ct" | "direct",
+  invocationStyle: "cf" | "direct",
   commandPrefix?: string,
 ): string {
   if (commandPrefix) {
@@ -767,7 +767,7 @@ function usageCommandPrefix(
   const displayedPath = displayCommandPath(mountedFilePath);
   return invocationStyle === "direct"
     ? displayedPath
-    : `ct exec ${displayedPath}`;
+    : `cf exec ${displayedPath}`;
 }
 
 function optionalVerbUsage(spec: ExecCommandSpec): string {
@@ -777,7 +777,7 @@ function optionalVerbUsage(spec: ExecCommandSpec): string {
 function usageLine(
   mountedFilePath: string,
   spec: ExecCommandSpec,
-  invocationStyle: "ct" | "direct",
+  invocationStyle: "cf" | "direct",
   commandPrefix?: string,
 ): string {
   const prefix = usageCommandPrefix(
@@ -814,7 +814,7 @@ function usageLine(
 function helpUsageLines(
   mountedFilePath: string,
   spec: ExecCommandSpec,
-  invocationStyle: "ct" | "direct",
+  invocationStyle: "cf" | "direct",
   commandPrefix?: string,
 ): string[] {
   const prefix = usageCommandPrefix(
@@ -967,7 +967,7 @@ export function renderExecHelp(
   options: RenderExecHelpOptions = {},
 ): string {
   const commandPrefix = options.commandPrefix;
-  const invocationStyle = options.invocationStyle ?? "ct";
+  const invocationStyle = options.invocationStyle ?? "cf";
   const specificFlags = specificFlagLines(spec.inputSchema);
   const genericFlags = genericFlagLines(spec.inputSchema);
   const typeShape = schemaShapeString(spec.inputSchema);
@@ -1081,7 +1081,7 @@ function pieceFlagUsageLine(
   commandPrefix: string,
   spec: ExecCommandSpec,
 ): string {
-  return usageLine(commandPrefix, spec, "ct", `${commandPrefix} --`);
+  return usageLine(commandPrefix, spec, "cf", `${commandPrefix} --`);
 }
 
 function pieceUsageLines(

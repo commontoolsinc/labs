@@ -8,7 +8,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface NoOpCounterArgs {
   value: Default<number, 0>;

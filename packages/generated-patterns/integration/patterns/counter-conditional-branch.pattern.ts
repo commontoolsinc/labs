@@ -7,7 +7,7 @@ import {
   ifElse,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface ConditionalBranchArgs {
   value: Default<number, 0>;

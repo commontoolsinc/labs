@@ -30,7 +30,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { Output as ProfileOutput } from "../../profile.tsx";
 
 // =============================================================================

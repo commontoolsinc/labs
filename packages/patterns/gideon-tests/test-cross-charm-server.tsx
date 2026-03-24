@@ -18,7 +18,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Input {
   // Counter value that increments each time the stream is invoked

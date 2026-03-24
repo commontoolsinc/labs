@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, Stream, UI, type VNode } from "commontools";
+import { NAME, pattern, Stream, UI, type VNode } from "commonfabric";
 import { Category } from "../../catalog.tsx";
 import { CategoryRow } from "./category-row.tsx";
 import { CategoryRowItem } from "./category-row-item.tsx";

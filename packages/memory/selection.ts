@@ -9,7 +9,7 @@ import type {
   SelectAll,
   URI,
 } from "./interface.ts";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 export const SelectAllString = "_";
 
 export const from = (

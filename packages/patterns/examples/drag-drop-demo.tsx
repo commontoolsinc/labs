@@ -9,7 +9,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import Counter from "../counter/counter.tsx";
 
 interface Item {

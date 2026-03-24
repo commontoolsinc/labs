@@ -1,5 +1,5 @@
-import { type Cell, NAME, type Runtime } from "@commontools/runner";
-import { LLMClient } from "@commontools/llm";
+import { type Cell, NAME, type Runtime } from "@commonfabric/runner";
+import { LLMClient } from "@commonfabric/llm";
 import {
   type Journal,
   type JournalEntry,
@@ -7,7 +7,7 @@ import {
   journalSchema,
   type JournalSnapshot,
   type ObjectStub,
-} from "@commontools/home-schemas";
+} from "@commonfabric/home-schemas";
 
 // Re-export types for consumers
 export type { Journal, JournalEntry, JournalEventType, JournalSnapshot };

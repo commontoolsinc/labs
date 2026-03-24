@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { getPropertyNameText } from "@commontools/schema-generator/property-name";
+import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
 import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import { uniquePaths } from "../utils/path-serialization.ts";

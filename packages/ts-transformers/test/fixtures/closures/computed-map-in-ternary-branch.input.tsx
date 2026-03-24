@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, computed, Default, pattern, UI, Writable } from "commontools";
+import { Cell, computed, Default, pattern, UI, Writable } from "commonfabric";
 
 interface Person {
   name: string;

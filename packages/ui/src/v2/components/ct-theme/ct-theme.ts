@@ -9,7 +9,7 @@ import {
   mergeWithDefaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
+import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 
 /**
  * ct-theme — Provides a theme to a subtree and applies CSS vars.

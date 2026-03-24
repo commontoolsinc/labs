@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { derive, pattern } from "commonfabric";
 // FIXTURE: pattern-derive-opaque-ref-map
 // Verifies: .map() on an OpaqueRef inside derive() is NOT transformed to mapWithPattern
 //   derive({}, () => items.map((n) => n * 2)) → derive({ items }, ({ items }) => items.map((n) => n * 2))

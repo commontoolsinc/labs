@@ -2,7 +2,7 @@
  * This is an entry point for a worker script that runs a local RuntimeWorker
  * that can communicate with a corresponding RuntimeClient.
  *
- * Imports from `@commontools/runner` may be used freely in this directory.
+ * Imports from `@commonfabric/runner` may be used freely in this directory.
  */
 import "core-js/proposals/explicit-resource-management";
 import "core-js/proposals/async-explicit-resource-management";

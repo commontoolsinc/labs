@@ -3,7 +3,7 @@ import { css, html, LitElement, svg as svgTag, TemplateResult } from "lit";
 import { property, query, state } from "lit/decorators.js";
 import dagre from "dagre";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
-import type { SchedulerGraphNode } from "@commontools/runtime-client";
+import type { SchedulerGraphNode } from "@commonfabric/runtime-client";
 import "./SchedulerSourceView.ts";
 import {
   parseActionLocation,

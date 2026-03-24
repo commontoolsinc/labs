@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * FIXTURE: helper-owned-compute-branches
  * Verifies: helper-owned branches inside computed() can mix compute-owned array
@@ -10,7 +10,7 @@ import * as __ctHelpers from "commontools";
  *   Writable array capture
  * - authored ifElse branches still lower safely around the mixed map behavior
  */
-import { computed, ifElse, pattern, UI, Writable } from "commontools";
+import { computed, ifElse, pattern, UI, Writable } from "commonfabric";
 interface Badge {
     text: string;
     active: boolean;

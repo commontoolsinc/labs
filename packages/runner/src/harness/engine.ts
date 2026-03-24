@@ -15,7 +15,7 @@ import {
   ProgramResolver,
   Source,
   TypeScriptCompiler,
-} from "@commontools/js-compiler";
+} from "@commonfabric/js-compiler";
 import {
   MappedPosition,
   UnsafeEvalIsolate,
@@ -24,11 +24,11 @@ import {
 import {
   CommonToolsTransformerPipeline,
   OpaqueRefErrorTransformer,
-} from "@commontools/ts-transformers";
+} from "@commonfabric/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
 import { Runtime } from "../runtime.ts";
-import { hashOf } from "@commontools/data-model/value-hash";
-import { StaticCache } from "@commontools/static";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { StaticCache } from "@commonfabric/static";
 import { pretransformProgram } from "./pretransform.ts";
 
 const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";

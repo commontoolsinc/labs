@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
+import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { handler, lift } from "../src/builder/module.ts";
 import { createBuilder } from "../src/builder/factory.ts";
@@ -11,12 +11,12 @@ import {
   Schema,
 } from "../src/builder/types.ts";
 import { pattern } from "../src/builder/pattern.ts";
-import { Cell, Runtime } from "@commontools/runner";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Cell, Runtime } from "@commonfabric/runner";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
-// This file primarily tests Schema<> & co from commontools/api/index.ts, which
+// This file primarily tests Schema<> & co from commonfabric/api/index.ts, which
 // gets transitively loaded by the above
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -34,7 +34,7 @@ describe("Schema-to-TS Type Conversion", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let str: ReturnType<typeof createBuilder>["commontools"]["str"];
+  let str: ReturnType<typeof createBuilder>["commonfabric"]["str"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -45,8 +45,8 @@ describe("Schema-to-TS Type Conversion", () => {
       storageManager,
     });
     tx = runtime.edit();
-    const { commontools } = createBuilder();
-    ({ str } = commontools);
+    const { commonfabric } = createBuilder();
+    ({ str } = commonfabric);
   });
 
   afterEach(async () => {

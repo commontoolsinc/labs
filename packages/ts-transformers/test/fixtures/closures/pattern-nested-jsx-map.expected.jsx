@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * Test case for nested map transformation inside ternary.
  *
@@ -10,7 +10,7 @@ import * as __ctHelpers from "commontools";
  * `mapWithPattern` because `item` comes from a mapWithPattern element,
  * NOT from the derive's captures.
  */
-import { Cell, computed, Default, pattern, UI } from "commontools";
+import { Cell, computed, Default, pattern, UI } from "commonfabric";
 interface Tag {
     name: string;
 }

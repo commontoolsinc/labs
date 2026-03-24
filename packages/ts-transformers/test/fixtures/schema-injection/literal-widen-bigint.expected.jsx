@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell } from "commonfabric";
 // FIXTURE: literal-widen-bigint
 // Verifies: bigint literals are widened to { type: "integer" } schema
 //   cell(123n) → cell(123n, { type: "integer" })

@@ -37,7 +37,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import {
   type AccountType as _AccountType,
   createGoogleAuth as createGoogleAuthUtil,

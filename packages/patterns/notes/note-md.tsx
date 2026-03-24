@@ -12,7 +12,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import {
   type MentionablePiece,
   type NoteMdInput,

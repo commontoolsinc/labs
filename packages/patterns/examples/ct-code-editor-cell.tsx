@@ -3,7 +3,7 @@
  * Integration test example for ct-code-editor with Cell binding.
  * Used to test cursor stability when typing with Cell sync.
  */
-import { Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commonfabric";
 
 interface Input {
   content: Default<string, "">;

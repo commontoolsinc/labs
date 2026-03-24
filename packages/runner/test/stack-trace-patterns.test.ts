@@ -8,7 +8,7 @@
 
 import { assertEquals, assertMatch } from "@std/assert";
 import { Runtime } from "../src/runtime.ts";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
@@ -34,7 +34,7 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
   const THROW_LINE = 5;
   const source = [
     "/// <cts-enable />", //                                  line 1
-    'import { lift, pattern } from "commontools";', //        line 2
+    'import { lift, pattern } from "commonfabric";', //        line 2
     "const double = lift((val: number) => {", //              line 3
     "  if (val > 10) {", //                                   line 4
     "    throw new Error('lift value too large');", //         line 5
@@ -104,7 +104,7 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
   const THROW_LINE = 6;
   const source = [
     "/// <cts-enable />", //                                          line 1
-    'import { type Cell, handler, pattern } from "commontools";', //  line 2
+    'import { type Cell, handler, pattern } from "commonfabric";', //  line 2
     "const clickHandler = handler(", //                               line 3
     "  (event: { action: string }, state: { status: Cell<string> }) => {", // line 4
     '    if (event.action === "crash") {', //                         line 5
@@ -180,7 +180,7 @@ Deno.test("lift error stack has multiple frames with correct source line", async
   const THROW_LINE = 4;
   const source = [
     "/// <cts-enable />", //                                  line 1
-    'import { lift, pattern } from "commontools";', //        line 2
+    'import { lift, pattern } from "commonfabric";', //        line 2
     "const double = lift((x: number) => {", //                line 3
     "  if (x < 0) throw new Error('negative not supported');", // line 4
     "  return x * 2;", //                                     line 5

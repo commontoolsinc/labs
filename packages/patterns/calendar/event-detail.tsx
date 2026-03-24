@@ -9,7 +9,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /** Input for creating a new event detail piece */
 interface EventDetailInput {

@@ -31,7 +31,7 @@ This shift has several benefits:
 Use `equals()` to compare cells or values. For cells, this checks reference equality (same object in the graph). For plain values, it checks structural equality.
 
 ```typescript
-import { equals, Writable } from 'commontools';
+import { equals, Writable } from 'commonfabric';
 
 const data = Writable.of({ name: "Ben" });
 
@@ -59,7 +59,7 @@ equals(deepData.key("address", "street"), deepData.get().address.street); // => 
 The most common use case is finding items in arrays:
 
 ```typescript
-import { equals, handler, Writable } from 'commontools';
+import { equals, handler, Writable } from 'commonfabric';
 
 interface Item {
   name: string;

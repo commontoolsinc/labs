@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * Test case for ternary transformation inside nested Cell.map callbacks.
  *
@@ -9,7 +9,7 @@ import * as __ctHelpers from "commontools";
  * This structure mirrors pattern-nested-jsx-map: outer ternary wraps items.map,
  * causing ifElse → derive, then inner ternary is inside nested .map callback.
  */
-import { Cell, computed, Default, pattern, UI } from "commontools";
+import { Cell, computed, Default, pattern, UI } from "commonfabric";
 interface Tag {
     name: string;
     active: boolean;

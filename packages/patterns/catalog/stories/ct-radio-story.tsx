@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, type VNode, Writable } from "commontools";
+import { NAME, pattern, UI, type VNode, Writable } from "commonfabric";
 import {
   Controls,
   SelectControl,

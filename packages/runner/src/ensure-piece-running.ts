@@ -1,4 +1,4 @@
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 import { TYPE } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
 import { type NormalizedFullLink, parseLink } from "./link-utils.ts";

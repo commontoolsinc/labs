@@ -5,7 +5,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import type {
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
-} from "@commontools/api";
+} from "@commonfabric/api";
 import {
   applyThemeToElement,
   type CTTheme,

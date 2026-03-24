@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import "../ct-chat-message/ct-chat-message.ts";
 import "../ct-tool-call/ct-tool-call.ts";
@@ -10,7 +10,7 @@ import type {
   BuiltInLLMMessage,
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
-} from "@commontools/api";
+} from "@commonfabric/api";
 import {
   applyThemeToElement,
   type CTTheme,

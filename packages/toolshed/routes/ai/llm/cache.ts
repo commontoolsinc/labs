@@ -1,7 +1,7 @@
 import { ensureDir } from "@std/fs";
 import { colors, timestamp } from "./cli.ts";
 import env from "@/env.ts";
-import { type BuiltInLLMMessage } from "@commontools/api";
+import { type BuiltInLLMMessage } from "@commonfabric/api";
 
 export const CACHE_DIR = `${env.CACHE_DIR}/llm-api-cache`;
 

@@ -8,7 +8,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import { Sidebar } from "./ui/sidebar/sidebar.tsx";
 import StoryRenderer from "./ui/story-renderer.tsx";

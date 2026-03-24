@@ -3,8 +3,8 @@
  * These define the structure of user's learned profile information.
  */
 
-import type { JSONSchema } from "@commontools/api";
-import type { Schema } from "@commontools/api/schema";
+import type { JSONSchema } from "@commonfabric/api";
+import type { Schema } from "@commonfabric/api/schema";
 
 export const factSchema = {
   type: "object",

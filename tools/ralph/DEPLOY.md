@@ -8,7 +8,7 @@ testing it with Playwright.
 First, create an identity key if one doesn't exist:
 
 ```bash
-NO_COLOR=1 deno task ct id new > my.key
+NO_COLOR=1 deno task cf id new > my.key
 ```
 
 **Important:** Do NOT add `2>&1` to this command - it will corrupt the key file
@@ -18,16 +18,16 @@ This creates a new identity key file named `my.key` in the current directory.
 
 ## Step 2: Deploy the Piece
 
-Deploy a piece to localhost using the `ct piece new` command:
+Deploy a piece to localhost using the `cf piece new` command:
 
 ```bash
-deno task ct piece new --identity ./my.key --api-url http://127.0.0.1:8000 --space <SPACE_NAME> <PATH_TO_PATTERN_FILE>
+deno task cf piece new --identity ./my.key --api-url http://127.0.0.1:8000 --space <SPACE_NAME> <PATH_TO_PATTERN_FILE>
 ```
 
 Example:
 
 ```bash
-deno task ct piece new --identity ./my.key --api-url http://127.0.0.1:8000 --space ellyse ./packages/patterns/counter.tsx
+deno task cf piece new --identity ./my.key --api-url http://127.0.0.1:8000 --space ellyse ./packages/patterns/counter.tsx
 ```
 
 The command will output a piece ID (e.g.,
@@ -73,10 +73,10 @@ Once logged in, you can interact with the piece using Playwright commands.
 
 ```bash
 # 1. Create identity key (if needed)
-deno task ct id new > my.key
+deno task cf id new > my.key
 
 # 2. Deploy piece
-deno task ct piece new --identity ./my.key --api-url http://127.0.0.1:8000 --space ellyse ./packages/patterns/counter.tsx
+deno task cf piece new --identity ./my.key --api-url http://127.0.0.1:8000 --space ellyse ./packages/patterns/counter.tsx
 
 # Output: baedreidon464mghox4uar46bbym5t6bnmlvn6wwzby5vvdmsw24oxaalp4
 

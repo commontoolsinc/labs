@@ -1,6 +1,6 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern, type JSONSchema } from "commontools";
-import "commontools/schema";
+import * as __ctHelpers from "commonfabric";
+import { computed, pattern, type JSONSchema } from "commonfabric";
+import "commonfabric/schema";
 // Test that pattern with both schemas already present is not transformed
 interface Input {
     count: number;

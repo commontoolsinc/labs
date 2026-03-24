@@ -5,11 +5,11 @@ import type {
   LoggerMetadata,
   RuntimeTelemetryMarkerResult,
   TimingStats,
-} from "@commontools/runtime-client";
-import { isRecord } from "@commontools/utils/types";
+} from "@commonfabric/runtime-client";
+import { isRecord } from "@commonfabric/utils/types";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
 import "./SchedulerGraphView.ts"; // Register x-scheduler-graph component
-import type { Logger, LoggerBreakdown } from "@commontools/utils/logger";
+import type { Logger, LoggerBreakdown } from "@commonfabric/utils/logger";
 
 /**
  * Hierarchical topic definitions for filtering telemetry events.

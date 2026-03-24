@@ -1,5 +1,5 @@
-import { type CellHandle, UI } from "@commontools/runtime-client";
-import { render } from "@commontools/html/client";
+import { type CellHandle, UI } from "@commonfabric/runtime-client";
+import { render } from "@commonfabric/html/client";
 import "../components/ct-cell-link/ct-cell-link.ts";
 
 /**

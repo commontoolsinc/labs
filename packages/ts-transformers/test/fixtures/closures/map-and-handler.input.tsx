@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, pattern, UI } from "commontools";
+import { Cell, pattern, UI } from "commonfabric";
 
 interface State {
   items: Array<{ price: number }>;

@@ -1,10 +1,10 @@
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 import {
   CellHandle,
   isCellHandle,
   UI,
   type VNode,
-} from "@commontools/runtime-client";
+} from "@commonfabric/runtime-client";
 
 export type SetPropHandler = <T>(
   target: T,

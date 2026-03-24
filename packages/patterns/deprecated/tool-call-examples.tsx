@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { generateText, NAME, pattern, str, UI, Writable } from "commontools";
+import { generateText, NAME, pattern, str, UI, Writable } from "commonfabric";
 
 import { calculator } from "../system/common-tools.tsx";
 

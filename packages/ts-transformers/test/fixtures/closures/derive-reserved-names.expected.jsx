@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-reserved-names
 // Verifies: variables with __ct_ prefixed names are captured without special treatment
 //   derive(value, fn) → derive(schema, schema, { value, __ct_reserved }, fn)

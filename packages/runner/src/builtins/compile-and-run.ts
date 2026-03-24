@@ -1,11 +1,11 @@
-import { type BuiltInCompileAndRunParams } from "commontools";
-import { hashOf } from "@commontools/data-model/value-hash";
+import { type BuiltInCompileAndRunParams } from "commonfabric";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { Program } from "@commontools/js-compiler";
-import { CompilerError } from "@commontools/js-compiler/typescript";
+import type { Program } from "@commonfabric/js-compiler";
+import { CompilerError } from "@commonfabric/js-compiler/typescript";
 
 /**
  * Compile a pattern/module and run it.

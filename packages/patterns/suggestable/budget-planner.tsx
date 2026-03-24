@@ -8,7 +8,7 @@ import {
   pattern,
   UI,
   type VNode,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Types =====
 

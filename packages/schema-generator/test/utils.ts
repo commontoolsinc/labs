@@ -1,7 +1,7 @@
 import ts from "typescript";
-import { StaticCacheFS } from "@commontools/static";
-import { isRecord } from "@commontools/utils/types";
-import type { JSONSchemaObj } from "@commontools/api";
+import { StaticCacheFS } from "@commonfabric/static";
+import { isRecord } from "@commonfabric/utils/types";
+import type { JSONSchemaObj } from "@commonfabric/api";
 
 // Cache for TypeScript library definitions
 let typeLibsCache: Record<string, string> | undefined;

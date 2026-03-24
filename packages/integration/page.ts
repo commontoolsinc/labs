@@ -12,8 +12,8 @@ import {
   SelectorOptions,
   WaitForSelectorOptions,
 } from "@astral/astral";
-import { sleep } from "@commontools/utils/sleep";
-import { Mutable } from "@commontools/utils/types";
+import { sleep } from "@commonfabric/utils/sleep";
+import { Mutable } from "@commonfabric/utils/types";
 import * as path from "@std/path";
 import { ensureDirSync } from "@std/fs";
 import { ConsoleMethod } from "./console.ts";

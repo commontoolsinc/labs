@@ -9,7 +9,7 @@ import {
   compareETags,
   createCacheHeaders,
   generateETag,
-} from "@commontools/static/etag";
+} from "@commonfabric/static/etag";
 
 // Cache durations for different file types
 

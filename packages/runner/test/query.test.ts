@@ -11,9 +11,9 @@ import {
   hashOf,
   resetModernHashConfig,
   setModernHashConfig,
-} from "@commontools/data-model/value-hash";
+} from "@commonfabric/data-model/value-hash";
 import { JSONObject, type JSONSchema } from "../src/index.ts";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   CompoundCycleTracker,
   ManagedStorageTransaction,
@@ -28,10 +28,10 @@ import type {
   SchemaPathSelector,
   State,
   URI,
-} from "@commontools/memory/interface";
+} from "@commonfabric/memory/interface";
 import { Runtime } from "../src/runtime.ts";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";

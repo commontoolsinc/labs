@@ -11,7 +11,7 @@
  * - sidebarUI: explicitly undefined (should NOT block rendering)
  * - previewUI: a valid UI (should render when accessed via variant)
  */
-import { computed, Default, NAME, pattern, UI } from "commontools";
+import { computed, Default, NAME, pattern, UI } from "commonfabric";
 
 interface State {
   title: Default<string, "Test Pattern">;

@@ -18,8 +18,8 @@ import {
 } from "../typescript/property-optionality.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { extractDocFromSymbolAndDecls, getDeclDocs } from "../doc-utils.ts";
-import { getLogger } from "@commontools/utils/logger";
-import { isRecord } from "@commontools/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isRecord } from "@commonfabric/utils/types";
 
 const logger = getLogger("schema-generator.object", {
   enabled: true,

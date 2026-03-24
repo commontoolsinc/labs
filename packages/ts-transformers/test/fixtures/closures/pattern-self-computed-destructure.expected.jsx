@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { SELF, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { SELF, pattern } from "commonfabric";
 interface Input {
     value: string;
 }

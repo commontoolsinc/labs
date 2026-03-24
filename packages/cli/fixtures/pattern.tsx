@@ -1,6 +1,6 @@
 /// <cts-enable />
-import { derive, handler, NAME, pattern, schema, str, UI } from "commontools";
-import "commontools/schema";
+import { derive, handler, NAME, pattern, schema, str, UI } from "commonfabric";
+import "commonfabric/schema";
 
 // Different way to define the same schema, using 'schema' helper function,
 // let's as leave off `as const satisfies JSONSchema`.

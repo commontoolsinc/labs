@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-type-assertion
 // Verifies: a type assertion (`as number`) in the callback body is preserved after capture extraction
 //   derive(value, fn) → derive(schema, schema, { value, multiplier }, fn)

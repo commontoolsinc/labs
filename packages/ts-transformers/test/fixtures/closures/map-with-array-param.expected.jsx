@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // FIXTURE: map-with-array-param
 // Verifies: .map() on reactive array is transformed when the third parameter (array) is used
 //   .map((item, index, array) => ...) → .mapWithPattern(pattern(...), {})

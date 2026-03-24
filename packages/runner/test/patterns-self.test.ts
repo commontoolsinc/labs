@@ -4,13 +4,13 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type JSONSchema, SELF } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 
 // Import types from public API for compile-time type tests
-import { type OpaqueRef } from "@commontools/api";
+import { type OpaqueRef } from "@commonfabric/api";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -21,7 +21,7 @@ describe("Pattern Runner - SELF", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -32,10 +32,10 @@ describe("Pattern Runner - SELF", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
+    const { commonfabric } = createBuilder();
     ({
       pattern,
-    } = commontools);
+    } = commonfabric);
   });
 
   afterEach(async () => {
@@ -197,7 +197,7 @@ describe("Pattern Runner - SELF", () => {
   });
 
   it("should correctly infer SELF type (TypeScript types, compile-time check)", () => {
-    // This test verifies SELF type inference using the PUBLIC API types from @commontools/api
+    // This test verifies SELF type inference using the PUBLIC API types from @commonfabric/api
     // The @ts-expect-error directives verify that SELF is NOT typed as `any`
     // If SELF were `any`, the "wrong type" assignments would succeed,
     // making @ts-expect-error unused - which is itself a compile error

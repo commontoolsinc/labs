@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 type ItemTuple = [
     item: string,
     count: number

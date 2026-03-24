@@ -1,4 +1,4 @@
-import { claimState, retract } from "@commontools/memory/fact";
+import { claimState, retract } from "@commonfabric/memory/fact";
 import type {
   Assertion,
   Fact,

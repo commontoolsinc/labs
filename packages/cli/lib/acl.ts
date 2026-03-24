@@ -1,14 +1,14 @@
-import { createSession, isDID, Session } from "@commontools/identity";
+import { createSession, isDID, Session } from "@commonfabric/identity";
 import { loadIdentity } from "./identity.ts";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   ACL,
   ACLUser,
   type Capability,
   isACLUser,
-} from "@commontools/memory/acl";
-import { ACLManager } from "@commontools/piece/ops";
+} from "@commonfabric/memory/acl";
+import { ACLManager } from "@commonfabric/piece/ops";
 import { awaitSyncWithTimeout, experimentalOptionsFromEnv } from "./utils.ts";
 
 export interface SpaceConfig {

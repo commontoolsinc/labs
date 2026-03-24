@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, handler, ifElse, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, handler, ifElse, pattern, UI } from "commonfabric";
 interface Item {
     id: number;
     name: string;

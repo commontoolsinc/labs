@@ -3,7 +3,7 @@
  *
  * Creates a guarded refresh function parameterized by endpoint.
  */
-import { getPatternEnvironment, Writable } from "commontools";
+import { getPatternEnvironment, Writable } from "commonfabric";
 
 /**
  * Create a guarded token refresh function for a specific OAuth provider.

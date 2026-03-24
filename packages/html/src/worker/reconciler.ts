@@ -22,8 +22,8 @@ import {
   type Stream,
   UI,
   useCancelGroup,
-} from "@commontools/runner";
-import { getLogger } from "@commontools/utils/logger";
+} from "@commonfabric/runner";
+import { getLogger } from "@commonfabric/utils/logger";
 import type {
   ChildNodeState,
   NodeState,

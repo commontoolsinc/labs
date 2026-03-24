@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { CellLike, type JSONSchema, NAME, pattern, UI } from "commontools";
+import { CellLike, type JSONSchema, NAME, pattern, UI } from "commonfabric";
 
 type IFramePattern = {
   src: string;

@@ -1,4 +1,4 @@
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import type { PatternBuilder } from "./pattern.ts";
 
 import type {
@@ -45,9 +45,9 @@ import type {
   UnlessFunction,
   WhenFunction,
   WishFunction,
-} from "@commontools/api";
-import type { Schema } from "@commontools/api/schema";
-import { toSchema } from "@commontools/api";
+} from "@commonfabric/api";
+import type { Schema } from "@commonfabric/api/schema";
+import { toSchema } from "@commonfabric/api";
 import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
 import {
   type IExtendedStorageTransaction,
@@ -133,8 +133,8 @@ export type {
   ToSchemaFunction,
   UnwrapCell,
   VNode,
-} from "@commontools/api";
-export type { Schema, SchemaWithoutCell } from "@commontools/api/schema";
+} from "@commonfabric/api";
+export type { Schema, SchemaWithoutCell } from "@commonfabric/api/schema";
 
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
@@ -161,7 +161,7 @@ export function isStreamValue(value: unknown): value is StreamValue {
   return isRecord(value) && "$stream" in value && value.$stream === true;
 }
 
-declare module "@commontools/api" {
+declare module "@commonfabric/api" {
   export interface Module {
     type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
     implementation?: ((...args: any[]) => any) | Pattern | string;
@@ -192,7 +192,7 @@ export const unsafe_originalPattern = Symbol("unsafe_originalPattern");
 export const unsafe_parentPattern = Symbol("unsafe_parentPattern");
 export const unsafe_materializeFactory = Symbol("unsafe_materializeFactory");
 
-declare module "@commontools/api" {
+declare module "@commonfabric/api" {
   interface Pattern {
     argumentSchema: JSONSchema;
     resultSchema: JSONSchema;
@@ -309,14 +309,14 @@ export interface BuilderFunctionsAndConstants {
 
   // Fabric value classes
   FabricInstance:
-    typeof import("@commontools/data-model/fabric-value").FabricInstance;
+    typeof import("@commonfabric/data-model/fabric-value").FabricInstance;
   FabricPrimitive:
-    typeof import("@commontools/data-model/fabric-value").FabricPrimitive;
+    typeof import("@commonfabric/data-model/fabric-value").FabricPrimitive;
   FabricEpochNsec:
-    typeof import("@commontools/data-model/fabric-epoch").FabricEpochNsec;
+    typeof import("@commonfabric/data-model/fabric-epoch").FabricEpochNsec;
   FabricEpochDays:
-    typeof import("@commontools/data-model/fabric-epoch").FabricEpochDays;
-  FabricHash: typeof import("@commontools/data-model/fabric-hash").FabricHash;
+    typeof import("@commonfabric/data-model/fabric-epoch").FabricEpochDays;
+  FabricHash: typeof import("@commonfabric/data-model/fabric-hash").FabricHash;
 }
 
 // Runtime interface needed by createCell

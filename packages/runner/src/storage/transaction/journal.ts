@@ -1,4 +1,4 @@
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   Activity,
   IAttestation,

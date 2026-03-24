@@ -10,7 +10,7 @@ import {
   pattern,
   str,
   UI,
-} from "commontools";
+} from "commonfabric";
 import { type FeedItem, parseRSSFeed } from "./rss-utils.ts";
 
 interface Settings {

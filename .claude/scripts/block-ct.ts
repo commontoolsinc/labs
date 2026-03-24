@@ -4,7 +4,7 @@
  *
  * Claude Code Pre-Tool hook.
  * - Blocks shell commands that invoke `ct` binary directly.
- * - Redirects to `deno task ct` instead.
+ * - Redirects to `deno task cf` instead.
  * - Exits 2 so Claude blocks the tool call and shows the message.
  */
 
@@ -26,15 +26,15 @@ cmdWithoutQuotes = cmdWithoutQuotes.replace(
   "",
 );
 
-// Match `ct` as a standalone command (not `deno task ct` or part of another word)
-// Matches: ct, ./ct, /path/to/ct but not `deno task ct` or `select`
+// Match `ct` as a standalone command (not `deno task cf` or part of another word)
+// Matches: ct, ./ct, /path/to/ct but not `deno task cf` or `select`
 if (/(?:^|[\s;|&])(?:\.\/)?ct(?:\s|$)/.test(cmdWithoutQuotes)) {
-  // Allow if it's already using deno task ct
+  // Allow if it's already using deno task cf
   if (/deno\s+task\s+ct/.test(cmdWithoutQuotes)) {
     Deno.exit(0);
   }
   console.error(
-    "Use `deno task ct` instead of `ct` binary directly. Try `deno task ct --help` first.",
+    "Use `deno task cf` instead of `ct` binary directly. Try `deno task cf --help` first.",
   );
   Deno.exit(2); // Claude interprets exit-code 2 as "block & surface stderr"
 }

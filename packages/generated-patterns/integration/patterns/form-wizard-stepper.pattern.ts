@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 type FieldValueMap = Record<string, Record<string, string>>;
 

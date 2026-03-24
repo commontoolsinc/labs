@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -14,10 +14,10 @@ describe("when and unless built-in functions", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
-  let when: ReturnType<typeof createBuilder>["commontools"]["when"];
-  let unless: ReturnType<typeof createBuilder>["commontools"]["unless"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
+  let when: ReturnType<typeof createBuilder>["commonfabric"]["when"];
+  let unless: ReturnType<typeof createBuilder>["commonfabric"]["unless"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -28,8 +28,8 @@ describe("when and unless built-in functions", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
-    ({ pattern, lift, when, unless } = commontools);
+    const { commonfabric } = createBuilder();
+    ({ pattern, lift, when, unless } = commonfabric);
   });
 
   afterEach(async () => {

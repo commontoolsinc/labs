@@ -10,7 +10,7 @@ import {
   toSchema,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import FavoritesManager from "./favorites-manager.tsx";
 import Journal from "./journal.tsx";
 import { EMPTY_LEARNED, type Fact, type LearnedSection } from "../profile.tsx";

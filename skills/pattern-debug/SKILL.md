@@ -18,7 +18,7 @@ piece issues.
 
 1. **Check TypeScript errors:**
    ```bash
-   deno task ct check pattern.tsx --no-run
+   deno task cf check pattern.tsx --no-run
    ```
 
 2. **Match error to documentation:**

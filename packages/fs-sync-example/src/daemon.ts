@@ -11,9 +11,9 @@
  * - System vs conflict error handling
  */
 
-import { Runtime } from "@commontools/runner";
-import { popFrame, pushFrameFromCause } from "@commontools/runner";
-import type { Cell, MemorySpace } from "@commontools/runner";
+import { Runtime } from "@commonfabric/runner";
+import { popFrame, pushFrameFromCause } from "@commonfabric/runner";
+import type { Cell, MemorySpace } from "@commonfabric/runner";
 import { debounce } from "@std/async";
 
 import type { Edit, FailedEdit, State, Todo } from "./types.ts";

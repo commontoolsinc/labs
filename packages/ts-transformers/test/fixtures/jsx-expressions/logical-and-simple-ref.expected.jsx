@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // FIXTURE: logical-and-simple-ref
 // Verifies: simple opaque ref && <JSX> is transformed to when() for short-circuit rendering
 //   showPanel && <div>Panel content</div> → when(showPanel, <div>Panel content</div>)

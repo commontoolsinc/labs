@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-local-variable
 // Verifies: callback-local variables are not captured, but outer cells are
 //   derive(a, fn) → derive(schema, schema, { a, b, c }, fn)

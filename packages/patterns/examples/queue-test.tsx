@@ -6,7 +6,7 @@ import {
   NAME,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 type QueueTestInput = {
   title: Default<string, "Queue Test">;

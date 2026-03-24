@@ -12,7 +12,7 @@
  * Without proper typeRegistry lookup, the schema might fall back to `unknown`
  * because checker.getTypeAtLocation() doesn't know about synthetic nodes.
  */
-import { Cell, derive, pattern } from "commontools";
+import { Cell, derive, pattern } from "commonfabric";
 
 interface Item {
   id: number;

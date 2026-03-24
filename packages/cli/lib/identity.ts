@@ -1,5 +1,5 @@
-import { Identity } from "@commontools/identity";
-import { decode } from "@commontools/utils/encoding";
+import { Identity } from "@commonfabric/identity";
+import { decode } from "@commonfabric/utils/encoding";
 
 export async function pkcs8FromPassphrase(
   passphrase: string,

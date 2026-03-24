@@ -1,7 +1,7 @@
 import { css, html, type PropertyValues } from "lit";
 import { state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle } from "@commontools/runtime-client";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { createStringCellController } from "../../core/cell-controller.ts";
 
 /**

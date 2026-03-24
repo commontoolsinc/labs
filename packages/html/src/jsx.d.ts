@@ -8,7 +8,7 @@ import type {
   JSXElement,
   RenderNode,
   Stream,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * Used to represent DOM API's where users can either pass
@@ -4580,7 +4580,7 @@ interface DOMIntrinsicElements {
 declare global {
   namespace JSX {
     // The output of a JSX renderer is a JSX.Element.
-    // Our renderer (`@commontools/api#h`) outputs `VNode`s,
+    // Our renderer (`@commonfabric/api#h`) outputs `VNode`s,
     // but also accepts cells containing objects with [UI] properties
     // (patterns used as components return OpaqueCell<{[UI]: VNode}>).
     type Element = JSXElement;

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-nested-callback
 // Verifies: capture extraction works with nested .map() which is itself transformed to mapWithPattern
 //   derive(numbers, fn) → derive(schema, schema, { numbers, multiplier }, fn)

@@ -10,7 +10,7 @@ import {
   str,
   toSchema,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 interface InputState {
   number: Cell<number>;

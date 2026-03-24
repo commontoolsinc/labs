@@ -39,7 +39,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface TestInput {
   firstName: Default<string, "John">;

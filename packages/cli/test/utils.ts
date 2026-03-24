@@ -1,4 +1,4 @@
-import { decode } from "@commontools/utils/encoding";
+import { decode } from "@commonfabric/utils/encoding";
 import { join } from "@std/path";
 import { expect } from "@std/expect/expect";
 
@@ -18,9 +18,9 @@ export function checkStderr(stderr: string[]) {
   expect(stderr[1]).toMatch(/experimentalDecorators compiler option/);
 }
 
-// Executes the `ct` command via CLI
-// `const { stdout, stderr, code } = ct("dev --no-run ./pattern.tsx")`
-export async function ct(
+// Executes the `cf` command via CLI
+// `const { stdout, stderr, code } = cf("dev --no-run ./pattern.tsx")`
+export async function cf(
   command: string,
 ): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
   // Use a regex to split up spaces outside of quotes.

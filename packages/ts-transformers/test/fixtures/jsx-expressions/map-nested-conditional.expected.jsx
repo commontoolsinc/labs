@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // FIXTURE: map-nested-conditional
 // Verifies: when() guard around mapWithPattern() with nested when() inside the map body
 //   showList && <div>{items.map(item => <div>{item.name && <span>}</div>)}</div>

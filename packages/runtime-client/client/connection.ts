@@ -1,5 +1,5 @@
-import { defer, type Deferred } from "@commontools/utils/defer";
-import { getLogger } from "@commontools/utils/logger";
+import { defer, type Deferred } from "@commonfabric/utils/defer";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   CellUpdateNotification,
   CommandRequest,

@@ -19,7 +19,7 @@ import {
   NAME,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 interface AuthData {
   token: string;

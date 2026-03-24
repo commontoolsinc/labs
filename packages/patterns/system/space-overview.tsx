@@ -14,7 +14,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { type MentionablePiece } from "./backlinks-index.tsx";
 import {
   searchPattern as summarySearchPattern,

@@ -24,7 +24,7 @@ import {
   str,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import {
   createSubPiece,
   getAddableTypes,

@@ -35,9 +35,9 @@ for file in $files; do
     # Check if file uses Writable< anywhere
     if grep -q 'Writable<' "$file"; then
         # Check if there's an import from commontools
-        if grep -q 'from "commontools"' "$file"; then
-            # Get the import block (everything between import { and } from "commontools")
-            import_block=$(perl -0777 -ne 'print $1 if /import\s*\{([^}]*)\}\s*from\s*"commontools"/s' "$file")
+        if grep -q 'from "commonfabric"' "$file"; then
+            # Get the import block (everything between import { and } from "commonfabric")
+            import_block=$(perl -0777 -ne 'print $1 if /import\s*\{([^}]*)\}\s*from\s*"commonfabric"/s' "$file")
 
             # Check if Cell is in import but not Writable
             if echo "$import_block" | grep -qw 'Cell' && ! echo "$import_block" | grep -qw 'Writable'; then
@@ -45,7 +45,7 @@ for file in $files; do
 
                 # Use perl to add Writable after Cell in import statements only
                 # This handles multi-line imports correctly
-                perl -i -0777 -pe 's/(import\s*\{[^}]*)\bCell\b([^}]*\}\s*from\s*"commontools")/$1Cell, Writable$2/s' "$file"
+                perl -i -0777 -pe 's/(import\s*\{[^}]*)\bCell\b([^}]*\}\s*from\s*"commonfabric")/$1Cell, Writable$2/s' "$file"
 
                 count2=$((count2 + 1))
             fi
@@ -59,4 +59,4 @@ echo "=== Done! ==="
 echo ""
 echo "Next steps:"
 echo "1. Review changes: git diff packages/patterns | head -200"
-echo "2. Test patterns: deno task ct check packages/patterns/todo-list.tsx --no-run"
+echo "2. Test patterns: deno task cf check packages/patterns/todo-list.tsx --no-run"

@@ -5,7 +5,7 @@
 ### 1. Check TypeScript Errors
 
 ```bash
-deno task ct check pattern.tsx --no-run
+deno task cf check pattern.tsx --no-run
 ```
 
 Fix all type errors before deploying. Most issues are caught here.
@@ -32,7 +32,7 @@ Hold **Alt** and hover to access debugging toolbar (val, id, watch/unwatch).
 ### 4. Inspect Deployed Piece
 
 ```bash
-deno task ct piece inspect --identity key.json --api-url URL --space SPACE --piece ID
+deno task cf piece inspect --identity key.json --api-url URL --space SPACE --piece ID
 ```
 
 ### 5. Simplify Until It Works

@@ -1,4 +1,4 @@
-import type { JSONSchema } from "@commontools/api";
+import type { JSONSchema } from "@commonfabric/api";
 
 const encoder = new TextEncoder();
 

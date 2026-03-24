@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, pattern, UI } from "commontools";
+import { Cell, Default, handler, pattern, UI } from "commonfabric";
 
 interface Item {
   text: Default<string, "">;

@@ -15,9 +15,9 @@ for file in $files; do
     # Check if file uses Writable<
     if grep -q 'Writable<' "$file"; then
         # Check if file has import from commontools
-        if grep -q 'from "commontools"' "$file"; then
-            # Extract just the import block (20 lines before 'from "commontools"')
-            import_block=$(grep -B 20 'from "commontools"' "$file" | head -21)
+        if grep -q 'from "commonfabric"' "$file"; then
+            # Extract just the import block (20 lines before 'from "commonfabric"')
+            import_block=$(grep -B 20 'from "commonfabric"' "$file" | head -21)
 
             # Check if Writable is already in the import
             if ! echo "$import_block" | grep -qw 'Writable'; then

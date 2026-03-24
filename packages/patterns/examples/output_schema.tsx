@@ -7,7 +7,7 @@ import {
   UI,
   VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 const increment = handler<unknown, { value: Writable<number> }>((_, state) => {
   state.value.set(state.value.get() + 1);

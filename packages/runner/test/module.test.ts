@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { JSONSchemaObj } from "@commontools/api";
-import { Identity } from "@commontools/identity";
+import { JSONSchemaObj } from "@commonfabric/api";
+import { Identity } from "@commonfabric/identity";
 import {
   type Frame,
   isModule,

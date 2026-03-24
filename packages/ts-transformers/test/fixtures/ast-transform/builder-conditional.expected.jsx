@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Default, NAME, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Default, NAME, pattern, UI } from "commonfabric";
 interface PatternState {
     count: Default<number, 0>;
     label: Default<string, "">;

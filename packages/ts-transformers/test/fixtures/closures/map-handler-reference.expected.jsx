@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI, handler, Cell } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern, UI, handler, Cell } from "commonfabric";
 declare global {
     namespace JSX {
         interface IntrinsicElements {

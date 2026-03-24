@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, pattern, SELF, UI, Writable } from "commontools";
+import { Default, pattern, SELF, UI, Writable } from "commonfabric";
 
 interface Input {
   label: Default<string, "Untitled">;

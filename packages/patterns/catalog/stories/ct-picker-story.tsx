@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, NAME, pattern, UI, type VNode, Writable } from "commontools";
+import { computed, NAME, pattern, UI, type VNode, Writable } from "commonfabric";
 
 import { Controls, SwitchControl } from "../ui/controls/index.ts";
 

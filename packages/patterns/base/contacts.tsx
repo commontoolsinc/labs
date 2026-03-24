@@ -22,7 +22,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Import shared types
 import type {

@@ -1,10 +1,10 @@
 import { css, html, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import type { CellHandle } from "@commontools/runtime-client";
-import { isCellHandle } from "@commontools/runtime-client";
+import type { CellHandle } from "@commonfabric/runtime-client";
+import { isCellHandle } from "@commonfabric/runtime-client";
 import { fabAnimations } from "./styles.ts";
-import { stringSchema } from "@commontools/runner/schemas";
+import { stringSchema } from "@commonfabric/runner/schemas";
 // Side-effect import to ensure ct-message-beads is registered
 import "../ct-message-beads/ct-message-beads.ts";
 

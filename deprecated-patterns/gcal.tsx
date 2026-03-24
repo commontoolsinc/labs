@@ -11,8 +11,8 @@ import {
   pattern,
   str,
   UI,
-} from "commontools";
-import type { Mutable, Schema } from "commontools/schema";
+} from "commonfabric";
+import type { Mutable, Schema } from "commonfabric/schema";
 
 const Classification = {
   Unclassified: "unclassified",

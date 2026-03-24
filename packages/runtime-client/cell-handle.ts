@@ -10,13 +10,13 @@ import {
   LINK_V1_TAG,
   type SigilLink,
   type URI,
-} from "@commontools/runner/shared";
+} from "@commonfabric/runner/shared";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
 import { type CellRef, JSONValue, RequestType } from "./protocol/mod.ts";
-import { DID } from "@commontools/identity";
-import { isRecord } from "@commontools/utils/types";
+import { DID } from "@commonfabric/identity";
+import { isRecord } from "@commonfabric/utils/types";
 import { InitializedRuntimeConnection } from "./client/connection.ts";
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 
 // Logger for schema warnings - disabled by default.
 // Enable via: globalThis.commontools.logger["cell-handle"].disabled = false

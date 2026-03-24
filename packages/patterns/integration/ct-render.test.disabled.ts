@@ -1,10 +1,10 @@
-import { env, Page, waitFor } from "@commontools/integration";
-import { PieceController, PiecesController } from "@commontools/piece/ops";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env, Page, waitFor } from "@commonfabric/integration";
+import { PieceController, PiecesController } from "@commonfabric/piece/ops";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assertEquals } from "@std/assert";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 

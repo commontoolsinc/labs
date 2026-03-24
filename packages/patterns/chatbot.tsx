@@ -14,7 +14,7 @@ import {
   VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { type MentionablePiece } from "./system/backlinks-index.tsx";
 
 const sendMessage = handler<

@@ -67,7 +67,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Secret<T> = T;
 
@@ -1032,7 +1032,7 @@ const AIRTABLE_CLIENT_SOURCE = `/**
  * const records = await client.listRecords(baseId, tableId);
  * \\\`\\\`\\\`
  */
-import { getPatternEnvironment, Writable } from "commontools";
+import { getPatternEnvironment, Writable } from "commonfabric";
 
 const env = getPatternEnvironment();
 
@@ -1360,7 +1360,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import {
   AirtableAuthManager,
@@ -2052,7 +2052,7 @@ All patterns start with:
 import {
   computed, Default, handler, ifElse, NAME, pattern,
   Stream, UI, Writable, getPatternEnvironment, wish, action, navigateTo,
-} from "commontools";
+} from "commonfabric";
 
 // Local no-op type alias for marking sensitive fields
 type Secret<T> = T;
@@ -2321,7 +2321,7 @@ Auth manager utility pattern. Uses the shared \`createAuthManager()\` factory �
 
 Typed API client class. Follow the Airtable client reference:
 
-- Import \`getPatternEnvironment\` and \`Writable\` from "commontools"
+- Import \`getPatternEnvironment\` and \`Writable\` from "commonfabric"
 - Import auth type from the auth pattern
 - Base URL: \`${api.baseUrl}\`
 - Implement:
@@ -2350,7 +2350,7 @@ ${
 Main importer pattern. Follow the Airtable importer reference:
 
 - First line: \`/// <cts-enable />\`
-- Import from \`"commontools"\`: computed, Default, handler, ifElse, NAME, pattern, UI, Writable
+- Import from \`"commonfabric"\`: computed, Default, handler, ifElse, NAME, pattern, UI, Writable
 - Import the auth manager and client
 - Define module-scope \`handler()\` functions for each API call:
   - Each handler takes \`auth\`, relevant state cells (\`loading\`, \`error\`, result cells)
@@ -2384,7 +2384,7 @@ Main importer pattern. Follow the Airtable importer reference:
 7. **No React patterns** — No useState, useEffect, hooks, or re-rendering
 8. **Data in <table>** — Use standard HTML table with inline styles for data display
 9. **First line: \`/// <cts-enable />\`** — Required for all .tsx pattern files
-10. **Import from "commontools"** — Not from individual packages
+10. **Import from "commonfabric"** — Not from individual packages
 </instructions>`);
 
   return sections.join("\n\n");

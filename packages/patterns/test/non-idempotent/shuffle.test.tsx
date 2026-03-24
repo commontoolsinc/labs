@@ -1,11 +1,11 @@
 /// <cts-enable />
 /**
  * Test that exercises a non-idempotent Math.random() shuffle computation.
- * The idempotency check in ct test should warn about it.
+ * The idempotency check in cf test should warn about it.
  *
- * Run: deno task ct test packages/patterns/test/non-idempotent/shuffle.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/test/non-idempotent/shuffle.test.tsx --verbose
  */
-import { computed, pattern, Writable } from "commontools";
+import { computed, pattern, Writable } from "commonfabric";
 
 export default pattern(() => {
   const items = Writable.of(["alpha", "bravo", "charlie", "delta", "echo"]);

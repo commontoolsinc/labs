@@ -9,15 +9,15 @@ import {
   isCommand,
 } from "../../shared/mod.ts";
 import { BaseView, createDefaultAppState, SHELL_COMMAND } from "./BaseView.ts";
-import { KeyStore } from "@commontools/identity";
+import { KeyStore } from "@commonfabric/identity";
 import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
-import { type RuntimeClient } from "@commontools/runtime-client";
-import { type DID } from "@commontools/identity";
+import { type RuntimeClient } from "@commonfabric/runtime-client";
+import { type DID } from "@commonfabric/identity";
 import { RuntimeInternals } from "../lib/runtime.ts";
-import { createVDomDebugHelpers } from "@commontools/html/debug";
+import { createVDomDebugHelpers } from "@commonfabric/html/debug";
 import { createDebugUtils } from "../lib/debug-utils.ts";
-import { runtimeContext, spaceContext } from "@commontools/ui";
+import { runtimeContext, spaceContext } from "@commonfabric/ui";
 import { provide } from "@lit/context";
 
 // The root element for the shell application.

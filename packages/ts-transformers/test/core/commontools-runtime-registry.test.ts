@@ -48,26 +48,26 @@ function extractInjectedCallableExports(sourceText: string): string[] {
     }
   }
 
-  let commontoolsObject: ts.ObjectLiteralExpression | undefined;
+  let commonfabricObject: ts.ObjectLiteralExpression | undefined;
   ts.forEachChild(sourceFile, function visit(node) {
     if (
       ts.isPropertyAssignment(node) &&
-      getPropertyNameText(node.name) === "commontools" &&
+      getPropertyNameText(node.name) === "commonfabric" &&
       ts.isObjectLiteralExpression(node.initializer)
     ) {
-      commontoolsObject = node.initializer;
+      commonfabricObject = node.initializer;
       return;
     }
     ts.forEachChild(node, visit);
   });
 
   assert(
-    commontoolsObject,
-    "Failed to locate createBuilder().commontools object in runner builder factory",
+    commonfabricObject,
+    "Failed to locate createBuilder().commonfabric object in runner builder factory",
   );
 
   const injectedExports = new Set<string>();
-  for (const property of commontoolsObject.properties) {
+  for (const property of commonfabricObject.properties) {
     if (ts.isShorthandPropertyAssignment(property)) {
       const importSource = importedIdentifiers.get(property.name.text);
       if (TRACKED_IMPORT_SOURCES.has(importSource ?? "")) {

@@ -218,7 +218,7 @@ Debugging tool for inspecting cell values. See [CELL_CONTEXT.md](CELL_CONTEXT.md
 Use `equals()` for identity comparison:
 
 ```tsx
-import { equals, handler, Writable } from 'commontools';
+import { equals, handler, Writable } from 'commonfabric';
 
 const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
   (_, { items, item }) => {

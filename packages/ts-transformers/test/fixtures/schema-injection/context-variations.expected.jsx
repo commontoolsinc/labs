@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, handler } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, pattern, handler } from "commonfabric";
 // 1. Top-level
 const _topLevel = cell(10, {
     type: "number"

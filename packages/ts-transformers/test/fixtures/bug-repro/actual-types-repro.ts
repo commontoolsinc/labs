@@ -7,7 +7,7 @@
  * RUN: deno run -A test/fixtures/bug-repro/verify-actual.ts
  */
 
-import type { OpaqueRef, OpaqueCell } from "commontools";
+import type { OpaqueRef, OpaqueCell } from "commonfabric";
 
 // ============================================================================
 // TEST CASES

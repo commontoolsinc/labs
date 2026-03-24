@@ -1,11 +1,11 @@
-import { env, waitFor } from "@commontools/integration";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env, waitFor } from "@commonfabric/integration";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import "../src/globals.ts";
-import { Identity } from "@commontools/identity";
-import { PieceController, PiecesController } from "@commontools/piece/ops";
-import { FileSystemProgramResolver } from "@commontools/js-compiler";
+import { Identity } from "@commonfabric/identity";
+import { PieceController, PiecesController } from "@commonfabric/piece/ops";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
 

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, fetchData, ifElse, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, fetchData, ifElse, pattern, UI } from "commonfabric";
 // Tests ifElse where ifTrue is explicitly undefined
 // This pattern is common: ifElse(pending, undefined, { result })
 // The transformer must handle this correctly - the undefined is a VALUE, not a missing argument

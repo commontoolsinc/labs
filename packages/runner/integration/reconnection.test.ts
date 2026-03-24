@@ -5,7 +5,7 @@
  * This test verifies that subscriptions are re-established after WebSocket reconnection
  */
 
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import { Replica, StorageManager } from "../src/storage/cache.ts";
 import type {
   Changes,
@@ -13,10 +13,10 @@ import type {
   Revision,
   State,
   URI,
-} from "@commontools/memory/interface";
-import type { FabricObject } from "@commontools/data-model/fabric-value";
-import { env } from "@commontools/integration";
-import type { JSONSchema } from "@commontools/api";
+} from "@commonfabric/memory/interface";
+import type { FabricObject } from "@commonfabric/data-model/fabric-value";
+import { env } from "@commonfabric/integration";
+import type { JSONSchema } from "@commonfabric/api";
 const { API_URL } = env;
 
 const MEMORY_WS_URL = `${

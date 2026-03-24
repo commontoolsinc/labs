@@ -258,7 +258,7 @@ declare disabled: boolean;
 Import types with `type` keyword when possible:
 
 ```typescript
-import type { Cell } from "@commontools/runner";
+import type { Cell } from "@commonfabric/runner";
 import type { CTTheme } from "../theme-context.ts";
 ```
 

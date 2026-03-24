@@ -5,7 +5,7 @@ TypeScript types are automatically processed at runtime. Enable with:
 
 ```typescript
 /// <cts-enable />
-import { pattern, UI, NAME } from "commontools";
+import { pattern, UI, NAME } from "commonfabric";
 ```
 
 CTS provides:

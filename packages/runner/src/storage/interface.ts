@@ -1,4 +1,4 @@
-import type { Immutable } from "@commontools/utils/types";
+import type { Immutable } from "@commonfabric/utils/types";
 import type { EntityId } from "../create-ref.ts";
 import type {
   Assertion,
@@ -19,9 +19,9 @@ import type {
   Unit,
   URI,
   Variant,
-} from "@commontools/memory/interface";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
-import { BaseMemoryAddress } from "@commontools/runner/traverse";
+} from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Cell } from "../cell.ts";
 
 export type {

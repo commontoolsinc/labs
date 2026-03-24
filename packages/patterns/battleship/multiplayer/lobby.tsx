@@ -19,7 +19,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import BattleshipRoom from "./room.tsx";
 import {

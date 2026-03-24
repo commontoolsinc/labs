@@ -40,7 +40,7 @@ import { LinearDescriptor } from "./linear-oauth/linear.descriptor.ts";
 import { NotionDescriptor } from "./notion-oauth/notion.descriptor.ts";
 import { SpotifyDescriptor } from "./spotify-oauth/spotify.descriptor.ts";
 import { StravaDescriptor } from "./strava-oauth/strava.descriptor.ts";
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("provider-registry");
 

@@ -30,9 +30,9 @@ replace () {
   fi
 }
 
-if [ -n "$CT_CLI_INTEGRATION_USE_LOCAL" ]; then
- ct() {
-   deno task ct "$@"
+if [ -n "$CF_CLI_INTEGRATION_USE_LOCAL" ]; then
+ cf() {
+   deno task cf "$@"
  }
 fi
 
@@ -52,20 +52,20 @@ echo "IDENTITY=$IDENTITY"
 echo "WORK_DIR=$WORK_DIR"
 
 # Create a key
-ct id new > $IDENTITY
+cf id new > $IDENTITY
 
 # Check space is empty
-if [ "$(ct piece ls $SPACE_ARGS)" != "" ]; then
+if [ "$(cf piece ls $SPACE_ARGS)" != "" ]; then
   error "Space not empty."
 fi
 
 # Create a new piece using custom default export as input
-PIECE_ID=$(ct piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
+PIECE_ID=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
 echo "Created piece: $PIECE_ID"
 
 echo "Fetching piece source to $WORK_DIR"
 # Retrieve the source code for $PIECE_ID to $WORK_DIR
-ct piece getsrc $SPACE_ARGS --piece $PIECE_ID $WORK_DIR
+cf piece getsrc $SPACE_ARGS --piece $PIECE_ID $WORK_DIR
 
 # Check file was retrieved
 if [ ! -f "$WORK_DIR/main.tsx" ]; then
@@ -79,11 +79,11 @@ echo "Updating piece source."
 
 # Update the piece's source code
 replace 's/Simple counter:/Simple counter 2:/g' "$WORK_DIR/main.tsx"
-ct piece setsrc --main-export $CUSTOM_EXPORT $SPACE_ARGS --piece $PIECE_ID $WORK_DIR/main.tsx
+cf piece setsrc --main-export $CUSTOM_EXPORT $SPACE_ARGS --piece $PIECE_ID $WORK_DIR/main.tsx
 
 # (Again) Retrieve the source code for $PIECE_ID to $WORK_DIR
 rm "$WORK_DIR/main.tsx"
-ct piece getsrc $SPACE_ARGS --piece $PIECE_ID $WORK_DIR
+cf piece getsrc $SPACE_ARGS --piece $PIECE_ID $WORK_DIR
 
 # Check file was retrieved with modifications
 grep -q "Simple counter 2" "$WORK_DIR/main.tsx"
@@ -94,13 +94,13 @@ fi
 echo "Applying piece input."
 
 # Apply new input to piece
-echo '{"value":5}' | ct piece apply $SPACE_ARGS --piece $PIECE_ID
+echo '{"value":5}' | cf piece apply $SPACE_ARGS --piece $PIECE_ID
 
 # get, set and then re-get a value from the piece
-echo '10' | ct piece set $SPACE_ARGS --piece $PIECE_ID value
+echo '10' | cf piece set $SPACE_ARGS --piece $PIECE_ID value
 
 # Verify the get returned what we expect
-RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID value)
+RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID value)
 assert_json_eq "$RESULT" '10' "Get operation did not return expected value. Expected: 10, Got: $RESULT"
 
 # Helper functions for testing
@@ -111,8 +111,8 @@ test_value() {
   local expected="$4"
   local flags="$5"
 
-  echo "$value" | ct piece set $SPACE_ARGS --piece $PIECE_ID "$path" $flags
-  local result=$(ct piece get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
+  echo "$value" | cf piece set $SPACE_ARGS --piece $PIECE_ID "$path" $flags
+  local result=$(cf piece get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
 
   if [ "$result" != "$expected" ]; then
     error "$test_name failed. Expected: $expected, Got: $result"
@@ -125,7 +125,7 @@ read_piece_value_or_default() {
   local fallback="$3"
   local actual
 
-  actual=$(ct piece get $SPACE_ARGS --piece "$piece_id" "$path" 2>/dev/null || true)
+  actual=$(cf piece get $SPACE_ARGS --piece "$piece_id" "$path" 2>/dev/null || true)
   if [ -z "$actual" ]; then
     printf '%s\n' "$fallback"
     return 0
@@ -145,8 +145,8 @@ test_json_value() {
   local value="$3"
   local flags="$4"
 
-  echo "$value" | ct piece set $SPACE_ARGS --piece $PIECE_ID "$path" $flags
-  local result=$(ct piece get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
+  echo "$value" | cf piece set $SPACE_ARGS --piece $PIECE_ID "$path" $flags
+  local result=$(cf piece get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
 
   assert_json_eq "$result" "$value" "$test_name failed. Expected: $value, Got: $result"
 }
@@ -157,7 +157,7 @@ test_get_only() {
   local expected="$3"
   local flags="$4"
 
-  local result=$(ct piece get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
+  local result=$(cf piece get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
 
   if [ "$result" != "$expected" ]; then
     error "$test_name failed. Expected: $expected, Got: $result"
@@ -190,107 +190,107 @@ test_value "Nested input path" "userData/user/name" '"inputValue"' '"inputValue"
 echo "Testing piece step..."
 
 # Recompute (one iteration) with updated inputs
-ct piece step $SPACE_ARGS --piece $PIECE_ID
+cf piece step $SPACE_ARGS --piece $PIECE_ID
 
 # Check space has new piece with correct inputs and title
 TITLE="Simple counter 2: 10"
-if ! ct piece ls $SPACE_ARGS | grep -q "$PIECE_ID $TITLE <unnamed>"; then
+if ! cf piece ls $SPACE_ARGS | grep -q "$PIECE_ID $TITLE <unnamed>"; then
   error "Piece did not appear in list of space pieces."
 fi
 
 echo "Testing piece link..."
 
 # Create a second piece from the same pattern
-PIECE_ID2=$(ct piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
+PIECE_ID2=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
 echo "Created second piece: $PIECE_ID2"
 
 # Initialize piece2 with value 0 and step so output is computed
-echo '0' | ct piece set $SPACE_ARGS --piece $PIECE_ID2 value --input
-ct piece step $SPACE_ARGS --piece $PIECE_ID2
+echo '0' | cf piece set $SPACE_ARGS --piece $PIECE_ID2 value --input
+cf piece step $SPACE_ARGS --piece $PIECE_ID2
 
 # Verify piece2 starts with value 0
-RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID2 value)
+RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID2 value)
 if [ "$RESULT" != "0" ]; then
   error "Piece2 value should be 0 before linking, got: $RESULT"
 fi
 
 # Linking from a nonexistent source path should fail
-if ct piece link $SPACE_ARGS $PIECE_ID/nonexistent $PIECE_ID2/value 2>/dev/null; then
+if cf piece link $SPACE_ARGS $PIECE_ID/nonexistent $PIECE_ID2/value 2>/dev/null; then
   error "Linking from nonexistent source path should have failed"
 fi
 
 # Linking to a nonexistent target path should fail
-if ct piece link $SPACE_ARGS $PIECE_ID/value $PIECE_ID2/nonexistent 2>/dev/null; then
+if cf piece link $SPACE_ARGS $PIECE_ID/value $PIECE_ID2/nonexistent 2>/dev/null; then
   error "Linking to nonexistent target path should have failed"
 fi
 
 # Link piece1's output value to piece2's input value
-ct piece link $SPACE_ARGS $PIECE_ID/value $PIECE_ID2/value
+cf piece link $SPACE_ARGS $PIECE_ID/value $PIECE_ID2/value
 
 # Read back piece2's input value - should be piece1's output value (10)
-RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID2 value --input)
+RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID2 value --input)
 if [ "$RESULT" != "10" ]; then
   error "After linking, piece2's input value should be 10 (from piece1), got: $RESULT"
 fi
 
 # Step piece2 to recompute with linked input
-ct piece step $SPACE_ARGS --piece $PIECE_ID2
+cf piece step $SPACE_ARGS --piece $PIECE_ID2
 
 # Verify piece2's output value is now 10 (from piece1 via link)
-RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID2 value)
+RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID2 value)
 if [ "$RESULT" != "10" ]; then
   error "After linking and stepping, piece2's output value should be 10, got: $RESULT"
 fi
 
 # Call increment handler on piece2 — since its value is linked to piece1's
 # output cell, this should update piece1's value too
-ct piece call $SPACE_ARGS --piece $PIECE_ID2 increment '{}'
+cf piece call $SPACE_ARGS --piece $PIECE_ID2 increment '{}'
 
 # Verify piece1's value is now 11 (was 10, incremented via piece2's handler)
-RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID value)
+RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID value)
 if [ "$RESULT" != "11" ]; then
   error "After calling increment on piece2, piece1's value should be 11, got: $RESULT"
 fi
 
 echo "Testing piece link with invented piece ID..."
 
-# Use an invented piece ID (not created via ct piece new) as a data source
+# Use an invented piece ID (not created via cf piece new) as a data source
 INVENTED_ID="baedreizzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
 
 # Write a value to the invented piece
-echo '42' | ct piece set $SPACE_ARGS --piece $INVENTED_ID value
+echo '42' | cf piece set $SPACE_ARGS --piece $INVENTED_ID value
 
 # Create a third piece and link the invented piece's value to its input
-PIECE_ID3=$(ct piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
+PIECE_ID3=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
 echo "Created third piece: $PIECE_ID3"
 
 # Linking from invented piece should fail without --allow-non-existing
-if ct piece link $SPACE_ARGS $INVENTED_ID/value $PIECE_ID3/value 2>/dev/null; then
+if cf piece link $SPACE_ARGS $INVENTED_ID/value $PIECE_ID3/value 2>/dev/null; then
   error "Linking from invented piece should have failed without --allow-non-existing"
 fi
 
 # Now link with --allow-non-existing
-ct piece link $SPACE_ARGS --allow-non-existing $INVENTED_ID/value $PIECE_ID3/value
+cf piece link $SPACE_ARGS --allow-non-existing $INVENTED_ID/value $PIECE_ID3/value
 
 # Read back piece3's input value - should be 42 from the invented piece
-RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID3 value --input)
+RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID3 value --input)
 if [ "$RESULT" != "42" ]; then
   error "After linking invented piece, piece3's input value should be 42, got: $RESULT"
 fi
 
 # Step piece3 to recompute with linked input
-ct piece step $SPACE_ARGS --piece $PIECE_ID3
+cf piece step $SPACE_ARGS --piece $PIECE_ID3
 
 # Verify piece3's output value is 42
-RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID3 value)
+RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID3 value)
 if [ "$RESULT" != "42" ]; then
   error "After stepping piece3 with invented link, output value should be 42, got: $RESULT"
 fi
 
 # Call increment on piece3 and verify the invented piece's value updates
-ct piece call $SPACE_ARGS --piece $PIECE_ID3 increment '{}'
+cf piece call $SPACE_ARGS --piece $PIECE_ID3 increment '{}'
 
-RESULT=$(ct piece get $SPACE_ARGS --piece $INVENTED_ID value)
+RESULT=$(cf piece get $SPACE_ARGS --piece $INVENTED_ID value)
 if [ "$RESULT" != "43" ]; then
   error "After calling increment on piece3, invented piece's value should be 43, got: $RESULT"
 fi
@@ -298,44 +298,44 @@ fi
 echo "Testing piece call with schema-derived flags and tools..."
 
 CALLABLE_PATTERN_SRC="$SCRIPT_DIR/pattern/fuse-exec.tsx"
-CALLABLE_PIECE_ID=$(ct piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $CALLABLE_PATTERN_SRC)
+CALLABLE_PIECE_ID=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $CALLABLE_PATTERN_SRC)
 echo "Created callable piece: $CALLABLE_PIECE_ID"
 
-CALL_HELP=$(ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help)
-echo "$CALL_HELP" | grep -q "ct piece call ... search --help" ||
+CALL_HELP=$(cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help)
+echo "$CALL_HELP" | grep -q "cf piece call ... search --help" ||
   error "Top-level callable help should work without the delimiter"
-echo "$CALL_HELP" | grep -q "ct piece call ... search <json>" ||
+echo "$CALL_HELP" | grep -q "cf piece call ... search <json>" ||
   error "Piece-call help should describe JSON input without --json"
 
-CALL_HELP_JSON=$(ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help --json)
+CALL_HELP_JSON=$(cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help --json)
 echo "$CALL_HELP_JSON" | jq -e '.inputSchema.properties.query.type == "string"' > /dev/null ||
   error "Top-level --help --json should return the machine-readable schema"
 
-# --json is now a registered no-op on ct piece call (CT-1393): agents expect
+# --json is now a registered no-op on cf piece call (CT-1393): agents expect
 # it to work because it's valid on all other piece subcommands.
-ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --json < /dev/null > /dev/null 2>&1 ||
-  error "Redundant --json should be accepted (no-op) on ct piece call"
+cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --json < /dev/null > /dev/null 2>&1 ||
+  error "Redundant --json should be accepted (no-op) on cf piece call"
 
-ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID recordMessage -- --message "piece-flags"
-RESULT=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID lastMessage)
+cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID recordMessage -- --message "piece-flags"
+RESULT=$(cf piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID lastMessage)
 if [ "$RESULT" != '"piece-flags"' ]; then
   error "Flag-based handler call should update lastMessage, got: $RESULT"
 fi
 
 LEGACY_COUNT_BEFORE=$(read_piece_value_or_default "$CALLABLE_PIECE_ID" "legacyCount" "0")
-ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite
-RESULT=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
+cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite
+RESULT=$(cf piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
 if [ "$RESULT" != "$((LEGACY_COUNT_BEFORE + 1))" ]; then
   error "Bare no-arg handler call should increment legacyCount, got: $RESULT"
 fi
 
-ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite -- invoke
-RESULT=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
+cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite -- invoke
+RESULT=$(cf piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
 if [ "$RESULT" != "$((LEGACY_COUNT_BEFORE + 2))" ]; then
   error "Explicit invoke should still call an empty-object handler, got legacyCount=$RESULT"
 fi
 
-TOOL_RESULT=$(ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search -- --query tea)
+TOOL_RESULT=$(cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search -- --query tea)
 assert_json_eq \
   "$TOOL_RESULT" \
   '{"query":"tea","help":"","source":"bound-source","summary":"bound-source:tea:"}' \

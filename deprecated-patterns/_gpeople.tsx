@@ -13,7 +13,7 @@ import {
   Schema,
   str,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 const Classification = {
   Unclassified: "unclassified",

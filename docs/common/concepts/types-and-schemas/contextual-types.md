@@ -5,7 +5,7 @@
 Four contexts where types appear differently:
 
 ```tsx
-import { Default, Writable, pattern, UI } from 'commontools';
+import { Default, Writable, pattern, UI } from 'commonfabric';
 
 interface ShoppingItem {
   title: string;

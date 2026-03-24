@@ -3,7 +3,7 @@
 There is never a reason to nest `computed()` calls. The inner `computed()` returns a cell reference, not a value, which breaks reactivity:
 
 ```typescript
-import { computed, Writable } from 'commontools';
+import { computed, Writable } from 'commonfabric';
 
 const myCell = Writable.of(10);
 

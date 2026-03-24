@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive, pattern, patternTool, type PatternToolResult } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
 type Output = {
     tool: PatternToolResult<Record<string, never>>;
 };

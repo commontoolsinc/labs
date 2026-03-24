@@ -9,7 +9,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { type MentionablePiece } from "./backlinks-index.tsx";
 
 export type SummarizablePiece = MentionablePiece & { summary?: string };

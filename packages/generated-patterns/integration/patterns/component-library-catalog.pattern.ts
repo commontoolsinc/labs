@@ -8,7 +8,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface ComponentLibraryCatalogArgs {
   components: Default<ComponentSeed[], typeof defaultComponentSeeds>;

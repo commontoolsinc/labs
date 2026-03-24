@@ -1,7 +1,7 @@
 import { html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { property } from "lit/decorators.js";
-import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
+import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 
 export class CTRouter extends BaseElement {
   @property({ attribute: false })

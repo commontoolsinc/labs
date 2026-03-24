@@ -1417,8 +1417,8 @@ function isImportedFromCommonTools(symbol: ts.Symbol): boolean {
     while (current) {
       if (ts.isImportDeclaration(current)) {
         return ts.isStringLiteral(current.moduleSpecifier) &&
-          (current.moduleSpecifier.text === "commontools" ||
-            current.moduleSpecifier.text === "@commontools/common");
+          (current.moduleSpecifier.text === "commonfabric" ||
+            current.moduleSpecifier.text === "@commonfabric/common");
       }
       current = current.parent;
     }
@@ -1440,8 +1440,8 @@ function getImportedCommonToolsNamedExport(
       !current ||
       !ts.isImportDeclaration(current) ||
       !ts.isStringLiteral(current.moduleSpecifier) ||
-      (current.moduleSpecifier.text !== "commontools" &&
-        current.moduleSpecifier.text !== "@commontools/common")
+      (current.moduleSpecifier.text !== "commonfabric" &&
+        current.moduleSpecifier.text !== "@commonfabric/common")
     ) {
       continue;
     }

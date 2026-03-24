@@ -1,8 +1,8 @@
 import {
   createUnifiedDiff,
   defineFixtureSuite,
-} from "@commontools/test-support/fixture-runner";
-import { StaticCacheFS } from "@commontools/static";
+} from "@commonfabric/test-support/fixture-runner";
+import { StaticCacheFS } from "@commonfabric/static";
 import { resolve } from "@std/path";
 import ts from "typescript";
 
@@ -100,9 +100,9 @@ const configs: FixtureConfig[] = [
 ];
 
 const staticCache = new StaticCacheFS();
-const commontools = await staticCache.getText("types/commontools.d.ts");
+const commontools = await staticCache.getText("types/commonfabric.d.ts");
 const commontoolsSchema = await staticCache.getText(
-  "types/commontools-schema.d.ts",
+  "types/commonfabric-schema.d.ts",
 );
 const FIXTURES_ROOT = "./test/fixtures";
 
@@ -202,8 +202,8 @@ if (!Deno.env.get("SKIP_INPUT_CHECK")) {
 
     const result = await batchTypeCheckFixtures(allFixtures, {
       types: {
-        "commontools.d.ts": commontools,
-        "commontools-schema.d.ts": commontoolsSchema,
+        "commonfabric.d.ts": commontools,
+        "commonfabric-schema.d.ts": commontoolsSchema,
       },
     });
 
@@ -261,8 +261,8 @@ for (const config of configs) {
         `${config.directory}/${fixture.relativeInputPath}`,
         {
           types: {
-            "commontools.d.ts": commontools,
-            "commontools-schema.d.ts": commontoolsSchema,
+            "commonfabric.d.ts": commontools,
+            "commonfabric-schema.d.ts": commontoolsSchema,
           },
           typeCheck: !Deno.env.get("SKIP_INPUT_CHECK"),
           precomputedDiagnostics,

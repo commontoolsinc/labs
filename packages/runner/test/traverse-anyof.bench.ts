@@ -5,8 +5,8 @@ import type {
   SchemaPathSelector,
   State,
   URI,
-} from "@commontools/memory/interface";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+} from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   IMemorySpaceValueAttestation,
   SchemaObjectTraverser,

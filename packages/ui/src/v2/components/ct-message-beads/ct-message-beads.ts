@@ -1,14 +1,14 @@
 import { css, html, nothing, render } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import type {
   BuiltInLLMContentPart,
   BuiltInLLMMessage,
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
-} from "@commontools/api";
+} from "@commonfabric/api";
 
 const MessagesSchema = {
   type: "array",

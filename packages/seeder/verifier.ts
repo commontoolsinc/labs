@@ -1,10 +1,10 @@
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { PieceResult } from "./interfaces.ts";
-import { sleep } from "@commontools/utils/sleep";
-import { Browser, Page, pipeConsole } from "@commontools/integration";
-import { Identity } from "@commontools/identity";
-import { login } from "@commontools/integration/shell-utils";
+import { sleep } from "@commonfabric/utils/sleep";
+import { Browser, Page, pipeConsole } from "@commonfabric/integration";
+import { Identity } from "@commonfabric/identity";
+import { login } from "@commonfabric/integration/shell-utils";
 
 const model = openai("gpt-4o-mini");
 

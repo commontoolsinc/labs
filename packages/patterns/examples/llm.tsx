@@ -9,7 +9,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type LLMTestInput = {
   title: Default<string, "LLM Test">;

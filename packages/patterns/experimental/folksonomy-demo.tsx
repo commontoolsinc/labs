@@ -27,7 +27,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Import the FolksonomyTags sub-pattern
 import { FolksonomyTags } from "./folksonomy-tags.tsx";

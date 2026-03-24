@@ -10,7 +10,7 @@ import {
   patternTool,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import { default as Note } from "../notes/note.tsx";
 

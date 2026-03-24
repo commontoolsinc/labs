@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, type Default, NAME, pattern, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commonfabric";
 
 type Input = { url: Default<string, "/api/patterns/index.md"> };
 

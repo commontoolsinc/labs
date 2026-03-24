@@ -3,7 +3,7 @@
  * Fixture: action closing over SELF requires inputs with defaults so the
  * piece data always satisfies the output schema's required properties.
  */
-import { action, type Default, NAME, pattern, SELF, UI, type VNode, Writable } from "commontools";
+import { action, type Default, NAME, pattern, SELF, UI, type VNode, Writable } from "commonfabric";
 
 interface TestOutput {
   [NAME]: string;

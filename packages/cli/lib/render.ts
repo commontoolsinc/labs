@@ -1,4 +1,4 @@
-import { encode } from "@commontools/utils/encoding";
+import { encode } from "@commonfabric/utils/encoding";
 
 function stringify(value: unknown): string {
   switch (typeof value) {

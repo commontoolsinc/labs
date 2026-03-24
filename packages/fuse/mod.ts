@@ -82,9 +82,9 @@ export async function main(argv: string[] = Deno.args) {
     boolean: ["debug"],
     collect: ["space"],
     default: {
-      "api-url": Deno.env.get("CT_API_URL") ?? "",
+      "api-url": Deno.env.get("CF_API_URL") ?? "",
       space: [] as string[],
-      identity: Deno.env.get("CT_IDENTITY") ?? "",
+      identity: Deno.env.get("CF_IDENTITY") ?? "",
       "exec-cli": "",
       "log-file": "",
       debug: false,

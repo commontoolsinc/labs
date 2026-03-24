@@ -10,7 +10,7 @@ import {
   pattern,
   str,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 // Reuse email schema from email-summarizer.tsx
 const EmailProperties = {

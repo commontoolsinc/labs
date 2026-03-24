@@ -1,6 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { CellHandle } from "@commontools/runtime-client";
+import { CellHandle } from "@commonfabric/runtime-client";
 import { CTPiece } from "../ct-piece/ct-piece.ts";
 
 declare global {

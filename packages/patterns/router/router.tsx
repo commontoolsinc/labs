@@ -8,7 +8,7 @@ import {
   type UIRenderable,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 export interface RouteContext {
   path: string;

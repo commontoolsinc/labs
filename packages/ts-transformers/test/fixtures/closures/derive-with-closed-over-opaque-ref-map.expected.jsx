@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive, OpaqueRef } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { derive, OpaqueRef } from "commonfabric";
 export default function TestDeriveWithClosedOverOpaqueRefMap() {
     const items = [1, 2, 3] as OpaqueRef<number[]>;
     // Explicit derive with closed-over OpaqueRef

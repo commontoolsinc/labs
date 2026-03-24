@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, Writable, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern, Writable, UI } from "commonfabric";
 interface State {
     items: Array<{
         name: string;

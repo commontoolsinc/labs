@@ -4,8 +4,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -17,9 +17,9 @@ describe("Pattern Runner - Async", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -30,12 +30,12 @@ describe("Pattern Runner - Async", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
+    const { commonfabric } = createBuilder();
     ({
       lift,
       pattern,
       handler,
-    } = commontools);
+    } = commonfabric);
   });
 
   afterEach(async () => {

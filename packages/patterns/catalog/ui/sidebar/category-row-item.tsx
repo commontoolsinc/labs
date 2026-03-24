@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, NAME, pattern, Stream, UI, type VNode } from "commontools";
+import { computed, NAME, pattern, Stream, UI, type VNode } from "commonfabric";
 import { type CategoryItem } from "../../catalog.tsx";
 
 interface CategoryRowItemInput {

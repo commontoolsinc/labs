@@ -3,8 +3,8 @@ import {
   type JSXElement,
   type RenderNode,
   type VNode,
-} from "@commontools/api";
-import { isCell, isCellResult } from "@commontools/runner";
+} from "@commonfabric/api";
+import { isCell, isCellResult } from "@commonfabric/runner";
 
 /**
  * Fragment element name used for JSX fragments.

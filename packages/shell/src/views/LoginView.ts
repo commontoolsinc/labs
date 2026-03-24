@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { state } from "lit/decorators.js";
 
-import { Identity, KeyStore, PassKey } from "@commontools/identity";
+import { Identity, KeyStore, PassKey } from "@commonfabric/identity";
 
 import { BaseView } from "./BaseView.ts";
 import {

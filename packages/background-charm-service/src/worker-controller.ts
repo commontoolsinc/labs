@@ -1,7 +1,7 @@
 import { BGCharmEntry } from "./schema.ts";
-import { Cell } from "@commontools/runner";
-import { Identity } from "@commontools/identity";
-import { defer, type Deferred } from "@commontools/utils/defer";
+import { Cell } from "@commonfabric/runner";
+import { Identity } from "@commonfabric/identity";
+import { defer, type Deferred } from "@commonfabric/utils/defer";
 import {
   isWorkerIPCRequest,
   isWorkerIPCResponse,

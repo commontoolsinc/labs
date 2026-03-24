@@ -9,13 +9,13 @@
  * - Deleting habits
  * - Default values
  *
- * Run: deno task ct test packages/patterns/habit-tracker/habit-tracker.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/habit-tracker/habit-tracker.test.tsx --verbose
  *
  * NOTE: Uses .filter(() => true).length instead of .length directly due to
  * a reactivity tracking bug where direct .length access doesn't register
  * dependencies. See packages/patterns/gideon-tests/array-length-repro.test.tsx
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commonfabric";
 import HabitTracker from "./habit-tracker.tsx";
 import type { Habit, HabitLog } from "./schemas.tsx";
 

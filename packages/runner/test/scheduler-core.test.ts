@@ -12,11 +12,11 @@ import {
   ignoreReadForScheduling,
   txToReactivityLog,
 } from "../src/scheduler.ts";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import type { Entity } from "@commontools/memory/interface";
-import * as Fact from "@commontools/memory/fact";
-import * as Changes from "@commontools/memory/changes";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { Entity } from "@commonfabric/memory/interface";
+import * as Fact from "@commonfabric/memory/fact";
+import * as Changes from "@commonfabric/memory/changes";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

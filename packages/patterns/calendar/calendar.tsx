@@ -11,7 +11,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import EventDetail, { type EventPiece } from "./event-detail.tsx";
 

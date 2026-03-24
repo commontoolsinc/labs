@@ -1,4 +1,4 @@
-import { type Config } from "@commontools/felt";
+import { type Config } from "@commonfabric/felt";
 import ports from "@commontools/ports" with { type: "json" };
 
 const PRODUCTION = !!Deno.env.get("PRODUCTION");

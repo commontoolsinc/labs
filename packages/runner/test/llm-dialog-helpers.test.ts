@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
-import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commontools";
+import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commonfabric";
 import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
 
 const {

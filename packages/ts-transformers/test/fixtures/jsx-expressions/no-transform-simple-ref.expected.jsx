@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { NAME, OpaqueRef, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { NAME, OpaqueRef, pattern } from "commonfabric";
 const count: OpaqueRef<number> = {} as any;
 const _element = <div>{count}</div>;
 // FIXTURE: no-transform-simple-ref

@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * FIXTURE: nested-computed-output-maps
  * Verifies: nested computed outputs can flow back into later pattern-owned
@@ -15,7 +15,7 @@ import * as __ctHelpers from "commontools";
  * - threadRows.map(...) lowers once the flow re-enters pattern-owned UI
  * - closures preserve thread/comment indices, state.lane, and local Writables
  */
-import { computed, handler, ifElse, lift, pattern, UI, Writable, } from "commontools";
+import { computed, handler, ifElse, lift, pattern, UI, Writable, } from "commonfabric";
 interface Comment {
     id: string;
     text: string;

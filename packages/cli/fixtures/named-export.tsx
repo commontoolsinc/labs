@@ -1,7 +1,7 @@
 // Test file with named export instead of default export
 /// <cts-enable />
-import { pattern, schema } from "commontools";
-import "commontools/schema";
+import { pattern, schema } from "commonfabric";
+import "commonfabric/schema";
 
 const model = schema({
   type: "object",

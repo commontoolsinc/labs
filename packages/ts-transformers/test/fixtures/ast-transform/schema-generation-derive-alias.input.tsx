@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive as deriveAlias } from "commontools";
+import { derive as deriveAlias } from "commonfabric";
 
 type AliasInput = {
   text: string;

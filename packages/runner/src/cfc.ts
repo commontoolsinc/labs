@@ -1,10 +1,10 @@
-import { JSONSchemaObj } from "@commontools/api";
-import { isRecord } from "@commontools/utils/types";
-import { getLogger } from "@commontools/utils/logger";
+import { JSONSchemaObj } from "@commonfabric/api";
+import { isRecord } from "@commonfabric/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
-import { isArrayIndexPropertyName } from "@commontools/data-model/fabric-value";
-import { rendererVDOMSchema, vnodeSchema } from "@commontools/runner/schemas";
+import { isArrayIndexPropertyName } from "@commonfabric/data-model/fabric-value";
+import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
 import { decodeJsonPointer } from "./link-types.ts";
 
 const logger = getLogger("cfc");

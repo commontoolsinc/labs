@@ -11,7 +11,7 @@ import {
   MemoryCompilationCache,
 } from "../src/compilation-cache/mod.ts";
 import type { CompilationCacheStorage } from "../src/compilation-cache/mod.ts";
-import type { JsScript } from "@commontools/js-compiler";
+import type { JsScript } from "@commonfabric/js-compiler";
 import type { CompileResult } from "../src/harness/types.ts";
 
 const testJsScript: JsScript = {

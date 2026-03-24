@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 
 // Module-level constant - should NOT be captured
 const TAX_RATE = 0.08;

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FakeTime } from "@std/testing/time";
 import type { ReactiveControllerHost } from "lit";
-import { CellHandle, isCellHandle } from "@commontools/runtime-client";
+import { CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 import {
   createMockCellHandle,
   pushUpdate,

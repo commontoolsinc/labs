@@ -6,8 +6,8 @@
  *        commontools.vdom.stats()   — node/listener counts
  */
 
-import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
-import { debugVDOMSchema } from "@commontools/runner/schemas";
+import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
+import { debugVDOMSchema } from "@commonfabric/runner/schemas";
 import { type ActiveRender, getActiveRenders } from "./render.ts";
 
 /**

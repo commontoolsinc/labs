@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { computed, NAME, pattern, UI, Writable } from "commontools";
+import { computed, NAME, pattern, UI, Writable } from "commonfabric";
 import Counter from "../counter/counter.tsx";
 import Note from "../notes/note.tsx";
 

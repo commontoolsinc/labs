@@ -9,10 +9,10 @@ import {
   NAME,
   parseLLMFriendlyLink,
   type RuntimeClient,
-} from "@commontools/runtime-client";
-import type { DID } from "@commontools/identity";
+} from "@commonfabric/runtime-client";
+import type { DID } from "@commonfabric/identity";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
-import { appViewToUrlPath, navigate } from "@commontools/shell/shared";
+import { appViewToUrlPath, navigate } from "@commonfabric/shell/shared";
 import {
   createDragPreview,
   endDrag,

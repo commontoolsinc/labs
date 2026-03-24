@@ -5,7 +5,7 @@
  * Displays computed summaries: totals, by-category breakdown, budget status.
  * Read-only view - uses OpaqueRef<> since it only reads data.
  */
-import { computed, NAME, OpaqueRef, pattern, UI } from "commontools";
+import { computed, NAME, OpaqueRef, pattern, UI } from "commonfabric";
 import { type CategoryBudget, type Expense } from "./schemas.tsx";
 
 // Sub-patterns use OpaqueRef for read-only access (no Writable<> needed)

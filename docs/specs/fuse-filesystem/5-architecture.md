@@ -48,7 +48,7 @@ management — lives in TypeScript.
 - **No IPC overhead.** The in-memory tree is directly accessible from FUSE
   callbacks. No serialization, no Unix sockets, no JSON-RPC protocol to
   design and debug.
-- **Simpler deployment.** `ct fuse mount` runs one process. No coordinating
+- **Simpler deployment.** `cf fuse mount` runs one process. No coordinating
   startup/shutdown of two daemons.
 - **Easier debugging.** Single stack trace, single log stream, standard Deno
   debugging tools.
@@ -209,7 +209,7 @@ packages/
       cell-bridge.test.ts
       fs.test.ts
   cli/
-    commands/fuse.ts             # ct fuse subcommand (new)
+    commands/fuse.ts             # cf fuse subcommand (new)
 ```
 
 ## CLI Integration
@@ -217,9 +217,9 @@ packages/
 The FUSE filesystem is accessed via the existing `ct` CLI:
 
 ```bash
-ct fuse mount <mountpoint> [options]
-ct fuse unmount <mountpoint>
-ct fuse status
+cf fuse mount <mountpoint> [options]
+cf fuse unmount <mountpoint>
+cf fuse status
 ```
 
 Options:

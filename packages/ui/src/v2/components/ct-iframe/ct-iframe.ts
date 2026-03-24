@@ -3,12 +3,12 @@ import { BaseElement } from "../../core/base-element.ts";
 import {
   CommonIframeSandboxElement as _,
   IPC,
-} from "@commontools/iframe-sandbox";
+} from "@commonfabric/iframe-sandbox";
 
 /**
  * CTIframe - An iframe to execute arbitrary scripts
  *
- * See `@commontools/iframe-sandbox` for security details.
+ * See `@commonfabric/iframe-sandbox` for security details.
  *
  * @element ct-iframe
  *

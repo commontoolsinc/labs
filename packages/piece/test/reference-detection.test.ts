@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 
 /**
  * These tests focus on the core functionality used by our piece reference detection

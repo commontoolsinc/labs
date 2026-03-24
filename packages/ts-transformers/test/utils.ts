@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { join } from "@std/path";
-import { StaticCacheFS } from "@commontools/static";
+import { StaticCacheFS } from "@commonfabric/static";
 import {
   CommonToolsTransformerPipeline,
   TransformationDiagnostic,
@@ -163,25 +163,25 @@ export async function batchTypeCheckFixtures(
     getDefaultLibFileName: () => "lib.d.ts",
     resolveModuleNames: (moduleNames) => {
       return moduleNames.map((name) => {
-        if (name === "commontools" && types["commontools.d.ts"]) {
+        if (name === "commonfabric" && types["commonfabric.d.ts"]) {
           return {
-            resolvedFileName: "commontools.d.ts",
+            resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
         }
         if (
-          name === "commontools/schema" && types["commontools-schema.d.ts"]
+          name === "commonfabric/schema" && types["commonfabric-schema.d.ts"]
         ) {
           return {
-            resolvedFileName: "commontools-schema.d.ts",
+            resolvedFileName: "commonfabric-schema.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
         }
-        if (name === "@commontools/common" && types["commontools.d.ts"]) {
+        if (name === "@commonfabric/common" && types["commonfabric.d.ts"]) {
           return {
-            resolvedFileName: "commontools.d.ts",
+            resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
@@ -386,25 +386,25 @@ export async function transformFiles(
     getDefaultLibFileName: () => "lib.d.ts",
     resolveModuleNames: (moduleNames) => {
       return moduleNames.map((name) => {
-        if (name === "commontools" && types["commontools.d.ts"]) {
+        if (name === "commonfabric" && types["commonfabric.d.ts"]) {
           return {
-            resolvedFileName: "commontools.d.ts",
+            resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
         }
         if (
-          name === "commontools/schema" && types["commontools-schema.d.ts"]
+          name === "commonfabric/schema" && types["commonfabric-schema.d.ts"]
         ) {
           return {
-            resolvedFileName: "commontools-schema.d.ts",
+            resolvedFileName: "commonfabric-schema.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
         }
-        if (name === "@commontools/common" && types["commontools.d.ts"]) {
+        if (name === "@commonfabric/common" && types["commonfabric.d.ts"]) {
           return {
-            resolvedFileName: "commontools.d.ts",
+            resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
@@ -717,16 +717,16 @@ export async function validateFiles(
     getDefaultLibFileName: () => "lib.d.ts",
     resolveModuleNames: (moduleNames) => {
       return moduleNames.map((name) => {
-        if (name === "commontools" && types["commontools.d.ts"]) {
+        if (name === "commonfabric" && types["commonfabric.d.ts"]) {
           return {
-            resolvedFileName: "commontools.d.ts",
+            resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
         }
-        if (name === "@commontools/common" && types["commontools.d.ts"]) {
+        if (name === "@commonfabric/common" && types["commonfabric.d.ts"]) {
           return {
-            resolvedFileName: "commontools.d.ts",
+            resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };

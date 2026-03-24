@@ -5,7 +5,7 @@ import {
   SpanStatusCode,
   trace,
 } from "@opentelemetry/api";
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 
 const tracer = trace.getTracer("common-memory", "1.0.0");
 

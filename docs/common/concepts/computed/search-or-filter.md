@@ -1,5 +1,5 @@
 ```tsx
-import { computed, Writable, UI, pattern } from 'commontools';
+import { computed, Writable, UI, pattern } from 'commonfabric';
 
 interface Item { title: string; }
 interface Input { items: Item[]; }

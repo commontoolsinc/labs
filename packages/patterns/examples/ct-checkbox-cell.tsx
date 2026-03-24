@@ -7,7 +7,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface CheckboxDemoInput {
   simpleEnabled: Writable<Default<boolean, false>>;

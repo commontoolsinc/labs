@@ -9,8 +9,8 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type CellHandle } from "@commontools/runtime-client";
-import { stringSchema } from "@commontools/runner/schemas";
+import { type CellHandle } from "@commonfabric/runtime-client";
+import { stringSchema } from "@commonfabric/runner/schemas";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import { createFormFieldController } from "../../core/form-field-controller.ts";
 

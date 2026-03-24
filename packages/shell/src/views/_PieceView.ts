@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
-import { PieceController } from "@commontools/piece/ops";
+import { PieceController } from "@commonfabric/piece/ops";
 
 export class XPieceView extends BaseView {
   static override styles = css`

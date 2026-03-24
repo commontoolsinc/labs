@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, NAME, pattern, UI, wish, Writable } from "commontools";
+import { computed, NAME, pattern, UI, wish, Writable } from "commonfabric";
 import { type SummaryIndexEntry } from "../system/summary-index.tsx";
 
 type SummaryIndexResult = {

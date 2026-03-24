@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, Writable } from "commontools";
+import { NAME, pattern, UI, Writable } from "commonfabric";
 
 /**
  * Reproduction case for ct-select not displaying initial values from backend.
@@ -18,7 +18,7 @@ import { NAME, pattern, UI, Writable } from "commontools";
  *
  * To test:
  * 1. Deploy this pattern with `piece new`
- * 2. Use CLI to set values: echo '"video"' | ct piece set --piece ID type ...
+ * 2. Use CLI to set values: echo '"video"' | cf piece set --piece ID type ...
  * 3. Refresh the page - the dropdown should show "🎬 Video", not "-"
  * 4. The "Current value" text should also display "video"
  */

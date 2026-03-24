@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { LRUCache } from "@commontools/utils/cache";
+import { LRUCache } from "@commonfabric/utils/cache";
 
 describe("LRUCache", () => {
   describe("basic operations", () => {

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { derive } from "commonfabric";
 type DeriveInput = {
     count: number;
 };

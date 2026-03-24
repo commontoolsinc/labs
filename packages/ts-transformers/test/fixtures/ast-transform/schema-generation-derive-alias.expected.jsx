@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive as deriveAlias } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { derive as deriveAlias } from "commonfabric";
 type AliasInput = {
     text: string;
 };

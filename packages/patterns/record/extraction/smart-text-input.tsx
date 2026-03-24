@@ -32,7 +32,7 @@ import {
   type ImageData,
   pattern,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Types =====
 

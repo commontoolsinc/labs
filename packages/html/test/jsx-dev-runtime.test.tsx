@@ -1,7 +1,7 @@
 /**
  * Tests for the JSX development runtime
  *
- * These tests verify that @commontools/html provides a development runtime
+ * These tests verify that @commonfabric/html provides a development runtime
  * compatible with TypeScript's "jsx": "react-jsxdev" configuration.
  */
 

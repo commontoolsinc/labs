@@ -1,12 +1,12 @@
 import { css, html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
-import { type DID, KeyStore } from "@commontools/identity";
+import { type DID, KeyStore } from "@commonfabric/identity";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { navigate } from "../../shared/mod.ts";
 import { Task } from "@lit/task";
-import { type CellHandle } from "@commontools/runtime-client";
-import type { FavoriteEntry } from "@commontools/home-schemas";
+import { type CellHandle } from "@commonfabric/runtime-client";
+import type { FavoriteEntry } from "@commonfabric/home-schemas";
 import "../components/Flex.ts";
 import "../components/PieceList.ts";
 import { type PieceItem } from "../components/PieceList.ts";

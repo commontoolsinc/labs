@@ -7,7 +7,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import {
   areAllShipsSunk,

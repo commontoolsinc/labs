@@ -47,7 +47,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface State {
   count: Default<number, 0>;

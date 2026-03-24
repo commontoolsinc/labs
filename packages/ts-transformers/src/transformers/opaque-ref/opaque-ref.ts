@@ -2,7 +2,7 @@ import ts from "typescript";
 import {
   getCellBrand,
   getCellKind as utilGetCellKind,
-} from "@commontools/schema-generator/cell-brand";
+} from "@commonfabric/schema-generator/cell-brand";
 
 /**
  * Check if a type is a cell type by looking for the CELL_BRAND property.

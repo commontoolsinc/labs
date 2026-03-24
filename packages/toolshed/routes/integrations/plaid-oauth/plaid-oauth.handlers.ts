@@ -15,12 +15,12 @@ import {
   removePlaidItem,
   upsertPlaidItem,
 } from "./plaid-oauth.utils.ts";
-import { setBGCharm } from "@commontools/background-charm";
+import { setBGCharm } from "@commonfabric/background-charm";
 import {
   type NormalizedLink,
   parseLink,
   type SigilLink,
-} from "@commontools/runner";
+} from "@commonfabric/runner";
 import { runtime } from "@/index.ts";
 import env from "@/env.ts";
 import {
@@ -30,7 +30,7 @@ import {
   Transaction,
   TransactionsSyncRequest,
 } from "plaid";
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 
 /**
  * Plaid Create Link Token Handler

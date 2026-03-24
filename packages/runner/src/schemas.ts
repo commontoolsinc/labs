@@ -5,7 +5,7 @@
  */
 
 import { NAME, type Schema, TYPE, UI } from "./shared.ts";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 
 export const rendererVDOMSchema = toDeepFrozenSchema(
   {

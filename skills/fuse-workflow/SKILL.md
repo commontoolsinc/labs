@@ -1,7 +1,7 @@
 ---
 name: fuse-workflow
 description: >
-  Agent operating guide for CT FUSE filesystem mounting. Use when running
+  Agent operating guide for CF FUSE filesystem mounting. Use when running
   agents against mounted spaces, reading/writing pieces via the filesystem,
   deploying patterns, calling handlers, or populating structured pieces. Triggers
   include "mount a space", "run an agent on CT", "deploy a pattern via FUSE",
@@ -10,9 +10,9 @@ description: >
 user-invocable: false
 ---
 
-# CT FUSE Agent Workflow
+# CF FUSE Agent Workflow
 
-Ground-truth reference for agents operating on Common Tools spaces via FUSE.
+Ground-truth reference for agents operating on Common Fabric spaces via FUSE.
 Validated through Runs 9–11. Update this skill when new friction patterns
 emerge.
 
@@ -65,8 +65,8 @@ non-`[FS]` pieces and find nothing. Handlers for non-`[FS]` pieces are in
 
 ```bash
 cd ~/code/labs
-export CT_IDENTITY=./shared.key
-export CT_API_URL=http://localhost:8000
+export CF_IDENTITY=./shared.key
+export CF_API_URL=http://localhost:8000
 
 # If running a headless agent (not inside Claude Code):
 unset CLAUDECODE
@@ -75,7 +75,7 @@ unset CLAUDECODE
 **Mount:**
 
 ```bash
-ct fuse mount /tmp/ct-mount --background
+cf fuse mount /tmp/ct-mount --background
 sleep 3  # wait for SummaryIndex warmup before accessing pieces
 ```
 
@@ -84,7 +84,7 @@ sleep 3  # wait for SummaryIndex warmup before accessing pieces
 ```bash
 ls /tmp/ct-mount/  # if empty or hangs, mount is stale
 # Remount:
-ct fuse mount /tmp/ct-mount --background && sleep 3
+cf fuse mount /tmp/ct-mount --background && sleep 3
 ```
 
 ---
@@ -102,7 +102,7 @@ Use this to:
 
 - Find the current piece name (including its count suffix) before any handler
   call
-- Get the piece `id` for `ct piece step` calls
+- Get the piece `id` for `cf piece step` calls
 - Check whether a piece already exists before deploying
 - Confirm piece count after deploy
 
@@ -256,17 +256,17 @@ target:
 
 ```bash
 cd ~/code/labs
-export CT_IDENTITY=./shared.key CT_API_URL=http://localhost:8000
+export CF_IDENTITY=./shared.key CF_API_URL=http://localhost:8000
 
 # 1. Deploy and capture piece ID
-ID=$(ct piece new packages/patterns/<path>.tsx \
+ID=$(cf piece new packages/patterns/<path>.tsx \
   --space SPACE --root packages/patterns 2>/dev/null | head -1)
 
 # 2. Set title
-ct piece call --quiet --piece $ID --space SPACE setTitle -- --value "My Title"
+cf piece call --quiet --piece $ID --space SPACE setTitle -- --value "My Title"
 
 # 3. Step to materialise
-ct piece step --piece $ID --space SPACE
+cf piece step --piece $ID --space SPACE
 
 # 4. Re-read pieces.json immediately — stale after deploy
 cat "MOUNT/SPACE/pieces/pieces.json"
@@ -300,17 +300,17 @@ cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c \
   "import json,sys; p=json.load(sys.stdin); print(next(x['name'] for x in p if 'Reading' in x['name']))"
 ```
 
-### When to run `ct piece step`
+### When to run `cf piece step`
 
 | Operation                     | Step needed?                               |
 | ----------------------------- | ------------------------------------------ |
-| `ct piece call` (CLI)         | Always                                     |
-| `ct piece set` (CLI)          | Always                                     |
+| `cf piece call` (CLI)         | Always                                     |
+| `cf piece set` (CLI)          | Always                                     |
 | FUSE handler invocation       | Sometimes — if count suffix doesn't update |
 | Read/Write/Edit on `index.md` | Never                                      |
 
 When in doubt after a FUSE handler call: run
-`ct piece step --piece $ID --space SPACE`, then re-read `pieces.json`.
+`cf piece step --piece $ID --space SPACE`, then re-read `pieces.json`.
 
 ### Error-that-succeeds patterns
 
@@ -340,7 +340,7 @@ load. Reads stall during the window.
 ls /tmp/ct-mount/
 
 # Remount:
-ct fuse mount /tmp/ct-mount --background && sleep 3
+cf fuse mount /tmp/ct-mount --background && sleep 3
 ```
 
 Add `sleep 2` before verification reads if you see repeated stalls.
@@ -350,7 +350,7 @@ Add `sleep 2` before verification reads if you see repeated stalls.
 ## Cleanup
 
 ```bash
-ct piece rm --piece $ID --space SPACE
+cf piece rm --piece $ID --space SPACE
 ```
 
 Use this to clean up duplicate pieces deployed by accident (no `--confirm`
@@ -373,8 +373,8 @@ Agent runner script pattern:
 #!/usr/bin/env bash
 set -euo pipefail
 cd ~/code/labs
-export CT_IDENTITY=./shared.key
-export CT_API_URL=http://localhost:8000
+export CF_IDENTITY=./shared.key
+export CF_API_URL=http://localhost:8000
 unset CLAUDECODE
 
 OUTPUT="${TRACE_FILE:-/dev/stderr}"

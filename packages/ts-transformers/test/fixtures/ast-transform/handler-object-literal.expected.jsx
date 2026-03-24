@@ -1,6 +1,6 @@
-import * as __ctHelpers from "commontools";
-import { Cell, handler, pattern } from "commontools";
-import "commontools/schema";
+import * as __ctHelpers from "commonfabric";
+import { Cell, handler, pattern } from "commonfabric";
+import "commonfabric/schema";
 interface State {
     value: Cell<number>;
     name?: Cell<string>;

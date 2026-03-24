@@ -30,7 +30,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { GmailSendClient } from "../util/gmail-send-client.ts";
 import { type Auth, createGoogleAuth } from "../util/google-auth-manager.tsx";
 

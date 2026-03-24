@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI, OpaqueRef } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern, UI, OpaqueRef } from "commonfabric";
 interface Item {
     id: number;
     name: string;

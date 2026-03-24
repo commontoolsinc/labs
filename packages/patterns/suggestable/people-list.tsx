@@ -7,7 +7,7 @@ import {
   UI,
   type VNode,
   wish,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Types =====
 

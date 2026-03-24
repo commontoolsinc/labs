@@ -13,8 +13,8 @@ import { generateText as generateTextCore } from "./generateText.ts";
 import { generateObject as generateObjectCore } from "./generateObject.ts";
 import { findModel } from "./models.ts";
 import env from "@/env.ts";
-import { isLLMRequest } from "@commontools/llm/types";
-import { type BuiltInLLMMessage } from "@commontools/api";
+import { isLLMRequest } from "@commonfabric/llm/types";
+import { type BuiltInLLMMessage } from "@commonfabric/api";
 
 const removeNonCacheableFields = (
   obj: object,

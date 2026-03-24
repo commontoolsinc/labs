@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import {
   SelectorTracker,
   StorageManager,
-} from "@commontools/runner/storage/cache.deno";
-import { ContextualFlowControl, type JSONSchema } from "@commontools/runner";
-import type { BaseMemoryAddress } from "@commontools/runner/traverse";
+} from "@commonfabric/runner/storage/cache.deno";
+import { ContextualFlowControl, type JSONSchema } from "@commonfabric/runner";
+import type { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Runtime } from "../src/runtime.ts";
 import type { Result, Unit } from "../src/storage/interface.ts";
 

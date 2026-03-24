@@ -64,6 +64,6 @@ return <>{items.map((item) => <ItemPattern item={item} />)}</>;
 
 ## Done When
 
-- Pattern compiles: `deno task ct check pattern.tsx --no-run`
+- Pattern compiles: `deno task cf check pattern.tsx --no-run`
 - Minimal UI renders inputs/buttons
 - Ready for testing

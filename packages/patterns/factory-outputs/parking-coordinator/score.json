@@ -14,7 +14,7 @@
       "na_count": 0,
       "failures": [],
       "positive_evidence": [
-        "Compiles cleanly with ct check --no-run (verified)",
+        "Compiles cleanly with cf check --no-run (verified)",
         "38/38 tests pass (verified)",
         "All 16 acceptance criteria verified PASS by manual tester post-fix",
         "Runtime error from undefined elements in computed filter was fixed (s != null guard added)",

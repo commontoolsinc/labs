@@ -1,8 +1,8 @@
-import type { HashObject } from "@commontools/data-model/value-hash";
-import type { JSONValue } from "@commontools/api";
+import type { HashObject } from "@commonfabric/data-model/value-hash";
+import type { JSONValue } from "@commonfabric/api";
 
-import type { FabricValue } from "@commontools/data-model/fabric-value";
-import type { SchemaPathSelector } from "@commontools/api";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { SchemaPathSelector } from "@commonfabric/api";
 export type { SchemaPathSelector };
 
 export type { JSONValue };

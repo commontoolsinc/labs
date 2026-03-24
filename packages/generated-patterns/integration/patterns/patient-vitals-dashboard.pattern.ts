@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface VitalThresholdsInput {
   heartRate?: { min?: number; max?: number };

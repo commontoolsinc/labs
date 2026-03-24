@@ -15,7 +15,7 @@ import {
   UI,
   VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Secret<T> = T;
 type Confidential<T> = T;
@@ -1107,7 +1107,7 @@ export default pattern<
       }
     >;
     // Optional: Link auth directly from a Google Auth piece when wish() is unavailable
-    // Use: ct piece link googleAuthPiece/auth gmailImporterPiece/overrideAuth
+    // Use: cf piece link googleAuthPiece/auth gmailImporterPiece/overrideAuth
     overrideAuth?: Auth;
   },
   Output

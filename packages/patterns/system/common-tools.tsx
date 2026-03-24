@@ -12,7 +12,7 @@ import {
   pattern,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 ///// COMMON TOOLS (get it?) ////
 

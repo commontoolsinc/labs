@@ -346,7 +346,7 @@ siblings for those directories:
   is serialized as-is
 
 Mounted callable files are readable. Their content starts with a stable
-shebang whose first line is `#!... exec`, so `ct exec <mounted-callable-file>`
+shebang whose first line is `#!... exec`, so `cf exec <mounted-callable-file>`
 can resolve the backing callable schema and execute it.
 
 Callable files also embed the handler's input schema as readable comments:

@@ -40,7 +40,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * Tag event sent to the aggregator.

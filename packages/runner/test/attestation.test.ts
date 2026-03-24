@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { assert, unclaimed } from "@commontools/memory/fact";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { assert, unclaimed } from "@commonfabric/memory/fact";
 import * as Attestation from "../src/storage/transaction/attestation.ts";
 import type { INotFoundError } from "../src/storage/interface.ts";
 

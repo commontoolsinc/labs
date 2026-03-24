@@ -1,6 +1,6 @@
 ---
 name: lit-component
-description: Guide for developing Lit web components in the Common UI v2 system (@commontools/ui/v2). Use when creating or modifying ct- prefixed components, implementing theme integration, working with Cell abstractions, or building reactive UI components that integrate with the Common Tools runtime.
+description: Guide for developing Lit web components in the Common UI v2 system (@commonfabric/ui/v2). Use when creating or modifying ct- prefixed components, implementing theme integration, working with Cell abstractions, or building reactive UI components that integrate with the Common Tools runtime.
 ---
 
 # Lit Component Development for Common UI
@@ -186,8 +186,8 @@ For components that work with reactive runtime data:
 
 ```typescript
 import { property } from "lit/decorators.js";
-import type { Cell } from "@commontools/runner";
-import { isCell } from "@commontools/runner";
+import type { Cell } from "@commonfabric/runner";
+import { isCell } from "@commonfabric/runner";
 
 export class MyComponent extends BaseElement {
   @property({ attribute: false })
@@ -352,7 +352,7 @@ Run with: `deno task test` (includes required flags)
 
 ## Package Structure
 
-Components are exported from `@commontools/ui/v2`:
+Components are exported from `@commonfabric/ui/v2`:
 
 ```typescript
 // packages/ui/src/v2/index.ts

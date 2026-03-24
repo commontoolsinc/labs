@@ -1,4 +1,4 @@
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   AuthorizationError,
   ConflictError,
@@ -14,7 +14,7 @@ import type {
   TransactionError,
   UCAN,
   Variant,
-} from "@commontools/memory/interface";
+} from "@commonfabric/memory/interface";
 
 export type Status<Pending extends object, Ready = Pending> =
   | { pending: Pending; ready?: void; time: Time }

@@ -17,7 +17,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Types =====
 interface Bookmark {

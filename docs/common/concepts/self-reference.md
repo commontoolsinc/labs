@@ -5,7 +5,7 @@ Use `SELF` to get a reference to the pattern's own output. This enables recursiv
 ## Quick Start
 
 ```typescript
-import { pattern, SELF, Writable, UI } from "commontools";
+import { pattern, SELF, Writable, UI } from "commonfabric";
 
 interface TreeNodeInput {
   name: string;

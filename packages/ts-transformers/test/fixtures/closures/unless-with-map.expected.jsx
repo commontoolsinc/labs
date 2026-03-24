@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * Test case for unless() with a reactive array map as the fallback.
  *
@@ -6,7 +6,7 @@ import * as __ctHelpers from "commontools";
  * When fallback is items.map(...), the map gets transformed to mapWithPattern.
  * Schema injection needs to know the type of the mapWithPattern result.
  */
-import { Cell, Default, pattern, UI } from "commontools";
+import { Cell, Default, pattern, UI } from "commonfabric";
 interface Item {
     label: string;
 }

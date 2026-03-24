@@ -9,7 +9,7 @@ import {
   str,
   Stream,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 // How many times to increment per click
 const INCREMENTS_PER_CLICK = 50;

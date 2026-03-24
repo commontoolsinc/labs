@@ -1,5 +1,5 @@
 import type { Pattern } from "../builder/types.ts";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 
 const FILTER_INPUT_SCHEMA = toDeepFrozenSchema({
   type: "object",

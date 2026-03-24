@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/deno-web-test",
+  "name": "@commonfabric/deno-web-test",
   "tasks": {
     "test": "deno test --allow-env --allow-read --allow-write --allow-run --allow-net test/*.test.ts"
   },

@@ -6,7 +6,7 @@
  * the nested computed expression should still lower locally in JSX without forcing
  * the whole JSX branch through an extra derive wrapper.
  */
-import { action, Cell, computed, pattern, UI } from "commontools";
+import { action, Cell, computed, pattern, UI } from "commonfabric";
 
 interface Card {
   title: string;

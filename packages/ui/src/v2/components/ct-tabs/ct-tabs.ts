@@ -1,6 +1,6 @@
 import { css, html } from "lit";
-import { type CellHandle } from "@commontools/runtime-client";
-import { stringSchema } from "@commontools/runner/schemas";
+import { type CellHandle } from "@commonfabric/runtime-client";
+import { stringSchema } from "@commonfabric/runner/schemas";
 import { BaseElement } from "../../core/base-element.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import type { CTTab } from "../ct-tab/ct-tab.ts";

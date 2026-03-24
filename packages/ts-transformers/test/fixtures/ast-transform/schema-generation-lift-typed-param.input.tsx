@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { lift } from "commontools";
+import { lift } from "commonfabric";
 
 // FIXTURE: schema-generation-lift-typed-param
 // Verifies: lift() with a primitive typed parameter generates scalar input and output schemas

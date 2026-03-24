@@ -9,7 +9,7 @@ import {
   Schema,
   str,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 const ItemSchema = {
   type: "object",

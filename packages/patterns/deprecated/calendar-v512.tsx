@@ -11,7 +11,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Note {
   id: string;

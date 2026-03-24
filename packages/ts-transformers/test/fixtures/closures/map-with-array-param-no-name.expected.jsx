@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // FIXTURE: map-with-array-param-no-name
 // Verifies: .map() with array param works when pattern uses inline type annotation
 //   .map((item, index, array) => ...) → .mapWithPattern(pattern(...), {})

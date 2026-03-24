@@ -33,7 +33,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface TestInput {
   // Trigger value that we can change to force re-computation

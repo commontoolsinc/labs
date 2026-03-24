@@ -17,7 +17,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { type CategoryBudget, type Expense, getTodayDate } from "./schemas.tsx";
 
 // ============ INPUT/OUTPUT TYPES ============

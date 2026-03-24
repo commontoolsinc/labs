@@ -1,17 +1,17 @@
-import { AnyCellWrapping } from "@commontools/api";
-import { getLogger } from "@commontools/utils/logger";
-import { Immutable, isRecord } from "@commontools/utils/types";
+import { AnyCellWrapping } from "@commonfabric/api";
+import { getLogger } from "@commonfabric/utils/logger";
+import { Immutable, isRecord } from "@commonfabric/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
-import type { JSONValue } from "@commontools/api";
+import type { JSONValue } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   type FabricValue,
-} from "@commontools/data-model/fabric-value";
+} from "@commonfabric/data-model/fabric-value";
 import {
   isNontrivialSchema,
   toDeepFrozenSchema,
-} from "@commontools/data-model/schema-utils";
+} from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -30,7 +30,7 @@ import {
   mergeAnyOfMatches,
   mergeSchemaFlags,
   SchemaObjectTraverser,
-} from "@commontools/runner/traverse";
+} from "@commonfabric/runner/traverse";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 
 const logger = getLogger("validateAndTransform", {

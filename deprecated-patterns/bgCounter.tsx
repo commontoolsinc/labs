@@ -8,7 +8,7 @@ import {
   pattern,
   str,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 const updater = handler<
   { delta: number },

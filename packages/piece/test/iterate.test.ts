@@ -1,12 +1,12 @@
 import { assert } from "@std/assert";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
+import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { Cell, type JSONSchema, Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Identity } from "@commontools/identity";
-import { JSONSchemaObj } from "@commontools/api";
+import { Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { JSONSchemaObj } from "@commonfabric/api";
 import { scrub } from "../src/iterate.ts";
 
 const signer = await Identity.fromPassphrase("test operator");

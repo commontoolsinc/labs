@@ -14,15 +14,15 @@
  * DOM inspection, as the iframe content is not directly accessible.
  */
 
-import { env, Page } from "@commontools/integration";
-import { sleep } from "@commontools/utils/sleep";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env, Page } from "@commonfabric/integration";
+import { sleep } from "@commonfabric/utils/sleep";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import type { ElementHandle } from "@astral/astral";
-import { Identity } from "@commontools/identity";
-import { PieceController, PiecesController } from "@commontools/piece/ops";
+import { Identity } from "@commonfabric/identity";
+import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import { type XAppView } from "../src/views/AppView.ts";
 
 const { SPACE_NAME, API_URL, FRONTEND_URL } = env;

@@ -7,8 +7,8 @@ import {
   pattern,
   toSchema,
   UI,
-} from "commontools";
-import "commontools/schema";
+} from "commonfabric";
+import "commonfabric/schema";
 
 interface Item {
   text: Default<string, "">;

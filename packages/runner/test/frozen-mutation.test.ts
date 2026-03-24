@@ -17,13 +17,13 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import { resetDataModelConfig } from "@commontools/data-model/fabric-value";
-import { resetModernHashConfig } from "@commontools/data-model/value-hash";
-import { resetJsonEncodingConfig } from "@commontools/data-model/json-encoding";
+import { resetDataModelConfig } from "@commonfabric/data-model/fabric-value";
+import { resetModernHashConfig } from "@commonfabric/data-model/value-hash";
+import { resetJsonEncodingConfig } from "@commonfabric/data-model/json-encoding";
 
 const signer = await Identity.fromPassphrase("test frozen mutation");
 const space = signer.did();

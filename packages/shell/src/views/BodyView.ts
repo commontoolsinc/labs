@@ -4,9 +4,9 @@ import { Task } from "@lit/task";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import "../components/OmniLayout.ts";
-import { CellHandle, PageHandle, VNode } from "@commontools/runtime-client";
-import { rendererVDOMSchema } from "@commontools/runner/schemas";
-import type { JSONSchema } from "@commontools/runner/shared";
+import { CellHandle, PageHandle, VNode } from "@commonfabric/runtime-client";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import type { JSONSchema } from "@commonfabric/runner/shared";
 
 type SubPages = {
   sidebarUI?: VNode;

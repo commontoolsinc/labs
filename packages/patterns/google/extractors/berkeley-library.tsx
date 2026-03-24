@@ -16,7 +16,7 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth berkeley-library/overrideAuth
+ * 3. Link: cf piece link google-auth/auth berkeley-library/overrideAuth
  *
  * Omnibot Actions:
  * - markAsReturned: Mark a book as returned by title
@@ -32,8 +32,8 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
-import type { Schema } from "commontools/schema";
+} from "commonfabric";
+import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
@@ -535,7 +535,7 @@ const setDueDateForGroup = handler<
 
 interface PatternInput {
   // Optional: Link auth directly from a Google Auth piece
-  // Use: ct piece link googleAuthPiece/auth berkeleyLibraryPiece/overrideAuth
+  // Use: cf piece link googleAuthPiece/auth berkeleyLibraryPiece/overrideAuth
   overrideAuth?: Auth;
   // Track items manually marked as returned (persisted)
   manuallyReturned?: Writable<Default<string[], []>>;

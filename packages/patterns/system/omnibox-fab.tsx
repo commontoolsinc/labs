@@ -13,7 +13,7 @@ import {
   when,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import Chatbot from "../chatbot.tsx";
 import {
   bash,

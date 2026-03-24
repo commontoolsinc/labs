@@ -31,7 +31,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import GmailExtractor, { type Email } from "../google/core/gmail-extractor.tsx";
 import type { Auth } from "../google/core/util/google-auth-manager.tsx";
 import {

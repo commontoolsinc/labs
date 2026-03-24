@@ -7,7 +7,7 @@ Any cell result with `[UI]` renders when placed in JSX — you don't need to kno
 Use a `Writable<string>` to represent the active view. A `computed()` block maps the string to a pattern instance:
 
 ```tsx
-import { computed, handler, pattern, UI, Writable } from "commontools";
+import { computed, handler, pattern, UI, Writable } from "commonfabric";
 import EditView from "./edit-view.tsx";
 import PreviewView from "./preview-view.tsx";
 import SettingsView from "./settings-view.tsx";
@@ -50,7 +50,7 @@ When `activeView` changes, the `computed` re-runs and returns a different sub-pa
 Instead of mapping a string to a view, hold a direct reference to the active cell and update it. The items must be **renderable cells** (pattern instances with `[UI]`) — not plain data objects. Use `<ct-render $cell={...} />` to display whatever cell is currently selected:
 
 ```tsx
-import { computed, equals, handler, pattern, UI, Writable } from "commontools";
+import { computed, equals, handler, pattern, UI, Writable } from "commonfabric";
 import ItemView from "./item-view.tsx";
 
 // ItemView produces cells with [UI]; this type captures what we need for the list

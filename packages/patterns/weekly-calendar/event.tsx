@@ -16,7 +16,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Simple random ID generator
 const generateId = () =>

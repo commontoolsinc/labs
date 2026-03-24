@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import type { CellRef } from "@commontools/runtime-client";
+import type { CellRef } from "@commonfabric/runtime-client";
 import { VDomRenderer } from "../src/main/renderer.ts";
 
 class MockConnection {

@@ -6,9 +6,9 @@ import {
   NAME,
   pattern,
   UI,
-} from "commontools";
-import type { Schema } from "commontools/schema";
-// Note: Import Schema from "commontools/schema" for typed schema inference
+} from "commonfabric";
+import type { Schema } from "commonfabric/schema";
+// Note: Import Schema from "commonfabric/schema" for typed schema inference
 
 // README:
 // sudo tailscale serve --https=443 localhost:8080

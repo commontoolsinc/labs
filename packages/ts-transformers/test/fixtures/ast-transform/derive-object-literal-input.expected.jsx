@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, derive, lift } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, derive, lift } from "commonfabric";
 const stage = cell<string>("initial", {
     type: "string"
 } as const satisfies __ctHelpers.JSONSchema);

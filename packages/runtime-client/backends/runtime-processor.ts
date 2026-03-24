@@ -1,6 +1,6 @@
-import { DID, Identity, type Session } from "@commontools/identity";
-import { PieceManager } from "@commontools/piece";
-import { PiecesController } from "@commontools/piece/ops";
+import { DID, Identity, type Session } from "@commonfabric/identity";
+import { PieceManager } from "@commonfabric/piece";
+import { PiecesController } from "@commonfabric/piece/ops";
 import {
   getLoggerCountsBreakdown,
   getLoggerFlagsBreakdown,
@@ -8,7 +8,7 @@ import {
   Logger,
   resetAllCountBaselines,
   resetAllTimingBaselines,
-} from "@commontools/utils/logger";
+} from "@commonfabric/utils/logger";
 import {
   type Cancel,
   type Cell,
@@ -21,16 +21,16 @@ import {
   RuntimeTelemetryEvent,
   setPatternEnvironment,
   type SigilLink,
-} from "@commontools/runner";
+} from "@commonfabric/runner";
 import {
   CachedCompiler,
   IDBCompilationCache,
-} from "@commontools/runner/compilation-cache";
+} from "@commonfabric/runner/compilation-cache";
 import {
   NameSchema,
   nameSchema,
   rendererVDOMSchema,
-} from "@commontools/runner/schemas";
+} from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
   type NormalizedFullLink,
@@ -95,8 +95,8 @@ import {
   type VDomUnmountRequest,
   type WriteStackTraceResponse,
 } from "../protocol/mod.ts";
-import { HttpProgramResolver, Program } from "@commontools/js-compiler";
-import { setLLMUrl } from "@commontools/llm";
+import { HttpProgramResolver, Program } from "@commonfabric/js-compiler";
+import { setLLMUrl } from "@commonfabric/llm";
 import {
   createCellRef,
   createPageRef,
@@ -104,8 +104,8 @@ import {
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
 import { cellRefToKey } from "../shared/utils.ts";
-import { RemoteResponse } from "@commontools/runtime-client";
-import { WorkerReconciler } from "@commontools/html/worker";
+import { RemoteResponse } from "@commonfabric/runtime-client";
+import { WorkerReconciler } from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;

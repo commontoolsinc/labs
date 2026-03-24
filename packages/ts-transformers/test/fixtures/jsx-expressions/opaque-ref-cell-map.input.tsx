@@ -9,7 +9,7 @@ import {
   navigateTo,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 // the simple charm (to which we'll store references within a cell)
 const SimplePattern = pattern(() => ({

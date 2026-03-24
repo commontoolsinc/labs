@@ -230,7 +230,7 @@ const EnvSchema = z.object({
   ),
 
   // URL that sandboxes should use to reach the toolshed API (injected as
-  // CT_API_URL into every sandbox exec). Defaults to API_URL if not set.
+  // CF_API_URL into every sandbox exec). Defaults to API_URL if not set.
   SANDBOX_TOOLSHED_URL: z.string().optional(),
 });
 

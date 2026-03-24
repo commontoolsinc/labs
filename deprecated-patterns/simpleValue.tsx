@@ -9,7 +9,7 @@ import {
   schema,
   str,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 const updater = handler<
   { newValues: string[] },

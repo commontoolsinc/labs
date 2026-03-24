@@ -8,12 +8,12 @@ import {
   type SortedAndCompactPaths,
 } from "../src/reactive-dependencies.ts";
 import type { Action, SpaceAndURI } from "../src/scheduler.ts";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
 } from "../src/storage/interface.ts";
-import type { MemorySpace } from "@commontools/memory/interface";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 
 // Helper function to create IMemorySpaceAddress for testing
 const createAddress = (

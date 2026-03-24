@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell } from "commonfabric";
 const existingSchema = { type: "number" } as const;
 // FIXTURE: double-inject-already-has-schema
 // Verifies: cell() calls that already have a schema argument are NOT double-injected

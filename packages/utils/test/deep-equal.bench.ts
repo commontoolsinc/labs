@@ -1,4 +1,4 @@
-import { deepEqual } from "@commontools/utils/deep-equal";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 // Create test fixtures once, outside the benchmarks
 const denseArray1000 = Array.from({ length: 1000 }, (_, i) => i);

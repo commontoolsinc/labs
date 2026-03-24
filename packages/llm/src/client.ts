@@ -141,7 +141,7 @@ const mockCatalog = new MockCatalog();
  *
  * Example:
  * ```ts
- * import { enableMockMode, addMockResponse } from "@commontools/llm/client";
+ * import { enableMockMode, addMockResponse } from "@commonfabric/llm/client";
  *
  * enableMockMode();
  * addMockResponse(
@@ -344,7 +344,7 @@ function runAssertions(
  *
  * Example:
  * ```ts
- * import { loadConversationFixture } from "@commontools/llm/client";
+ * import { loadConversationFixture } from "@commonfabric/llm/client";
  *
  * loadConversationFixture({
  *   responses: [

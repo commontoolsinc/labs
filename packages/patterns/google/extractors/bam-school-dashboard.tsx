@@ -15,7 +15,7 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth bam-school-dashboard/overrideAuth
+ * 3. Link: cf piece link google-auth/auth bam-school-dashboard/overrideAuth
  */
 import {
   computed,
@@ -27,8 +27,8 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
-import type { Schema } from "commontools/schema";
+} from "commonfabric";
+import type { Schema } from "commonfabric/schema";
 import GmailExtractor, { type Email } from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";

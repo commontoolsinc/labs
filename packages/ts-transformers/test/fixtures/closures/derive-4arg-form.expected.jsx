@@ -1,6 +1,6 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern, type JSONSchema } from "commontools";
-import "commontools/schema";
+import * as __ctHelpers from "commonfabric";
+import { Writable, derive, pattern, type JSONSchema } from "commonfabric";
+import "commonfabric/schema";
 // FIXTURE: derive-4arg-form
 // Verifies: closure extraction works with explicit 4-arg derive(inputSchema, outputSchema, input, fn)
 //   derive(schema, schema, value, fn) → derive(mergedSchema, schema, { value, multiplier }, fn)

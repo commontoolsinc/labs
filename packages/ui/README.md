@@ -33,13 +33,13 @@ src/
 
 ```typescript
 // Import v2 components (default)
-import { CTButton, CTCard, CTInput } from "@commontools/ui";
+import { CTButton, CTCard, CTInput } from "@commonfabric/ui";
 
 // Or import specific versions
-import { v2 } from "@commontools/ui";
+import { v2 } from "@commonfabric/ui";
 
 // Auto-register all v2 components
-import { registerAllComponents } from "@commontools/ui/v2";
+import { registerAllComponents } from "@commonfabric/ui/v2";
 registerAllComponents();
 ```
 

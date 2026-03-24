@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // FIXTURE: logical-complex-expressions
 // Verifies: nested && and mixed || && with JSX are transformed to when() with derive() predicates
 //   a && b && <JSX>     → when(derive({a, b}, ...), <JSX>)

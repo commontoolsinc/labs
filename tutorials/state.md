@@ -45,7 +45,7 @@ import {
   h,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 export default pattern(() => {
   const characterName = cell<string>("");
@@ -185,7 +185,7 @@ import {
   UI,
   lift,
   derive,
-} from "commontools";
+} from "commonfabric";
 
 export default pattern(() => {
   const characterName = cell<string>("");

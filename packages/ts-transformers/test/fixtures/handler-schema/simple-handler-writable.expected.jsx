@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { handler, Writable } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { handler, Writable } from "commonfabric";
 interface CounterEvent {
     increment: number;
 }

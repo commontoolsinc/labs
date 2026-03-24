@@ -37,7 +37,7 @@ import {
   addMockObjectResponse,
   clearMockResponses,
   resetMockMode,
-} from "@commontools/llm/client";
+} from "@commonfabric/llm/client";
 
 // Enable once at module level
 enableMockMode();
@@ -138,7 +138,7 @@ import {
   clearMockResponses,
   loadConversationFixture,
   loadConversationFixtureFile,
-} from "@commontools/llm/client";
+} from "@commonfabric/llm/client";
 
 // From a file
 await loadConversationFixtureFile("test/fixtures/my-conversation.json");

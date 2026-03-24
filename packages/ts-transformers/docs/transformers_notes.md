@@ -4,9 +4,9 @@ _Last updated: 2025-09-23_
 
 ## Overview
 
-`@commontools/ts-transformers` now houses our TypeScript AST transformers. The
+`@commonfabric/ts-transformers` now houses our TypeScript AST transformers. The
 package exposes the modular OpaqueRef rewrite we ship to pattern authors (via
-`createModularOpaqueRefTransformer`), and `@commontools/js-runtime` now consumes
+`createModularOpaqueRefTransformer`), and `@commonfabric/js-runtime` now consumes
 that implementation directly. This document captures the current implementation,
 outstanding gaps, and the focused roadmap we intend to pursue.
 
@@ -122,11 +122,11 @@ outstanding gaps, and the focused roadmap we intend to pursue.
   architecture to identify candidates and apply appropriate transformations
 - **Import flexibility**: Expand helper resolution so the rewrite pipeline works
   when authors:
-  - Glob-import (`import * as ct from "commontools"`) and access helpers via
+  - Glob-import (`import * as ct from "commonfabric"`) and access helpers via
     namespace members.
   - Rename specific imports
     (`import { derive as ctDerive } from
-    "commontools"`) without breaking
+    "commonfabric"`) without breaking
     helper detection.
   - Omit any CommonTools import in `cts`-enabled files, by inserting a safe
     namespace import during a preprocessing pass if none is detected.

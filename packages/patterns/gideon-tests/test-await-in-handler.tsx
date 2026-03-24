@@ -46,7 +46,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Handler WITH await (supposedly blocks UI)
 const testWithAwait = handler<

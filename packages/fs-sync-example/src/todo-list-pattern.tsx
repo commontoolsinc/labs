@@ -20,7 +20,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { Edit, FailedEdit, Todo } from "./types.ts";
 
 // ---------------------------------------------------------------------------

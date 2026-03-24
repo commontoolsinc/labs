@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, derive, pattern, toSchema, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, derive, pattern, toSchema, UI } from "commonfabric";
 interface State {
     value: Cell<number>;
 }

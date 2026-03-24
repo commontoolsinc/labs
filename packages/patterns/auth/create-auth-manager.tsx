@@ -26,8 +26,8 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
-import type { NodeFactory, Opaque } from "commontools";
+} from "commonfabric";
+import type { NodeFactory, Opaque } from "commonfabric";
 
 import type { AuthInfo, AuthState, TokenExpiryWarning } from "./auth-types.ts";
 import type { AuthManagerDescriptor } from "./auth-manager-descriptor.ts";

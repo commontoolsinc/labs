@@ -5,21 +5,21 @@ import {
   Identity,
   IdentityCreateConfig,
   Session,
-} from "@commontools/identity";
-import { env, waitFor } from "@commontools/integration";
+} from "@commonfabric/identity";
+import { env, waitFor } from "@commonfabric/integration";
 import {
   CellHandle,
   type JSONSchema,
   RuntimeClient,
   type VNode,
-} from "@commontools/runtime-client";
-import { rendererVDOMSchema } from "@commontools/runner/schemas";
+} from "@commonfabric/runtime-client";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { assertEquals, assertExists } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { Program } from "@commontools/js-compiler";
-import { render } from "@commontools/html/client";
-import { MockDoc } from "@commontools/html/mock-doc";
-import { WebWorkerRuntimeTransport } from "@commontools/runtime-client/transports/web-worker";
+import { Program } from "@commonfabric/js-compiler";
+import { render } from "@commonfabric/html/client";
+import { MockDoc } from "@commonfabric/html/mock-doc";
+import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 
 const { API_URL } = env;
 
@@ -34,7 +34,7 @@ const identity = await Identity.fromPassphrase("test operator", keyConfig);
 const spaceName = globalThis.crypto.randomUUID();
 
 const TEST_PROGRAM = `/// <cts-enable />
-import { Cell, NAME, pattern, UI } from "commontools";
+import { Cell, NAME, pattern, UI } from "commonfabric";
 export default pattern((_) => {
   const cell = Cell.of("hello");
   return {
@@ -48,7 +48,7 @@ export default pattern((_) => {
 });`;
 
 const TEMP_PATTERN = `/// <cts-enable />
-import { Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commonfabric";
 
 interface PatternState {
   count: Default<number, 0>;
@@ -386,7 +386,7 @@ describe("RuntimeClient", () => {
   describe("events", () => {
     it("emits console events from page execution", async () => {
       const consolePattern = `/// <cts-enable />
-import { NAME, pattern, UI } from "commontools";
+import { NAME, pattern, UI } from "commonfabric";
 export default pattern((_) => {
   console.log('hello');
   return {
@@ -531,7 +531,7 @@ export default pattern((_) => {
     it("renders cell values in VNode children", async () => {
       // Pattern that renders a state value in the UI
       const valuePattern = `/// <cts-enable />
-import { Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commonfabric";
 
 interface State {
   value: Default<number, 10>;
@@ -581,7 +581,7 @@ export default pattern<State>(({ value }) => {
     it("renders derived cell values (like nth function)", async () => {
       // Pattern that uses a derived expression similar to counter's nth(state.value)
       const derivedPattern = `/// <cts-enable />
-import { Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commonfabric";
 
 function formatValue(n: number): string {
   return "number-" + n;
@@ -634,7 +634,7 @@ export default pattern<State>(({ value }) => {
 
     it("dispatches click events through rendered page handlers", async () => {
       const clickPattern = `/// <cts-enable />
-import { action, Default, NAME, pattern, UI, Writable } from "commontools";
+import { action, Default, NAME, pattern, UI, Writable } from "commonfabric";
 
 interface State {
   value: Writable<Default<number, 0>>;

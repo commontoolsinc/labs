@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { lift, Cell, toSchema } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { lift, Cell, toSchema } from "commonfabric";
 interface CharmEntry {
     id: string;
     name: string;

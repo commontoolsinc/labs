@@ -18,7 +18,7 @@ Steps:
      `PatternIntegrationScenario` from `../pattern-harness.ts`, define
      scenarios, export them, and run them in a `describe`/`it` block. See any
      existing `.test.ts` file (e.g. `echo.test.ts`) for the pattern.
-   - Import from `"commontools"`. Available APIs: `handler`, `pattern`, `lift`,
+   - Import from `"commonfabric"`. Available APIs: `handler`, `pattern`, `lift`,
      `str`, `cell`, `derive`, `Cell`, `Default`. `derive` is a convenience
      wrapper around lift: `derive(x, x => x+1)` is the same as
      `lift(x => x+1)(x)`.

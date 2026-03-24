@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, derive, pattern, patternTool, type PatternToolResult } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
 const content = cell("Hello world\nGoodbye world", {
     type: "string"
 } as const satisfies __ctHelpers.JSONSchema);

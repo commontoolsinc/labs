@@ -1,8 +1,8 @@
-# @commontools/fuse
+# @commonfabric/fuse
 
 Mount Common Tools spaces as a FUSE filesystem. Pieces appear as directories
 with their cell data exploded into files and subdirectories — browse with `ls`,
-read with `cat`, write with `echo`, execute mounted callables with `ct exec`,
+read with `cat`, write with `echo`, execute mounted callables with `cf exec`,
 and link pieces together with `ln -s`.
 
 ## Prerequisites
@@ -22,7 +22,7 @@ sudo apt-get install -y fuse3 libfuse3-dev pkg-config gcc
 
 ```bash
 # Mount your home space
-ct fuse mount /tmp/ct
+cf fuse mount /tmp/ct
 
 # In another terminal, explore
 ls /tmp/ct/home/pieces/
@@ -30,7 +30,7 @@ cat /tmp/ct/home/pieces/todo-app/result.json
 cat /tmp/ct/home/pieces/todo-app/result/items/0/text
 
 # Unmount
-ct fuse unmount /tmp/ct
+cf fuse unmount /tmp/ct
 ```
 
 ## Filesystem Layout
@@ -111,7 +111,7 @@ xattr -p user.json.type home/pieces/todo-app/result/count
 cat home/pieces/todo-app/meta.json
 # => {"id":"of:ba4j...","entityId":"ba4j...","patternName":"todo-app"}
 
-# Mounted callables are executable and start with a ct exec shebang
+# Mounted callables are executable and start with a cf exec shebang
 head -n1 home/pieces/todo-app/result/addItem.handler
 head -n1 home/pieces/todo-app/result/search.tool
 
@@ -139,20 +139,20 @@ echo '{"title":"Fresh","items":[],"count":0}' > home/pieces/todo-app/result.json
 echo '{"text":"Buy oat milk"}' > home/pieces/todo-app/result/addItem.handler
 
 # Execute the same mounted handler with schema-derived CLI flags
-ct exec home/pieces/todo-app/result/addItem.handler invoke --text "Buy oat milk"
+cf exec home/pieces/todo-app/result/addItem.handler invoke --text "Buy oat milk"
 
 # Run a mounted pattern tool (tool input flags come from the pattern schema)
-ct exec home/pieces/todo-app/result/search.tool --query "oat milk"
+cf exec home/pieces/todo-app/result/search.tool --query "oat milk"
 
 # Or execute either mounted callable directly through its shebang shim
 home/pieces/todo-app/result/addItem.handler invoke --text "Buy oat milk"
 home/pieces/todo-app/result/search.tool --query "oat milk"
 
 # Top-level help describes the mounted callable instead of invoking it
-ct exec home/pieces/todo-app/result/search.tool --help
+cf exec home/pieces/todo-app/result/search.tool --help
 
 # The same callable paths also exist under entities/<piece-id>/
-ct exec home/entities/of:ba4j.../result/search.tool --query "oat milk"
+cf exec home/entities/of:ba4j.../result/search.tool --query "oat milk"
 ```
 
 ### Creating and Deleting
@@ -208,28 +208,28 @@ ls "did:key:z6Mkk.../pieces/"
 
 ```bash
 # Mount (foreground — Ctrl+C to unmount)
-ct fuse mount /tmp/ct
+cf fuse mount /tmp/ct
 
 # Mount in background
-ct fuse mount /tmp/ct --background
+cf fuse mount /tmp/cf --background
 
 # Check active mounts
-ct fuse status
+cf fuse status
 
 # Unmount
-ct fuse unmount /tmp/ct
+cf fuse unmount /tmp/ct
 
 # With explicit connection settings
-ct fuse mount /tmp/ct --api-url http://localhost:8000 --identity ./my.key
+cf fuse mount /tmp/cf --api-url http://localhost:8000 --identity ./my.key
 
 # Show callable help from the mounted schema
-ct exec /tmp/ct/home/pieces/todo-app/result/search.tool --help
+cf exec /tmp/ct/home/pieces/todo-app/result/search.tool --help
 ```
 
-Environment variables `CT_API_URL` and `CT_IDENTITY` are also supported.
+Environment variables `CF_API_URL` and `CF_IDENTITY` are also supported.
 
 Handlers remain writable through the mounted `.handler` file. Both mounted
-`.handler` and `.tool` files can be executed directly or via `ct exec`.
+`.handler` and `.tool` files can be executed directly or via `cf exec`.
 
 ## Architecture
 
@@ -299,7 +299,7 @@ deno run --unstable-ffi --allow-ffi --allow-read --allow-write --allow-env --all
   packages/fuse/mod.ts /tmp/ct ...
 ```
 
-If using `ct fuse mount`, these permissions are set automatically.
+If using `cf fuse mount`, these permissions are set automatically.
 
 ### `Resource fork` / `._*` files from macOS
 
@@ -309,7 +309,7 @@ the filesystem (EACCES). This is expected — use the terminal, not Finder.
 ### Writes not persisting
 
 Writes are fire-and-forget. If the toolshed is down, writes silently fail. Check
-`ct fuse status` or verify the toolshed is reachable:
+`cf fuse status` or verify the toolshed is reachable:
 
 ```bash
 curl http://localhost:8000/api/storage/memory
@@ -321,9 +321,9 @@ curl http://localhost:8000/api/storage/memory
 Add `--debug` for verbose FUSE operation logging:
 
 ```bash
-ct fuse mount /tmp/ct --debug
+cf fuse mount /tmp/cf --debug
 # or
-deno run ... packages/fuse/mod.ts /tmp/ct --debug
+deno run ... packages/fuse/mod.ts /tmp/cf --debug
 ```
 
 ## Direct Invocation
@@ -332,5 +332,5 @@ You can also run the FUSE filesystem directly without the CLI:
 
 ```bash
 deno run --unstable-ffi --allow-ffi --allow-read --allow-write --allow-env --allow-net \
-  packages/fuse/mod.ts /tmp/ct --api-url http://localhost:8000
+  packages/fuse/mod.ts /tmp/cf --api-url http://localhost:8000
 ```

@@ -1,13 +1,13 @@
 # Logger System
 
-The runtime uses a structured logging system (`@commontools/utils/logger`) across
+The runtime uses a structured logging system (`@commonfabric/utils/logger`) across
 all packages. Loggers are tagged by module name, support severity levels, and
 track call counts, timing stats, and flags — all accessible at runtime.
 
 ## Creating a Logger
 
 ```typescript
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 
 // Create a logger for your module (disabled by default, debug level)
 const logger = getLogger("my-module", { enabled: false, level: "debug" });
@@ -193,6 +193,6 @@ These operate across all registered loggers:
 | `resetAllCountBaselines()` | Set count baselines for all loggers |
 | `resetAllTimingBaselines()` | Set timing baselines for all loggers |
 
-All are importable from `@commontools/utils/logger` and also registered on
+All are importable from `@commonfabric/utils/logger` and also registered on
 `globalThis.commontools` for browser console access. See
 [console-commands](./console-commands.md) for interactive usage.

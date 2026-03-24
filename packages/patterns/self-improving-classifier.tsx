@@ -26,7 +26,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // =============================================================================
 // TYPES

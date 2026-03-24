@@ -20,7 +20,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // ============================================================================
 // ATOMIC TYPES - Keep simple, use string for editable fields

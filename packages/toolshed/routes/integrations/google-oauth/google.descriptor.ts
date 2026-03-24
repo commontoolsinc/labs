@@ -6,8 +6,8 @@
  * and emptyAuthData handle this.
  */
 import env from "@/env.ts";
-import { AuthSchema } from "@commontools/runner";
-import type { JSONSchema } from "@commontools/runner";
+import { AuthSchema } from "@commonfabric/runner";
+import type { JSONSchema } from "@commonfabric/runner";
 import type {
   OAuth2Tokens,
   ProviderDescriptor,

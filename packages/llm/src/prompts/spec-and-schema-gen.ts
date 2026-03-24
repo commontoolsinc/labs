@@ -1,10 +1,10 @@
 import { hydratePrompt, llmPrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
-import type { JSONSchema, JSONSchemaObjMutable } from "@commontools/runner";
-import { WorkflowForm } from "@commontools/piece";
-import { JSONSchemaObj } from "@commontools/api";
-import { isRecord } from "@commontools/utils/types";
+import type { JSONSchema, JSONSchemaObjMutable } from "@commonfabric/runner";
+import { WorkflowForm } from "@commonfabric/piece";
+import { JSONSchemaObj } from "@commonfabric/api";
+import { isRecord } from "@commonfabric/utils/types";
 
 // Prompt for generating schema and specification from a goal
 export const SCHEMA_FROM_GOAL_PROMPT = llmPrompt(

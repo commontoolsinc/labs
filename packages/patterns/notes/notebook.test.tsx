@@ -20,10 +20,10 @@
  * The test harness sets up defaultPattern so wish("#default") resolves,
  * enabling tests for handlers that push to allPieces.
  *
- * Run: deno task ct test packages/patterns/notes/notebook.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/notes/notebook.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
-import { NAME } from "@commontools/runner";
+import { action, computed, pattern } from "commonfabric";
+import { NAME } from "@commonfabric/runner";
 import Notebook from "./notebook.tsx";
 import Note from "./note.tsx";
 

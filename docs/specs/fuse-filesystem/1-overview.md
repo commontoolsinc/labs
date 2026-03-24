@@ -33,7 +33,7 @@ local filesystem. Cells appear as files and directories. Standard Unix tools
 
 ```bash
 # Mount (all spaces accessible under one mountpoint)
-ct fuse mount ~/mnt/ct --api-url http://localhost:8000
+cf fuse mount ~/mnt/cf --api-url http://localhost:8000
 
 # List known spaces (home is always present)
 ls ~/mnt/ct/
@@ -75,7 +75,7 @@ echo '{"items":[{"text":"Buy oat milk","done":true}],"title":"Todos"}' \
 echo '{"item":"New task"}' > ~/mnt/ct/home/pieces/todo-app/result/addItem.handler
 
 # Unmount
-ct fuse unmount ~/mnt/ct
+cf fuse unmount ~/mnt/ct
 ```
 
 ---

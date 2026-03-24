@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-multiple-captures
 // Verifies: two captured cells are both extracted into the derive capture object
 //   derive(value, fn) → derive(schema, schema, { value, multiplier, offset }, fn)

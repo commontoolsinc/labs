@@ -10,9 +10,9 @@
  * Each approach is tested side-by-side with a workaround so we can
  * see exactly which cases fail.
  *
- * Run: deno task ct test packages/patterns/gideon-tests/proxy-length-repro.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/gideon-tests/proxy-length-repro.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commonfabric";
 import ProxyLengthRepro from "./proxy-length-repro.tsx";
 
 export default pattern(() => {

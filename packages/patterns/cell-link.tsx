@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commonfabric";
 import Note from "./notes/note.tsx";
 
 export default pattern<{ title: Default<string, "Suggestion Tester"> }>(

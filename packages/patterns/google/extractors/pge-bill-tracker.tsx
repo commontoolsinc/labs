@@ -14,7 +14,7 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth pge-bill-tracker/overrideAuth
+ * 3. Link: cf piece link google-auth/auth pge-bill-tracker/overrideAuth
  */
 import {
   computed,
@@ -25,7 +25,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import BillExtractor, {
   type Auth,
   type BillAnalysis,

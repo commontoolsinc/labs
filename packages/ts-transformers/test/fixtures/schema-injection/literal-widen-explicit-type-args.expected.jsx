@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell } from "commonfabric";
 // FIXTURE: literal-widen-explicit-type-args
 // Verifies: Cell.of with explicit type arguments injects schema matching the type arg
 //   Cell.of<number>(10) → Cell.of<number>(10, { type: "number" })

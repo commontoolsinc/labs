@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, pattern } from "commonfabric";
 // FIXTURE: pattern-computed-opaque-ref-map
 // Verifies: .map() on an OpaqueRef inside computed() is NOT transformed to mapWithPattern
 //   computed(() => items.map((n) => n * 2)) → derive({ items }, ({ items }) => items.map((n) => n * 2))

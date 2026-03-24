@@ -9,7 +9,7 @@
  *
  * Error observed: "Value at path value/argument/corrections/0-Technical_Expertise is not an object"
  */
-import { Cell, Default, handler, NAME, pattern, UI } from "commontools";
+import { Cell, Default, handler, NAME, pattern, UI } from "commonfabric";
 
 interface Item {
   value: string;

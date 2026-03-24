@@ -1,7 +1,7 @@
 import { css, html, nothing, render } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
-import { type CellHandle, NAME } from "@commontools/runtime-client";
+import { type CellHandle, NAME } from "@commonfabric/runtime-client";
 import { BaseElement } from "../../core/base-element.ts";
 import {
   applyThemeToElement,

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { toSchema } from "commontools";
+import { toSchema } from "commonfabric";
 
 interface LinkedData {
   "@link": string;

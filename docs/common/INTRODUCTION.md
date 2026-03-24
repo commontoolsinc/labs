@@ -14,4 +14,4 @@ Each pattern is composed of `Cell`s (passed in as `Inputs`), [lifted functions](
 
 A pattern returns a `Result` `Cell`, including special fields like `[UI]` (renderable html, composed of custom UI components (from `packages/ui`) as well as any number of user-defined key-value pairs. 
 
-Patterns are free to import from other patterns and compose together into reactive graphs. Patterns are lightweight and should be used exploratively to validate claims and understand usage patterns. The `ct` binary (also available via `deno task ct`) is used to compile and typecheck patterns interactively.
+Patterns are free to import from other patterns and compose together into reactive graphs. Patterns are lightweight and should be used exploratively to validate claims and understand usage patterns. The `ct` binary (also available via `deno task cf`) is used to compile and typecheck patterns interactively.

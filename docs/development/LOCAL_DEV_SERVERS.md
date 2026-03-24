@@ -43,7 +43,7 @@ server. See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 the passphrase `"implicit trust"`. To create a matching key for CLI operations:
 ```bash
 deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
-export CT_IDENTITY=./claude.key
+export CF_IDENTITY=./claude.key
 ```
 
 **First-time browser login:**

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern, UI, VNode, } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, pattern, UI, VNode, } from "commonfabric";
 // Simulates `any` leaking through a generic function (like generateObject)
 declare function fetchAny(): any;
 // FIXTURE: pattern-any-result-override

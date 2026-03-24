@@ -1,7 +1,7 @@
-import { deepEqual } from "@commontools/utils/deep-equal";
-import { getLogger } from "@commontools/utils/logger";
-import { isRecord } from "@commontools/utils/types";
-import type { MemorySpace, URI } from "@commontools/memory/interface";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isRecord } from "@commonfabric/utils/types";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { getTopFrame } from "./builder/pattern.ts";
 import {
   type Frame,
@@ -52,7 +52,7 @@ import type {
   SchedulerGraphNode,
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
-import { ensureNotRenderThread } from "@commontools/utils/env";
+import { ensureNotRenderThread } from "@commonfabric/utils/env";
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {

@@ -31,7 +31,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import {
   CalendarWriteClient,
   type RSVPStatus,

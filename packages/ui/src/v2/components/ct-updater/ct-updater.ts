@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { CTPiece } from "../ct-piece/ct-piece.ts";
-import { CellHandle } from "@commontools/runtime-client";
+import { CellHandle } from "@commonfabric/runtime-client";
 
 /**
  * CTUpdater - Button component for registering pieces for background updates

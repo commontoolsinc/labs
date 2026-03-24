@@ -33,5 +33,5 @@ This pattern demonstrates the bug scenario (shared `const` style object) and the
 old workaround (factory function). With the fix applied, both sections render
 identically — all 10 cards are styled.
 
-Run with `deno task ct check main.tsx --pattern-json` and verify all cards have
+Run with `deno task cf check main.tsx --pattern-json` and verify all cards have
 full style data.

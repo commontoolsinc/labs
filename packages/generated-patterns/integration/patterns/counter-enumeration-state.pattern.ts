@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 type CounterState = "idle" | "running" | "paused" | "complete";
 

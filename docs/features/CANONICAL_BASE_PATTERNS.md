@@ -517,7 +517,7 @@ Containers manage items, discover patterns, and support nested lists:
 ```typescript
 // packages/patterns/container-protocol.ts
 
-import type { Stream, Writable, VNode } from "commontools";
+import type { Stream, Writable, VNode } from "commonfabric";
 
 /**
  * What containers expect from their items
@@ -594,8 +594,8 @@ export interface UpgradeOption {
 
 ```typescript
 /// <cts-enable />
-import { pattern, NAME, UI, Writable, action, computed } from "commontools";
-import type { PersonLike, ContainerItem, ContainerProtocol } from "commontools";
+import { pattern, NAME, UI, Writable, action, computed } from "commonfabric";
+import type { PersonLike, ContainerItem, ContainerProtocol } from "commonfabric";
 
 interface Input {
   title?: string;
@@ -678,8 +678,8 @@ This shows how a user might fork the base Contact pattern to create a FamilyMemb
 ### Base: contact.tsx (provided)
 ```typescript
 /// <cts-enable />
-import { pattern, NAME, UI, Writable, Default, computed } from "commontools";
-import type { PersonLike } from "commontools";
+import { pattern, NAME, UI, Writable, Default, computed } from "commonfabric";
+import type { PersonLike } from "commonfabric";
 
 export interface Contact extends PersonLike {
   name: string;
@@ -711,8 +711,8 @@ LLM forks contact.tsx and adds the requested fields:
 
 ```typescript
 /// <cts-enable />
-import { pattern, NAME, UI, Writable, Default, computed } from "commontools";
-import type { PersonLike } from "commontools";
+import { pattern, NAME, UI, Writable, Default, computed } from "commonfabric";
+import type { PersonLike } from "commonfabric";
 
 // Forked from Contact, added: relationship, birthday, dietary, gifts
 export interface FamilyMember extends PersonLike {
@@ -755,8 +755,8 @@ export default pattern<{ member: Writable<Default<FamilyMember, { name: "", rela
 
 ```typescript
 /// <cts-enable />
-import { pattern, NAME, UI, Writable, computed } from "commontools";
-import type { PersonLike, ContainerProtocol } from "commontools";
+import { pattern, NAME, UI, Writable, computed } from "commonfabric";
+import type { PersonLike, ContainerProtocol } from "commonfabric";
 
 // A sub-list that imports from Google Contacts
 interface GoogleContactsImport extends ContainerProtocol<PersonLike> {
@@ -888,7 +888,7 @@ These are over-engineering for an edge case. If someone really needs sophisticat
 
 ### Phase 1: Core Infrastructure
 - [ ] Define minimal interface types (`TaskLike`, `PersonLike`, `EventLike`)
-- [ ] Export from "commontools" entrypoint
+- [ ] Export from "commonfabric" entrypoint
 - [ ] Revise container-protocol.ts with subLists support
 
 ### Phase 2: Base Patterns + First Container

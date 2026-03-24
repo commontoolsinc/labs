@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell } from "commonfabric";
 // FIXTURE: literal-widen-mixed-values
 // Verifies: schema injection works for literals, variable references, and expressions alike
 //   cell(10) → cell(10, { type: "number" })

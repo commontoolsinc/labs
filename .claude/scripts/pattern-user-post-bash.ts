@@ -21,7 +21,7 @@ try {
 const command = input.tool_input?.command || "";
 
 // Only process ct commands
-if (!command.includes("ct piece") && !command.includes("ct ")) {
+if (!command.includes("cf piece") && !command.includes("ct ")) {
   Deno.exit(0);
 }
 
@@ -29,16 +29,16 @@ let suggestion = "";
 
 if (command.includes("piece new")) {
   suggestion =
-    "Piece created. Next: use 'ct piece inspect' to view state or 'ct piece call' to test handlers.";
+    "Piece created. Next: use 'cf piece inspect' to view state or 'cf piece call' to test handlers.";
 } else if (command.includes("piece setsrc")) {
   suggestion =
-    "Source updated. Next: use 'ct piece step' to trigger re-evaluation, then 'ct piece inspect' to verify.";
+    "Source updated. Next: use 'cf piece step' to trigger re-evaluation, then 'cf piece inspect' to verify.";
 } else if (command.includes("piece set ")) {
   suggestion =
-    "State set. Run 'ct piece step' to trigger re-evaluation before reading computed values.";
+    "State set. Run 'cf piece step' to trigger re-evaluation before reading computed values.";
 } else if (command.includes("piece inspect")) {
   suggestion =
-    "State inspected. Use 'ct piece call handlerName' to test handlers or 'ct piece set' to modify state.";
+    "State inspected. Use 'cf piece call handlerName' to test handlers or 'cf piece set' to modify state.";
 }
 
 if (suggestion) {

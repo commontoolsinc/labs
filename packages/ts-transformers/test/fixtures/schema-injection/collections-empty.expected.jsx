@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, pattern } from "commonfabric";
 // FIXTURE: collections-empty
 // Verifies: empty arrays and objects produce valid degenerate schemas
 //   cell([]) → cell([], { type: "array", items: false })

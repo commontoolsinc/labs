@@ -19,7 +19,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Word dictionary for validation
 import { VALID_WORDS } from "./scrabble-words.ts";

@@ -10,10 +10,10 @@ import type {
   TriggerTraceEntry,
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
-} from "@commontools/runner/shared";
-import type { DID, KeyPairRaw } from "@commontools/identity";
-import { type Program } from "@commontools/js-compiler/interface";
-import { RuntimeTelemetryMarkerResult } from "@commontools/runtime-client";
+} from "@commonfabric/runner/shared";
+import type { DID, KeyPairRaw } from "@commonfabric/identity";
+import { type Program } from "@commonfabric/js-compiler/interface";
+import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
 export type { JSONSchema, JSONValue, Program };
 
 export type MessageId = number;
@@ -323,7 +323,7 @@ export interface SetBreakpointsRequest extends BaseRequest {
   actionIds: string[];
 }
 
-// Logger count types for IPC (matches @commontools/utils/logger types)
+// Logger count types for IPC (matches @commonfabric/utils/logger types)
 export interface LogCounts {
   debug: number;
   info: number;
@@ -349,7 +349,7 @@ export interface LoggerInfo {
 
 export type LoggerMetadata = Record<string, LoggerInfo>;
 
-// Timing stats types for IPC (matches @commontools/utils/logger types)
+// Timing stats types for IPC (matches @commonfabric/utils/logger types)
 export interface CDFPoint {
   x: number; // Latency in ms
   y: number; // Cumulative probability (0-1)

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, NAME, pattern, UI } from "commontools";
+import { computed, NAME, pattern, UI } from "commonfabric";
 
 export default pattern(() => {
   // Line chart data - simple number array (auto-indexed x)

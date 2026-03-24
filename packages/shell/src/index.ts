@@ -1,6 +1,6 @@
 import "core-js/proposals/explicit-resource-management";
 import "core-js/proposals/async-explicit-resource-management";
-import "@commontools/ui";
+import "@commonfabric/ui";
 import { API_URL, COMMIT_SHA, ENVIRONMENT } from "./lib/env.ts";
 import "./components/index.ts";
 import "./views/index.ts";

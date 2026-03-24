@@ -1,7 +1,7 @@
 import ts from "typescript";
 
 // Constant for identifying CommonTools declarations
-const COMMONTOOLS_DECLARATION = "commontools.d.ts";
+const COMMONTOOLS_DECLARATION = "commonfabric.d.ts";
 
 /**
  * Checks if a declaration comes from the CommonTools library

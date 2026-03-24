@@ -13,7 +13,7 @@
  *
  * @example Typical usage - disabled by default with debug level
  * ```typescript
- * import { getLogger } from "@commontools/utils/logger";
+ * import { getLogger } from "@commonfabric/utils/logger";
  *
  * // Common pattern: create a debug logger that's disabled by default
  * // pass in function for lazy evaluation of parameters
@@ -23,7 +23,7 @@
  *
  * @example Basic usage
  * ```typescript
- * import { log } from "@commontools/utils/logger";
+ * import { log } from "@commonfabric/utils/logger";
  *
  * // Global logger instance - no module tag
  * // First parameter is always a string key for tracking
@@ -36,7 +36,7 @@
  *
  * @example Module-tagged logging
  * ```typescript
- * import { getLogger } from "@commontools/utils/logger";
+ * import { getLogger } from "@commonfabric/utils/logger";
  *
  * // Explicitly specify module name - recommended approach
  * const logger = getLogger("user-service");
@@ -97,11 +97,11 @@
  * logger.resetCounts();
  *
  * // Get total across ALL loggers (in TypeScript/Deno)
- * import { getTotalLoggerCounts } from "@commontools/utils/logger";
+ * import { getTotalLoggerCounts } from "@commonfabric/utils/logger";
  * const total = getTotalLoggerCounts(); // Sum of all logger counts
  *
  * // Get breakdown by logger and message key (in TypeScript/Deno)
- * import { getLoggerCountsBreakdown } from "@commontools/utils/logger";
+ * import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
  * const breakdown = getLoggerCountsBreakdown();
  * // {
  * //   "module-1": {
@@ -113,7 +113,7 @@
  * // }
  *
  * // Reset all logger counts (in TypeScript/Deno)
- * import { resetAllLoggerCounts } from "@commontools/utils/logger";
+ * import { resetAllLoggerCounts } from "@commonfabric/utils/logger";
  * resetAllLoggerCounts();
  * ```
  *
@@ -167,7 +167,7 @@
  * ```
  */
 
-import { isDeno } from "@commontools/utils/env";
+import { isDeno } from "@commonfabric/utils/env";
 
 export type LogMessage = unknown | (() => unknown);
 
@@ -435,20 +435,20 @@ export function getGlobalLogFloor(): LogLevel | undefined {
 }
 
 /**
- * Read `CT_LOG_LEVEL` from the environment (Deno only).
+ * Read `CF_LOG_LEVEL` from the environment (Deno only).
  * Returns undefined when not set or not a valid level.
  */
 function getEnvFloor(): LogLevel | undefined {
   if (isDeno()) {
     try {
-      const envLevel = Deno.env.get("CT_LOG_LEVEL");
+      const envLevel = Deno.env.get("CF_LOG_LEVEL");
       if (envLevel && envLevel in LOG_LEVELS) return envLevel as LogLevel;
     } catch { /* ignore permission errors */ }
   }
   return undefined;
 }
 
-// Auto-initialize floor from CT_LOG_LEVEL so workers inherit it.
+// Auto-initialize floor from CF_LOG_LEVEL so workers inherit it.
 _globalLevelFloor = getEnvFloor();
 
 /**

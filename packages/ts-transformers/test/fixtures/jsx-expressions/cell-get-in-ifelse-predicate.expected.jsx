@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, ifElse, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, ifElse, pattern, UI } from "commonfabric";
 // Reproduction of bug: .get() called on Cell inside ifElse predicate
 // The transformer wraps predicates in derive(), which unwraps Cells,
 // but fails to remove the .get() calls

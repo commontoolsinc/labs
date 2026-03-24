@@ -17,7 +17,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Confidential<T> = T;
 

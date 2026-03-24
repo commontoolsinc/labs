@@ -6,7 +6,7 @@ abstractions with Lit components.
 ## What are Cells?
 
 Cells are reactive data containers from the Common Tools runtime
-(`@commontools/runner`). They provide:
+(`@commonfabric/runner`). They provide:
 
 - Reactive updates via subscriptions
 - Transactional mutations
@@ -35,7 +35,7 @@ Declare Cell properties using `@property({ attribute: false })`:
 
 ```typescript
 import { property } from "lit/decorators.js";
-import type { Cell } from "@commontools/runner";
+import type { Cell } from "@commonfabric/runner";
 
 export class MyComponent extends BaseElement {
   @property({ attribute: false })
@@ -210,7 +210,7 @@ override render() {
 The `ct-render` component handles rendering cells with `[UI]` properties:
 
 ```typescript
-import { UI } from "@commontools/api";
+import { UI } from "@commonfabric/api";
 
 // In render()
 return html`
@@ -227,7 +227,7 @@ The component automatically:
 ### Cell Type Checking
 
 ```typescript
-import { isCell } from "@commontools/runner";
+import { isCell } from "@commonfabric/runner";
 
 if (isCell(this.value)) {
   // It's a Cell, use .get(), .key(), etc.

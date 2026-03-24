@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, pattern, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface MutableTupleArgs {
   pair: Default<[number, number], [0, 0]>;

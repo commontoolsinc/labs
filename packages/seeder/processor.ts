@@ -5,10 +5,10 @@ import type {
   Step,
 } from "./interfaces.ts";
 import { Verifier } from "./verifier.ts";
-import { PieceManager } from "@commontools/piece";
+import { PieceManager } from "@commonfabric/piece";
 import { CommandType } from "./interfaces.ts";
-import { createDataPiece, processWorkflow } from "@commontools/piece";
-import { isRecord } from "@commontools/utils/types";
+import { createDataPiece, processWorkflow } from "@commonfabric/piece";
+import { isRecord } from "@commonfabric/utils/types";
 
 export class Processor {
   private cache: boolean;

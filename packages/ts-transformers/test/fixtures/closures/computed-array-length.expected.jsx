@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * Regression test for array.length access inside computed().
  *
@@ -9,7 +9,7 @@ import * as __ctHelpers from "commontools";
  * The fix ensures the schema is { type: "array", items: { not: true } }
  * rather than { type: "object", properties: { length: { type: "number" } } }
  */
-import { computed, NAME, pattern, UI, wish } from "commontools";
+import { computed, NAME, pattern, UI, wish } from "commonfabric";
 interface Charm {
     id: string;
     name: string;

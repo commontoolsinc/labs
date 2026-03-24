@@ -27,7 +27,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import GmailExtractor, { type Email } from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/util/google-auth-manager.tsx";
 import {
@@ -39,7 +39,7 @@ import {
   type ScopeKey,
 } from "../core/util/google-auth-manager.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
-import type { Stream } from "commontools";
+import type { Stream } from "commonfabric";
 
 // Debug flag for development
 const DEBUG_NOTES = false;

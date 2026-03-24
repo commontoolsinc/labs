@@ -1,9 +1,9 @@
-import { deepEqual } from "@commontools/utils/deep-equal";
-import { normalizeFact, unclaimed } from "@commontools/memory/fact";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { normalizeFact, unclaimed } from "@commonfabric/memory/fact";
 import {
   fabricFromNativeValue,
   type FabricValue,
-} from "@commontools/data-model/fabric-value";
+} from "@commonfabric/data-model/fabric-value";
 import type {
   Assertion,
   IAttestation,
@@ -32,7 +32,7 @@ import {
   UnsupportedMediaTypeError,
   write,
 } from "./attestation.ts";
-import { hashOf } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as Edit from "./edit.ts";
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);

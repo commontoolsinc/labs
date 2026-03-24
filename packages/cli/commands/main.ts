@@ -11,15 +11,15 @@ import { test } from "./test.ts";
 import ports from "@commontools/ports" with { type: "json" };
 
 function envStatus(): string {
-  const identity = Deno.env.get("CT_IDENTITY");
-  const apiUrl = Deno.env.get("CT_API_URL");
+  const identity = Deno.env.get("CF_IDENTITY");
+  const apiUrl = Deno.env.get("CF_API_URL");
   if (!identity && !apiUrl) return "";
   const lines: string[] = ["", "ENVIRONMENT:"];
   if (identity) {
-    lines.push(`  CT_IDENTITY = ${identity} (set, no need to pass --identity)`);
+    lines.push(`  CF_IDENTITY = ${identity} (set, no need to pass --identity)`);
   }
   if (apiUrl) {
-    lines.push(`  CT_API_URL  = ${apiUrl} (set, no need to pass --api-url)`);
+    lines.push(`  CF_API_URL  = ${apiUrl} (set, no need to pass --api-url)`);
   }
   return lines.join("\n");
 }
@@ -27,14 +27,14 @@ function envStatus(): string {
 const mainDescription = `Tool for running programs on common fabric.
 
 QUICK START:
-  ct check ./pattern.tsx            # Type-check and test locally
-  ct piece new ./pattern.tsx ...    # Deploy to a space
-  ct piece --help                   # Help for deployed patterns (with tips)
+  cf check ./pattern.tsx            # Type-check and test locally
+  cf piece new ./pattern.tsx ...    # Deploy to a space
+  cf piece --help                   # Help for deployed patterns (with tips)
 
 FIRST TIME SETUP:
-  ct id new > claude.key            # Create identity key
-  export CT_IDENTITY=./claude.key   # Set default identity
-  export CT_API_URL=http://localhost:${ports.toolshed}  # Set default API URL
+  cf id new > claude.key            # Create identity key
+  export CF_IDENTITY=./claude.key   # Set default identity
+  export CF_API_URL=http://localhost:${ports.toolshed}  # Set default API URL
 
 LOCAL DEVELOPMENT:
   ./scripts/start-local-dev.sh      # Start local servers
@@ -42,18 +42,18 @@ LOCAL DEVELOPMENT:
 ${envStatus()}
 LOGGING:
   Only errors are shown by default. Enable more with:
-    ct --log-level info check ./pattern.tsx
-    CT_LOG_LEVEL=debug ct piece ls
+    cf --log-level info check ./pattern.tsx
+    CF_LOG_LEVEL=debug cf piece ls
   Valid levels: debug, info, warn, error (default), silent
 
-Run 'ct <command> --help' for command-specific help.`;
+Run 'cf <command> --help' for command-specific help.`;
 
 export const main = new Command()
-  .name("ct")
+  .name("cf")
   .description(mainDescription)
   .version("0.0.1")
   // Add global help subcommand to all commands
-  // like `ct foo help` -- this is OK, but the most appealing
+  // like `cf foo help` -- this is OK, but the most appealing
   // feature here is adding a "default" command when none are provided
   // as a way to display help text on a root command.
   .default("help")
@@ -92,11 +92,11 @@ export const main = new Command()
   .command(
     "deploy",
     new Command()
-      .description("Use 'ct piece new' instead.")
+      .description("Use 'cf piece new' instead.")
       .hidden()
       .action(() => {
         console.log(
-          "The 'deploy' command does not exist. Use 'ct piece new' to deploy a pattern.",
+          "The 'deploy' command does not exist. Use 'cf piece new' to deploy a pattern.",
         );
       }),
   );

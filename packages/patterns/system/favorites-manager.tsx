@@ -10,7 +10,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Favorite = {
   cell: Writable<{ [NAME]?: string }>;

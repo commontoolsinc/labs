@@ -9,8 +9,8 @@ import {
   schema,
   str,
   type Stream,
-} from "commontools";
-import "commontools/schema";
+} from "commonfabric";
+import "commonfabric/schema";
 
 interface Input {
   lastMessage: string;

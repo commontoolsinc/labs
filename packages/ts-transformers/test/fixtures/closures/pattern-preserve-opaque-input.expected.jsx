@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, type Writable, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern, type Writable, UI } from "commonfabric";
 interface State {
     foo: string;
     bar: string;

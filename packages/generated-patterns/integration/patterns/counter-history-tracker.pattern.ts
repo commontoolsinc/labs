@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, pattern, str } from "commontools";
+import { Cell, Default, handler, pattern, str } from "commonfabric";
 
 interface HistoryCounterArgs {
   value: Default<number, 0>;

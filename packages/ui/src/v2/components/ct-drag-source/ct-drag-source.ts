@@ -7,7 +7,7 @@ import {
   startDrag,
   updateDragPointer,
 } from "../../core/drag-state.ts";
-import type { CellHandle } from "@commontools/runtime-client";
+import type { CellHandle } from "@commonfabric/runtime-client";
 import "../ct-cell-context/ct-cell-context.ts";
 
 /**

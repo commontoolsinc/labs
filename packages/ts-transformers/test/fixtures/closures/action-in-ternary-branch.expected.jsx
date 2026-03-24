@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * Regression test: action() result used in same ternary branch as computed()
  *
@@ -6,7 +6,7 @@ import * as __ctHelpers from "commontools";
  * the nested computed expression should still lower locally in JSX without forcing
  * the whole JSX branch through an extra derive wrapper.
  */
-import { action, Cell, computed, pattern, UI } from "commontools";
+import { action, Cell, computed, pattern, UI } from "commonfabric";
 interface Card {
     title: string;
     description: string;

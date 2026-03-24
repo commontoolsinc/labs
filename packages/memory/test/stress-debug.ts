@@ -2,7 +2,7 @@ import * as Provider from "../provider.ts";
 import * as Consumer from "../consumer.ts";
 import * as Changes from "../changes.ts";
 import * as Fact from "../fact.ts";
-import { hashOf } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 
 import { alice, space } from "./principal.ts";
 

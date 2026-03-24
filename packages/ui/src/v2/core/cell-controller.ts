@@ -3,7 +3,7 @@ import {
   CellHandle,
   isCellHandle,
   type JSONSchema,
-} from "@commontools/runtime-client";
+} from "@commonfabric/runtime-client";
 import {
   InputTimingController,
   type InputTimingOptions,

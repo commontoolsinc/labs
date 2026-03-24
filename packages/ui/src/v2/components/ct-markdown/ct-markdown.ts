@@ -12,7 +12,7 @@ import {
   type CTTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
+import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 
 export type MarkdownVariant = "default" | "inverse";
 

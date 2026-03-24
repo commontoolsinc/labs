@@ -8,7 +8,7 @@
 - **Omit `Writable<>`** for read-only access - the framework automatically provides reactive values
 
 ```tsx
-import { Default, Writable, UI, pattern } from 'commontools'
+import { Default, Writable, UI, pattern } from 'commonfabric'
 
 interface Item {}
 

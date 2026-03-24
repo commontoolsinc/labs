@@ -2,7 +2,7 @@
  * Type definitions for the CT Map component
  */
 
-import type { OpaqueRef } from "@commontools/api";
+import type { OpaqueRef } from "@commonfabric/api";
 
 /**
  * Represents a geographic coordinate with latitude and longitude

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, computed, pattern } from "commontools";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: computed-optional-chaining
 // Verifies: computed() with optional chaining and nullish coalescing on captured cells

@@ -1,6 +1,6 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 // deno-lint-ignore-file no-unused-vars
-import { handler, computed } from "commontools";
+import { handler, computed } from "commonfabric";
 // FIXTURE: safe-context-and-jsx
 // Verifies: && and || with JSX inside handler callbacks are transformed to when()/unless()
 //   computed(() => show) && <span> → when(computed(() => show), <span>)

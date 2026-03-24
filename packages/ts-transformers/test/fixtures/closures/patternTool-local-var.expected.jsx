@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, generateText, pattern, patternTool, type PatternToolResult, Writable } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, generateText, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
 const content = Writable.of("Hello world", {
     type: "string"
 } as const satisfies __ctHelpers.JSONSchema);

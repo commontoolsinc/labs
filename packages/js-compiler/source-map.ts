@@ -1,6 +1,6 @@
 import { SourceMap } from "./interface.ts";
 import { MappedPosition, SourceMapConsumer } from "source-map-js";
-import { LRUCache } from "@commontools/utils/cache";
+import { LRUCache } from "@commonfabric/utils/cache";
 
 export type { MappedPosition };
 

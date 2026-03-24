@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, JSONSchema, NAME, pattern, UI } from "commontools";
+import { handler, JSONSchema, NAME, pattern, UI } from "commonfabric";
 
 const InputSchema = {
   type: "object",

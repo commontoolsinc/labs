@@ -33,7 +33,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Input {
   condition: Default<boolean, true>;

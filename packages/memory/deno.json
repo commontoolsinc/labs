@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/memory",
+  "name": "@commonfabric/memory",
   "tasks": {
     "dev": "deno run --allow-read --allow-write --allow-net --allow-ffi --allow-env deno.ts",
     "check": "deno check .",
@@ -43,7 +43,7 @@
     "./schema": "./schema.ts"
   },
   "imports": {
-    "@commontools/leb128": "jsr:@commontools/leb128",
+    "@commonfabric/leb128": "jsr:@commonfabric/leb128",
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0"
   }

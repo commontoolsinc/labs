@@ -1,10 +1,10 @@
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import {
   emptySchemaObject,
   schemaForValueType,
   schemaWithProperties,
-} from "@commontools/data-model/schema-utils";
-import { internSchema } from "@commontools/data-model/schema-hash";
+} from "@commonfabric/data-model/schema-utils";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { type LegacyAlias } from "../sigil-types.ts";
 import {
   isPattern,
@@ -18,7 +18,7 @@ import {
   unsafe_originalPattern,
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
-import { deepEqual } from "@commontools/utils/deep-equal";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { Runtime } from "../runtime.ts";
 import {
   isCellLink,

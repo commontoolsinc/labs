@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commontools";
+import { cell, pattern, UI } from "commonfabric";
 
 // FIXTURE: map-nested-conditional
 // Verifies: when() guard around mapWithPattern() with nested when() inside the map body

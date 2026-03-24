@@ -1,7 +1,7 @@
 import { css, html, LitElement } from "lit";
 import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
-import { ACLUser, Capability } from "@commontools/memory/acl";
+import { ACLUser, Capability } from "@commonfabric/memory/acl";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import "../components/Button.ts";
 

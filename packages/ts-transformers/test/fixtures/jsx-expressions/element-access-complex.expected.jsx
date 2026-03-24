@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { ifElse, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { ifElse, pattern, UI } from "commonfabric";
 interface State {
     matrix: number[][];
     row: number;

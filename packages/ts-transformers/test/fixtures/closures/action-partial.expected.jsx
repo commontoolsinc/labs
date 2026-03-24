@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, pattern, action } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, pattern, action } from "commonfabric";
 interface BaseState {
     a: Cell<string>;
     b: Cell<number>;

@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import type { CellHandle } from "@commontools/runtime-client";
+import type { CellHandle } from "@commonfabric/runtime-client";
 
 /**
  * CTCellHandleContext - Wraps page regions and associates them with a CellHandle

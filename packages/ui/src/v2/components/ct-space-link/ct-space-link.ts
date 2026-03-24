@@ -2,8 +2,8 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-chip/ct-chip.ts";
-import type { DID } from "@commontools/identity";
-import { navigate } from "@commontools/shell/shared";
+import type { DID } from "@commonfabric/identity";
+import { navigate } from "@commonfabric/shell/shared";
 
 /**
  * CTSpaceLink - Renders a space as a clickable pill that navigates to the space

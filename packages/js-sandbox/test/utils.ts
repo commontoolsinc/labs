@@ -3,8 +3,8 @@ import {
   InMemoryProgram,
   JsScript,
   TypeScriptCompiler,
-} from "@commontools/js-compiler";
-import { TestStaticCache } from "@commontools/static/utils";
+} from "@commonfabric/js-compiler";
+import { TestStaticCache } from "@commonfabric/static/utils";
 
 const types = await getTypeScriptEnvironmentTypes(new TestStaticCache());
 

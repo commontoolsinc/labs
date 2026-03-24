@@ -16,7 +16,7 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth email-pattern-launcher/overrideAuth
+ * 3. Link: cf piece link google-auth/auth email-pattern-launcher/overrideAuth
  */
 import {
   //compileAndRun,
@@ -29,7 +29,7 @@ import {
   pattern,
   UI,
   when,
-} from "commontools";
+} from "commonfabric";
 import GmailExtractor, { type Auth } from "../core/gmail-extractor.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
@@ -117,7 +117,7 @@ function buildGmailQuery(entries: RegistryEntry[]): string { // Build "from:@dom
 
 interface PatternInput {
   // Optional: Link auth directly from a Google Auth piece
-  // Use: ct piece link googleAuthPiece/auth emailPatternLauncher/overrideAuth
+  // Use: cf piece link googleAuthPiece/auth emailPatternLauncher/overrideAuth
   overrideAuth?: Auth;
 }
 

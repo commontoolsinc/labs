@@ -9,9 +9,9 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
-import type { Schema } from "@commontools/api/schema";
-import { stringArraySchema, stringSchema } from "@commontools/runner/schemas";
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import type { Schema } from "@commonfabric/api/schema";
+import { stringArraySchema, stringSchema } from "@commonfabric/runner/schemas";
 import { createCellController } from "../../core/cell-controller.ts";
 
 // TODO(v2-token-migration): Migrate this component to component-level tokens,

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, pattern } from "commontools";
+import { type Cell, Default, handler, lift, pattern } from "commonfabric";
 
 interface SearchResult {
   id: string;

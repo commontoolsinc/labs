@@ -12,7 +12,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import Suggestion from "../system/suggestion.tsx";
 
 // ===== Types =====

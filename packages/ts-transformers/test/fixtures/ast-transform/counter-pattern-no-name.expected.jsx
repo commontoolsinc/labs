@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, Default, handler, NAME, pattern, str, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, Default, handler, NAME, pattern, str, UI } from "commonfabric";
 interface CounterState {
     value: Cell<number>;
 }

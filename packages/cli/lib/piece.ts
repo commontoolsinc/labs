@@ -1,14 +1,14 @@
-import { createSession, isDID, Session } from "@commontools/identity";
+import { createSession, isDID, Session } from "@commonfabric/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
-import { Runtime, RuntimeProgram, UI, VNode } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache";
-import { extractUserCode, pieceId, PieceManager } from "@commontools/piece";
-import { PiecesController } from "@commontools/piece/ops";
+import { Runtime, RuntimeProgram, UI, VNode } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
+import { extractUserCode, pieceId, PieceManager } from "@commonfabric/piece";
+import { PiecesController } from "@commonfabric/piece/ops";
 import { dirname, join } from "@std/path";
-import { FileSystemProgramResolver } from "@commontools/js-compiler";
-import { setLLMUrl } from "@commontools/llm";
-import { isRecord } from "@commontools/utils/types";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { setLLMUrl } from "@commonfabric/llm";
+import { isRecord } from "@commonfabric/utils/types";
 import { isHandlerCell } from "../../fuse/callables.ts";
 import { awaitSyncWithTimeout, experimentalOptionsFromEnv } from "./utils.ts";
 import {
@@ -16,7 +16,7 @@ import {
   type CallableExecutionDeps,
   type CallableResolution,
   type CliRuntimeErrorRecord,
-  CT_RUNTIME_ERROR_LOG,
+  CF_RUNTIME_ERROR_LOG,
   detectCallableKind,
   executeResolvedCallable,
 } from "./callable.ts";
@@ -131,8 +131,8 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
       }
     },
   });
-  (runtime as Runtime & { [CT_RUNTIME_ERROR_LOG]?: CliRuntimeErrorRecord[] })[
-    CT_RUNTIME_ERROR_LOG
+  (runtime as Runtime & { [CF_RUNTIME_ERROR_LOG]?: CliRuntimeErrorRecord[] })[
+    CF_RUNTIME_ERROR_LOG
   ] = runtimeErrors;
 
   if (!(await runtime.healthCheck())) {
@@ -475,7 +475,7 @@ export async function executePieceCallable(
       helpText: parsed.showHelpJson
         ? renderExecHelpJson(resolved.commandSpec)
         : renderPieceCallHelp(
-          deps.helpCommandPrefix ?? `ct piece call ... ${callableName}`,
+          deps.helpCommandPrefix ?? `cf piece call ... ${callableName}`,
           resolved.commandSpec,
         ),
       parsed,
@@ -529,7 +529,7 @@ export async function linkPieces(
     const errors: string[] = [];
 
     // Check source piece exists by verifying it has a source/process cell
-    // (i.e., was created via ct piece new, not just written to with ct piece set)
+    // (i.e., was created via cf piece new, not just written to with cf piece set)
     const sourcePiece = await pieces.get(sourcePieceId, false);
     const sourceHasProcess =
       sourcePiece.getCell().getSourceCell() !== undefined;

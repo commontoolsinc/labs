@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, pattern } from "commonfabric";
 // CT-1334: computed() with template literal capturing pattern parameter.
 // The `token` from pattern destructuring must be captured as an explicit
 // input to the derived derive() call, so the callback receives the

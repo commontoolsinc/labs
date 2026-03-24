@@ -1,8 +1,8 @@
-import { env, waitFor } from "@commontools/integration";
+import { env, waitFor } from "@commonfabric/integration";
 import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
 import { ShellIntegration } from "../../integration/shell-utils.ts";
-import type { Page } from "@commontools/integration";
+import type { Page } from "@commonfabric/integration";
 
 const { FRONTEND_URL } = env;
 

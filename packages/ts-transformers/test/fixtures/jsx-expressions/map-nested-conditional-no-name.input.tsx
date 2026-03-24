@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commontools";
+import { cell, pattern, UI } from "commonfabric";
 
 // FIXTURE: map-nested-conditional-no-name
 // Verifies: same nested conditional map transforms work when pattern param is typed as any

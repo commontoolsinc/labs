@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { derive } from "commonfabric";
 declare const flag: boolean;
 // FIXTURE: schema-generation-derive-multiple-returns
 // Verifies: derive() with multiple return paths infers a union output schema

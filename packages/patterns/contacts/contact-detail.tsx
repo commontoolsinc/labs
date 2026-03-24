@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, Default, NAME, pattern, UI, Writable } from "commontools";
+import { computed, Default, NAME, pattern, UI, Writable } from "commonfabric";
 
 /** Raw data shape - use in collection patterns */
 export interface Contact {

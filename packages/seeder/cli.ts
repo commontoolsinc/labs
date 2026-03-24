@@ -1,10 +1,10 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache";
-import { setLLMUrl } from "@commontools/llm";
-import { createSession, Identity } from "@commontools/identity";
-import { PieceManager } from "@commontools/piece";
-import { sleep } from "@commontools/utils/sleep";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
+import { setLLMUrl } from "@commonfabric/llm";
+import { createSession, Identity } from "@commonfabric/identity";
+import { PieceManager } from "@commonfabric/piece";
+import { sleep } from "@commonfabric/utils/sleep";
 import { Processor } from "./processor.ts";
 import { scenarios } from "./scenarios.ts";
 import { ExecutedScenario } from "./interfaces.ts";

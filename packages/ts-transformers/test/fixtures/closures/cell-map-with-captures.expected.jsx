@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, cell, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, cell, pattern, UI } from "commonfabric";
 interface State {
     values: number[];
     multiplier: number;

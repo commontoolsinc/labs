@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-chip/ct-chip.ts";
-import { isCellHandle } from "@commontools/runtime-client";
+import { isCellHandle } from "@commonfabric/runtime-client";
 
 /**
  * Attachment data structure

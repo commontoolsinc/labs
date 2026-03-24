@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell } from "commontools";
+import { Cell } from "commonfabric";
 
 // FIXTURE: literal-widen-explicit-type-args
 // Verifies: Cell.of with explicit type arguments injects schema matching the type arg

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, NAME, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, NAME, pattern, UI } from "commonfabric";
 // FIXTURE: conditional-empty-check
 // Verifies: !cell.get().length && <JSX> is transformed to when() with derive() predicate
 //   !items.get().length && <span> → when(derive({items}, ({items}) => !items.get().length), <span>)

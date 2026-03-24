@@ -1,10 +1,10 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * action() results used as event handlers in JSX. action() is an
  * opaque origin but handler results are typically used directly
  * (no property access), so opaque classification doesn't affect them.
  */
-import { action, pattern, UI, Writable } from "commontools";
+import { action, pattern, UI, Writable } from "commonfabric";
 interface State {
     label: string;
 }

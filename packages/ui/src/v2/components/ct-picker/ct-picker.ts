@@ -4,8 +4,8 @@ import {
   createArrayCellController,
   createCellController,
 } from "../../core/cell-controller.ts";
-import { type CellHandle } from "@commontools/runtime-client";
-import { numberSchema } from "@commontools/runner/schemas";
+import { type CellHandle } from "@commonfabric/runtime-client";
+import { numberSchema } from "@commonfabric/runner/schemas";
 import "../ct-render/ct-render.ts";
 
 /**

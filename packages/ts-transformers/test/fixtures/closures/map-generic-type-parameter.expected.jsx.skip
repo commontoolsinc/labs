@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, OpaqueRef } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern, OpaqueRef } from "commonfabric";
 interface Email {
     id: string;
     content: string;

@@ -11,13 +11,13 @@
  * - Invalid event handling (graceful rejection)
  * - Dense scope (100 unique tags in 1 scope)
  *
- * Run: deno task ct test packages/patterns/experimental/folksonomy-aggregator.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/experimental/folksonomy-aggregator.test.tsx --verbose
  *
  * Note: Uses module-scoped handlers with explicit state parameters
  * instead of action() closures to avoid "reactive reference outside
  * reactive context" errors when accessing reactive proxy objects.
  */
-import { Cell, computed, handler, pattern, Stream } from "commontools";
+import { Cell, computed, handler, pattern, Stream } from "commonfabric";
 import AggregatorPattern from "./folksonomy-aggregator.tsx";
 
 export interface TagEvent {

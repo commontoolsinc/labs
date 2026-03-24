@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { when, pattern, UI, NAME } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { when, pattern, UI, NAME } from "commonfabric";
 interface State {
     enabled: boolean;
     message: string;

@@ -9,7 +9,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import { default as Note, type NotePiece } from "../notes/note.tsx";
 

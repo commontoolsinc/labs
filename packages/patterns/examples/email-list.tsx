@@ -7,7 +7,7 @@ import {
   VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { Email } from "../google/core/gmail-importer.tsx";
 import { Contact } from "../contacts/contact-detail.tsx";
 

@@ -1,4 +1,4 @@
-# Test Plan: `ct exec` + FUSE Callable Files
+# Test Plan: `cf exec` + FUSE Callable Files
 
 ## Reconciliation
 
@@ -14,15 +14,15 @@ These adjustments do not change scope or cost from the approved strategy.
 
 ### `Real FUSE interaction harness`
 
-- **What it does**: Starts from a local toolshed, creates a temp identity and space, deploys a deterministic fixture pattern, mounts a real FUSE filesystem, performs real filesystem reads and writes, runs `ct exec`, and inspects resulting piece state and tool stdout.
-- **What it exposes**: Mounted file paths, CLI stdout/stderr, exit codes, observed file contents, and state verification through existing `ct piece get`/`ct piece inspect` style commands.
+- **What it does**: Starts from a local toolshed, creates a temp identity and space, deploys a deterministic fixture pattern, mounts a real FUSE filesystem, performs real filesystem reads and writes, runs `cf exec`, and inspects resulting piece state and tool stdout.
+- **What it exposes**: Mounted file paths, CLI stdout/stderr, exit codes, observed file contents, and state verification through existing `cf piece get`/`cf piece inspect` style commands.
 - **Estimated complexity**: Medium-high.
 - **Tests depending on it**: 1, 2, 3, 4.
-- **Implementation notes**: Build this as `packages/cli/integration/fuse-exec.sh` plus `packages/cli/integration/pattern/fuse-exec.tsx`. It requires a reachable local `API_URL`, `CT_CLI_INTEGRATION_USE_LOCAL=1`, and a FUSE provider on the test machine.
+- **Implementation notes**: Build this as `packages/cli/integration/fuse-exec.sh` plus `packages/cli/integration/pattern/fuse-exec.tsx`. It requires a reachable local `API_URL`, `CF_CLI_INTEGRATION_USE_LOCAL=1`, and a FUSE provider on the test machine.
 
 ### `CLI exec focused harness`
 
-- **What it does**: Exercises `ct exec` resolution, argv handling, schema-derived flag parsing, help rendering, and execution dispatch without requiring a live mount.
+- **What it does**: Exercises `cf exec` resolution, argv handling, schema-derived flag parsing, help rendering, and execution dispatch without requiring a live mount.
 - **What it exposes**: Temp mount-state directories, synthetic mounted paths and `meta.json` files, stubbed manager/piece/runtime collaborators, captured stdout/stderr, and structured error assertions.
 - **Estimated complexity**: Medium.
 - **Tests depending on it**: 5, 6, 7.
@@ -38,7 +38,7 @@ These adjustments do not change scope or cost from the approved strategy.
 
 ### `Mount-state helper harness`
 
-- **What it does**: Validates persisted mount metadata, absolute-path normalization, stale-entry cleanup, and shim generation independently of `ct exec`.
+- **What it does**: Validates persisted mount metadata, absolute-path normalization, stale-entry cleanup, and shim generation independently of `cf exec`.
 - **What it exposes**: Temp state directories, synthetic mount entries, shim file contents, and liveness decisions.
 - **Estimated complexity**: Low.
 - **Tests depending on it**: 5, 10.
@@ -46,7 +46,7 @@ These adjustments do not change scope or cost from the approved strategy.
 
 ### `Runner semantic guardrail harness`
 
-- **What it does**: Preserves the existing semantic baselines that `ct exec` relies on for schema lookup and tool-shape formatting.
+- **What it does**: Preserves the existing semantic baselines that `cf exec` relies on for schema lookup and tool-shape formatting.
 - **What it exposes**: `asSchemaFromLinks()` behavior, PatternToolResult schema formatting, and real pattern-tool execution examples.
 - **Estimated complexity**: Low.
 - **Tests depending on it**: 11, 12.
@@ -62,12 +62,12 @@ These adjustments do not change scope or cost from the approved strategy.
 
 ## Test plan
 
-1. **Name**: Mounted handler files under `pieces/...` are readable, executable through `ct exec`, and still accept legacy write-through.
+1. **Name**: Mounted handler files under `pieces/...` are readable, executable through `cf exec`, and still accept legacy write-through.
    **Type**: scenario
    **Disposition**: new
    **Harness**: `Real FUSE interaction harness`
-   **Preconditions**: A local toolshed is running; the deterministic fixture pattern is deployed into a temp space; the space is mounted through `ct fuse mount`; the fixture exposes one handler with required scalar input.
-   **Actions**: List the mounted piece directory; assert the expected `*.handler` file exists under `input/` or `result/`; read the file and capture the first line; run `ct exec <handler-file> --help`; run `ct exec <handler-file> invoke ...`; run `ct exec <handler-file> ...` again without an explicit verb; inspect piece state after each call; write JSON directly with `echo ... > <handler-file>` and inspect piece state again.
+   **Preconditions**: A local toolshed is running; the deterministic fixture pattern is deployed into a temp space; the space is mounted through `cf fuse mount`; the fixture exposes one handler with required scalar input.
+   **Actions**: List the mounted piece directory; assert the expected `*.handler` file exists under `input/` or `result/`; read the file and capture the first line; run `cf exec <handler-file> --help`; run `cf exec <handler-file> invoke ...`; run `cf exec <handler-file> ...` again without an explicit verb; inspect piece state after each call; write JSON directly with `echo ... > <handler-file>` and inspect piece state again.
    **Expected outcome**: Per the User description, the Implementation plan `User-visible behavior` items 1, 3, 4, 5, 6, and 10, and the FUSE spec read/write semantics, the handler remains present as `*.handler`, `head -n1` starts with `#!` and contains ` exec`, top-level `--help` succeeds without invoking the handler, explicit and implicit `invoke` both exit `0` and mutate the backing piece state through the mounted handler within a generous 5 second timeout, and the legacy write path still succeeds and mutates the same state.
    **Interactions**: CLI command parsing, mount-state lookup, FUSE daemon reads and writes, mounted-file to cell resolution, piece controller writes, runtime idle/sync waiting, and kernel cache invalidation.
 
@@ -76,16 +76,16 @@ These adjustments do not change scope or cost from the approved strategy.
    **Disposition**: new
    **Harness**: `Real FUSE interaction harness`
    **Preconditions**: The mounted fixture exposes one pattern tool with one bound `extraParam`, plus deterministic JSON output that depends on both user input and the bound parameter.
-   **Actions**: List the mounted piece directory and the relevant `.json` sibling; assert a `*.tool` entry exists; assert the old `pattern/extraParams` internals are not exposed as normal mounted children; read the tool file and capture the first line; run `ct exec <tool-file> --help`; run `ct exec <tool-file> run --flag ...`; run `ct exec <tool-file> ...` again without an explicit verb; capture stdout for both runs.
+   **Actions**: List the mounted piece directory and the relevant `.json` sibling; assert a `*.tool` entry exists; assert the old `pattern/extraParams` internals are not exposed as normal mounted children; read the tool file and capture the first line; run `cf exec <tool-file> --help`; run `cf exec <tool-file> run --flag ...`; run `cf exec <tool-file> ...` again without an explicit verb; capture stdout for both runs.
    **Expected outcome**: Per the User description, the Implementation plan `User-visible behavior` items 2, 3, 4, 5, 6, 8, and 9, and the FUSE spec path and JSON mapping, the mounted surface shows `*.tool` instead of expanded tool internals, reading the file returns a shebang-backed script whose first line contains ` exec`, top-level help renders schema-driven usage, explicit and implicit `run` both exit `0` within 5 seconds, and stdout is the expected JSON result that reflects both the provided flags and the bound `extraParams`.
-   **Interactions**: FUSE callable discovery, callable JSON-sigil rendering, `ct exec` schema translation, runtime pattern execution, stdout serialization, and mounted tree layout.
+   **Interactions**: FUSE callable discovery, callable JSON-sigil rendering, `cf exec` schema translation, runtime pattern execution, stdout serialization, and mounted tree layout.
 
-3. **Name**: `ct exec <tool-file> run --help` is parsed as the schema field when the tool input schema contains `help`, while `ct exec <tool-file> --help` still prints top-level help.
+3. **Name**: `cf exec <tool-file> run --help` is parsed as the schema field when the tool input schema contains `help`, while `cf exec <tool-file> --help` still prints top-level help.
    **Type**: scenario
    **Disposition**: new
    **Harness**: `Real FUSE interaction harness`
    **Preconditions**: The fixture tool input schema includes a top-level field literally named `help`, and tool output visibly reflects the field value so the execution path is observable.
-   **Actions**: Run `ct exec <tool-file> --help`; then run `ct exec <tool-file> run --help <value>`; capture stdout, stderr, and exit code for both invocations.
+   **Actions**: Run `cf exec <tool-file> --help`; then run `cf exec <tool-file> run --help <value>`; capture stdout, stderr, and exit code for both invocations.
    **Expected outcome**: Per the User description and the Implementation plan `User-visible behavior` items 6 and 7 plus Task 5, the top-level invocation prints command help and does not execute the tool, while the post-verb invocation treats `--help` as the schema field, executes successfully, and returns output incorporating the provided field value instead of CLI help text.
    **Interactions**: Raw argv preservation in the CLI, schema-derived option parsing, help rendering, and end-to-end tool execution.
 
@@ -98,7 +98,7 @@ These adjustments do not change scope or cost from the approved strategy.
    **Expected outcome**: Per the Implementation plan `Important contracts` items 2, 6, and 7 and Task 5, plus the FUSE spec path scheme, the `entities/...` path is accepted, both paths address the same underlying callable cell, handler side effects are identical, and tool stdout is identical for the same inputs.
    **Interactions**: Shared mounted-callable path parser, entity resolution under FUSE, piece metadata lookup, CLI resolution, and runtime execution.
 
-5. **Name**: `ct exec` resolves mounted callable files from persisted mount state and sibling `meta.json`, not from display-name guesses.
+5. **Name**: `cf exec` resolves mounted callable files from persisted mount state and sibling `meta.json`, not from display-name guesses.
    **Type**: integration
    **Disposition**: new
    **Harness**: `CLI exec focused harness` plus `Mount-state helper harness`
@@ -107,16 +107,16 @@ These adjustments do not change scope or cost from the approved strategy.
    **Expected outcome**: Per the Implementation plan `Important contracts` items 2, 3, 4, and 5 and the FUSE spec piece naming rules, the resolver chooses the longest matching mountpoint, requires persisted mount metadata, treats identity and mountpoint as absolute paths, ignores the de-duped display name as a stable identifier, and uses sibling `meta.json` to recover the canonical piece ID.
    **Interactions**: Filesystem temp state, mount-state lookup, mounted-piece metadata parsing, and CLI resolution logic.
 
-6. **Name**: `ct exec` rejects invalid paths and invalid arguments with readable CLI errors instead of stack traces.
+6. **Name**: `cf exec` rejects invalid paths and invalid arguments with readable CLI errors instead of stack traces.
    **Type**: boundary
    **Disposition**: new
    **Harness**: `CLI exec focused harness`
    **Preconditions**: Command parsing and resolution helpers are available with stubbed collaborators.
-   **Actions**: Run `ct exec` against a non-mounted absolute path, a mounted non-callable file, a stale mount entry, a `.tool` path with an unknown flag, a missing required field, an invalid enum value, and a mixed `--json` plus generated-flags invocation.
+   **Actions**: Run `cf exec` against a non-mounted absolute path, a mounted non-callable file, a stale mount entry, a `.tool` path with an unknown flag, a missing required field, an invalid enum value, and a mixed `--json` plus generated-flags invocation.
    **Expected outcome**: Per the User description, the Implementation plan `User-visible behavior` item 10 and `Keep schema flags simple and predictable`, each case exits non-zero with a clear CLI error describing the problem, and none of the cases surface a raw stack trace.
    **Interactions**: CLI parser, mount resolution, schema-derived flag validation, and error rendering.
 
-7. **Name**: Schema-derived parsing covers the supported flag surface for `ct exec`.
+7. **Name**: Schema-derived parsing covers the supported flag surface for `cf exec`.
    **Type**: integration
    **Disposition**: new
    **Harness**: `CLI exec focused harness`
@@ -157,16 +157,16 @@ These adjustments do not change scope or cost from the approved strategy.
     **Disposition**: extend
     **Harness**: `Runner semantic guardrail harness`
     **Preconditions**: Runner tests can construct cells whose schema must be recovered through linked pattern metadata rather than from the child cell directly.
-    **Actions**: Extend the existing `asSchemaFromLinks()` characterization with a callable-shaped child cell representative of the `ct exec` lookup path and assert the resolved schema is the linked schema.
+    **Actions**: Extend the existing `asSchemaFromLinks()` characterization with a callable-shaped child cell representative of the `cf exec` lookup path and assert the resolved schema is the linked schema.
     **Expected outcome**: Per the User description, the Implementation plan `Important contracts` item 1, and the existing runner schema-resolution contract, `asSchemaFromLinks()` resolves the linked schema instead of returning `undefined`, ensuring callable discovery and help generation use the backing schema rather than stale local metadata.
     **Interactions**: Runner cells, source-link traversal, and schema resolution only.
 
-12. **Name**: Pattern-tool schema formatting and execution remain suitable as `ct exec` help and runtime baselines.
+12. **Name**: Pattern-tool schema formatting and execution remain suitable as `cf exec` help and runtime baselines.
     **Type**: regression
     **Disposition**: extend
     **Harness**: `Runner semantic guardrail harness`
     **Preconditions**: Existing PatternToolResult examples and mixed handler plus `patternTool(...)` execution examples remain available in the runner tests.
-    **Actions**: Extend the schema-format examples to cover the concrete pattern-tool shapes used by the `ct exec` fixture and run the existing bound-`extraParams` pattern-tool examples.
+    **Actions**: Extend the schema-format examples to cover the concrete pattern-tool shapes used by the `cf exec` fixture and run the existing bound-`extraParams` pattern-tool examples.
     **Expected outcome**: Per the User description, the Implementation plan `User-visible behavior` items 8 and 9, and the existing runner guardrails, help formatting shows the user-facing `extraParams` shape rather than leaking internal `pattern` structure, output-schema heuristics stay display-only, and bound-`extraParams` pattern tools still run to completion with the expected structured result.
     **Interactions**: Runner schema formatter, pattern-tool metadata, and runtime execution.
 
@@ -174,10 +174,10 @@ These adjustments do not change scope or cost from the approved strategy.
 
 ### Covered action space
 
-- Real mounted behavior for reading `*.handler` and `*.tool` files, executing them with `ct exec`, and preserving legacy handler writes.
+- Real mounted behavior for reading `*.handler` and `*.tool` files, executing them with `cf exec`, and preserving legacy handler writes.
 - Both callable path families the plan explicitly supports: `pieces/...` and `entities/...`.
 - Help and parsing behavior that the user explicitly called out: top-level help, default verbs, post-verb `--help` precedence, generated flags, and `--json`.
-- Mount-state and shebang-shim behavior that `ct exec` depends on outside the daemon.
+- Mount-state and shebang-shim behavior that `cf exec` depends on outside the daemon.
 - FUSE layout and representation rules: readable callable files, `.tool` synthesis, and callable sigils inside `.json` siblings.
 - Schema resolution and PatternToolResult formatting guardrails from the runner layer that inform callable discovery and help text.
 
@@ -190,6 +190,6 @@ These adjustments do not change scope or cost from the approved strategy.
 
 ### Risks carried by the exclusions
 
-- Without direct `./file.tool` execution coverage, the feature can still regress on executable-bit or shell-dispatch behavior without failing this plan. That is acceptable for this change because the feature contract is `ct exec`, not direct shell execution.
-- Without broader `llm-dialog` refactors, `ct exec` and LLM tool execution may continue to share behavior only by convention rather than through a common helper. The differential and runner guardrail tests reduce this risk but do not remove it entirely.
+- Without direct `./file.tool` execution coverage, the feature can still regress on executable-bit or shell-dispatch behavior without failing this plan. That is acceptable for this change because the feature contract is `cf exec`, not direct shell execution.
+- Without broader `llm-dialog` refactors, `cf exec` and LLM tool execution may continue to share behavior only by convention rather than through a common helper. The differential and runner guardrail tests reduce this risk but do not remove it entirely.
 - If FUSE is unavailable in a given environment, helper and focused tests can still go green while the actual mounted flow remains unproven there. The real integration script is therefore an acceptance gate for feature sign-off on supported local environments.

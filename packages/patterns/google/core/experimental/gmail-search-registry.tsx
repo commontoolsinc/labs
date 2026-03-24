@@ -26,7 +26,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // ============================================================================
 // TYPES

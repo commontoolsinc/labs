@@ -5,9 +5,9 @@ import {
   InMemoryProgram,
   JsScript,
   TypeScriptCompiler,
-} from "@commontools/js-compiler";
+} from "@commonfabric/js-compiler";
 import { UnsafeEvalRuntime } from "../src/harness/eval-runtime.ts";
-import { StaticCacheFS } from "@commontools/static";
+import { StaticCacheFS } from "@commonfabric/static";
 
 const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
 

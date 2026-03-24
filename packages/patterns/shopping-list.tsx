@@ -24,7 +24,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import StoreMapper from "./store-mapper.tsx";
 
 // Item with optional aisle override for manual corrections

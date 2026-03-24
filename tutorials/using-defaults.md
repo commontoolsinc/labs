@@ -87,7 +87,7 @@ import {
   pattern,
   UI,
   type Cell,
-} from "commontools";
+} from "commonfabric";
 
 interface CounterState {
   count: Default<number, 100>;
@@ -156,7 +156,7 @@ import {
   pattern,
   UI,
   type Cell,
-} from "commontools";
+} from "commonfabric";
 
 interface TodoListState {
   items: Default<string[], ["Pay bill", "Write code", "Dinner with friends"]>;
@@ -209,7 +209,7 @@ import {
   pattern,
   UI,
   type Cell,
-} from "commontools";
+} from "commonfabric";
 
 interface TodoListState {
   items: Default<string[], ["Pay bill", "Write code", "Dinner with friends"]>;
@@ -348,7 +348,7 @@ import {
   pattern,
   UI,
   type Cell,
-} from "commontools";
+} from "commonfabric";
 
 interface Player {
   playerName: string;

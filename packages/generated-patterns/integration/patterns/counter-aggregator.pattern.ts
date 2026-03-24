@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, pattern, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface CounterEntry {
   id?: string;

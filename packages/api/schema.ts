@@ -6,9 +6,9 @@
  * TypeScript compilation overhead for patterns that don't need schema inference.
  *
  * Usage:
- *   import type { Schema } from "commontools/schema";
+ *   import type { Schema } from "commonfabric/schema";
  *   // or
- *   import type { Schema } from "@commontools/api/schema";
+ *   import type { Schema } from "@commonfabric/api/schema";
  *
  * When imported, this module also augments the function types from the main API
  * (PatternFunction, DeriveFunction, etc.) with schema-based overloads.
@@ -24,14 +24,14 @@ import type {
   PatternFactory,
   SELF,
   Stream,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Helper Types =====
 
 /**
  * Helper type to recursively remove `readonly` properties from type `T`.
  *
- * (Duplicated from @commontools/utils/types.ts, but we want to keep this
+ * (Duplicated from @commonfabric/utils/types.ts, but we want to keep this
  * independent for now)
  */
 export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
@@ -322,7 +322,7 @@ export type SchemaWithoutCell<
 
 // ===== Module Augmentation for Schema-based Overloads =====
 
-declare module "commontools" {
+declare module "commonfabric" {
   // Augment PatternFunction with schema-based overloads
   interface PatternFunction {
     // Function + two schemas: infer types from JSONSchema literals
@@ -380,9 +380,9 @@ declare module "commontools" {
   // Augment WishFunction with schema-based overloads
   interface WishFunction {
     <S extends JSONSchema = JSONSchema>(
-      target: Opaque<import("commontools").WishParams>,
+      target: Opaque<import("commonfabric").WishParams>,
       schema: S,
-    ): OpaqueRef<import("commontools").WishState<Schema<S>>>;
+    ): OpaqueRef<import("commonfabric").WishState<Schema<S>>>;
   }
 
   // Augment IResolvable with schema-based getArgumentCell overload
@@ -397,6 +397,6 @@ declare module "commontools" {
     of<S extends JSONSchema>(
       value: Schema<S>,
       schema: S,
-    ): import("commontools").Apply<Wrap, Schema<S>>;
+    ): import("commonfabric").Apply<Wrap, Schema<S>>;
   }
 }

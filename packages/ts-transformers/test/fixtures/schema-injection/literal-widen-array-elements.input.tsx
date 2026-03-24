@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell } from "commontools";
+import { cell } from "commonfabric";
 
 // FIXTURE: literal-widen-array-elements
 // Verifies: array literals produce { type: "array", items: { type: T } } with widened element types

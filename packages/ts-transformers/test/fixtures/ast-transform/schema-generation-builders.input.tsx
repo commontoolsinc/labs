@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, handler, pattern, UI } from "commontools";
+import { Cell, handler, pattern, UI } from "commonfabric";
 
 type TodoState = {
   items: Cell<string[]>;

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { derive } from "commonfabric";
 declare const total: number;
 // FIXTURE: schema-generation-derive-untyped
 // Verifies: derive() with no generic type args infers schemas from the declared source type

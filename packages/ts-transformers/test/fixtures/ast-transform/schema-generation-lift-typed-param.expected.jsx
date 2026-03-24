@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { lift } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { lift } from "commonfabric";
 // FIXTURE: schema-generation-lift-typed-param
 // Verifies: lift() with a primitive typed parameter generates scalar input and output schemas
 //   lift((value: number) => value * 2) → lift({ type: "number" }, { type: "number" }, fn)

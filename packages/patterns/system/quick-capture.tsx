@@ -13,7 +13,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import Note from "../notes/note.tsx";
 import Notebook from "../notes/notebook.tsx";
 import { listMentionable, listRecent } from "./common-tools.tsx";

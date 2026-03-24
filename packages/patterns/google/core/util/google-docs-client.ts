@@ -17,7 +17,7 @@
  * const comments = await client.listComments(fileId);
  * ```
  */
-import { Cell, getPatternEnvironment } from "commontools";
+import { Cell, getPatternEnvironment } from "commonfabric";
 
 const env = getPatternEnvironment();
 

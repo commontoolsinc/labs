@@ -1,15 +1,15 @@
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseView, createDefaultAppState } from "./BaseView.ts";
-import { KeyStore } from "@commontools/identity";
+import { KeyStore } from "@commonfabric/identity";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { DebuggerController } from "../lib/debugger-controller.ts";
 import { Task, TaskStatus } from "@lit/task";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
-import { type NameSchema, stringSchema } from "@commontools/runner/schemas";
+import { type NameSchema, stringSchema } from "@commonfabric/runner/schemas";
 import { updatePageTitle } from "../../shared/mod.ts";
 import { KeyboardController } from "../lib/keyboard-router.ts";
-import { NAME, PageHandle } from "@commontools/runtime-client";
+import { NAME, PageHandle } from "@commonfabric/runtime-client";
 
 export class XAppView extends BaseView {
   static override styles = css`

@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * Regression test: computed() inside ifElse branch should not double-wrap .get()
  *
@@ -10,7 +10,7 @@ import * as __ctHelpers from "commontools";
  * Bug: secondToggle.get() was returning CellImpl instead of boolean
  * Fix: Added isInsideSafeCallbackWrapper check in rewriteChildExpressions
  */
-import { computed, ifElse, pattern, UI, Writable } from "commontools";
+import { computed, ifElse, pattern, UI, Writable } from "commonfabric";
 // FIXTURE: nested-computed-in-ifelse
 // Verifies: computed() inside ifElse branches transforms to derive() without double-wrapping .get()
 //   computed(() => { secondToggle.get(); ... }) → derive({ secondToggle }, ({ secondToggle }) => { secondToggle.get(); ... })

@@ -15,7 +15,7 @@
  *
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commonfabric";
 import ParkingCoordinator, { DEFAULT_SPOTS } from "./main.tsx";
 import type { ParkingSpot, Person, SpotRequest } from "./main.tsx";
 

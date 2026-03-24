@@ -9,7 +9,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // NOTE: This example uses [ID] to demonstrate advanced array manipulation features
 // and ensure stable references when items are inserted/removed at the front of the array.

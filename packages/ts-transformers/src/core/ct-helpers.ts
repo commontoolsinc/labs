@@ -3,7 +3,7 @@ import { TransformationContext } from "./mod.ts";
 
 export const CT_HELPERS_IDENTIFIER = "__ctHelpers";
 
-const CT_HELPERS_SPECIFIER = "commontools";
+const CT_HELPERS_SPECIFIER = "commonfabric";
 
 const HELPERS_STMT =
   `import * as ${CT_HELPERS_IDENTIFIER} from "${CT_HELPERS_SPECIFIER}";`;
@@ -175,7 +175,7 @@ function getCTHelpersIdentifier(
   if (!ts.isImportDeclaration(statement)) return;
   const { importClause, moduleSpecifier } = statement;
 
-  // Check specifier is "commontools"
+  // Check specifier is "commonfabric"
   if (!ts.isStringLiteral(moduleSpecifier)) return;
   if (moduleSpecifier.text !== CT_HELPERS_SPECIFIER) return;
 

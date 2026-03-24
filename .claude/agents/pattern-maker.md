@@ -25,7 +25,7 @@ Get something running quickly, then improve it. Don't write finished code upfron
 ## Workflow: Sketch → Run → Iterate
 
 1. **Sketch** — Types + one handler + minimal UI. Just enough to render something.
-2. **Run** — `deno task ct check main.tsx` — actually see it in browser
+2. **Run** — `deno task cf check main.tsx` — actually see it in browser
 3. **Check** — Does it render? Does clicking do anything? Console errors?
 4. **Iterate** — Add next piece, run again
 
@@ -33,7 +33,7 @@ Get something running quickly, then improve it. Don't write finished code upfron
 
 ```
 # After each change:
-deno task ct check main.tsx
+deno task cf check main.tsx
 ```
 
 ## Tests

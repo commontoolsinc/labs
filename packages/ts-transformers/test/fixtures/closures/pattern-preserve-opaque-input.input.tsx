@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, type Writable, UI } from "commontools";
+import { pattern, type Writable, UI } from "commonfabric";
 
 interface State {
   foo: string;

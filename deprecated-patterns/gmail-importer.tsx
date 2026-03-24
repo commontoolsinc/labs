@@ -10,7 +10,7 @@ import {
   pattern,
   str,
   UI,
-} from "commontools";
+} from "commonfabric";
 import TurndownService from "turndown";
 
 type CFC<T, C extends string> = T;

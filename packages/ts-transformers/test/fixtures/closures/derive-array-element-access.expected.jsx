@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-array-element-access
 // Verifies: an array variable accessed by index inside derive is captured as a whole array
 //   derive(value, fn) → derive(schema, schema, { value, factors }, fn)

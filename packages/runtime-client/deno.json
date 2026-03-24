@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/runtime-client",
+  "name": "@commonfabric/runtime-client",
   "tasks": {
     "test": "echo 'No tests to run.'",
     "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS ./integration/*.test.ts"

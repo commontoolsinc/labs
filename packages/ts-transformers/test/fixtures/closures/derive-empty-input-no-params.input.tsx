@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, derive, pattern } from "commontools";
+import { Writable, derive, pattern } from "commonfabric";
 
 // FIXTURE: derive-empty-input-no-params
 // Verifies: zero-parameter callback with empty `{}` input still captures closed-over cells

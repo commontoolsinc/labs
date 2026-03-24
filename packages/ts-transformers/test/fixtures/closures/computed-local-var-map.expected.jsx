@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * Regression: .map() on a computed result assigned to a local variable
  * inside another computed() should NOT be transformed to .mapWithPattern().
@@ -6,7 +6,7 @@ import * as __ctHelpers from "commontools";
  * Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
  * so `localVar` is a plain array and .mapWithPattern() doesn't exist on it.
  */
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
 interface Item {
     name: string;
     price: number;

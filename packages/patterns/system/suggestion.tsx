@@ -16,7 +16,7 @@ import {
   wish,
   type WishState,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import {
   bash,
   fetchAndRunPattern,

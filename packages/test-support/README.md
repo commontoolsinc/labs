@@ -1,4 +1,4 @@
-# @commontools/test-support
+# @commonfabric/test-support
 
 Shared testing infrastructure for CommonTools packages. This package currently
 exports a configurable fixture runner that powers schema generator and
@@ -7,7 +7,7 @@ transformer tests without duplicating boilerplate code.
 ## Usage
 
 ```ts
-import { defineFixtureSuite } from "@commontools/test-support/fixture-runner";
+import { defineFixtureSuite } from "@commonfabric/test-support/fixture-runner";
 
 await defineFixtureSuite({
   suiteName: "Schema fixtures",

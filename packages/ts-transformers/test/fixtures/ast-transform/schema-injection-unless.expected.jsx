@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { unless, pattern, UI, NAME } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { unless, pattern, UI, NAME } from "commonfabric";
 interface State {
     value: string | null;
     defaultValue: string;

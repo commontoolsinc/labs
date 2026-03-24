@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, handler, NAME, pattern, str, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, handler, NAME, pattern, str, UI } from "commonfabric";
 interface PatternState {
     value: number;
 }

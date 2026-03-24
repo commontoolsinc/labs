@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * Regression test: action() referenced inside explicit computed() in JSX
  *
@@ -6,7 +6,7 @@ import * as __ctHelpers from "commontools";
  * (not encouraged, but should still work). The action is referenced INSIDE
  * the computed expression, so it must be captured in the derive wrapper.
  */
-import { action, Cell, computed, pattern, UI } from "commontools";
+import { action, Cell, computed, pattern, UI } from "commonfabric";
 interface Card {
     title: string;
     description: string;

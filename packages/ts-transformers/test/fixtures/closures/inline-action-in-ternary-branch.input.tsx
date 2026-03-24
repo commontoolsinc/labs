@@ -7,7 +7,7 @@
  * to a handler, and the Cell reference (state.isEditing) must be properly
  * captured in the derive wrapper created for the computed.
  */
-import { Cell, computed, pattern, UI } from "commontools";
+import { Cell, computed, pattern, UI } from "commonfabric";
 
 interface Card {
   title: string;

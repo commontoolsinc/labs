@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell } from "commonfabric";
 // FIXTURE: literal-widen-array-elements
 // Verifies: array literals produce { type: "array", items: { type: T } } with widened element types
 //   cell([1, 2, 3]) → cell([...], { type: "array", items: { type: "number" } })

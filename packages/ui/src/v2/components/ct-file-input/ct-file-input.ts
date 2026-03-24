@@ -2,8 +2,8 @@ import { css, html, type TemplateResult } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import type { ButtonSize, ButtonVariant } from "../ct-button/ct-button.ts";
-import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
-import type { Schema } from "@commontools/api/schema";
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import type { Schema } from "@commonfabric/api/schema";
 import { createArrayCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {

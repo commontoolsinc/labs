@@ -91,11 +91,11 @@ const path = ["x-root", "#shadow-root", "ct-input", "#shadow-root", "input"];
 ## Example Test
 
 ```typescript
-import { env, waitFor } from "@commontools/integration";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env, waitFor } from "@commonfabric/integration";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
-import { Identity } from "@commontools/identity";
-import { PiecesController } from "@commontools/piece/ops";
+import { Identity } from "@commonfabric/identity";
+import { PiecesController } from "@commonfabric/piece/ops";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 

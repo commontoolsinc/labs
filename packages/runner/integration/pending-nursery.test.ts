@@ -1,12 +1,12 @@
 #!/usr/bin/env -S deno run -A
 
 import { assert, assertEquals } from "@std/assert";
-import { Runtime } from "@commontools/runner";
-import { Identity, IdentityCreateConfig } from "@commontools/identity";
-import { Provider, StorageManager } from "@commontools/runner/storage/cache";
-import { type JSONSchema } from "@commontools/runner";
+import { Runtime } from "@commonfabric/runner";
+import { Identity, IdentityCreateConfig } from "@commonfabric/identity";
+import { Provider, StorageManager } from "@commonfabric/runner/storage/cache";
+import { type JSONSchema } from "@commonfabric/runner";
 import { toURI } from "../src/uri-utils.ts";
-import { env } from "@commontools/integration";
+import { env } from "@commonfabric/integration";
 const { API_URL } = env;
 
 // Create test identity

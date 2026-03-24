@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, cell, ComparableCell } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, cell, ComparableCell } from "commonfabric";
 // FIXTURE: cell-of-no-value
 // Verifies: Cell.of/cell with type arg but no value injects undefined as first arg plus schema
 //   Cell.of<string>() → Cell.of<string>(undefined, { type: "string" })

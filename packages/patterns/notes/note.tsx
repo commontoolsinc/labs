@@ -18,7 +18,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import NoteMd from "./note-md.tsx";
 import {
   type MentionablePiece,

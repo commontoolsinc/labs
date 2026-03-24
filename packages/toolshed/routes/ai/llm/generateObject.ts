@@ -1,7 +1,7 @@
 import {
   type LLMGenerateObjectRequest,
   type LLMGenerateObjectResponse,
-} from "@commontools/llm/types";
+} from "@commonfabric/llm/types";
 import { findModel } from "./models.ts";
 import {
   generateObject as generateObjectCore,
@@ -9,7 +9,7 @@ import {
   type ModelMessage,
 } from "ai";
 import { Ajv } from "ajv";
-import { DEFAULT_GENERATE_OBJECT_MODELS } from "@commontools/llm";
+import { DEFAULT_GENERATE_OBJECT_MODELS } from "@commonfabric/llm";
 import { trace } from "@opentelemetry/api";
 
 export async function generateObject(

@@ -1,11 +1,11 @@
-import { Immutable, isRecord } from "@commontools/utils/types";
-import { getLogger } from "@commontools/utils/logger";
+import { Immutable, isRecord } from "@commonfabric/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   cloneIfNecessary,
   type FabricObject,
   type FabricValue,
   isArrayIndexPropertyName,
-} from "@commontools/data-model/fabric-value";
+} from "@commonfabric/data-model/fabric-value";
 import type {
   CommitError,
   IAttestation,

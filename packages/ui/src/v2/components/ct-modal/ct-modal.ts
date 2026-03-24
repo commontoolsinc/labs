@@ -61,7 +61,7 @@ import {
   type ModalRegistration,
 } from "../modal-context.ts";
 import { modalStyles } from "./styles.ts";
-import { CellHandle } from "@commontools/runtime-client";
+import { CellHandle } from "@commonfabric/runtime-client";
 
 export class CTModal extends BaseElement {
   static override styles = [BaseElement.baseStyles, modalStyles];

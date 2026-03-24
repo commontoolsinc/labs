@@ -10,7 +10,7 @@
  * - nested ternaries inside task/tag callbacks lower without extra derive noise
  * - handler captures preserve section/task/index/local Writable references
  */
-import { computed, handler, ifElse, pattern, UI, Writable } from "commontools";
+import { computed, handler, ifElse, pattern, UI, Writable } from "commonfabric";
 
 interface Task {
   id: string;

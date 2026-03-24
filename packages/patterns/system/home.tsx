@@ -7,7 +7,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import FavoritesManager from "./favorites-manager.tsx";
 import { EMPTY_LEARNED, type LearnedSection } from "../profile.tsx";
 
