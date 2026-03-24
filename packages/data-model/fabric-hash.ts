@@ -55,13 +55,13 @@ export class FabricHash extends FabricPrimitive {
   }
 
   /**
-   * Parse a `FabricHash` from its string representation
+   * Parse an instance from its string representation
    * (`<algorithmTag>:<base64urlHash>`).
    */
   static fromString(source: string): FabricHash {
     const colonIndex = source.indexOf(":");
     if (colonIndex === -1) {
-      throw new ReferenceError(`Invalid content ID string: ${source}`);
+      throw new ReferenceError(`Invalid content hash string: ${source}`);
     }
     const algorithmTag = source.substring(0, colonIndex);
     const hashBase64url = source.substring(colonIndex + 1);

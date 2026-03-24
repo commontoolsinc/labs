@@ -1,7 +1,7 @@
 /**
- * Content identifier dispatch layer.
+ * Content hash dispatch layer.
  *
- * Provides the public API for content identification (hashing): `hashOf`,
+ * Provides the public API for content hashing: `hashOf`,
  * `isHashObject`, `hashObjectFromJson`, `fromString`. Dispatches between
  * canonical hashing (value-hash-modern.ts) and legacy merkle-reference
  * (value-hash-legacy.ts) based on a runtime flag.
@@ -23,14 +23,14 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Type constraint for content identifier referents — i.e., any value
+ * Type constraint for content hash referents — i.e., any value
  * including `null` but _not_ `undefined`.
  * Used by `HashObject<T>` and related generic types.
  */
 export type DefinedReferent = NonNullable<unknown> | null;
 
 /**
- * Content identifier -- a hash-based reference to a value.
+ * Content hash -- a hash-based reference to a value.
  *
  * Union of `Reference.View` (legacy merkle-reference) and
  * `FabricHash` (canonical hashing). Both branches provide `.bytes`,
@@ -88,7 +88,7 @@ export function hashObjectFromString(source: string): HashObject {
 }
 
 /**
- * Type guard: returns true if the value is a content identifier
+ * Type guard: returns true if the value is a content hash
  * (`Reference.View` or `FabricHash`).
  */
 export function isHashObject<T extends DefinedReferent>(
@@ -112,13 +112,7 @@ export function fromString(source: string): HashObject {
     : fromStringLegacy(source);
 }
 
-/**
- * Compute a content identifier for the given source value.
- *
- * In server environments, uses node:crypto SHA-256 (hardware accelerated).
- * In browsers, uses hash-wasm (WASM, ~3x faster than pure JS).
- * Falls back to @noble/hashes if neither is available.
- */
+/** Compute a content hash for the given source value. */
 export function hashOf<T extends DefinedReferent>(
   source: T,
 ): HashObject<T> {
