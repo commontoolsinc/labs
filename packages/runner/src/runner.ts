@@ -64,6 +64,7 @@ import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
 import { deriveImplementationIdentity } from "./cfc/implementation-identity.ts";
+import { withInternalVerifierRead } from "./cfc/read-observation-logging.ts";
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
 
@@ -1268,7 +1269,10 @@ export class Runner {
           parseLink(value, processCell),
           "writeRedirect",
         );
-        value = tx.readValueOrThrow(maybeStreamLink);
+        value = tx.readValueOrThrow(
+          maybeStreamLink,
+          withInternalVerifierRead(),
+        );
       }
       if (isStreamValue(value)) {
         streamLink = parseLink(inputs.$event, processCell);
@@ -1408,7 +1412,7 @@ export class Runner {
 
               const rawResult = tx.readValueOrThrow(
                 resultCell.getAsNormalizedFullLink(),
-                { meta: ignoreReadForScheduling },
+                withInternalVerifierRead({ meta: ignoreReadForScheduling }),
               );
 
               const resultRedirects = findAllWriteRedirectCells(
@@ -1423,7 +1427,9 @@ export class Runner {
               // Create effect that re-runs when inputs change
               // (nothing else would read from it, otherwise)
               const readResultAction: Action = (tx) =>
-                resultRedirects.forEach((link) => tx.readValueOrThrow(link));
+                resultRedirects.forEach((link) =>
+                  tx.readValueOrThrow(link, withInternalVerifierRead())
+                );
               if (name) {
                 Object.defineProperty(readResultAction, "name", {
                   value: `readResult:${name}`,
@@ -1882,7 +1888,7 @@ export class Runner {
         } else {
           // It's a ReactivityLog - reads are already captured, nothing to do
           for (const read of builtinPopulateDependencies.reads) {
-            depTx.readOrThrow(read);
+            depTx.readOrThrow(read, withInternalVerifierRead());
           }
         }
       } else {
