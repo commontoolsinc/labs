@@ -1221,7 +1221,8 @@ export function rewriteOpaquePathTerminalJsxExpressionSite(
   const { expression } = params;
 
   if (
-    !ts.isCallExpression(expression) || !classifyOpaquePathTerminalCall(expression)
+    !ts.isCallExpression(expression) ||
+    !classifyOpaquePathTerminalCall(expression)
   ) {
     return undefined;
   }
