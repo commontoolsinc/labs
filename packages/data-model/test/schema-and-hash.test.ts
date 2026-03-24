@@ -4,6 +4,7 @@ import {
   assertEquals,
   assertNotStrictEquals,
   assertStrictEquals,
+  assertThrows,
 } from "@std/assert";
 import type { JSONSchemaObj } from "@commontools/api";
 import { FabricHash } from "../fabric-hash.ts";
@@ -22,6 +23,31 @@ describe("SchemaAndHash", () => {
   afterEach(() => {
     resetSchemaHashConfig();
     resetModernHashConfig();
+  });
+
+  describe("constructor", () => {
+    it("throws if schema is not deep-frozen", () => {
+      const hash = new FabricHash(new Uint8Array(32), "fid1");
+      assertThrows(
+        () => new SchemaAndHash({ type: "number" }, hash),
+        Error,
+        "schema must be deep-frozen",
+      );
+    });
+
+    it("accepts a deep-frozen schema", () => {
+      const schema = toDeepFrozenSchema({ type: "number" });
+      const hash = new FabricHash(new Uint8Array(32), "fid1");
+      const sah = new SchemaAndHash(schema, hash);
+      assertStrictEquals(sah.schema, schema);
+      assertStrictEquals(sah.hash, hash);
+    });
+
+    it("accepts boolean schema (primitives are inherently frozen)", () => {
+      const hash = new FabricHash(new Uint8Array(32), "fid1");
+      const sah = new SchemaAndHash(true, hash);
+      assertStrictEquals(sah.schema, true);
+    });
   });
 
   describe("from()", () => {

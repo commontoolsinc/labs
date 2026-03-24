@@ -4,6 +4,7 @@
  * form and that the hash is computed once.
  */
 import type { JSONSchema } from "@commontools/api";
+import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "./fabric-hash.ts";
 import { hashSchema } from "./schema-hash.ts";
 import { toDeepFrozenSchema } from "./schema-utils.ts";
@@ -15,7 +16,16 @@ export class SchemaAndHash {
   /** The content hash of the schema as a `FabricHash`. */
   readonly hash: FabricHash;
 
+  /**
+   * Constructs a `SchemaAndHash` from an already-deep-frozen schema and
+   * its pre-computed hash. Throws if the schema is not deep-frozen.
+   * Use `SchemaAndHash.from()` for the friendly entry point that handles
+   * freezing and hash computation.
+   */
   constructor(schema: JSONSchema, hash: FabricHash) {
+    if (!isDeepFrozen(schema)) {
+      throw new Error("SchemaAndHash: schema must be deep-frozen");
+    }
     this.schema = schema;
     this.hash = hash;
     Object.freeze(this);
