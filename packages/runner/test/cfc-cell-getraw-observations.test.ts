@@ -71,4 +71,51 @@ describe("CFC cell.getRaw observations", () => {
     );
     expect(reads.some((read) => read.path.startsWith("/error/"))).toBe(false);
   });
+
+  it("records a whole-value observation before object update merges", () => {
+    const cell = runtime.getCell<{ profile: { name: string; role: string } }>(
+      space,
+      "cfc-cell-update-root",
+      undefined,
+      tx,
+    );
+    cell.set({ profile: { name: "Ada", role: "admin" } });
+
+    const beforeReads =
+      canonicalizeBoundaryActivity(tx.journal.activity()).reads
+        .length;
+
+    cell.update({ profile: { role: "operator" } } as any);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .slice(beforeReads)
+      .filter((read) => !read.internalVerifierRead);
+    expect(reads.some((read) => read.path === "/" && read.op === "value")).toBe(
+      true,
+    );
+  });
+
+  it("records a whole-value observation before array push appends", () => {
+    const cell = runtime.getCell<{ items: number[] }>(
+      space,
+      "cfc-cell-push-root",
+      undefined,
+      tx,
+    );
+    cell.set({ items: [1, 2] });
+    const itemsCell = cell.key("items");
+
+    const beforeReads =
+      canonicalizeBoundaryActivity(tx.journal.activity()).reads
+        .length;
+
+    itemsCell.push(3);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .slice(beforeReads)
+      .filter((read) => !read.internalVerifierRead);
+    expect(
+      reads.some((read) => read.path === "/items" && read.op === "value"),
+    ).toBe(true);
+  });
 });

@@ -814,7 +814,11 @@ export class CellImpl<T extends StorableValue>
 
     // Get current value, following aliases and references
     const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
-    const currentValue = this.tx.readValueOrThrow(resolvedLink);
+    const currentValue = this.tx.readValueOrThrow(
+      resolvedLink,
+      withInternalVerifierRead(),
+    );
+    recordCfcReadObservation(this.tx, resolvedLink, { op: "value" });
 
     // If there's no current value, initialize based on schema, even if there is
     // no default value.
@@ -868,7 +872,11 @@ export class CellImpl<T extends StorableValue>
     // Follow aliases and references, since we want to get to an assumed
     // existing array.
     const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
-    const currentValue = this.tx.readValueOrThrow(resolvedLink);
+    const currentValue = this.tx.readValueOrThrow(
+      resolvedLink,
+      withInternalVerifierRead(),
+    );
+    recordCfcReadObservation(this.tx, resolvedLink, { op: "value" });
     const cause = this._frame?.cause;
 
     let array = currentValue as unknown[];
