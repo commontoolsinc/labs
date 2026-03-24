@@ -562,4 +562,84 @@ describe("CFC convenience read decomposition", () => {
       reads.some((read) => read.path === "/items/2" && read.op !== undefined),
     ).toBe(false);
   });
+
+  it("decomposes findIndex into structural observations plus visited child values", () => {
+    const cell = runtime.getCell<{ items: number[] }>(
+      space,
+      "cfc-convenience-array-find-index",
+      undefined,
+      tx,
+    );
+    cell.set({ items: [10, 20, 30] });
+
+    const proxy = createQueryResultProxy<{ items: number[] }>(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      false,
+      "skip",
+    );
+
+    expect(proxy.items.findIndex((value) => value >= 20)).toBe(1);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .filter((read) => read.cfc?.op !== undefined);
+    expect(
+      reads.some((read) => read.path === "/items" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items" && read.op === "enumerate"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items" && read.op === "count"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/0" && read.op === "value"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/1" && read.op === "value"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/2" && read.op !== undefined),
+    ).toBe(false);
+  });
+
+  it("observes sparse-array holes as shape without forcing hole values", () => {
+    const cell = runtime.getCell<{ items: number[] }>(
+      space,
+      "cfc-convenience-array-sparse-some",
+      undefined,
+      tx,
+    );
+    const items = [10, 20, 30];
+    delete items[1];
+    cell.set({ items });
+
+    const proxy = createQueryResultProxy<{ items: number[] }>(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      false,
+      "skip",
+    );
+
+    expect(proxy.items.some((value) => value === 30)).toBe(true);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .filter((read) => read.cfc?.op !== undefined);
+    expect(
+      reads.some((read) => read.path === "/items/0" && read.op === "value"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/1" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/1" && read.op === "value"),
+    ).toBe(false);
+    expect(
+      reads.some((read) => read.path === "/items/2" && read.op === "value"),
+    ).toBe(true);
+  });
 });
