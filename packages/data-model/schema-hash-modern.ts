@@ -1,10 +1,10 @@
 /**
  * Modern schema hashing via canonical content identification.
  *
- * Stub implementation — the modern schema hashing path is not yet
- * implemented. These functions are dispatch targets for `schema-hash.ts`
- * when the `modernSchemaHash` experiment flag is ON. They will be filled
- * in once the canonical schema hashing design is finalized.
+ * Delegates to `hashOfModern()` from `value-hash-modern.ts` to produce
+ * deterministic hashes using the modern (non-merkle-reference) hashing
+ * pipeline. The string representation of the resulting `FabricHash` is
+ * returned.
  *
  * Follows the same modern/legacy split pattern used by
  * `value-hash-modern.ts` and `fabric-value-modern.ts`.
@@ -12,21 +12,16 @@
 
 import type { JSONSchema } from "@commontools/api";
 import type { FabricValue } from "./interface.ts";
+import { hashOfModern } from "./value-hash-modern.ts";
 
-/** Modern hash of a JSONSchema (not yet implemented). */
-export function hashSchemaModern(_schema: JSONSchema): string {
-  throw new Error(
-    "hashSchemaModern is not yet implemented — " +
-      "the modernSchemaHash experiment flag should not be enabled",
-  );
+/** Modern hash of a JSONSchema. */
+export function hashSchemaModern(schema: JSONSchema): string {
+  return hashOfModern(schema).toString();
 }
 
-/** Modern hash of a schema-related item (not yet implemented). */
+/** Modern hash of a schema-related item. */
 export function hashSchemaItemModern(
-  _item: FabricValue,
+  item: FabricValue,
 ): string {
-  throw new Error(
-    "hashSchemaItemModern is not yet implemented — " +
-      "the modernSchemaHash experiment flag should not be enabled",
-  );
+  return hashOfModern(item).toString();
 }
