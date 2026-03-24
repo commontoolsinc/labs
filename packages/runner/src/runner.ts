@@ -71,6 +71,9 @@ export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
   private functionCache = new FunctionCache();
+  private pendingSetups = new Map<`${MemorySpace}/${URI}`, Promise<unknown>>();
+  private pendingStarts = new Map<`${MemorySpace}/${URI}`, Promise<boolean>>();
+  private readonly pendingStartCancel: Cancel = () => {};
   // Map whose key is the result cell's full key, and whose values are the
   // patterns as strings
   private resultPatternCache = new Map<`${MemorySpace}/${URI}`, string>();
@@ -109,6 +112,17 @@ export class Runner {
     };
   }
 
+  hasPendingWork(): boolean {
+    return this.pendingSetups.size > 0 || this.pendingStarts.size > 0;
+  }
+
+  async idle(): Promise<void> {
+    await Promise.all([
+      ...this.pendingSetups.values(),
+      ...this.pendingStarts.values(),
+    ]);
+  }
+
   /**
    * Prepare a piece for running by creating/updating its process and result
    * cells, registering the pattern, and applying defaults/arguments.
@@ -138,13 +152,20 @@ export class Runner {
       this.setupInternal(providedTx, patternOrModule, argument, resultCell);
       return Promise.resolve(resultCell);
     } else {
+      const key = this.getDocKey(resultCell);
       // Ignore errors after retrying for now, as outside the tx, we'll see the
       // latest true value, it just lost the ract against someone else changing
       // the pattern or argument. Correct action is anyhow similar to what would
       // have happened if the write succeeded and was immediately overwritten.
-      return this.runtime.editWithRetry((tx) => {
+      const setupPromise = this.runtime.editWithRetry((tx) => {
         this.setupInternal(tx, patternOrModule, argument, resultCell);
       }).then(() => resultCell);
+      this.pendingSetups.set(key, setupPromise);
+      return setupPromise.finally(() => {
+        if (this.pendingSetups.get(key) === setupPromise) {
+          this.pendingSetups.delete(key);
+        }
+      });
     }
   }
 
@@ -572,6 +593,7 @@ export class Runner {
   private doStart<T = any>(
     resultCell: Cell<T>,
     seenCells: Set<Cell> = new Set(),
+    skipPendingCheck = false,
   ): Promise<boolean> {
     // Step 1: For subpath cells, resolve to root cell
     const link = resultCell.getAsNormalizedFullLink();
@@ -581,19 +603,57 @@ export class Runner {
 
     const key = this.getDocKey(rootCell);
 
+    if (!skipPendingCheck) {
+      const pendingStart = this.pendingStarts.get(key);
+      if (pendingStart) {
+        return pendingStart;
+      }
+    }
+
     // Step 2: Already started? Return success
-    if (this.cancels.has(key)) return Promise.resolve(true);
+    if (
+      this.cancels.has(key) &&
+      this.cancels.get(key) !== this.pendingStartCancel
+    ) {
+      return Promise.resolve(true);
+    }
+
+    const trackPendingStart = (promise: Promise<boolean>): Promise<boolean> => {
+      this.pendingStarts.set(key, promise);
+      if (!this.cancels.has(key)) {
+        this.cancels.set(key, this.pendingStartCancel);
+      }
+      return promise.finally(() => {
+        if (this.pendingStarts.get(key) === promise) {
+          this.pendingStarts.delete(key);
+        }
+        if (this.cancels.get(key) === this.pendingStartCancel) {
+          this.cancels.delete(key);
+        }
+      });
+    };
+
+    const pendingSetup = this.pendingSetups.get(key);
+    if (pendingSetup) {
+      return trackPendingStart(
+        Promise.resolve(pendingSetup).then(() =>
+          this.doStart(rootCell, seenCells, true)
+        ),
+      );
+    }
 
     // Step 3: Not synced yet? Sync and retry
     // Once getRaw() has a value, all properties including source are synced.
     if (rootCell.getRaw() === undefined) {
-      return Promise.resolve(rootCell.sync()).then(() => {
-        if (rootCell.getRaw() === undefined) {
-          return Promise.reject(new Error("No data at cell"));
-        } else {
-          return this.doStart(rootCell, seenCells);
-        }
-      });
+      return trackPendingStart(
+        Promise.resolve(rootCell.sync()).then(() => {
+          if (rootCell.getRaw() === undefined) {
+            return Promise.reject(new Error("No data at cell"));
+          } else {
+            return this.doStart(rootCell, seenCells, true);
+          }
+        }),
+      );
     }
 
     // Step 4: Check for process cell, or follow link if there is one
@@ -627,19 +687,21 @@ export class Runner {
     }
     const pattern = this.runtime.patternManager.patternById(patternId);
     if (!pattern) {
-      return this.runtime.patternManager.loadPattern(
-        patternId,
-        processCell.space,
-      )
-        .then((loaded) => {
-          if (loaded) {
-            return this.doStart(rootCell, seenCells);
-          } else {
-            return Promise.reject(
-              new Error(`Could not load pattern ${patternId}`),
-            );
-          }
-        });
+      return trackPendingStart(
+        this.runtime.patternManager.loadPattern(
+          patternId,
+          processCell.space,
+        )
+          .then((loaded) => {
+            if (loaded) {
+              return this.doStart(rootCell, seenCells, true);
+            } else {
+              return Promise.reject(
+                new Error(`Could not load pattern ${patternId}`),
+              );
+            }
+          }),
+      );
     }
 
     // Step 6: Start the pattern

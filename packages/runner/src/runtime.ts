@@ -332,8 +332,14 @@ export class Runtime {
   /**
    * Wait for all pending operations to complete
    */
-  idle(): Promise<void> {
-    return this.scheduler.idle();
+  async idle(): Promise<void> {
+    while (true) {
+      await this.runner.idle();
+      await this.scheduler.idle();
+      if (!this.runner.hasPendingWork()) {
+        return;
+      }
+    }
   }
 
   getCfcTrustContextSnapshot(): CfcTrustContext | undefined {
