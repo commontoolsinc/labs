@@ -314,7 +314,11 @@ export class CycleTracker<K> {
  *
  * This will not work correctly if the key is modified after being added.
  */
-export class CompoundCycleTracker<EqualKey, ExtraKey, Value = unknown> {
+export class CompoundCycleTracker<
+  EqualKey,
+  ExtraKey extends FabricValue,
+  Value = unknown,
+> {
   // partialKey (identity) → Map<hash(extraKey), Value?>
   private partial: Map<EqualKey, Map<string, Value | undefined>>;
   constructor() {
@@ -337,7 +341,7 @@ export class CompoundCycleTracker<EqualKey, ExtraKey, Value = unknown> {
       existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    const hash = hashSchemaItem(extraKey as FabricValue);
+    const hash = hashSchemaItem(extraKey);
     if (existing.has(hash)) {
       return null;
     }
@@ -361,7 +365,7 @@ export class CompoundCycleTracker<EqualKey, ExtraKey, Value = unknown> {
     if (existing === undefined) {
       return undefined;
     }
-    const hash = hashSchemaItem(extraKey as FabricValue);
+    const hash = hashSchemaItem(extraKey);
     return existing.get(hash);
   }
 }
