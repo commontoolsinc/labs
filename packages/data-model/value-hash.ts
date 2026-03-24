@@ -97,7 +97,7 @@ let canonicalHashingEnabled = false;
  * Parse a `FabricHash` from its string representation
  * (`<algorithmTag>:<base64urlHash>`).
  */
-function contentIdFromString(source: string): FabricHash {
+function hashFromString(source: string): FabricHash {
   const colonIndex = source.indexOf(":");
   if (colonIndex === -1) {
     throw new ReferenceError(`Invalid content ID string: ${source}`);
@@ -105,6 +105,19 @@ function contentIdFromString(source: string): FabricHash {
   const algorithmTag = source.substring(0, colonIndex);
   const hashBase64url = source.substring(colonIndex + 1);
   return new FabricHash(fromBase64url(hashBase64url), algorithmTag);
+}
+
+/**
+ * Parse a hash string and return it as-is after validation. Verifies the
+ * format matches `<algorithmTag>:<base64urlHash>` but returns the original
+ * `string` rather than constructing a `FabricHash`.
+ */
+export function rawHashFromString(source: string): string {
+  const colonIndex = source.indexOf(":");
+  if (colonIndex === -1) {
+    throw new ReferenceError(`Invalid content ID string: ${source}`);
+  }
+  return source;
 }
 
 /** Shared `isContentId` implementation (same for both modes). */
@@ -127,11 +140,11 @@ function configureDispatch(): void {
     // ----- Canonical hashing implementations -----
 
     contentIdFromJSON = (source) => {
-      return contentIdFromString(source["/"]);
+      return hashFromString(source["/"]);
     };
 
     fromString = (source) => {
-      return contentIdFromString(source);
+      return hashFromString(source);
     };
 
     hashOf = (source) => {
