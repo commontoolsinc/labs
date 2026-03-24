@@ -235,4 +235,18 @@ describe("plain-data sandbox helper", () => {
     expect(result[secret]).toEqual({ count: Infinity });
     expect(Object.isFrozen(result[secret] as object)).toBe(true);
   });
+
+  it("freezes intrinsic RegExp instances", () => {
+    const value = /hello/gi;
+    value.lastIndex = 2;
+
+    const result = freezeVerifiedPlainData(value);
+
+    expect(result).toBeInstanceOf(RegExp);
+    expect(result).not.toBe(value);
+    expect(result.source).toBe("hello");
+    expect(result.flags).toBe("gi");
+    expect(result.lastIndex).toBe(2);
+    expect(Object.isFrozen(result)).toBe(true);
+  });
 });

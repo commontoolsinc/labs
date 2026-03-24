@@ -8,6 +8,7 @@ interface BindingInfo {
   trustedRuntimeName?: string;
   namespaceImport?: boolean;
   captureSafe?: boolean;
+  ctDataSafe?: boolean;
   functionNode?: ts.FunctionLikeDeclaration;
   hardeningHelper?: boolean;
 }
@@ -57,6 +58,52 @@ const SAFE_GLOBAL_IDENTIFIERS = new Set([
   "parseFloat",
   "parseInt",
   "undefined",
+]);
+const CT_DATA_GLOBAL_CALLS = new Set([
+  "BigInt",
+  "Boolean",
+  "Number",
+  "String",
+  "isFinite",
+  "isNaN",
+  "parseFloat",
+  "parseInt",
+]);
+const CT_DATA_STATIC_CALLS = new Map<string, ReadonlySet<string>>([
+  ["Array", new Set(["from"])],
+  ["Object", new Set(["entries", "fromEntries", "keys", "values"])],
+]);
+const CT_DATA_PURE_METHOD_NAMES = new Set([
+  "entries",
+  "filter",
+  "flatMap",
+  "getFullYear",
+  "includes",
+  "indexOf",
+  "join",
+  "keys",
+  "map",
+  "slice",
+  "test",
+  "toLowerCase",
+  "toUpperCase",
+  "trim",
+  "values",
+]);
+const CT_DATA_LOCAL_MUTATOR_METHOD_NAMES = new Set([
+  "add",
+  "clear",
+  "copyWithin",
+  "delete",
+  "fill",
+  "pop",
+  "push",
+  "reverse",
+  "set",
+  "shift",
+  "sort",
+  "splice",
+  "unshift",
 ]);
 
 interface PendingCaptureCheck {
@@ -978,7 +1025,10 @@ function isTopLevelDataExpression(
 ): boolean {
   const expr = unwrapExpression(expression);
 
-  if (isPrimitiveLikeExpression(expr)) {
+  if (
+    isPrimitiveLikeExpression(expr) ||
+    expr.kind === ts.SyntaxKind.RegularExpressionLiteral
+  ) {
     return true;
   }
 
@@ -1053,7 +1103,10 @@ function isCaptureSafeDataExpression(
 ): boolean {
   const expr = unwrapExpression(expression);
 
-  if (isPrimitiveLikeExpression(expr)) {
+  if (
+    isPrimitiveLikeExpression(expr) ||
+    expr.kind === ts.SyntaxKind.RegularExpressionLiteral
+  ) {
     return true;
   }
 
@@ -1085,23 +1138,15 @@ function verifyCtDataExpression(
 ): void {
   const expr = unwrapExpression(expression);
 
-  if (isPrimitiveLikeExpression(expr)) {
+  if (
+    isPrimitiveLikeExpression(expr) ||
+    expr.kind === ts.SyntaxKind.RegularExpressionLiteral
+  ) {
     return;
   }
 
   if (ts.isIdentifier(expr)) {
-    if (
-      locals.has(expr.text) ||
-      expr.text === "undefined" ||
-      expr.text === "NaN" ||
-      expr.text === "Infinity"
-    ) {
-      return;
-    }
-
-    if (
-      env.get(expr.text)?.kind === "data" && env.get(expr.text)?.captureSafe
-    ) {
+    if (isAllowedCtDataIdentifier(expr.text, env, locals)) {
       return;
     }
 
@@ -1207,16 +1252,12 @@ function verifyCtDataExpression(
   }
 
   if (ts.isNewExpression(expr)) {
-    if (isAllowedCtDataCollection(expr)) {
-      for (const arg of expr.arguments ?? []) {
-        verifyCtDataExpression(arg, sourceFile, env, locals);
-      }
-      return;
-    }
     if (isAllowedCtDataProxy(expr)) {
       verifyCtDataProxyExpression(expr, sourceFile, env, locals);
       return;
     }
+    verifyCtDataNewExpression(expr, sourceFile, env, locals);
+    return;
   }
 
   if (ts.isCallExpression(expr)) {
@@ -1237,6 +1278,8 @@ function verifyCtDataExpression(
       verifyCtDataIife(expr, sourceFile, env, locals);
       return;
     }
+    verifyCtDataCallExpression(expr, sourceFile, env, locals);
+    return;
   }
 
   throw verificationError(
@@ -1278,68 +1321,493 @@ function verifyCtDataIife(
   }
 
   const locals = new Set(outerLocals);
-  if (!ts.isBlock(target.body)) {
-    verifyCtDataExpression(target.body, sourceFile, env, locals);
+  verifyCtDataFunctionLike(target, sourceFile, env, locals, new Set());
+}
+
+function isAllowedCtDataIdentifier(
+  identifier: string,
+  env: Map<string, BindingInfo>,
+  locals: Set<string>,
+): boolean {
+  if (
+    locals.has(identifier) ||
+    identifier === "undefined" ||
+    identifier === "NaN" ||
+    identifier === "Infinity" ||
+    SAFE_GLOBAL_IDENTIFIERS.has(identifier)
+  ) {
+    return true;
+  }
+
+  const binding = env.get(identifier);
+  if (!binding) {
+    return false;
+  }
+
+  if (binding.kind === "data") {
+    return binding.captureSafe === true;
+  }
+
+  return binding.kind === "function";
+}
+
+function verifyCtDataCallExpression(
+  expression: ts.CallExpression,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  locals: Set<string>,
+): void {
+  if (expression.expression.kind === ts.SyntaxKind.ImportKeyword) {
+    throw verificationError(
+      sourceFile,
+      expression,
+      "Dynamic import() is not allowed in __ct_data()",
+    );
+  }
+
+  const callee = normalizeCallTarget(expression.expression);
+  if (ts.isIdentifier(callee)) {
+    verifyCtDataIdentifierCall(expression, callee, sourceFile, env, locals);
     return;
   }
 
-  let sawReturn = false;
-  for (const statement of target.body.statements) {
-    if (
-      ts.isExpressionStatement(statement) &&
-      ts.isStringLiteral(statement.expression)
-    ) {
+  if (ts.isPropertyAccessExpression(callee)) {
+    verifyCtDataPropertyCall(expression, callee, sourceFile, env, locals);
+    return;
+  }
+
+  if (ts.isElementAccessExpression(callee)) {
+    throw verificationError(
+      sourceFile,
+      expression,
+      "__ct_data() does not allow computed method calls",
+    );
+  }
+
+  throw verificationError(
+    sourceFile,
+    expression,
+    "__ct_data() initializer contains unsupported executable code",
+  );
+}
+
+function verifyCtDataIdentifierCall(
+  expression: ts.CallExpression,
+  callee: ts.Identifier,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  locals: Set<string>,
+): void {
+  const binding = env.get(callee.text);
+  if (binding?.kind === "function") {
+    verifyCtDataCallArguments(expression.arguments, sourceFile, env, locals);
+    verifyCtDataTopLevelHelperCall(
+      callee,
+      sourceFile,
+      env,
+      new Set(),
+    );
+    return;
+  }
+
+  if (binding?.kind === "import") {
+    throw verificationError(
+      sourceFile,
+      expression,
+      `__ct_data() cannot call imported helper '${callee.text}'`,
+    );
+  }
+
+  if (locals.has(callee.text)) {
+    throw verificationError(
+      sourceFile,
+      expression,
+      `__ct_data() cannot call local binding '${callee.text}' unless it is inlined directly`,
+    );
+  }
+
+  if (!CT_DATA_GLOBAL_CALLS.has(callee.text)) {
+    throw verificationError(
+      sourceFile,
+      expression,
+      `__ct_data() cannot call ambient global '${callee.text}'`,
+    );
+  }
+
+  verifyCtDataCallArguments(expression.arguments, sourceFile, env, locals);
+}
+
+function verifyCtDataPropertyCall(
+  expression: ts.CallExpression,
+  callee: ts.PropertyAccessExpression,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  locals: Set<string>,
+): void {
+  const base = normalizeCallTarget(
+    callee.expression as ts.LeftHandSideExpression,
+  );
+  if (
+    ts.isIdentifier(base) &&
+    isRejectedAmbientCtDataCall(base.text, callee.name.text)
+  ) {
+    throw verificationError(
+      sourceFile,
+      expression,
+      `__ct_data() must not call ${base.text}.${callee.name.text}() directly`,
+    );
+  }
+
+  if (
+    ts.isIdentifier(base) &&
+    CT_DATA_STATIC_CALLS.get(base.text)?.has(callee.name.text)
+  ) {
+    verifyCtDataCallArguments(expression.arguments, sourceFile, env, locals);
+    return;
+  }
+
+  const receiverRoot = getAccessRootIdentifier(callee.expression);
+  const receiverIsLocal = !!receiverRoot && locals.has(receiverRoot.text);
+  const methodName = callee.name.text;
+  if (
+    !CT_DATA_PURE_METHOD_NAMES.has(methodName) &&
+    !(receiverIsLocal && CT_DATA_LOCAL_MUTATOR_METHOD_NAMES.has(methodName))
+  ) {
+    throw verificationError(
+      sourceFile,
+      expression,
+      `__ct_data() cannot call method '${methodName}' here`,
+    );
+  }
+
+  verifyCtDataExpression(callee.expression, sourceFile, env, locals);
+  verifyCtDataCallArguments(expression.arguments, sourceFile, env, locals);
+}
+
+function verifyCtDataCallArguments(
+  args: readonly ts.Expression[],
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  locals: Set<string>,
+): void {
+  for (const arg of args) {
+    const target = unwrapExpression(arg);
+    if (ts.isArrowFunction(target) || ts.isFunctionExpression(target)) {
+      verifyCtDataFunctionLike(target, sourceFile, env, locals, new Set());
       continue;
     }
+    verifyCtDataExpression(arg, sourceFile, env, locals);
+  }
+}
 
-    if (ts.isVariableStatement(statement)) {
-      if (!(statement.declarationList.flags & ts.NodeFlags.Const)) {
-        throw verificationError(
-          sourceFile,
-          statement,
-          "__ct_data() IIFEs only allow const local bindings",
-        );
-      }
+function verifyCtDataTopLevelHelperCall(
+  callee: ts.Identifier,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  visiting: Set<string>,
+): void {
+  const binding = env.get(callee.text);
+  if (binding?.kind !== "function" || !binding.functionNode) {
+    throw verificationError(
+      sourceFile,
+      callee,
+      `Unknown __ct_data() helper '${callee.text}'`,
+    );
+  }
 
-      for (const declaration of statement.declarationList.declarations) {
-        if (!ts.isIdentifier(declaration.name) || !declaration.initializer) {
-          throw verificationError(
+  if (binding.ctDataSafe === true || visiting.has(callee.text)) {
+    return;
+  }
+
+  if (binding.ctDataSafe === false) {
+    throw verificationError(
+      sourceFile,
+      callee,
+      `Top-level helper '${callee.text}' is not safe for __ct_data()`,
+    );
+  }
+
+  visiting.add(callee.text);
+  try {
+    verifyCtDataFunctionLike(
+      binding.functionNode,
+      sourceFile,
+      env,
+      new Set(),
+      visiting,
+    );
+    binding.ctDataSafe = true;
+  } catch (error) {
+    binding.ctDataSafe = false;
+    throw error;
+  } finally {
+    visiting.delete(callee.text);
+  }
+}
+
+function verifyCtDataFunctionLike(
+  fn: ts.FunctionLikeDeclaration,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  outerLocals: Set<string>,
+  visiting: Set<string>,
+): void {
+  const locals = new Set(outerLocals);
+  if (fn.name && ts.isIdentifier(fn.name)) {
+    locals.add(fn.name.text);
+  }
+  for (const parameter of fn.parameters) {
+    for (const name of bindingNames(parameter.name)) {
+      locals.add(name);
+    }
+    if (parameter.initializer) {
+      verifyCtDataExpression(parameter.initializer, sourceFile, env, locals);
+    }
+  }
+
+  if (!fn.body) {
+    return;
+  }
+
+  if (ts.isBlock(fn.body)) {
+    verifyCtDataBlock(fn.body, sourceFile, env, locals, visiting);
+    return;
+  }
+
+  verifyCtDataExpression(fn.body, sourceFile, env, locals);
+}
+
+function verifyCtDataBlock(
+  block: ts.Block,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  outerLocals: Set<string>,
+  visiting: Set<string>,
+): void {
+  const locals = new Set(outerLocals);
+  for (const statement of block.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name) {
+      locals.add(statement.name.text);
+    }
+  }
+
+  for (const statement of block.statements) {
+    verifyCtDataStatement(statement, sourceFile, env, locals, visiting);
+  }
+}
+
+function verifyCtDataStatement(
+  statement: ts.Statement,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  locals: Set<string>,
+  visiting: Set<string>,
+): void {
+  if (
+    ts.isExpressionStatement(statement) &&
+    ts.isStringLiteral(statement.expression)
+  ) {
+    return;
+  }
+
+  if (ts.isFunctionDeclaration(statement)) {
+    verifyCtDataFunctionLike(statement, sourceFile, env, locals, visiting);
+    return;
+  }
+
+  if (ts.isVariableStatement(statement)) {
+    verifyCtDataVariableStatement(statement, sourceFile, env, locals);
+    return;
+  }
+
+  if (ts.isReturnStatement(statement)) {
+    if (statement.expression) {
+      verifyCtDataExpression(statement.expression, sourceFile, env, locals);
+    }
+    return;
+  }
+
+  if (ts.isExpressionStatement(statement)) {
+    verifyCtDataExpression(statement.expression, sourceFile, env, locals);
+    return;
+  }
+
+  if (ts.isIfStatement(statement)) {
+    verifyCtDataExpression(statement.expression, sourceFile, env, locals);
+    verifyCtDataNestedStatement(
+      statement.thenStatement,
+      sourceFile,
+      env,
+      locals,
+      visiting,
+    );
+    if (statement.elseStatement) {
+      verifyCtDataNestedStatement(
+        statement.elseStatement,
+        sourceFile,
+        env,
+        locals,
+        visiting,
+      );
+    }
+    return;
+  }
+
+  if (ts.isForStatement(statement)) {
+    verifyCtDataForStatement(statement, sourceFile, env, locals, visiting);
+    return;
+  }
+
+  if (ts.isBlock(statement)) {
+    verifyCtDataNestedStatement(statement, sourceFile, env, locals, visiting);
+    return;
+  }
+
+  if (
+    ts.isEmptyStatement(statement) ||
+    ts.isBreakStatement(statement) ||
+    ts.isContinueStatement(statement)
+  ) {
+    return;
+  }
+
+  throw verificationError(
+    sourceFile,
+    statement,
+    "__ct_data() helpers only allow local bindings, loops, conditionals, and synchronous expressions",
+  );
+}
+
+function verifyCtDataNestedStatement(
+  statement: ts.Statement,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  locals: Set<string>,
+  visiting: Set<string>,
+): void {
+  if (ts.isBlock(statement)) {
+    verifyCtDataBlock(statement, sourceFile, env, locals, visiting);
+    return;
+  }
+
+  verifyCtDataStatement(statement, sourceFile, env, new Set(locals), visiting);
+}
+
+function verifyCtDataVariableStatement(
+  statement: ts.VariableStatement,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  locals: Set<string>,
+): void {
+  for (const declaration of statement.declarationList.declarations) {
+    if (!declaration.initializer) {
+      throw verificationError(
+        sourceFile,
+        declaration,
+        "__ct_data() locals must be initialized",
+      );
+    }
+    verifyCtDataExpression(declaration.initializer, sourceFile, env, locals);
+    for (const name of bindingNames(declaration.name)) {
+      locals.add(name);
+    }
+  }
+}
+
+function verifyCtDataForStatement(
+  statement: ts.ForStatement,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  locals: Set<string>,
+  visiting: Set<string>,
+): void {
+  const loopLocals = new Set(locals);
+  if (statement.initializer) {
+    if (ts.isVariableDeclarationList(statement.initializer)) {
+      for (const declaration of statement.initializer.declarations) {
+        if (declaration.initializer) {
+          verifyCtDataExpression(
+            declaration.initializer,
             sourceFile,
-            declaration,
-            "__ct_data() IIFEs only allow simple initialized const bindings",
+            env,
+            loopLocals,
           );
         }
-        verifyCtDataExpression(
-          declaration.initializer,
-          sourceFile,
-          env,
-          locals,
-        );
-        locals.add(declaration.name.text);
+        for (const name of bindingNames(declaration.name)) {
+          loopLocals.add(name);
+        }
       }
-      continue;
+    } else {
+      verifyCtDataExpression(
+        statement.initializer,
+        sourceFile,
+        env,
+        loopLocals,
+      );
+    }
+  }
+  if (statement.condition) {
+    verifyCtDataExpression(statement.condition, sourceFile, env, loopLocals);
+  }
+  if (statement.incrementor) {
+    verifyCtDataExpression(statement.incrementor, sourceFile, env, loopLocals);
+  }
+  verifyCtDataNestedStatement(
+    statement.statement,
+    sourceFile,
+    env,
+    loopLocals,
+    visiting,
+  );
+}
+
+function verifyCtDataNewExpression(
+  expression: ts.NewExpression,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  locals: Set<string>,
+): void {
+  const target = normalizeCallTarget(expression.expression);
+  if (ts.isIdentifier(target)) {
+    const binding = env.get(target.text);
+    if (binding?.kind === "import") {
+      throw verificationError(
+        sourceFile,
+        expression,
+        `__ct_data() cannot construct imported helper '${target.text}'`,
+      );
     }
 
-    if (ts.isReturnStatement(statement) && statement.expression) {
-      verifyCtDataExpression(statement.expression, sourceFile, env, locals);
-      sawReturn = true;
-      continue;
+    if (
+      !locals.has(target.text) &&
+      !SAFE_GLOBAL_IDENTIFIERS.has(target.text) &&
+      binding?.kind !== "function"
+    ) {
+      throw verificationError(
+        sourceFile,
+        expression,
+        `__ct_data() cannot construct '${target.text}' here`,
+      );
     }
-
+  } else {
     throw verificationError(
       sourceFile,
-      statement,
-      "__ct_data() IIFEs only allow const bindings and a final return",
+      expression,
+      "__ct_data() only allows direct constructor calls",
     );
   }
 
-  if (!sawReturn) {
-    throw verificationError(
-      sourceFile,
-      target,
-      "__ct_data() IIFEs must return a data value",
-    );
+  for (const arg of expression.arguments ?? []) {
+    verifyCtDataExpression(arg, sourceFile, env, locals);
   }
+}
+
+function isRejectedAmbientCtDataCall(
+  baseName: string,
+  propertyName: string,
+): boolean {
+  return baseName === "Date" && propertyName === "now" ||
+    baseName === "Math" && propertyName === "random";
 }
 
 function verifyCtDataProxyExpression(

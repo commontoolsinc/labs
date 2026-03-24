@@ -26,8 +26,9 @@ export class ModuleScopeCtDataTransformer extends Transformer {
 
   override transform(context: TransformationContext): ts.SourceFile {
     const { factory, sourceFile } = context;
+    const localCallableBindings = collectTopLevelCallableBindings(sourceFile);
     const statements = sourceFile.statements.map((statement) =>
-      transformTopLevelStatement(statement, context)
+      transformTopLevelStatement(statement, context, localCallableBindings)
     );
     return factory.updateSourceFile(sourceFile, statements);
   }
@@ -36,6 +37,7 @@ export class ModuleScopeCtDataTransformer extends Transformer {
 function transformTopLevelStatement(
   statement: ts.Statement,
   context: TransformationContext,
+  localCallableBindings: ReadonlySet<string>,
 ): ts.Statement {
   const { factory } = context;
 
@@ -49,7 +51,10 @@ function transformTopLevelStatement(
       (declaration) => {
         if (
           !declaration.initializer ||
-          !shouldWrapTopLevelExpression(declaration.initializer)
+          !shouldWrapTopLevelExpression(
+            declaration.initializer,
+            localCallableBindings,
+          )
         ) {
           return declaration;
         }
@@ -77,7 +82,7 @@ function transformTopLevelStatement(
 
   if (
     ts.isExportAssignment(statement) &&
-    shouldWrapTopLevelExpression(statement.expression)
+    shouldWrapTopLevelExpression(statement.expression, localCallableBindings)
   ) {
     return factory.updateExportAssignment(
       statement,
@@ -102,6 +107,7 @@ function wrapWithCtData(
 
 function shouldWrapTopLevelExpression(
   expression: ts.Expression,
+  localCallableBindings: ReadonlySet<string>,
 ): boolean {
   if (isAnyLikeTypeAssertion(expression)) {
     return false;
@@ -119,7 +125,10 @@ function shouldWrapTopLevelExpression(
 
   if (ts.isCallExpression(expr)) {
     if (isTrustedBuilderCall(expr)) return false;
-    return isTrustedDataHelperCall(expr) || isImmediatelyInvokedFunction(expr);
+    return isTrustedDataHelperCall(expr) ||
+      isImmediatelyInvokedFunction(expr) ||
+      isIntrinsicCtDataCall(expr) ||
+      isTopLevelLocalHelperCall(expr, localCallableBindings);
   }
 
   if (ts.isNewExpression(expr)) {
@@ -127,6 +136,7 @@ function shouldWrapTopLevelExpression(
   }
 
   if (
+    expr.kind === ts.SyntaxKind.RegularExpressionLiteral ||
     ts.isObjectLiteralExpression(expr) ||
     ts.isArrayLiteralExpression(expr)
   ) {
@@ -149,6 +159,25 @@ function isImmediatelyInvokedFunction(expression: ts.CallExpression): boolean {
   return ts.isArrowFunction(target) || ts.isFunctionExpression(target);
 }
 
+function isIntrinsicCtDataCall(expression: ts.CallExpression): boolean {
+  const target = unwrapExpression(expression.expression);
+  return ts.isPropertyAccessExpression(target) &&
+    ts.isIdentifier(target.expression) &&
+    (
+      target.expression.text === "Array" && target.name.text === "from" ||
+      target.expression.text === "Object" &&
+        target.name.text === "fromEntries"
+    );
+}
+
+function isTopLevelLocalHelperCall(
+  expression: ts.CallExpression,
+  localCallableBindings: ReadonlySet<string>,
+): boolean {
+  const target = unwrapExpression(expression.expression);
+  return ts.isIdentifier(target) && localCallableBindings.has(target.text);
+}
+
 function hasNamedTarget(
   expression: ts.Expression,
   names: ReadonlySet<string>,
@@ -161,6 +190,41 @@ function hasNamedTarget(
     return names.has(target.name.text);
   }
   return false;
+}
+
+function collectTopLevelCallableBindings(
+  sourceFile: ts.SourceFile,
+): ReadonlySet<string> {
+  const names = new Set<string>();
+
+  for (const statement of sourceFile.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name) {
+      names.add(statement.name.text);
+      continue;
+    }
+
+    if (!ts.isVariableStatement(statement)) continue;
+    if (!(statement.declarationList.flags & ts.NodeFlags.Const)) continue;
+
+    for (const declaration of statement.declarationList.declarations) {
+      if (
+        !ts.isIdentifier(declaration.name) ||
+        !declaration.initializer
+      ) {
+        continue;
+      }
+
+      const initializer = unwrapExpression(declaration.initializer);
+      if (
+        ts.isArrowFunction(initializer) ||
+        ts.isFunctionExpression(initializer)
+      ) {
+        names.add(declaration.name.text);
+      }
+    }
+  }
+
+  return names;
 }
 
 function isAnyLikeTypeAssertion(expression: ts.Expression): boolean {

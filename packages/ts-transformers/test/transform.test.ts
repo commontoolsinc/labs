@@ -39,13 +39,24 @@ describe("CommonFabricTransformerPipeline", () => {
     const source = `/// <cts-enable />
 import { lift, schema } from "commontools";
 
+function buildYears() {
+  return Array.from({ length: 3 }, (_, index) => String(index + 1));
+}
+
 const model = schema({ type: "string" } as const);
 const lookup = (() => ({ open: "Open" }))();
+const days = Array.from({ length: 3 }, (_, index) => String(index + 1));
+const matcher = /^[a-z]+$/;
+const scopeMap = { gmail: "gmail.readonly" } as const;
+const scopes = Object.fromEntries(
+  Object.entries(scopeMap).map(([key, value]) => [key, { value }]),
+);
+const years = buildYears();
 const tags = new Set(["a", "b"]);
 const proxied = new Proxy({ open: "Open" }, {});
 const passthrough = lift((value: string) => value);
 
-export { model, lookup, tags, proxied, passthrough };
+export { model, lookup, days, matcher, scopes, years, tags, proxied, passthrough };
 `;
 
     const output = await transformFiles({
@@ -60,6 +71,22 @@ export { model, lookup, tags, proxied, passthrough };
     assertStringIncludes(
       main,
       'const lookup = __ctHelpers.__ct_data((() => ({ open: "Open" }))());',
+    );
+    assertStringIncludes(
+      main,
+      "const days = __ctHelpers.__ct_data(Array.from({ length: 3 }, (_, index) => String(index + 1)));",
+    );
+    assertStringIncludes(
+      main,
+      "const matcher = __ctHelpers.__ct_data(/^[a-z]+$/);",
+    );
+    assertStringIncludes(
+      main,
+      "const scopes = __ctHelpers.__ct_data(Object.fromEntries(",
+    );
+    assertStringIncludes(
+      main,
+      "const years = __ctHelpers.__ct_data(buildYears());",
     );
     assertStringIncludes(
       main,

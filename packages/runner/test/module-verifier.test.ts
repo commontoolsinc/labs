@@ -98,4 +98,36 @@ describe("verifyProgramModuleScope()", () => {
 
     expect(() => verifyProgramModuleScope(program)).not.toThrow();
   });
+
+  it("accepts __ct_data() with intrinsic collection helpers and local helpers", () => {
+    const program: Program = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { __ct_data, safeDateNow } from "commontools";',
+            "function buildYears() {",
+            "  const currentYear = new Date(safeDateNow()).getFullYear();",
+            "  const years: string[] = [];",
+            "  for (let year = currentYear; year >= currentYear - 2; year--) {",
+            "    years.push(String(year));",
+            "  }",
+            "  return years;",
+            "}",
+            'const scopeMap = { gmail: "gmail.readonly" } as const;',
+            "const years = __ct_data(buildYears());",
+            "const scopes = __ct_data(",
+            "  Object.fromEntries(",
+            "    Object.entries(scopeMap).map(([key, value]) => [key, { value }]),",
+            "  ),",
+            ");",
+            "export default { years, scopes };",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).not.toThrow();
+  });
 });

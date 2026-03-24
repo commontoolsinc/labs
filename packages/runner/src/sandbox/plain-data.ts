@@ -12,6 +12,7 @@ export type ModuleSafeValue =
   | number
   | string
   | bigint
+  | RegExp
   | readonly ModuleSafeValue[]
   | ModuleSafeRecord
   | ReadonlyMap<ModuleSafeValue, ModuleSafeValue>
@@ -94,6 +95,11 @@ function validateModuleSafeValue(
 
     if (proto === Set.prototype || proto === FrozenSet.prototype) {
       validateSet(objectValue as ReadonlySet<unknown>, path, visited);
+      validateOwnProperties(objectValue, path, visited);
+      return;
+    }
+
+    if (proto === RegExp.prototype) {
       validateOwnProperties(objectValue, path, visited);
       return;
     }
@@ -230,6 +236,10 @@ function freezeModuleSafeValue(
     );
   }
 
+  if (proto === RegExp.prototype) {
+    return freezeRegExp(objectValue as RegExp, path, converted);
+  }
+
   throw validationError(
     path,
     `Unsupported object prototype '${proto?.constructor?.name ?? "null"}'`,
@@ -329,6 +339,43 @@ function freezeSet(
   }
 
   copyOwnProperties(value as object, result, path, converted);
+
+  Object.freeze(result);
+  verifiedPlainData.add(result);
+  return result;
+}
+
+function freezeRegExp(
+  value: RegExp,
+  path: string,
+  converted: WeakMap<object, ModuleSafeValue>,
+): RegExp {
+  const result = new RegExp(value.source, value.flags);
+  converted.set(value, result);
+  result.lastIndex = value.lastIndex;
+
+  for (const key of Reflect.ownKeys(value)) {
+    if (key === "lastIndex") continue;
+
+    const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+    if (!descriptor) {
+      throw validationError(
+        pathForKey(path, key),
+        "Own property descriptor is missing",
+      );
+    }
+
+    defineSnapshotProperty(
+      result,
+      key,
+      freezeModuleSafeValue(
+        Reflect.get(value, key),
+        pathForKey(path, key),
+        converted,
+      ),
+      descriptor.enumerable ?? true,
+    );
+  }
 
   Object.freeze(result);
   verifiedPlainData.add(result);

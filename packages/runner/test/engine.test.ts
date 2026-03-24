@@ -521,6 +521,88 @@ describe("Engine in SES mode", () => {
     expect(main?.default).toBeDefined();
   });
 
+  it("allows CTS-wrapped local helper calls for inert top-level data", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            'import { safeDateNow } from "commontools";',
+            "function buildYears() {",
+            "  const currentYear = new Date(safeDateNow()).getFullYear();",
+            "  const years: string[] = [];",
+            "  for (let year = currentYear; year >= currentYear - 2; year--) {",
+            "    years.push(String(year));",
+            "  }",
+            "  return years;",
+            "}",
+            "const years = buildYears();",
+            "export default years;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    expect(jsScript.js).toContain("__ct_data(buildYears())");
+
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    expect(main?.default).toHaveLength(3);
+    expect(typeof main?.default?.[0]).toBe("string");
+  });
+
+  it("allows CTS-wrapped Object.fromEntries() top-level snapshots", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            'const scopeMap = { gmail: "gmail.readonly" } as const;',
+            "const scopes = Object.fromEntries(",
+            "  Object.entries(scopeMap).map(([key, value]) => [key, { value }]),",
+            ");",
+            "export default scopes;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    expect(jsScript.js).toContain("__ct_data(Object.fromEntries(");
+
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    expect(main?.default).toEqual({
+      gmail: { value: "gmail.readonly" },
+    });
+  });
+
+  it("allows CTS-wrapped RegExp top-level snapshots", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "const matcher = /^[a-z]+$/;",
+            "export default matcher;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    expect(jsScript.js).toContain("__ct_data(/^[a-z]+$/)");
+
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    expect(main?.default).toBeInstanceOf(RegExp);
+    expect(main?.default?.test("hello")).toBe(true);
+  });
+
   it("rejects top-level mutable bindings", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",

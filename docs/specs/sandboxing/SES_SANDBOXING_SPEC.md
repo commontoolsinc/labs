@@ -362,8 +362,16 @@ pattern construction. A data initializer may use:
 - previously verified module-safe-data bindings
 - approved top-level local helper calls whose captures are themselves limited to
   module-safe data
+- selected intrinsic data-construction helpers such as `Array.from(...)`,
+  `Object.entries(...)`, `Object.fromEntries(...)`, and pure collection/string
+  methods over already-safe inputs
 - explicit runtime snapshot helpers such as `safeDateNow()` and
   `nonPrivateRandom()`
+
+Local helper bodies used by `__ct_data(...)` are allowed to use ordinary
+synchronous control flow and local mutation of ephemeral locals, as long as they
+do not reach out to builder/runtime capabilities and the surviving result still
+passes module-safe-data validation.
 
 A data initializer MUST NOT call:
 
@@ -389,6 +397,7 @@ Version 1 of the allowed domain is a deliberate subset of
 - arrays of allowed values
 - plain object records whose string-keyed or symbol-keyed own data properties
   are allowed values
+- exact intrinsic `RegExp` instances
 - exact intrinsic `Map` instances whose keys and values are allowed values
 - exact intrinsic `Set` instances whose elements are allowed values
 
