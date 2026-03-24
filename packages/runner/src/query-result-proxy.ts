@@ -148,6 +148,40 @@ function normalizeArrayAtIndex(
   return normalizedIndex;
 }
 
+function normalizeArraySliceIndex(
+  length: number,
+  indexArg: unknown,
+  defaultIndex: number,
+): number {
+  if (indexArg === undefined) {
+    return defaultIndex;
+  }
+
+  const numericIndex = Number(indexArg);
+  if (Number.isNaN(numericIndex) || numericIndex === -Infinity) {
+    return 0;
+  }
+  if (numericIndex === Infinity) {
+    return length;
+  }
+
+  const relativeIndex = Math.trunc(numericIndex);
+  return relativeIndex >= 0
+    ? Math.min(relativeIndex, length)
+    : Math.max(length + relativeIndex, 0);
+}
+
+function normalizeArraySliceBounds(
+  length: number,
+  startArg: unknown,
+  endArg: unknown,
+): readonly [number, number] {
+  return [
+    normalizeArraySliceIndex(length, startArg, 0),
+    normalizeArraySliceIndex(length, endArg, length),
+  ];
+}
+
 function isShapeOnlyPropertyCheck(
   prop: PropertyKey,
 ): prop is ShapeOnlyPropertyCheck {
@@ -407,6 +441,44 @@ export function createQueryResultProxy<T>(
                 depth,
                 writable,
               );
+            }
+
+            if (prop === "slice") {
+              const readTx = (tx?.status().status === "ready")
+                ? tx
+                : runtime.edit();
+              observeLink(tx, link, "shape");
+              observeLink(tx, link, "enumerate");
+              observeLink(tx, link, "count");
+              const current = readValueInternally(readTx, link) as any[];
+              const length = current.length;
+              const [start, end] = normalizeArraySliceBounds(
+                length,
+                args[0],
+                args[1],
+              );
+              const resultLength = Math.max(end - start, 0);
+              const result = new Array(resultLength);
+
+              for (let index = start; index < end; index++) {
+                const childLink = {
+                  ...link,
+                  path: [...link.path, String(index)],
+                };
+                if (Object.hasOwn(current, index)) {
+                  result[index - start] = readObservedChildValue(
+                    runtime,
+                    tx,
+                    childLink,
+                    depth,
+                    writable,
+                  );
+                  continue;
+                }
+                observeLink(tx, childLink, "shape");
+              }
+
+              return result;
             }
 
             // This will also mark each element read in the log. Almost all

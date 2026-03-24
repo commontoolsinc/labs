@@ -436,4 +436,46 @@ describe("CFC convenience read decomposition", () => {
       reads.some((read) => read.path === "/items/0" && read.op === "value"),
     ).toBe(true);
   });
+
+  it("decomposes slice into structural observations plus selected child values", () => {
+    const cell = runtime.getCell<{ items: number[] }>(
+      space,
+      "cfc-convenience-array-slice",
+      undefined,
+      tx,
+    );
+    cell.set({ items: [10, 20, 30] });
+
+    const proxy = createQueryResultProxy<{ items: number[] }>(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      false,
+      "skip",
+    );
+
+    expect(proxy.items.slice(0, 2)).toEqual([10, 20]);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .filter((read) => read.cfc?.op !== undefined);
+    expect(
+      reads.some((read) => read.path === "/items" && read.op === "shape"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items" && read.op === "enumerate"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items" && read.op === "count"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/0" && read.op === "value"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/1" && read.op === "value"),
+    ).toBe(true);
+    expect(
+      reads.some((read) => read.path === "/items/2" && read.op !== undefined),
+    ).toBe(false);
+  });
 });
