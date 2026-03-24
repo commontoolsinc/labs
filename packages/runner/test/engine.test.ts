@@ -250,41 +250,6 @@ describe("Engine.evaluate()", () => {
     });
   });
 
-  it("throws when toSchema() reaches runtime without CTS", async () => {
-    await runtime.dispose();
-    await storageManager.close();
-
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-      sandbox: {
-        mode: "unsafe-eval",
-      },
-    });
-    engine = runtime.harness as Engine;
-
-    const program: RuntimeProgram = {
-      main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: [
-            'import { toSchema } from "commontools";',
-            "export default toSchema<{ count: number }>({",
-            "  default: { count: 0 },",
-            "});",
-          ].join("\n"),
-        },
-      ],
-    };
-
-    const { jsScript, id } = await engine.compile(program);
-    await expect(engine.evaluate(id, jsScript, program.files)).rejects.toThrow(
-      "toSchema() must be transformed at compile time",
-    );
-  });
-
   it("throws when handler() relies on CTS inference without CTS", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
@@ -306,45 +271,6 @@ describe("Engine.evaluate()", () => {
       "Handler requires schemas or CTS transformer",
     );
   });
-
-  it("characterizes shared top-level mutable state in untransformed modules", async () => {
-    await runtime.dispose();
-    await storageManager.close();
-
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-      sandbox: {
-        mode: "unsafe-eval",
-      },
-    });
-    engine = runtime.harness as Engine;
-
-    const program: RuntimeProgram = {
-      main: "/main.ts",
-      files: [
-        {
-          name: "/main.ts",
-          contents: [
-            "let counter = 0;",
-            "export default function next(): number {",
-            "  counter += 1;",
-            "  return counter;",
-            "}",
-          ].join("\n"),
-        },
-      ],
-    };
-
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
-    const next = main!["default"] as () => number;
-
-    // Current harness behavior: module-scope state lives across export calls.
-    expect(next()).toBe(1);
-    expect(next()).toBe(2);
-  });
 });
 
 describe("Engine in SES mode", () => {
@@ -357,10 +283,6 @@ describe("Engine in SES mode", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      sandbox: {
-        mode: "ses",
-        verifyModules: true,
-      },
     });
     engine = runtime.harness as Engine;
   });

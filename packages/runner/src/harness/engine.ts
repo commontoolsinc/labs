@@ -16,11 +16,7 @@ import {
   Source,
   TypeScriptCompiler,
 } from "@commonfabric/js-compiler";
-import {
-  MappedPosition,
-  UnsafeEvalIsolate,
-  UnsafeEvalRuntime,
-} from "./eval-runtime.ts";
+import { MappedPosition } from "./eval-runtime.ts";
 import {
   CommonFabricTransformerPipeline,
   OpaqueRefErrorTransformer,
@@ -90,8 +86,8 @@ export class EngineProgramResolver extends InMemoryProgram {
 
 interface Internals {
   compiler: TypeScriptCompiler;
-  runtime: UnsafeEvalRuntime | SESRuntime;
-  isolate: UnsafeEvalIsolate | SESIsolate;
+  runtime: SESRuntime;
+  isolate: SESIsolate;
   runtimeExports: Record<string, any> | undefined;
   // Callback will be called with a map of exported values to `RuntimeProgram`
   // after compilation and initial eval and before compilation returns, so
@@ -116,16 +112,14 @@ export class Engine extends EventTarget implements Harness {
       this.ctRuntime.staticCache,
     );
     const compiler = new TypeScriptCompiler(environmentTypes);
-    const runtime = this.ctRuntime.sandbox.mode === "ses"
-      ? new SESRuntime({
-        globals: {
-          [RUNTIME_ENGINE_CONSOLE_HOOK]: globalThis[
-            RUNTIME_ENGINE_CONSOLE_HOOK
-          ],
-        },
-        lockdown: this.ctRuntime.sandbox.lockdown,
-      })
-      : new UnsafeEvalRuntime();
+    const runtime = new SESRuntime({
+      globals: {
+        [RUNTIME_ENGINE_CONSOLE_HOOK]: globalThis[
+          RUNTIME_ENGINE_CONSOLE_HOOK
+        ],
+      },
+      lockdown: true,
+    });
     const isolate = runtime.getIsolate("");
     const { runtimeExports, exportsCallback } = await RuntimeModules
       .getExports();
@@ -181,13 +175,8 @@ export class Engine extends EventTarget implements Harness {
       },
     });
 
-    if (
-      this.ctRuntime.sandbox.mode === "ses" &&
-      this.ctRuntime.sandbox.verifyModules
-    ) {
-      verifyProgramModuleScope(transformedProgram ?? resolvedProgram);
-      preflightCompiledBundle(jsScript.js, jsScript.filename ?? filename);
-    }
+    verifyProgramModuleScope(transformedProgram ?? resolvedProgram);
+    preflightCompiledBundle(jsScript.js, jsScript.filename ?? filename);
 
     return { id, jsScript };
   }
@@ -252,38 +241,14 @@ export class Engine extends EventTarget implements Harness {
   }
 
   getInvocation(source: string): HarnessedFunction {
-    if (this.ctRuntime.sandbox.mode === "ses") {
-      return evaluateFunctionSourceInSES(source, {
-        globals: {
-          [RUNTIME_ENGINE_CONSOLE_HOOK]: globalThis[
-            RUNTIME_ENGINE_CONSOLE_HOOK
-          ],
-        },
-        lockdown: this.ctRuntime.sandbox.lockdown,
-      }) as HarnessedFunction;
-    }
-
-    if (this.internals) {
-      // Extract inline source map and sourceURL from the source string
-      // so the isolate's SourceMapParser can map stack traces back to
-      // original TypeScript sources.
-      const sourceMapMatch = source.match(
-        /\/\/# sourceMappingURL=data:application\/json;base64,([^\s]+)/,
-      );
-      const sourceUrlMatch = source.match(/\/\/# sourceURL=([^\s]+)/);
-      if (sourceMapMatch && sourceUrlMatch) {
-        try {
-          const sourceMap = JSON.parse(atob(sourceMapMatch[1]));
-          this.internals.isolate.loadSourceMap(
-            sourceUrlMatch[1],
-            sourceMap,
-          );
-        } catch {
-          // Ignore malformed source maps
-        }
-      }
-    }
-    return eval(source);
+    return evaluateFunctionSourceInSES(source, {
+      globals: {
+        [RUNTIME_ENGINE_CONSOLE_HOOK]: globalThis[
+          RUNTIME_ENGINE_CONSOLE_HOOK
+        ],
+      },
+      lockdown: this.ctRuntime.sandbox.lockdown,
+    }) as HarnessedFunction;
   }
 
   // Map a single position to its original source location.
@@ -339,7 +304,7 @@ export class Engine extends EventTarget implements Harness {
     }
 
     if (this.internals) {
-      // Clear the UnsafeEvalRuntime which holds accumulated source maps
+      // Clear the SES runtime state which holds accumulated source maps
       this.internals.runtime.clear();
 
       // Clear references to allow GC
