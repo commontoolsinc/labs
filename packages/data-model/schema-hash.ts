@@ -1,23 +1,23 @@
 /**
  * Schema hashing dispatch layer.
  *
- * Provides `hashSchema` and `hashSchemaPathSelector` — deterministic string
- * hashes for schemas and schema path selectors. Dispatches between legacy
- * `stableStringify` (schema-hash-legacy.ts) and canonical hashing
+ * Provides `hashSchema` and `hashSchemaItem` — deterministic string
+ * hashes for schemas and general schema-related items. Dispatches between
+ * legacy `stableStringify` (schema-hash-legacy.ts) and canonical hashing
  * (schema-hash-modern.ts) based on a runtime flag.
  *
  * Follows the same inline-flag-test dispatch pattern used by
  * `fabric-value.ts`.
  */
 
-import type { JSONSchema, SchemaPathSelector } from "@commontools/api";
+import type { FabricValue, JSONSchema } from "@commontools/api";
 import {
+  hashSchemaItemLegacy,
   hashSchemaLegacy,
-  hashSchemaPathSelectorLegacy,
 } from "./schema-hash-legacy.ts";
 import {
+  hashSchemaItemModern,
   hashSchemaModern,
-  hashSchemaPathSelectorModern,
 } from "./schema-hash-modern.ts";
 
 // ---------------------------------------------------------------------------
@@ -59,11 +59,12 @@ export function hashSchema(schema: JSONSchema): string {
 }
 
 /**
- * Compute a deterministic string hash of a SchemaPathSelector.
- * Structurally-equal selectors always produce the same hash.
+ * Compute a deterministic string hash of a schema-related item (e.g. a
+ * path selector, a value descriptor, etc.). Structurally-equal items
+ * always produce the same hash.
  */
-export function hashSchemaPathSelector(selector: SchemaPathSelector): string {
+export function hashSchemaItem(item: FabricValue): string {
   return modernSchemaHashEnabled
-    ? hashSchemaPathSelectorModern(selector)
-    : hashSchemaPathSelectorLegacy(selector);
+    ? hashSchemaItemModern(item)
+    : hashSchemaItemLegacy(item);
 }

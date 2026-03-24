@@ -1,7 +1,7 @@
 import { hashOf } from "@commontools/data-model/value-hash";
 import {
   hashSchema,
-  hashSchemaPathSelector,
+  hashSchemaItem,
 } from "@commontools/data-model/schema-hash";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj } from "@commontools/api";
@@ -296,15 +296,15 @@ export class MapSet<K, V> {
 /**
  * Convenience subclass of `MapSet` specialized for `string` keys and
  * `SchemaPathSelector` values — the common case throughout traverse/query
- * code. When `hashValues` is `true`, uses `hashSchemaPathSelector` from
- * the schema-hash dispatch layer as the hash function.
+ * code. When `hashValues` is `true`, uses `hashSchemaItem` from the
+ * schema-hash dispatch layer as the hash function.
  */
 export class MapSetStringToPathSelectors extends MapSet<
   string,
   SchemaPathSelector
 > {
   constructor(hashValues: boolean = false) {
-    super(hashValues ? hashSchemaPathSelector : undefined);
+    super(hashValues ? hashSchemaItem : undefined);
   }
 }
 

@@ -10,7 +10,7 @@
  * `value-hash-modern.ts` and `fabric-value-modern.ts`.
  */
 
-import type { JSONSchema, SchemaPathSelector } from "@commontools/api";
+import type { FabricValue, JSONSchema } from "@commontools/api";
 
 /** Modern hash of a JSONSchema (not yet implemented). */
 export function hashSchemaModern(_schema: JSONSchema): string {
@@ -20,12 +20,12 @@ export function hashSchemaModern(_schema: JSONSchema): string {
   );
 }
 
-/** Modern hash of a SchemaPathSelector (not yet implemented). */
-export function hashSchemaPathSelectorModern(
-  _selector: SchemaPathSelector,
+/** Modern hash of a schema-related item (not yet implemented). */
+export function hashSchemaItemModern(
+  _item: FabricValue,
 ): string {
   throw new Error(
-    "hashSchemaPathSelectorModern is not yet implemented — " +
+    "hashSchemaItemModern is not yet implemented — " +
       "the modernSchemaHash experiment flag should not be enabled",
   );
 }

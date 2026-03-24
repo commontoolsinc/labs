@@ -10,7 +10,7 @@
  * replaced by canonical hashing (via `modernHash`) behind a flag.
  */
 
-import type { JSONSchema, SchemaPathSelector } from "@commontools/api";
+import type { FabricValue, JSONSchema } from "@commontools/api";
 
 const _hashCache = new WeakMap<object, string>();
 
@@ -57,9 +57,7 @@ export function hashSchemaLegacy(schema: JSONSchema): string {
   return stableStringify(schema);
 }
 
-/** Legacy hash of a SchemaPathSelector. */
-export function hashSchemaPathSelectorLegacy(
-  selector: SchemaPathSelector,
-): string {
-  return stableStringify(selector);
+/** Legacy hash of a schema-related item. */
+export function hashSchemaItemLegacy(item: FabricValue): string {
+  return stableStringify(item);
 }
