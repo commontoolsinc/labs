@@ -9,8 +9,8 @@ import {
 import { expect } from "@std/expect";
 import {
   hashOf,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  resetModernHashConfig,
+  setModernHashConfig,
 } from "@commontools/data-model/value-hash";
 import { JSONObject, type JSONSchema } from "../src/index.ts";
 import type { FabricDatum } from "@commontools/data-model/fabric-value";
@@ -41,8 +41,8 @@ const space = signer.did();
 
 for (const modernHash of [false, true]) {
   describe(`modernHash=${modernHash}`, () => {
-    beforeAll(() => setCanonicalHashConfig(modernHash));
-    afterAll(() => resetCanonicalHashConfig());
+    beforeAll(() => setModernHashConfig(modernHash));
+    afterAll(() => resetModernHashConfig());
 
     describe("Query", () => {
       let storageManager: ReturnType<typeof StorageManager.emulate>;

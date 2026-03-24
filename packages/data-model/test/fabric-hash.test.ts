@@ -11,8 +11,8 @@ import {
   hashObjectFromJson,
   hashOf,
   isHashObject,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  resetModernHashConfig,
+  setModernHashConfig,
 } from "../value-hash.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
@@ -88,7 +88,7 @@ Deno.test("FabricHash", async (t) => {
   await t.step(
     "hashObjectFromJson round-trips through FabricHash when canonical hashing is on",
     () => {
-      setCanonicalHashConfig(true);
+      setModernHashConfig(true);
       try {
         const original = new FabricHash(SAMPLE_HASH, "fid1");
         const json = original.toJSON();
@@ -100,7 +100,7 @@ Deno.test("FabricHash", async (t) => {
         assertEquals(cid.toString(), original.toString());
         assertEquals(cid.hash, original.hash);
       } finally {
-        resetCanonicalHashConfig();
+        resetModernHashConfig();
       }
     },
   );
@@ -108,7 +108,7 @@ Deno.test("FabricHash", async (t) => {
   await t.step(
     "fromString round-trips through FabricHash when canonical hashing is on",
     () => {
-      setCanonicalHashConfig(true);
+      setModernHashConfig(true);
       try {
         // Use a non-fid1 tag to verify the parser doesn't hardcode it.
         const original = new FabricHash(SAMPLE_HASH, "sha3");
@@ -121,7 +121,7 @@ Deno.test("FabricHash", async (t) => {
         assertEquals(cid.hash, original.hash);
         assertEquals(cid.algorithmTag, "sha3");
       } finally {
-        resetCanonicalHashConfig();
+        resetModernHashConfig();
       }
     },
   );
@@ -129,7 +129,7 @@ Deno.test("FabricHash", async (t) => {
   await t.step(
     "fromString throws on invalid format (no colon) when canonical hashing is on",
     () => {
-      setCanonicalHashConfig(true);
+      setModernHashConfig(true);
       try {
         assertThrows(
           () => fromString("nocolonhere"),
@@ -137,7 +137,7 @@ Deno.test("FabricHash", async (t) => {
           "Invalid content hash string",
         );
       } finally {
-        resetCanonicalHashConfig();
+        resetModernHashConfig();
       }
     },
   );
@@ -163,12 +163,12 @@ Deno.test("FabricHash", async (t) => {
   await t.step(
     "hashOf() returns FabricHash when canonical hashing is on",
     () => {
-      setCanonicalHashConfig(true);
+      setModernHashConfig(true);
       try {
         const result = hashOf({ hello: "world" });
         assertInstanceOf(result, FabricHash);
       } finally {
-        resetCanonicalHashConfig();
+        resetModernHashConfig();
       }
     },
   );
@@ -176,7 +176,7 @@ Deno.test("FabricHash", async (t) => {
   await t.step(
     "nested hashOf() works when canonical hashing is on (no throw on FabricHash in value tree)",
     () => {
-      setCanonicalHashConfig(true);
+      setModernHashConfig(true);
       try {
         // First hashOf produces a FabricHash.
         const innerRef = hashOf({ the: "text/plain", of: "entity:123" });
@@ -193,7 +193,7 @@ Deno.test("FabricHash", async (t) => {
         const outerRef = hashOf(outerSource);
         assertInstanceOf(outerRef, FabricHash);
       } finally {
-        resetCanonicalHashConfig();
+        resetModernHashConfig();
       }
     },
   );
@@ -204,7 +204,7 @@ Deno.test("FabricHash", async (t) => {
       // Explicitly pin canonical hashing off rather than relying on ambient
       // default, so this step exercises the legacy path even if the default
       // changes.
-      setCanonicalHashConfig(false);
+      setModernHashConfig(false);
       try {
         const result = hashOf({ test: true });
         assert(Reference.is(result), "Expected a Reference.View instance");
@@ -213,7 +213,7 @@ Deno.test("FabricHash", async (t) => {
           "Should not be FabricHash when flag is off",
         );
       } finally {
-        resetCanonicalHashConfig();
+        resetModernHashConfig();
       }
     },
   );

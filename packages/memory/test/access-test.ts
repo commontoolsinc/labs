@@ -5,8 +5,8 @@ import * as Access from "../access.ts";
 import { type DID } from "@commontools/identity";
 import {
   hashOf,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  resetModernHashConfig,
+  setModernHashConfig,
 } from "@commontools/data-model/value-hash";
 import { Invocation } from "../interface.ts";
 
@@ -17,10 +17,10 @@ describe("access", () => {
   // Explicitly pin canonical hashing off so these tests exercise the legacy
   // hashOf() path regardless of what the ambient default is.
   beforeAll(() => {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
   });
   afterAll(() => {
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   });
 
   it("signer.did()", () => {

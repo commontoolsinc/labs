@@ -15,8 +15,8 @@ import {
 import { assert, assertEquals, assertFalse } from "@std/assert";
 import {
   hashOf,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  resetModernHashConfig,
+  setModernHashConfig,
 } from "@commontools/data-model/value-hash";
 import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
@@ -29,7 +29,7 @@ import { alice } from "./principal.ts";
 
 // Explicitly pin canonical hashing off so these tests exercise the legacy
 // hashOf() path regardless of what the ambient default is.
-setCanonicalHashConfig(false);
+setModernHashConfig(false);
 
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
@@ -48,9 +48,9 @@ const the = "application/json";
 const store = new URL(`memory://`);
 
 describe("redactCommitData call sites", () => {
-  // Clean up the module-level setCanonicalHashConfig(false) after all tests.
+  // Clean up the module-level setModernHashConfig(false) after all tests.
   afterAll(() => {
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   });
 
   let provider: Provider.Provider<Provider.Protocol>;

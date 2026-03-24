@@ -1,11 +1,11 @@
 /**
- * Hashing Performance Benchmarks: Legacy (merkle-reference) vs. Canonical
+ * Hashing Performance Benchmarks: Legacy (merkle-reference) vs. Modern
  *
  * Compares the two hashing paths used by `hashOf()`:
  * - Legacy: merkle-reference tree builder with primitive LRU + WeakMap caching
- * - Canonical: `hashOfModern()` single-pass incremental SHA-256
+ * - Modern: `hashOfModern()` single-pass incremental SHA-256
  *
- * Uses `setCanonicalHashConfig()` with `BenchContext.start()`/`b.end()` to
+ * Uses `setModernHashConfig()` with `BenchContext.start()`/`b.end()` to
  * exclude config setup and teardown from timing.
  *
  * Run with: deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check test/hashing-bench.ts
@@ -13,8 +13,8 @@
 
 import {
   hashOf,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  resetModernHashConfig,
+  setModernHashConfig,
 } from "../value-hash.ts";
 import { hashOfModern } from "../value-hash-modern.ts";
 import { deepFreeze } from "../deep-freeze.ts";
@@ -94,12 +94,12 @@ const assertion16KB = {
 
 // Warm up both paths to avoid measuring JIT compilation
 for (let i = 0; i < 20; i++) {
-  setCanonicalHashConfig(false);
+  setModernHashConfig(false);
   hashOf(smallObject);
-  setCanonicalHashConfig(true);
+  setModernHashConfig(true);
   hashOf(smallObject);
 }
-resetCanonicalHashConfig();
+resetModernHashConfig();
 
 // ==========================================================================
 // Same-object benchmarks (measures cache effectiveness)
@@ -110,11 +110,11 @@ Deno.bench({
   group: "small-object",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(smallObject);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -122,11 +122,11 @@ Deno.bench({
   name: "canonical hashOf() - small object (5 keys)",
   group: "small-object",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(smallObject);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -135,11 +135,11 @@ Deno.bench({
   group: "medium-object",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(mediumObject);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -147,11 +147,11 @@ Deno.bench({
   name: "canonical hashOf() - medium object (15 keys, 2-level)",
   group: "medium-object",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(mediumObject);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -160,11 +160,11 @@ Deno.bench({
   group: "large-tree",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(largeNestedTree);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -172,11 +172,11 @@ Deno.bench({
   name: "canonical hashOf() - large tree (~364 nodes)",
   group: "large-tree",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(largeNestedTree);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -185,11 +185,11 @@ Deno.bench({
   group: "small-array",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(smallArray);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -197,11 +197,11 @@ Deno.bench({
   name: "canonical hashOf() - small array (5 elements)",
   group: "small-array",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(smallArray);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -210,11 +210,11 @@ Deno.bench({
   group: "large-array",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(largeArray);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -222,11 +222,11 @@ Deno.bench({
   name: "canonical hashOf() - large array (200 objects)",
   group: "large-array",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(largeArray);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -235,11 +235,11 @@ Deno.bench({
   group: "repeated-subtrees",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(repeatedSubtrees);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -247,11 +247,11 @@ Deno.bench({
   name: "canonical hashOf() - repeated subtrees (50 items, 1 shared)",
   group: "repeated-subtrees",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(repeatedSubtrees);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -260,11 +260,11 @@ Deno.bench({
   group: "unclaimed",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(unclaimedFact);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -272,11 +272,11 @@ Deno.bench({
   name: "canonical hashOf() - unclaimed {the, of}",
   group: "unclaimed",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(unclaimedFact);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -285,11 +285,11 @@ Deno.bench({
   group: "assertion-16kb",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(assertion16KB);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -297,11 +297,11 @@ Deno.bench({
   name: "canonical hashOf() - 16KB assertion",
   group: "assertion-16kb",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(assertion16KB);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -344,11 +344,11 @@ Deno.bench({
   baseline: true,
   fn(b) {
     const data = freshSmallObject();
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -357,11 +357,11 @@ Deno.bench({
   group: "small-object-fresh",
   fn(b) {
     const data = freshSmallObject();
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -371,11 +371,11 @@ Deno.bench({
   baseline: true,
   fn(b) {
     const data = freshMediumObject();
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -384,11 +384,11 @@ Deno.bench({
   group: "medium-object-fresh",
   fn(b) {
     const data = freshMediumObject();
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -398,11 +398,11 @@ Deno.bench({
   baseline: true,
   fn(b) {
     const data = freshUnclaimedFact();
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -411,11 +411,11 @@ Deno.bench({
   group: "unclaimed-fresh",
   fn(b) {
     const data = freshUnclaimedFact();
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -425,11 +425,11 @@ Deno.bench({
   baseline: true,
   fn(b) {
     const data = freshAssertion16KB();
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -438,11 +438,11 @@ Deno.bench({
   group: "assertion-16kb-fresh",
   fn(b) {
     const data = freshAssertion16KB();
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -496,10 +496,10 @@ const frozenLargeTree = deepFreeze(makeLargeNestedTree(6, 3));
 
 // Warm up frozen-object path
 for (let i = 0; i < 20; i++) {
-  setCanonicalHashConfig(true);
+  setModernHashConfig(true);
   hashOf(frozenSmallFlat);
   hashOf(frozenLargeTree);
-  resetCanonicalHashConfig();
+  resetModernHashConfig();
 }
 
 Deno.bench({
@@ -507,11 +507,11 @@ Deno.bench({
   group: "frozen-small-flat",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(frozenSmallFlat);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -519,11 +519,11 @@ Deno.bench({
   name: "canonical hashOf() - frozen small flat (5 keys, WeakMap cached)",
   group: "frozen-small-flat",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(frozenSmallFlat);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -532,11 +532,11 @@ Deno.bench({
   group: "frozen-nested",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(frozenNested);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -544,11 +544,11 @@ Deno.bench({
   name: "canonical hashOf() - frozen nested (3-level, WeakMap cached)",
   group: "frozen-nested",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(frozenNested);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -557,11 +557,11 @@ Deno.bench({
   group: "frozen-array",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(frozenArray);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -569,11 +569,11 @@ Deno.bench({
   name: "canonical hashOf() - frozen array (6 elements, WeakMap cached)",
   group: "frozen-array",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(frozenArray);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -582,11 +582,11 @@ Deno.bench({
   group: "frozen-obj-arrays",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(frozenObjectWithArrays);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -594,11 +594,11 @@ Deno.bench({
   name: "canonical hashOf() - frozen object+arrays (WeakMap cached)",
   group: "frozen-obj-arrays",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(frozenObjectWithArrays);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -607,11 +607,11 @@ Deno.bench({
   group: "frozen-large-tree",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(frozenLargeTree);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -619,11 +619,11 @@ Deno.bench({
   name: "canonical hashOf() - frozen large tree (~364 nodes, WeakMap cached)",
   group: "frozen-large-tree",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(frozenLargeTree);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -643,11 +643,11 @@ Deno.bench({
       score: 95.5,
       tag: null,
     });
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -662,11 +662,11 @@ Deno.bench({
       score: 95.5,
       tag: null,
     });
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -680,11 +680,11 @@ Deno.bench({
       scores: { math: 95, science: 88, history: 72 },
       meta: { created: "2026-01-01", version: 3 },
     });
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -697,11 +697,11 @@ Deno.bench({
       scores: { math: 95, science: 88, history: 72 },
       meta: { created: "2026-01-01", version: 3 },
     });
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -711,11 +711,11 @@ Deno.bench({
   baseline: true,
   fn(b) {
     const data = deepFreeze(makeLargeNestedTree(6, 3));
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -724,11 +724,11 @@ Deno.bench({
   group: "frozen-large-tree-fresh",
   fn(b) {
     const data = deepFreeze(makeLargeNestedTree(6, 3));
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -743,23 +743,23 @@ const frozenTheOf = Object.freeze({
 
 // Warm up
 for (let i = 0; i < 20; i++) {
-  setCanonicalHashConfig(true);
+  setModernHashConfig(true);
   hashOf(frozenTheOf);
-  setCanonicalHashConfig(false);
+  setModernHashConfig(false);
   hashOf(frozenTheOf);
 }
-resetCanonicalHashConfig();
+resetModernHashConfig();
 
 Deno.bench({
   name: "legacy hashOf() - frozen {the, of} (cached)",
   group: "frozen-the-of",
   baseline: true,
   fn(b) {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(frozenTheOf);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -767,11 +767,11 @@ Deno.bench({
   name: "canonical hashOf() - frozen {the, of} (WeakMap cached)",
   group: "frozen-the-of",
   fn(b) {
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(frozenTheOf);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -784,11 +784,11 @@ Deno.bench({
       the: "application/json",
       of: "did:key:z6Mktest1234567890",
     });
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });
 
@@ -800,10 +800,10 @@ Deno.bench({
       the: "application/json",
       of: "did:key:z6Mktest1234567890",
     });
-    setCanonicalHashConfig(true);
+    setModernHashConfig(true);
     b.start();
     hashOf(data);
     b.end();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   },
 });

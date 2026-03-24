@@ -8,8 +8,8 @@ import {
 } from "@std/testing/bdd";
 import {
   hashOf,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  resetModernHashConfig,
+  setModernHashConfig,
 } from "@commontools/data-model/value-hash";
 import type { JSONSchema } from "@commontools/runner";
 import * as Changes from "../changes.ts";
@@ -57,16 +57,16 @@ for (const modernHash of [false, true]) {
     let session: Space.View;
 
     beforeAll(() => {
-      setCanonicalHashConfig(modernHash);
+      setModernHashConfig(modernHash);
       doc = `of:${hashOf({ hello: "world" })}` as const;
       doc1 = doc;
       doc2 = `of:${hashOf({ goodbye: "world" })}` as const;
       doc3 = `of:${hashOf({ goodbye: "cruel world" })}` as const;
-      resetCanonicalHashConfig();
+      resetModernHashConfig();
     });
 
     beforeEach(async () => {
-      setCanonicalHashConfig(modernHash);
+      setModernHashConfig(modernHash);
       const result = await Space.open({ url: DB });
       assert(result.ok, "Open create repository if it does not exist");
       session = result.ok;
@@ -74,7 +74,7 @@ for (const modernHash of [false, true]) {
 
     afterEach(async () => {
       await Space.close(session);
-      resetCanonicalHashConfig();
+      resetModernHashConfig();
     });
 
     it("querying non existing memory returns no facts", async () => {

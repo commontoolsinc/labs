@@ -19,8 +19,8 @@ import {
   setDataModelConfig,
 } from "@commontools/data-model/fabric-value";
 import {
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  resetModernHashConfig,
+  setModernHashConfig,
 } from "@commontools/data-model/value-hash";
 import {
   resetJsonEncodingConfig,
@@ -243,7 +243,7 @@ export class Runtime {
 
     // Propagate experimental flags to the memory layer's ambient config.
     setDataModelConfig(this.experimental);
-    setCanonicalHashConfig(this.experimental.modernHash);
+    setModernHashConfig(this.experimental.modernHash);
     setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
     setSchemaHashConfig(this.experimental.modernSchemaHash);
     this.id = options.storageManager.id;
@@ -408,7 +408,7 @@ export class Runtime {
 
     // Reset experimental fabric config to defaults
     resetDataModelConfig();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
     resetJsonEncodingConfig();
     resetSchemaHashConfig();
 

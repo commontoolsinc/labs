@@ -14,8 +14,8 @@ import {
 } from "@std/testing/bdd";
 import {
   hashOf,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  resetModernHashConfig,
+  setModernHashConfig,
 } from "@commontools/data-model/value-hash";
 import type { JSONSchema } from "@commontools/runner";
 import * as Changes from "../changes.ts";
@@ -61,13 +61,13 @@ for (const modernHash of [false, true]) {
     let provider: Provider.Provider<Provider.Protocol>;
 
     beforeAll(() => {
-      setCanonicalHashConfig(modernHash);
+      setModernHashConfig(modernHash);
       doc = `of:${hashOf({ hello: "world" })}` as const;
-      resetCanonicalHashConfig();
+      resetModernHashConfig();
     });
 
     beforeEach(async () => {
-      setCanonicalHashConfig(modernHash);
+      setModernHashConfig(modernHash);
       const open = await Provider.open({
         serviceDid,
         store,
@@ -79,7 +79,7 @@ for (const modernHash of [false, true]) {
 
     afterEach(async () => {
       await provider.close();
-      resetCanonicalHashConfig();
+      resetModernHashConfig();
     });
 
     it("query empty memory", async () => {

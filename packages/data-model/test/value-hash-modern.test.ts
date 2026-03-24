@@ -4,7 +4,7 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
-import { hashOfModern as canonicalHashRaw } from "../value-hash-modern.ts";
+import { hashOfModern as modernHashRaw } from "../value-hash-modern.ts";
 import { FabricHash } from "../fabric-hash.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import { FabricError, FabricUint8Array } from "../fabric-native-instances.ts";
@@ -31,7 +31,7 @@ function hex(hash: Uint8Array): string {
 
 /** Extract the raw hash bytes from modernHash for comparison. */
 function modernHash(value: unknown): Uint8Array {
-  return canonicalHashRaw(value).hash;
+  return modernHashRaw(value).hash;
 }
 
 // =========================================================================
@@ -960,14 +960,14 @@ Deno.test("modernHash", async (t) => {
   // =========================================================================
 
   await t.step("modernHash returns FabricHash with fid1 tag", () => {
-    const result = canonicalHashRaw(42);
+    const result = modernHashRaw(42);
     assertEquals(result instanceof FabricHash, true);
     assertEquals(result.algorithmTag, "fid1");
     assertEquals(result.hash.length, 32);
   });
 
   await t.step("FabricHash.toString() produces fid1:<base64>", () => {
-    const result = canonicalHashRaw(42);
+    const result = modernHashRaw(42);
     const str = result.toString();
     assertEquals(str.startsWith("fid1:"), true);
     // Should not contain padding (unpadded base64).
@@ -975,7 +975,7 @@ Deno.test("modernHash", async (t) => {
   });
 
   await t.step("FabricHash is frozen (FabricPrimitive)", () => {
-    const result = canonicalHashRaw(42);
+    const result = modernHashRaw(42);
     assertEquals(Object.isFrozen(result), true);
   });
 });
@@ -986,60 +986,60 @@ Deno.test("modernHash", async (t) => {
 
 Deno.test("modernHash caching", async (t) => {
   await t.step("null returns same object (precomputed constant)", () => {
-    const a = canonicalHashRaw(null);
-    const b = canonicalHashRaw(null);
+    const a = modernHashRaw(null);
+    const b = modernHashRaw(null);
     assertStrictEquals(a, b);
   });
 
   await t.step("undefined returns same object (precomputed constant)", () => {
-    const a = canonicalHashRaw(undefined);
-    const b = canonicalHashRaw(undefined);
+    const a = modernHashRaw(undefined);
+    const b = modernHashRaw(undefined);
     assertStrictEquals(a, b);
   });
 
   await t.step("true returns same object (precomputed constant)", () => {
-    const a = canonicalHashRaw(true);
-    const b = canonicalHashRaw(true);
+    const a = modernHashRaw(true);
+    const b = modernHashRaw(true);
     assertStrictEquals(a, b);
   });
 
   await t.step("false returns same object (precomputed constant)", () => {
-    const a = canonicalHashRaw(false);
-    const b = canonicalHashRaw(false);
+    const a = modernHashRaw(false);
+    const b = modernHashRaw(false);
     assertStrictEquals(a, b);
   });
 
   await t.step("primitive string cache returns same object", () => {
-    const a = canonicalHashRaw("cache-test-string");
-    const b = canonicalHashRaw("cache-test-string");
+    const a = modernHashRaw("cache-test-string");
+    const b = modernHashRaw("cache-test-string");
     assertStrictEquals(a, b);
   });
 
   await t.step("primitive number cache returns same object", () => {
-    const a = canonicalHashRaw(98765);
-    const b = canonicalHashRaw(98765);
+    const a = modernHashRaw(98765);
+    const b = modernHashRaw(98765);
     assertStrictEquals(a, b);
   });
 
   await t.step("primitive bigint cache returns same object", () => {
-    const a = canonicalHashRaw(99887766n);
-    const b = canonicalHashRaw(99887766n);
+    const a = modernHashRaw(99887766n);
+    const b = modernHashRaw(99887766n);
     assertStrictEquals(a, b);
   });
 
   await t.step("deep-frozen object cache returns same object", () => {
     const obj = Object.freeze({ a: 1, b: Object.freeze({ c: 2 }) });
-    const a = canonicalHashRaw(obj);
-    const b = canonicalHashRaw(obj);
+    const a = modernHashRaw(obj);
+    const b = modernHashRaw(obj);
     assertStrictEquals(a, b);
   });
 
   await t.step("mutable object is not cached (recomputed each time)", () => {
     const obj = { a: 1 };
-    const a = canonicalHashRaw(obj);
+    const a = modernHashRaw(obj);
     // Mutate
     obj.a = 2;
-    const b = canonicalHashRaw(obj);
+    const b = modernHashRaw(obj);
     // Hashes should differ because the object changed
     assertNotEquals(hex(a.hash), hex(b.hash));
   });
@@ -1047,8 +1047,8 @@ Deno.test("modernHash caching", async (t) => {
   await t.step(
     "different primitives with same type produce different hashes",
     () => {
-      const a = canonicalHashRaw("hello");
-      const b = canonicalHashRaw("world");
+      const a = modernHashRaw("hello");
+      const b = modernHashRaw("world");
       assertNotEquals(hex(a.hash), hex(b.hash));
     },
   );

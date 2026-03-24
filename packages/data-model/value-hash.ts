@@ -3,7 +3,7 @@
  *
  * Provides the public API for content hashing: `hashOf`,
  * `isHashObject`, `hashObjectFromJson`, `fromString`. Dispatches between
- * canonical hashing (value-hash-modern.ts) and legacy merkle-reference
+ * modern hashing (value-hash-modern.ts) and legacy merkle-reference
  * (value-hash-legacy.ts) based on a runtime flag.
  *
  * Follows the same inline-flag-test dispatch pattern used by
@@ -33,8 +33,8 @@ export type DefinedReferent = NonNullable<unknown> | null;
 /**
  * Content hash -- a hash-based reference to a value.
  *
- * Union of `LegacyHashObject` (legacy merkle-reference) and
- * `FabricHash` (canonical hashing). Both branches provide `.bytes`,
+ * Union of `LegacyHashObject` (legacy hashing implementation) and
+ * `FabricHash` (modern hashing implementation). Both branches provide `.bytes`,
  * `.toString()`, `.toJSON()`, and `"/"`.
  *
  * The phantom type parameter `T` is kept for compatibility with generic call
@@ -45,33 +45,33 @@ export type HashObject<
 > = LegacyHashObject<T> | FabricHash;
 
 // ---------------------------------------------------------------------------
-// Canonical hashing mode flag
+// Modern hashing mode flag
 // ---------------------------------------------------------------------------
 
 /**
- * Module-level flag for canonical hashing mode, set by the `Runtime`
- * constructor via `setCanonicalHashConfig()`. When enabled, the public API
- * functions dispatch to canonical hash implementations instead of
+ * Module-level flag for modern hashing mode, set by the `Runtime`
+ * constructor via `setModernHashConfig()`. When enabled, the public API
+ * functions dispatch to modern hash implementations instead of
  * merkle-reference.
  */
-let canonicalHashingEnabled = false;
+let modernHashEnabled = false;
 
 /**
- * Activates or deactivates canonical hashing mode. Called by the `Runtime`
+ * Activates or deactivates modern hashing mode. Called by the `Runtime`
  * constructor to propagate `ExperimentalOptions.modernHash` into the
  * memory layer.
  */
-export function setCanonicalHashConfig(enabled: boolean): void {
-  canonicalHashingEnabled = enabled;
+export function setModernHashConfig(enabled: boolean): void {
+  modernHashEnabled = enabled;
 }
 
 /**
- * Restores canonical hashing mode to its default (disabled). Called by
+ * Restores modern hashing mode to its default (disabled). Called by
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or
  * test runs.
  */
-export function resetCanonicalHashConfig(): void {
-  canonicalHashingEnabled = false;
+export function resetModernHashConfig(): void {
+  modernHashEnabled = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +83,7 @@ export function resetCanonicalHashConfig(): void {
  * Modern path delegates to `FabricHash.fromString()`.
  */
 export function hashObjectFromString(source: string): HashObject {
-  return canonicalHashingEnabled
+  return modernHashEnabled
     ? FabricHash.fromString(source)
     : hashObjectFromStringLegacy(source);
 }
@@ -100,14 +100,14 @@ export function isHashObject<T extends DefinedReferent>(
 
 /** Reconstructs a hash object from its JSON representation. */
 export function hashObjectFromJson(source: { "/": string }): HashObject {
-  return canonicalHashingEnabled
+  return modernHashEnabled
     ? FabricHash.fromString(source["/"])
     : hashObjectFromJsonLegacy(source);
 }
 
 /** Reconstruct a hash object from its string representation. */
 export function fromString(source: string): HashObject {
-  return canonicalHashingEnabled
+  return modernHashEnabled
     ? FabricHash.fromString(source)
     : hashObjectFromStringLegacy(source);
 }
@@ -116,7 +116,5 @@ export function fromString(source: string): HashObject {
 export function hashOf<T extends DefinedReferent>(
   source: T,
 ): HashObject<T> {
-  return canonicalHashingEnabled
-    ? hashOfModern(source)
-    : hashOfLegacyCached(source);
+  return modernHashEnabled ? hashOfModern(source) : hashOfLegacyCached(source);
 }

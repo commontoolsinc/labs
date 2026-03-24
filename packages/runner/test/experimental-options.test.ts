@@ -14,8 +14,8 @@ import {
 import { FabricError } from "@commontools/data-model/fabric-native-instances";
 import {
   hashOf,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  resetModernHashConfig,
+  setModernHashConfig,
 } from "@commontools/data-model/value-hash";
 import { resetSchemaHashConfig } from "@commontools/data-model/schema-hash";
 
@@ -30,7 +30,7 @@ const signer = await Identity.fromPassphrase("test experimental");
 describe("ExperimentalOptions", () => {
   afterEach(() => {
     resetDataModelConfig();
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
     resetSchemaHashConfig();
   });
 
@@ -364,22 +364,22 @@ describe("ExperimentalOptions", () => {
 
   describe("hashOf() with modernHash flag", () => {
     it("works normally when modernHash is false", () => {
-      setCanonicalHashConfig(false);
+      setModernHashConfig(false);
       const ref = hashOf("hello");
       expect(ref).toBeDefined();
       expect(typeof ref.toString()).toBe("string");
     });
 
     it("produces a valid reference when modernHash is true", () => {
-      setCanonicalHashConfig(true);
+      setModernHashConfig(true);
       const ref = hashOf("hello");
       expect(ref).toBeDefined();
       expect(typeof ref.toString()).toBe("string");
     });
 
     it("works again after reset", () => {
-      setCanonicalHashConfig(true);
-      resetCanonicalHashConfig();
+      setModernHashConfig(true);
+      resetModernHashConfig();
       const ref = hashOf("hello");
       expect(ref).toBeDefined();
     });

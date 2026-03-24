@@ -62,7 +62,7 @@ Server Process (Deno)
   +-- toolshed/env.ts        --> Zod parses env vars
   +-- toolshed/index.ts      --> new Runtime({ experimental: { ... } })
                                     +-- setDataModelConfig(...)
-                                    +-- setCanonicalHashConfig(...)
+                                    +-- setModernHashConfig(...)
 ```
 
 ### Browser-side (build-time injection)
@@ -95,9 +95,9 @@ Browser Web Worker
               +-- setDataModelConfig(...)
               |    +-- currentConfig.modernDataModel = true
               |         +-- fabricFromNativeValue() checks currentConfig
-              +-- setCanonicalHashConfig(...)
-                   +-- canonicalHashingEnabled = true
-                        +-- hashOf() dispatches to modernHash()
+              +-- setModernHashConfig(...)
+                   +-- modernHashEnabled = true
+                        +-- hashOf() dispatches to hashOfModern()
 ```
 
 Key points:
@@ -168,8 +168,8 @@ with defaults (all `false`) and stores the resolved result as
 
 The memory layer uses module-level ambient config variables:
 `currentConfig` in `packages/data-model/fabric-value.ts` (set by
-`setDataModelConfig()`) and `canonicalHashingEnabled` in
-`packages/data-model/value-hash.ts` (set by `setCanonicalHashConfig()`). This means:
+`setDataModelConfig()`) and `modernHashEnabled` in
+`packages/data-model/value-hash.ts` (set by `setModernHashConfig()`). This means:
 
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser, the Web Worker is a separate JS context, so its flags are

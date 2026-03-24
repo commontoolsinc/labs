@@ -15,8 +15,8 @@ import * as Commit from "../commit.ts";
 import * as Query from "../query.ts";
 import {
   hashOf,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  resetModernHashConfig,
+  setModernHashConfig,
 } from "@commontools/data-model/value-hash";
 
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
@@ -35,13 +35,13 @@ for (const modernHash of [false, true]) {
     let session: Memory.MemorySession;
 
     beforeAll(() => {
-      setCanonicalHashConfig(modernHash);
+      setModernHashConfig(modernHash);
       doc = `of:${hashOf({ hello: "world" })}` as const;
-      resetCanonicalHashConfig();
+      resetModernHashConfig();
     });
 
     beforeEach(async () => {
-      setCanonicalHashConfig(modernHash);
+      setModernHashConfig(modernHash);
       const open = await Memory.open({
         store: memory,
         serviceDid,
@@ -52,7 +52,7 @@ for (const modernHash of [false, true]) {
 
     afterEach(async () => {
       await session.close();
-      resetCanonicalHashConfig();
+      resetModernHashConfig();
     });
 
     it("query non-existing", async () => {

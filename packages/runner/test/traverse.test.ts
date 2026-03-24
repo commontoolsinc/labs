@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   hashOf,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  resetModernHashConfig,
+  setModernHashConfig,
 } from "@commontools/data-model/value-hash";
 import type {
   Entity,
@@ -45,8 +45,8 @@ function getTraverser(
 
 for (const modernHash of [false, true]) {
   describe(`modernHash=${modernHash}`, () => {
-    beforeAll(() => setCanonicalHashConfig(modernHash));
-    afterAll(() => resetCanonicalHashConfig());
+    beforeAll(() => setModernHashConfig(modernHash));
+    afterAll(() => resetModernHashConfig());
 
     describe("SchemaObjectTraverser.traverseDAG", () => {
       it("follows sigil cell links when traversing", () => {

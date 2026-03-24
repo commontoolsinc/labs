@@ -11,8 +11,8 @@ import { createRef, getEntityId } from "../src/create-ref.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import {
   hashOf,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  resetModernHashConfig,
+  setModernHashConfig,
 } from "@commontools/data-model/value-hash";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
@@ -26,10 +26,10 @@ describe("hashOf", () => {
   // Explicitly pin canonical hashing off so these tests exercise the legacy
   // hashOf() path regardless of what the ambient default is.
   beforeAll(() => {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
   });
   afterAll(() => {
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   });
 
   it("should create a reference that is equal to another reference with the same source", () => {

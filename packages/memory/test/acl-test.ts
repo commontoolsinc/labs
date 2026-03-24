@@ -4,8 +4,8 @@ import { alice, bob, space } from "./principal.ts";
 import * as Access from "../access.ts";
 import {
   hashOf,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
+  resetModernHashConfig,
+  setModernHashConfig,
 } from "@commontools/data-model/value-hash";
 import { type ACL, type Invocation } from "../interface.ts";
 import { ANYONE_USER, checkACL } from "../acl.ts";
@@ -17,10 +17,10 @@ describe("acl", () => {
   // Explicitly pin canonical hashing off so these tests exercise the legacy
   // hashOf() path regardless of what the ambient default is.
   beforeAll(() => {
-    setCanonicalHashConfig(false);
+    setModernHashConfig(false);
   });
   afterAll(() => {
-    resetCanonicalHashConfig();
+    resetModernHashConfig();
   });
 
   it("checkACL - READ capability allows query commands", () => {

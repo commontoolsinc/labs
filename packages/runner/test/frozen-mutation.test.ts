@@ -22,7 +22,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import { resetDataModelConfig } from "@commontools/data-model/fabric-value";
-import { resetCanonicalHashConfig } from "@commontools/data-model/value-hash";
+import { resetModernHashConfig } from "@commontools/data-model/value-hash";
 import { resetJsonEncodingConfig } from "@commontools/data-model/json-encoding";
 
 const signer = await Identity.fromPassphrase("test frozen mutation");
@@ -30,7 +30,7 @@ const space = signer.did();
 
 function resetAllConfigs() {
   resetDataModelConfig();
-  resetCanonicalHashConfig();
+  resetModernHashConfig();
   resetJsonEncodingConfig();
 }
 
