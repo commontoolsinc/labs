@@ -301,7 +301,7 @@ The transformer should normalize top-level functions to a canonical wrapped
 assignment before verification, for example:
 
 ```javascript
-const helperFunction = __ct_fn(function (x) {
+const helperFunction = __ctHardenFn(function (x) {
   return x * 2;
 });
 ```
@@ -311,16 +311,18 @@ variants. The verifier must still inspect the wrapped expression and confirm it
 is a direct `function` expression.
 
 If a top-level helper is intended to be callable from `__ct_data(...)`, it must
-be approved under a stricter data-safe class, for example `__ct_pure_fn(...)`.
-That stricter class requires:
+be approved under a stricter data-safe constraint. In the current
+implementation that is a verifier property, not a separate wrapper class. Such
+helpers require:
 
-- captures limited to module-safe data or other approved `__ct_pure_fn(...)`
-  helpers
+- captures limited to module-safe data or other previously approved local
+  helpers with the same property
 - no references to builder entrypoints, graph constructors, or arbitrary runtime
   imports
 
-Ordinary `__ct_fn(...)` helpers are callable from builder/pattern code but are
-not assumed to be safe inside data wrappers.
+Ordinary `__ctHardenFn(...)` helpers are callable from builder/pattern code but
+are not assumed to be safe inside data wrappers unless the verifier can prove
+their captures are module-safe.
 
 #### 4.2.3 Verified Module-Safe Data
 
@@ -358,8 +360,8 @@ pattern construction. A data initializer may use:
 
 - literals and operators
 - previously verified module-safe-data bindings
-- approved `__ct_pure_fn(...)` top-level helpers whose captures are themselves
-  limited to module-safe data
+- approved top-level local helper calls whose captures are themselves limited to
+  module-safe data
 
 A data initializer MUST NOT call:
 
@@ -475,8 +477,8 @@ The compiler/transformer is not in the TCB. It may assist by:
 
 - inserting stable sentinel comments before each top-level item
 - rewriting trusted builders, top-level functions, and data initializers into a
-  small canonical wrapper language such as `__ct_builder(...)`, `__ct_fn(...)`,
-  `__ct_pure_fn(...)`, and `__ct_data(...)`
+  small canonical wrapper language such as `__ct_builder(...)`,
+  `__ctHardenFn(...)`, and `__ct_data(...)`
 - rewriting candidate plain-data initializers into
   `freezeVerifiedPlainData(...)`
 - hoisting inline callbacks to make direct-callback verification easier
@@ -508,8 +510,8 @@ not a general JavaScript parser. It only needs to:
 - confirm that each surviving top-level item matches one of the canonical
   wrapper forms or allowed import/export/type forms
 - for `__ct_data(...)` items, confirm their declared captures resolve only to
-  previously approved module-safe-data bindings or approved `__ct_pure_fn(...)`
-  helpers
+  previously approved module-safe-data bindings or approved local helper calls
+  whose captures are themselves module-safe
 - reject anything outside that mini-language
 
 The trusted verifier does **not** need to understand arbitrary JavaScript AST
@@ -1701,10 +1703,8 @@ Examples:
 - insert stable sentinel comments before each top-level item
 - normalize trusted builders into canonical forms such as
   `__ct_builder("lift", function ...)`
-- normalize top-level functions into canonical forms such as
-  `__ct_fn(function ...)`
-- normalize data-safe helper functions into canonical forms such as
-  `__ct_pure_fn(function ...)`
+- normalize direct top-level functions into a canonical hardening form such as
+  `const localFn = __ctHardenFn(function ...)` or `__ctHardenFn(localFn)`
 - normalize data bindings into canonical forms such as
   `__ct_data(expr)`
 - rewrite module-safe-data candidates into `freezeVerifiedPlainData(...)` within the
@@ -1753,7 +1753,8 @@ compiler output from executing statements outside `define(...)` registrations.
 The verifier must check:
 
 - trusted builders receive direct callbacks only
-- top-level functions are direct functions only
+- top-level functions are direct functions only, optionally wrapped in the
+  canonical hardening helper form
 - all other surviving top-level values are module-safe data and hardened
 - no unclassified top-level side effects survive
 
@@ -1802,6 +1803,18 @@ snapshot that escapes module load.
 Direct top-level functions and trusted builder implementations must be hardened
 as soon as they are created, but only after the verifier has constrained the
 environment they may close over.
+
+In the current implementation this splits into two canonical paths:
+
+- direct top-level functions are rewritten by the non-TCB transformer into a
+  local `__ctHardenFn(...)` helper pattern that freezes the function object and
+  its prototype immediately after definition
+- trusted builder implementations are hardened in the runtime builder layer as
+  soon as `lift(...)`, `handler(...)`, `pattern(...)`, or related constructors
+  receive them
+
+The compiled-bundle verifier treats the `__ctHardenFn(...)` helper declaration
+and its direct call sites as part of the accepted canonical wrapper grammar.
 
 #### 2.4 Enforce import policy at verification time (Priority: High)
 
@@ -1887,7 +1900,8 @@ private instantiateJavaScriptNode(
 
 The runtime no longer exposes a live `unsafe-eval` authored-module path.
 `harness.getInvocation()` still exists as an internal seam, but it now
-delegates to SES function-source evaluation rather than `UnsafeEvalIsolate`.
+delegates to SES function-source evaluation rather than `UnsafeEvalIsolate`,
+and the rehydrated callback function is hardened before it is cached or invoked.
 The runtime routes either:
 
 - verified module load through the main SES module path, or
@@ -1953,16 +1967,26 @@ describe('SES Sandbox Security', () => {
     await expect(loadPattern(pattern)).rejects.toThrow();
   });
 
-  it('freezes all pattern exports', async () => {
+  it('hardens direct function exports and builder implementations', async () => {
     const pattern = `
-      export const myLift = lift((x) => x * 2);
+      function next() {
+        next.count = (next.count ?? 0) + 1;
+        return next.count;
+      }
+
+      export default next;
+      export const myLift = lift(function step(x) {
+        step.count = (step.count ?? 0) + 1;
+        return x * 2;
+      });
     `;
 
     const compartment = await loadPattern(pattern);
-    const exp = compartment.exports.get('myLift');
+    const next = compartment.exports.get('default');
+    const myLift = compartment.exports.get('myLift');
 
-    expect(Object.isFrozen(exp)).toBe(true);
-    expect(Object.isFrozen(exp.implementation)).toBe(true);
+    expect(() => next()).toThrow();
+    expect(() => myLift.implementation(1)).toThrow();
   });
 
   it('materializes accessor-based plain-data snapshots', async () => {
