@@ -193,6 +193,12 @@ export function createQueryResultProxy<T>(
 
   const proxy = new Proxy(proxyTarget as object, {
     get: (target, prop, receiver) => {
+      if (Array.isArray(value) && prop === "length") {
+        observeLink(tx, link, "count");
+        const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+        return (readValueInternally(readTx, link) as any[]).length;
+      }
+
       // When encountering a frozen property, we just return the value to
       // maintain proxy invariants.
       const descriptor = Object.getOwnPropertyDescriptor(target, prop);
@@ -404,12 +410,6 @@ export function createQueryResultProxy<T>(
 
             return result;
           };
-      }
-
-      if (Array.isArray(value) && prop === "length") {
-        observeLink(tx, link, "count");
-        const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
-        return (readValueInternally(readTx, link) as any[]).length;
       }
 
       const childLink = {

@@ -113,6 +113,67 @@ describe("CT-1240: query result proxy enumeration", () => {
     ).toBe(true);
   });
 
+  it("followRef is logged on the reference path before reading the target", () => {
+    const targetCell = runtime.getCell<{ code: number; status: string }>(
+      space,
+      "test-followref-target",
+      undefined,
+      tx,
+    );
+    targetCell.set({
+      code: 403,
+      status: "PERMISSION_DENIED",
+    });
+
+    const sourceCell = runtime.getCell<{ error: typeof targetCell }>(
+      space,
+      "test-followref-source",
+      undefined,
+      tx,
+    );
+    sourceCell.set({ error: targetCell });
+
+    const proxy = createQueryResultProxy<{ error: { code: number } }>(
+      runtime,
+      tx,
+      sourceCell.getAsNormalizedFullLink(),
+      0,
+      false,
+      "skip",
+    );
+
+    expect(proxy.error.code).toBe(403);
+
+    const reads = canonicalizeBoundaryActivity(tx.journal.activity()).reads
+      .filter((read) => read.cfc?.op !== undefined);
+    const followRefIndex = reads.findIndex((read) =>
+      read.id === sourceCell.getAsNormalizedFullLink().id &&
+      read.path === "/error" &&
+      read.op === "followRef"
+    );
+    const targetShapeIndex = reads.findIndex((read) =>
+      read.id === targetCell.getAsNormalizedFullLink().id &&
+      read.path === "/code" &&
+      read.op === "shape"
+    );
+    const targetValueIndex = reads.findIndex((read) =>
+      read.id === targetCell.getAsNormalizedFullLink().id &&
+      read.path === "/code" &&
+      read.op === "value"
+    );
+
+    expect(
+      reads.some((read) =>
+        read.id === sourceCell.getAsNormalizedFullLink().id &&
+        read.path === "/error" &&
+        read.op === "shape"
+      ),
+    ).toBe(true);
+    expect(followRefIndex).toBeGreaterThanOrEqual(0);
+    expect(targetShapeIndex).toBeGreaterThan(followRefIndex);
+    expect(targetValueIndex).toBeGreaterThan(followRefIndex);
+  });
+
   it("spread copies all properties with correct values", () => {
     const cell = runtime.getCell<
       { method: string; url: string; headers: { auth: string } }
