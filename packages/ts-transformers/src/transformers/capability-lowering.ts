@@ -1,5 +1,6 @@
 import ts from "typescript";
 import {
+  classifyReactiveContext,
   createDataFlowAnalyzer,
   detectCallKind,
   getTypeAtLocationWithFallback,
@@ -161,6 +162,19 @@ function reportOptionalError(
   });
 }
 
+function reportReceiverMethodError(
+  context: TransformationContext,
+  node: ts.Node,
+  message: string,
+): void {
+  context.reportDiagnostic({
+    severity: "error",
+    type: "pattern-context:receiver-method-call",
+    message,
+    node,
+  });
+}
+
 function rewritePatternBody(
   body: ts.ConciseBody,
   opaqueRoots: Set<string>,
@@ -218,7 +232,7 @@ function rewritePatternBody(
   const analyze = createDataFlowAnalyzer(context.checker);
   const reportOnce = (
     node: ts.Node,
-    type: "computation" | "optional",
+    type: "computation" | "optional" | "receiver-method",
     message: string,
   ): void => {
     const key = node.getStart(context.sourceFile);
@@ -226,8 +240,10 @@ function rewritePatternBody(
     diagnosticsSeen.add(key);
     if (type === "computation") {
       reportComputationError(context, node, message);
-    } else {
+    } else if (type === "optional") {
       reportOptionalError(context, node, message);
+    } else {
+      reportReceiverMethodError(context, node, message);
     }
   };
 
@@ -584,6 +600,27 @@ function rewritePatternBody(
               "Optional-call forms are not lowerable in pattern context. Move this access into computed().",
             );
             return visited;
+          }
+
+          if (parentCall && ts.isCallExpression(parentCall)) {
+            const reactiveContext = classifyReactiveContext(
+              parentCall,
+              context.checker,
+              context,
+            );
+            if (
+              reactiveContext.kind === "pattern" &&
+              (reactiveContext.owner === "pattern" ||
+                reactiveContext.owner === "render") &&
+              !reactiveContext.inJsxExpression
+            ) {
+              reportOnce(
+                parentCall,
+                "receiver-method",
+                "Method calls on reactive values are not yet supported directly in non-JSX pattern bodies. Move this call into computed(() => ...), derive(...), or another safe wrapper.",
+              );
+              return visited;
+            }
           }
 
           reportOnce(

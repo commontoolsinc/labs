@@ -636,6 +636,114 @@ Deno.test(
   },
 );
 
+Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
+  await t.step(
+    "errors on top-level object-property receiver method call in pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ name: string }>((state) => ({
+        upper: state.name.toUpperCase(),
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const receiverErrors = errors.filter((error) =>
+        error.type === "pattern-context:receiver-method-call"
+      );
+      assertEquals(errors.length, 1);
+      assertEquals(receiverErrors.length, 1);
+      assertEquals(
+        receiverErrors[0]!.type,
+        "pattern-context:receiver-method-call",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on top-level call-argument receiver method call in pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const identity = <T,>(value: T) => value;
+
+      export default pattern<{ name: string }>((state) => {
+        const upper = identity(state.name.trim());
+        return { upper };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const receiverErrors = errors.filter((error) =>
+        error.type === "pattern-context:receiver-method-call"
+      );
+      assertEquals(errors.length, 1);
+      assertEquals(receiverErrors.length, 1);
+      assertEquals(
+        receiverErrors[0]!.type,
+        "pattern-context:receiver-method-call",
+      );
+    },
+  );
+
+  await t.step("allows receiver method call inside JSX", async () => {
+    const source = `/// <cts-enable />
+      import { pattern, h } from "commontools";
+
+      export default pattern<{ name: string }>((state) => {
+        return <div>{state.name.toUpperCase()}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0);
+  });
+
+  await t.step("allows receiver method call inside computed()", async () => {
+    const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern<{ name: string }>((state) => {
+        const upper = computed(() => state.name.toUpperCase());
+        return { upper };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0);
+  });
+
+  await t.step(
+    "does not add the direct-pattern receiver-method diagnostic inside pattern-owned array-method callbacks",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        return items.map((item) => item.toUpperCase());
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const receiverErrors = getErrors(diagnostics).filter((error) =>
+        error.type === "pattern-context:receiver-method-call"
+      );
+      assertEquals(receiverErrors.length, 0);
+    },
+  );
+});
+
 Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   await t.step("allows reading opaques inside computed()", async () => {
     const source = `/// <cts-enable />
