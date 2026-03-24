@@ -5,7 +5,10 @@ import {
   isFunctionDeclaration,
   isModuleScopedDeclaration,
 } from "../ast/scope-analysis.ts";
-import { groupCapturesByRoot } from "../utils/capture-tree.ts";
+import {
+  groupCapturesByRoot,
+  parseCaptureExpression,
+} from "../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 
 export interface CaptureAnalysis {
@@ -115,7 +118,7 @@ export class CaptureCollector {
         } else if (!isMethodCall(node)) {
           // Not a method call, capture the property access normally
           const captured = this.shouldCapturePropertyAccess(node, func);
-          if (captured) {
+          if (captured && parseCaptureExpression(captured)) {
             captures.add(captured);
             // Don't visit children - we've captured the whole property access chain
             return;
@@ -126,6 +129,18 @@ export class CaptureCollector {
         }
         // For method calls on identifiers (multiplier.get()), don't capture the property access
         // The identifier will be captured separately
+      }
+
+      if (ts.isElementAccessExpression(node)) {
+        if (ts.isCallExpression(node.parent) && node.parent.expression === node) {
+          return;
+        }
+
+        const captured = this.shouldCaptureElementAccess(node, func);
+        if (captured) {
+          captures.add(captured);
+          return;
+        }
       }
 
       // For plain identifiers
@@ -163,59 +178,35 @@ export class CaptureCollector {
     func: ts.FunctionLikeDeclaration,
   ): ts.Expression | undefined {
     // Get the root object (e.g., 'state' in 'state.discount')
-    let root = node.expression;
-    while (ts.isPropertyAccessExpression(root)) {
-      root = root.expression;
-    }
-
-    if (!ts.isIdentifier(root)) {
+    const root = this.getCaptureRootIdentifier(node.expression);
+    if (!root) {
       return undefined;
     }
 
-    const symbol = this.checker.getSymbolAtLocation(root);
-    if (!symbol) return undefined;
-
-    const declarations = symbol.getDeclarations();
-    if (!declarations || declarations.length === 0) return undefined;
-
-    // Skip imports - they're module-scoped and don't need to be captured
-    const isImport = declarations.some((decl) =>
-      ts.isImportSpecifier(decl) ||
-      ts.isImportClause(decl) ||
-      ts.isNamespaceImport(decl)
-    );
-    if (isImport) {
-      return undefined;
-    }
-
-    // Skip module-scoped declarations
-    if (
-      declarations.some((decl: ts.Declaration) =>
-        isModuleScopedDeclaration(decl)
-      )
-    ) {
-      return undefined;
-    }
-
-    // Skip function declarations
-    if (
-      declarations.some((decl: ts.Declaration) =>
-        isFunctionDeclaration(decl, this.checker)
-      )
-    ) {
-      return undefined;
-    }
-
-    // Check if ANY declaration is outside the callback
-    const hasExternalDeclaration = declarations.some((decl: ts.Declaration) => {
-      const isWithin = isDeclaredWithinFunction(decl, func);
-      return !isWithin;
-    });
-
-    if (hasExternalDeclaration) {
+    if (this.hasExternalDeclaration(root, func)) {
       // Intrinsic reads on array/string-like values must capture the root
       // value itself so the generated derive input matches the shrunk schema.
       return this.getIntrinsicPropertyCaptureTarget(node) ?? node;
+    }
+
+    return undefined;
+  }
+
+  private shouldCaptureElementAccess(
+    node: ts.ElementAccessExpression,
+    func: ts.FunctionLikeDeclaration,
+  ): ts.Expression | undefined {
+    if (!parseCaptureExpression(node)) {
+      return undefined;
+    }
+
+    const root = this.getCaptureRootIdentifier(node.expression);
+    if (!root) {
+      return undefined;
+    }
+
+    if (this.hasExternalDeclaration(root, func)) {
+      return node;
     }
 
     return undefined;
@@ -496,13 +487,8 @@ export class CaptureCollector {
     }
 
     if (ts.isPropertyAccessExpression(capture)) {
-      // Property access: check if root identifier is a parameter or local variable
-      // Walk down the chain to find the root: a.b.c -> a
-      let rootExpr: ts.Expression = capture;
-      while (ts.isPropertyAccessExpression(rootExpr)) {
-        rootExpr = rootExpr.expression;
-      }
-      if (ts.isIdentifier(rootExpr)) {
+      const rootExpr = this.getCaptureRootIdentifier(capture);
+      if (rootExpr) {
         return !this.isParameterOrLocalVariable(
           rootExpr,
           outerFunc,
@@ -513,7 +499,72 @@ export class CaptureCollector {
       return true;
     }
 
+    if (ts.isElementAccessExpression(capture)) {
+      const rootExpr = this.getCaptureRootIdentifier(capture);
+      if (rootExpr) {
+        return !this.isParameterOrLocalVariable(
+          rootExpr,
+          outerFunc,
+          funcParams,
+        );
+      }
+      return true;
+    }
+
     // Other types of captures (e.g., element access, call expressions) - include them
     return true;
+  }
+
+  private getCaptureRootIdentifier(
+    expr: ts.Expression,
+  ): ts.Identifier | undefined {
+    let current: ts.Expression = expr;
+    while (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current)
+    ) {
+      current = current.expression;
+    }
+    return ts.isIdentifier(current) ? current : undefined;
+  }
+
+  private hasExternalDeclaration(
+    root: ts.Identifier,
+    func: ts.FunctionLikeDeclaration,
+  ): boolean {
+    const symbol = this.checker.getSymbolAtLocation(root);
+    if (!symbol) return false;
+
+    const declarations = symbol.getDeclarations();
+    if (!declarations || declarations.length === 0) return false;
+
+    const isImport = declarations.some((decl) =>
+      ts.isImportSpecifier(decl) ||
+      ts.isImportClause(decl) ||
+      ts.isNamespaceImport(decl)
+    );
+    if (isImport) {
+      return false;
+    }
+
+    if (
+      declarations.some((decl: ts.Declaration) =>
+        isModuleScopedDeclaration(decl)
+      )
+    ) {
+      return false;
+    }
+
+    if (
+      declarations.some((decl: ts.Declaration) =>
+        isFunctionDeclaration(decl, this.checker)
+      )
+    ) {
+      return false;
+    }
+
+    return declarations.some((decl: ts.Declaration) =>
+      !isDeclaredWithinFunction(decl, func)
+    );
   }
 }

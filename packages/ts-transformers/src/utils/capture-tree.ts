@@ -2,6 +2,12 @@ import ts from "typescript";
 
 import { isSafeIdentifierText } from "./identifiers.ts";
 
+const KNOWN_COMPUTED_CAPTURE_KEYS = new Map<string, string>([
+  ["NAME", "$NAME"],
+  ["TYPE", "$TYPE"],
+  ["UI", "$UI"],
+]);
+
 export interface CapturePathInfo {
   readonly root: string;
   readonly path: readonly string[];
@@ -21,36 +27,64 @@ export function parseCaptureExpression(
     return { root: expr.text, path: [], expression: expr };
   }
 
-  if (ts.isPropertyAccessExpression(expr)) {
+  if (ts.isPropertyAccessExpression(expr) || ts.isElementAccessExpression(expr)) {
     const segments: string[] = [];
     let current: ts.Expression = expr;
 
-    while (ts.isPropertyAccessExpression(current)) {
-      // If we encounter optional chaining (e.g., foo?.bar), stop here and
-      // capture just the expression before the optional chain.
-      // This preserves nullability in the schema - the root object might be
-      // null/undefined, so we shouldn't descend into its properties.
-      if (ts.isPropertyAccessChain(current)) {
-        // The expression before the ?. is our capture target
-        const beforeChain = current.expression;
-        if (ts.isIdentifier(beforeChain)) {
-          return { root: beforeChain.text, path: [], expression: beforeChain };
-        }
-        // If it's a nested property access before the chain (e.g., a.b?.c),
-        // recursively parse that part
-        if (ts.isPropertyAccessExpression(beforeChain)) {
-          return parseCaptureExpression(beforeChain);
-        }
-        // Can't parse this expression
+    while (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
+      // If we encounter optional chaining (e.g., foo?.bar or foo?.[NAME]),
+      // capture the expression before the optional chain so nullability is
+      // preserved in the generated schema.
+      if (
+        ts.isPropertyAccessExpression(current) &&
+        ts.isPropertyAccessChain(current)
+      ) {
+        return parseCaptureExpression(current.expression);
+      }
+      if (
+        ts.isElementAccessExpression(current) &&
+        ts.isElementAccessChain(current)
+      ) {
+        return parseCaptureExpression(current.expression);
+      }
+
+      if (ts.isPropertyAccessExpression(current)) {
+        segments.unshift(current.name.text);
+        current = current.expression;
+        continue;
+      }
+
+      const segment = getStaticElementAccessSegment(
+        current.argumentExpression,
+      );
+      if (!segment) {
         return undefined;
       }
-      segments.unshift(current.name.text);
       current = current.expression;
+      segments.unshift(segment);
     }
 
     if (ts.isIdentifier(current)) {
       return { root: current.text, path: segments, expression: expr };
     }
+  }
+
+  return undefined;
+}
+
+function getStaticElementAccessSegment(
+  expr: ts.Expression,
+): string | undefined {
+  if (
+    ts.isStringLiteral(expr) ||
+    ts.isNumericLiteral(expr) ||
+    ts.isNoSubstitutionTemplateLiteral(expr)
+  ) {
+    return expr.text;
+  }
+
+  if (ts.isIdentifier(expr)) {
+    return KNOWN_COMPUTED_CAPTURE_KEYS.get(expr.text);
   }
 
   return undefined;

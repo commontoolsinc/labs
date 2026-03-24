@@ -109,7 +109,12 @@ function isCapabilityAnalyzableFunction(
     !!node.body;
 }
 
-const KNOWN_SYMBOL_IDENTIFIERS = new Set(["NAME", "UI", "SELF"]);
+const KNOWN_SYMBOL_IDENTIFIERS = new Set(["NAME", "TYPE", "UI", "SELF"]);
+const KNOWN_SYMBOL_PATH_SEGMENTS = new Map<string, string>([
+  ["NAME", "$NAME"],
+  ["TYPE", "$TYPE"],
+  ["UI", "$UI"],
+]);
 
 function isLiteralElement(
   expr: ts.Expression | undefined,
@@ -169,7 +174,10 @@ function extractAccessPath(expr: ts.Expression): AccessPathInfo | undefined {
         ts.isIdentifier(current.argumentExpression) &&
         KNOWN_SYMBOL_IDENTIFIERS.has(current.argumentExpression.text)
       ) {
-        path.unshift(current.argumentExpression.text);
+        path.unshift(
+          KNOWN_SYMBOL_PATH_SEGMENTS.get(current.argumentExpression.text) ??
+            current.argumentExpression.text,
+        );
       } else {
         dynamic = true;
       }

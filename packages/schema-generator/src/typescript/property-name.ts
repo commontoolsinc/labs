@@ -1,5 +1,11 @@
 import ts from "typescript";
 
+const KNOWN_COMPUTED_PROPERTY_NAMES = new Map<string, string>([
+  ["NAME", "$NAME"],
+  ["TYPE", "$TYPE"],
+  ["UI", "$UI"],
+]);
+
 /**
  * Extract static text for a property name when available.
  * Supports identifier keys plus string/numeric/template literal keys.
@@ -21,6 +27,16 @@ export function getPropertyNameText(name: ts.PropertyName): string | undefined {
       ts.isNoSubstitutionTemplateLiteral(expr)
     ) {
       return expr.text;
+    }
+    if (ts.isIdentifier(expr)) {
+      return KNOWN_COMPUTED_PROPERTY_NAMES.get(expr.text);
+    }
+    if (
+      ts.isPropertyAccessExpression(expr) &&
+      ts.isIdentifier(expr.expression) &&
+      expr.expression.text === "__ctHelpers"
+    ) {
+      return KNOWN_COMPUTED_PROPERTY_NAMES.get(expr.name.text);
     }
   }
 

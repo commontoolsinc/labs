@@ -201,6 +201,149 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "preserves known symbol keys when shrinking captured pattern instances",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { computed, NAME, pattern } from "commontools";',
+        "",
+        "interface SubjectOutput {",
+        "  [NAME]: string;",
+        "  title: string;",
+        "  noteCount: number;",
+        "}",
+        "",
+        "const Subject = pattern<{}, SubjectOutput>(() => ({",
+        '  [NAME]: "Notebook",',
+        '  title: "Docs",',
+        "  noteCount: 1,",
+        "}));",
+        "",
+        "export default pattern(() => {",
+        "  const subject = Subject({});",
+        "  const ok = computed(() => {",
+        "    const name = subject[NAME];",
+        "    return name.includes(subject.title) &&",
+        "      name.includes(String(subject.noteCount));",
+        "  });",
+        "  return { ok };",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+
+      const normalized = result.output.replace(/\s+/g, " ");
+      assertEquals(
+        normalized.includes(
+          'subject: { type: "object", properties: { $NAME: { type: "string" }, title: { type: "string" }, noteCount: { type: "number" } }, required: ["$NAME", "title", "noteCount"] }',
+        ),
+        true,
+        `expected known symbol capture to survive shrinking:\n${result.output}`,
+      );
+    },
+  );
+
+  await t.step(
+    "static array index captures keep array roots for scalar item access",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { computed, pattern } from "commontools";',
+        "",
+        "interface State {",
+        "  prices: number[];",
+        "  discount: number;",
+        "}",
+        "",
+        "export default pattern<State>((state) => ({",
+        "  total: computed(() => state.prices[0]! * (1 - state.discount)),",
+        "}));",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+
+      const normalized = result.output.replace(/\s+/g, " ");
+      assertEquals(
+        normalized.includes(
+          'state: { type: "object", properties: { prices: { type: "array", items: { type: "number" } }, discount: { type: "number" } }, required: ["prices", "discount"] }',
+        ),
+        true,
+        `expected indexed scalar array capture to stay array-shaped:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes(
+          'prices: { type: "object", properties: { "0":',
+        ),
+        false,
+        `did not expect indexed scalar array capture to collapse to object keys:\n${result.output}`,
+      );
+    },
+  );
+
+  await t.step(
+    "static array index captures keep array roots for object item access",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { computed, pattern } from "commontools";',
+        "",
+        "interface User {",
+        "  id: string;",
+        "  name: string;",
+        "  age: number;",
+        "}",
+        "",
+        "interface State {",
+        "  users: User[];",
+        "}",
+        "",
+        "export default pattern<State>((state) => ({",
+        "  firstName: computed(() => state.users[0]!.name),",
+        "}));",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `expected no shrink errors: ${fmtErrors(result.diagnostics)}`,
+      );
+
+      const normalized = result.output.replace(/\s+/g, " ");
+      assertEquals(
+        normalized.includes(
+          'state: { type: "object", properties: { users: { type: "array", items: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } } }, required: ["users"] }',
+        ),
+        true,
+        `expected indexed object array capture to stay array-shaped:\n${result.output}`,
+      );
+      assertEquals(
+        normalized.includes(
+          'users: { type: "object", properties: { "0":',
+        ),
+        false,
+        `did not expect indexed object array capture to collapse to object keys:\n${result.output}`,
+      );
+    },
+  );
+
+  await t.step(
     "preserves cell wrappers for array items in computed for-of loops",
     async () => {
       const source = [

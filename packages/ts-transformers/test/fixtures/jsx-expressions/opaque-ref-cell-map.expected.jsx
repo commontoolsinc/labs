@@ -207,10 +207,18 @@ export default pattern(() => {
                 } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
                     type: "object",
                     properties: {
-                        charm: true
+                        charm: {
+                            type: "object",
+                            properties: {
+                                $NAME: true
+                            },
+                            required: ["$NAME"]
+                        }
                     },
                     required: ["charm"]
-                } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[NAME]), "Unnamed")}</span>
+                } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { charm: {
+                        $NAME: charm.key(__ctHelpers.NAME)
+                    } }, ({ charm }) => charm[NAME]), "Unnamed")}</span>
               </li>);
             }, {
                 type: "object",
@@ -253,12 +261,40 @@ export default pattern(() => {
 }, false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
+        $NAME: {
+            type: "string",
+            "enum": ["Charms Launcher"]
+        },
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        },
         cellRef: {
             type: "array",
             items: true
         }
     },
-    required: ["cellRef"]
+    required: ["$NAME", "$UI", "cellRef"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
