@@ -42,24 +42,24 @@ const EnvSchema = z.object({
   // ===========================================================================
   // (/routes/ai/llm) Environment variables for LLM Providers
   // ===========================================================================
-  CTTS_AI_LLM_ANTHROPIC_API_KEY: z.string().default(""),
-  CTTS_AI_LLM_GROQ_API_KEY: z.string().default(""),
-  CTTS_AI_LLM_OPENAI_API_KEY: z.string().default(""),
-  CTTS_AI_LLM_CEREBRAS_API_KEY: z.string().default(""),
-  CTTS_AI_LLM_PERPLEXITY_API_KEY: z.string().default(""),
-  CTTS_AI_LLM_AWS_ACCESS_KEY_ID: z.string().default(""),
-  CTTS_AI_LLM_AWS_SECRET_ACCESS_KEY: z.string().default(""),
-  CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS: z.string().default(""),
-  CTTS_AI_LLM_GOOGLE_VERTEX_PROJECT: z.string().default(""),
-  CTTS_AI_LLM_GOOGLE_VERTEX_LOCATION: z.string().default(""),
-  CTTS_AI_LLM_XAI_API_KEY: z.string().default(""),
-  CTTS_AI_GATEWAY_URL: z.string().default(""),
+  CFTS_AI_LLM_ANTHROPIC_API_KEY: z.string().default(""),
+  CFTS_AI_LLM_GROQ_API_KEY: z.string().default(""),
+  CFTS_AI_LLM_OPENAI_API_KEY: z.string().default(""),
+  CFTS_AI_LLM_CEREBRAS_API_KEY: z.string().default(""),
+  CFTS_AI_LLM_PERPLEXITY_API_KEY: z.string().default(""),
+  CFTS_AI_LLM_AWS_ACCESS_KEY_ID: z.string().default(""),
+  CFTS_AI_LLM_AWS_SECRET_ACCESS_KEY: z.string().default(""),
+  CFTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS: z.string().default(""),
+  CFTS_AI_LLM_GOOGLE_VERTEX_PROJECT: z.string().default(""),
+  CFTS_AI_LLM_GOOGLE_VERTEX_LOCATION: z.string().default(""),
+  CFTS_AI_LLM_XAI_API_KEY: z.string().default(""),
+  CFTS_AI_GATEWAY_URL: z.string().default(""),
 
   // LLM Observability Tool
-  CTTS_AI_LLM_PHOENIX_PROJECT: z.string().default(""),
-  CTTS_AI_LLM_PHOENIX_URL: z.string().default(""),
-  CTTS_AI_LLM_PHOENIX_API_URL: z.string().default(""),
-  CTTS_AI_LLM_PHOENIX_API_KEY: z.string().default(""),
+  CFTS_AI_LLM_PHOENIX_PROJECT: z.string().default(""),
+  CFTS_AI_LLM_PHOENIX_URL: z.string().default(""),
+  CFTS_AI_LLM_PHOENIX_API_URL: z.string().default(""),
+  CFTS_AI_LLM_PHOENIX_API_KEY: z.string().default(""),
   // ===========================================================================
 
   // ===========================================================================
@@ -219,7 +219,7 @@ const EnvSchema = z.object({
   // Directory for the server-side filesystem compilation cache.
   // Must be writable. In multi-process environments (e.g. common-cluster),
   // use distinct directories per process to avoid conflicts.
-  COMPILATION_CACHE_FS_DIR: z.string().default("/tmp/ct-compilation-cache"),
+  COMPILATION_CACHE_FS_DIR: z.string().default("/tmp/cf-compilation-cache"),
 
   // ===========================================================================
   // Sandbox Service

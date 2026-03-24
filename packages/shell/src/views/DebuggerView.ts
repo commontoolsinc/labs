@@ -1455,21 +1455,21 @@ export class XDebuggerView extends LitElement {
 
   private getLoggerRegistry(): Record<string, Logger> {
     const global = globalThis as unknown as {
-      commontools?: { logger?: Record<string, Logger> };
+      commonfabric?: { logger?: Record<string, Logger> };
     };
-    return global.commontools?.logger ?? {};
+    return global.commonfabric?.logger ?? {};
   }
 
   private getLoggerBreakdown(): Record<string, LoggerBreakdown | number> {
     const global = globalThis as unknown as {
-      commontools?: {
+      commonfabric?: {
         getLoggerCountsBreakdown?: () => Record<
           string,
           LoggerBreakdown | number
         >;
       };
     };
-    return global.commontools?.getLoggerCountsBreakdown?.() ?? { total: 0 };
+    return global.commonfabric?.getLoggerCountsBreakdown?.() ?? { total: 0 };
   }
 
   private getBreakdownTotal(
@@ -1569,14 +1569,14 @@ export class XDebuggerView extends LitElement {
 
   private getLoggerTiming(): Record<string, Record<string, TimingStats>> {
     const global = globalThis as unknown as {
-      commontools?: {
+      commonfabric?: {
         getTimingStatsBreakdown?: () => Record<
           string,
           Record<string, TimingStats>
         >;
       };
     };
-    return global.commontools?.getTimingStatsBreakdown?.() ?? {};
+    return global.commonfabric?.getTimingStatsBreakdown?.() ?? {};
   }
 
   private mergeLoggerTiming(
@@ -1625,13 +1625,13 @@ export class XDebuggerView extends LitElement {
   private async resetBaseline(): Promise<void> {
     // Reset counts baseline
     const global = globalThis as unknown as {
-      commontools?: {
+      commonfabric?: {
         resetAllCountBaselines?: () => void;
         resetAllTimingBaselines?: () => void;
       };
     };
-    global.commontools?.resetAllCountBaselines?.();
-    global.commontools?.resetAllTimingBaselines?.();
+    global.commonfabric?.resetAllCountBaselines?.();
+    global.commonfabric?.resetAllTimingBaselines?.();
 
     // Reset in worker via IPC
     const runtime = this.debuggerController?.getRuntime();
@@ -2727,7 +2727,7 @@ export class XDebuggerView extends LitElement {
               <br><br>
               You can also run from the console:
               <code style="display: block; margin-top: 0.5rem; color: #3b82f6;">
-                await commontools.detectNonIdempotent(5000)
+                await commonfabric.detectNonIdempotent(5000)
               </code>
             </div>
           `}

@@ -714,11 +714,11 @@ export class RuntimeProcessor {
 
   #getLoggerMetadata(): LoggerMetadata {
     const global = globalThis as unknown as {
-      commontools?: { logger?: Record<string, Logger> };
+      commonfabric?: { logger?: Record<string, Logger> };
     };
     const result: LoggerMetadata = {};
-    if (global.commontools?.logger) {
-      for (const [name, logger] of Object.entries(global.commontools.logger)) {
+    if (global.commonfabric?.logger) {
+      for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
         result[name] = {
           enabled: !logger.disabled,
           level: (logger.level ?? "info") as LogLevel,
@@ -753,16 +753,16 @@ export class RuntimeProcessor {
 
   #getLoggers(loggerName?: string): Logger[] {
     const global = globalThis as unknown as {
-      commontools?: { logger?: Record<string, Logger> };
+      commonfabric?: { logger?: Record<string, Logger> };
     };
-    if (!global.commontools?.logger) {
+    if (!global.commonfabric?.logger) {
       return [];
     }
     if (loggerName) {
-      const logger = global.commontools.logger[loggerName];
+      const logger = global.commonfabric.logger[loggerName];
       return logger ? [logger] : [];
     }
-    return Object.values(global.commontools.logger);
+    return Object.values(global.commonfabric.logger);
   }
 
   #onTelemetry = (event: Event) => {

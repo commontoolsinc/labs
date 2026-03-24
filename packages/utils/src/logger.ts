@@ -120,7 +120,7 @@
  * @example Browser console usage for metrics
  * ```javascript
  * // Get breakdown of all logger counts by name and message key
- * globalThis.commontools.getLoggerCountsBreakdown()
+ * globalThis.commonfabric.getLoggerCountsBreakdown()
  * // Returns: {
  * //   "module-1": {
  * //     "user-login": { debug: 5, info: 10, warn: 2, error: 0, total: 17 },
@@ -130,22 +130,22 @@
  * // }
  *
  * // Get just the total count
- * globalThis.commontools.getTotalLoggerCounts()
+ * globalThis.commonfabric.getTotalLoggerCounts()
  * // Returns: 17
  *
  * // Reset all counts
- * globalThis.commontools.resetAllLoggerCounts()
+ * globalThis.commonfabric.resetAllLoggerCounts()
  *
  * // Access individual logger counts
- * globalThis.commontools.logger["module-name"].counts
+ * globalThis.commonfabric.logger["module-name"].counts
  * // Returns: { debug: 5, info: 10, warn: 2, error: 1, total: 18 }
  *
  * // Access individual logger counts by key
- * globalThis.commontools.logger["module-name"].countsByKey
+ * globalThis.commonfabric.logger["module-name"].countsByKey
  * // Returns: { "user-login": { debug: 5, info: 10, warn: 2, error: 0, total: 17 }, ... }
  *
  * // Reset specific logger
- * globalThis.commontools.logger["module-name"].resetCounts()
+ * globalThis.commonfabric.logger["module-name"].resetCounts()
  * ```
  *
  * @example Automatic count summaries
@@ -1109,37 +1109,37 @@ export function getLogger(
 ): Logger {
   // Initialize global storage if needed
   const global = globalThis as unknown as {
-    commontools: { logger: Record<string, Logger> };
+    commonfabric: { logger: Record<string, Logger> };
   };
-  if (!global.commontools) {
-    global.commontools = { logger: {} };
+  if (!global.commonfabric) {
+    global.commonfabric = { logger: {} };
   }
-  if (!global.commontools.logger) {
-    global.commontools.logger = {};
+  if (!global.commonfabric.logger) {
+    global.commonfabric.logger = {};
   }
 
   // Return existing logger if one exists
-  if (global.commontools.logger[moduleName]) {
-    return global.commontools.logger[moduleName];
+  if (global.commonfabric.logger[moduleName]) {
+    return global.commonfabric.logger[moduleName];
   }
 
   // Create and store new logger
   const logger = new Logger(moduleName, options);
-  global.commontools.logger[moduleName] = logger;
+  global.commonfabric.logger[moduleName] = logger;
 
   return logger;
 }
 
 /**
  * Reset call counts for all registered loggers.
- * Iterates through all loggers in globalThis.commontools.logger and resets their counts.
+ * Iterates through all loggers in globalThis.commonfabric.logger and resets their counts.
  */
 export function resetAllLoggerCounts(): void {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
-  if (global.commontools?.logger) {
-    Object.values(global.commontools.logger).forEach((logger) =>
+  if (global.commonfabric?.logger) {
+    Object.values(global.commonfabric.logger).forEach((logger) =>
       logger.resetCounts()
     );
   }
@@ -1151,12 +1151,12 @@ export function resetAllLoggerCounts(): void {
  */
 export function getTotalLoggerCounts(): number {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
-  if (!global.commontools?.logger) {
+  if (!global.commonfabric?.logger) {
     return 0;
   }
-  return Object.values(global.commontools.logger)
+  return Object.values(global.commonfabric.logger)
     .reduce((sum, logger) => sum + logger.counts.total, 0);
 }
 
@@ -1168,14 +1168,14 @@ export function getLoggerCountsBreakdown(): Record<string, LoggerBreakdown> & {
   total: number;
 } {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
 
   const breakdown: Record<string, LoggerBreakdown> = {};
   let total = 0;
 
-  if (global.commontools?.logger) {
-    for (const [name, logger] of Object.entries(global.commontools.logger)) {
+  if (global.commonfabric?.logger) {
+    for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
       const loggerBreakdown = { total: 0 } as LoggerBreakdown;
 
       // Add counts by key (skip "total" to avoid overwriting the reserved property)
@@ -1223,13 +1223,13 @@ export type TimingStatsBreakdown = {
  */
 export function getTimingStatsBreakdown(): TimingStatsBreakdown {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
 
   const breakdown: TimingStatsBreakdown = {};
 
-  if (global.commontools?.logger) {
-    for (const [name, logger] of Object.entries(global.commontools.logger)) {
+  if (global.commonfabric?.logger) {
+    for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
       const stats = logger.timeStats;
       if (Object.keys(stats).length > 0) {
         breakdown[name] = stats;
@@ -1255,13 +1255,13 @@ export type LoggerFlagsBreakdown = Record<
  */
 export function getLoggerFlagsBreakdown(): LoggerFlagsBreakdown {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
 
   const breakdown: LoggerFlagsBreakdown = {};
 
-  if (global.commontools?.logger) {
-    for (const [name, logger] of Object.entries(global.commontools.logger)) {
+  if (global.commonfabric?.logger) {
+    for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
       const flags = logger.flags;
       if (Object.keys(flags).length > 0) {
         breakdown[name] = flags;
@@ -1274,14 +1274,14 @@ export function getLoggerFlagsBreakdown(): LoggerFlagsBreakdown {
 
 /**
  * Reset timing statistics for all registered loggers.
- * Iterates through all loggers in globalThis.commontools.logger and resets their timing stats.
+ * Iterates through all loggers in globalThis.commonfabric.logger and resets their timing stats.
  */
 export function resetAllTimingStats(): void {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
-  if (global.commontools?.logger) {
-    Object.values(global.commontools.logger).forEach((logger) =>
+  if (global.commonfabric?.logger) {
+    Object.values(global.commonfabric.logger).forEach((logger) =>
       logger.resetTimeStats()
     );
   }
@@ -1293,10 +1293,10 @@ export function resetAllTimingStats(): void {
  */
 export function resetAllCountBaselines(): void {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
-  if (global.commontools?.logger) {
-    Object.values(global.commontools.logger).forEach((logger) =>
+  if (global.commonfabric?.logger) {
+    Object.values(global.commonfabric.logger).forEach((logger) =>
       logger.resetCountBaseline()
     );
   }
@@ -1308,10 +1308,10 @@ export function resetAllCountBaselines(): void {
  */
 export function resetAllTimingBaselines(): void {
   const global = globalThis as unknown as {
-    commontools?: { logger?: Record<string, Logger> };
+    commonfabric?: { logger?: Record<string, Logger> };
   };
-  if (global.commontools?.logger) {
-    Object.values(global.commontools.logger).forEach((logger) =>
+  if (global.commonfabric?.logger) {
+    Object.values(global.commonfabric.logger).forEach((logger) =>
       logger.resetTimingBaseline()
     );
   }
@@ -1320,7 +1320,7 @@ export function resetAllTimingBaselines(): void {
 // Make helper functions available globally for browser console access
 if (typeof globalThis !== "undefined") {
   const global = globalThis as unknown as {
-    commontools: {
+    commonfabric: {
       logger: Record<string, Logger>;
       getTotalLoggerCounts?: typeof getTotalLoggerCounts;
       getLoggerCountsBreakdown?: typeof getLoggerCountsBreakdown;
@@ -1334,17 +1334,17 @@ if (typeof globalThis !== "undefined") {
       getGlobalLogFloor?: typeof getGlobalLogFloor;
     };
   };
-  if (!global.commontools) {
-    global.commontools = { logger: {} } as typeof global.commontools;
+  if (!global.commonfabric) {
+    global.commonfabric = { logger: {} } as typeof global.commonfabric;
   }
-  global.commontools.getTotalLoggerCounts = getTotalLoggerCounts;
-  global.commontools.getLoggerCountsBreakdown = getLoggerCountsBreakdown;
-  global.commontools.resetAllLoggerCounts = resetAllLoggerCounts;
-  global.commontools.getTimingStatsBreakdown = getTimingStatsBreakdown;
-  global.commontools.getLoggerFlagsBreakdown = getLoggerFlagsBreakdown;
-  global.commontools.resetAllTimingStats = resetAllTimingStats;
-  global.commontools.resetAllCountBaselines = resetAllCountBaselines;
-  global.commontools.resetAllTimingBaselines = resetAllTimingBaselines;
-  global.commontools.setGlobalLogFloor = setGlobalLogFloor;
-  global.commontools.getGlobalLogFloor = getGlobalLogFloor;
+  global.commonfabric.getTotalLoggerCounts = getTotalLoggerCounts;
+  global.commonfabric.getLoggerCountsBreakdown = getLoggerCountsBreakdown;
+  global.commonfabric.resetAllLoggerCounts = resetAllLoggerCounts;
+  global.commonfabric.getTimingStatsBreakdown = getTimingStatsBreakdown;
+  global.commonfabric.getLoggerFlagsBreakdown = getLoggerFlagsBreakdown;
+  global.commonfabric.resetAllTimingStats = resetAllTimingStats;
+  global.commonfabric.resetAllCountBaselines = resetAllCountBaselines;
+  global.commonfabric.resetAllTimingBaselines = resetAllTimingBaselines;
+  global.commonfabric.setGlobalLogFloor = setGlobalLogFloor;
+  global.commonfabric.getGlobalLogFloor = getGlobalLogFloor;
 }

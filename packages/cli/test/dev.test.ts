@@ -12,7 +12,7 @@ describe("cli dev", () => {
     expect(code).toBe(0);
   });
 
-  it("Runs a pattern with commontools+3P modules", async () => {
+  it("Runs a pattern with commonfabric+3P modules", async () => {
     const { code, stdout, stderr } = await cf(
       "dev fixtures/3p-modules.tsx --pattern-json",
     );

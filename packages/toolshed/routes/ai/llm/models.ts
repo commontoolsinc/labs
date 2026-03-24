@@ -113,9 +113,9 @@ const addModel = ({
   PROVIDER_NAMES.add(name.split(":")[0]);
 };
 
-if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
+if (env.CFTS_AI_LLM_ANTHROPIC_API_KEY) {
   const anthropicProvider = createAnthropic({
-    apiKey: env.CTTS_AI_LLM_ANTHROPIC_API_KEY,
+    apiKey: env.CFTS_AI_LLM_ANTHROPIC_API_KEY,
   });
   console.log(" Adding 🤖 anthropic");
 
@@ -253,9 +253,9 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
   });
 }
 
-if (env.CTTS_AI_LLM_GROQ_API_KEY) {
+if (env.CFTS_AI_LLM_GROQ_API_KEY) {
   const groqProvider = createGroq({
-    apiKey: env.CTTS_AI_LLM_GROQ_API_KEY,
+    apiKey: env.CFTS_AI_LLM_GROQ_API_KEY,
   });
   console.log(" Adding 🤖 groq");
 
@@ -292,9 +292,9 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
   });
 }
 
-if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
+if (env.CFTS_AI_LLM_OPENAI_API_KEY) {
   const openAIProvider = createOpenAI({
-    apiKey: env.CTTS_AI_LLM_OPENAI_API_KEY,
+    apiKey: env.CFTS_AI_LLM_OPENAI_API_KEY,
   });
   console.log(" Adding 🤖 openai");
   addModel({
@@ -368,17 +368,17 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
   });
 }
 
-if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
+if (env.CFTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
   const credentials = JSON.parse(
-    Deno.readTextFileSync(env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS),
+    Deno.readTextFileSync(env.CFTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS),
   );
   console.log(" Adding 🤖 google");
   const vertexProvider = createVertex({
     googleAuthOptions: {
       credentials,
     },
-    project: env.CTTS_AI_LLM_GOOGLE_VERTEX_PROJECT,
-    location: env.CTTS_AI_LLM_GOOGLE_VERTEX_LOCATION,
+    project: env.CFTS_AI_LLM_GOOGLE_VERTEX_PROJECT,
+    location: env.CFTS_AI_LLM_GOOGLE_VERTEX_LOCATION,
   });
 
   addModel({
@@ -415,7 +415,7 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
 }
 
 async function loadGatewayModels() {
-  const url = env.CTTS_AI_GATEWAY_URL.replace(/\/+$/, "");
+  const url = env.CFTS_AI_GATEWAY_URL.replace(/\/+$/, "");
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
@@ -494,6 +494,6 @@ export const findModel = (name: string) => {
   return MODELS[name];
 };
 
-if (env.CTTS_AI_GATEWAY_URL) {
+if (env.CFTS_AI_GATEWAY_URL) {
   await loadGatewayModels();
 }

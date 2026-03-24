@@ -3,7 +3,7 @@ import { type RuntimeClient } from "@commonfabric/runtime-client";
 
 declare global {
   var app: App;
-  var commontools: {
+  var commonfabric: {
     rt?: RuntimeClient;
     detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
     watchWrites?: (

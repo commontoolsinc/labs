@@ -109,7 +109,7 @@ export interface TestRunnerOptions {
 // ---------------------------------------------------------------------------
 
 type GlobalWithLoggers = {
-  commontools?: {
+  commonfabric?: {
     logger?: Record<
       string,
       {
@@ -176,8 +176,8 @@ function getGlobalLogCounts(): {
 } {
   const g = globalThis as unknown as GlobalWithLoggers;
   const r = { debug: 0, info: 0, warn: 0, error: 0, total: 0 };
-  if (g.commontools?.logger) {
-    for (const logger of Object.values(g.commontools.logger)) {
+  if (g.commonfabric?.logger) {
+    for (const logger of Object.values(g.commonfabric.logger)) {
       const c = logger.counts;
       r.debug += c.debug;
       r.info += c.info;
@@ -198,8 +198,8 @@ function getGlobalLogCountDeltas(): {
 } {
   const g = globalThis as unknown as GlobalWithLoggers;
   const r = { debug: 0, info: 0, warn: 0, error: 0, total: 0 };
-  if (g.commontools?.logger) {
-    for (const logger of Object.values(g.commontools.logger)) {
+  if (g.commonfabric?.logger) {
+    for (const logger of Object.values(g.commonfabric.logger)) {
       const d = logger.getCountDeltas();
       r.debug += d.debug;
       r.info += d.info;
@@ -333,8 +333,8 @@ function printLoggerStats(
   const countEntries: CountEntry[] = [];
   if (useDelta) {
     const g = globalThis as unknown as GlobalWithLoggers;
-    if (g.commontools?.logger) {
-      for (const [name, logger] of Object.entries(g.commontools.logger)) {
+    if (g.commonfabric?.logger) {
+      for (const [name, logger] of Object.entries(g.commonfabric.logger)) {
         const c = logger.getCountDeltas();
         if (c.total > 0) {
           countEntries.push({

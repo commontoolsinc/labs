@@ -257,13 +257,13 @@ export const submitFeedback: AppRouteHandler<FeedbackRoute> = async (c) => {
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "Authorization": `Bearer ${env.CTTS_AI_LLM_PHOENIX_API_KEY}`,
+        "Authorization": `Bearer ${env.CFTS_AI_LLM_PHOENIX_API_KEY}`,
       },
       body: JSON.stringify(phoenixPayload),
     };
 
     const response = await fetch(
-      `${env.CTTS_AI_LLM_PHOENIX_API_URL}/span_annotations?sync=false`,
+      `${env.CFTS_AI_LLM_PHOENIX_API_URL}/span_annotations?sync=false`,
       phoenixAnnotationPayload,
     );
 

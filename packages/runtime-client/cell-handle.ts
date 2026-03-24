@@ -19,7 +19,7 @@ import { InitializedRuntimeConnection } from "./client/connection.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
 // Logger for schema warnings - disabled by default.
-// Enable via: globalThis.commontools.logger["cell-handle"].disabled = false
+// Enable via: globalThis.commonfabric.logger["cell-handle"].disabled = false
 const logger = getLogger("cell-handle", { enabled: false });
 
 export const $onCellUpdate = Symbol("$onCellUpdate");
@@ -46,7 +46,7 @@ export class CellHandle<T = unknown> {
   /**
    * Check if this cell has a schema defined. Warns if no schema is set.
    * Warning is disabled by default; enable via:
-   * globalThis.commontools.logger["cell-handle"].disabled = false
+   * globalThis.commonfabric.logger["cell-handle"].disabled = false
    */
   #requireSchema(method: string): void {
     if (!this.#ref.schema && !this.#schemaWarned) {
