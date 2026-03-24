@@ -7,8 +7,8 @@ import {
 import * as Reference from "merkle-reference";
 import { FabricHash } from "../fabric-hash.ts";
 import {
-  contentIdFromJSON,
   fromString,
+  hashObjectFromJson,
   hashOf,
   isHashObject,
   resetCanonicalHashConfig,
@@ -86,13 +86,13 @@ Deno.test("FabricHash", async (t) => {
   // -----------------------------------------------------------------
 
   await t.step(
-    "contentIdFromJSON round-trips through FabricHash when canonical hashing is on",
+    "hashObjectFromJson round-trips through FabricHash when canonical hashing is on",
     () => {
       setCanonicalHashConfig(true);
       try {
         const original = new FabricHash(SAMPLE_HASH, "fid1");
         const json = original.toJSON();
-        const reconstructed = contentIdFromJSON(json);
+        const reconstructed = hashObjectFromJson(json);
 
         // The reconstructed value should be a FabricHash.
         assertInstanceOf(reconstructed, FabricHash);

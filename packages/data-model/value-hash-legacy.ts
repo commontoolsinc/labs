@@ -127,8 +127,8 @@ export const referLegacyCached = <T extends DefinedReferent>(
   return referLegacy(source);
 };
 
-/** Legacy `contentIdFromJSON` using merkle-reference. */
-export const contentIdFromJSONLegacy = Reference.fromJSON;
+/** Legacy `hashObjectFromJson` using merkle-reference. */
+export const hashObjectFromJsonLegacy = Reference.fromJSON;
 
 /** Legacy `fromString` using merkle-reference. */
 export const fromStringLegacy = Reference.fromString as (

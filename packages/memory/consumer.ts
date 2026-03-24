@@ -49,8 +49,8 @@ import type {
 } from "./interface.ts";
 import type { FabricDatum } from "@commontools/data-model/fabric-value";
 import {
-  contentIdFromJSON,
   type HashObject,
+  hashObjectFromJson,
   hashOf,
 } from "@commontools/data-model/value-hash";
 import * as Socket from "./socket.ts";
@@ -902,7 +902,7 @@ class QuerySubscriptionInvocation<
     // This is a bit strange, but the revisions in here aren't proper
     // They've lost their Reference methods, so recreate them
     commit.revisions.forEach((item) => {
-      item.cause = contentIdFromJSON(JSON.parse(JSON.stringify(item.cause)));
+      item.cause = hashObjectFromJson(JSON.parse(JSON.stringify(item.cause)));
     });
 
     return { ok: {} };

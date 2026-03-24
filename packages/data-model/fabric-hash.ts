@@ -8,7 +8,7 @@
  * of the hash bytes. For example: `fid1:abc123...`
  */
 import { FabricPrimitive } from "./interface.ts";
-import { fromBase64url, toUnpaddedBase64url } from "./bigint-encoding.ts";
+import { toUnpaddedBase64url } from "./bigint-encoding.ts";
 
 export class FabricHash extends FabricPrimitive {
   constructor(
@@ -52,19 +52,5 @@ export class FabricHash extends FabricPrimitive {
    */
   toJSON(): { "/": string } {
     return { "/": this.toString() };
-  }
-
-  /**
-   * Parse a `FabricHash` from its string representation
-   * (`<algorithmTag>:<base64urlHash>`).
-   */
-  static fromString(source: string): FabricHash {
-    const colonIndex = source.indexOf(":");
-    if (colonIndex === -1) {
-      throw new ReferenceError(`Invalid content ID string: ${source}`);
-    }
-    const algorithmTag = source.substring(0, colonIndex);
-    const hashBase64url = source.substring(colonIndex + 1);
-    return new FabricHash(fromBase64url(hashBase64url), algorithmTag);
   }
 }

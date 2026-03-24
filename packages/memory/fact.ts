@@ -12,9 +12,9 @@ import {
   Unclaimed,
 } from "./interface.ts";
 import {
-  HashObject,
-  contentIdFromJSON,
   fromString,
+  HashObject,
+  hashObjectFromJson,
   hashOf,
   isHashObject,
 } from "@commontools/data-model/value-hash";
@@ -183,7 +183,7 @@ export function normalizeFact<
     : arg.cause == null
     ? unclaimedRef({ the: arg.the, of: arg.of })
     : "/" in arg.cause
-    ? contentIdFromJSON(arg.cause as unknown as { "/": string })
+    ? hashObjectFromJson(arg.cause as unknown as { "/": string })
     : hashOf({
       the: arg.cause.the,
       of: arg.cause.of,

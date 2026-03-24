@@ -2,7 +2,7 @@
  * Content identifier dispatch layer.
  *
  * Provides the public API for content identification (hashing): `hashOf`,
- * `isHashObject`, `contentIdFromJSON`, `fromString`. Dispatches between
+ * `isHashObject`, `hashObjectFromJson`, `fromString`. Dispatches between
  * canonical hashing (value-hash-modern.ts) and legacy merkle-reference
  * (value-hash-legacy.ts) based on a runtime flag.
  *
@@ -11,8 +11,9 @@
  */
 import { modernHash } from "./value-hash-modern.ts";
 import { FabricHash } from "./fabric-hash.ts";
+import { fromBase64url } from "./bigint-encoding.ts";
 import {
-  contentIdFromJSONLegacy,
+  hashObjectFromJsonLegacy,
   fromStringLegacy,
   Reference,
   referLegacyCached,
@@ -78,6 +79,20 @@ export function resetCanonicalHashConfig(): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * Parse a `FabricHash` from its string representation
+ * (`<algorithmTag>:<base64urlHash>`).
+ */
+export function hashObjectFromString(source: string): FabricHash {
+  const colonIndex = source.indexOf(":");
+  if (colonIndex === -1) {
+    throw new ReferenceError(`Invalid content ID string: ${source}`);
+  }
+  const algorithmTag = source.substring(0, colonIndex);
+  const hashBase64url = source.substring(colonIndex + 1);
+  return new FabricHash(fromBase64url(hashBase64url), algorithmTag);
+}
+
+/**
  * Type guard: returns true if the value is a content identifier
  * (`Reference.View` or `FabricHash`).
  */
@@ -88,17 +103,17 @@ export function isHashObject<T extends DefinedReferent>(
   return Reference.is(value);
 }
 
-/** Reconstructs a content identifier from its JSON representation. */
-export function contentIdFromJSON(source: { "/": string }): HashObject {
+/** Reconstructs a hash object from its JSON representation. */
+export function hashObjectFromJson(source: { "/": string }): HashObject {
   return canonicalHashingEnabled
-    ? FabricHash.fromString(source["/"])
-    : contentIdFromJSONLegacy(source);
+    ? hashObjectFromString(source["/"])
+    : hashObjectFromJsonLegacy(source);
 }
 
-/** Reconstruct a content identifier from its string representation. */
+/** Reconstruct a hash object from its string representation. */
 export function fromString(source: string): HashObject {
   return canonicalHashingEnabled
-    ? FabricHash.fromString(source)
+    ? hashObjectFromString(source)
     : fromStringLegacy(source);
 }
 
