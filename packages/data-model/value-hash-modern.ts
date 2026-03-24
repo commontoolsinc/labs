@@ -349,6 +349,15 @@ const frozenObjectHashCache = new WeakMap<object, FabricHash>();
  *
  * Caches results for primitives (LRU) and deep-frozen objects (WeakMap).
  */
+/**
+ * Like `hashOfModern()`, but returns the hash as a raw string
+ * (`tag:base64url`). Delegates to `hashOfModern()` so cached
+ * `FabricHash` instances are preserved.
+ */
+export function hashOfAsRawStringModern(value: unknown): string {
+  return hashOfModern(value).toString();
+}
+
 export function hashOfModern(value: unknown): FabricHash {
   switch (typeof value) {
     case "boolean":

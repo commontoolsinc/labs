@@ -12,16 +12,16 @@
 
 import type { JSONSchema } from "@commontools/api";
 import type { FabricValue } from "./interface.ts";
-import { hashOfModern } from "./value-hash-modern.ts";
+import { hashOfAsRawStringModern } from "./value-hash-modern.ts";
 
 /** Modern hash of a JSONSchema. */
 export function hashSchemaModern(schema: JSONSchema): string {
-  return hashOfModern(schema).toString();
+  return hashOfAsRawStringModern(schema);
 }
 
 /** Modern hash of a schema-related item. */
 export function hashSchemaItemModern(
   item: FabricValue,
 ): string {
-  return hashOfModern(item).toString();
+  return hashOfAsRawStringModern(item);
 }
