@@ -95,8 +95,9 @@ export function hashObjectFromString(source: string): HashObject {
 export function isHashObject<T extends DefinedReferent>(
   value: unknown | HashObject<T>,
 ): value is HashObject<T> {
-  if (value instanceof FabricHash) return true;
-  return isLegacyHashObject(value);
+  return canonicalHashingEnabled
+    ? value instanceof FabricHash || isLegacyHashObject(value)
+    : isLegacyHashObject(value) || value instanceof FabricHash;
 }
 
 /** Reconstructs a hash object from its JSON representation. */
