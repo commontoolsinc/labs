@@ -336,6 +336,96 @@ Deno.test(
 );
 
 Deno.test(
+  "Expression site policy: reactive dynamic JSX element-access roots use the explicit dynamic element-access owner",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>{state.items[state.index]}</div>
+      ));
+    `);
+
+    const elementAccess = findFirstNode(
+      sourceFile,
+      (node): node is ts.ElementAccessExpression =>
+        ts.isElementAccessExpression(node) &&
+        node.getText(sourceFile) === "state.items[state.index]",
+    );
+
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      elementAccess,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.containerKind, "jsx-expression");
+    assertEquals(
+      classifyJsxExpressionSiteRoute(elementAccess, context, analyze),
+      {
+        route: "owned-pre-closure",
+        owner: "dynamic-element-access-root",
+      },
+    );
+  },
+);
+
+Deno.test(
+  "Expression site policy: non-reactive dynamic JSX element-access roots stay in the residual skip bucket",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((_state: any) => {
+        const rows = ["a", "b", "c"];
+        const index = 1;
+        return <div>{rows[index]}</div>;
+      });
+    `);
+
+    const elementAccess = findFirstNode(
+      sourceFile,
+      (node): node is ts.ElementAccessExpression =>
+        ts.isElementAccessExpression(node) &&
+        node.getText(sourceFile) === "rows[index]",
+    );
+
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      elementAccess,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.containerKind, "jsx-expression");
+    assertEquals(
+      classifyJsxExpressionSiteRoute(elementAccess, context, analyze),
+      {
+        route: "skip",
+        reason: "not-shared-jsx-root-kind",
+      },
+    );
+  },
+);
+
+Deno.test(
   "Expression site policy: synthetic compute-owned authored subtrees are visible in site metadata",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`

@@ -44,7 +44,10 @@ export type JsxExpressionSiteRoute =
   | { route: "shared-post-closure" }
   | {
     route: "owned-pre-closure";
-    owner: "opaque-path-terminal-root" | "deferred-jsx-array-method-root";
+    owner:
+      | "opaque-path-terminal-root"
+      | "deferred-jsx-array-method-root"
+      | "dynamic-element-access-root";
   }
   | {
     route: "legacy-jsx";
@@ -708,6 +711,32 @@ function isDirectArrayMethodRootExpression(expression: ts.Expression): boolean {
   return ts.isCallExpression(current) && !!classifyArrayMethodCall(current);
 }
 
+function isOwnedDynamicElementAccessRoot(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  const current = unwrapExpression(expression);
+  if (!ts.isElementAccessExpression(current)) {
+    return false;
+  }
+
+  const argument = current.argumentExpression;
+  if (!argument) {
+    return false;
+  }
+
+  if (
+    ts.isLiteralExpression(argument) ||
+    ts.isNoSubstitutionTemplateLiteral(argument) ||
+    getKnownComputedKeyExpression(argument, context)
+  ) {
+    return false;
+  }
+
+  return analyze(current).containsOpaqueRef;
+}
+
 export function getExpressionSitePolicyInfo(
   expression: ts.Expression,
   containerKind: ExpressionContainerKind,
@@ -788,6 +817,13 @@ export function classifyJsxExpressionSiteRoute(
     return {
       route: "skip",
       reason: "deferred-jsx-array-method-root",
+    };
+  }
+
+  if (isOwnedDynamicElementAccessRoot(expression, context, analyze)) {
+    return {
+      route: "owned-pre-closure",
+      owner: "dynamic-element-access-root",
     };
   }
 
