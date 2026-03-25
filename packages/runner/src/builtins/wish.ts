@@ -719,23 +719,39 @@ export function wish(
               [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
             });
           } else {
-            // Multiple results — use first result immediately, launch
-            // suggestion pattern picker in the background if available
-            const resultUI = uniqueResultCells[0].key(UI).get();
-            sendResult(tx, {
-              result: uniqueResultCells[0],
-              candidates: candidatesCell,
-              [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
-            });
-            // Fire-and-forget: launch picker UI that may override the result
-            launchSuggestionPattern(
-              {
-                situation: query,
-                context: context ?? {},
-                initialResults: candidatesCell,
-              },
-              tx,
-            );
+            // Multiple results — if suggestion pattern is already loaded,
+            // launch it and send its result cell so the picker's output
+            // flows through. Otherwise fall back to first result and kick
+            // off the fetch for next time.
+            if (suggestionPattern) {
+              sendResult(
+                tx,
+                launchSuggestionPattern(
+                  {
+                    situation: query,
+                    context: context ?? {},
+                    initialResults: candidatesCell,
+                  },
+                  tx,
+                ),
+              );
+            } else {
+              // Pattern not loaded yet — send first result, start fetch
+              const resultUI = uniqueResultCells[0].key(UI).get();
+              sendResult(tx, {
+                result: uniqueResultCells[0],
+                candidates: candidatesCell,
+                [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
+              });
+              launchSuggestionPattern(
+                {
+                  situation: query,
+                  context: context ?? {},
+                  initialResults: candidatesCell,
+                },
+                tx,
+              );
+            }
           }
         } catch (e) {
           const errorMsg = e instanceof WishError ? e.message : String(e);
