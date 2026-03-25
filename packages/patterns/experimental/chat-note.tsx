@@ -601,11 +601,11 @@ const ChatNote = pattern<Input, Output>(
           </cf-vstack>
 
           {/* Keyboard shortcut: Cmd+Enter to generate */}
-          <ct-keybind
+          <cf-keybind
             code="Enter"
             meta
             ignore-editable={false}
-            onct-keybind={handleGenerate({
+            oncf-keybind={handleGenerate({
               content,
               llmSystem,
               llmMessages,
@@ -615,11 +615,11 @@ const ChatNote = pattern<Input, Output>(
             })}
           />
           {/* Keyboard shortcut: Ctrl+Enter to generate (Windows/Linux) */}
-          <ct-keybind
+          <cf-keybind
             code="Enter"
             ctrl
             ignore-editable={false}
-            onct-keybind={handleGenerate({
+            oncf-keybind={handleGenerate({
               content,
               llmSystem,
               llmMessages,

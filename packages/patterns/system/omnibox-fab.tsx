@@ -253,7 +253,7 @@ Be matter-of-fact. Prefer action to explanation.`;
             fabExpanded,
           })}
         >
-          <ct-fab
+          <cf-fab
             expanded={fabExpanded}
             variant="primary"
             position="bottom-center"
@@ -262,8 +262,8 @@ Be matter-of-fact. Prefer action to explanation.`;
             $messages={omnibot.messages}
             $previewMessage={latestAssistantMessage}
             placeholder="Ask about anything..."
-            onct-fab-backdrop-click={closeFab({ fabExpanded })}
-            onct-fab-escape={closeFab({ fabExpanded })}
+            oncf-fab-backdrop-click={closeFab({ fabExpanded })}
+            oncf-fab-escape={closeFab({ fabExpanded })}
             onClick={toggle({ value: fabExpanded })}
           >
             {ifElse(
@@ -349,7 +349,7 @@ Be matter-of-fact. Prefer action to explanation.`;
               </div>,
               null,
             )}
-          </ct-fab>
+          </cf-fab>
         </ct-drop-zone>
       ),
       fabExpanded,

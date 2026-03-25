@@ -212,25 +212,25 @@ export default pattern<FriendListsState>(
             </button>
           </div>
 
-          <ct-keybind
+          <cf-keybind
             ctrl
             key="ArrowUp"
-            onct-keybind={moveUpHandler}
+            oncf-keybind={moveUpHandler}
           />
-          <ct-keybind
+          <cf-keybind
             ctrl
             key="ArrowDown"
-            onct-keybind={moveDownHandler}
+            oncf-keybind={moveDownHandler}
           />
-          <ct-keybind
+          <cf-keybind
             ctrl
             key="ArrowLeft"
-            onct-keybind={moveToPersonalHandler}
+            oncf-keybind={moveToPersonalHandler}
           />
-          <ct-keybind
+          <cf-keybind
             ctrl
             key="ArrowRight"
-            onct-keybind={moveToWorkHandler}
+            oncf-keybind={moveToWorkHandler}
           />
 
           <div style="display: flex; gap: 2rem;">

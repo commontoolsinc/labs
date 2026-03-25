@@ -839,7 +839,7 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Note editor modal state
     // NOTE: In the future, this should use a <cf-modal> component instead of inline implementation.
-    // A cf-modal component would follow the ct-fab pattern:
+    // A cf-modal component would follow the cf-fab pattern:
     //   <cf-modal $open={isOpen} oncf-modal-close={handleClose}>
     //     <content />
     //   </cf-modal>
@@ -2152,21 +2152,21 @@ const Record = pattern<RecordInput, RecordOutput>(
               style={{ width: "100%", resize: "vertical" }}
             />
             {/* Keyboard shortcut for save (Cmd/Ctrl+Enter) */}
-            <ct-keybind
+            <cf-keybind
               code="Enter"
               meta
               ignore-editable={false}
-              onct-keybind={saveNote({
+              oncf-keybind={saveNote({
                 subPieces,
                 editingNoteIndex,
                 editingNoteText,
               })}
             />
-            <ct-keybind
+            <cf-keybind
               code="Enter"
               ctrl
               ignore-editable={false}
-              onct-keybind={saveNote({
+              oncf-keybind={saveNote({
                 subPieces,
                 editingNoteIndex,
                 editingNoteText,
@@ -2241,10 +2241,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                 }}
               />
               {/* Escape key handler */}
-              <ct-keybind
+              <cf-keybind
                 code="Escape"
                 ignore-editable={false}
-                onct-keybind={closeExpanded({ expandedIndex })}
+                oncf-keybind={closeExpanded({ expandedIndex })}
               />
             </div>,
             null,

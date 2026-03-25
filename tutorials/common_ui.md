@@ -61,16 +61,16 @@ Used to render a `Cell` that has a `[UI]` property into the DOM. Usually not req
 <ct-render $cell={myCharm} />
 ```
 
-## ct-keybind (beta)
+## cf-keybind (beta)
 
 Register keyboard shortcuts with a handler. These registrations are mediated by `packages/shell/src/lib/keyboard-router.ts` in the shell to prevent conflicts with system shortcuts.
 
 ```{code-block} html
-    <ct-keybind
+    <cf-keybind
         code="KeyN"
         alt
         preventDefault
-        onct-keybind={createChatPattern({ ... })}
+        oncf-keybind={createChatPattern({ ... })}
     />
 ```
 

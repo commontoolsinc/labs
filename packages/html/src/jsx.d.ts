@@ -2884,7 +2884,7 @@ interface CFCopyButtonElement extends CTHTMLElement {}
 interface CFFileDownloadElement extends CTHTMLElement {}
 interface CFIFrameElement extends CTHTMLElement {}
 interface CFHStackElement extends CTHTMLElement {}
-interface CTFabElement extends CTHTMLElement {}
+interface CFFabElement extends CTHTMLElement {}
 interface CFModalElement extends CTHTMLElement {}
 interface CFModalProviderElement extends CTHTMLElement {}
 interface CFChevronButtonElement extends CTHTMLElement {}
@@ -2896,7 +2896,7 @@ interface CFVStackElement extends CTHTMLElement {}
 interface CFMessageInputElement extends CTHTMLElement {}
 interface CFToolbarElement extends CTHTMLElement {}
 interface CFKbdElement extends CTHTMLElement {}
-interface CTKeybindElement extends CTHTMLElement {}
+interface CFKeybindElement extends CTHTMLElement {}
 interface CFRenderElement extends CTHTMLElement {}
 interface CFCellContextElement extends CTHTMLElement {}
 interface CTDragSourceElement extends CTHTMLElement {}
@@ -3214,13 +3214,19 @@ interface CTTableAttributes<T> extends CTHTMLAttributes<T> {
   "hover"?: boolean;
 }
 
-interface CTKeybindAttributes<T> extends CTHTMLAttributes<T> {
-  "code": string; // Could be tighter e.g. `Key${string}`
+type CFKeybindAttributes<T> = Omit<CTHTMLAttributes<T>, "key"> & {
+  "name"?: string;
+  "code"?: string; // Could be tighter e.g. `Key${string}`
   "ctrl"?: boolean;
   "meta"?: boolean;
   "alt"?: boolean;
+  "shift"?: boolean;
+  "ignore-editable"?: boolean;
   "preventDefault"?: boolean;
-}
+  "stop-propagation"?: boolean;
+  "allow-repeat"?: boolean;
+  "oncf-keybind"?: EventHandler<any>;
+};
 
 type TailwindNumberType =
   | 0
@@ -3497,7 +3503,7 @@ interface CFLoaderAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-stop"?: EventHandler<{}>;
 }
 
-interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
+interface CFFabAttributes<T> extends CTHTMLAttributes<T> {
   "expanded"?: boolean;
   "variant"?: "default" | "primary";
   "position"?:
@@ -3511,6 +3517,8 @@ interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
   "$messages"?: CellLike<any[]>;
   "$previewMessage"?: CellLike<string | null>;
   "placeholder"?: string;
+  "oncf-fab-backdrop-click"?: EventHandler<{}>;
+  "oncf-fab-escape"?: EventHandler<{}>;
 }
 
 interface CFModalAttributes<T> extends CTHTMLAttributes<T> {
@@ -4737,9 +4745,9 @@ declare global {
         CFCopyButtonAttributes<CFCopyButtonElement>,
         CFCopyButtonElement
       >;
-      "ct-fab": CTDOM.DetailedHTMLProps<
-        CTFabAttributes<CTFabElement>,
-        CTFabElement
+      "cf-fab": CTDOM.DetailedHTMLProps<
+        CFFabAttributes<CFFabElement>,
+        CFFabElement
       >;
       "cf-modal": CTDOM.DetailedHTMLProps<
         CFModalAttributes<CFModalElement>,
@@ -4797,9 +4805,9 @@ declare global {
         CTHTMLAttributes<CFKbdElement>,
         CFKbdElement
       >;
-      "ct-keybind": CTDOM.DetailedHTMLProps<
-        CTKeybindAttributes<CTKeybindElement>,
-        CTKeybindElement
+      "cf-keybind": CTDOM.DetailedHTMLProps<
+        CFKeybindAttributes<CFKeybindElement>,
+        CFKeybindElement
       >;
       "cf-render": CTDOM.DetailedHTMLProps<
         CFRenderAttributes<CFRenderElement>,

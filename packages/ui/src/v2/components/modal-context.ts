@@ -67,7 +67,7 @@ export const modalContext = createContext<ModalManager | undefined>(
   Symbol("ct.modal-manager"),
 );
 
-/** Base z-index for modals (above ct-fab's 999) */
+/** Base z-index for modals (above cf-fab's 999) */
 export const MODAL_BASE_Z_INDEX = 1000;
 
 /** Z-index increment per stacked modal */

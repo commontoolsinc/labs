@@ -11,14 +11,14 @@ import "../cf-message-beads/cf-message-beads.ts";
 /**
  * A morphing floating action button that expands into a panel.
  *
- * @element ct-fab
+ * @element cf-fab
  *
  * @attr {boolean} expanded - Whether the FAB is expanded (controlled state)
  * @attr {string} variant - Visual variant: "default" | "primary"
  * @attr {string} position - Screen position: "bottom-right" | "bottom-left" | "top-right" | "top-left" | "bottom-center"
  *
- * @fires ct-fab-backdrop-click - Fired when user clicks backdrop
- * @fires ct-fab-escape - Fired when user presses Escape
+ * @fires cf-fab-backdrop-click - Fired when user clicks backdrop
+ * @fires cf-fab-escape - Fired when user presses Escape
  *
  * @slot - Content for the expanded panel
  *
@@ -27,7 +27,7 @@ import "../cf-message-beads/cf-message-beads.ts";
  * @csspart collapsed - The collapsed pill content container
  * @csspart panel - The panel container
  */
-export class CTFab extends BaseElement {
+export class CFFab extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     fabAnimations,
@@ -598,13 +598,13 @@ export class CTFab extends BaseElement {
             e.clientY <= rect.bottom;
 
           if (!inside) {
-            this.emit("ct-fab-backdrop-click");
+            this.emit("cf-fab-backdrop-click");
           }
         };
 
         private _handleKeydown = (e: KeyboardEvent) => {
           if (e.key === "Escape" && this.expanded) {
-            this.emit("ct-fab-escape");
+            this.emit("cf-fab-escape");
           }
         };
 
@@ -698,6 +698,6 @@ export class CTFab extends BaseElement {
         }
       }
 
-      if (!globalThis.customElements.get("ct-fab")) {
-        globalThis.customElements.define("ct-fab", CTFab);
+      if (!globalThis.customElements.get("cf-fab")) {
+        globalThis.customElements.define("cf-fab", CFFab);
       }

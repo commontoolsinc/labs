@@ -300,17 +300,17 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     [NAME]: computed(() => `Ben's Space (${visiblePieces.length})`),
     [UI]: (
       <cf-screen>
-        <ct-keybind
+        <cf-keybind
           code="KeyO"
           meta
           preventDefault
-          onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
+          oncf-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
         />
-        <ct-keybind
+        <cf-keybind
           code="KeyO"
           ctrl
           preventDefault
-          onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
+          oncf-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
         />
 
         <cf-toolbar slot="header" sticky>

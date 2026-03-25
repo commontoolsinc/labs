@@ -5,9 +5,9 @@ import { keyboardRouterContext } from "../keyboard-context.ts";
 import type { KeyboardRouter, ShortcutSpec } from "../keyboard-router.ts";
 
 /**
- * CTKeybind - Declarative keyboard shortcut listener
+ * CFKeybind - Declarative keyboard shortcut listener
  *
- * @element ct-keybind
+ * @element cf-keybind
  *
  * @attr {string} name - Optional name for the binding
  * @attr {string} code - KeyboardEvent.code (e.g. "KeyO", "ArrowUp")
@@ -21,14 +21,14 @@ import type { KeyboardRouter, ShortcutSpec } from "../keyboard-router.ts";
  * @attr {boolean} stopPropagation - Call stopPropagation() on match
  * @attr {boolean} allowRepeat - Allow AutoRepeat (default: false)
  *
- * @fires ct-keybind - Fired when the binding matches. Detail includes:
+ * @fires cf-keybind - Fired when the binding matches. Detail includes:
  *   { name?, event, code, key, alt, ctrl, meta, shift }
  *
  * @example
- * <ct-keybind name="quick-jump" meta key="o"></ct-keybind>
- * <ct-keybind name="close" alt key="w"></ct-keybind>
+ * <cf-keybind name="quick-jump" meta key="o"></cf-keybind>
+ * <cf-keybind name="close" alt key="w"></cf-keybind>
  */
-export class CTKeybind extends BaseElement {
+export class CFKeybind extends BaseElement {
   static override properties = {
     name: { type: String },
     code: { type: String },
@@ -128,7 +128,7 @@ export class CTKeybind extends BaseElement {
   #emitMatch(e: KeyboardEvent) {
     if (this.preventDefault) e.preventDefault();
     if (this.stopPropagation) e.stopPropagation();
-    this.emit("ct-keybind", {
+    this.emit("cf-keybind", {
       name: this.name,
       event: e,
       code: e.code,
@@ -215,4 +215,4 @@ export class CTKeybind extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-keybind", CTKeybind);
+globalThis.customElements.define("cf-keybind", CFKeybind);

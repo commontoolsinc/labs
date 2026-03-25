@@ -77,19 +77,19 @@ export default pattern<FriendListState>((state) => {
         <h2>My Friends</h2>
         <p>Click to select, Ctrl+Up/Down to reorder</p>
 
-        <ct-keybind
+        <cf-keybind
           ctrl
           key="ArrowUp"
-          onct-keybind={moveItem({
+          oncf-keybind={moveItem({
             names: state.names,
             selectedIndex: state.selectedIndex,
             direction: "UP",
           })}
         />
-        <ct-keybind
+        <cf-keybind
           ctrl
           key="ArrowDown"
-          onct-keybind={moveItem({
+          oncf-keybind={moveItem({
             names: state.names,
             selectedIndex: state.selectedIndex,
             direction: "DOWN",
