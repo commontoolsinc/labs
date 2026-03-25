@@ -719,7 +719,12 @@ export class SchemaGenerator implements ISchemaGenerator {
       if (memberSchemas.length === 1) {
         return memberSchemas[0]!;
       }
-      return { anyOf: memberSchemas as JSONSchemaMutable[] };
+      // Filter out `false` schemas (from `never` types) — they reject all
+      // values and are no-ops inside anyOf.
+      const filtered = memberSchemas.filter((s) => s !== false);
+      if (filtered.length === 0) return false;
+      if (filtered.length === 1) return filtered[0]!;
+      return { anyOf: filtered as JSONSchemaMutable[] };
     }
 
     // Synthetic TypeReferenceNodes may fail to bind in checker APIs directly.

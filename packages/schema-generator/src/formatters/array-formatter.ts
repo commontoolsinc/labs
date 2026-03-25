@@ -1,5 +1,8 @@
 import ts from "typescript";
-import type { JSONSchemaMutable } from "@commontools/api";
+import type {
+  JSONSchemaMutable,
+  JSONSchemaMutableOrBoolean,
+} from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { getArrayElementInfo } from "../type-utils.ts";
@@ -17,7 +20,7 @@ export class ArrayFormatter implements TypeFormatter {
     if (context.arrayItemsOverride !== undefined) {
       return {
         type: "array",
-        items: context.arrayItemsOverride as boolean | JSONSchemaMutable,
+        items: context.arrayItemsOverride as JSONSchemaMutableOrBoolean,
       };
     }
 
