@@ -67,12 +67,12 @@ export class CFIframe extends BaseElement {
       .error-content {
         background-color: var(
           --cf-theme-color-surface,
-          var(--ct-color-white, #ffffff)
+          var(--cf-color-white, #ffffff)
         );
         padding: var(--cf-theme-spacing-loose, 1.25rem);
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-md, 0.375rem)
+          var(--cf-border-radius-md, 0.375rem)
         );
         max-width: 80%;
         max-height: 80%;
@@ -82,23 +82,23 @@ export class CFIframe extends BaseElement {
 
       .error-content h2 {
         margin: 0 0 1rem;
-        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
       }
 
       .error-content p {
         margin: 0.5rem 0;
-        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
       }
 
       .error-content pre {
         background-color: var(
           --cf-theme-color-surface-hover,
-          var(--ct-color-gray-100, #f3f4f6)
+          var(--cf-color-gray-100, #f3f4f6)
         );
         padding: 1rem;
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-sm, 0.25rem)
+          var(--cf-border-radius-sm, 0.25rem)
         );
         overflow: auto;
         font-family: monospace;
@@ -115,15 +115,15 @@ export class CFIframe extends BaseElement {
         padding: 0.5rem 1rem;
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-md, 0.375rem)
+          var(--cf-border-radius-md, 0.375rem)
         );
         border: 1px solid
-          var(--cf-theme-color-border, var(--ct-color-gray-300, #d1d5db));
+          var(--cf-theme-color-border, var(--cf-color-gray-300, #d1d5db));
         background-color: var(
           --cf-theme-color-surface,
-          var(--ct-color-white, #ffffff)
+          var(--cf-color-white, #ffffff)
         );
-        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
         cursor: pointer;
         font-size: 0.875rem;
         font-weight: 500;
@@ -133,22 +133,22 @@ export class CFIframe extends BaseElement {
       .error-actions button:hover {
         background-color: var(
           --cf-theme-color-surface-hover,
-          var(--ct-color-gray-100, #f3f4f6)
+          var(--cf-color-gray-100, #f3f4f6)
         );
       }
 
       .error-actions button:first-child {
         background-color: var(
           --cf-theme-color-primary,
-          var(--ct-color-primary, #3b82f6)
+          var(--cf-color-primary, #3b82f6)
         );
         color: var(
           --cf-theme-color-primary-foreground,
-          var(--ct-color-white, #ffffff)
+          var(--cf-color-white, #ffffff)
         );
         border-color: var(
           --cf-theme-color-primary,
-          var(--ct-color-primary, #3b82f6)
+          var(--cf-color-primary, #3b82f6)
         );
       }
 

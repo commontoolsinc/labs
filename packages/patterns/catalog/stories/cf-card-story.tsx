@@ -24,7 +24,7 @@ export default pattern<CardStoryInput, CardStoryOutput>(() => {
         <cf-card>
           <cf-vstack gap="1">
             <cf-heading level={5}>Basic Card</cf-heading>
-            <span style="color: var(--ct-color-gray-600);">
+            <span style="color: var(--cf-color-gray-600);">
               A simple card with text content. Cards provide built-in padding.
             </span>
           </cf-vstack>
@@ -35,7 +35,7 @@ export default pattern<CardStoryInput, CardStoryOutput>(() => {
             <span style="font-size: 2rem;">🎨</span>
             <cf-vstack gap="0" style="flex: 1;">
               <span style="font-weight: 600;">Card with Icon</span>
-              <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+              <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
                 Horizontal layout with icon and text
               </span>
             </cf-vstack>

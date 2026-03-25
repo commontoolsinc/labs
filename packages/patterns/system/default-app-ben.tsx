@@ -324,7 +324,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
               fontSize: "14px",
               padding: "6px 12px",
               textDecoration: "none",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-color-text-secondary)",
             }}
           >
             Mentions
@@ -336,7 +336,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
               fontSize: "14px",
               padding: "6px 12px",
               textDecoration: "none",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-color-text-secondary)",
             }}
           >
             Search
@@ -348,7 +348,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
               fontSize: "14px",
               padding: "6px 12px",
               textDecoration: "none",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-color-text-secondary)",
             }}
           >
             Graph
@@ -360,7 +360,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
               fontSize: "14px",
               padding: "6px 12px",
               textDecoration: "none",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-color-text-secondary)",
             }}
           >
             History
@@ -398,8 +398,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                 position: "fixed",
                 top: "112px",
                 right: "16px",
-                background: "var(--ct-color-bg, white)",
-                border: "1px solid var(--ct-color-border, #e5e5e7)",
+                background: "var(--cf-color-bg, white)",
+                border: "1px solid var(--cf-color-border, #e5e5e7)",
                 borderRadius: "12px",
                 boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
                 minWidth: "160px",
@@ -438,7 +438,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
               <div
                 style={{
                   height: "1px",
-                  background: "var(--ct-color-border, #e5e5e7)",
+                  background: "var(--cf-color-border, #e5e5e7)",
                   margin: "4px 8px",
                 }}
               />

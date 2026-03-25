@@ -47,7 +47,7 @@ export default pattern<Record<string, never>>((_) => {
             <span
               style={{
                 fontSize: "13px",
-                color: "var(--ct-color-text-secondary)",
+                color: "var(--cf-color-text-secondary)",
               }}
             >
               Showing {filteredCount} results
@@ -70,7 +70,7 @@ export default pattern<Record<string, never>>((_) => {
                   <td
                     style={{
                       fontSize: "13px",
-                      color: "var(--ct-color-text-secondary)",
+                      color: "var(--cf-color-text-secondary)",
                     }}
                   >
                     {entry.summary}

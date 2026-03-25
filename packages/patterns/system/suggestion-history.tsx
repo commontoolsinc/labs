@@ -72,7 +72,7 @@ const SuggestionHistory = pattern<Input, Output>(() => {
           {allEntries.map((entry: SuggestionHistoryEntry) => (
             <div
               style={{
-                border: "1px solid var(--ct-color-border, #e5e5e7)",
+                border: "1px solid var(--cf-color-border, #e5e5e7)",
                 borderRadius: "12px",
                 overflow: "hidden",
               }}
@@ -102,7 +102,7 @@ const SuggestionHistory = pattern<Input, Output>(() => {
                 <div
                   style={{
                     fontSize: "12px",
-                    color: "var(--ct-color-text-secondary)",
+                    color: "var(--cf-color-text-secondary)",
                   }}
                 >
                   {entry.timestamp}

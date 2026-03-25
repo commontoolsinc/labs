@@ -86,7 +86,7 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
           <cf-vstack slot="header" gap="2">
             <cf-hstack justify="between" align="center">
               <cf-heading level={4}>Habits ({habitCount})</cf-heading>
-              <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+              <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
                 {todayDate}
               </span>
             </cf-hstack>
@@ -135,7 +135,7 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
                         <span style="font-weight: 500;">
                           {habit.name || "(unnamed)"}
                         </span>
-                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                           Streak: {streak} days
                         </span>
                       </cf-vstack>
@@ -175,14 +175,14 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
                               borderRadius: "4px",
                               backgroundColor: dayCompleted
                                 ? habit.color
-                                : "var(--ct-color-gray-200)",
+                                : "var(--cf-color-gray-200)",
                               display: "flex",
                               alignItems: "center",
                               justifyContent: "center",
                               fontSize: "0.625rem",
                               color: dayCompleted
                                 ? "white"
-                                : "var(--ct-color-gray-400)",
+                                : "var(--cf-color-gray-400)",
                             }}
                           >
                             {date.slice(-2)}
@@ -196,7 +196,7 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
 
               {hasNoHabits
                 ? (
-                  <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+                  <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
                     No habits yet. Add one below!
                   </div>
                 )

@@ -30,7 +30,7 @@ export const badgeStyles = `
     font-weight: 600;
     line-height: 1;
     transition: all var(--cf-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+      var(--cf-transition-timing-ease);
     white-space: nowrap;
     font-family: inherit;
   }
@@ -72,7 +72,7 @@ export const badgeStyles = `
     margin-right: -0.25rem;
     opacity: 0.7;
     transition: opacity var(--cf-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+      var(--cf-transition-timing-ease);
     border-radius: 0.25rem;
     padding: 0;
     width: 14px;

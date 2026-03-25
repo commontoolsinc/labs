@@ -32,7 +32,7 @@ export class CFMessageInput extends BaseElement {
       .container {
         display: grid;
         grid-template-columns: 1fr auto;
-        gap: var(--ct-spacing-2, 0.5rem);
+        gap: var(--cf-spacing-2, 0.5rem);
         align-items: center;
       }
 

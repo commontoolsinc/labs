@@ -140,7 +140,7 @@ const EntryRow = pattern<Entry, { [UI]: VNode }>(({ piece, backlinks }) => {
                 $cell={link}
                 style={{
                   fontSize: "12px",
-                  color: "var(--ct-color-text-secondary)",
+                  color: "var(--cf-color-text-secondary)",
                 }}
               />
             ))}
@@ -195,7 +195,7 @@ const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
           <span
             style={{
               fontSize: "13px",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-color-text-secondary)",
             }}
           >
             {filteredCount} of {totalCount} pieces

@@ -9,7 +9,7 @@ export const messageInputStyles = `
   :host {
     display: block;
     width: 100%;
-    --cf-message-input-gap: var(--ct-spacing-2, 0.5rem);
+    --cf-message-input-gap: var(--cf-spacing-2, 0.5rem);
     --cf-message-input-height: 2.5rem;
   }
 
@@ -42,13 +42,13 @@ export const messageInputStyles = `
 
   /* Focus-within styling */
   :host(:focus-within) .container {
-    --cf-message-input-ring: var(--ring, var(--ct-colors-primary-500));
+    --cf-message-input-ring: var(--ring, var(--cf-colors-primary-500));
   }
 
   /* Responsive adjustments */
   @media (max-width: 640px) {
     :host {
-      --cf-message-input-gap: var(--ct-spacing-1, 0.25rem);
+      --cf-message-input-gap: var(--cf-spacing-1, 0.25rem);
     }
   }
 `;

@@ -404,11 +404,11 @@ export class CFPlaidLink extends BaseElement {
         padding: var(--cf-theme-spacing-loose, 1.5rem);
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-lg, 0.5rem)
+          var(--cf-border-radius-lg, 0.5rem)
         );
         background-color: var(
           --cf-theme-color-surface,
-          var(--ct-color-white, #ffffff)
+          var(--cf-color-white, #ffffff)
         );
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         max-width: 800px;
@@ -420,23 +420,23 @@ export class CFPlaidLink extends BaseElement {
 
       .connected-accounts h3 {
         margin: 0 0 var(--cf-theme-spacing-normal, 1rem);
-        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
         font-size: 1.25rem;
         font-weight: 600;
       }
 
       .bank-item {
         border: 1px solid
-          var(--cf-theme-color-border, var(--ct-color-gray-300, #d1d5db));
+          var(--cf-theme-color-border, var(--cf-color-gray-300, #d1d5db));
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-md, 0.375rem)
+          var(--cf-border-radius-md, 0.375rem)
         );
         padding: var(--cf-theme-spacing-normal, 1rem);
         margin-bottom: var(--cf-theme-spacing-normal, 1rem);
         background-color: var(
           --cf-theme-color-surface-hover,
-          var(--ct-color-gray-50, #f9fafb)
+          var(--cf-color-gray-50, #f9fafb)
         );
       }
 
@@ -449,7 +449,7 @@ export class CFPlaidLink extends BaseElement {
 
       .bank-header h4 {
         margin: 0;
-        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
         font-size: 1.1rem;
         font-weight: 600;
       }
@@ -457,18 +457,18 @@ export class CFPlaidLink extends BaseElement {
       .remove-button {
         background-color: var(
           --cf-theme-color-error,
-          var(--ct-color-red-600, #dc2626)
+          var(--cf-color-red-600, #dc2626)
         );
         color: var(
           --cf-theme-color-primary-foreground,
-          var(--ct-color-white, #ffffff)
+          var(--cf-color-white, #ffffff)
         );
         border: none;
         padding: var(--cf-theme-spacing-tight, 0.375rem)
           var(--cf-theme-spacing-normal, 0.75rem);
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-sm, 0.25rem)
+          var(--cf-border-radius-sm, 0.25rem)
         );
         cursor: pointer;
         font-size: 0.9rem;
@@ -479,14 +479,14 @@ export class CFPlaidLink extends BaseElement {
       .remove-button:hover {
         background-color: var(
           --cf-theme-color-error,
-          var(--ct-color-red-700, #b91c1c)
+          var(--cf-color-red-700, #b91c1c)
         );
       }
 
       .remove-button:disabled {
         background-color: var(
           --cf-theme-color-border,
-          var(--ct-color-gray-300, #d1d5db)
+          var(--cf-color-gray-300, #d1d5db)
         );
         cursor: not-allowed;
       }
@@ -500,13 +500,13 @@ export class CFPlaidLink extends BaseElement {
       .account {
         background-color: var(
           --cf-theme-color-surface,
-          var(--ct-color-white, #ffffff)
+          var(--cf-color-white, #ffffff)
         );
         border: 1px solid
-          var(--cf-theme-color-border, var(--ct-color-gray-200, #e5e7eb));
+          var(--cf-theme-color-border, var(--cf-color-gray-200, #e5e7eb));
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-md, 0.375rem)
+          var(--cf-border-radius-md, 0.375rem)
         );
         padding: var(--cf-theme-spacing-normal, 0.75rem);
       }
@@ -520,13 +520,13 @@ export class CFPlaidLink extends BaseElement {
 
       .account-name {
         font-weight: 500;
-        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
       }
 
       .account-mask {
         color: var(
           --cf-theme-color-text-muted,
-          var(--ct-color-gray-600, #6b7280)
+          var(--cf-color-gray-600, #6b7280)
         );
         font-size: 0.9rem;
       }
@@ -537,7 +537,7 @@ export class CFPlaidLink extends BaseElement {
         padding: 0.125rem var(--cf-theme-spacing-tight, 0.5rem);
         border-radius: var(
           --cf-theme-border-radius-full,
-          var(--ct-radius-full, 9999px)
+          var(--cf-radius-full, 9999px)
         );
         font-size: 0.8rem;
         text-transform: capitalize;
@@ -553,26 +553,26 @@ export class CFPlaidLink extends BaseElement {
       .balance-label {
         color: var(
           --cf-theme-color-text-muted,
-          var(--ct-color-gray-600, #6b7280)
+          var(--cf-color-gray-600, #6b7280)
         );
       }
 
       .balance-amount {
         font-weight: 500;
-        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
       }
 
       .bank-footer {
         margin-top: var(--cf-theme-spacing-normal, 0.75rem);
         padding-top: var(--cf-theme-spacing-normal, 0.75rem);
         border-top: 1px solid
-          var(--cf-theme-color-border, var(--ct-color-gray-200, #e5e7eb));
+          var(--cf-theme-color-border, var(--cf-color-gray-200, #e5e7eb));
         }
 
         .last-updated {
           color: var(
             --cf-theme-color-text-muted,
-            var(--ct-color-gray-600, #6b7280)
+            var(--cf-color-gray-600, #6b7280)
           );
           font-size: 0.85rem;
         }
@@ -591,7 +591,7 @@ export class CFPlaidLink extends BaseElement {
             var(--cf-theme-spacing-loose, 1.5rem);
           border-radius: var(
             --cf-theme-border-radius,
-            var(--ct-border-radius-md, 0.375rem)
+            var(--cf-border-radius-md, 0.375rem)
           );
           cursor: pointer;
           font-weight: 500;
@@ -607,7 +607,7 @@ export class CFPlaidLink extends BaseElement {
         .connect-button:disabled {
           background-color: var(
             --cf-theme-color-border,
-            var(--ct-color-gray-300, #d1d5db)
+            var(--cf-color-gray-300, #d1d5db)
           );
           cursor: not-allowed;
         }
@@ -616,7 +616,7 @@ export class CFPlaidLink extends BaseElement {
           padding: var(--cf-theme-spacing-normal, 0.75rem);
           border-radius: var(
             --cf-theme-border-radius,
-            var(--ct-border-radius-md, 0.375rem)
+            var(--cf-border-radius-md, 0.375rem)
           );
           background-color: #e8f5e9;
           color: #2e7d32;

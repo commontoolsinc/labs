@@ -20,14 +20,14 @@ export const collapsibleStyles = `
   .content-wrapper {
     overflow: hidden;
     transition: height var(--cf-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+      var(--cf-transition-timing-ease);
     height: 0;
     will-change: height;
   }
 
   .collapsible.open .content-wrapper {
     transition: height var(--cf-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+      var(--cf-transition-timing-ease);
   }
 
   .content {
@@ -75,9 +75,9 @@ export const collapsibleStyles = `
     transform-origin: 50% 50%;
     transform: rotate(0deg);
     transition: transform var(--cf-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+      var(--cf-transition-timing-ease);
     color: var(--cf-theme-color-text-muted, #64748b);
-    font-weight: var(--ct-font-weight-semibold, 600);
+    font-weight: var(--cf-font-weight-semibold, 600);
   }
 
   :host([open]) .indicator::before {

@@ -105,7 +105,7 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
         <cf-vstack slot="header" gap="1">
           <cf-hstack justify="between" align="center">
             <cf-heading level={4}>Calendar ({eventCount})</cf-heading>
-            <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+            <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
               {todayDate}
             </span>
           </cf-hstack>
@@ -117,7 +117,7 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
               const sorted = sortedEvents;
               if (sorted.length === 0) {
                 return (
-                  <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+                  <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
                     No events yet. Add one below!
                   </div>
                 );
@@ -139,17 +139,17 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
                           fontWeight: "600",
                           fontSize: "0.875rem",
                           color: dateIsToday
-                            ? "var(--ct-color-primary-500)"
+                            ? "var(--cf-color-primary-500)"
                             : dateIsPast
-                            ? "var(--ct-color-gray-400)"
-                            : "var(--ct-color-gray-700)",
+                            ? "var(--cf-color-gray-400)"
+                            : "var(--cf-color-gray-700)",
                         }}
                       >
                         {formatDate(date)}
                       </span>
                       {dateIsToday
                         ? (
-                          <span style="font-size: 0.75rem; background: var(--ct-color-primary-100); color: var(--ct-color-primary-700); padding: 0.125rem 0.5rem; border-radius: 999px;">
+                          <span style="font-size: 0.75rem; background: var(--cf-color-primary-100); color: var(--cf-color-primary-700); padding: 0.125rem 0.5rem; border-radius: 999px;">
                             Today
                           </span>
                         )
@@ -162,7 +162,7 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
                   <cf-card>
                     <cf-hstack gap="2" align="center">
                       {event.time && (
-                        <span style="font-size: 0.875rem; color: var(--ct-color-gray-500); min-width: 50px;">
+                        <span style="font-size: 0.875rem; color: var(--cf-color-gray-500); min-width: 50px;">
                           {event.time}
                         </span>
                       )}
@@ -171,7 +171,7 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
                           {event.title || "(untitled)"}
                         </span>
                         {event.notes && (
-                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
+                          <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
                             {event.notes}
                           </span>
                         )}

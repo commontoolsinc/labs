@@ -149,7 +149,7 @@ export function getSemanticSpacing(
   const spacingLevel = Math.min(4, Math.round(scaledValue * 4));
   const fallback = `${scaledValue}rem`;
 
-  return `var(--ct-spacing-${spacingLevel}, ${fallback})`;
+  return `var(--cf-spacing-${spacingLevel}, ${fallback})`;
 }
 
 /**

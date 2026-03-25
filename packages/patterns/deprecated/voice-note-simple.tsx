@@ -58,7 +58,7 @@ const VoiceNoteSimple = pattern<Input, Output>(
             <cf-card>
               <div style={{ padding: "1rem" }}>
                 <h3 style={{ marginTop: 0 }}>Voice Input Component Test</h3>
-                <p style={{ color: "var(--ct-color-gray-600)" }}>
+                <p style={{ color: "var(--cf-color-gray-600)" }}>
                   Hold the microphone button to record. Release to transcribe.
                 </p>
 
@@ -82,7 +82,7 @@ const VoiceNoteSimple = pattern<Input, Output>(
                       display: "flex",
                       gap: "1rem",
                       fontSize: "0.875rem",
-                      color: "var(--ct-color-gray-600)",
+                      color: "var(--cf-color-gray-600)",
                     }}
                   >
                     <span>

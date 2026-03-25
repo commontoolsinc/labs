@@ -180,12 +180,12 @@ without theme context:
 .button {
   background-color: var(
     --cf-theme-color-primary,
-    var(--ct-colors-primary-500, #3b82f6)
+    var(--cf-colors-primary-500, #3b82f6)
   );
   font-family: var(--cf-theme-font-family, inherit);
   border-radius: var(
     --cf-theme-border-radius,
-    var(--ct-border-radius-md, 0.375rem)
+    var(--cf-border-radius-md, 0.375rem)
   );
 }
 ```
@@ -199,38 +199,38 @@ defined in `packages/ui/src/v2/styles/variables.ts`.
 
 **Colors:**
 
-- `--ct-colors-primary-{50-900}`: Primary color scale
-- `--ct-colors-gray-{50-900}`: Gray color scale
-- `--ct-colors-success`, `--ct-colors-warning`, `--ct-colors-error`,
-  `--ct-colors-info`
+- `--cf-colors-primary-{50-900}`: Primary color scale
+- `--cf-colors-gray-{50-900}`: Gray color scale
+- `--cf-colors-success`, `--cf-colors-warning`, `--cf-colors-error`,
+  `--cf-colors-info`
 
 **Typography:**
 
-- `--ct-font-family-sans`, `--ct-font-family-mono`
-- `--ct-font-size-{xs,sm,base,lg,xl,2xl,3xl,4xl}`
-- `--ct-font-weight-{light,normal,medium,semibold,bold}`
-- `--ct-line-height-{none,tight,snug,normal,relaxed,loose}`
+- `--cf-font-family-sans`, `--cf-font-family-mono`
+- `--cf-font-size-{xs,sm,base,lg,xl,2xl,3xl,4xl}`
+- `--cf-font-weight-{light,normal,medium,semibold,bold}`
+- `--cf-line-height-{none,tight,snug,normal,relaxed,loose}`
 
 **Spacing:**
 
-- `--ct-spacing-{0,1,2,3,4,5,6,8,10,12,16,20,24}`
+- `--cf-spacing-{0,1,2,3,4,5,6,8,10,12,16,20,24}`
 
 **Border Radius:**
 
-- `--ct-border-radius-{none,sm,base,md,lg,xl,2xl,3xl,full}`
+- `--cf-border-radius-{none,sm,base,md,lg,xl,2xl,3xl,full}`
 
 **Shadows:**
 
-- `--ct-shadow-{sm,base,md,lg,xl,none}`
+- `--cf-shadow-{sm,base,md,lg,xl,none}`
 
 **Transitions:**
 
-- `--ct-transition-duration-{fast,base,slow}`
-- `--ct-transition-timing-{ease,ease-in,ease-out,ease-in-out}`
+- `--cf-transition-duration-{fast,base,slow}`
+- `--cf-transition-timing-{ease,ease-in,ease-out,ease-in-out}`
 
 **Z-index:**
 
-- `--ct-z-index-{auto,0,10,20,30,40,50,100,1000}`
+- `--cf-z-index-{auto,0,10,20,30,40,50,100,1000}`
 
 ## Theme Helper Functions
 

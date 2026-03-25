@@ -24,8 +24,8 @@ export class CFTabPanel extends BaseElement {
       :host {
         display: flex;
         flex-direction: column;
-        margin-top: var(--ct-spacing-6);
-        animation: fadeIn var(--ct-transition-duration-fast) ease-in;
+        margin-top: var(--cf-spacing-6);
+        animation: fadeIn var(--cf-transition-duration-fast) ease-in;
         flex: 1;
         min-height: 0;
       }
@@ -60,7 +60,7 @@ export class CFTabPanel extends BaseElement {
       /* Vertical orientation - adjust spacing */
       :host-context(cf-tabs[orientation="vertical"]) {
         margin-top: 0;
-        margin-left: var(--ct-spacing-6);
+        margin-left: var(--cf-spacing-6);
       }
     `,
   ];

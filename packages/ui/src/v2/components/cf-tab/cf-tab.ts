@@ -35,12 +35,12 @@ export class CFTab extends BaseElement {
         align-items: center;
         justify-content: center;
         white-space: nowrap;
-        border-radius: var(--cf-theme-border-radius, var(--ct-border-radius-md));
-        padding: var(--ct-spacing-2) var(--ct-spacing-3);
-        font-size: var(--ct-font-size-sm);
-        font-weight: var(--ct-font-weight-medium);
-        transition: all var(--ct-transition-duration-fast)
-          var(--ct-transition-timing-ease);
+        border-radius: var(--cf-theme-border-radius, var(--cf-border-radius-md));
+        padding: var(--cf-spacing-2) var(--cf-spacing-3);
+        font-size: var(--cf-font-size-sm);
+        font-weight: var(--cf-font-weight-medium);
+        transition: all var(--cf-transition-duration-fast)
+          var(--cf-transition-timing-ease);
         cursor: pointer;
         background: transparent;
         border: none;
@@ -55,7 +55,7 @@ export class CFTab extends BaseElement {
 
       .tab:focus-visible {
         outline: 2px solid
-          var(--cf-theme-color-primary, var(--ct-colors-primary-500));
+          var(--cf-theme-color-primary, var(--cf-colors-primary-500));
         outline-offset: 2px;
       }
 
@@ -78,7 +78,7 @@ export class CFTab extends BaseElement {
         height: 2px;
         background-color: var(
           --cf-theme-color-primary,
-          var(--ct-colors-primary-500)
+          var(--cf-colors-primary-500)
         );
       }
 

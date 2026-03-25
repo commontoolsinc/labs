@@ -347,7 +347,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
           <span
             style={{
               fontSize: "13px",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-color-text-secondary)",
             }}
           >
             {baseEdgeCount} base links, {agentEdgeCount} agent links,{" "}
@@ -372,7 +372,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
                       <td
                         style={{
                           fontSize: "13px",
-                          color: "var(--ct-color-text-secondary)",
+                          color: "var(--cf-color-text-secondary)",
                         }}
                       >
                         {node.summary}
@@ -396,7 +396,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
                   <td
                     style={{
                       fontSize: "13px",
-                      color: "var(--ct-color-text-secondary)",
+                      color: "var(--cf-color-text-secondary)",
                       textAlign: "center",
                     }}
                   >

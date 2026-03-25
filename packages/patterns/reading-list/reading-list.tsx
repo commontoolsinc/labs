@@ -192,22 +192,22 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
                         {item.title || "(untitled)"}
                       </span>
                       {item.author && (
-                        <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+                        <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
                           by {item.author}
                         </span>
                       )}
                       <cf-hstack gap="2" align="center">
-                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-400);">
                           {item.status}
                         </span>
                         {renderStars(item.rating) && (
-                          <span style="font-size: 0.75rem; color: var(--ct-color-warning-500);">
+                          <span style="font-size: 0.75rem; color: var(--cf-color-warning-500);">
                             {renderStars(item.rating)}
                           </span>
                         )}
                       </cf-hstack>
                       {item.notes && (
-                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); font-style: italic; margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
+                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); font-style: italic; margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
                           {item.notes}
                         </span>
                       )}
@@ -231,7 +231,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
 
             {hasNoFilteredItems
               ? (
-                <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+                <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
                   No items yet. Add something to read!
                 </div>
               )

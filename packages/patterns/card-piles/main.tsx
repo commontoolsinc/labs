@@ -94,7 +94,7 @@ const cardStyle = {
   width: "70px",
   height: "100px",
   background: "white",
-  border: "2px solid var(--ct-color-border, #e2e8f0)",
+  border: "2px solid var(--cf-color-border, #e2e8f0)",
   borderRadius: "8px",
   display: "flex",
   flexDirection: "column",
@@ -108,10 +108,10 @@ const cardStyle = {
 const pileStyle = {
   minWidth: "120px",
   minHeight: "180px",
-  border: "2px dashed var(--ct-color-border, #cbd5e1)",
+  border: "2px dashed var(--cf-color-border, #cbd5e1)",
   borderRadius: "12px",
   padding: "1rem",
-  background: "var(--ct-color-bg-secondary, #f8fafc)",
+  background: "var(--cf-color-bg-secondary, #f8fafc)",
   display: "flex",
   flexDirection: "column",
   gap: "0.5rem",
@@ -119,7 +119,7 @@ const pileStyle = {
 
 const pileLabelStyle = {
   fontSize: "12px",
-  color: "var(--ct-color-text-secondary, #64748b)",
+  color: "var(--cf-color-text-secondary, #64748b)",
   fontWeight: "600",
   marginBottom: "0.5rem",
 } as const;
@@ -132,7 +132,7 @@ const cardListStyle = {
 } as const;
 
 const emptyPileStyle = {
-  color: "var(--ct-color-text-secondary, #94a3b8)",
+  color: "var(--cf-color-text-secondary, #94a3b8)",
   fontSize: "13px",
   fontStyle: "italic",
   textAlign: "center",

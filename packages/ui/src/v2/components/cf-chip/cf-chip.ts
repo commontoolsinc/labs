@@ -37,17 +37,17 @@ export class CFChip extends BaseElement {
         padding: 0.25rem 0.625rem;
         background: var(
           --cf-theme-color-surface,
-          var(--ct-color-gray-100, #f5f5f5)
+          var(--cf-color-gray-100, #f5f5f5)
         );
         color: var(
           --cf-theme-color-text,
-          var(--ct-color-gray-900, #212121)
+          var(--cf-color-gray-900, #212121)
         );
         border: 1px solid
-          var(--cf-theme-color-border, var(--ct-color-gray-300, #e0e0e0));
+          var(--cf-theme-color-border, var(--cf-color-gray-300, #e0e0e0));
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-full, 9999px)
+          var(--cf-border-radius-full, 9999px)
         );
         font-size: 0.8125rem;
         line-height: 1;
@@ -64,7 +64,7 @@ export class CFChip extends BaseElement {
         .chip.interactive:hover {
           background: var(
             --cf-theme-color-surface-hover,
-            var(--ct-color-gray-200, #eeeeee)
+            var(--cf-color-gray-200, #eeeeee)
           );
         }
 
@@ -72,15 +72,15 @@ export class CFChip extends BaseElement {
         .chip.primary {
           background: var(
             --cf-theme-color-primary-surface,
-            var(--ct-color-blue-50, #eff6ff)
+            var(--cf-color-blue-50, #eff6ff)
           );
           border-color: var(
             --cf-theme-color-primary,
-            var(--ct-color-blue-200, #bfdbfe)
+            var(--cf-color-blue-200, #bfdbfe)
           );
           color: var(
             --cf-theme-color-primary,
-            var(--ct-color-blue-700, #1d4ed8)
+            var(--cf-color-blue-700, #1d4ed8)
           );
         }
 
@@ -88,15 +88,15 @@ export class CFChip extends BaseElement {
         .chip.accent {
           background: var(
             --cf-theme-color-accent-surface,
-            var(--ct-color-purple-50, #faf5ff)
+            var(--cf-color-purple-50, #faf5ff)
           );
           border-color: var(
             --cf-theme-color-accent,
-            var(--ct-color-purple-200, #e9d5ff)
+            var(--cf-color-purple-200, #e9d5ff)
           );
           color: var(
             --cf-theme-color-accent,
-            var(--ct-color-purple-700, #7c3aed)
+            var(--cf-color-purple-700, #7c3aed)
           );
         }
 

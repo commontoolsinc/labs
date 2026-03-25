@@ -57,14 +57,14 @@ const StyleObjectRepro = pattern<ReproInput, ReproOutput>(() => {
             <cf-heading level={5} style="color: #ef4444;">
               Bug Demo (shared style object)
             </cf-heading>
-            <div style="color: var(--ct-color-gray-500); font-size: 0.875rem; margin-bottom: 8px;">
+            <div style="color: var(--cf-color-gray-500); font-size: 0.875rem; margin-bottom: 8px;">
               These boxes share a style object reference — only the first one
               renders correctly:
             </div>
             {bugItems.map((label) => (
               <div style={sharedCardStyle}>
                 <span style="fontWeight: 600;">{label}</span>
-                <span style="color: var(--ct-color-gray-400); marginLeft: 8px;">
+                <span style="color: var(--cf-color-gray-400); marginLeft: 8px;">
                   — using sharedCardStyle
                 </span>
               </div>
@@ -74,7 +74,7 @@ const StyleObjectRepro = pattern<ReproInput, ReproOutput>(() => {
           {/* ===== Divider ===== */}
           <div
             style={{
-              borderTop: "2px dashed var(--ct-color-gray-300)",
+              borderTop: "2px dashed var(--cf-color-gray-300)",
               margin: "8px 0",
             }}
           />
@@ -84,14 +84,14 @@ const StyleObjectRepro = pattern<ReproInput, ReproOutput>(() => {
             <cf-heading level={5} style="color: #10b981;">
               Fix Demo (factory function)
             </cf-heading>
-            <div style="color: var(--ct-color-gray-500); font-size: 0.875rem; margin-bottom: 8px;">
+            <div style="color: var(--cf-color-gray-500); font-size: 0.875rem; margin-bottom: 8px;">
               These boxes each get a fresh style object from a factory function
               — all render correctly:
             </div>
             {fixItems.map((label) => (
               <div style={makeCardStyle()}>
                 <span style="fontWeight: 600;">{label}</span>
-                <span style="color: var(--ct-color-gray-400); marginLeft: 8px;">
+                <span style="color: var(--cf-color-gray-400); marginLeft: 8px;">
                   — using makeCardStyle()
                 </span>
               </div>

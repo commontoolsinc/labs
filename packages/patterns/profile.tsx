@@ -304,8 +304,8 @@ const sectionHeaderStyle = {
   gap: "8px",
   width: "100%",
   padding: "12px 16px",
-  background: "var(--ct-color-bg-secondary, #f9fafb)",
-  border: "1px solid var(--ct-color-border, #e5e5e7)",
+  background: "var(--cf-color-bg-secondary, #f9fafb)",
+  border: "1px solid var(--cf-color-border, #e5e5e7)",
   borderRadius: "8px",
   cursor: "pointer",
   fontSize: "15px",
@@ -314,8 +314,8 @@ const sectionHeaderStyle = {
 
 const sectionContentStyle = {
   padding: "12px",
-  background: "var(--ct-color-bg, white)",
-  border: "1px solid var(--ct-color-border, #e5e5e7)",
+  background: "var(--cf-color-bg, white)",
+  border: "1px solid var(--cf-color-border, #e5e5e7)",
   borderRadius: "8px",
 };
 
@@ -331,8 +331,8 @@ const removeButtonStyle = {
 
 const bigAddButtonStyle = {
   padding: "12px 24px",
-  background: "var(--ct-color-bg-secondary, #f3f4f6)",
-  border: "1px dashed var(--ct-color-border, #e5e5e7)",
+  background: "var(--cf-color-bg-secondary, #f3f4f6)",
+  border: "1px dashed var(--cf-color-border, #e5e5e7)",
   borderRadius: "8px",
   cursor: "pointer",
   fontSize: "14px",
@@ -397,7 +397,7 @@ const Profile = pattern<ProfileInput, Output>(
             gap="2"
             padding="4"
             style={{
-              borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
+              borderBottom: "1px solid var(--cf-color-border, #e5e5e7)",
             }}
           >
             <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "600" }}>
@@ -406,7 +406,7 @@ const Profile = pattern<ProfileInput, Output>(
             <span
               style={{
                 fontSize: "13px",
-                color: "var(--ct-color-text-secondary, #6b7280)",
+                color: "var(--cf-color-text-secondary, #6b7280)",
               }}
             >
               Personal data blackboard - tag with #profile for discovery
@@ -426,7 +426,7 @@ const Profile = pattern<ProfileInput, Output>(
                 >
                   <span style={{ fontSize: "18px" }}>👤</span>
                   <span style={{ flex: 1, textAlign: "left" }}>About Me</span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => selfExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -496,7 +496,7 @@ const Profile = pattern<ProfileInput, Output>(
                 >
                   <span style={{ fontSize: "18px" }}>💑</span>
                   <span style={{ flex: 1, textAlign: "left" }}>Partner</span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => partnerExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -549,15 +549,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => children.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => childrenExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -648,15 +648,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => parents.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => parentsExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -731,15 +731,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => inlaws.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => inlawsExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -815,15 +815,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => addresses.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => addressesExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -904,15 +904,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => vehicles.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => vehiclesExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -1001,15 +1001,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => memberships.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => membershipsExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -1086,15 +1086,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => banks.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => banksExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -1168,7 +1168,7 @@ const Profile = pattern<ProfileInput, Output>(
                 >
                   <span style={{ fontSize: "18px" }}>💼</span>
                   <span style={{ flex: 1, textAlign: "left" }}>Employment</span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => employmentExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -1243,15 +1243,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => learned.key("facts").get().length)} facts
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => (learnedExpanded.get() ? "▼" : "▶"))}
                   </span>
                 </button>
@@ -1275,8 +1275,8 @@ const Profile = pattern<ProfileInput, Output>(
                                 style={{
                                   padding: "4px 12px",
                                   background:
-                                    "var(--ct-color-primary-surface, #eff6ff)",
-                                  color: "var(--ct-color-primary, #3b82f6)",
+                                    "var(--cf-color-primary-surface, #eff6ff)",
+                                  color: "var(--cf-color-primary, #3b82f6)",
                                   borderRadius: "16px",
                                   fontSize: "13px",
                                 }}
@@ -1297,7 +1297,7 @@ const Profile = pattern<ProfileInput, Output>(
                         <p
                           style={{
                             fontSize: "13px",
-                            color: "var(--ct-color-text-secondary)",
+                            color: "var(--cf-color-text-secondary)",
                             fontStyle: "italic",
                           }}
                         >
@@ -1311,7 +1311,7 @@ const Profile = pattern<ProfileInput, Output>(
                             style={{
                               overflowX: "auto",
                               border:
-                                "1px solid var(--ct-color-border, #e5e5e7)",
+                                "1px solid var(--cf-color-border, #e5e5e7)",
                               borderRadius: "8px",
                             }}
                           >
@@ -1326,7 +1326,7 @@ const Profile = pattern<ProfileInput, Output>(
                                 <tr
                                   style={{
                                     background:
-                                      "var(--ct-color-bg-secondary, #f9fafb)",
+                                      "var(--cf-color-bg-secondary, #f9fafb)",
                                   }}
                                 >
                                   <th
@@ -1335,7 +1335,7 @@ const Profile = pattern<ProfileInput, Output>(
                                       textAlign: "left",
                                       fontWeight: "600",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                     }}
                                   >
                                     Fact
@@ -1346,7 +1346,7 @@ const Profile = pattern<ProfileInput, Output>(
                                       textAlign: "center",
                                       fontWeight: "600",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                       width: "80px",
                                     }}
                                   >
@@ -1358,7 +1358,7 @@ const Profile = pattern<ProfileInput, Output>(
                                       textAlign: "left",
                                       fontWeight: "600",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                       width: "140px",
                                     }}
                                   >
@@ -1370,7 +1370,7 @@ const Profile = pattern<ProfileInput, Output>(
                                       textAlign: "left",
                                       fontWeight: "600",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                       width: "100px",
                                     }}
                                   >
@@ -1385,7 +1385,7 @@ const Profile = pattern<ProfileInput, Output>(
                                       style={{
                                         padding: "10px 12px",
                                         borderBottom:
-                                          "1px solid var(--ct-color-border, #e5e5e7)",
+                                          "1px solid var(--cf-color-border, #e5e5e7)",
                                       }}
                                     >
                                       {fact.content}
@@ -1394,7 +1394,7 @@ const Profile = pattern<ProfileInput, Output>(
                                       style={{
                                         padding: "10px 12px",
                                         borderBottom:
-                                          "1px solid var(--ct-color-border, #e5e5e7)",
+                                          "1px solid var(--cf-color-border, #e5e5e7)",
                                         textAlign: "center",
                                       }}
                                     >
@@ -1432,8 +1432,8 @@ const Profile = pattern<ProfileInput, Output>(
                                       style={{
                                         padding: "10px 12px",
                                         borderBottom:
-                                          "1px solid var(--ct-color-border, #e5e5e7)",
-                                        color: "var(--ct-color-text-secondary)",
+                                          "1px solid var(--cf-color-border, #e5e5e7)",
+                                        color: "var(--cf-color-text-secondary)",
                                         fontSize: "12px",
                                       }}
                                     >
@@ -1443,8 +1443,8 @@ const Profile = pattern<ProfileInput, Output>(
                                       style={{
                                         padding: "10px 12px",
                                         borderBottom:
-                                          "1px solid var(--ct-color-border, #e5e5e7)",
-                                        color: "var(--ct-color-text-secondary)",
+                                          "1px solid var(--cf-color-border, #e5e5e7)",
+                                        color: "var(--cf-color-text-secondary)",
                                         fontSize: "12px",
                                       }}
                                     >
@@ -1474,7 +1474,7 @@ const Profile = pattern<ProfileInput, Output>(
                         <div
                           style={{
                             overflowX: "auto",
-                            border: "1px solid var(--ct-color-border, #e5e5e7)",
+                            border: "1px solid var(--cf-color-border, #e5e5e7)",
                             borderRadius: "8px",
                           }}
                         >
@@ -1489,7 +1489,7 @@ const Profile = pattern<ProfileInput, Output>(
                               <tr
                                 style={{
                                   background:
-                                    "var(--ct-color-bg-secondary, #f9fafb)",
+                                    "var(--cf-color-bg-secondary, #f9fafb)",
                                 }}
                               >
                                 <th
@@ -1498,7 +1498,7 @@ const Profile = pattern<ProfileInput, Output>(
                                     textAlign: "left",
                                     fontWeight: "600",
                                     borderBottom:
-                                      "1px solid var(--ct-color-border, #e5e5e7)",
+                                      "1px solid var(--cf-color-border, #e5e5e7)",
                                   }}
                                 >
                                   Key
@@ -1509,7 +1509,7 @@ const Profile = pattern<ProfileInput, Output>(
                                     textAlign: "left",
                                     fontWeight: "600",
                                     borderBottom:
-                                      "1px solid var(--ct-color-border, #e5e5e7)",
+                                      "1px solid var(--cf-color-border, #e5e5e7)",
                                   }}
                                 >
                                   Value
@@ -1520,7 +1520,7 @@ const Profile = pattern<ProfileInput, Output>(
                                     textAlign: "center",
                                     fontWeight: "600",
                                     borderBottom:
-                                      "1px solid var(--ct-color-border, #e5e5e7)",
+                                      "1px solid var(--cf-color-border, #e5e5e7)",
                                     width: "80px",
                                   }}
                                 >
@@ -1535,7 +1535,7 @@ const Profile = pattern<ProfileInput, Output>(
                                     style={{
                                       padding: "10px 12px",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                       fontWeight: "500",
                                     }}
                                   >
@@ -1545,7 +1545,7 @@ const Profile = pattern<ProfileInput, Output>(
                                     style={{
                                       padding: "10px 12px",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                     }}
                                   >
                                     {pref.value}
@@ -1554,7 +1554,7 @@ const Profile = pattern<ProfileInput, Output>(
                                     style={{
                                       padding: "10px 12px",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                       textAlign: "center",
                                     }}
                                   >
@@ -1617,7 +1617,7 @@ const Profile = pattern<ProfileInput, Output>(
                           style={{
                             gap: "4px",
                             padding: "12px",
-                            background: "var(--ct-color-bg-secondary, #f9fafb)",
+                            background: "var(--cf-color-bg-secondary, #f9fafb)",
                             borderRadius: "8px",
                             fontFamily: "monospace",
                             fontSize: "13px",
@@ -1633,7 +1633,7 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               <span
                                 style={{
-                                  color: "var(--ct-color-text-secondary)",
+                                  color: "var(--cf-color-text-secondary)",
                                 }}
                               >
                                 [{q.category}]
@@ -1659,7 +1659,7 @@ const Profile = pattern<ProfileInput, Output>(
                   style={{
                     fontSize: "14px",
                     fontWeight: "600",
-                    color: "var(--ct-color-text, #111827)",
+                    color: "var(--cf-color-text, #111827)",
                   }}
                 >
                   📝 General Notes
@@ -1669,7 +1669,7 @@ const Profile = pattern<ProfileInput, Output>(
                   placeholder="Any other notes or information..."
                   rows={4}
                   style={{
-                    border: "1px solid var(--ct-color-border, #e5e5e7)",
+                    border: "1px solid var(--cf-color-border, #e5e5e7)",
                     borderRadius: "8px",
                   }}
                 />

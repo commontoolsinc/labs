@@ -37,7 +37,7 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
           </div>
           <cf-vstack gap="2">
             <span>This is the modal body content.</span>
-            <span style="color: var(--ct-color-gray-500); font-size: 0.875rem;">
+            <span style="color: var(--cf-color-gray-500); font-size: 0.875rem;">
               You can put any content here — forms, text, images, etc.
             </span>
           </cf-vstack>

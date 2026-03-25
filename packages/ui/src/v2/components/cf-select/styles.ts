@@ -28,7 +28,7 @@ export const selectStyles = `
     border: 1px solid var(--cf-theme-color-border, #e5e7eb);
     border-radius: var(--cf-theme-border-radius, 0.375rem);
     transition: all var(--cf-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+      var(--cf-transition-timing-ease);
     font-family: var(--cf-theme-font-family, inherit);
     appearance: none;
     -moz-appearance: none; /* Firefox */

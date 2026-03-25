@@ -40,7 +40,7 @@ export const textareaStyles = `
     border: 1px solid var(--border);
     border-radius: var(--textarea-border-radius);
     transition: all var(--cf-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+      var(--cf-transition-timing-ease);
     display: block;
     overflow: auto;
     word-wrap: break-word;

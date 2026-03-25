@@ -38,7 +38,7 @@ export default pattern<ImageInput, ImageOutput>(({ url, caption }) => {
             <div
               style={{
                 fontSize: "14px",
-                color: "var(--ct-color-gray-500)",
+                color: "var(--cf-color-gray-500)",
                 textAlign: "center",
                 padding: "4px 0",
               }}

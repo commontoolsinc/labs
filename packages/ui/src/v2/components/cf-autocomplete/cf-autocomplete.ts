@@ -200,10 +200,10 @@ export class CFAutocomplete extends BaseElement {
         border: 1px solid var(--cf-theme-color-border, #e5e7eb);
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-md, 0.375rem)
+          var(--cf-border-radius-md, 0.375rem)
         );
         transition: all var(--cf-theme-animation-duration, 150ms)
-          var(--ct-transition-timing-ease);
+          var(--cf-transition-timing-ease);
         font-family: var(--cf-theme-font-family, inherit);
       }
 
@@ -235,7 +235,7 @@ export class CFAutocomplete extends BaseElement {
           border: 1px solid var(--cf-theme-color-border, #e5e7eb);
           border-radius: var(
             --cf-theme-border-radius,
-            var(--ct-border-radius-md, 0.375rem)
+            var(--cf-border-radius-md, 0.375rem)
           );
           box-shadow:
             0 4px 6px -1px rgba(0, 0, 0, 0.1),

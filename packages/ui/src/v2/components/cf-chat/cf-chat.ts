@@ -77,25 +77,25 @@ export class CFChat extends BaseElement {
       }
 
       .message-item {
-        margin-bottom: var(--ct-spacing-1, 0.25rem);
+        margin-bottom: var(--cf-spacing-1, 0.25rem);
       }
 
       .message-item.grouped {
-        margin-bottom: var(--ct-spacing-1, 0.25rem);
+        margin-bottom: var(--cf-spacing-1, 0.25rem);
       }
 
       .message-item.last-in-group {
-        margin-bottom: var(--ct-spacing-4, 1rem);
+        margin-bottom: var(--cf-spacing-4, 1rem);
       }
 
       .message-item.system {
-        margin-bottom: var(--ct-spacing-4, 1rem);
+        margin-bottom: var(--cf-spacing-4, 1rem);
       }
 
       .tool-attachments-only {
         display: flex;
         flex-direction: column;
-        gap: var(--ct-spacing-1, 0.25rem);
+        gap: var(--cf-spacing-1, 0.25rem);
         max-width: 70%;
         align-self: flex-start;
       }
@@ -105,28 +105,28 @@ export class CFChat extends BaseElement {
         align-items: flex-start;
         margin-bottom: var(
           --cf-theme-spacing-message-bottom,
-          var(--ct-spacing-1, 0.25rem)
+          var(--cf-spacing-1, 0.25rem)
         );
       }
 
       .pending-bubble {
         background-color: var(
           --cf-theme-surface,
-          var(--ct-color-gray-100, #f3f4f6)
+          var(--cf-color-gray-100, #f3f4f6)
         );
-        color: var(--cf-theme-text-muted, var(--ct-color-gray-900, #111827));
-        padding: var(--cf-theme-padding-bubble, var(--ct-spacing-3, 0.75rem))
-          var(--cf-theme-padding-bubble-horizontal, var(--ct-spacing-4, 1rem));
+        color: var(--cf-theme-text-muted, var(--cf-color-gray-900, #111827));
+        padding: var(--cf-theme-padding-bubble, var(--cf-spacing-3, 0.75rem))
+          var(--cf-theme-padding-bubble-horizontal, var(--cf-spacing-4, 1rem));
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-lg, 0.5rem)
+          var(--cf-border-radius-lg, 0.5rem)
         );
         border: 1px solid
-          var(--cf-theme-border-muted, var(--ct-color-gray-200, #e5e7eb));
+          var(--cf-theme-border-muted, var(--cf-color-gray-200, #e5e7eb));
         max-width: 70%;
         display: flex;
         align-items: center;
-        gap: var(--cf-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
+        gap: var(--cf-theme-spacing-tight, var(--cf-spacing-1, 0.25rem));
       }
 
       .typing-dots {
@@ -139,7 +139,7 @@ export class CFChat extends BaseElement {
         height: 8px;
         background-color: var(
           --cf-theme-text-muted,
-          var(--ct-color-gray-400, #9ca3af)
+          var(--cf-color-gray-400, #9ca3af)
         );
         border-radius: 50%;
         animation: typingBounce 1.4s infinite ease-in-out;

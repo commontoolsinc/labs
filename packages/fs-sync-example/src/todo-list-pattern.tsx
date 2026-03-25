@@ -157,7 +157,7 @@ export default pattern<Input, Output>(
                 <div
                   style={{
                     textAlign: "center",
-                    color: "var(--ct-color-gray-500)",
+                    color: "var(--cf-color-gray-500)",
                     padding: "2rem",
                   }}
                 >
@@ -183,7 +183,7 @@ export default pattern<Input, Output>(
                     <span
                       style={{
                         fontSize: "11px",
-                        color: "var(--ct-color-gray-400)",
+                        color: "var(--cf-color-gray-400)",
                       }}
                     >
                       {todo.id}

@@ -148,14 +148,14 @@ export class CFFileDownload extends BaseElement {
       .autosave-indicator.saved {
         background-color: var(
           --cf-theme-color-success,
-          var(--ct-colors-success, #22c55e)
+          var(--cf-colors-success, #22c55e)
         );
       }
 
       .autosave-indicator.pending {
         background-color: var(
           --cf-theme-color-warning,
-          var(--ct-colors-warning, #f59e0b)
+          var(--cf-colors-warning, #f59e0b)
         );
         animation: gentle-pulse 2s ease-in-out infinite;
       }
@@ -163,7 +163,7 @@ export class CFFileDownload extends BaseElement {
       .autosave-indicator.saving {
         background-color: var(
           --cf-theme-color-primary,
-          var(--ct-colors-info, #3b82f6)
+          var(--cf-colors-info, #3b82f6)
         );
       }
 
@@ -202,9 +202,9 @@ export class CFFileDownload extends BaseElement {
         padding: 4px 8px;
         background: var(
           --cf-theme-color-text,
-          var(--ct-colors-gray-900, rgba(0, 0, 0, 0.8))
+          var(--cf-colors-gray-900, rgba(0, 0, 0, 0.8))
         );
-        color: var(--cf-theme-color-background, var(--ct-colors-gray-50, white));
+        color: var(--cf-theme-color-background, var(--cf-colors-gray-50, white));
         font-size: 12px;
         border-radius: 4px;
         white-space: nowrap;

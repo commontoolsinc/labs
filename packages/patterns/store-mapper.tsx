@@ -1051,7 +1051,7 @@ export default pattern<Input, Output>(
                         style={{
                           textAlign: "center",
                           fontSize: "12px",
-                          color: "var(--ct-color-gray-500)",
+                          color: "var(--cf-color-gray-500)",
                         }}
                       >
                         <span style={{ color: "#3b82f6" }}>■</span>{" "}
@@ -1474,7 +1474,7 @@ export default pattern<Input, Output>(
                     <div
                       style={{
                         textAlign: "center",
-                        color: "var(--ct-color-gray-500)",
+                        color: "var(--cf-color-gray-500)",
                         padding: "2rem",
                       }}
                     >
@@ -1765,8 +1765,8 @@ export default pattern<Input, Output>(
                                   dept.location,
                                   (l: string) => l === "unassigned",
                                 ),
-                                "var(--ct-color-yellow-100)",
-                                "var(--ct-color-green-100)",
+                                "var(--cf-color-yellow-100)",
+                                "var(--cf-color-green-100)",
                               ),
                             }}
                           >
@@ -2123,7 +2123,7 @@ export default pattern<Input, Output>(
                       <p
                         style={{
                           fontSize: "14px",
-                          color: "var(--ct-color-gray-500)",
+                          color: "var(--cf-color-gray-500)",
                         }}
                       >
                         Record where items are actually located for future
@@ -2177,7 +2177,7 @@ export default pattern<Input, Output>(
                           <cf-hstack
                             gap="2"
                             align="center"
-                            style="padding: 0.5rem; background: var(--ct-color-gray-50); border-radius: 6px;"
+                            style="padding: 0.5rem; background: var(--cf-color-gray-50); border-radius: 6px;"
                           >
                             <span style={{ flex: 1 }}>
                               <strong>{loc.itemName}</strong> →{" "}
@@ -2205,7 +2205,7 @@ export default pattern<Input, Output>(
                     <div
                       style={{
                         textAlign: "center",
-                        color: "var(--ct-color-gray-500)",
+                        color: "var(--cf-color-gray-500)",
                         padding: "2rem",
                       }}
                     >
@@ -2228,7 +2228,7 @@ export default pattern<Input, Output>(
                       <p
                         style={{
                           fontSize: "14px",
-                          color: "var(--ct-color-gray-500)",
+                          color: "var(--cf-color-gray-500)",
                         }}
                       >
                         This outline is used by the Shopping List for AI-powered
@@ -2236,7 +2236,7 @@ export default pattern<Input, Output>(
                       </p>
                       <pre
                         style={{
-                          background: "var(--ct-color-gray-50)",
+                          background: "var(--cf-color-gray-50)",
                           padding: "1rem",
                           borderRadius: "6px",
                           fontSize: "13px",

@@ -138,7 +138,7 @@ export class CFInput extends BaseElement {
       --cf-input-color-success: var(--cf-theme-color-success, #16a34a);
       --cf-input-border-radius: var(
         --cf-theme-border-radius,
-        var(--ct-border-radius-md, 0.375rem)
+        var(--cf-border-radius-md, 0.375rem)
       );
       --cf-input-animation-duration: var(--cf-theme-animation-duration, 150ms);
       --cf-input-font-family: var(--cf-theme-font-family, inherit);
@@ -164,10 +164,10 @@ export class CFInput extends BaseElement {
       border: 1px solid var(--cf-input-color-border, #e5e7eb);
       border-radius: var(
         --cf-input-border-radius,
-        var(--ct-border-radius-md, 0.375rem)
+        var(--cf-border-radius-md, 0.375rem)
       );
       transition: all var(--cf-input-animation-duration, 150ms)
-        var(--ct-transition-timing-ease);
+        var(--cf-transition-timing-ease);
       font-family: var(--cf-input-font-family, inherit);
     }
 
@@ -233,7 +233,7 @@ export class CFInput extends BaseElement {
         border: none;
         border-radius: var(
           --cf-input-border-radius,
-          var(--ct-border-radius-sm, 0.25rem)
+          var(--cf-border-radius-sm, 0.25rem)
         );
         cursor: pointer;
       }

@@ -12,7 +12,7 @@ export const styles = css`
     --cf-code-editor-font-family-prose: var(
       --cf-theme-font-family,
       var(
-        --ct-font-family-sans,
+        --cf-font-family-sans,
         -apple-system,
         BlinkMacSystemFont,
         "Segoe UI",
@@ -26,64 +26,64 @@ export const styles = css`
       --cf-theme-animation-duration,
       150ms
     );
-    --cf-code-editor-transition-ease: var(--ct-transition-timing-ease, ease);
+    --cf-code-editor-transition-ease: var(--cf-transition-timing-ease, ease);
 
     --cf-code-editor-color-neutral-50: var(
-      --ct-color-neutral-50,
+      --cf-color-neutral-50,
       hsl(0, 0%, 97%)
     );
     --cf-code-editor-color-neutral-100: var(
-      --ct-color-neutral-100,
+      --cf-color-neutral-100,
       hsl(0, 0%, 95%)
     );
     --cf-code-editor-color-neutral-200: var(
-      --ct-color-neutral-200,
+      --cf-color-neutral-200,
       hsl(0, 0%, 88%)
     );
     --cf-code-editor-color-neutral-400: var(
-      --ct-color-neutral-400,
+      --cf-color-neutral-400,
       hsl(0, 0%, 60%)
     );
     --cf-code-editor-color-neutral-500: var(
-      --ct-color-neutral-500,
+      --cf-color-neutral-500,
       hsl(0, 0%, 45%)
     );
 
     --cf-code-editor-color-primary-50: var(
-      --ct-color-primary-50,
+      --cf-color-primary-50,
       hsla(212, 100%, 47%, 0.08)
     );
     --cf-code-editor-color-primary-100: var(
-      --ct-color-primary-100,
+      --cf-color-primary-100,
       hsla(212, 100%, 47%, 0.15)
     );
     --cf-code-editor-color-primary-200: var(
-      --ct-color-primary-200,
+      --cf-color-primary-200,
       hsla(212, 100%, 47%, 0.25)
     );
     --cf-code-editor-color-primary-300: var(
-      --ct-color-primary-300,
+      --cf-color-primary-300,
       hsla(212, 72%, 48%, 0.4)
     );
     --cf-code-editor-color-primary-600: var(
-      --ct-color-primary-600,
+      --cf-color-primary-600,
       hsl(212, 72%, 48%)
     );
     --cf-code-editor-color-primary-700: var(
-      --ct-color-primary-700,
+      --cf-color-primary-700,
       hsl(212, 80%, 40%)
     );
 
     --cf-code-editor-color-warning-100: var(
-      --ct-color-warning-100,
+      --cf-color-warning-100,
       hsla(45, 100%, 50%, 0.15)
     );
     --cf-code-editor-color-warning-400: var(
-      --ct-color-warning-400,
+      --cf-color-warning-400,
       hsl(45, 70%, 50%)
     );
     --cf-code-editor-color-warning-700: var(
-      --ct-color-warning-700,
+      --cf-color-warning-700,
       hsl(45, 80%, 35%)
     );
 

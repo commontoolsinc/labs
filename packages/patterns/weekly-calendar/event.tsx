@@ -278,7 +278,7 @@ const Event = pattern<Input, Output>(
             gap="2"
             padding="4"
             style={{
-              borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
+              borderBottom: "1px solid var(--cf-color-border, #e5e5e7)",
             }}
           >
             <cf-hstack gap="3" style={{ alignItems: "center" }}>
@@ -334,7 +334,7 @@ const Event = pattern<Input, Output>(
               <span
                 style={{
                   fontSize: "0.875rem",
-                  color: "var(--ct-color-text-secondary, #6e6e73)",
+                  color: "var(--cf-color-text-secondary, #6e6e73)",
                 }}
               >
                 {dateDisplay} | {timeDisplay} ({durationDisplay})
@@ -417,7 +417,7 @@ const Event = pattern<Input, Output>(
                 backlinks.get().length > 0 ? "flex" : "none"
               ),
               alignItems: "center",
-              borderTop: "1px solid var(--ct-color-border, #e5e5e7)",
+              borderTop: "1px solid var(--cf-color-border, #e5e5e7)",
               flexWrap: "wrap",
             }}
           >
@@ -425,7 +425,7 @@ const Event = pattern<Input, Output>(
               style={{
                 fontSize: "12px",
                 lineHeight: "28px",
-                color: "var(--ct-color-text-secondary, #666)",
+                color: "var(--cf-color-text-secondary, #666)",
               }}
             >
               Linked from:

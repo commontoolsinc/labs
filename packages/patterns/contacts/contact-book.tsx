@@ -149,18 +149,18 @@ export default pattern<ContactBookInput, ContactBookOutput>(
                           {contact.name || "(unnamed)"}
                         </span>
                         {contact.email && (
-                          <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                          <span style="font-size: 0.875rem; color: var(--cf-color-gray-600);">
                             {contact.email}
                           </span>
                         )}
                         {contact.company && (
-                          <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+                          <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
                             {contact.company}
                           </span>
                         )}
                         {/* Show relationships */}
                         {contactRelations.map((rel: Relationship) => (
-                          <span style="font-size: 0.75rem; color: var(--ct-color-primary-500);">
+                          <span style="font-size: 0.75rem; color: var(--cf-color-primary-500);">
                             ↔ {rel.fromName === contact.name
                               ? rel.toName
                               : rel.fromName}
@@ -182,7 +182,7 @@ export default pattern<ContactBookInput, ContactBookOutput>(
 
               {ifElse(
                 computed(() => contacts.get().length === 0),
-                <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+                <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
                   No contacts yet. Add one below!
                 </div>,
                 null,

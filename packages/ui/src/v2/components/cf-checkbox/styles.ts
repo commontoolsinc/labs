@@ -41,7 +41,7 @@ export const checkboxStyles = `
     border-radius: 0.25rem; /* rounded */
     background-color: var(--background, #fff);
     transition: all var(--cf-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+      var(--cf-transition-timing-ease);
     display: flex;
     align-items: center;
     justify-content: center;

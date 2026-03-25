@@ -238,7 +238,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
         <cf-vstack slot="header" gap="2">
           <cf-hstack justify="between" align="center">
             <cf-heading level={4}>People Directory</cf-heading>
-            <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+            <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
               {peopleCount}{" "}
               {computed(() => people.get().length === 1 ? "person" : "people")}
             </span>
@@ -264,7 +264,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                     <span style="font-weight: 600; font-size: 1rem;">
                       {person.name || "(unnamed)"}
                     </span>
-                    <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                    <span style="font-size: 0.875rem; color: var(--cf-color-gray-600);">
                       {person.email}
                     </span>
                     <span
@@ -274,13 +274,13 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                         borderRadius: "4px",
                         background: ifElse(
                           computed(() => person.role === "admin"),
-                          "var(--ct-color-blue-100)",
-                          "var(--ct-color-gray-100)",
+                          "var(--cf-color-blue-100)",
+                          "var(--cf-color-gray-100)",
                         ),
                         color: ifElse(
                           computed(() => person.role === "admin"),
-                          "var(--ct-color-blue-700)",
-                          "var(--ct-color-gray-700)",
+                          "var(--cf-color-blue-700)",
+                          "var(--cf-color-gray-700)",
                         ),
                         width: "fit-content",
                       }}
@@ -300,7 +300,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
 
             {ifElse(
               computed(() => people.get().length === 0),
-              <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+              <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
                 No people yet. Click "Add Person" to create one!
               </div>,
               null,

@@ -92,7 +92,7 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
             <cf-heading level={4}>
               {computed(() => topic || "Budget Planner")}
             </cf-heading>
-            <span style="color: var(--ct-color-text-secondary); font-size: 0.85rem;">
+            <span style="color: var(--cf-color-text-secondary); font-size: 0.85rem;">
               Budget: ${maxAmount}
             </span>
           </cf-vstack>
@@ -100,7 +100,7 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
           <cf-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
               response.pending,
-              <div style="color: var(--ct-color-text-secondary);">
+              <div style="color: var(--cf-color-text-secondary);">
                 <cf-loader show-elapsed /> Generating budget...
               </div>,
               <cf-vstack gap="3">
@@ -110,7 +110,7 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
                       {item.name}
                     </span>
                     <cf-hstack gap="1" align="center">
-                      <span style="color: var(--ct-color-text-secondary); font-size: 0.85rem;">
+                      <span style="color: var(--cf-color-text-secondary); font-size: 0.85rem;">
                         $
                       </span>
                       <cf-input
@@ -123,7 +123,7 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
 
                 <div
                   style={{
-                    borderTop: "2px solid var(--ct-color-border, #e5e7eb)",
+                    borderTop: "2px solid var(--cf-color-border, #e5e7eb)",
                     paddingTop: "0.75rem",
                     marginTop: "0.25rem",
                   }}
@@ -140,7 +140,7 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
                     <span
                       style={{
                         flex: "1",
-                        color: "var(--ct-color-text-secondary)",
+                        color: "var(--cf-color-text-secondary)",
                         fontSize: "0.85rem",
                       }}
                     >
@@ -151,8 +151,8 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
                         fontSize: "0.85rem",
                         color: computed(() =>
                           remaining < 0
-                            ? "var(--ct-color-danger, #ef4444)"
-                            : "var(--ct-color-text-secondary)"
+                            ? "var(--cf-color-danger, #ef4444)"
+                            : "var(--cf-color-text-secondary)"
                         ),
                       }}
                     >

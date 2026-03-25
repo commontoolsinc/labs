@@ -48,7 +48,7 @@ export class CFHeading extends BaseElement {
       }
 
       .heading {
-        margin: 0 0 var(--ct-spacing-2, 0.5rem) 0;
+        margin: 0 0 var(--cf-spacing-2, 0.5rem) 0;
       }
 
       :host([no-margin]) .heading {
@@ -57,39 +57,39 @@ export class CFHeading extends BaseElement {
 
       /* Level styles using workspace variables */
       .h1 {
-        font-size: var(--ct-font-size-4xl, 2.25rem);
-        line-height: var(--ct-line-height-tight, 1.25);
-        font-weight: var(--ct-font-weight-bold, 700);
+        font-size: var(--cf-font-size-4xl, 2.25rem);
+        line-height: var(--cf-line-height-tight, 1.25);
+        font-weight: var(--cf-font-weight-bold, 700);
       }
 
       .h2 {
-        font-size: var(--ct-font-size-3xl, 1.875rem);
-        line-height: var(--ct-line-height-snug, 1.375);
-        font-weight: var(--ct-font-weight-semibold, 600);
+        font-size: var(--cf-font-size-3xl, 1.875rem);
+        line-height: var(--cf-line-height-snug, 1.375);
+        font-weight: var(--cf-font-weight-semibold, 600);
       }
 
       .h3 {
-        font-size: var(--ct-font-size-2xl, 1.5rem);
-        line-height: var(--ct-line-height-normal, 1.5);
-        font-weight: var(--ct-font-weight-semibold, 600);
+        font-size: var(--cf-font-size-2xl, 1.5rem);
+        line-height: var(--cf-line-height-normal, 1.5);
+        font-weight: var(--cf-font-weight-semibold, 600);
       }
 
       .h4 {
-        font-size: var(--ct-font-size-xl, 1.25rem);
-        line-height: var(--ct-line-height-normal, 1.5);
-        font-weight: var(--ct-font-weight-medium, 500);
+        font-size: var(--cf-font-size-xl, 1.25rem);
+        line-height: var(--cf-line-height-normal, 1.5);
+        font-weight: var(--cf-font-weight-medium, 500);
       }
 
       .h5 {
-        font-size: var(--ct-font-size-lg, 1.125rem);
-        line-height: var(--ct-line-height-normal, 1.5);
-        font-weight: var(--ct-font-weight-normal, 400);
+        font-size: var(--cf-font-size-lg, 1.125rem);
+        line-height: var(--cf-line-height-normal, 1.5);
+        font-weight: var(--cf-font-weight-normal, 400);
       }
 
       .h6 {
-        font-size: var(--ct-font-size-base, 1rem);
-        line-height: var(--ct-line-height-normal, 1.5);
-        font-weight: var(--ct-font-weight-normal, 400);
+        font-size: var(--cf-font-size-base, 1rem);
+        line-height: var(--cf-line-height-normal, 1.5);
+        font-weight: var(--cf-font-weight-normal, 400);
         color: var(--cf-theme-color-text-muted, #6b7280);
       }
     `,

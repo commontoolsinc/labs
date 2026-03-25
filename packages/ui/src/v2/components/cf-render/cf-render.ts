@@ -247,7 +247,7 @@ export class CFRender extends BaseElement {
     const container = this._containerRef.value;
     if (container) {
       container.innerHTML =
-        `<div style="color: var(--ct-color-destructive)">Error rendering content: ${
+        `<div style="color: var(--cf-color-destructive)">Error rendering content: ${
           error instanceof Error ? error.message : "Unknown error"
         }</div>`;
     }

@@ -144,7 +144,7 @@ export default pattern<
           <span
             style={{
               fontSize: "14px",
-              color: "var(--ct-color-text-secondary, #666)",
+              color: "var(--cf-color-text-secondary, #666)",
             }}
           >
             Creating notebooks...
@@ -162,7 +162,7 @@ export default pattern<
               style={{
                 fontSize: "16px",
                 fontWeight: "600",
-                color: "var(--ct-color-success, #16a34a)",
+                color: "var(--cf-color-success, #16a34a)",
               }}
             >
               Done! Created 12 pieces (6 notes + 6 notebooks)
@@ -170,7 +170,7 @@ export default pattern<
             <span
               style={{
                 fontSize: "13px",
-                color: "var(--ct-color-text-secondary, #666)",
+                color: "var(--cf-color-text-secondary, #666)",
               }}
             >
               3 levels of nesting: parent &gt; child &gt; grandchild

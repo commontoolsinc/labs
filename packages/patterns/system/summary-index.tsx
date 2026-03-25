@@ -107,7 +107,7 @@ const SummaryIndex = pattern<Input, Output>(() => {
           <span
             style={{
               fontSize: "13px",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-color-text-secondary)",
             }}
           >
             {filteredCount} of {entryCount} pieces
@@ -123,7 +123,7 @@ const SummaryIndex = pattern<Input, Output>(() => {
                   <td
                     style={{
                       fontSize: "13px",
-                      color: "var(--ct-color-text-secondary)",
+                      color: "var(--cf-color-text-secondary)",
                     }}
                   >
                     {entry.summary}

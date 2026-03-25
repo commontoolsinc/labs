@@ -68,7 +68,7 @@ const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
                 </div>
                 <div
                   style={{
-                    color: "var(--ct-color-gray-500)",
+                    color: "var(--cf-color-gray-500)",
                     fontSize: "0.875rem",
                   }}
                 >
@@ -92,7 +92,7 @@ const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
                   style={{
                     fontSize: "0.8rem",
                     fontFamily: "monospace",
-                    background: "var(--ct-color-gray-100, #f3f4f6)",
+                    background: "var(--cf-color-gray-100, #f3f4f6)",
                     padding: "0.5rem",
                     borderRadius: "0.25rem",
                     whiteSpace: "pre-wrap",

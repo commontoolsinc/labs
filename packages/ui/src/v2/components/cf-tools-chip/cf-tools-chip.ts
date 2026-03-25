@@ -131,17 +131,17 @@ export class CFToolsChip extends BaseElement {
         padding: 0.25rem 0.625rem;
         background: var(
           --cf-theme-color-surface,
-          var(--ct-colors-gray-100, #f5f5f5)
+          var(--cf-colors-gray-100, #f5f5f5)
         );
         color: var(
           --cf-theme-color-text,
-          var(--ct-colors-gray-900, #212121)
+          var(--cf-colors-gray-900, #212121)
         );
         border: 1px solid
-          var(--cf-theme-color-border, var(--ct-colors-gray-300, #e0e0e0));
+          var(--cf-theme-color-border, var(--cf-colors-gray-300, #e0e0e0));
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-full, 9999px)
+          var(--cf-border-radius-full, 9999px)
         );
         font-size: 0.8125rem;
         line-height: 1;
@@ -156,7 +156,7 @@ export class CFToolsChip extends BaseElement {
         .chip:hover {
           background: var(
             --cf-theme-color-surface-hover,
-            var(--ct-colors-gray-200, #eeeeee)
+            var(--cf-colors-gray-200, #eeeeee)
           );
         }
 
@@ -167,7 +167,7 @@ export class CFToolsChip extends BaseElement {
           border-radius: 50%;
           background: var(
             --cf-theme-color-accent,
-            var(--ct-colors-primary-500, #2196f3)
+            var(--cf-colors-primary-500, #2196f3)
           );
         }
 
@@ -186,20 +186,20 @@ export class CFToolsChip extends BaseElement {
           overflow: auto;
           background: var(
             --cf-theme-color-surface,
-            var(--ct-colors-gray-50, #fafafa)
+            var(--cf-colors-gray-50, #fafafa)
           );
           color: var(
             --cf-theme-color-text,
-            var(--ct-colors-gray-900, #212121)
+            var(--cf-colors-gray-900, #212121)
           );
           border: 1px solid
-            var(--cf-theme-color-border, var(--ct-colors-gray-300, #e0e0e0));
+            var(--cf-theme-color-border, var(--cf-colors-gray-300, #e0e0e0));
           border-radius: var(
             --cf-theme-border-radius,
-            var(--ct-border-radius-lg, 0.5rem)
+            var(--cf-border-radius-lg, 0.5rem)
           );
           box-shadow: var(
-            --ct-shadow-md,
+            --cf-shadow-md,
             0 4px 6px -1px rgba(0, 0, 0, 0.1),
             0 2px 4px -1px rgba(0, 0, 0, 0.06)
           );
@@ -227,7 +227,7 @@ export class CFToolsChip extends BaseElement {
             gap: 0.5rem;
             padding: 0.25rem 0.25rem 0.5rem 0.25rem;
             border-bottom: 1px solid
-              var(--cf-theme-color-border, var(--ct-colors-gray-300, #e0e0e0));
+              var(--cf-theme-color-border, var(--cf-colors-gray-300, #e0e0e0));
             margin-bottom: 0.5rem;
           }
 
@@ -247,7 +247,7 @@ export class CFToolsChip extends BaseElement {
             padding: 0.375rem 0.5rem;
             border-radius: var(
               --cf-theme-border-radius,
-              var(--ct-border-radius-md, 0.375rem)
+              var(--cf-border-radius-md, 0.375rem)
             );
             background: transparent;
           }
@@ -267,7 +267,7 @@ export class CFToolsChip extends BaseElement {
             font-size: 0.72rem;
             color: var(--cf-theme-color-text-muted, #6b7280);
             border-left: 2px solid
-              var(--cf-theme-color-border-muted, var(--ct-colors-gray-300));
+              var(--cf-theme-color-border-muted, var(--cf-colors-gray-300));
             padding-left: 0.5rem;
             white-space: pre-wrap;
           }
@@ -588,7 +588,7 @@ export class CFToolsChip extends BaseElement {
             color: var(--cf-theme-color-text, #0f172a);
             border: 1px solid var(--cf-theme-color-border, #e5e7eb);
             border-radius: var(--cf-theme-border-radius, 0.5rem);
-            box-shadow: var(--ct-shadow-md, 0 4px 6px -1px rgba(0,0,0,.1),
+            box-shadow: var(--cf-shadow-md, 0 4px 6px -1px rgba(0,0,0,.1),
               0 2px 4px -1px rgba(0,0,0,.06));
             padding: 0.5rem;
             pointer-events: auto;

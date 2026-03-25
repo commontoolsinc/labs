@@ -116,7 +116,7 @@ export class CFAutoLayout extends BaseElement {
       overflow: hidden;
       background: var(
         --cf-theme-color-surface,
-        var(--ct-surface, #f1f5f9)
+        var(--cf-surface, #f1f5f9)
       );
       padding: var(--cf-theme-spacing-normal, 0.5rem);
       /* Visual separation and rounding on content-adjacent corners */
@@ -130,11 +130,11 @@ export class CFAutoLayout extends BaseElement {
         );
       border-top-right-radius: var(
         --cf-theme-border-radius,
-        var(--ct-border-radius-md, 0.375rem)
+        var(--cf-border-radius-md, 0.375rem)
       );
       border-bottom-right-radius: var(
         --cf-theme-border-radius,
-        var(--ct-border-radius-md, 0.375rem)
+        var(--cf-border-radius-md, 0.375rem)
       );
     }
     .sidebar-right {
@@ -145,11 +145,11 @@ export class CFAutoLayout extends BaseElement {
         );
       border-top-left-radius: var(
         --cf-theme-border-radius,
-        var(--ct-border-radius-md, 0.375rem)
+        var(--cf-border-radius-md, 0.375rem)
       );
       border-bottom-left-radius: var(
         --cf-theme-border-radius,
-        var(--ct-border-radius-md, 0.375rem)
+        var(--cf-border-radius-md, 0.375rem)
       );
     }
 
@@ -196,7 +196,7 @@ export class CFAutoLayout extends BaseElement {
           );
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-md, 0.375rem)
+          var(--cf-border-radius-md, 0.375rem)
         );
         padding: var(--cf-theme-spacing-loose, 1rem);
         box-sizing: border-box;
@@ -280,7 +280,7 @@ export class CFAutoLayout extends BaseElement {
         max-width: 90vw;
         background: var(
           --cf-theme-color-surface,
-          var(--ct-surface, #f1f5f9)
+          var(--cf-surface, #f1f5f9)
         );
         /*box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);*/
         transition: transform 0.25s ease;
@@ -328,19 +328,19 @@ export class CFAutoLayout extends BaseElement {
 
       /* Bottom/Top toolbar with centered tabs */
       .mobile-bar {
-        --ct-mobile-bar-height: 3rem;
+        --cf-mobile-bar-height: 3rem;
         position: absolute;
         left: 0;
         right: 0;
         bottom: 0;
-        height: var(--ct-mobile-bar-height);
+        height: var(--cf-mobile-bar-height);
         display: grid;
         grid-template-columns: auto 1fr auto;
         align-items: center;
         gap: 0.25rem;
         background: var(
           --cf-theme-color-surface,
-          var(--ct-surface, #f1f5f9)
+          var(--cf-surface, #f1f5f9)
         );
         border-top: 1px solid
           var(
@@ -384,11 +384,11 @@ export class CFAutoLayout extends BaseElement {
 
         /* Reserve space for the mobile bar so content is full height */
         .layout {
-          padding-bottom: var(--ct-mobile-bar-height, 3rem);
+          padding-bottom: var(--cf-mobile-bar-height, 3rem);
         }
         :host([tabsposition="top"]) .layout {
           padding-bottom: 0;
-          padding-top: var(--ct-mobile-bar-height, 3rem);
+          padding-top: var(--cf-mobile-bar-height, 3rem);
         }
         /* Show the bar on mobile */
         .mobile-bar {

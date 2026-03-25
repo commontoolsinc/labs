@@ -41,7 +41,7 @@ export const radioStyles = `
     border-radius: 50%; /* Full circle */
     background-color: var(--background, #fff);
     transition: all var(--cf-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+      var(--cf-transition-timing-ease);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -65,7 +65,7 @@ export const radioStyles = `
     opacity: 0;
     transform: scale(0);
     transition: all var(--cf-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+      var(--cf-transition-timing-ease);
   }
 
   .radio.checked .indicator {

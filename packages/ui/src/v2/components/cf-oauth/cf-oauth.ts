@@ -268,11 +268,11 @@ export class CFOAuth extends BaseElement {
         padding: var(--cf-theme-spacing-loose, 1.5rem);
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-lg, 0.5rem)
+          var(--cf-border-radius-lg, 0.5rem)
         );
         background-color: var(
           --cf-theme-color-surface,
-          var(--ct-color-white, #ffffff)
+          var(--cf-color-white, #ffffff)
         );
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         max-width: 600px;
@@ -299,7 +299,7 @@ export class CFOAuth extends BaseElement {
       .user-name {
         margin: 0;
         font-size: 1.5rem;
-        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--cf-color-gray-900, #111827));
         font-weight: 600;
       }
 
@@ -307,7 +307,7 @@ export class CFOAuth extends BaseElement {
         margin: 0.25rem 0 0;
         color: var(
           --cf-theme-color-text-muted,
-          var(--ct-color-gray-600, #6b7280)
+          var(--cf-color-gray-600, #6b7280)
         );
       }
 
@@ -325,7 +325,7 @@ export class CFOAuth extends BaseElement {
           var(--cf-theme-spacing-loose, 1.5rem);
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-md, 0.375rem)
+          var(--cf-border-radius-md, 0.375rem)
         );
         cursor: pointer;
         font-weight: 500;
@@ -341,7 +341,7 @@ export class CFOAuth extends BaseElement {
       .oauth-button:disabled {
         background-color: var(
           --cf-theme-color-border,
-          var(--ct-color-gray-300, #d1d5db)
+          var(--cf-color-gray-300, #d1d5db)
         ) !important;
         cursor: not-allowed;
       }
@@ -350,7 +350,7 @@ export class CFOAuth extends BaseElement {
         padding: var(--cf-theme-spacing-normal, 0.75rem);
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-md, 0.375rem)
+          var(--cf-border-radius-md, 0.375rem)
         );
         background-color: var(--cf-oauth-status-bg, #f0f4f8);
         color: var(--cf-oauth-status-color, #333);
@@ -360,14 +360,14 @@ export class CFOAuth extends BaseElement {
       .oauth-button.logout {
         background-color: var(
           --cf-theme-color-error,
-          var(--ct-color-red-600, #dc2626)
+          var(--cf-color-red-600, #dc2626)
         ) !important;
       }
 
       .oauth-button.logout:hover {
         background-color: var(
           --cf-theme-color-error,
-          var(--ct-color-red-700, #b91c1c)
+          var(--cf-color-red-700, #b91c1c)
         ) !important;
       }
     `,

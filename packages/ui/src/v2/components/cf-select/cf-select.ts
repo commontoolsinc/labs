@@ -73,7 +73,7 @@ export class CFSelect extends BaseElement {
         --cf-select-color-surface: var(--cf-theme-color-surface, #f1f5f9);
         --cf-select-border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-md, 0.375rem)
+          var(--cf-border-radius-md, 0.375rem)
         );
         --cf-select-animation-duration: var(--cf-theme-animation-duration, 150ms);
         --cf-select-font-family: var(--cf-theme-font-family, inherit);
@@ -94,10 +94,10 @@ export class CFSelect extends BaseElement {
         border: 1px solid var(--cf-select-color-border, #e5e7eb);
         border-radius: var(
           --cf-select-border-radius,
-          var(--ct-border-radius-md, 0.375rem)
+          var(--cf-border-radius-md, 0.375rem)
         );
         transition: all var(--cf-select-animation-duration, 150ms)
-          var(--ct-transition-timing-ease);
+          var(--cf-transition-timing-ease);
         font-family: var(--cf-select-font-family, inherit);
         appearance: none;
         -moz-appearance: none;

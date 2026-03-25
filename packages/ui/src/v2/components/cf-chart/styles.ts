@@ -32,31 +32,31 @@ export const chartStyles = css`
 
   .axis text {
     font-size: 10px;
-    font-family: var(--ct-font-family, system-ui, sans-serif);
-    fill: var(--ct-text-secondary, #888);
+    font-family: var(--cf-font-family, system-ui, sans-serif);
+    fill: var(--cf-text-secondary, #888);
   }
 
   .axis line,
   .axis path {
-    stroke: var(--ct-border-color, #ddd);
+    stroke: var(--cf-border-color, #ddd);
     stroke-width: 1;
     fill: none;
   }
 
   .axis .grid-line {
-    stroke: var(--ct-border-color, #ddd);
+    stroke: var(--cf-border-color, #ddd);
     stroke-opacity: 0.4;
     stroke-dasharray: 2 2;
   }
 
   .axis .axis-label {
     font-size: 11px;
-    fill: var(--ct-text-secondary, #888);
+    fill: var(--cf-text-secondary, #888);
     font-weight: 500;
   }
 
   .crosshair line {
-    stroke: var(--ct-text-secondary, #888);
+    stroke: var(--cf-text-secondary, #888);
     stroke-width: 1;
     stroke-dasharray: 4 2;
     pointer-events: none;
@@ -65,13 +65,13 @@ export const chartStyles = css`
   .tooltip {
     position: absolute;
     pointer-events: none;
-    background: var(--ct-surface, #1a1a1a);
-    color: var(--ct-text, #fff);
-    border: 1px solid var(--ct-border-color, #333);
+    background: var(--cf-surface, #1a1a1a);
+    color: var(--cf-text, #fff);
+    border: 1px solid var(--cf-border-color, #333);
     border-radius: 4px;
     padding: 4px 8px;
     font-size: 12px;
-    font-family: var(--ct-font-family, system-ui, sans-serif);
+    font-family: var(--cf-font-family, system-ui, sans-serif);
     white-space: nowrap;
     z-index: 10;
     transform: translate(-50%, -100%);

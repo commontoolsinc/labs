@@ -4,11 +4,11 @@ export const styles = css`
   :host {
     --cf-button-border-radius: var(
       --cf-theme-border-radius,
-      var(--ct-border-radius-md, 0.375rem)
+      var(--cf-border-radius-md, 0.375rem)
     );
     --cf-button-border-radius-full: var(
       --cf-theme-border-radius-full,
-      var(--ct-border-radius-full, 9999px)
+      var(--cf-border-radius-full, 9999px)
     );
     --cf-button-font-family: var(--cf-theme-font-family, inherit);
     --cf-button-animation-duration: var(--cf-theme-animation-duration, 0.2s);
@@ -20,7 +20,7 @@ export const styles = css`
     --cf-button-icon-padding: 0;
     --cf-button-color-primary: var(
       --cf-theme-color-primary,
-      var(--ct-colors-primary-500, #3b82f6)
+      var(--cf-colors-primary-500, #3b82f6)
     );
     --cf-button-color-primary-foreground: var(
       --cf-theme-color-primary-foreground,
@@ -28,15 +28,15 @@ export const styles = css`
     );
     --cf-button-color-secondary: var(
       --cf-theme-color-secondary,
-      var(--ct-colors-gray-100, #f3f4f6)
+      var(--cf-colors-gray-100, #f3f4f6)
     );
     --cf-button-color-secondary-foreground: var(
       --cf-theme-color-secondary-foreground,
-      var(--ct-colors-gray-900, #111827)
+      var(--cf-colors-gray-900, #111827)
     );
     --cf-button-color-error: var(
       --cf-theme-color-error,
-      var(--ct-colors-error, #dc2626)
+      var(--cf-colors-error, #dc2626)
     );
     --cf-button-color-error-foreground: var(
       --cf-theme-color-error-foreground,
@@ -44,23 +44,23 @@ export const styles = css`
     );
     --cf-button-color-border: var(
       --cf-theme-color-border,
-      var(--ct-colors-gray-300, #d1d5db)
+      var(--cf-colors-gray-300, #d1d5db)
     );
     --cf-button-color-surface: var(
       --cf-theme-color-surface,
-      var(--ct-colors-gray-50, #f9fafb)
+      var(--cf-colors-gray-50, #f9fafb)
     );
     --cf-button-color-surface-hover: var(
       --cf-theme-color-surface-hover,
-      var(--ct-colors-gray-200, #e5e7eb)
+      var(--cf-colors-gray-200, #e5e7eb)
     );
     --cf-button-color-text: var(
       --cf-theme-color-text,
-      var(--ct-colors-gray-900, #111827)
+      var(--cf-colors-gray-900, #111827)
     );
     --cf-button-color-text-muted: var(
       --cf-theme-color-text-muted,
-      var(--ct-colors-gray-500, #6b7280)
+      var(--cf-colors-gray-500, #6b7280)
     );
 
     display: inline-block;
@@ -81,7 +81,7 @@ export const styles = css`
     white-space: nowrap;
     border-radius: var(
       --cf-button-border-radius,
-      var(--ct-border-radius-md, 0.375rem)
+      var(--cf-border-radius-md, 0.375rem)
     );
     font-size: 0.875rem;
     font-weight: 500;
@@ -102,7 +102,7 @@ export const styles = css`
 
   .button:focus-visible {
     outline: 2px solid
-      var(--cf-button-color-primary, var(--ct-colors-primary-500, #3b82f6));
+      var(--cf-button-color-primary, var(--cf-colors-primary-500, #3b82f6));
     outline-offset: 2px;
   }
 
@@ -151,7 +151,7 @@ export const styles = css`
     .button.primary {
       background-color: var(
         --cf-button-color-primary,
-        var(--ct-colors-primary-500, #3b82f6)
+        var(--cf-colors-primary-500, #3b82f6)
       );
       color: var(
         --cf-button-color-primary-foreground,
@@ -159,7 +159,7 @@ export const styles = css`
       );
       border-color: var(
         --cf-button-color-primary,
-        var(--ct-colors-primary-500, #3b82f6)
+        var(--cf-colors-primary-500, #3b82f6)
       );
     }
 
@@ -175,7 +175,7 @@ export const styles = css`
     .button.destructive {
       background-color: var(
         --cf-button-color-error,
-        var(--ct-colors-error, #dc2626)
+        var(--cf-colors-error, #dc2626)
       );
       color: var(
         --cf-button-color-error-foreground,
@@ -183,7 +183,7 @@ export const styles = css`
       );
       border-color: var(
         --cf-button-color-error,
-        var(--ct-colors-error, #dc2626)
+        var(--cf-colors-error, #dc2626)
       );
     }
 
@@ -194,49 +194,49 @@ export const styles = css`
     .button.outline {
       border-color: var(
         --cf-button-color-border,
-        var(--ct-colors-gray-300, #d1d5db)
+        var(--cf-colors-gray-300, #d1d5db)
       );
       background-color: transparent;
-      color: var(--cf-button-color-text, var(--ct-colors-gray-900, #111827));
+      color: var(--cf-button-color-text, var(--cf-colors-gray-900, #111827));
     }
 
     .button.outline:hover:not(:disabled) {
       background-color: var(
         --cf-button-color-surface,
-        var(--ct-colors-gray-50, #f9fafb)
+        var(--cf-colors-gray-50, #f9fafb)
       );
     }
 
     .button.secondary {
       background-color: var(
         --cf-button-color-secondary,
-        var(--ct-colors-gray-100, #f3f4f6)
+        var(--cf-colors-gray-100, #f3f4f6)
       );
       color: var(
         --cf-button-color-secondary-foreground,
-        var(--ct-colors-gray-900, #111827)
+        var(--cf-colors-gray-900, #111827)
       );
       border-color: var(
         --cf-button-color-secondary,
-        var(--ct-colors-gray-100, #f3f4f6)
+        var(--cf-colors-gray-100, #f3f4f6)
       );
     }
 
     .button.secondary:hover:not(:disabled) {
       background-color: var(
         --cf-button-color-surface-hover,
-        var(--ct-colors-gray-200, #e5e7eb)
+        var(--cf-colors-gray-200, #e5e7eb)
       );
       border-color: var(
         --cf-button-color-surface-hover,
-        var(--ct-colors-gray-200, #e5e7eb)
+        var(--cf-colors-gray-200, #e5e7eb)
       );
     }
 
     .button.ghost {
       color: var(
         --cf-button-color-text-muted,
-        var(--ct-colors-gray-500, #6b7280)
+        var(--cf-colors-gray-500, #6b7280)
       );
       background-color: transparent;
       border: none;
@@ -244,10 +244,10 @@ export const styles = css`
     }
 
     .button.ghost:hover:not(:disabled) {
-      color: var(--cf-button-color-text, var(--ct-colors-gray-700, #374151));
+      color: var(--cf-button-color-text, var(--cf-colors-gray-700, #374151));
       background-color: var(
         --cf-button-color-surface-hover,
-        var(--ct-colors-gray-100, #f3f4f6)
+        var(--cf-colors-gray-100, #f3f4f6)
       );
     }
 
@@ -256,14 +256,14 @@ export const styles = css`
       height: 1.5rem;
       border-radius: var(
         --cf-button-border-radius,
-        var(--ct-border-radius-sm, 0.25rem)
+        var(--cf-border-radius-sm, 0.25rem)
       );
     }
 
     .button.link {
       color: var(
         --cf-button-color-primary,
-        var(--ct-colors-primary-500, #3b82f6)
+        var(--cf-colors-primary-500, #3b82f6)
       );
       text-underline-offset: 4px;
     }
@@ -275,14 +275,14 @@ export const styles = css`
     .button.pill {
       background: var(
         --cf-button-color-surface,
-        var(--ct-colors-gray-100, #f3f4f6)
+        var(--cf-colors-gray-100, #f3f4f6)
       );
-      color: var(--cf-button-color-text, var(--ct-colors-gray-900, #111827));
+      color: var(--cf-button-color-text, var(--cf-colors-gray-900, #111827));
       border: 1px solid
-        var(--cf-button-color-border, var(--ct-colors-gray-300, #d1d5db));
+        var(--cf-button-color-border, var(--cf-colors-gray-300, #d1d5db));
       border-radius: var(
         --cf-button-border-radius-full,
-        var(--ct-radius-full, 9999px)
+        var(--cf-radius-full, 9999px)
       );
       height: auto;
       padding: 0.25rem 0.625rem;
@@ -293,7 +293,7 @@ export const styles = css`
     .button.pill:hover:not(:disabled) {
       background: var(
         --cf-button-color-surface-hover,
-        var(--ct-colors-gray-200, #e5e7eb)
+        var(--cf-colors-gray-200, #e5e7eb)
       );
     }
   `;

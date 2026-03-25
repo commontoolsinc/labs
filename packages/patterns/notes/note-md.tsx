@@ -140,7 +140,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
               display: computed(() => (hasBacklinks ? "block" : "none")),
               marginTop: "2rem",
               paddingTop: "1rem",
-              borderTop: "1px solid var(--ct-color-border, #e5e5e7)",
+              borderTop: "1px solid var(--cf-color-border, #e5e5e7)",
             }}
           >
             <span
@@ -149,7 +149,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
                 fontWeight: "600",
                 textTransform: "uppercase",
                 letterSpacing: "0.05em",
-                color: "var(--ct-color-gray-500, #6b7280)",
+                color: "var(--cf-color-gray-500, #6b7280)",
                 marginBottom: "0.5rem",
                 display: "block",
               }}
@@ -180,7 +180,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
             gap="3"
             align="center"
             style={{
-              borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
+              borderBottom: "1px solid var(--cf-color-border, #e5e5e7)",
             }}
           >
             <cf-heading level={1} style={{ flex: "1" }}>

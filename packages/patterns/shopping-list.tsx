@@ -416,7 +416,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
             <span
               style={{
                 fontSize: "13px",
-                color: "var(--ct-color-gray-500)",
+                color: "var(--cf-color-gray-500)",
                 flex: 1,
               }}
             >
@@ -476,7 +476,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                   <div
                     style={{
                       textAlign: "center",
-                      color: "var(--ct-color-gray-500)",
+                      color: "var(--cf-color-gray-500)",
                       padding: "2rem",
                     }}
                   >
@@ -572,8 +572,8 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                             fontSize: "12px",
                             padding: "4px 8px",
                             borderRadius: "4px",
-                            background: "var(--ct-color-green-100)",
-                            color: "var(--ct-color-green-700)",
+                            background: "var(--cf-color-green-100)",
+                            color: "var(--cf-color-green-700)",
                           }}
                         >
                           {itemWithAisle.item.aisleOverride}
@@ -593,8 +593,8 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                               fontSize: "12px",
                               padding: "4px 8px",
                               borderRadius: "4px",
-                              background: "var(--ct-color-blue-100)",
-                              color: "var(--ct-color-blue-700)",
+                              background: "var(--cf-color-blue-100)",
+                              color: "var(--cf-color-blue-700)",
                             }}
                           >
                             {derive(

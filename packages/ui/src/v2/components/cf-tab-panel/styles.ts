@@ -13,11 +13,11 @@ export const tabPanelStyles = `
   }
 
   .tab-panel {
-    padding: var(--ct-spacing-6);
+    padding: var(--cf-spacing-6);
     background-color: white;
-    border-radius: var(--ct-border-radius-md);
+    border-radius: var(--cf-border-radius-md);
     width: 100%;
-    animation: fadeIn var(--ct-transition-duration-base) var(--ct-transition-timing-ease);
+    animation: fadeIn var(--cf-transition-duration-base) var(--cf-transition-timing-ease);
   }
 
   @keyframes fadeIn {
@@ -33,12 +33,12 @@ export const tabPanelStyles = `
 
   /* Focus styles for keyboard navigation */
   .tab-panel:focus {
-    outline: 2px solid var(--ct-colors-primary-500);
+    outline: 2px solid var(--cf-colors-primary-500);
     outline-offset: 2px;
   }
 
   /* Vertical orientation adjustments */
   :host-context(cf-tabs[orientation="vertical"]) .tab-panel {
-    margin-left: var(--ct-spacing-4);
+    margin-left: var(--cf-spacing-4);
   }
 `;

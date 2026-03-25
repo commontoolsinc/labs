@@ -468,15 +468,15 @@ function getTierColor(tier: Tier | undefined): string {
   switch (tier) {
     case 0:
     default:
-      return "var(--ct-color-gray-400)";
+      return "var(--cf-color-gray-400)";
     case 1:
-      return "var(--ct-color-info-500)";
+      return "var(--cf-color-info-500)";
     case 2:
-      return "var(--ct-color-success-500)";
+      return "var(--cf-color-success-500)";
     case 3:
-      return "var(--ct-color-warning-500)";
+      return "var(--cf-color-warning-500)";
     case 4:
-      return "var(--ct-color-error-500)";
+      return "var(--cf-color-error-500)";
   }
 }
 
@@ -2088,7 +2088,7 @@ Each suggestion should have:
                       <span style="font-size: 1.5rem; font-weight: 600;">
                         {stats.totalExamples}
                       </span>
-                      <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+                      <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                         Examples
                       </span>
                     </cf-vstack>
@@ -2096,7 +2096,7 @@ Each suggestion should have:
                       <span style="font-size: 1.5rem; font-weight: 600;">
                         {stats.positiveExamples}
                       </span>
-                      <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+                      <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                         YES
                       </span>
                     </cf-vstack>
@@ -2104,7 +2104,7 @@ Each suggestion should have:
                       <span style="font-size: 1.5rem; font-weight: 600;">
                         {stats.negativeExamples}
                       </span>
-                      <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+                      <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                         NO
                       </span>
                     </cf-vstack>
@@ -2112,14 +2112,14 @@ Each suggestion should have:
                       <span style="font-size: 1.5rem; font-weight: 600;">
                         {stats.totalRules}
                       </span>
-                      <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+                      <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                         Rules
                       </span>
                     </cf-vstack>
                   </cf-hstack>
                   {ifElse(
                     computed(() => stats.autoClassified > 0),
-                    <span style="font-size: 0.875rem; color: var(--ct-color-gray-500); text-align: center;">
+                    <span style="font-size: 0.875rem; color: var(--cf-color-gray-500); text-align: center;">
                       Correction rate:{" "}
                       {computed(() => (stats.correctionRate * 100).toFixed(1))}%
                     </span>,
@@ -2141,7 +2141,7 @@ Each suggestion should have:
                       const entries = newItemFieldEntries;
                       return !entries || entries.length === 0;
                     }),
-                    <span style="color: var(--ct-color-gray-400); font-size: 0.875rem;">
+                    <span style="color: var(--cf-color-gray-400); font-size: 0.875rem;">
                       No fields added yet
                     </span>,
                     <cf-vstack gap="1">
@@ -2213,10 +2213,10 @@ Each suggestion should have:
               {/* Currently classifying - show loader or result */}
               {ifElse(
                 computed(() => currentItem.get() !== null),
-                <cf-card style="border-left: 4px solid var(--ct-color-info-500);">
+                <cf-card style="border-left: 4px solid var(--cf-color-info-500);">
                   <cf-vstack gap="2">
                     {/* Show item being classified */}
-                    <pre style="font-size: 0.75rem; overflow: auto; max-height: 100px; margin: 0; background: var(--ct-color-gray-50); padding: 0.5rem; border-radius: 4px;">
+                    <pre style="font-size: 0.75rem; overflow: auto; max-height: 100px; margin: 0; background: var(--cf-color-gray-50); padding: 0.5rem; border-radius: 4px;">
                       {computed(() => {
                         const result = currentClassificationResult;
                         if (result) {
@@ -2241,8 +2241,8 @@ Each suggestion should have:
                                   currentClassificationResult?.classification
                                     .classification ?? false
                                 ),
-                                "var(--ct-color-success-600)",
-                                "var(--ct-color-error-600)",
+                                "var(--cf-color-success-600)",
+                                "var(--cf-color-error-600)",
                               ),
                             }}
                           >
@@ -2255,7 +2255,7 @@ Each suggestion should have:
                               "NO",
                             )}
                           </span>
-                          <span style="color: var(--ct-color-gray-500); font-size: 0.875rem;">
+                          <span style="color: var(--cf-color-gray-500); font-size: 0.875rem;">
                             ({computed(() =>
                               (
                                 (currentClassificationResult?.classification
@@ -2268,7 +2268,7 @@ Each suggestion should have:
                           </span>
                         </cf-hstack>
 
-                        <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                        <span style="font-size: 0.875rem; color: var(--cf-color-gray-600);">
                           {computed(() =>
                             currentClassificationResult?.classification
                               .reasoning ?? ""
@@ -2317,17 +2317,17 @@ Each suggestion should have:
               {/* Undone Auto-Classification - Manual Review */}
               {ifElse(
                 computed(() => undoneAutoItem.get() !== null),
-                <cf-card style="border-left: 4px solid var(--ct-color-warning-500);">
+                <cf-card style="border-left: 4px solid var(--cf-color-warning-500);">
                   <cf-vstack gap="2">
                     <cf-hstack gap="2" align="center">
                       <cf-heading level={5}>Manual Review</cf-heading>
-                      <span style="font-size: 0.75rem; color: var(--ct-color-warning-600);">
+                      <span style="font-size: 0.75rem; color: var(--cf-color-warning-600);">
                         (undone auto-classification)
                       </span>
                     </cf-hstack>
 
                     {/* Show item fields */}
-                    <pre style="font-size: 0.75rem; overflow: auto; max-height: 100px; margin: 0; background: var(--ct-color-gray-50); padding: 0.5rem; border-radius: 4px;">
+                    <pre style="font-size: 0.75rem; overflow: auto; max-height: 100px; margin: 0; background: var(--cf-color-gray-50); padding: 0.5rem; border-radius: 4px;">
                       {computed(() => {
                         const undone = undoneAutoItem.get();
                         return undone
@@ -2345,8 +2345,8 @@ Each suggestion should have:
                             computed(() =>
                               undoneAutoItem.get()?.label ?? false
                             ),
-                            "var(--ct-color-success-600)",
-                            "var(--ct-color-error-600)",
+                            "var(--cf-color-success-600)",
+                            "var(--cf-color-error-600)",
                           ),
                         }}
                       >
@@ -2356,7 +2356,7 @@ Each suggestion should have:
                           "NO",
                         )}
                       </span>
-                      <span style="color: var(--ct-color-gray-500); font-size: 0.875rem;">
+                      <span style="color: var(--cf-color-gray-500); font-size: 0.875rem;">
                         ({computed(() =>
                           (
                             (undoneAutoItem.get()?.confidence ?? 0) * 100
@@ -2366,7 +2366,7 @@ Each suggestion should have:
                       </span>
                     </cf-hstack>
 
-                    <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                    <span style="font-size: 0.875rem; color: var(--cf-color-gray-600);">
                       {computed(() => undoneAutoItem.get()?.reasoning ?? "")}
                     </span>
 
@@ -2403,7 +2403,7 @@ Each suggestion should have:
                   <cf-vstack gap="2">
                     <cf-heading level={5}>Awaiting Confirmation</cf-heading>
                     {pendingClassifications.map((pending) => (
-                      <cf-card style="background: var(--ct-color-gray-50);">
+                      <cf-card style="background: var(--cf-color-gray-50);">
                         <cf-vstack gap="2">
                           <pre style="font-size: 0.75rem; overflow: auto; max-height: 100px; margin: 0;">
                             {computed(() =>
@@ -2417,8 +2417,8 @@ Each suggestion should have:
                                 fontWeight: "600",
                                 color: ifElse(
                                   pending.result.classification,
-                                  "var(--ct-color-success-600)",
-                                  "var(--ct-color-error-600)",
+                                  "var(--cf-color-success-600)",
+                                  "var(--cf-color-error-600)",
                                 ),
                               }}
                             >
@@ -2428,7 +2428,7 @@ Each suggestion should have:
                                 "NO",
                               )}
                             </span>
-                            <span style="color: var(--ct-color-gray-500); font-size: 0.875rem;">
+                            <span style="color: var(--cf-color-gray-500); font-size: 0.875rem;">
                               ({computed(() =>
                                 (pending.result.confidence * 100).toFixed(0)
                               )}% confidence via{" "}
@@ -2436,7 +2436,7 @@ Each suggestion should have:
                             </span>
                           </cf-hstack>
 
-                          <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                          <span style="font-size: 0.875rem; color: var(--cf-color-gray-600);">
                             {pending.result.reasoning ?? ""}
                           </span>
 
@@ -2493,7 +2493,7 @@ Each suggestion should have:
                       <cf-hstack
                         gap="2"
                         align="center"
-                        style="padding: 0.5rem; background: var(--ct-color-gray-50); border-radius: 4px;"
+                        style="padding: 0.5rem; background: var(--cf-color-gray-50); border-radius: 4px;"
                       >
                         {/* Tier badge */}
                         <span
@@ -2513,14 +2513,14 @@ Each suggestion should have:
                         </span>
                         <cf-vstack gap="0" style="flex: 1;">
                           <span style="font-weight: 500;">{rule.name}</span>
-                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+                          <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                             {rule.targetField}: /{rule.pattern}/{ifElse(
                               rule.caseInsensitive,
                               "i",
                               "",
                             )} → {ifElse(rule.predicts, "YES", "NO")}
                           </span>
-                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                          <span style="font-size: 0.75rem; color: var(--cf-color-gray-400);">
                             P:{" "}
                             {computed(() => (rule.precision * 100).toFixed(0))}%
                             | F1: {computed(() =>
@@ -2546,7 +2546,7 @@ Each suggestion should have:
               {/* Suggested Rules */}
               {ifElse(
                 computed(() => visibleSuggestions.length > 0),
-                <cf-card style="border-left: 4px solid var(--ct-color-success-500);">
+                <cf-card style="border-left: 4px solid var(--cf-color-success-500);">
                   <cf-vstack gap="2">
                     <cf-hstack gap="2" align="center" justify="between">
                       <cf-heading level={5}>Suggested Rules</cf-heading>
@@ -2555,19 +2555,19 @@ Each suggestion should have:
                       </cf-button>
                     </cf-hstack>
                     {visibleSuggestions.map(({ suggestion, originalIndex }) => (
-                      <cf-card style="background: var(--ct-color-success-50);">
+                      <cf-card style="background: var(--cf-color-success-50);">
                         <cf-vstack gap="2">
                           <cf-vstack gap="0">
                             <span style="font-weight: 500;">
                               {suggestion.name}
                             </span>
-                            <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+                            <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                               {suggestion.targetField}: /{suggestion.pattern}/ →
                               {" "}
                               {suggestion.predicts ? "YES" : "NO"}
                             </span>
                           </cf-vstack>
-                          <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                          <span style="font-size: 0.875rem; color: var(--cf-color-gray-600);">
                             {suggestion.reasoning}
                           </span>
                           <cf-hstack gap="2">
@@ -2603,11 +2603,11 @@ Each suggestion should have:
               {/* Auto-Classified Items (with Undo) */}
               {ifElse(
                 computed(() => recentAutoClassified.get().length > 0),
-                <cf-card style="margin-bottom: 1rem; border-left: 4px solid var(--ct-color-warning-500);">
+                <cf-card style="margin-bottom: 1rem; border-left: 4px solid var(--cf-color-warning-500);">
                   <cf-vstack gap="2">
                     <cf-hstack align="center" gap="2">
                       <h5 style="margin: 0;">Auto-Classified</h5>
-                      <span style="font-size: 0.75rem; color: var(--ct-color-warning-600);">
+                      <span style="font-size: 0.75rem; color: var(--cf-color-warning-600);">
                         (click Undo to review manually)
                       </span>
                     </cf-hstack>
@@ -2617,7 +2617,7 @@ Each suggestion should have:
                         align="center"
                         style={{
                           padding: "0.5rem",
-                          background: "var(--ct-color-warning-50)",
+                          background: "var(--cf-color-warning-50)",
                           borderRadius: "4px",
                         }}
                       >
@@ -2640,8 +2640,8 @@ Each suggestion should have:
                             fontWeight: "600",
                             color: ifElse(
                               autoItem.label,
-                              "var(--ct-color-success-600)",
-                              "var(--ct-color-error-600)",
+                              "var(--cf-color-success-600)",
+                              "var(--cf-color-error-600)",
                             ),
                           }}
                         >
@@ -2681,7 +2681,7 @@ Each suggestion should have:
               {ifElse(
                 computed(() => examples.get().length > 0),
                 <details>
-                  <summary style="cursor: pointer; padding: 0.5rem; color: var(--ct-color-gray-600);">
+                  <summary style="cursor: pointer; padding: 0.5rem; color: var(--cf-color-gray-600);">
                     Recent Examples ({computed(() => examples.get().length)})
                   </summary>
                   <cf-vstack gap="1" style="margin-top: 0.5rem;">
@@ -2702,11 +2702,11 @@ Each suggestion should have:
                               computed(() =>
                                 selectedExampleId.get() === example.input.id
                               ),
-                              "var(--ct-color-info-100)",
+                              "var(--cf-color-info-100)",
                               ifElse(
                                 example.wasCorrection,
-                                "var(--ct-color-warning-50)",
-                                "var(--ct-color-gray-50)",
+                                "var(--cf-color-warning-50)",
+                                "var(--cf-color-gray-50)",
                               ),
                             ),
                             borderRadius: ifElse(
@@ -2718,7 +2718,7 @@ Each suggestion should have:
                             ),
                             borderLeft: ifElse(
                               example.isInteresting,
-                              "3px solid var(--ct-color-warning-400)",
+                              "3px solid var(--cf-color-warning-400)",
                               "none",
                             ),
                           }}
@@ -2728,21 +2728,21 @@ Each suggestion should have:
                               fontWeight: "600",
                               color: ifElse(
                                 example.label,
-                                "var(--ct-color-success-600)",
-                                "var(--ct-color-error-600)",
+                                "var(--cf-color-success-600)",
+                                "var(--cf-color-error-600)",
                               ),
                             }}
                           >
                             {ifElse(example.label, "YES", "NO")}
                           </span>
-                          <span style="flex: 1; font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                          <span style="flex: 1; font-size: 0.875rem; color: var(--cf-color-gray-600);">
                             {getExamplePreview(example)}
                           </span>
-                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                          <span style="font-size: 0.75rem; color: var(--cf-color-gray-400);">
                             {getExampleDecidedBy(example)}
                             {ifElse(example.wasCorrection, " (corrected)", "")}
                           </span>
-                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                          <span style="font-size: 0.75rem; color: var(--cf-color-gray-400);">
                             {ifElse(
                               computed(() =>
                                 selectedExampleId.get() === example.input.id
@@ -2762,17 +2762,17 @@ Each suggestion should have:
                             style={{
                               marginTop: "0",
                               borderRadius: "0 0 4px 4px",
-                              borderTop: "1px solid var(--ct-color-gray-200)",
-                              background: "var(--ct-color-gray-25)",
+                              borderTop: "1px solid var(--cf-color-gray-200)",
+                              background: "var(--cf-color-gray-25)",
                             }}
                           >
                             <cf-vstack gap="2">
                               {/* All input fields */}
                               <cf-vstack gap="1">
-                                <span style="font-weight: 600; font-size: 0.75rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
+                                <span style="font-weight: 600; font-size: 0.75rem; color: var(--cf-color-gray-500); text-transform: uppercase;">
                                   Input Fields
                                 </span>
-                                <pre style="font-size: 0.75rem; overflow: auto; max-height: 150px; margin: 0; background: white; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--ct-color-gray-200);">
+                                <pre style="font-size: 0.75rem; overflow: auto; max-height: 150px; margin: 0; background: white; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--cf-color-gray-200);">
                                   {computed(() =>
                                     JSON.stringify(
                                       example.input.fields,
@@ -2786,7 +2786,7 @@ Each suggestion should have:
                               {/* Classification details */}
                               <cf-hstack gap="4" wrap>
                                 <cf-vstack gap="0">
-                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
+                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--cf-color-gray-500); text-transform: uppercase;">
                                     Label
                                   </span>
                                   <span
@@ -2794,8 +2794,8 @@ Each suggestion should have:
                                       fontWeight: "600",
                                       color: ifElse(
                                         example.label,
-                                        "var(--ct-color-success-600)",
-                                        "var(--ct-color-error-600)",
+                                        "var(--cf-color-success-600)",
+                                        "var(--cf-color-error-600)",
                                       ),
                                     }}
                                   >
@@ -2803,7 +2803,7 @@ Each suggestion should have:
                                   </span>
                                 </cf-vstack>
                                 <cf-vstack gap="0">
-                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
+                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--cf-color-gray-500); text-transform: uppercase;">
                                     Confidence
                                   </span>
                                   <span style="font-size: 0.875rem;">
@@ -2813,7 +2813,7 @@ Each suggestion should have:
                                   </span>
                                 </cf-vstack>
                                 <cf-vstack gap="0">
-                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
+                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--cf-color-gray-500); text-transform: uppercase;">
                                     Decided By
                                   </span>
                                   <span style="font-size: 0.875rem;">
@@ -2821,7 +2821,7 @@ Each suggestion should have:
                                   </span>
                                 </cf-vstack>
                                 <cf-vstack gap="0">
-                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
+                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--cf-color-gray-500); text-transform: uppercase;">
                                     Timestamp
                                   </span>
                                   <span style="font-size: 0.875rem;">
@@ -2838,10 +2838,10 @@ Each suggestion should have:
                               {ifElse(
                                 computed(() => !!example.reasoning),
                                 <cf-vstack gap="1">
-                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
+                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--cf-color-gray-500); text-transform: uppercase;">
                                     Reasoning
                                   </span>
-                                  <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                                  <span style="font-size: 0.875rem; color: var(--cf-color-gray-600);">
                                     {example.reasoning}
                                   </span>
                                 </cf-vstack>,
@@ -2854,7 +2854,7 @@ Each suggestion should have:
                                 <cf-hstack
                                   gap="1"
                                   align="center"
-                                  style="font-size: 0.75rem; color: var(--ct-color-warning-600); padding: 0.25rem 0.5rem; background: var(--ct-color-warning-50); border-radius: 4px;"
+                                  style="font-size: 0.75rem; color: var(--cf-color-warning-600); padding: 0.25rem 0.5rem; background: var(--cf-color-warning-50); border-radius: 4px;"
                                 >
                                   <span style="font-weight: 500;">
                                     Correction:

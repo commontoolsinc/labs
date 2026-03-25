@@ -23,7 +23,7 @@ export class CFTabList extends BaseElement {
       :host {
         --cf-tab-list-border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius-md)
+          var(--cf-border-radius-md)
         );
         --cf-tab-list-color-surface: var(--cf-theme-color-surface, #f1f5f9);
 
@@ -35,9 +35,9 @@ export class CFTabList extends BaseElement {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border-radius: var(--cf-tab-list-border-radius, var(--ct-border-radius-md));
+        border-radius: var(--cf-tab-list-border-radius, var(--cf-border-radius-md));
         background-color: var(--cf-tab-list-color-surface, #f1f5f9);
-        padding: var(--ct-spacing-1);
+        padding: var(--cf-spacing-1);
         height: 2.5rem;
         gap: 0.125rem;
       }

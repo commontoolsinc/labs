@@ -167,11 +167,11 @@ Then use theme CSS variables with fallbacks:
 .button {
   background-color: var(
     --cf-theme-color-primary,
-    var(--ct-colors-primary-500, #3b82f6)
+    var(--cf-colors-primary-500, #3b82f6)
   );
   border-radius: var(
     --cf-theme-border-radius,
-    var(--ct-border-radius-md, 0.375rem)
+    var(--cf-border-radius-md, 0.375rem)
   );
   font-family: var(--cf-theme-font-family, inherit);
 }

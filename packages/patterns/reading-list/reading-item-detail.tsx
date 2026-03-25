@@ -88,21 +88,21 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
               <cf-card>
                 <cf-vstack gap="2">
                   <cf-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                       Title
                     </label>
                     <cf-input $value={title} placeholder="Title" />
                   </cf-vstack>
 
                   <cf-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                       Author
                     </label>
                     <cf-input $value={author} placeholder="Author name" />
                   </cf-vstack>
 
                   <cf-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                       URL
                     </label>
                     <cf-input
@@ -114,7 +114,7 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
 
                   <cf-hstack gap="2">
                     <cf-vstack gap="1" style="flex: 1;">
-                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                         Type
                       </label>
                       <cf-select
@@ -129,7 +129,7 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                     </cf-vstack>
 
                     <cf-vstack gap="1" style="flex: 1;">
-                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                         Status
                       </label>
                       <cf-select
@@ -145,7 +145,7 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                   </cf-hstack>
 
                   <cf-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                       Rating
                     </label>
                     <cf-select
@@ -165,7 +165,7 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
 
               <cf-card>
                 <cf-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                     Notes
                   </label>
                   <cf-textarea

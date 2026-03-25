@@ -89,7 +89,7 @@ const Question = pattern<QuestionInput, QuestionOutput>(
           <cf-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
               response.pending,
-              <div style="color: var(--ct-color-text-secondary);">
+              <div style="color: var(--cf-color-text-secondary);">
                 <cf-loader show-elapsed /> Generating question...
               </div>,
               <cf-question

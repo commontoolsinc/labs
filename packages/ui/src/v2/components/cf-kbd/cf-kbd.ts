@@ -28,11 +28,11 @@ export class CFKbd extends BaseElement {
         border-radius: 0.25rem;
         background: var(
           --cf-theme-color-surface,
-          var(--ct-color-gray-100, #f3f4f6)
+          var(--cf-color-gray-100, #f3f4f6)
         );
         border: 1px solid
-          var(--cf-theme-color-border, var(--ct-color-gray-300, #d1d5db));
-        color: var(--cf-theme-color-text, var(--ct-color-gray-800, #1f2937));
+          var(--cf-theme-color-border, var(--cf-color-gray-300, #d1d5db));
+        color: var(--cf-theme-color-text, var(--cf-color-gray-800, #1f2937));
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-size: 0.75rem;
         line-height: 1;

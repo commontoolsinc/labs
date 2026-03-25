@@ -42,7 +42,7 @@ export class CFToolbar extends BaseElement {
         --cf-toolbar-color-text: var(--cf-theme-color-text, #0f172a);
         --cf-toolbar-color-border: var(
           --cf-theme-color-border,
-          var(--ct-colors-gray-200, #e5e7eb)
+          var(--cf-colors-gray-200, #e5e7eb)
         );
 
         display: block;
@@ -59,7 +59,7 @@ export class CFToolbar extends BaseElement {
         background: var(--cf-toolbar-color-surface, #ffffff);
         color: var(--cf-toolbar-color-text, #0f172a);
         border-bottom: 1px solid
-          var(--cf-toolbar-color-border, var(--ct-colors-gray-200, #e5e7eb));
+          var(--cf-toolbar-color-border, var(--cf-colors-gray-200, #e5e7eb));
         }
 
         :host([dense]) .toolbar {
@@ -69,7 +69,7 @@ export class CFToolbar extends BaseElement {
 
           :host([elevated]) .toolbar {
             box-shadow: 0 1px 0 0
-              var(--cf-toolbar-color-border, var(--ct-colors-gray-200, #e5e7eb));
+              var(--cf-toolbar-color-border, var(--cf-colors-gray-200, #e5e7eb));
             }
 
             :host([sticky]) {

@@ -1245,7 +1245,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                 backlinks.get().length > 0 ? "flex" : "none"
               ),
               alignItems: "center",
-              borderTop: "1px solid var(--ct-color-border, #e5e5e7)",
+              borderTop: "1px solid var(--cf-color-border, #e5e5e7)",
               flexWrap: "wrap",
             }}
           >
@@ -1253,7 +1253,7 @@ const WeeklyCalendar = pattern<Input, Output>(
               style={{
                 fontSize: "12px",
                 lineHeight: "28px",
-                color: "var(--ct-color-text-secondary, #666)",
+                color: "var(--cf-color-text-secondary, #666)",
               }}
             >
               Linked from:

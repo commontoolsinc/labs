@@ -41,12 +41,12 @@ export class CFToolCall extends BaseElement {
       }
 
       .tool-call-container {
-        border: 1px solid var(--cf-theme-border, var(--ct-color-gray-200, #e5e7eb));
+        border: 1px solid var(--cf-theme-border, var(--cf-color-gray-200, #e5e7eb));
         border-radius: var(
           --cf-theme-border-radius,
-          var(--ct-border-radius, 0.25rem)
+          var(--cf-border-radius, 0.25rem)
         );
-        background-color: var(--cf-theme-surface, var(--ct-color-gray-50, #f9fafb));
+        background-color: var(--cf-theme-surface, var(--cf-color-gray-50, #f9fafb));
         overflow: hidden;
         transition: all var(--cf-theme-animation-duration, 0.2s) ease;
       }
@@ -54,16 +54,16 @@ export class CFToolCall extends BaseElement {
       .tool-call-header {
         display: flex;
         align-items: center;
-        gap: var(--cf-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
-        padding: var(--cf-theme-spacing-normal, var(--ct-spacing-2, 0.5rem))
-          var(--cf-theme-spacing-loose, var(--ct-spacing-3, 0.75rem));
+        gap: var(--cf-theme-spacing-normal, var(--cf-spacing-2, 0.5rem));
+        padding: var(--cf-theme-spacing-normal, var(--cf-spacing-2, 0.5rem))
+          var(--cf-theme-spacing-loose, var(--cf-spacing-3, 0.75rem));
         cursor: pointer;
         user-select: none;
         font-size: 0.875rem;
         font-family: var(
           --cf-theme-mono-font-family,
           var(
-            --ct-font-mono,
+            --cf-font-mono,
             ui-monospace,
             "Cascadia Code",
             "Source Code Pro",
@@ -73,7 +73,7 @@ export class CFToolCall extends BaseElement {
             monospace
           )
         );
-        color: var(--cf-theme-text, var(--ct-color-gray-700, #374151));
+        color: var(--cf-theme-text, var(--cf-color-gray-700, #374151));
         background: transparent;
         border: none;
         width: 100%;
@@ -83,7 +83,7 @@ export class CFToolCall extends BaseElement {
       .tool-call-header:hover {
         background-color: var(
           --cf-theme-surface-hover,
-          var(--ct-color-gray-100, #f3f4f6)
+          var(--cf-color-gray-100, #f3f4f6)
         );
       }
 
@@ -101,12 +101,12 @@ export class CFToolCall extends BaseElement {
       .tool-call-status {
         display: flex;
         align-items: center;
-        gap: var(--cf-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
+        gap: var(--cf-theme-spacing-tight, var(--cf-spacing-1, 0.25rem));
         font-size: 0.75rem;
         font-family: var(
           --cf-theme-mono-font-family,
           var(
-            --ct-font-mono,
+            --cf-font-mono,
             ui-monospace,
             "Cascadia Code",
             "Source Code Pro",
@@ -122,7 +122,7 @@ export class CFToolCall extends BaseElement {
         width: 16px;
         height: 16px;
         transition: transform var(--cf-theme-animation-duration, 0.2s) ease;
-        color: var(--cf-theme-text-muted, var(--ct-color-gray-400, #9ca3af));
+        color: var(--cf-theme-text-muted, var(--cf-color-gray-400, #9ca3af));
       }
 
       .chevron.expanded {
@@ -131,20 +131,20 @@ export class CFToolCall extends BaseElement {
 
       .tool-call-content {
         border-top: 1px solid
-          var(--cf-theme-border, var(--ct-color-gray-200, #e5e7eb));
+          var(--cf-theme-border, var(--cf-color-gray-200, #e5e7eb));
         background-color: var(
           --cf-theme-background,
-          var(--ct-color-white, #ffffff)
+          var(--cf-color-white, #ffffff)
         );
       }
 
       .tool-section {
-        padding: var(--cf-theme-spacing-loose, var(--ct-spacing-3, 0.75rem));
+        padding: var(--cf-theme-spacing-loose, var(--cf-spacing-3, 0.75rem));
       }
 
       .tool-section:not(:last-child) {
         border-bottom: 1px solid
-          var(--cf-theme-border-muted, var(--ct-color-gray-100, #f3f4f6));
+          var(--cf-theme-border-muted, var(--cf-color-gray-100, #f3f4f6));
         }
 
         .tool-section-title {
@@ -152,15 +152,15 @@ export class CFToolCall extends BaseElement {
           font-size: 0.75rem;
           text-transform: uppercase;
           letter-spacing: 0.025em;
-          color: var(--cf-theme-text-muted, var(--ct-color-gray-600, #4b5563));
-          margin-bottom: var(--cf-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
+          color: var(--cf-theme-text-muted, var(--cf-color-gray-600, #4b5563));
+          margin-bottom: var(--cf-theme-spacing-normal, var(--cf-spacing-2, 0.5rem));
         }
 
         .tool-section-content {
           font-family: var(
             --cf-theme-mono-font-family,
             var(
-              --ct-font-mono,
+              --cf-font-mono,
               ui-monospace,
               "Cascadia Code",
               "Source Code Pro",
@@ -171,13 +171,13 @@ export class CFToolCall extends BaseElement {
             )
           );
           font-size: 0.75rem;
-          background-color: var(--cf-theme-surface, var(--ct-color-gray-50, #f9fafb));
-          border: 1px solid var(--cf-theme-border, var(--ct-color-gray-200, #e5e7eb));
+          background-color: var(--cf-theme-surface, var(--cf-color-gray-50, #f9fafb));
+          border: 1px solid var(--cf-theme-border, var(--cf-color-gray-200, #e5e7eb));
           border-radius: var(
             --cf-theme-border-radius,
-            var(--ct-border-radius-sm, 0.125rem)
+            var(--cf-border-radius-sm, 0.125rem)
           );
-          padding: var(--cf-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
+          padding: var(--cf-theme-spacing-normal, var(--cf-spacing-2, 0.5rem));
           white-space: pre-wrap;
           word-break: break-word;
           overflow-x: auto;
@@ -187,26 +187,26 @@ export class CFToolCall extends BaseElement {
 
         /* Status styling */
         .status-pending {
-          color: var(--cf-theme-primary, var(--ct-color-blue-600, #2563eb));
+          color: var(--cf-theme-primary, var(--cf-color-blue-600, #2563eb));
         }
 
         .status-success {
-          color: var(--cf-theme-success, var(--ct-color-green-600, #16a34a));
+          color: var(--cf-theme-success, var(--cf-color-green-600, #16a34a));
         }
 
         .status-error {
-          color: var(--cf-theme-error, var(--ct-color-red-600, #dc2626));
+          color: var(--cf-theme-error, var(--cf-color-red-600, #dc2626));
         }
 
         .error-content {
-          color: var(--cf-theme-error, var(--ct-color-red-700, #b91c1c));
+          color: var(--cf-theme-error, var(--cf-color-red-700, #b91c1c));
           background-color: var(
             --cf-theme-error-background,
-            var(--ct-color-red-50, #fef2f2)
+            var(--cf-color-red-50, #fef2f2)
           );
           border-color: var(
             --cf-theme-error-border,
-            var(--ct-color-red-200, #fecaca)
+            var(--cf-color-red-200, #fecaca)
           );
         }
       `,

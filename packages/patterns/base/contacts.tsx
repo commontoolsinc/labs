@@ -220,7 +220,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
                   <cf-card
                     style={computed(() =>
                       selectedIndex.get() === index
-                        ? "background: var(--ct-color-blue-50, #eff6ff); border: 1px solid var(--ct-color-blue-300, #93c5fd); cursor: pointer;"
+                        ? "background: var(--cf-color-blue-50, #eff6ff); border: 1px solid var(--cf-color-blue-300, #93c5fd); cursor: pointer;"
                         : "cursor: pointer;"
                     )}
                     onClick={selectContact({ selectedIndex, index })}

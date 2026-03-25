@@ -705,17 +705,17 @@ export const styles = css`
 
       /* Default color values if not provided */
       --background: #ffffff;
-      --foreground: var(--ct-colors-gray-900, #0f172a);
-      --border: var(--ct-colors-gray-300, #e2e8f0);
-      --primary: var(--ct-colors-primary-500, #3b82f6);
-      --ring: var(--ct-colors-primary-500, #3b82f6);
+      --foreground: var(--cf-colors-gray-900, #0f172a);
+      --border: var(--cf-colors-gray-300, #e2e8f0);
+      --primary: var(--cf-colors-primary-500, #3b82f6);
+      --ring: var(--cf-colors-primary-500, #3b82f6);
     }
 
     .map-container {
       width: 100%;
       height: 100%;
       min-height: inherit;
-      border-radius: var(--ct-border-radius-md, 0.375rem);
+      border-radius: var(--cf-border-radius-md, 0.375rem);
       overflow: hidden;
       position: relative;
     }
@@ -724,8 +724,8 @@ export const styles = css`
     .map-container .leaflet-container {
       width: 100%;
       height: 100%;
-      background: var(--ct-colors-gray-100, #f8fafc);
-      font-family: var(--ct-font-family, inherit);
+      background: var(--cf-colors-gray-100, #f8fafc);
+      font-family: var(--cf-font-family, inherit);
     }
 
     /* ================================================
@@ -738,7 +738,7 @@ export const styles = css`
       background: var(--background, #ffffff);
       color: var(--foreground, #0f172a);
       box-shadow: var(
-        --ct-shadow-md,
+        --cf-shadow-md,
         0 4px 6px -1px rgba(0, 0, 0, 0.1),
         0 2px 4px -1px rgba(0, 0, 0, 0.06)
       );
@@ -746,69 +746,69 @@ export const styles = css`
     }
 
     .leaflet-popup-content-wrapper {
-      border-radius: var(--ct-border-radius-lg, 0.5rem);
+      border-radius: var(--cf-border-radius-lg, 0.5rem);
       padding: 0;
     }
 
     .leaflet-popup-content {
-      margin: var(--ct-spacing-3, 0.75rem) var(--ct-spacing-4, 1rem);
-      font-size: var(--ct-font-size-sm, 0.875rem);
-      line-height: var(--ct-line-height-normal, 1.5);
-      font-family: var(--ct-font-family, inherit);
+      margin: var(--cf-spacing-3, 0.75rem) var(--cf-spacing-4, 1rem);
+      font-size: var(--cf-font-size-sm, 0.875rem);
+      line-height: var(--cf-line-height-normal, 1.5);
+      font-family: var(--cf-font-family, inherit);
     }
 
     /* Simple popup styling */
     .popup-simple {
-      padding: var(--ct-spacing-2, 0.5rem) 0;
+      padding: var(--cf-spacing-2, 0.5rem) 0;
     }
 
     .popup-icon {
-      font-size: var(--ct-font-size-2xl, 1.5rem);
-      margin-bottom: var(--ct-spacing-2, 0.5rem);
+      font-size: var(--cf-font-size-2xl, 1.5rem);
+      margin-bottom: var(--cf-spacing-2, 0.5rem);
       text-align: center;
     }
 
     .popup-title {
-      font-weight: var(--ct-font-weight-semibold, 600);
+      font-weight: var(--cf-font-weight-semibold, 600);
       color: var(--foreground, #0f172a);
-      margin-bottom: var(--ct-spacing-1, 0.25rem);
-      font-size: var(--ct-font-size-base, 1rem);
+      margin-bottom: var(--cf-spacing-1, 0.25rem);
+      font-size: var(--cf-font-size-base, 1rem);
     }
 
     .popup-description {
-      color: var(--ct-colors-gray-600, #64748b);
-      font-size: var(--ct-font-size-sm, 0.875rem);
+      color: var(--cf-colors-gray-600, #64748b);
+      font-size: var(--cf-font-size-sm, 0.875rem);
       margin: 0;
     }
 
     /* Close button theming */
     .leaflet-container a.leaflet-popup-close-button {
-      color: var(--ct-colors-gray-500, #64748b);
+      color: var(--cf-colors-gray-500, #64748b);
       width: 28px;
       height: 28px;
       font-size: 18px;
       line-height: 28px;
-      top: var(--ct-spacing-2, 0.5rem);
-      right: var(--ct-spacing-2, 0.5rem);
-      border-radius: var(--ct-border-radius-sm, 0.25rem);
+      top: var(--cf-spacing-2, 0.5rem);
+      right: var(--cf-spacing-2, 0.5rem);
+      border-radius: var(--cf-border-radius-sm, 0.25rem);
       transition: all var(--cf-theme-animation-duration, 150ms)
-        var(--ct-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1));
+        var(--cf-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1));
       }
 
       .leaflet-container a.leaflet-popup-close-button:hover,
       .leaflet-container a.leaflet-popup-close-button:focus {
         color: var(--foreground, #0f172a);
-        background: var(--ct-colors-gray-100, #f8fafc);
+        background: var(--cf-colors-gray-100, #f8fafc);
       }
 
       /* Control theming */
       .leaflet-bar {
         border: 1px solid var(--border, #e2e8f0);
         box-shadow: var(
-          --ct-shadow-sm,
+          --cf-shadow-sm,
           0 1px 2px 0 rgba(0, 0, 0, 0.05)
         );
-        border-radius: var(--ct-border-radius-md, 0.375rem);
+        border-radius: var(--cf-border-radius-md, 0.375rem);
       }
 
       .leaflet-bar a {
@@ -816,28 +816,28 @@ export const styles = css`
         color: var(--foreground, #0f172a);
         border-bottom: 1px solid var(--border, #e2e8f0);
         transition: all var(--cf-theme-animation-duration, 150ms)
-          var(--ct-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1));
+          var(--cf-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1));
         }
 
         .leaflet-bar a:hover {
-          background-color: var(--ct-colors-gray-100, #f8fafc);
+          background-color: var(--cf-colors-gray-100, #f8fafc);
         }
 
         .leaflet-bar a:first-child {
-          border-top-left-radius: var(--ct-border-radius-md, 0.375rem);
-          border-top-right-radius: var(--ct-border-radius-md, 0.375rem);
+          border-top-left-radius: var(--cf-border-radius-md, 0.375rem);
+          border-top-right-radius: var(--cf-border-radius-md, 0.375rem);
         }
 
         .leaflet-bar a:last-child {
-          border-bottom-left-radius: var(--ct-border-radius-md, 0.375rem);
-          border-bottom-right-radius: var(--ct-border-radius-md, 0.375rem);
+          border-bottom-left-radius: var(--cf-border-radius-md, 0.375rem);
+          border-bottom-right-radius: var(--cf-border-radius-md, 0.375rem);
         }
 
         /* Attribution theming */
         .leaflet-container .leaflet-control-attribution {
           background: var(--background, rgba(255, 255, 255, 0.9));
-          color: var(--ct-colors-gray-600, #64748b);
-          font-size: var(--ct-font-size-xs, 0.75rem);
+          color: var(--cf-colors-gray-600, #64748b);
+          font-size: var(--cf-font-size-xs, 0.75rem);
           border-top: 1px solid var(--border, #e2e8f0);
         }
 

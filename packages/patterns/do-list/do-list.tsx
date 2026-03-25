@@ -318,7 +318,7 @@ const DoItemCard = pattern<
           )}
 
           <details style="margin-top: 8px; margin-left: 24px;">
-            <summary style="cursor: pointer; font-size: 0.8rem; color: var(--ct-color-gray-500);">
+            <summary style="cursor: pointer; font-size: 0.8rem; color: var(--cf-color-gray-500);">
               AI Suggestions
             </summary>
             <Suggestion
@@ -350,7 +350,7 @@ const CompletedItemCard = pattern<
       >
         <cf-hstack gap="2" align="center">
           <cf-checkbox $checked={item.done} />
-          <span style="text-decoration: line-through; flex: 1; color: var(--ct-color-gray-500);">
+          <span style="text-decoration: line-through; flex: 1; color: var(--cf-color-gray-500);">
             {item.title}
           </span>
         </cf-hstack>
@@ -402,7 +402,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
 
         {hasNoItems
           ? (
-            <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
+            <div style="text-align: center; color: var(--cf-color-gray-500); padding: 1rem;">
               No items yet. Add one below!
             </div>
           )
@@ -415,7 +415,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
           <cf-button
             variant="ghost"
             size="sm"
-            style="font-size: 0.8rem; color: var(--ct-color-gray-500);"
+            style="font-size: 0.8rem; color: var(--cf-color-gray-500);"
             onClick={() => archiveCompleted.send({})}
           >
             Archive completed
@@ -443,7 +443,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
         <cf-vstack slot="header" gap="1">
           <cf-hstack justify="between" align="center">
             <cf-heading level={4}>Do List</cf-heading>
-            <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+            <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
               {computed(() => activeItems.length)} items
             </span>
           </cf-hstack>
@@ -455,7 +455,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
 
             {hasNoItems
               ? (
-                <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+                <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
                   No items yet. Add one below!
                 </div>
               )
@@ -464,7 +464,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
             {ifElse(
               hasCompleted,
               <details style="margin-top: 1rem;">
-                <summary style="cursor: pointer; font-size: 0.875rem; color: var(--ct-color-gray-500); padding: 0.5rem 0;">
+                <summary style="cursor: pointer; font-size: 0.875rem; color: var(--cf-color-gray-500); padding: 0.5rem 0;">
                   Completed ({computed(() => completedItems.length)})
                 </summary>
                 <cf-vstack gap="2" style="padding-top: 0.5rem;">
@@ -473,7 +473,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
                     <cf-button
                       variant="ghost"
                       size="sm"
-                      style="font-size: 0.8rem; color: var(--ct-color-gray-500);"
+                      style="font-size: 0.8rem; color: var(--cf-color-gray-500);"
                       onClick={() => archiveCompleted.send({})}
                     >
                       Archive all

@@ -35,7 +35,7 @@ export const alertStyles = `
     gap: 0.75rem;
     font-family: inherit;
     transition: all var(--cf-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+      var(--cf-transition-timing-ease);
   }
 
   /* Alert icon */
@@ -93,7 +93,7 @@ export const alertStyles = `
     cursor: pointer;
     opacity: 0.7;
     transition: opacity var(--cf-theme-animation-duration, 150ms)
-      var(--ct-transition-timing-ease);
+      var(--cf-transition-timing-ease);
     border-radius: 0.25rem;
     padding: 0.25rem;
     width: 1.5rem;
