@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
-import "../ct-tool-call/ct-tool-call.ts";
+import "../cf-tool-call/cf-tool-call.ts";
 import "../cf-button/cf-button.ts";
 import "../ct-copy-button/ct-copy-button.ts";
 import "../cf-markdown/cf-markdown.ts";
@@ -284,10 +284,10 @@ export class CFChatMessage extends BaseElement {
         ${toolCalls.map((toolCall) => {
           const toolResult = resultMap.get(toolCall.toolCallId);
           return html`
-            <ct-tool-call
+            <cf-tool-call
               .call="${toolCall}"
               .result="${toolResult}"
-            ></ct-tool-call>
+            ></cf-tool-call>
           `;
         })}
       </div>

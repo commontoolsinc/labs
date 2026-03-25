@@ -138,7 +138,7 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
 
         <cf-vscroll flex showScrollbar fadeEdges>
           <cf-vstack gap="3" style="padding: 1rem;">
-            <ct-message-beads
+            <cf-message-beads
               label="overview"
               $messages={messages}
               pending={pending}

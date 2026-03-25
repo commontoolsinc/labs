@@ -115,7 +115,7 @@ export default pattern<ChatStoryInput, ChatStoryOutput>(() => {
             backgroundColor: "#fafafa",
           }}
         >
-          <ct-message-beads
+          <cf-message-beads
             $messages={messages}
             pending={pending}
             style="flex: 1;"

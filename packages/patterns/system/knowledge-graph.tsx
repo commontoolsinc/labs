@@ -354,7 +354,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
             {compoundNodeCount} groups
           </span>
 
-          <ct-message-beads
+          <cf-message-beads
             label="graph analysis"
             $messages={messages}
             pending={pending}

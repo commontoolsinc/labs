@@ -17,22 +17,22 @@ interface Attachment {
 }
 
 /**
- * CTAttachmentsBar - Display pinned cells as a horizontal list of chips
+ * CFAttachmentsBar - Display pinned cells as a horizontal list of chips
  *
- * @element ct-attachments-bar
+ * @element cf-attachments-bar
  *
  * @attr {boolean} removable - Whether pinned cells can be removed (default: false)
  *
  * @prop {Attachment[]} pinnedCells - Array of pinned cells to display
  *
- * @fires ct-remove - Fired when a pinned cell is removed. detail: { id: string }
- * @fires ct-click - Fired when a pinned cell is clicked. detail: { id: string, attachment: Attachment }
+ * @fires cf-remove - Fired when a pinned cell is removed. detail: { id: string }
+ * @fires cf-click - Fired when a pinned cell is clicked. detail: { id: string, attachment: Attachment }
  *
  * @example
- * <ct-attachments-bar .pinnedCells=${pinnedCells}></ct-attachments-bar>
- * <ct-attachments-bar .pinnedCells=${pinnedCells} removable></ct-attachments-bar>
+ * <cf-attachments-bar .pinnedCells=${pinnedCells}></cf-attachments-bar>
+ * <cf-attachments-bar .pinnedCells=${pinnedCells} removable></cf-attachments-bar>
  */
-export class CTAttachmentsBar extends BaseElement {
+export class CFAttachmentsBar extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -90,11 +90,11 @@ export class CTAttachmentsBar extends BaseElement {
 
   private _handleRemove(id: string, e?: Event): void {
     e?.stopPropagation();
-    this.emit("ct-remove", { id });
+    this.emit("cf-remove", { id });
   }
 
   private _handleClick(id: string, attachment: Attachment): void {
-    this.emit("ct-click", { id, attachment });
+    this.emit("cf-click", { id, attachment });
   }
 
   override render() {
@@ -137,4 +137,4 @@ export class CTAttachmentsBar extends BaseElement {
   }
 }
 
-customElements.define("ct-attachments-bar", CTAttachmentsBar);
+customElements.define("cf-attachments-bar", CFAttachmentsBar);

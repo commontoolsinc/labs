@@ -5,7 +5,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import "../cf-chat-message/cf-chat-message.ts";
-import "../ct-tool-call/ct-tool-call.ts";
+import "../cf-tool-call/cf-tool-call.ts";
 import type {
   BuiltInLLMMessage,
   BuiltInLLMToolCallPart,
@@ -368,10 +368,10 @@ export class CFChat extends BaseElement {
                 ${toolCalls.map((toolCall) => {
                   const toolResult = toolResultMap.get(toolCall.toolCallId);
                   return html`
-                    <ct-tool-call
+                    <cf-tool-call
                       .call="${toolCall}"
                       .result="${toolResult}"
-                    ></ct-tool-call>
+                    ></cf-tool-call>
                   `;
                 })}
               </div>

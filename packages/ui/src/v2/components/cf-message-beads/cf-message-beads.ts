@@ -68,7 +68,7 @@ function beadLabel(msg: BuiltInLLMMessage): string {
   return msg.role;
 }
 
-export class CTMessageBeads extends BaseElement {
+export class CFMessageBeads extends BaseElement {
   private _cellController = createCellController<BuiltInLLMMessage[]>(this, {
     timing: { strategy: "immediate" },
     onChange: () => this.requestUpdate(),
@@ -247,7 +247,7 @@ export class CTMessageBeads extends BaseElement {
     el.style.position = "fixed";
     el.style.zIndex = "1001";
     el.style.pointerEvents = "none";
-    el.dataset.ctMessageBeadsTooltip = "";
+    el.dataset.cfMessageBeadsTooltip = "";
     document.body.appendChild(el);
     this.#tooltip = el;
   }
@@ -320,7 +320,7 @@ export class CTMessageBeads extends BaseElement {
   };
 
   private _onRefineClick = () => {
-    this.emit("ct-refine", {});
+    this.emit("cf-refine", {});
   };
 
   override render() {
@@ -374,6 +374,6 @@ export class CTMessageBeads extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-message-beads", CTMessageBeads);
+globalThis.customElements.define("cf-message-beads", CFMessageBeads);
 
-export type { CTMessageBeads as CTMessageBeadsElement };
+export type { CFMessageBeads as CFMessageBeadsElement };

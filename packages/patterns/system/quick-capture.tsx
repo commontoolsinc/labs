@@ -221,7 +221,7 @@ ${profileSection}`;
 
           <cf-vscroll flex showScrollbar fadeEdges snapToBottom>
             <cf-vstack gap="3" style="padding: 1rem;">
-              <ct-message-beads
+              <cf-message-beads
                 label="capture"
                 $messages={messages}
                 pending={pending}

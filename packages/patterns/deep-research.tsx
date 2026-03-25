@@ -115,11 +115,11 @@ When done, call presentResult with your structured findings.`,
             result,
           })}
         />
-        <ct-message-beads
+        <cf-message-beads
           label="research"
           $messages={messages}
           pending={pending}
-          onct-refine={showRefineInput({ showRefine })}
+          oncf-refine={showRefineInput({ showRefine })}
         />
         <div>
           <h3>{computed(() => (result?.summary ? "Summary" : ""))}</h3>

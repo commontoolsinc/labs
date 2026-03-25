@@ -724,7 +724,7 @@ interface ImageOutput {
 ## `deep-research.tsx`
 
 Deep research agent that uses llmDialog to search the web and synthesize
-findings. Shows live progress via ct-message-beads and renders a structured
+findings. Shows live progress via cf-message-beads and renders a structured
 result with summary, confidence, and sources. Supports follow-up refinement.
 
 **Keywords:** llm, research, web-search, tools, llmDialog, agent, beads

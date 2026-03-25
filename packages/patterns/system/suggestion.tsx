@@ -240,11 +240,11 @@ Use the user context above to personalize your suggestions when relevant.`;
           undefined,
         )}
       </cf-cell-context>
-      <ct-message-beads
+      <cf-message-beads
         label="suggestion"
         $messages={messages}
         pending={pending}
-        onct-refine={showRefineInput({ showRefine })}
+        oncf-refine={showRefineInput({ showRefine })}
       />
 
       <ct-question

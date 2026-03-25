@@ -5,8 +5,8 @@ import type { CellHandle } from "@commonfabric/runtime-client";
 import { isCellHandle } from "@commonfabric/runtime-client";
 import { fabAnimations } from "./styles.ts";
 import { stringSchema } from "@commonfabric/runner/schemas";
-// Side-effect import to ensure ct-message-beads is registered
-import "../ct-message-beads/ct-message-beads.ts";
+// Side-effect import to ensure cf-message-beads is registered
+import "../cf-message-beads/cf-message-beads.ts";
 
 /**
  * A morphing floating action button that expands into a panel.
@@ -305,7 +305,7 @@ export class CTFab extends BaseElement {
             text-overflow: ellipsis;
           }
 
-          ct-message-beads {
+          cf-message-beads {
             flex: 1;
             min-width: 0;
           }
@@ -664,10 +664,10 @@ export class CTFab extends BaseElement {
                     `
                     : nothing} ${this.messages
                     ? html`
-                      <ct-message-beads
+                      <cf-message-beads
                         .messages="${this.messages}"
                         ?pending="${this.pending}"
-                      >${this.placeholderText}</ct-message-beads>
+                      >${this.placeholderText}</cf-message-beads>
                     `
                     : html`
                       <span class="fab-placeholder">${this

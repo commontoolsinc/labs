@@ -17,22 +17,22 @@ import {
 export type ToolCallState = "pending" | "success" | "error";
 
 /**
- * CTToolCall - Expandable tool call display component
+ * CFToolCall - Expandable tool call display component
  *
- * @element ct-tool-call
+ * @element cf-tool-call
  *
  * @attr {object} toolCall - The tool call data (BuiltInLLMToolCallPart)
  * @attr {object} toolResult - The tool result data (BuiltInLLMToolResultPart, optional)
  * @attr {boolean} expanded - Whether the tool call details are expanded
  *
  * @example
- * <ct-tool-call
+ * <cf-tool-call
  *   .toolCall=${toolCall}
  *   .toolResult=${toolResult}
  *   expanded
- * ></ct-tool-call>
+ * ></cf-tool-call>
  */
-export class CTToolCall extends BaseElement {
+export class CFToolCall extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -383,4 +383,4 @@ export class CTToolCall extends BaseElement {
     }
   }
 
-  globalThis.customElements.define("ct-tool-call", CTToolCall);
+  globalThis.customElements.define("cf-tool-call", CFToolCall);

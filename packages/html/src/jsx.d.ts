@@ -2911,8 +2911,8 @@ interface CTTableElement extends CTHTMLElement {}
 interface CFTagsElement extends CTHTMLElement {}
 interface CFPromptInputElement extends CTHTMLElement {}
 interface CFChatElement extends CTHTMLElement {}
-interface CTMessageBeadsElement extends CTHTMLElement {}
-interface CTAttachmentsBarElement extends CTHTMLElement {}
+interface CFMessageBeadsElement extends CTHTMLElement {}
+interface CFAttachmentsBarElement extends CTHTMLElement {}
 interface CTCTCollapsibleElement extends CTHTMLElement {}
 interface CFFragmentElement extends CTHTMLElement {}
 interface CTUpdaterElement extends CTHTMLElement {}
@@ -2980,7 +2980,7 @@ interface CTResizableHandleElement extends CTHTMLElement {}
 
 // Other components
 interface CTScrollAreaElement extends CTHTMLElement {}
-interface CTToolCallElement extends CTHTMLElement {}
+interface CFToolCallElement extends CTHTMLElement {}
 
 interface CTDraggableAttributes<T> extends CTHTMLAttributes<T> {
   "key"?: number;
@@ -3162,11 +3162,11 @@ interface CFChatAttributes<T> extends CTHTMLAttributes<T> {
   "tools"?: any;
 }
 
-interface CTMessageBeadsAttributes<T> extends CTHTMLAttributes<T> {
+interface CFMessageBeadsAttributes<T> extends CTHTMLAttributes<T> {
   "$messages"?: CellLike<any>;
   "pending"?: boolean;
   "label"?: string;
-  "onct-refine"?: EventHandler<any>;
+  "oncf-refine"?: EventHandler<any>;
 }
 
 interface CFPromptInputAttributes<T> extends CTHTMLAttributes<T> {
@@ -3199,9 +3199,11 @@ interface CFPromptInputAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-attachment-remove"?: EventHandler<{ id: string }>;
 }
 
-interface CTAttachmentsBarAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAttachmentsBarAttributes<T> extends CTHTMLAttributes<T> {
   "removable"?: boolean;
   "pinnedCells"?: any;
+  "oncf-remove"?: EventHandler<{ id: string }>;
+  "oncf-click"?: EventHandler<{ id: string; attachment: any }>;
 }
 
 interface CFTagsAttributes<T> extends CTHTMLAttributes<T> {
@@ -4105,7 +4107,7 @@ interface CTScrollAreaAttributes<T> extends CTHTMLAttributes<T> {
     | CellLike<"vertical" | "horizontal" | "both">;
 }
 
-interface CTToolCallAttributes<T> extends CTHTMLAttributes<T> {
+interface CFToolCallAttributes<T> extends CTHTMLAttributes<T> {
   "call"?: any | CellLike<any>;
   "result"?: any | CellLike<any>;
   "expanded"?: boolean | CellLike<boolean>;
@@ -4822,13 +4824,13 @@ declare global {
         CFChatAttributes<CFChatElement>,
         CFChatElement
       >;
-      "ct-message-beads": CTDOM.DetailedHTMLProps<
-        CTMessageBeadsAttributes<CTMessageBeadsElement>,
-        CTMessageBeadsElement
+      "cf-message-beads": CTDOM.DetailedHTMLProps<
+        CFMessageBeadsAttributes<CFMessageBeadsElement>,
+        CFMessageBeadsElement
       >;
-      "ct-attachments-bar": CTDOM.DetailedHTMLProps<
-        CTAttachmentsBarAttributes<CTAttachmentsBarElement>,
-        CTAttachmentsBarElement
+      "cf-attachments-bar": CTDOM.DetailedHTMLProps<
+        CFAttachmentsBarAttributes<CFAttachmentsBarElement>,
+        CFAttachmentsBarElement
       >;
       "ct-ct-collapsible": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CTCTCollapsibleElement>,
@@ -5036,9 +5038,9 @@ declare global {
         CTScrollAreaAttributes<CTScrollAreaElement>,
         CTScrollAreaElement
       >;
-      "ct-tool-call": CTDOM.DetailedHTMLProps<
-        CTToolCallAttributes<CTToolCallElement>,
-        CTToolCallElement
+      "cf-tool-call": CTDOM.DetailedHTMLProps<
+        CFToolCallAttributes<CFToolCallElement>,
+        CFToolCallElement
       >;
 
       // Map component

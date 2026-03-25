@@ -307,7 +307,7 @@ You can mix-and-match the above components to achieve practically any (standard)
 - gap: `ct-icon` (and `ct-label` has an optional in-built icon)
     - gap: icon set?
 
-- visual: `ct-kdb`, `ct-separator`, `ct-table`, `ct-tool-call`
+- visual: `ct-kdb`, `ct-separator`, `ct-table`, `cf-tool-call`
 	- gap: `ct-img` or `ct-media`
 
 # Input Components
@@ -347,7 +347,7 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 ## Chat Components
 
-- chat: `cf-chat`, `cf-prompt-input`, `cf-chat-message`, `ct-tool-call`, `cf-tools-chip`
+- chat: `cf-chat`, `cf-prompt-input`, `cf-chat-message`, `cf-tool-call`, `cf-tools-chip`
 
 # Unused/Unproven Components
 
