@@ -1,4 +1,4 @@
-# CT Protocol: Commit Model (Section 5)
+# CF Protocol: Commit Model (Section 5)
 
 See `docs/specs/verifiable-execution/README.md` for navigation.
 

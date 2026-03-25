@@ -4,7 +4,7 @@
 
 **Goal:** Add `cf exec` for mounted callable files, expose pattern tools as `.tool`, make callable files readable with a `#!... exec` first line, and drive help/flag parsing from the resolved callable schema.
 
-**Architecture:** Treat mounted handlers and pattern tools as one FUSE concept: callable files discovered from `childCell.asSchemaFromLinks()`, surfaced as `.handler` or `.tool`, and rendered as readable synthetic files whose first line is a stable `ct` shebang. Persist enough mount metadata for `cf exec` to map an absolute mounted file path back to the owning space, piece, and child cell without talking to the FUSE daemon. Keep execution logic local to the CLI: parse flags from the callable schema, resolve the backing cell, dispatch handlers through existing piece writes, dispatch pattern tools through a minimal runtime-run path, and prove the shipped behavior with a real mounted-filesystem integration script.
+**Architecture:** Treat mounted handlers and pattern tools as one FUSE concept: callable files discovered from `childCell.asSchemaFromLinks()`, surfaced as `.handler` or `.tool`, and rendered as readable synthetic files whose first line is a stable `cf` shebang. Persist enough mount metadata for `cf exec` to map an absolute mounted file path back to the owning space, piece, and child cell without talking to the FUSE daemon. Keep execution logic local to the CLI: parse flags from the callable schema, resolve the backing cell, dispatch handlers through existing piece writes, dispatch pattern tools through a minimal runtime-run path, and prove the shipped behavior with a real mounted-filesystem integration script.
 
 **Tech Stack:** Deno 2, Cliffy, `@commonfabric/piece`, `@commonfabric/runner`, FUSE low-level bindings, existing CLI integration shell harnesses.
 
@@ -16,7 +16,7 @@
 
 1. Mounted `*.handler` files remain writable and start being readable.
 2. Mounted pattern-tool values are surfaced as `*.tool` siblings instead of expanded `pattern/extraParams` directories.
-3. Reading either callable file returns text whose first line is `#!<stable-ct-shim> exec`.
+3. Reading either callable file returns text whose first line is `#!<stable-cf-shim> exec`.
 4. `cf exec <mounted-callable-file> [invoke|run] [flags]` works for mounted `*.handler` and `*.tool` paths.
 5. The verb defaults by callable kind when omitted:
    - handler defaults to `invoke`
@@ -104,12 +104,12 @@
 
 ## Architecture Decisions
 
-### 1. Generate a stable `ct` shim for the shebang line, but do not gate on direct shell execution
+### 1. Generate a stable `cf` shim for the shebang line, but do not gate on direct shell execution
 
 The repo does not ship a real `ct` binary path; developers often launch the CLI via `deno task cf`. Rendered callable files still need a deterministic first line:
 
 ```text
-#!/absolute/path/to/generated/ct-shim exec
+#!/absolute/path/to/generated/cf-shim exec
 ```
 
 Implement `ensureExecShim(...)` in `packages/cli/lib/fuse.ts` and pass the shim path to the FUSE daemon. The shim should be repo-rooted and explicit:

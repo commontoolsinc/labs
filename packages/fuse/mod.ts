@@ -2,7 +2,7 @@
 //
 // Usage:
 //   deno run --unstable-ffi --allow-ffi --allow-read --allow-write --allow-env --allow-net \
-//     packages/fuse/mod.ts /tmp/ct-fuse [--api-url URL --space NAME --identity PATH]
+//     packages/fuse/mod.ts /tmp/cf-fuse [--api-url URL --space NAME --identity PATH]
 //
 // Supports multiple spaces. --space can be repeated or omitted (defaults to "home").
 // Unknown space names are resolved on-demand via lookup.

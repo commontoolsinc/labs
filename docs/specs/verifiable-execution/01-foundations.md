@@ -1,4 +1,4 @@
-# CT Protocol: Foundations (Sections 1–4)
+# CF Protocol: Foundations (Sections 1–4)
 
 See `docs/specs/verifiable-execution/README.md` for navigation.
 
@@ -24,7 +24,7 @@ This pattern no longer scales. Systems are larger, more automated, and more
 intertwined; the consequences of error or misrepresentation are higher; and the
 parties asked to trust them are often remote in space, time, and incentives.
 
-The CT Protocol begins from a different premise: **trust should be _derivable_,
+The CF Protocol begins from a different premise: **trust should be _derivable_,
 not declarative.** A claim should be accompanied by the evidence that produced
 it, structured so that an independent verifier can replay the reasoning without
 privileged access. Trust, in this view, is not a favor granted by authority, but
@@ -91,7 +91,7 @@ database, a collection of files on disk, a snapshot held in memory. Changes
 happen, but the change itself is rarely preserved as a first-class object. At
 best, there is an audit log; at worst, only the latest value survives.
 
-**The CT Protocol inverts this perspective.** A state change is not an
+**The CF Protocol inverts this perspective.** A state change is not an
 incidental side effect; it is the primary event. A **Fact** represents state at
 a point in time:
 
@@ -126,7 +126,7 @@ Each receipt also serves as a **computation envelope**:
 - commits to output state
 - commits to CFC label commitments (schema-derived, path-granular) and a policy identifier
 
-By treating receipts as the unit of history, the CT Protocol makes the past
+By treating receipts as the unit of history, the CF Protocol makes the past
 inspectable. One can trace not just the current state of a system, but the
 sequence of decisions and derivations that led there.
 
@@ -142,7 +142,7 @@ and continue to react over time. Most reactions are pull-based—triggered when
 state is observed or consulted—with optional periodic refresh for long-running
 processes.
 
-Because trust in the CT Protocol is narrow, explicit, and mechanically enforced,
+Because trust in the CF Protocol is narrow, explicit, and mechanically enforced,
 **patterns do not need to be trusted in order to be run.** They are safe by
 construction under Contextual Flow Control: they cannot exfiltrate data,
 escalate privileges, or violate context without explicit policy. As a result,

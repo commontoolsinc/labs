@@ -55,7 +55,7 @@ piece root. All pieces have a `.handlers` file at the piece root.
 Mounted callable reads return synthetic text whose first line is:
 
 ```text
-#!<stable-ct-shim> exec
+#!<stable-cf-shim> exec
 ```
 
 This is display-only for this change. The supported execution contract is

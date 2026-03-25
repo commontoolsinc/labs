@@ -1,4 +1,4 @@
-# CT Protocol: Append-Only Log & Authorization (Sections 8–9)
+# CF Protocol: Append-Only Log & Authorization (Sections 8–9)
 
 See `docs/specs/verifiable-execution/README.md` for navigation.
 
@@ -57,7 +57,7 @@ CREATE TABLE memory (
 
 Receipts gain much of their power from ordering. Authorization changes over
 time. Delegations are granted and revoked. Policies evolve. By anchoring each
-receipt to a position in an immutable sequence, the CT Protocol allows verifiers
+receipt to a position in an immutable sequence, the CF Protocol allows verifiers
 to answer time-sensitive questions precisely:
 
 - _Was this signer authorized at the moment this change occurred?_
@@ -83,7 +83,7 @@ settings. This creates several problems:
 
 ### 9.2 ACLs as Evolving State
 
-In the CT Protocol, authorization does not float above the system. **It lives
+In the CF Protocol, authorization does not float above the system. **It lives
 _inside_ the same historical record as everything else.**
 
 Access-control lists are state, expressed as facts like any other. Adding a
@@ -110,7 +110,7 @@ This design has two consequences:
 ### 9.3 Authorization at Commit Time
 
 This notion—_authorization at commit time_—is central. When verifying a
-historical action, the CT Protocol does not ask whether the signer is authorized
+historical action, the CF Protocol does not ask whether the signer is authorized
 now. **It asks whether they were authorized then.**
 
 The answer is determined mechanically by replaying facts in order. There is no
