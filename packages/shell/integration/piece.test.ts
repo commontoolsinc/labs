@@ -97,6 +97,57 @@ describe("shell piece tests", () => {
       });
     };
 
+    const logDebugSnapshot = async (label: string) => {
+      console.log(label, {
+        shellState: await shell.state(),
+        pieceValue: await piece.result.get(["value"]),
+        page: await page.evaluate(() => {
+          const rootView = document.querySelector("x-root-view");
+          const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
+            | {
+              _patterns?: {
+                status?: unknown;
+                value?: {
+                  activePattern?: {
+                    id(): string;
+                  };
+                };
+              };
+              _selectedPattern?: {
+                status?: unknown;
+                value?: {
+                  id(): string;
+                };
+              };
+              _spaceRootPattern?: {
+                status?: unknown;
+                value?: {
+                  id(): string;
+                };
+              };
+              _patternError?: {
+                message?: string;
+              };
+            }
+            | null;
+          return {
+            href: globalThis.location.href,
+            hasRuntime: !!globalThis.commontools?.rt,
+            hasRootView: !!rootView,
+            hasAppView: !!appView,
+            patternsStatus: appView?._patterns?.status,
+            selectedPatternStatus: appView?._selectedPattern?.status,
+            spaceRootPatternStatus: appView?._spaceRootPattern?.status,
+            activePatternId: appView?._patterns?.value?.activePattern?.id?.(),
+            selectedPatternId: appView?._selectedPattern?.value?.id?.(),
+            spaceRootPatternId: appView?._spaceRootPattern?.value?.id?.(),
+            patternError: appView?._patternError?.message,
+            bodyText: document.body.textContent?.trim().slice(0, 200),
+          };
+        }),
+      });
+    };
+
     const clickDecrement = async () => {
       await waitFor(async () => {
         return await page.evaluate(async (expectedPieceId) => {
@@ -127,7 +178,12 @@ describe("shell piece tests", () => {
       });
     };
 
-    await waitForActivePattern();
+    try {
+      await waitForActivePattern();
+    } catch (error) {
+      await logDebugSnapshot("shell piece test debug");
+      throw error;
+    }
     await waitFor(async () => (await piece.result.get(["value"])) === 0);
 
     await clickDecrement();
