@@ -1302,7 +1302,8 @@ export function rewriteExpressionSite(
   ) as ts.Expression;
 }
 
-export function rewriteFallbackJsxExpressionSite(
+// Shared rewrite entrypoint for explicit owned pre-closure JSX roots.
+export function rewriteOwnedPreClosureJsxExpressionSite(
   params: Omit<RewriteExpressionSiteParams, "containerKind">,
 ): ts.Expression | undefined {
   const {
@@ -1377,7 +1378,7 @@ export function rewriteOpaquePathTerminalJsxExpressionSite(
     return undefined;
   }
 
-  return rewriteFallbackJsxExpressionSite(params);
+  return rewriteOwnedPreClosureJsxExpressionSite(params);
 }
 
 export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
@@ -1521,7 +1522,7 @@ export function rewriteArrayMethodCallbackExpressionSites(
         route.route === "skip" &&
         route.reason === "array-method-owned"
       ) {
-        const rewritten = rewriteFallbackJsxExpressionSite({
+        const rewritten = rewriteOwnedPreClosureJsxExpressionSite({
           expression: node.expression,
           context,
           analyze,

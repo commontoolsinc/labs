@@ -4,7 +4,7 @@ import { createDataFlowAnalyzer, visitEachChildWithJsx } from "../ast/mod.ts";
 import {
   classifyJsxExpressionSiteRoute,
   rewriteExpressionSite,
-  rewriteFallbackJsxExpressionSite,
+  rewriteOwnedPreClosureJsxExpressionSite,
   rewriteOpaquePathTerminalJsxExpressionSite,
 } from "./expression-site-lowering.ts";
 
@@ -88,7 +88,7 @@ function transform(context: TransformationContext): ts.SourceFile {
           route.owner === "object-literal-root"
         )
       ) {
-        const rewritten = rewriteFallbackJsxExpressionSite({
+        const rewritten = rewriteOwnedPreClosureJsxExpressionSite({
           expression: node.expression,
           context,
           analyze,
