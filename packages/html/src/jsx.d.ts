@@ -2862,8 +2862,8 @@ interface CFLoaderElement extends CTHTMLElement {}
 interface CFInputElement extends CTHTMLElement {}
 interface CFLinkPreviewElement extends CTHTMLElement {}
 interface CFTextAreaElement extends CTHTMLElement {}
-interface CTFileInputElement extends CTHTMLElement {}
-interface CTImageInputElement extends CTHTMLElement {}
+interface CFFileInputElement extends CTHTMLElement {}
+interface CFImageInputElement extends CTHTMLElement {}
 interface CFInputLegacyElement extends CTHTMLElement {}
 interface CFCheckboxElement extends CTHTMLElement {}
 interface CFAutocompleteElement extends CTHTMLElement {}
@@ -2923,8 +2923,8 @@ interface CTDraggableElement extends CTHTMLElement {}
 interface CTPlaidLinkElement extends CTHTMLElement {}
 interface CFPieceElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
-interface CTVoiceInputElement extends CTHTMLElement {}
-interface CTAudioVisualizerElement extends CTHTMLElement {}
+interface CFVoiceInputElement extends CTHTMLElement {}
+interface CFAudioVisualizerElement extends CTHTMLElement {}
 interface CTLocationElement extends CTHTMLElement {}
 interface CFWebhookElement extends CTHTMLElement {}
 interface CFSecretViewerElement extends CTHTMLElement {}
@@ -3038,36 +3038,26 @@ interface CFPieceAttributes<T> extends CTHTMLAttributes<T> {
   "space-name"?: string;
 }
 
-interface CTVoiceInputAttributes<T> extends CTHTMLAttributes<T> {
+interface CFVoiceInputAttributes<T> extends CTHTMLAttributes<T> {
   "$transcription"?: CellLike<any>;
   "recordingMode"?: "hold" | "toggle";
   "autoTranscribe"?: boolean;
   "maxDuration"?: number;
   "showWaveform"?: boolean;
   "disabled"?: boolean;
-  "barCount"?: number;
-  "barWidth"?: number;
-  "barGap"?: number;
-  "minHeight"?: number;
-  "maxHeight"?: number;
-  "visualizerColor"?: string;
-  "smoothing"?: number;
-  "onct-transcription-complete"?: EventHandler<any>;
-  "onct-transcription-error"?: EventHandler<any>;
-  "onct-recording-start"?: EventHandler<any>;
-  "onct-recording-stop"?: EventHandler<any>;
-  "onct-error"?: EventHandler<any>;
-  "onct-change"?: EventHandler<any>;
+  "oncf-transcription-start"?: EventHandler<any>;
+  "oncf-transcription-complete"?: EventHandler<any>;
+  "oncf-transcription-error"?: EventHandler<any>;
+  "oncf-recording-start"?: EventHandler<any>;
+  "oncf-recording-stop"?: EventHandler<any>;
+  "oncf-error"?: EventHandler<any>;
+  "oncf-change"?: EventHandler<any>;
 }
 
-interface CTAudioVisualizerAttributes<T> extends CTHTMLAttributes<T> {
-  "barCount"?: number;
-  "barWidth"?: number;
-  "barGap"?: number;
-  "minHeight"?: number;
-  "maxHeight"?: number;
+interface CFAudioVisualizerAttributes<T> extends CTHTMLAttributes<T> {
+  "bars"?: number;
   "color"?: string;
-  "smoothing"?: number;
+  "height"?: number;
 }
 
 // Chart component attributes
@@ -3640,7 +3630,7 @@ interface CFInputLegacyAttributes<T> extends CTHTMLAttributes<T> {
   "customStyle"?: string;
 }
 
-interface CTFileInputAttributes<T> extends CTHTMLAttributes<T> {
+interface CFFileInputAttributes<T> extends CTHTMLAttributes<T> {
   "multiple"?: boolean;
   "maxFiles"?: number;
   "accept"?: string;
@@ -3661,12 +3651,13 @@ interface CTFileInputAttributes<T> extends CTHTMLAttributes<T> {
   "maxSizeBytes"?: number;
   "files"?: any[]; // FileData[]
   "$files"?: any; // CellLike<FileData[]>
-  "onct-change"?: EventHandler<any>;
-  "onct-remove"?: EventHandler<any>;
-  "onct-error"?: EventHandler<any>;
+  "oncf-click"?: EventHandler<any>;
+  "oncf-change"?: EventHandler<any>;
+  "oncf-remove"?: EventHandler<any>;
+  "oncf-error"?: EventHandler<any>;
 }
 
-interface CTImageInputAttributes<T> extends CTHTMLAttributes<T> {
+interface CFImageInputAttributes<T> extends CTHTMLAttributes<T> {
   "multiple"?: boolean;
   "maxImages"?: number;
   "maxSizeBytes"?: number;
@@ -3687,9 +3678,10 @@ interface CTImageInputAttributes<T> extends CTHTMLAttributes<T> {
   "disabled"?: boolean;
   "images"?: any[]; // ImageData[]
   "$images"?: any; // CellLike<ImageData[]>
-  "onct-change"?: EventHandler<any>;
-  "onct-remove"?: EventHandler<any>;
-  "onct-error"?: EventHandler<any>;
+  "oncf-click"?: EventHandler<any>;
+  "oncf-change"?: EventHandler<any>;
+  "oncf-remove"?: EventHandler<any>;
+  "oncf-error"?: EventHandler<any>;
 }
 
 interface CFCheckboxAttributes<T> extends CTHTMLAttributes<T> {
@@ -4668,13 +4660,13 @@ declare global {
         CFTextAreaAttributes<CFTextAreaElement>,
         CFTextAreaElement
       >;
-      "ct-file-input": CTDOM.DetailedHTMLProps<
-        CTFileInputAttributes<CTFileInputElement>,
-        CTFileInputElement
+      "cf-file-input": CTDOM.DetailedHTMLProps<
+        CFFileInputAttributes<CFFileInputElement>,
+        CFFileInputElement
       >;
-      "ct-image-input": CTDOM.DetailedHTMLProps<
-        CTImageInputAttributes<CTImageInputElement>,
-        CTImageInputElement
+      "cf-image-input": CTDOM.DetailedHTMLProps<
+        CFImageInputAttributes<CFImageInputElement>,
+        CFImageInputElement
       >;
       "cf-checkbox": CTDOM.DetailedHTMLProps<
         CFCheckboxAttributes<CFCheckboxElement>,
@@ -4876,13 +4868,13 @@ declare global {
         CFPieceAttributes<CFPieceElement>,
         CFPieceElement
       >;
-      "ct-voice-input": CTDOM.DetailedHTMLProps<
-        CTVoiceInputAttributes<CTVoiceInputElement>,
-        CTVoiceInputElement
+      "cf-voice-input": CTDOM.DetailedHTMLProps<
+        CFVoiceInputAttributes<CFVoiceInputElement>,
+        CFVoiceInputElement
       >;
-      "ct-audio-visualizer": CTDOM.DetailedHTMLProps<
-        CTAudioVisualizerAttributes<CTAudioVisualizerElement>,
-        CTAudioVisualizerElement
+      "cf-audio-visualizer": CTDOM.DetailedHTMLProps<
+        CFAudioVisualizerAttributes<CFAudioVisualizerElement>,
+        CFAudioVisualizerElement
       >;
       "ct-location": CTDOM.DetailedHTMLProps<
         CTLocationAttributes<CTLocationElement>,

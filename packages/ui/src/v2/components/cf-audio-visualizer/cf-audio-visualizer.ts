@@ -3,18 +3,18 @@ import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTAudioVisualizer - Real-time audio waveform visualization
+ * CFAudioVisualizer - Real-time audio waveform visualization
  *
- * @element ct-audio-visualizer
+ * @element cf-audio-visualizer
  *
  * @attr {number} bars - Number of frequency bars to display (default: 8)
  * @attr {string} color - Bar color (default: 'white')
  * @attr {number} height - Visualizer height in pixels (default: 40)
  *
  * @example
- * <ct-audio-visualizer bars={12} color="#5865F2" height={48}></ct-audio-visualizer>
+ * <cf-audio-visualizer bars={12} color="#5865F2" height={48}></cf-audio-visualizer>
  */
-export class CTAudioVisualizer extends BaseElement {
+export class CFAudioVisualizer extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -198,4 +198,4 @@ export class CTAudioVisualizer extends BaseElement {
   }
 }
 
-customElements.define("ct-audio-visualizer", CTAudioVisualizer);
+customElements.define("cf-audio-visualizer", CFAudioVisualizer);

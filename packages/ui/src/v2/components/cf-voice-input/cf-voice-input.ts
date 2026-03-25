@@ -13,8 +13,8 @@ import {
   themeContext,
 } from "../theme-context.ts";
 import { classMap } from "lit/directives/class-map.js";
-import "../ct-audio-visualizer/ct-audio-visualizer.ts";
-import type { CTAudioVisualizer } from "../ct-audio-visualizer/ct-audio-visualizer.ts";
+import "../cf-audio-visualizer/cf-audio-visualizer.ts";
+import type { CFAudioVisualizer } from "../cf-audio-visualizer/cf-audio-visualizer.ts";
 import { convertToWav } from "../../utils/audio-conversion.ts";
 
 // Schema for TranscriptionData
@@ -83,9 +83,9 @@ type _ValidateTranscriptionData = Schema<
 const _validateTranscriptionData: _ValidateTranscriptionData = true;
 
 /**
- * CTVoiceInput - Voice recording and transcription component
+ * CFVoiceInput - Voice recording and transcription component
  *
- * @element ct-voice-input
+ * @element cf-voice-input
  *
  * @attr {string} recordingMode - Recording mode: "hold" | "toggle" (default: "hold")
  * @attr {boolean} autoTranscribe - Automatically transcribe when recording stops (default: true)
@@ -93,18 +93,18 @@ const _validateTranscriptionData: _ValidateTranscriptionData = true;
  * @attr {boolean} showWaveform - Show audio waveform visualization (default: true)
  * @attr {boolean} disabled - Disable recording (default: false)
  *
- * @fires ct-recording-start - Recording started. detail: { timestamp: number }
- * @fires ct-recording-stop - Recording stopped. detail: { duration: number, audioData: Blob }
- * @fires ct-transcription-start - Transcription request sent. detail: { id: string }
- * @fires ct-transcription-complete - Transcription received. detail: { transcription: TranscriptionData }
- * @fires ct-transcription-error - Transcription failed. detail: { error: Error, message: string }
- * @fires ct-error - General error occurred. detail: { error: Error, message: string }
- * @fires ct-change - Transcription data changed. detail: { transcription: TranscriptionData }
+ * @fires cf-recording-start - Recording started. detail: { timestamp: number }
+ * @fires cf-recording-stop - Recording stopped. detail: { duration: number, audioData: Blob }
+ * @fires cf-transcription-start - Transcription request sent. detail: { id: string }
+ * @fires cf-transcription-complete - Transcription received. detail: { transcription: TranscriptionData }
+ * @fires cf-transcription-error - Transcription failed. detail: { error: Error, message: string }
+ * @fires cf-error - General error occurred. detail: { error: Error, message: string }
+ * @fires cf-change - Transcription data changed. detail: { transcription: TranscriptionData }
  *
  * @example
- * <ct-voice-input $transcription={transcription}></ct-voice-input>
+ * <cf-voice-input $transcription={transcription}></cf-voice-input>
  */
-export class CTVoiceInput extends BaseElement {
+export class CFVoiceInput extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -313,7 +313,7 @@ export class CTVoiceInput extends BaseElement {
     {
       timing: { strategy: "immediate" },
       onChange: (newValue) => {
-        this.emit("ct-change", { transcription: newValue });
+        this.emit("cf-change", { transcription: newValue });
       },
     },
   );
@@ -324,7 +324,7 @@ export class CTVoiceInput extends BaseElement {
   private stream?: MediaStream;
   private timerInterval?: number;
   private maxDurationTimeout?: number;
-  private visualizerRef: Ref<CTAudioVisualizer> = createRef();
+  private visualizerRef: Ref<CFAudioVisualizer> = createRef();
 
   private _generateId(): string {
     return `voice-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
@@ -554,7 +554,7 @@ export class CTVoiceInput extends BaseElement {
         }
       }, this.maxDuration * 1000);
 
-      this.emit("ct-recording-start", { timestamp: this.startTime });
+      this.emit("cf-recording-start", { timestamp: this.startTime });
     } catch (error) {
       this._recordingState = "idle";
       const errorObj = error as Error;
@@ -619,7 +619,7 @@ export class CTVoiceInput extends BaseElement {
 
     const audioBlob = new Blob(chunks, { type: mimeType });
 
-    this.emit("ct-recording-stop", { duration, audioData: audioBlob });
+    this.emit("cf-recording-stop", { duration, audioData: audioBlob });
 
     if (this.autoTranscribe) {
       await this._transcribeAudio(audioBlob, mimeType, duration);
@@ -635,7 +635,7 @@ export class CTVoiceInput extends BaseElement {
     duration: number,
   ) {
     const id = this._generateId();
-    this.emit("ct-transcription-start", { id });
+    this.emit("cf-transcription-start", { id });
 
     try {
       // Try to convert to WAV for best compatibility with transcription APIs
@@ -669,12 +669,12 @@ export class CTVoiceInput extends BaseElement {
       // Update cell via controller
       this._cellController.setValue(transcriptionData);
 
-      this.emit("ct-transcription-complete", {
+      this.emit("cf-transcription-complete", {
         transcription: transcriptionData,
       });
     } catch (error) {
       const errorObj = error as Error;
-      this.emit("ct-transcription-error", {
+      this.emit("cf-transcription-error", {
         error: errorObj,
         message: errorObj.message,
       });
@@ -712,7 +712,7 @@ export class CTVoiceInput extends BaseElement {
     }
 
     this.errorMessage = message;
-    this.emit("ct-error", { error, message });
+    this.emit("cf-error", { error, message });
   }
 
   private _formatDuration(seconds: number): string {
@@ -758,12 +758,12 @@ export class CTVoiceInput extends BaseElement {
             ${this.showWaveform
               ? html`
                 <div class="waveform-container">
-                  <ct-audio-visualizer
+                  <cf-audio-visualizer
                     ${ref(this.visualizerRef)}
                     bars="12"
                     color="var(--ct-theme-color-primary, #3b82f6)"
                     height="40"
-                  ></ct-audio-visualizer>
+                  ></cf-audio-visualizer>
                 </div>
               `
               : ""}
@@ -782,4 +782,4 @@ export class CTVoiceInput extends BaseElement {
   }
 }
 
-customElements.define("ct-voice-input", CTVoiceInput);
+customElements.define("cf-voice-input", CFVoiceInput);

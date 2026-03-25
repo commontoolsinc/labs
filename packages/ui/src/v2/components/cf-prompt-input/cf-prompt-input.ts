@@ -17,7 +17,7 @@ import { MentionController } from "../../core/mention-controller.ts";
 import { createCellController } from "../../core/cell-controller.ts";
 import "../cf-button/cf-button.ts";
 import "../cf-chip/cf-chip.ts";
-import "../ct-voice-input/ct-voice-input.ts";
+import "../cf-voice-input/cf-voice-input.ts";
 
 /**
  * Attachment data structure
@@ -306,11 +306,11 @@ export class CFPromptInput extends BaseElement {
             }
 
             /* Embedded voice input - compact styling */
-            .voice-wrapper ct-voice-input {
+            .voice-wrapper cf-voice-input {
               --ct-theme-spacing-normal: 0;
             }
 
-            .voice-wrapper ct-voice-input::part(container) {
+            .voice-wrapper cf-voice-input::part(container) {
               gap: 0;
             }
 
@@ -782,14 +782,14 @@ export class CFPromptInput extends BaseElement {
                   ${this.voice
                     ? html`
                       <div class="voice-wrapper">
-                        <ct-voice-input
+                        <cf-voice-input
                           recordingMode="hold"
                           autoTranscribe
                           .showWaveform="${false}"
                           ?disabled="${this.disabled}"
-                          @ct-transcription-complete="${this
+                          @cf-transcription-complete="${this
                             ._handleTranscription}"
-                        ></ct-voice-input>
+                        ></cf-voice-input>
                       </div>
                     `
                     : ""}

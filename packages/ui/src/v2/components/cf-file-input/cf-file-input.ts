@@ -61,9 +61,9 @@ type _ValidateFileData = Schema<
 const _validateFileData: _ValidateFileData = true;
 
 /**
- * CTFileInput - Generic file upload component
+ * CFFileInput - Generic file upload component
  *
- * @element ct-file-input
+ * @element cf-file-input
  *
  * @attr {boolean} multiple - Allow multiple files (default: false)
  * @attr {number} maxFiles - Max number of files (default: unlimited)
@@ -77,16 +77,16 @@ const _validateFileData: _ValidateFileData = true;
  * @attr {boolean} disabled - Disable the input
  * @attr {number} maxSizeBytes - Max size warning threshold (default: none)
  *
- * @fires ct-change - Fired when file(s) are added. detail: { files: FileData[] }
- * @fires ct-remove - Fired when a file is removed. detail: { id: string, files: FileData[] }
- * @fires ct-error - Fired when an error occurs. detail: { error: Error, message: string }
+ * @fires cf-change - Fired when file(s) are added. detail: { files: FileData[] }
+ * @fires cf-remove - Fired when a file is removed. detail: { id: string, files: FileData[] }
+ * @fires cf-error - Fired when an error occurs. detail: { error: Error, message: string }
  *
  * @example
- * <ct-file-input accept=".pdf,.docx" buttonText="📄 Upload Document"></ct-file-input>
+ * <cf-file-input accept=".pdf,.docx" buttonText="📄 Upload Document"></cf-file-input>
  * @example
- * <ct-file-input accept="image/\*,application/pdf" multiple></ct-file-input>
+ * <cf-file-input accept="image/\*,application/pdf" multiple></cf-file-input>
  */
-export class CTFileInput extends BaseElement {
+export class CFFileInput extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -444,7 +444,7 @@ export class CTFileInput extends BaseElement {
   }
 
   private _handleButtonClick() {
-    this.emit("ct-click"); // Emit before opening file picker
+    this.emit("cf-click"); // Emit before opening file picker
     const input = this.shadowRoot?.querySelector(
       'input[type="file"]',
     ) as HTMLInputElement;
@@ -464,7 +464,7 @@ export class CTFileInput extends BaseElement {
     if (this.multiple && this.maxFiles) {
       const totalFiles = currentFiles.length + files.length;
       if (totalFiles > this.maxFiles) {
-        this.emit("ct-error", {
+        this.emit("cf-error", {
           error: new Error("Max files exceeded"),
           message: `Maximum ${this.maxFiles} files allowed`,
         });
@@ -502,7 +502,7 @@ export class CTFileInput extends BaseElement {
           );
           newFiles.push(fileData);
         } catch (error) {
-          this.emit("ct-error", {
+          this.emit("cf-error", {
             error: error as Error,
             message: `Failed to process ${file.name}`,
           });
@@ -514,7 +514,7 @@ export class CTFileInput extends BaseElement {
         ? [...currentFiles, ...newFiles]
         : newFiles;
       this.setFiles(updatedFiles);
-      this.emit("ct-change", { files: updatedFiles });
+      this.emit("cf-change", { files: updatedFiles });
     } finally {
       this.loading = false;
       // Reset input so same file can be selected again
@@ -526,8 +526,8 @@ export class CTFileInput extends BaseElement {
     const currentFiles = this.getFiles();
     const updatedFiles = currentFiles.filter((file) => file.id !== id);
     this.setFiles(updatedFiles);
-    this.emit("ct-remove", { id, files: updatedFiles });
-    this.emit("ct-change", { files: updatedFiles });
+    this.emit("cf-remove", { id, files: updatedFiles });
+    this.emit("cf-change", { files: updatedFiles });
   }
 
   override connectedCallback() {
@@ -579,4 +579,4 @@ export class CTFileInput extends BaseElement {
   }
 }
 
-customElements.define("ct-file-input", CTFileInput);
+customElements.define("cf-file-input", CFFileInput);

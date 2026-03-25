@@ -65,7 +65,7 @@ const clearPhoto = handler<
 // ===== The Pattern =====
 export const PhotoModule = pattern<PhotoModuleInput, PhotoModuleOutput>(
   ({ image: inputImage, label }) => {
-    // We use an array internally for ct-image-input compatibility
+    // We use an array internally for cf-image-input compatibility
     // but the module only supports a single image
     // NOTE: Writable.of must use empty array to avoid TypeScript OOM (CT-1148)
     // Using input params in Writable.of() causes deep type inference explosion
@@ -172,7 +172,7 @@ export const PhotoModule = pattern<PhotoModuleInput, PhotoModuleOutput>(
               )}
             </cf-vstack>,
             // No photo yet - show upload input
-            <ct-image-input
+            <cf-image-input
               $images={images}
               maxImages={1}
               showPreview={false}

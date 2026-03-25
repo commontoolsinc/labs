@@ -10,7 +10,7 @@ import {
   Writable,
 } from "commonfabric";
 
-// Type definition for transcription data (from ct-voice-input component)
+// Type definition for transcription data (from cf-voice-input component)
 interface TranscriptionChunk {
   timestamp: [number, number];
   text: string;
@@ -82,13 +82,13 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                 Hold the microphone button to record. Release to transcribe.
               </p>
 
-              <ct-voice-input
+              <cf-voice-input
                 $transcription={transcription}
                 recordingMode="hold"
                 autoTranscribe
                 maxDuration={120}
                 showWaveform
-                onct-transcription-complete={handleTranscriptionComplete}
+                oncf-transcription-complete={handleTranscriptionComplete}
               />
 
               {hasTranscription && (

@@ -305,7 +305,7 @@ interface Output {
 Record voice notes with automatic transcription and note history. Hold the
 microphone button to record, release to transcribe.
 
-**Keywords:** voice, transcription, audio, ct-voice-input
+**Keywords:** voice, transcription, audio, cf-voice-input
 
 ### Input Schema
 
@@ -762,7 +762,7 @@ type Output = {
 Upload images and get AI-powered analysis and descriptions. Supports multiple
 images with customizable prompts.
 
-**Keywords:** vision, image, generateText, ct-image-input
+**Keywords:** vision, image, generateText, cf-image-input
 
 ### Input Schema
 

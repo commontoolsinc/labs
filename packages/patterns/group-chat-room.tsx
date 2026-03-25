@@ -775,8 +775,8 @@ export default pattern<RoomInput, RoomOutput>(
                           {computed(() => getInitials(myNameResolved))}
                         </div>,
                       )}
-                      {/* Hidden ct-image-input overlaid on avatar */}
-                      <ct-image-input
+                      {/* Hidden cf-image-input overlaid on avatar */}
+                      <cf-image-input
                         $images={avatarImages}
                         maxImages={1}
                         showPreview={false}
@@ -801,7 +801,7 @@ export default pattern<RoomInput, RoomOutput>(
                     </div>
 
                     {/* Attachment button for sending images to chat */}
-                    <ct-image-input
+                    <cf-image-input
                       $images={chatImages}
                       maxImages={1}
                       showPreview={false}

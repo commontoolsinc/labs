@@ -698,11 +698,11 @@ export default pattern<Input, Output>(({ importJson }) => {
                 <p>
                   Upload a backup file or paste JSON to restore your records.
                 </p>
-                <ct-file-input
+                <cf-file-input
                   accept=".json,application/json"
                   buttonText="📤 Upload Backup File"
                   showPreview={false}
-                  onct-change={handleFileUpload({ importJson })}
+                  oncf-change={handleFileUpload({ importJson })}
                 />
                 <ct-code-editor
                   $value={importJson}

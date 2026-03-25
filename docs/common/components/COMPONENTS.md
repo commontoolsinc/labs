@@ -252,15 +252,15 @@ Full-screen container for app-like layouts. Use instead of `<div style={{ height
 
 ---
 
-## ct-image-input
+## cf-image-input
 
 ```tsx
-<ct-image-input
-  onct-change={handleImageUpload}
+<cf-image-input
+  oncf-change={handleImageUpload}
   maxSizeBytes={5000000}
 >
   📷 Add Photo
-</ct-image-input>
+</cf-image-input>
 ```
 
 The component compresses images to fit within `maxSizeBytes`.

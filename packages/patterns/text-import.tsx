@@ -76,7 +76,7 @@ function decodeBase64ToText(dataUrl: string): string {
 
 // ===== Handlers =====
 
-// Define the expected event shape from ct-file-input
+// Define the expected event shape from cf-file-input
 interface FileUploadEvent {
   detail: {
     files: Array<{
@@ -247,11 +247,11 @@ export const TextImportModule = pattern<
             </div>
           </cf-vstack>,
           // No file yet - show upload input
-          <ct-file-input
+          <cf-file-input
             accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
             buttonText={`${MODULE_METADATA.icon} Import Text File`}
             showPreview={false}
-            onct-change={handleFileUpload({ content, filename })}
+            oncf-change={handleFileUpload({ content, filename })}
             style={{ width: "100%" }}
           />,
         )}

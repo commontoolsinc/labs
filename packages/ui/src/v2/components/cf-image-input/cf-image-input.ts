@@ -1,7 +1,7 @@
 import { html, type TemplateResult } from "lit";
 import { property } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
-import { CTFileInput, type FileData } from "../ct-file-input/ct-file-input.ts";
+import { CFFileInput, type FileData } from "../cf-file-input/cf-file-input.ts";
 import {
   compressImage,
   formatFileSize,
@@ -51,12 +51,12 @@ export interface ImageData extends FileData {
 }
 
 /**
- * CTImageInput - Image capture and upload component with camera support
+ * CFImageInput - Image capture and upload component with camera support
  *
- * Extends CTFileInput with image-specific features like compression, EXIF extraction,
+ * Extends CFFileInput with image-specific features like compression, EXIF extraction,
  * and camera capture support.
  *
- * @element ct-image-input
+ * @element cf-image-input
  *
  * @attr {boolean} multiple - Allow multiple images (default: false)
  * @attr {number} maxImages - Max number of images (default: unlimited)
@@ -70,16 +70,16 @@ export interface ImageData extends FileData {
  * @attr {boolean} removable - Allow removing images (default: true)
  * @attr {boolean} disabled - Disable the input
  *
- * @fires ct-change - Fired when image(s) are added. detail: { images: ImageData[] }
- * @fires ct-remove - Fired when an image is removed. detail: { id: string, images: ImageData[] }
- * @fires ct-error - Fired when an error occurs. detail: { error: Error, message: string }
+ * @fires cf-change - Fired when image(s) are added. detail: { images: ImageData[] }
+ * @fires cf-remove - Fired when an image is removed. detail: { id: string, images: ImageData[] }
+ * @fires cf-error - Fired when an error occurs. detail: { error: Error, message: string }
  *
  * @example
- * <ct-image-input capture="environment" buttonText="📸 Scan"></ct-image-input>
+ * <cf-image-input capture="environment" buttonText="📸 Scan"></cf-image-input>
  * @example
- * <ct-image-input maxSizeBytes={5000000} buttonText="📸 Upload"></ct-image-input>
+ * <cf-image-input maxSizeBytes={5000000} buttonText="📸 Upload"></cf-image-input>
  */
-export class CTImageInput extends CTFileInput {
+export class CFImageInput extends CFFileInput {
   // Override default properties with image-specific defaults
   @property({ type: String })
   override buttonText = "📷 Add Photo";
@@ -220,13 +220,13 @@ export class CTImageInput extends CTFileInput {
     detail?: T,
     options?: EventInit,
   ): boolean {
-    if (eventName === "ct-change" && (detail as any)?.files) {
+    if (eventName === "cf-change" && (detail as any)?.files) {
       // Add 'images' property for backward compatibility
       return super.emit(eventName, {
         ...detail,
         images: (detail as any).files,
       } as T, options);
-    } else if (eventName === "ct-remove" && (detail as any)?.files) {
+    } else if (eventName === "cf-remove" && (detail as any)?.files) {
       // Add 'images' property for backward compatibility
       return super.emit(eventName, {
         ...detail,
@@ -238,4 +238,4 @@ export class CTImageInput extends CTFileInput {
   }
 }
 
-customElements.define("ct-image-input", CTImageInput);
+customElements.define("cf-image-input", CFImageInput);

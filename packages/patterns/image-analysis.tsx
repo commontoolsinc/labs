@@ -73,7 +73,7 @@ export default pattern<ImageChatInput, ImageChatOutput>(
               <cf-card>
                 <cf-vstack gap="2">
                   <cf-heading level={5}>Upload Images</cf-heading>
-                  <ct-image-input
+                  <cf-image-input
                     multiple
                     maxImages={5}
                     showPreview

@@ -1508,7 +1508,7 @@ export default pattern<Input, Output>(
                         Take photos of aisle signs - AI will extract aisle
                         numbers and products automatically.
                       </div>
-                      <ct-image-input
+                      <cf-image-input
                         multiple
                         maxImages={20}
                         maxSizeBytes={4000000}
