@@ -1,5 +1,5 @@
 /**
- * ct-map - Interactive map component using Leaflet
+ * cf-map - Interactive map component using Leaflet
  *
  * Displays markers, circles, and polylines with bidirectional Cell reactivity.
  * Uses OpenStreetMap tiles (no API key required).
@@ -13,11 +13,11 @@ import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import type {
   Bounds,
-  CtBoundsChangeDetail,
-  CtCircleClickDetail,
-  CtClickDetail,
-  CtMarkerClickDetail,
-  CtMarkerDragEndDetail,
+  CfBoundsChangeDetail,
+  CfCircleClickDetail,
+  CfClickDetail,
+  CfMarkerClickDetail,
+  CfMarkerDragEndDetail,
   LatLng,
   MapCircle,
   MapMarker,
@@ -123,9 +123,9 @@ const mapValueSchema: JSONSchema = {
 };
 
 /**
- * CTMap - Interactive map component with markers, circles, and polylines
+ * CFMap - Interactive map component with markers, circles, and polylines
  *
- * @element ct-map
+ * @element cf-map
  *
  * @attr {MapValue|Cell<MapValue>} value - Map data with markers, circles, polylines
  * @attr {LatLng|Cell<LatLng>} center - Map center coordinates (bidirectional)
@@ -134,25 +134,25 @@ const mapValueSchema: JSONSchema = {
  * @attr {boolean} fitToBounds - Auto-fit to show all features
  * @attr {boolean} interactive - Enable pan/zoom (default: true)
  *
- * @fires ct-click - Map background click with { lat, lng }
- * @fires ct-bounds-change - Viewport change with { bounds, center, zoom }
- * @fires ct-marker-click - Marker click with { marker, index, lat, lng }
- * @fires ct-marker-drag-end - Marker drag end with { marker, index, position, oldPosition }
- * @fires ct-circle-click - Circle click with { circle, index, lat, lng }
+ * @fires cf-click - Map background click with { lat, lng }
+ * @fires cf-bounds-change - Viewport change with { bounds, center, zoom }
+ * @fires cf-marker-click - Marker click with { marker, index, lat, lng }
+ * @fires cf-marker-drag-end - Marker drag end with { marker, index, position, oldPosition }
+ * @fires cf-circle-click - Circle click with { circle, index, lat, lng }
  *
  * @note Polyline click events are not currently supported. Polylines are rendered
  * for display only (routes, paths). For clickable segments, use circles as waypoints.
  *
  * @example
- * <ct-map
+ * <cf-map
  *   $value={mapDataCell}
  *   $center={centerCell}
  *   $zoom={zoomCell}
  *   fitToBounds
- *   @ct-marker-click={handleMarkerClick}
- * ></ct-map>
+ *   @cf-marker-click={handleMarkerClick}
+ * ></cf-map>
  */
-export class CTMap extends BaseElement {
+export class CFMap extends BaseElement {
   static override styles = [BaseElement.baseStyles, styles];
 
   static override properties = {
@@ -456,7 +456,7 @@ export class CTMap extends BaseElement {
 
     // Handle tile loading errors gracefully
     tileLayer.on("tileerror", (event: L.TileErrorEvent) => {
-      console.warn("ct-map: Tile loading error", {
+      console.warn("cf-map: Tile loading error", {
         coords: event.coords,
         error: event.error,
       });
@@ -549,12 +549,12 @@ export class CTMap extends BaseElement {
         };
 
         // Emit bounds change event
-        const detail: CtBoundsChangeDetail = {
+        const detail: CfBoundsChangeDetail = {
           bounds: boundsData,
           center: centerData,
           zoom,
         };
-        this.emit("ct-bounds-change", detail);
+        this.emit("cf-bounds-change", detail);
 
         // Update Cell values (bidirectional) using controllers
         this._updateCenterCell(centerData);
@@ -572,11 +572,11 @@ export class CTMap extends BaseElement {
    * Extracted to allow deferred clicks after animations.
    */
   private _emitClickEvent(e: L.LeafletMouseEvent): void {
-    const detail: CtClickDetail = {
+    const detail: CfClickDetail = {
       lat: e.latlng.lat,
       lng: e.latlng.lng,
     };
-    this.emit("ct-click", detail);
+    this.emit("cf-click", detail);
   }
 
   // === Value Getters (using CellControllers) ===
@@ -885,7 +885,7 @@ export class CTMap extends BaseElement {
 
         markerIcon = L.divIcon({
           html: span.outerHTML,
-          className: "ct-map-emoji-marker",
+          className: "cf-map-emoji-marker",
           iconSize: [32, 32],
           iconAnchor: [16, 32],
           popupAnchor: [0, -32],
@@ -899,7 +899,7 @@ export class CTMap extends BaseElement {
             <path d="M12.5 0C5.6 0 0 5.6 0 12.5c0 2.4.7 4.6 1.9 6.5L12.5 41l10.6-22c1.2-1.9 1.9-4.1 1.9-6.5C25 5.6 19.4 0 12.5 0z" fill="#3b82f6"/>
             <circle cx="12.5" cy="12.5" r="5" fill="white"/>
           </svg>`,
-          className: "ct-map-default-marker",
+          className: "cf-map-default-marker",
           iconSize: [25, 41],
           iconAnchor: [12, 41],
           popupAnchor: [0, -41],
@@ -920,13 +920,13 @@ export class CTMap extends BaseElement {
 
       // Click handler
       leafletMarker.on("click", (e: L.LeafletMouseEvent) => {
-        const detail: CtMarkerClickDetail = {
+        const detail: CfMarkerClickDetail = {
           marker,
           index,
           lat: e.latlng.lat,
           lng: e.latlng.lng,
         };
-        this.emit("ct-marker-click", detail);
+        this.emit("cf-marker-click", detail);
       });
 
       // Drag handlers
@@ -946,13 +946,13 @@ export class CTMap extends BaseElement {
             lat: newLatLng.lat,
             lng: newLatLng.lng,
           };
-          const detail: CtMarkerDragEndDetail = {
+          const detail: CfMarkerDragEndDetail = {
             marker,
             index,
             position: newPosition,
             oldPosition,
           };
-          this.emit("ct-marker-drag-end", detail);
+          this.emit("cf-marker-drag-end", detail);
         });
       }
 
@@ -1033,13 +1033,13 @@ export class CTMap extends BaseElement {
 
       // Click handler
       leafletCircle.on("click", (e: L.LeafletMouseEvent) => {
-        const detail: CtCircleClickDetail = {
+        const detail: CfCircleClickDetail = {
           circle,
           index,
           lat: e.latlng.lat,
           lng: e.latlng.lng,
         };
-        this.emit("ct-circle-click", detail);
+        this.emit("cf-circle-click", detail);
       });
 
       // Add to layer and track
@@ -1443,6 +1443,6 @@ export class CTMap extends BaseElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "ct-map": CTMap;
+    "cf-map": CFMap;
   }
 }

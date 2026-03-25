@@ -1,7 +1,7 @@
 /**
- * Tests for CTMap component types and data structures
+ * Tests for CFMap component types and data structures
  *
- * Note: The CTMap component imports Leaflet which requires a browser environment.
+ * Note: The CFMap component imports Leaflet which requires a browser environment.
  * These tests focus on type validation and data structure verification that can
  * run in Deno without a full browser DOM.
  *
@@ -11,11 +11,11 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type {
   Bounds,
-  CtBoundsChangeDetail,
-  CtCircleClickDetail,
-  CtClickDetail,
-  CtMarkerClickDetail,
-  CtMarkerDragEndDetail,
+  CfBoundsChangeDetail,
+  CfCircleClickDetail,
+  CfClickDetail,
+  CfMarkerClickDetail,
+  CfMarkerDragEndDetail,
   LatLng,
   MapCircle,
   MapMarker,
@@ -26,7 +26,7 @@ import type {
 // === Type Structure Tests ===
 // These tests verify that the type definitions are correctly structured
 
-describe("CTMap Types - LatLng", () => {
+describe("CFMap Types - LatLng", () => {
   it("should define lat and lng as numbers", () => {
     const latLng: LatLng = { lat: 37.7749, lng: -122.4194 };
     expect(typeof latLng.lat).toBe("number");
@@ -47,7 +47,7 @@ describe("CTMap Types - LatLng", () => {
   });
 });
 
-describe("CTMap Types - Bounds", () => {
+describe("CFMap Types - Bounds", () => {
   it("should define all four boundary values", () => {
     const bounds: Bounds = {
       north: 38,
@@ -73,7 +73,7 @@ describe("CTMap Types - Bounds", () => {
   });
 });
 
-describe("CTMap Types - MapMarker", () => {
+describe("CFMap Types - MapMarker", () => {
   it("should require position", () => {
     const marker: MapMarker = {
       position: { lat: 37.7749, lng: -122.4194 },
@@ -109,7 +109,7 @@ describe("CTMap Types - MapMarker", () => {
   });
 });
 
-describe("CTMap Types - MapCircle", () => {
+describe("CFMap Types - MapCircle", () => {
   it("should require center and radius", () => {
     const circle: MapCircle = {
       center: { lat: 37.7749, lng: -122.4194 },
@@ -149,7 +149,7 @@ describe("CTMap Types - MapCircle", () => {
   });
 });
 
-describe("CTMap Types - MapPolyline", () => {
+describe("CFMap Types - MapPolyline", () => {
   it("should require points array", () => {
     const polyline: MapPolyline = {
       points: [
@@ -189,7 +189,7 @@ describe("CTMap Types - MapPolyline", () => {
   });
 });
 
-describe("CTMap Types - MapValue", () => {
+describe("CFMap Types - MapValue", () => {
   it("should support empty structure", () => {
     const empty: MapValue = {};
     expect(empty.markers).toBeUndefined();
@@ -272,9 +272,9 @@ describe("CTMap Types - MapValue", () => {
 
 // === Event Detail Type Tests ===
 
-describe("CTMap Types - CtClickDetail", () => {
+describe("CFMap Types - CfClickDetail", () => {
   it("should contain lat and lng", () => {
-    const detail: CtClickDetail = {
+    const detail: CfClickDetail = {
       lat: 37.7749,
       lng: -122.4194,
     };
@@ -283,9 +283,9 @@ describe("CTMap Types - CtClickDetail", () => {
   });
 });
 
-describe("CTMap Types - CtBoundsChangeDetail", () => {
+describe("CFMap Types - CfBoundsChangeDetail", () => {
   it("should contain bounds, center, and zoom", () => {
-    const detail: CtBoundsChangeDetail = {
+    const detail: CfBoundsChangeDetail = {
       bounds: { north: 38, south: 37, east: -122, west: -123 },
       center: { lat: 37.5, lng: -122.5 },
       zoom: 10,
@@ -296,9 +296,9 @@ describe("CTMap Types - CtBoundsChangeDetail", () => {
   });
 });
 
-describe("CTMap Types - CtMarkerClickDetail", () => {
+describe("CFMap Types - CfMarkerClickDetail", () => {
   it("should contain marker, index, and coordinates", () => {
-    const detail: CtMarkerClickDetail = {
+    const detail: CfMarkerClickDetail = {
       marker: { position: { lat: 37.7749, lng: -122.4194 }, title: "Test" },
       index: 0,
       lat: 37.7749,
@@ -311,9 +311,9 @@ describe("CTMap Types - CtMarkerClickDetail", () => {
   });
 });
 
-describe("CTMap Types - CtMarkerDragEndDetail", () => {
+describe("CFMap Types - CfMarkerDragEndDetail", () => {
   it("should contain marker, index, position, and oldPosition", () => {
-    const detail: CtMarkerDragEndDetail = {
+    const detail: CfMarkerDragEndDetail = {
       marker: { position: { lat: 37.78, lng: -122.42 }, draggable: true },
       index: 0,
       position: { lat: 37.78, lng: -122.42 },
@@ -325,9 +325,9 @@ describe("CTMap Types - CtMarkerDragEndDetail", () => {
   });
 });
 
-describe("CTMap Types - CtCircleClickDetail", () => {
+describe("CFMap Types - CfCircleClickDetail", () => {
   it("should contain circle, index, and coordinates", () => {
-    const detail: CtCircleClickDetail = {
+    const detail: CfCircleClickDetail = {
       circle: { center: { lat: 37.7749, lng: -122.4194 }, radius: 500 },
       index: 0,
       lat: 37.7749,
@@ -341,7 +341,7 @@ describe("CTMap Types - CtCircleClickDetail", () => {
 
 // === Coordinate Validation Tests ===
 
-describe("CTMap coordinate validation scenarios", () => {
+describe("CFMap coordinate validation scenarios", () => {
   it("should handle edge case latitudes", () => {
     const northPole: LatLng = { lat: 90, lng: 0 };
     const southPole: LatLng = { lat: -90, lng: 0 };
@@ -383,7 +383,7 @@ describe("CTMap coordinate validation scenarios", () => {
 
 // === Data Structure Tests ===
 
-describe("CTMap data structure scenarios", () => {
+describe("CFMap data structure scenarios", () => {
   it("should handle large marker collections", () => {
     const markers: MapMarker[] = Array.from({ length: 1000 }, (_, i) => ({
       position: { lat: 37 + (i / 1000), lng: -122 + (i / 1000) },
@@ -441,7 +441,7 @@ describe("CTMap data structure scenarios", () => {
 
 // === Schema Binding Data Shape Tests ===
 
-describe("CTMap schema binding data shapes", () => {
+describe("CFMap schema binding data shapes", () => {
   it("should define marker structure compatible with JSON schema", () => {
     // The component uses JSON schema for nested cell resolution
     // This test verifies the data shape matches expectations
@@ -504,7 +504,7 @@ describe("CTMap schema binding data shapes", () => {
 
 // === Edge Cases ===
 
-describe("CTMap edge cases", () => {
+describe("CFMap edge cases", () => {
   it("should handle zero radius circles", () => {
     const circle: MapCircle = {
       center: { lat: 0, lng: 0 },

@@ -1,5 +1,5 @@
 /**
- * Styles for ct-map component
+ * Styles for cf-map component
  * Includes Leaflet core CSS and ct-* theme integration
  */
 
@@ -436,7 +436,7 @@ export const styles = css`
   .leaflet-default-icon-path {
     /* used only in path-guessing heuristic, see L.Icon.Default */
     /* Disabled in Shadow DOM: the default marker icons cannot be resolved from relative paths.
-      The ct-map component uses custom emoji markers instead, so these icons are not needed. */
+      The cf-map component uses custom emoji markers instead, so these icons are not needed. */
     /* background-image: url(images/marker-icon.png); */
   }
 
@@ -691,7 +691,7 @@ export const styles = css`
     }
 
     /* ================================================
-    * ct-map Component Styles
+    * cf-map Component Styles
     * Theme-integrated styles for the map container
     * ================================================ */
 
@@ -857,23 +857,23 @@ export const styles = css`
         * ================================================ */
 
         /* Default marker icon (SVG pin) */
-        .ct-map-default-marker {
+        .cf-map-default-marker {
           background: transparent !important;
           border: none !important;
         }
 
-        .ct-map-default-marker svg {
+        .cf-map-default-marker svg {
           display: block;
           filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.3));
         }
 
         /* Emoji marker icon */
-        .ct-map-emoji-marker {
+        .cf-map-emoji-marker {
           background: transparent !important;
           border: none !important;
         }
 
-        .ct-map-emoji-marker .emoji-marker {
+        .cf-map-emoji-marker .emoji-marker {
           font-size: 24px;
           line-height: 1;
           filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.3));

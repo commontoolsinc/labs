@@ -4151,20 +4151,20 @@ interface CFToolCallAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 // Map component types
-interface CTMapLatLng {
+interface CFMapLatLng {
   lat: number;
   lng: number;
 }
 
-interface CTMapBounds {
+interface CFMapBounds {
   north: number;
   south: number;
   east: number;
   west: number;
 }
 
-interface CTMapMarker {
-  position: CTMapLatLng;
+interface CFMapMarker {
+  position: CFMapLatLng;
   title?: string;
   description?: string;
   icon?: string;
@@ -4172,8 +4172,8 @@ interface CTMapMarker {
   draggable?: boolean;
 }
 
-interface CTMapCircle {
-  center: CTMapLatLng;
+interface CFMapCircle {
+  center: CFMapLatLng;
   radius: number;
   color?: string;
   fillOpacity?: number;
@@ -4183,59 +4183,59 @@ interface CTMapCircle {
   popup?: any;
 }
 
-interface CTMapPolyline {
-  points: CTMapLatLng[];
+interface CFMapPolyline {
+  points: CFMapLatLng[];
   color?: string;
   strokeWidth?: number;
   dashArray?: string;
 }
 
-interface CTMapValue {
-  markers?: CTMapMarker[];
-  circles?: CTMapCircle[];
-  polylines?: CTMapPolyline[];
+interface CFMapValue {
+  markers?: CFMapMarker[];
+  circles?: CFMapCircle[];
+  polylines?: CFMapPolyline[];
 }
 
-interface CTMapAttributes<T> extends CTHTMLAttributes<T> {
-  "value"?: CTMapValue | CellLike<CTMapValue>;
-  "$value"?: CTMapValue | CellLike<CTMapValue>;
-  "center"?: CTMapLatLng | CellLike<CTMapLatLng | null> | null;
-  "$center"?: CTMapLatLng | CellLike<CTMapLatLng | null> | null;
+interface CFMapAttributes<T> extends CTHTMLAttributes<T> {
+  "value"?: CFMapValue | CellLike<CFMapValue>;
+  "$value"?: CFMapValue | CellLike<CFMapValue>;
+  "center"?: CFMapLatLng | CellLike<CFMapLatLng | null> | null;
+  "$center"?: CFMapLatLng | CellLike<CFMapLatLng | null> | null;
   "zoom"?: number | CellLike<number | null> | null;
   "$zoom"?: number | CellLike<number | null> | null;
-  "bounds"?: CTMapBounds | CellLike<CTMapBounds | null> | null;
-  "$bounds"?: CTMapBounds | CellLike<CTMapBounds | null> | null;
+  "bounds"?: CFMapBounds | CellLike<CFMapBounds | null> | null;
+  "$bounds"?: CFMapBounds | CellLike<CFMapBounds | null> | null;
   "fitToBounds"?: boolean | CellLike<boolean>;
   "interactive"?: boolean | CellLike<boolean>;
-  "onct-click"?: (event: CustomEvent<{ lat: number; lng: number }>) => void;
-  "onct-bounds-change"?: (
+  "oncf-click"?: (event: CustomEvent<{ lat: number; lng: number }>) => void;
+  "oncf-bounds-change"?: (
     event: CustomEvent<
-      { bounds: CTMapBounds; center: CTMapLatLng; zoom: number }
+      { bounds: CFMapBounds; center: CFMapLatLng; zoom: number }
     >,
   ) => void;
-  "onct-marker-click"?: (
+  "oncf-marker-click"?: (
     event: CustomEvent<
-      { marker: CTMapMarker; index: number; lat: number; lng: number }
+      { marker: CFMapMarker; index: number; lat: number; lng: number }
     >,
   ) => void;
-  "onct-marker-drag-end"?: (
+  "oncf-marker-drag-end"?: (
     event: CustomEvent<
       {
-        marker: CTMapMarker;
+        marker: CFMapMarker;
         index: number;
-        position: CTMapLatLng;
-        oldPosition: CTMapLatLng;
+        position: CFMapLatLng;
+        oldPosition: CFMapLatLng;
       }
     >,
   ) => void;
-  "onct-circle-click"?: (
+  "oncf-circle-click"?: (
     event: CustomEvent<
-      { circle: CTMapCircle; index: number; lat: number; lng: number }
+      { circle: CFMapCircle; index: number; lat: number; lng: number }
     >,
   ) => void;
 }
 
-interface CTMapElement extends CTHTMLElement {}
+interface CFMapElement extends CTHTMLElement {}
 
 /**
  * Typings for native DOM elements.
@@ -5081,9 +5081,9 @@ declare global {
       >;
 
       // Map component
-      "ct-map": CTDOM.DetailedHTMLProps<
-        CTMapAttributes<CTMapElement>,
-        CTMapElement
+      "cf-map": CTDOM.DetailedHTMLProps<
+        CFMapAttributes<CFMapElement>,
+        CFMapElement
       >;
 
       // Chart components

@@ -11,7 +11,7 @@ import {
 } from "commonfabric";
 
 /**
- * Trip Planner Demo - Comprehensive ct-map component demonstration
+ * Trip Planner Demo - Comprehensive cf-map component demonstration
  *
  * Demonstrates:
  * - Basic markers with title/description/icon
@@ -308,7 +308,7 @@ export default pattern<Input, Output>(
 
               {/* Map container */}
               <cf-card style="padding: 0; overflow: hidden;">
-                <ct-map
+                <cf-map
                   $value={mapValue}
                   $center={center}
                   $zoom={zoom}
@@ -316,12 +316,12 @@ export default pattern<Input, Output>(
                   fitToBounds={computed(
                     () => fitBoundsTrigger.get() > 0 && stops.get().length > 0,
                   )}
-                  onct-click={addStopHandler({
+                  oncf-click={addStopHandler({
                     stops,
                     stopCount: stopCount,
                   })}
-                  onct-marker-drag-end={markerDragHandler({ stops })}
-                  onct-marker-click={markerClickHandler({ selectedStopIndex })}
+                  oncf-marker-drag-end={markerDragHandler({ stops })}
+                  oncf-marker-click={markerClickHandler({ selectedStopIndex })}
                 />
               </cf-card>
 

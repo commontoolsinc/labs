@@ -1,5 +1,5 @@
 /**
- * Type definitions for the CT Map component
+ * Type definitions for the CF Map component
  */
 
 import type { OpaqueRef } from "@commonfabric/api";
@@ -26,7 +26,7 @@ export interface Bounds {
  * Represents a marker on the map
  *
  * Popup content follows a progressive model:
- * - Simple: Use `title`, `description`, `icon` fields (pure data, rendered by ct-map)
+ * - Simple: Use `title`, `description`, `icon` fields (pure data, rendered by cf-map)
  * - Advanced: Use `popup` field with a Cell/OpaqueRef that has a [UI] property
  */
 export interface MapMarker {
@@ -88,7 +88,7 @@ export interface MapValue {
 /**
  * Event detail emitted when the map background (not a feature) is clicked
  */
-export interface CtClickDetail {
+export interface CfClickDetail {
   lat: number;
   lng: number;
 }
@@ -96,7 +96,7 @@ export interface CtClickDetail {
 /**
  * Event detail emitted when the viewport changes (pan/zoom)
  */
-export interface CtBoundsChangeDetail {
+export interface CfBoundsChangeDetail {
   bounds: Bounds;
   center: LatLng;
   zoom: number;
@@ -105,7 +105,7 @@ export interface CtBoundsChangeDetail {
 /**
  * Event detail emitted when a marker is clicked
  */
-export interface CtMarkerClickDetail {
+export interface CfMarkerClickDetail {
   marker: MapMarker;
   index: number;
   lat: number;
@@ -115,7 +115,7 @@ export interface CtMarkerClickDetail {
 /**
  * Event detail emitted when a draggable marker drag operation completes
  */
-export interface CtMarkerDragEndDetail {
+export interface CfMarkerDragEndDetail {
   marker: MapMarker;
   index: number;
   position: LatLng;
@@ -125,7 +125,7 @@ export interface CtMarkerDragEndDetail {
 /**
  * Event detail emitted when a circle is clicked
  */
-export interface CtCircleClickDetail {
+export interface CfCircleClickDetail {
   circle: MapCircle;
   index: number;
   lat: number;

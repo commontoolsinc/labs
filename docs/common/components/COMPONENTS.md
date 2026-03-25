@@ -309,7 +309,7 @@ on cell resolution and link formats.
 
 ---
 
-## ct-map
+## cf-map
 
 Interactive map component using Leaflet with OpenStreetMap tiles. No API key required.
 
@@ -368,11 +368,11 @@ interface MapPolyline {
 
 | Event | Detail | Description |
 |-------|--------|-------------|
-| `ct-click` | `{ lat, lng }` | Map background clicked |
-| `ct-bounds-change` | `{ bounds, center, zoom }` | Viewport changed |
-| `ct-marker-click` | `{ marker, index, lat, lng }` | Marker clicked |
-| `ct-marker-drag-end` | `{ marker, index, position, oldPosition }` | Marker drag completed |
-| `ct-circle-click` | `{ circle, index, lat, lng }` | Circle clicked |
+| `cf-click` | `{ lat, lng }` | Map background clicked |
+| `cf-bounds-change` | `{ bounds, center, zoom }` | Viewport changed |
+| `cf-marker-click` | `{ marker, index, lat, lng }` | Marker clicked |
+| `cf-marker-drag-end` | `{ marker, index, position, oldPosition }` | Marker drag completed |
+| `cf-circle-click` | `{ circle, index, lat, lng }` | Circle clicked |
 
 **Note:** Polylines do not emit click events. For clickable segments, use circles as waypoints.
 
@@ -387,12 +387,12 @@ const mapData = {
     icon: "📍"
   }))
 };
-<ct-map $value={mapData} fitToBounds />
+<cf-map $value={mapData} fitToBounds />
 
 // Interactive: Click to add marker
-<ct-map
+<cf-map
   $value={mapData}
-  onct-click={(e) => {
+  oncf-click={(e) => {
     markers.push({
       position: { lat: e.detail.lat, lng: e.detail.lng },
       title: "New Location",
@@ -402,9 +402,9 @@ const mapData = {
 />
 
 // Draggable markers
-<ct-map
+<cf-map
   $value={mapData}
-  onct-marker-drag-end={(e) => {
+  oncf-marker-drag-end={(e) => {
     markers.key(e.detail.index).key("position").set(e.detail.position);
   }}
 />
