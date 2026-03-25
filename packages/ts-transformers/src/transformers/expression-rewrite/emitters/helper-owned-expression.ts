@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import { normalizeDataFlows } from "../../../ast/mod.ts";
+import { classifyOpaquePathTerminalCall } from "../../opaque-roots.ts";
 import {
   createReactiveWrapperForExpression,
   filterRelevantDataFlows,
@@ -19,6 +20,13 @@ function isHelperOwnedComputationExpression(
     ts.isPrefixUnaryExpression(expression) ||
     ts.isPostfixUnaryExpression(expression) ||
     ts.isConditionalExpression(expression);
+}
+
+function isHelperOwnedCellGetExpression(
+  expression: ts.Expression,
+): expression is ts.CallExpression {
+  return ts.isCallExpression(expression) &&
+    classifyOpaquePathTerminalCall(expression) === "get";
 }
 
 interface RewriteHelperOwnedExpressionParams {
@@ -83,7 +91,10 @@ export function rewriteHelperOwnedExpression(
 
   if (
     relevantDataFlows.length > 0 &&
-    isHelperOwnedComputationExpression(expression)
+    (
+      isHelperOwnedComputationExpression(expression) ||
+      isHelperOwnedCellGetExpression(expression)
+    )
   ) {
     const forced = createReactiveWrapperForExpression(
       expression,

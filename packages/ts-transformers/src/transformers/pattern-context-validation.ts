@@ -33,6 +33,7 @@
  *   callback: ERROR (use a nested computed()/derive())
  */
 import ts from "typescript";
+import { getCellKind } from "@commontools/schema-generator/cell-brand";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
   classifyReactiveContext,
@@ -52,7 +53,10 @@ import {
   isOpaqueSourceExpression,
   isTopmostMemberAccess,
 } from "./opaque-roots.ts";
-import { findLowerableExpressionSite } from "./expression-site-lowering.ts";
+import {
+  findLowerableExpressionSite,
+  getExpressionSitePolicyInfo,
+} from "./expression-site-lowering.ts";
 
 const EMPTY_OPAQUE_ROOTS = new Set<string>();
 
@@ -125,7 +129,13 @@ export class PatternContextValidationTransformer extends Transformer {
         // Check for .get() calls
         if (
           this.isGetCall(node) &&
-          isInRestrictedReactiveContext(node, checker, context)
+          isInRestrictedReactiveContext(node, checker, context) &&
+          !this.isSupportedHelperOwnedCellGetCall(
+            node,
+            context,
+            checker,
+            analyze,
+          )
         ) {
           context.reportDiagnostic({
             severity: "error",
@@ -160,6 +170,48 @@ export class PatternContextValidationTransformer extends Transformer {
       expr.name.text === "get" &&
       node.arguments.length === 0
     );
+  }
+
+  private isSupportedHelperOwnedCellGetCall(
+    node: ts.CallExpression,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+    analyze: ReturnType<typeof createDataFlowAnalyzer>,
+  ): boolean {
+    if (!this.isGetCall(node)) {
+      return false;
+    }
+
+    const target = node.expression;
+    if (!ts.isPropertyAccessExpression(target)) {
+      return false;
+    }
+
+    let receiverType: ts.Type;
+    try {
+      receiverType = checker.getTypeAtLocation(target.expression);
+    } catch {
+      return false;
+    }
+
+    const cellKind = getCellKind(receiverType, checker);
+    if (cellKind !== "cell" && cellKind !== "stream") {
+      return false;
+    }
+
+    const lowerableSite = findLowerableExpressionSite(node, context, analyze);
+    if (!lowerableSite) {
+      return false;
+    }
+
+    const siteInfo = getExpressionSitePolicyInfo(
+      lowerableSite.expression,
+      lowerableSite.containerKind,
+      context,
+      analyze,
+    );
+
+    return !!siteInfo.helperBoundaryKind;
   }
 
   /**

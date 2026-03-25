@@ -1726,6 +1726,52 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   );
 
   await t.step(
+    "allows .get() on Writable inside authored ifElse branch",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, ifElse, Writable } from "commontools";
+
+      export default pattern<{ count: Writable<number>; show: boolean }>((
+        { count, show },
+      ) => {
+        return { value: ifElse(show, count.get(), 0) };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        ".get() on Writable inside authored ifElse should be allowed",
+      );
+    },
+  );
+
+  await t.step(
+    "still errors on opaque .get() inside authored ifElse branch",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, ifElse } from "commontools";
+
+      export default pattern<{ items: string[]; show: boolean }>((
+        { items, show },
+      ) => {
+        return { value: ifElse(show, items.get(), []) };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "opaque-get:invalid-call");
+      assertHasErrorType(errors, "pattern-context:get-call");
+    },
+  );
+
+  await t.step(
     "allows direct access on computed result (correct usage)",
     async () => {
       const source = `/// <cts-enable />

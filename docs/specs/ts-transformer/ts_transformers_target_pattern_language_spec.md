@@ -71,7 +71,7 @@ Each construct family is classified as one of:
 | Dynamic key access inside JSX expressions, explicit computation callbacks, supported collection callbacks, or structural binding forms | Supported | Dynamic access like `selectedScopes[key]` is valid in local authored expression contexts or in binding forms that preserve the dynamic key directly |
 | Bare dynamic key access in top-level pattern-facing code | Unsupported | Forms like `input[key]` as a direct top-level pattern-body traversal are outside the intended declarative language and should move into JSX, an explicit computation callback, a supported collection callback, or a structural binding form |
 | Cell-style `.key(...)` traversal on explicitly cell-like values | Supported | When the authored value is truly `Cell`/`Writable`/`Stream`-like, `.key(...)` remains part of that value's direct API rather than an implementation artifact |
-| Cell-style `.get()` reads on explicitly cell-like values inside JSX expressions or explicit computation callbacks | Supported | Eager cell reads remain valid in JSX interpolation and explicit computation callbacks such as `computed`, `derive`, `action`, `lift`, and `handler` |
+| Cell-style `.get()` reads on explicitly cell-like values inside JSX expressions, authored helper control flow, or explicit computation callbacks | Supported | Eager cell reads remain valid when authored in JSX interpolation, helper control flow such as `ifElse` / `when` / `unless`, and explicit computation callbacks such as `computed`, `derive`, `action`, `lift`, and `handler` |
 | Foreign callback / imperative container roots in JSX | Unsupported | Shapes like `[0, 1].forEach(() => list.map(...))` are not part of the intended reactive language core and should move into supported value expressions, wrappers, or helpers |
 | Residual callback-container pass-through behavior for invalid programs | Compatibility-only | Some invalid callback-container shapes may still survive as plain JS in current emitted output, but that is residual implementation behavior rather than supported language policy |
 | Optional-call on reactive receivers | Unsupported | Optional-call forms are outside the intended language because they are difficult to lower without semantic ambiguity |
@@ -193,12 +193,14 @@ The intended split is:
      values is part of the authored language
    - example:
      - `input.key("foo")` where `input` is a declared `Writable<{ ... }>`
-2. **true cell-style eager read inside JSX or an explicit computation callback**
+2. **true cell-style eager read inside JSX, authored helper control flow, or an explicit computation callback**
    - `.get()` remains valid when the authored value truly has cell semantics
-     and the read occurs inside JSX or an explicit computation callback
+     and the read occurs inside JSX, helper control flow, or an explicit
+     computation callback
    - examples:
      - `computed(() => input.key("foo").get())`
      - JSX expression sites like `{input.key("foo").get()}`
+     - `ifElse(show, count.get(), 0)`
      - `lift` / `handler` / `action` / `derive` callbacks that preserve
        declared cell semantics
 3. **direct top-level eager read in pattern-owned reactive context**
@@ -216,17 +218,9 @@ The real rule is:
 
 - `.key(...)` is a real source-level API for true cell-like values
 - `.get()` is valid only when both the value semantics and the authored
-  expression context justify an eager read
+  expression context justify an eager read, including helper control flow
 - ordinary opaque/reactive values should still prefer direct property access
   and canonical lowered traversal rather than authored `.get()`
-
-One explicit open design question remains here:
-
-- whether authored helper control flow like `ifElse(show, count.get(), 0)`
-  should join the supported `.get()` contexts for true cell-like values
-  instead of remaining in the current conservative rejected bucket
-- current implementation rejects that shape, but this spec does not yet treat
-  that rejection as settled target-language policy
 
 ## 6. Immediate Classification Questions To Refine Next
 
@@ -242,9 +236,9 @@ These families should be the first explicit follow-up questions for v2:
 4. whether the current explicit-cell `.key(...)` / `.get()` boundary is the
    right long-term authored API surface, or whether it should be narrowed or
    documented more aggressively relative to ordinary opaque/property access
-5. whether true cell `.get()` reads should also be supported in authored helper
-   control flow (`ifElse`, `when`, `unless`), rather than only in JSX and
-   explicit computation callbacks
+5. whether the current true-cell `.get()` support should remain limited to JSX,
+   helper control flow, and explicit computation callbacks, or whether any
+   broader direct pattern-body eager-read forms deserve support
 
 ## 7. Use This Spec
 

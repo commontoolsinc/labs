@@ -3122,6 +3122,58 @@ export default pattern<{ count: number; show: boolean }>(({ count, show }) => ({
 );
 
 Deno.test(
+  "Capability-first: authored ifElse Writable.get() branch lowers reactively",
+  async () => {
+    const source = `/// <cts-enable />
+import { ifElse, pattern, Writable } from "commontools";
+
+export default pattern<{ count: Writable<number>; show: boolean }>(({ count, show }) => ({
+  value: ifElse(show, count.get(), 0),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "ifElse(");
+    assertStringIncludes(
+      output,
+      "__ctHelpers.computed((): number => count.get())",
+    );
+    assert(
+      !output.includes("show, count.get(), 0"),
+      "expected authored ifElse Writable.get() branch to be reactively wrapped",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: JSX authored ifElse Writable.get() branch lowers reactively",
+  async () => {
+    const source = `/// <cts-enable />
+import { UI, ifElse, pattern, Writable } from "commontools";
+
+export default pattern<{ count: Writable<number>; show: boolean }>(({ count, show }) => ({
+  [UI]: <div>{ifElse(show, count.get(), 0)}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "ifElse(");
+    assertStringIncludes(output, "__ctHelpers.derive(");
+    assertStringIncludes(output, "({ count }) => count.get()");
+    assert(
+      !output.includes("{ifElse(show, count.get(), 0)}"),
+      "expected JSX authored ifElse Writable.get() branch to be reactively wrapped",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: authored ifElse condition factory call keeps captured property access inside factory boundary",
   async () => {
     const source = `/// <cts-enable />

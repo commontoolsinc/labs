@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { getCellKind } from "@commontools/schema-generator/cell-brand";
 import {
   classifyArrayMethodCall,
   classifyArrayMethodResultSinkCall,
@@ -647,6 +648,33 @@ function getHelperBoundaryKind(
   return undefined;
 }
 
+function isSupportedHelperOwnedExplicitReadRoot(
+  expression: ts.Expression,
+  context: TransformationContext,
+): expression is ts.CallExpression {
+  if (
+    !ts.isCallExpression(expression) ||
+    classifyOpaquePathTerminalCall(expression) !== "get"
+  ) {
+    return false;
+  }
+
+  const callee = expression.expression;
+  if (!ts.isPropertyAccessExpression(callee)) {
+    return false;
+  }
+
+  try {
+    const receiverType = context.checker.getTypeAtLocation(callee.expression);
+    const cellKind = getCellKind(receiverType, context.checker);
+    // Helper-owned branches may own explicit eager reads on true cell-like
+    // values, but not arbitrary method calls or opaque-ref `.get()` misuse.
+    return cellKind === "cell" || cellKind === "stream";
+  } catch {
+    return false;
+  }
+}
+
 function isDeferredJsxArrayMethodExpression(
   expression: ts.Expression,
   context: TransformationContext,
@@ -1086,7 +1114,8 @@ function canRewriteHelperOwnedExpressionSite(
     !ts.isBinaryExpression(expression) &&
     !ts.isPrefixUnaryExpression(expression) &&
     !ts.isPostfixUnaryExpression(expression) &&
-    !ts.isConditionalExpression(expression)
+    !ts.isConditionalExpression(expression) &&
+    !isSupportedHelperOwnedExplicitReadRoot(expression, context)
   ) {
     return false;
   }
