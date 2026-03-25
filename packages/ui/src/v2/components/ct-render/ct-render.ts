@@ -89,6 +89,7 @@ export class CTRender extends BaseElement {
       flex-direction: column;
       width: 100%;
       height: 100%;
+      overflow: auto;
     }
 
     .loading-spinner {
