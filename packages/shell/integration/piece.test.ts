@@ -171,7 +171,6 @@ describe("shell piece tests", () => {
                     cell(): {
                       key(name: string): {
                         sync(): Promise<unknown>;
-                        get(): unknown;
                       };
                     };
                   };
@@ -180,7 +179,11 @@ describe("shell piece tests", () => {
             }
             | null;
           const activePattern = appView?._patterns?.value?.activePattern;
-          return !!activePattern && activePattern.id() === expectedPieceId;
+          if (!activePattern || activePattern.id() !== expectedPieceId) {
+            return false;
+          }
+          const decrement = activePattern.cell().key("decrement");
+          return decrement.sync().then(() => true, () => false);
         }, { args: [pieceId] });
       });
     };
@@ -197,6 +200,7 @@ describe("shell piece tests", () => {
                     id(): string;
                     cell(): {
                       key(name: string): {
+                        sync(): Promise<unknown>;
                         send(value: unknown): Promise<void>;
                       };
                     };
@@ -209,7 +213,9 @@ describe("shell piece tests", () => {
           if (!activePattern || activePattern.id() !== expectedPieceId) {
             return false;
           }
-          await activePattern.cell().key("decrement").send(undefined);
+          const decrement = activePattern.cell().key("decrement");
+          await decrement.sync();
+          await decrement.send(undefined);
           return true;
         }, { args: [pieceId] });
       });
@@ -224,9 +230,19 @@ describe("shell piece tests", () => {
     await waitFor(async () => (await piece.result.get(["value"])) === 0);
 
     await clickDecrement();
-    await waitFor(async () => (await piece.result.get(["value"])) === -1);
+    try {
+      await waitFor(async () => (await piece.result.get(["value"])) === -1);
+    } catch (error) {
+      await logDebugSnapshot("shell piece decrement debug");
+      throw error;
+    }
 
     await clickDecrement();
-    await waitFor(async () => (await piece.result.get(["value"])) === -2);
+    try {
+      await waitFor(async () => (await piece.result.get(["value"])) === -2);
+    } catch (error) {
+      await logDebugSnapshot("shell piece decrement debug");
+      throw error;
+    }
   });
 });
