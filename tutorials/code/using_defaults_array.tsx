@@ -29,7 +29,7 @@ export default pattern<TodoListState>((state) => {
           oncf-send={addItem({ items: state.items })}
         />
         <ul>
-          {/* Note: key is not needed for Common Tools but linters require it */}
+          {/* Note: key is not needed for Common Fabric but linters require it */}
           {state.items.map((item, index) => <li key={index}>{item}</li>)}
         </ul>
       </div>

@@ -1,7 +1,7 @@
 /// <cts-enable />
 import { generateText, NAME, pattern, str, UI, Writable } from "commonfabric";
 
-import { calculator } from "../system/common-tools.tsx";
+import { calculator } from "../system/common-fabric.tsx";
 
 export default pattern(() => {
   const expression = Writable.of("1+1");

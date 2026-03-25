@@ -15,7 +15,7 @@ import {
   type VNode,
   Writable,
 } from "commonfabric";
-import { readWebpage, searchWeb } from "./system/common-tools.tsx";
+import { readWebpage, searchWeb } from "./system/common-fabric.tsx";
 
 type ResearchResult = {
   summary: string;

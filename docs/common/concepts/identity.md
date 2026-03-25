@@ -4,7 +4,7 @@
 
 In traditional web development, you often model data like a database: objects have `id` fields, and you look things up by ID. This works because you're constantly serializing and deserializing data—fetching from APIs, storing in localStorage, passing through JSON.
 
-**Common Tools works differently.** The reactive fabric is an in-memory object graph with direct references (pointers), not a database with keyed records. When you have a reference to an object, you *have* that object—you don't need an ID to find it later.
+**Common Fabric works differently.** The reactive fabric is an in-memory object graph with direct references (pointers), not a database with keyed records. When you have a reference to an object, you *have* that object—you don't need an ID to find it later.
 
 ```tsx
 // Object graph (no id!)

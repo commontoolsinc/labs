@@ -6,7 +6,7 @@ subject: Tutorial
 authors:
   - name: Ellyse Cedeno
     email: ellyse@common.tools
-keywords: commontools, state, Cell, Default, pattern inputs
+keywords: commonfabric, state, Cell, Default, pattern inputs
 abstract: |
   In this section, we learn how to use Default<> to automatically create and initialize
   Cells for pattern inputs. This is the recommended pattern for managing pattern state.
@@ -36,7 +36,7 @@ instead of `cell()`.
 3. **Schema generation** - Generates proper JSON schema for your pattern
 4. **Works** - also at the time of this writing, `cell()` has some bugs, this is
    a huge reason to avoid it. When you use `Default<>` in a pattern's input
-   interface, the Common Tools runtime automatically creates a Cell and
+   interface, the Common Fabric runtime automatically creates a Cell and
    initializes it with your default value.
 
 ## A Simple Counter with Default

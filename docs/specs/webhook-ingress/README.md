@@ -6,7 +6,7 @@ Draft — seeking framework author review
 
 ## Overview
 
-The webhook ingress system allows external services (GitHub, Stripe, Slack, etc.) to push data into Common Tools patterns via standard HTTP webhooks. Each webhook is a stable HTTPS endpoint that accepts JSON payloads authenticated with a bearer token and sends them into a reactive stream.
+The webhook ingress system allows external services (GitHub, Stripe, Slack, etc.) to push data into Common Fabric patterns via standard HTTP webhooks. Each webhook is a stable HTTPS endpoint that accepts JSON payloads authenticated with a bearer token and sends them into a reactive stream.
 
 This is a generalization of the OAuth callback flow: any external service that can POST to a URL can inject data into the reactive cell graph. Patterns subscribe to the inbox stream and react to new payloads automatically.
 
@@ -70,7 +70,7 @@ All state lives in cells — no in-memory indexes, no server-side registries tha
 ### Per-webhook registration cell
 
 Stored in **toolshed's service space** (`identity.did()`):
-- Entity: `of:${sha256("ct:webhook:" + webhookId)}`
+- Entity: `of:${sha256("cf:webhook:" + webhookId)}`
 - Contains: `{ id, secretHash, cellLink, enabled, name, createdBy, createdAt }`
 - Any of the 21 toolshed instances can read this via shared storage
 
@@ -90,13 +90,13 @@ Stored in **user's space** (pattern-created):
 ### Per-space webhook index
 
 Stored in **toolshed's service space**:
-- Entity: `of:${sha256("ct:webhooks-for:" + space)}`
+- Entity: `of:${sha256("cf:webhooks-for:" + space)}`
 - Contains: `string[]` of webhook IDs belonging to that space
 - Used by the admin list endpoint; patterns should not depend on this
 
 ### Discovery
 
-Patterns that create webhooks export their webhook metadata as output properties, discoverable via the wish/summary-index mechanism. This is the idiomatic CT approach — no server-side registry array needed for pattern-level discovery.
+Patterns that create webhooks export their webhook metadata as output properties, discoverable via the wish/summary-index mechanism. This is the idiomatic Common Fabric approach — no server-side registry array needed for pattern-level discovery.
 
 ## API Reference
 

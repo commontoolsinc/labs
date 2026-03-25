@@ -1,15 +1,15 @@
 ---
-name: ct
-description: Guide for using the ct (CommonTools) binary to interact with pieces,
+name: cf
+description: Guide for using the cf (Common Fabric) CLI to interact with pieces,
   patterns, and the Common Fabric. Use this skill when deploying patterns, managing
   pieces, linking data between pieces, or debugging pattern execution. Triggers include
   requests to "deploy this pattern", "call a handler", "link these pieces", "get data
   from piece", or "test this pattern locally".
 ---
 
-# CT CLI
+# CF CLI
 
-The `ct` binary is the CLI for CommonTools. **Use `--help` for current
+The `cf` CLI is the command-line interface for Common Fabric. **Use `--help` for current
 commands:**
 
 ```bash
@@ -23,13 +23,13 @@ deno task cf check --help     # Type checking
 **Identity key** (required for most operations):
 
 ```bash
-ls -la ct.key                  # Check for existing
+ls -la cf.key                  # Check for existing
 
 # For local dev: derive key matching toolshed's "implicit trust" identity
-deno run -A packages/cli/mod.ts id derive "implicit trust" > ct.key
+deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
 
 # For a fresh random key (e.g., against production):
-deno run -A packages/cli/mod.ts id new > ct.key
+deno run -A packages/cli/mod.ts id new > cf.key
 ```
 
 **IMPORTANT:** Do NOT use `deno task cf id new > file` — the `deno task` wrapper
@@ -40,7 +40,7 @@ prints ANSI-colored preamble to stdout, which pollutes the key file. Always use
 
 ```bash
 export CF_API_URL=http://localhost:8000  # or https://toolshed.saga-castor.ts.net/
-export CF_IDENTITY=./ct.key
+export CF_IDENTITY=./cf.key
 ```
 
 **Experimental flags** (must be set on both servers AND CLI commands):
@@ -165,7 +165,7 @@ See `docs/common/workflows/handlers-cli-testing.md` for the full workflow and
 | Issue                        | Fix                                                                          |
 | ---------------------------- | ---------------------------------------------------------------------------- |
 | Commands hang                | Check Tailnet connection for `*.ts.net` URLs                                 |
-| Permission denied            | `chmod 600 ct.key`                                                           |
+| Permission denied            | `chmod 600 cf.key`                                                           |
 | JSON parse error             | Check nested quotes, no trailing commas                                      |
 | Local servers not responding | `./scripts/check-local-dev.sh` then `./scripts/restart-local-dev.sh --force` |
 

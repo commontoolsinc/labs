@@ -1,6 +1,6 @@
 /**
  * openapi-to-provider.ts — Parse an OpenAPI 3.x spec's `securitySchemes` and
- * extract OAuth2 configuration into the Common Tools `ProviderDescriptor`
+ * extract OAuth2 configuration into the Common Fabric `ProviderDescriptor`
  * format.
  *
  * Usage:

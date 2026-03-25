@@ -25,7 +25,7 @@ import {
   readWebpage,
   searchWeb,
   updateProfile,
-} from "./common-tools.tsx";
+} from "./common-fabric.tsx";
 import { MentionablePiece } from "./backlinks-index.tsx";
 import {
   searchPattern as summarySearchPattern,

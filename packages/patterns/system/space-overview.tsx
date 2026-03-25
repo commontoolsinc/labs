@@ -20,7 +20,7 @@ import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,
 } from "./summary-index.tsx";
-import { listMentionable, listRecent } from "./common-tools.tsx";
+import { listMentionable, listRecent } from "./common-fabric.tsx";
 
 // ===== Types =====
 

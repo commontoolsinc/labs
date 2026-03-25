@@ -6,7 +6,7 @@ user-invocable: false
 
 # Deploy Phase
 
-Use the `ct` skill, or read `skills/ct/SKILL.md`, for comprehensive CLI
+Use the `cf` skill, or read `skills/cf/SKILL.md`, for comprehensive CLI
 documentation.
 
 ## Read First
@@ -17,7 +17,7 @@ documentation.
 ## Find Identity Key
 
 ```bash
-ls -la ./ct.key ./identity.key 2>/dev/null || ls -la *.key 2>/dev/null || find . -name "*.key" -maxdepth 2 2>/dev/null
+ls -la ./cf.key ./identity.key 2>/dev/null || ls -la *.key 2>/dev/null || find . -name "*.key" -maxdepth 2 2>/dev/null
 ```
 
 ## Commands

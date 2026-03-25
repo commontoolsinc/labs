@@ -353,8 +353,8 @@ export const FolksonomyTags = pattern<
 
           {
             /* Autocomplete input - use $value binding with multiple mode
-              instead of oncf-select (runtime bug: CustomEvent.detail not passed through ct-render)
-              onct-change triggers telemetry posting for additions */
+              instead of oncf-select (runtime bug: CustomEvent.detail not passed through cf-render)
+              oncf-change triggers telemetry posting for additions */
           }
           <cf-autocomplete
             items={autocompleteItems}
@@ -362,7 +362,7 @@ export const FolksonomyTags = pattern<
             allowCustom
             multiple
             $value={tags}
-            onct-change={onTagsChanged({
+            oncf-change={onTagsChanged({
               tags,
               previousTags,
               aggregatorStream,

@@ -14,7 +14,7 @@ import {
   Writable,
 } from "commonfabric";
 
-///// COMMON TOOLS (get it?) ////
+///// COMMON FABRIC (get it?) ////
 
 import { type MentionablePiece } from "./backlinks-index.tsx";
 

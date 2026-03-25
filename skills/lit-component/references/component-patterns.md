@@ -148,7 +148,7 @@ export class CFButton extends BaseElement {
 
 Components that deeply integrate with the runtime and Cell abstractions.
 
-**Examples:** `ct-render`, `cf-code-editor`, `ct-outliner`
+**Examples:** `cf-render`, `cf-code-editor`, `ct-outliner`
 
 **Characteristics:**
 

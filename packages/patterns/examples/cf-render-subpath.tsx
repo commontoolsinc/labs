@@ -1,8 +1,8 @@
 /// <cts-enable />
 /**
- * Test pattern for ct-render subpath behavior.
+ * Test pattern for cf-render subpath behavior.
  *
- * This pattern tests the fix for the ct-render regression where subpath cells
+ * This pattern tests the fix for the cf-render regression where subpath cells
  * like .key("sidebarUI") that intentionally return undefined were being
  * incorrectly blocked by the async-loading detection logic.
  *
@@ -26,7 +26,7 @@ export default pattern<State>((state) => {
         <p>This is the main UI. sidebarUI is intentionally undefined.</p>
       </div>
     ),
-    // Explicitly undefined - ct-render should NOT wait forever for this
+    // Explicitly undefined - cf-render should NOT wait forever for this
     // For now, exclude the sidebarUI property entirely -- having it in our
     // returned value makes the transformer think it should be required,
     // but since it's undefined, our object won't match the schema.

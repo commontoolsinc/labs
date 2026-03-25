@@ -1,6 +1,6 @@
 ## Core Principle: Writable<> is About Write Access, Not Reactivity
 
-**The most important thing to understand:** Everything in CommonTools is reactive by default. The `Writable<>` wrapper in type signatures doesn't enable reactivity—it indicates **write intent**.
+**The most important thing to understand:** Everything in Common Fabric is reactive by default. The `Writable<>` wrapper in type signatures doesn't enable reactivity—it indicates **write intent**.
 
 ### The Rule
 

@@ -1,6 +1,6 @@
 ---
 name: lit-component
-description: Guide for developing Lit web components in the Common UI v2 system (@commonfabric/ui/v2). Use when creating or modifying ct- prefixed components, implementing theme integration, working with Cell abstractions, or building reactive UI components that integrate with the Common Tools runtime.
+description: Guide for developing Lit web components in the Common UI v2 system (@commonfabric/ui/v2). Use when creating or modifying cf- prefixed components, implementing theme integration, working with Cell abstractions, or building reactive UI components that integrate with the Common Fabric runtime.
 ---
 
 # Lit Component Development for Common UI
@@ -12,7 +12,7 @@ UI v2 component library (`packages/ui/src/v2`).
 
 Use this skill when:
 
-- Creating new `ct-` prefixed components in the UI package
+- Creating new `cf-` prefixed components in the UI package
 - Modifying existing Common UI v2 components
 - Implementing theme-aware components
 - Integrating components with Cell abstractions from the runtime
@@ -60,8 +60,8 @@ and `references/advanced-patterns.md` for complex integration patterns.
 Create the component directory structure:
 
 ```
-packages/ui/src/v2/components/ct-component-name/
-├── ct-component-name.ts    # Component implementation
+packages/ui/src/v2/components/cf-component-name/
+├── cf-component-name.ts    # Component implementation
 ├── index.ts                # Export and registration
 └── styles.ts               # Optional: for complex components
 ```
@@ -74,7 +74,7 @@ Basic template:
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
-export class CTComponentName extends BaseElement {
+export class CFComponentName extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -107,19 +107,19 @@ export class CTComponentName extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-component-name", CTComponentName);
+globalThis.customElements.define("cf-component-name", CFComponentName);
 ```
 
 ### 4. Create Index File
 
 ```typescript
-import { CTComponentName } from "./ct-component-name.ts";
+import { CFComponentName } from "./cf-component-name.ts";
 
-if (!customElements.get("ct-component-name")) {
-  customElements.define("ct-component-name", CTComponentName);
+if (!customElements.get("cf-component-name")) {
+  customElements.define("cf-component-name", CFComponentName);
 }
 
-export { CTComponentName };
+export { CFComponentName };
 export type {}; /* exported types */
 ```
 
@@ -416,7 +416,7 @@ Study these components to understand architectural patterns:
 
 - **Context provider:** `cf-theme` - Ambient configuration with `@provide`,
   `display: contents`, reactive Cell subscriptions
-- **Runtime rendering:** `ct-render` - Pattern loading, UI extraction, lifecycle
+- **Runtime rendering:** `cf-render` - Pattern loading, UI extraction, lifecycle
   management
 - **Third-party integration:** `cf-code-editor` - CodeMirror lifecycle,
   Compartments, bidirectional sync, CellController

@@ -68,7 +68,7 @@ export default pattern<Record<string, never>>((_) => {
             </cf-vstack>
           </cf-cell-context>
         ))}
-        {favorites!.length === 0 && <ct-text>No favorites yet.</ct-text>}
+        {favorites!.length === 0 && <p>No favorites yet.</p>}
       </cf-vstack>
     ),
   };

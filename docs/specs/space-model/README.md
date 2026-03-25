@@ -1,6 +1,6 @@
 # Space Model Specification
 
-This document specifies the data and execution model for Common Tools spaces,
+This document specifies the data and execution model for Common Fabric spaces,
 covering the full stack from persistent storage at the lowest layer up through
 transactions and the dataflow/reactivity system at the top.
 

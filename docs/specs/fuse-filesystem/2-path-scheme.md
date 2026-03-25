@@ -2,7 +2,7 @@
 
 ## Addressing Model
 
-The fundamental address of a cell in Common Tools is:
+The fundamental address of a cell in Common Fabric is:
 
 ```
 (space: MemorySpace, entity: URI, path: string[])

@@ -8,7 +8,7 @@ import { Identity } from "@commonfabric/identity";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
-describe("ct-render integration test", () => {
+describe("cf-render integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
@@ -30,7 +30,7 @@ describe("ct-render integration test", () => {
           import.meta.dirname!,
           "..",
           "examples",
-          "ct-render.tsx",
+          "cf-render.tsx",
         ),
       ),
       // We operate on the piece in this thread
@@ -74,7 +74,7 @@ describe("ct-render integration test", () => {
       }
     });
 
-    // Verify via direct operations that the ct-render structure works
+    // Verify via direct operations that the cf-render structure works
     const value = await piece.result.get(["value"]);
     assertEquals(value, 0);
   });
@@ -135,7 +135,7 @@ describe("ct-render integration test", () => {
     const page = shell.page();
 
     await waitFor(async () => {
-      // Find all counter result elements (should be 1 for ct-render and two others)
+      // Find all counter result elements (should be 1 for cf-render and two others)
       const counterResults = await page.$$("#counter-result", {
         strategy: "pierce",
       });
@@ -177,7 +177,7 @@ function clickNthButton(
 }
 
 /**
- * Tests for ct-render subpath behavior.
+ * Tests for cf-render subpath behavior.
  *
  * This tests the fix where subpath cells like .key("sidebarUI") that
  * intentionally return undefined were being incorrectly blocked by the
@@ -186,7 +186,7 @@ function clickNthButton(
  * Root cells (path=[]) wait for undefined to become defined (async loading).
  * Subpath cells (path=["key"]) render immediately even if undefined.
  */
-describe("ct-render subpath handling", () => {
+describe("cf-render subpath handling", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
@@ -207,7 +207,7 @@ describe("ct-render subpath handling", () => {
           import.meta.dirname!,
           "..",
           "examples",
-          "ct-render-subpath.tsx",
+          "cf-render-subpath.tsx",
         ),
       ),
       { start: true },
@@ -219,8 +219,8 @@ describe("ct-render subpath handling", () => {
   });
 
   it("should render main UI without blocking on undefined sidebarUI", async () => {
-    // This test verifies the fix for the ct-render regression.
-    // Before the fix, ct-render would wait forever for undefined subpath cells
+    // This test verifies the fix for the cf-render regression.
+    // Before the fix, cf-render would wait forever for undefined subpath cells
     // like .key("sidebarUI") to become defined, blocking the main UI.
     const page = shell.page();
     await shell.goto({
@@ -271,7 +271,7 @@ describe("ct-render subpath handling", () => {
 
   it("should render correctly without sidebarUI property", async () => {
     // This test verifies that the pattern renders even though sidebarUI
-    // is not defined (or defined as undefined). The ct-render fix ensures
+    // is not defined (or defined as undefined). The cf-render fix ensures
     // that subpath cells like .key("sidebarUI") don't block the main render.
     const page = shell.page();
 

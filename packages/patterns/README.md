@@ -46,7 +46,7 @@ keywords/features.
 - chatbot-list-view.tsx: Chat application with sidebar list of chat sessions
   - **Data types**: array of objects (CharmEntry with ID and piece), selected
     piece object
-  - **Keywords**: lift, handler, navigateTo, cf-select, ct-render,
+  - **Keywords**: lift, handler, navigateTo, cf-select, cf-render,
     cf-autolayout, wish, [ID]
 
 - chatbot.tsx: Full-featured chatbot with LLM integration and attachments
@@ -59,7 +59,7 @@ keywords/features.
   - **Data types**: array of tuples (date/pizza strings), web response object
   - **Keywords**: fetchData, lift, string parsing, map
 
-- system/common-tools.tsx: Reusable tool patterns and handlers for LLM
+- system/common-fabric.tsx: Reusable tool patterns and handlers for LLM
   integration
   - **Data types**: array of list items (objects), API response objects
   - **Keywords**: handler, pattern as tool, fetchData, derive, ifElse
@@ -78,9 +78,9 @@ keywords/features.
   - **Data types**: boolean
   - **Keywords**: cf-checkbox, handler, checked property, oncf-change, ifElse
 
-- examples/ct-render.tsx: Rendering sub-patterns with ct-render component
+- examples/cf-render.tsx: Rendering sub-patterns with cf-render component
   - **Data types**: number (counter value)
-  - **Keywords**: ct-render, $cell, nested patterns, pattern composition,
+  - **Keywords**: cf-render, $cell, nested patterns, pattern composition,
     handler
 
 - cf-select.tsx: Dropdown select component with various value types

@@ -6,9 +6,9 @@ subject: Tutorial
 authors:
   - name: Ben Follington
     email: ben@common.tools
-keywords: commontools, UI
+keywords: commonfabric, UI
 abstract: |
-  Common UI is a collection of web components (prefixed with ct-) exposed for building patterns.
+  Common UI is a collection of web components (prefixed with cf-) exposed for building patterns.
 ---
 # Common UI
 
@@ -23,7 +23,7 @@ Swift developers are encouraged to use the defaults as much as possible. By doin
 :::
 
 
-Our `ui` package is a web component library implemented in `lit` that interoperates with the Common Tools runtime to produce a Swift UI-like abstraction, this means our components are divided into layers:
+Our `ui` package is a web component library implemented in `lit` that interoperates with the Common Fabric runtime to produce a Swift UI-like abstraction, this means our components are divided into layers:
 
 
 # System Components
@@ -53,12 +53,12 @@ return {
 
 Can be nested and overriden further down the subtree.
 
-## ct-render
+## cf-render
 
 Used to render a `Cell` that has a `[UI]` property into the DOM. Usually not required inside a pattern, used in the app shell itself.
 
 ```{code-block} html
-<ct-render $cell={myCharm} />
+<cf-render $cell={myCharm} />
 ```
 
 ## cf-keybind (beta)
@@ -342,7 +342,7 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 - interactive: `cf-collapsible`, `cf-tab-list`, `cf-canvas`
 
-- complex/integrated (cell interop): `cf-code-editor`, `ct-outliner`
+- complex/integrated (cell interop): `cf-code-editor`, legacy `ct-outliner`
 	- gap: editable table rows
 
 ## Chat Components

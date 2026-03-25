@@ -7,7 +7,7 @@ subtitle: A gentle tutorial into using the llm() function in a pattern
 authors:
   - name: Ellyse Cedeno
     email: ellyse@common.tools
-keywords: commontools, patterns, llm, builtins
+keywords: commonfabric, patterns, llm, builtins
 abstract: |
   In this section, we will create patterns to make LLM calls. We'll iterate on them to make new features, making sure you understand the changes each step of the way.
 ---
@@ -238,7 +238,7 @@ In a few seconds, it gets a response back from the LLM.
 This sets `llmResponse.result`, which triggers the generated `ifElse(derive(...))` wrapper behind that conditional expression.
 And finally we see the `llmResponse: ...` in the [UI].
 
-There's a lot more to discover with the llm() function call (such as sending a list of user and agent messages for history or even tool use) and even more to learn about the Common Tools runtime system.
+There's a lot more to discover with the llm() function call (such as sending a list of user and agent messages for history or even tool use) and even more to learn about the Common Fabric runtime system.
 
 
 ```{code-block} typescript

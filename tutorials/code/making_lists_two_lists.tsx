@@ -237,7 +237,7 @@ export default pattern<FriendListsState>(
             <div>
               <h3>Personal Friends</h3>
               <ul>
-                {/* Note: key is not needed for Common Tools but linters require it */}
+                {/* Note: key is not needed for Common Fabric but linters require it */}
                 {state.personalFriends.map((friend, index) => (
                   <li
                     key={index}
@@ -255,7 +255,7 @@ export default pattern<FriendListsState>(
             <div>
               <h3>Work Friends</h3>
               <ul>
-                {/* Note: key is not needed for Common Tools but linters require it */}
+                {/* Note: key is not needed for Common Fabric but linters require it */}
                 {state.workFriends.map((friend, index) => (
                   <li
                     key={index}

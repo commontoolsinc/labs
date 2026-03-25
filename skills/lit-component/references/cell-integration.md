@@ -1,11 +1,11 @@
 # Cell Integration Patterns
 
-This document covers patterns for integrating Common Tools runtime Cell
+This document covers patterns for integrating Common Fabric runtime Cell
 abstractions with Lit components.
 
 ## What are Cells?
 
-Cells are reactive data containers from the Common Tools runtime
+Cells are reactive data containers from the Common Fabric runtime
 (`@commonfabric/runner`). They provide:
 
 - Reactive updates via subscriptions
@@ -207,14 +207,14 @@ override render() {
 
 ### Rendering UI from Cells
 
-The `ct-render` component handles rendering cells with `[UI]` properties:
+The `cf-render` component handles rendering cells with `[UI]` properties:
 
 ```typescript
 import { UI } from "@commonfabric/api";
 
 // In render()
 return html`
-  <ct-render .cell="${myCharmCell}"></ct-render>
+  <cf-render .cell="${myCharmCell}"></cf-render>
 `;
 ```
 
@@ -294,4 +294,4 @@ patterns:
 
 - `ct-outliner` - Path-based operations, diff-based rendering with Cells
 - `cf-code-editor` - Bidirectional sync between Cell values and CodeMirror state
-- `ct-render` - Pattern loading and UI extraction with Cell subscriptions
+- `cf-render` - Pattern loading and UI extraction with Cell subscriptions

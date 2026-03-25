@@ -39,7 +39,7 @@ import { toPascalCase } from "./openapi-utils.ts";
 // ---------------------------------------------------------------------------
 
 const USAGE = `
-generate-importer — Generate a full Common Tools importer from an OpenAPI spec
+generate-importer — Generate a full Common Fabric importer from an OpenAPI spec
 
 USAGE:
   deno run -A packages/patterns/tools/generate-importer.ts [OPTIONS]

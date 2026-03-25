@@ -1182,9 +1182,9 @@ type Input = Record<string, never>;
 
 ## `system/piece-grid.tsx`
 
-A thumbnail tile grid view for pieces with scaled-down ct-render previews.
+A thumbnail tile grid view for pieces with scaled-down cf-render previews.
 
-**Keywords:** grid, pieces, thumbnail, preview, ct-render
+**Keywords:** grid, pieces, thumbnail, preview, cf-render
 
 ### Input Schema
 

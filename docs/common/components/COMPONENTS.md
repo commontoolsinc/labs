@@ -4,7 +4,7 @@
 
 > **Living documentation:** [`packages/patterns/catalog/catalog.tsx`](../../../packages/patterns/catalog/catalog.tsx) is the authoritative, type-checked component catalog. Each component has a story file under [`packages/patterns/catalog/stories/`](../../../packages/patterns/catalog/stories/) showing usage. Refer to those files for the most accurate, up-to-date examples.
 
-CommonTools UI components with bidirectional binding support.
+Common Fabric UI components with bidirectional binding support.
 
 ## Bidirectional Binding
 
@@ -16,13 +16,13 @@ Use `$` prefix for automatic two-way sync. No handler needed for simple updates.
 <cf-select $value={category} items={[...]} />
 ```
 
-**Native HTML inputs are one-way only.** Always use `ct-*` components for form inputs.
+**Native HTML inputs are one-way only.** Always use the Common Fabric form components for inputs.
 
 For when to use handlers vs binding, see [two-way-binding](../patterns/two-way-binding.md).
 
 ## Property Names: Use CamelCase
 
-Use camelCase for `ct-*` component properties. Kebab-case JSX attributes don't map correctly:
+Use camelCase for Common Fabric component properties. Kebab-case JSX attributes don't map correctly:
 
 ```tsx
 // ❌ Kebab-case won't work
@@ -151,7 +151,7 @@ Styled card with built-in padding (1rem). Don't add extra padding to children.
 
 ---
 
-## ct-render
+## cf-render
 
 Renders pattern instances for composition.
 
@@ -161,7 +161,7 @@ import SubPattern from "./sub-pattern.tsx";
 const subView = SubPattern({ items });
 
 // Three equivalent ways:
-<ct-render $cell={subView} />   // Most explicit
+<cf-render $cell={subView} />   // Most explicit
 {subView}                        // Direct interpolation
 <SubPattern items={items} />     // JSX syntax
 ```
@@ -175,8 +175,8 @@ const listView = ListView({ items });
 const gridView = GridView({ items });
 
 <div style={{ display: "flex", gap: "1rem" }}>
-  <ct-render $cell={listView} />
-  <ct-render $cell={gridView} />
+  <cf-render $cell={listView} />
+  <cf-render $cell={gridView} />
 </div>
 // Both views stay in sync automatically
 ```
@@ -201,14 +201,14 @@ type OutlinerNode = {
 
 ---
 
-## ct-cell-context
+## cf-cell-context
 
 Debugging tool for inspecting cell values. See [CELL_CONTEXT.md](CELL_CONTEXT.md).
 
 ```tsx
-<ct-cell-context $cell={result} label="Result">
+<cf-cell-context $cell={result} label="Result">
   <div>{result.value}</div>
-</ct-cell-context>
+</cf-cell-context>
 ```
 
 ---
@@ -449,7 +449,7 @@ const mapData = {
 | Element | Syntax | Example |
 |---------|--------|---------|
 | HTML (`div`, `span`) | Object, camelCase | `style={{ backgroundColor: "#fff" }}` |
-| Custom (`ct-*`) | String, kebab-case | `style="background-color: #fff;"` |
+| Custom (`cf-*`) | String, kebab-case | `style="background-color: #fff;"` |
 
 ```tsx
 // Mixed usage

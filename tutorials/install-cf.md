@@ -1,19 +1,19 @@
 ---
-title: Installing Common Tools
-short_title: Installing Common Tools
-description: How to install the Common Tools runtime
+title: Installing Common Fabric
+short_title: Installing Common Fabric
+description: How to install the Common Fabric runtime
 subject: Tutorial
-subtitle: How to install the Common Tools runtime
+subtitle: How to install the Common Fabric runtime
 authors:
   - name: Ellyse Cedeno
     email: ellyse@common.tools
-keywords: commontools, install
+keywords: commonfabric, install
 abstract: |
-  In this section, we install the code and servers needed to run the Common Tools runtime locally.
+  In this section, we install the code and servers needed to run the Common Fabric runtime locally.
 ---
-## Install Common Tools
+## Install Common Fabric
 
-Getting the basic Common Tools runtime up and running locally consists of 4 steps
+Getting the basic Common Fabric runtime up and running locally consists of 4 steps
 1. Install Deno
 1. Get the code
 1. Configure any AI or extra services you want to run locally
@@ -92,7 +92,7 @@ See `./packages/toolshed/env.ts` for a list of LLMs supported and their associat
 The current default LLM is Claude, therefore setting the Anthropic key is really the only
 requirement.
 ```
-$ export CTTS_AI_LLM_ANTHROPIC_API_KEY=<INSERT_YOUR_ANTHROPIC_KEY>
+$ export CFTS_AI_LLM_ANTHROPIC_API_KEY=<INSERT_YOUR_ANTHROPIC_KEY>
 ```
 
 ## Run the servers
@@ -112,7 +112,7 @@ Now the servers should be running and you can navigate to [http://localhost:8000
 
 (deploy_pieces)=
 ## How to deploy pieces
-To deploy your first piece, you will run the `ct` CLI tool.
+To deploy your first piece, you will run the `cf` CLI.
 You'll need to create an identity for yourself. Run the following command at the project root:
 ```
 $ deno task cf id new > my.key
@@ -140,4 +140,3 @@ You will need to run the `deno task cf piece new` command each time you want to 
 
 You will also need to keep the Toolshed and Shell servers running in order to run the deploy command and also to visit the piece on your browser.
 :::
-

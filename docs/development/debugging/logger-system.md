@@ -20,7 +20,7 @@ logger.error("save-failed", "Failed to save user", error);
 ```
 
 `getLogger` returns the same instance if called twice with the same module name.
-All registered loggers are stored on `globalThis.commontools.logger`.
+All registered loggers are stored on `globalThis.commonfabric.logger`.
 
 ## Log Levels
 
@@ -55,20 +55,20 @@ you track call volume even for silent loggers.
 ### Controlling Loggers from the Shell (IPC)
 
 The shell's `RuntimeClient` exposes methods that reach into the worker. The
-client is available on `globalThis.commontools.rt` for browser console access:
+client is available on `globalThis.commonfabric.rt` for browser console access:
 
 ```javascript
 // Set log level for a specific logger in the worker
-await commontools.rt.setLoggerLevel("debug", "runner");
+await commonfabric.rt.setLoggerLevel("debug", "runner");
 
 // Set log level for ALL loggers in the worker
-await commontools.rt.setLoggerLevel("debug");
+await commonfabric.rt.setLoggerLevel("debug");
 
 // Disable a specific logger in the worker
-await commontools.rt.setLoggerEnabled(false, "runner");
+await commonfabric.rt.setLoggerEnabled(false, "runner");
 
 // Enable all loggers in the worker
-await commontools.rt.setLoggerEnabled(true);
+await commonfabric.rt.setLoggerEnabled(true);
 ```
 
 These are used by the debugger UI but can also be called from the browser console
@@ -194,5 +194,5 @@ These operate across all registered loggers:
 | `resetAllTimingBaselines()` | Set timing baselines for all loggers |
 
 All are importable from `@commonfabric/utils/logger` and also registered on
-`globalThis.commontools` for browser console access. See
+`globalThis.commonfabric` for browser console access. See
 [console-commands](./console-commands.md) for interactive usage.

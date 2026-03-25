@@ -22,7 +22,7 @@ import {
   fetchAndRunPattern,
   listMentionable,
   listRecent,
-} from "./common-tools.tsx";
+} from "./common-fabric.tsx";
 import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,

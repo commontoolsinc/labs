@@ -1,6 +1,6 @@
 # Form Components
 
-This document describes the form component system in Common Tools UI, which
+This document describes the form component system in Common Fabric UI, which
 provides a "write gate" pattern for transactional form submissions.
 
 ## Overview

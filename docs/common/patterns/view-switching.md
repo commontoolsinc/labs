@@ -47,7 +47,7 @@ When `activeView` changes, the `computed` re-runs and returns a different sub-pa
 
 ## Approach 2: Update a Cell Pointer
 
-Instead of mapping a string to a view, hold a direct reference to the active cell and update it. The items must be **renderable cells** (pattern instances with `[UI]`) — not plain data objects. Use `<ct-render $cell={...} />` to display whatever cell is currently selected:
+Instead of mapping a string to a view, hold a direct reference to the active cell and update it. The items must be **renderable cells** (pattern instances with `[UI]`) — not plain data objects. Use `<cf-render $cell={...} />` to display whatever cell is currently selected:
 
 ```tsx
 import { computed, equals, handler, pattern, UI, Writable } from "commonfabric";
@@ -88,8 +88,8 @@ export default pattern<{
             {entry.item.title}
           </div>
         ))}
-        {/* ct-render extracts and displays the active cell's [UI] */}
-        <ct-render $cell={activeItem} />
+        {/* cf-render extracts and displays the active cell's [UI] */}
+        <cf-render $cell={activeItem} />
       </div>
     ),
     activeItem,
@@ -102,9 +102,9 @@ This is useful when:
 - Rendering anonymous cells — you just need to display whatever the pointer references
 - Embedding cells from other patterns or spaces
 
-**Key point:** The items stored in `activeItem` must be cells with `[UI]` (i.e., pattern instances), not plain data objects. Placing a plain data object in `activeItem` and using `<ct-render>` will render nothing. If you need to select plain data and display it, use Approach 1 (switch on a string) or render the data's fields directly in JSX.
+**Key point:** The items stored in `activeItem` must be cells with `[UI]` (i.e., pattern instances), not plain data objects. Placing a plain data object in `activeItem` and using `<cf-render>` will render nothing. If you need to select plain data and display it, use Approach 1 (switch on a string) or render the data's fields directly in JSX.
 
-**Rendering anonymous cells:** Use `<ct-render $cell={piece} />` to render any cell's `[UI]`, even if you don't know its type. See `packages/patterns/system/piece-grid.tsx` for an example rendering a grid of arbitrary pieces.
+**Rendering anonymous cells:** Use `<cf-render $cell={piece} />` to render any cell's `[UI]`, even if you don't know its type. See `packages/patterns/system/piece-grid.tsx` for an example rendering a grid of arbitrary pieces.
 
 ## Approach 3: Tabs
 
@@ -132,7 +132,7 @@ The `.for("activeTab")` call makes the tab state durable (persisted by key). See
 | Known set of views, menu/sidebar navigation | Switch on a string |
 | Selecting from dynamic data (list items, search results) | Cell pointer |
 | Simple tabbed layout with static panels | `cf-tabs` |
-| Rendering cells you don't control (grids, embeds) | Cell pointer + `ct-render` |
+| Rendering cells you don't control (grids, embeds) | Cell pointer + `cf-render` |
 
 ## See Also
 

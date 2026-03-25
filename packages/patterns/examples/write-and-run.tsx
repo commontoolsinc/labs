@@ -44,7 +44,7 @@ export default pattern<Input>(({ value }) => {
 });`;
 
 const SYSTEM_PROMPT =
-  `You are a CommonTools pattern generator. Given a user request, generate a complete TypeScript pattern file.
+  `You are a Common Fabric pattern generator. Given a user request, generate a complete TypeScript pattern file.
 
 IMPORTANT RULES:
 1. Start with: /// <cts-enable />

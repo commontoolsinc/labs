@@ -24,7 +24,7 @@ Without this directive, the transformers will not modify your code.
 
 ### What is OpaqueRef?
 
-OpaqueRef is a type representing reactive values in CommonTools. It wraps:
+OpaqueRef is a type representing reactive values in Common Fabric. It wraps:
 
 - The actual value type (e.g., `string`, `number`, `{ name: string }`)
 - Methods for reactivity (`.get()`, `.set()`, etc.) used inside
@@ -342,7 +342,7 @@ const schema = {
 
 A critical aspect of the AST system is semantic validation that runs
 **regardless of transformation mode**. This validation ensures patterns follow
-CommonTools patterns correctly and provides helpful error messages for both
+Common Fabric patterns correctly and provides helpful error messages for both
 humans and LLMs.
 
 NOTE: this is not yet implemented.

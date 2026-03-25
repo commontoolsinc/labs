@@ -1240,7 +1240,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                             selectedNoteIndices.get().length ===
                               notes.get().length
                           )}
-                          onct-change={computed(() =>
+                          oncf-change={computed(() =>
                             selectedNoteIndices.get().length ===
                                 notes.get().length
                               ? deselectAllNotesAction

@@ -16,7 +16,7 @@ import {
 } from "commonfabric";
 import Note from "../notes/note.tsx";
 import Notebook from "../notes/notebook.tsx";
-import { listMentionable, listRecent } from "./common-tools.tsx";
+import { listMentionable, listRecent } from "./common-fabric.tsx";
 import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,

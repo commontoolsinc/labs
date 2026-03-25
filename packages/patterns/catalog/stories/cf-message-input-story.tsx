@@ -27,7 +27,7 @@ export default pattern<MessageInputStoryInput, MessageInputStoryOutput>(() => {
     ),
     controls: (
       <div style={{ color: "#6b7280", fontSize: "13px", padding: "8px 12px" }}>
-        No interactive controls. Fires ct-send on button click or Enter.
+        No interactive controls. Fires cf-send on button click or Enter.
         Shift+Enter for newline.
       </div>
     ),

@@ -1,12 +1,12 @@
 ---
 title: Making Lists
 short_title: Making Lists
-description: Creating and working with lists in Common Tools
+description: Creating and working with lists in Common Fabric
 subject: Tutorial
 authors:
   - name: Ellyse Cedeno
     email: ellyse@common.tools
-keywords: commontools, lists, arrays, state
+keywords: commonfabric, lists, arrays, state
 abstract: |
   In this section, we learn how to create and work with lists in the Common
   Tools runtime. We'll especially focus on displaying lists and manipulating them.
@@ -24,7 +24,7 @@ a contact list, or a feed of messages.
 
 **Important Concept: Bidirectional Binding**
 
-Before we dive in, know that CommonTools components support **bidirectional binding** with the `$` prefix (`$value`, `$checked`, etc.). This automatically updates cells when users interact with components, often eliminating the need for handlers! We'll introduce this concept as we go, but keep in mind: if you're just syncing UI ↔ data with no additional logic, bidirectional binding is usually simpler than using handlers.
+Before we dive in, know that Common Fabric components support **bidirectional binding** with the `$` prefix (`$value`, `$checked`, etc.). This automatically updates cells when users interact with components, often eliminating the need for handlers! We'll introduce this concept as we go, but keep in mind: if you're just syncing UI ↔ data with no additional logic, bidirectional binding is usually simpler than using handlers.
 
 ## Our First List
 

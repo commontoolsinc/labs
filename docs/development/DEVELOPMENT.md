@@ -2,7 +2,7 @@
 
 # Development Guide
 
-This guide covers coding standards, design principles, and build/test workflows for CommonTools development.
+This guide covers coding standards, design principles, and build/test workflows for Common Fabric development.
 
 ## Style & Conventions
 

@@ -2036,11 +2036,11 @@ export function generateImporterPrompt(ctx: PromptContext): string {
   // SECTION 1: System context — Pattern framework overview
   // =========================================================================
   sections.push(`<system>
-You are generating Common Tools pattern files for the "${providerLabel}" API integration.
+You are generating Common Fabric pattern files for the "${providerLabel}" API integration.
 
-## Common Tools Pattern Framework
+## Common Fabric Pattern Framework
 
-Common Tools patterns are reactive programs (similar to Solid.js components)
+Common Fabric patterns are reactive programs (similar to Solid.js components)
 that define a reactive graph once upfront. They are NOT re-invoked like React
 components.
 
@@ -2091,7 +2091,7 @@ Import only what you need from the above list. Define \`type Secret<T> = T;\` lo
 
 ### UI Components
 
-Use \`ct-*\` custom elements:
+Use \`cf-*\` custom elements:
 
 - \`<cf-oauth $auth={auth} scopes={scopes} provider="..." providerLabel="..." brandColor="..." loginEndpoint="..." tokenField="...">\` — OAuth flow component
 - \`<cf-checkbox $checked={cell}>Label</cf-checkbox>\` — Checkbox with bidirectional binding
@@ -2103,7 +2103,7 @@ Use \`ct-*\` custom elements:
 - \`<cf-render $cell={patternInstance} />\` — Render a sub-pattern
 
 Native HTML elements (\`<div>\`, \`<table>\`, \`<button>\`) work with object-style
-\`style={{ camelCase: "value" }}\`. Custom \`ct-*\` elements use string-style
+\`style={{ camelCase: "value" }}\`. Custom \`cf-*\` elements use string-style
 \`style="kebab-case: value;"\`.
 
 ### Anti-Patterns to Avoid
