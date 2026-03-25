@@ -211,13 +211,15 @@ describe("default-app flow test", () => {
         return !!(await clickButtonWithText(page, "New Note"));
       });
 
-      console.log(`Look for '📝 New Note' (note ${noteIndex})...`);
+      console.log(`Wait for note view (note ${noteIndex})...`);
       await waitFor(async () => {
-        const link = await page.waitForSelector("#header-piece-link", {
-          strategy: "pierce",
+        return await page.evaluate(() => {
+          const state = globalThis.app?.serialize?.();
+          return !!state &&
+            "pieceId" in state.view &&
+            typeof state.view.pieceId === "string" &&
+            state.view.pieceId.length > 0;
         });
-        const innerText = await link.innerText();
-        return innerText === "📝 New Note";
       });
 
       await waitFor(async () => {
