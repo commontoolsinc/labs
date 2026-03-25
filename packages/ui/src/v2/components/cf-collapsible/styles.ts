@@ -19,14 +19,14 @@ export const collapsibleStyles = `
   /* Content wrapper for animation */
   .content-wrapper {
     overflow: hidden;
-    transition: height var(--ct-theme-animation-duration, 150ms)
+    transition: height var(--cf-theme-animation-duration, 150ms)
       var(--ct-transition-timing-ease);
     height: 0;
     will-change: height;
   }
 
   .collapsible.open .content-wrapper {
-    transition: height var(--ct-theme-animation-duration, 150ms)
+    transition: height var(--cf-theme-animation-duration, 150ms)
       var(--ct-transition-timing-ease);
   }
 
@@ -74,9 +74,9 @@ export const collapsibleStyles = `
     display: block;
     transform-origin: 50% 50%;
     transform: rotate(0deg);
-    transition: transform var(--ct-theme-animation-duration, 150ms)
+    transition: transform var(--cf-theme-animation-duration, 150ms)
       var(--ct-transition-timing-ease);
-    color: var(--ct-theme-color-text-muted, #64748b);
+    color: var(--cf-theme-color-text-muted, #64748b);
     font-weight: var(--ct-font-weight-semibold, 600);
   }
 

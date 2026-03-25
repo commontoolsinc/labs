@@ -34,7 +34,7 @@ export const alertStyles = `
     padding: 1rem;
     gap: 0.75rem;
     font-family: inherit;
-    transition: all var(--ct-theme-animation-duration, 150ms)
+    transition: all var(--cf-theme-animation-duration, 150ms)
       var(--ct-transition-timing-ease);
   }
 
@@ -92,7 +92,7 @@ export const alertStyles = `
     justify-content: center;
     cursor: pointer;
     opacity: 0.7;
-    transition: opacity var(--ct-theme-animation-duration, 150ms)
+    transition: opacity var(--cf-theme-animation-duration, 150ms)
       var(--ct-transition-timing-ease);
     border-radius: 0.25rem;
     padding: 0.25rem;

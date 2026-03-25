@@ -14,8 +14,8 @@ import type {
 } from "@commonfabric/api";
 import {
   applyThemeToElement,
-  type CTTheme,
-  themeContext,
+  type CFTheme,
+  cfThemeContext,
 } from "../theme-context.ts";
 
 /**
@@ -49,7 +49,7 @@ export class CFChatMessage extends BaseElement {
         flex-direction: column;
         width: 100%;
         font-family: var(
-          --ct-theme-font-family,
+          --cf-theme-font-family,
           system-ui,
           -apple-system,
           sans-serif
@@ -71,8 +71,8 @@ export class CFChatMessage extends BaseElement {
       }
 
       .message {
-        padding: var(--ct-theme-padding-message, var(--ct-spacing-3, 0.75rem));
-        border-radius: var(--ct-theme-border-radius, 0.5rem);
+        padding: var(--cf-theme-padding-message, var(--ct-spacing-3, 0.75rem));
+        border-radius: var(--cf-theme-border-radius, 0.5rem);
         word-wrap: break-word;
         position: relative;
         width: fit-content;
@@ -84,21 +84,21 @@ export class CFChatMessage extends BaseElement {
       /* Role-specific message styling */
       :host([role="user"]) .message {
         background-color: var(
-          --ct-theme-color-accent,
+          --cf-theme-color-accent,
           var(--ct-color-blue-500, #3b82f6)
         );
         color: var(
-          --ct-theme-color-accent-foreground,
+          --cf-theme-color-accent-foreground,
           var(--ct-color-white, #ffffff)
         );
       }
 
       :host([role="assistant"]) .message {
         background-color: var(
-          --ct-theme-color-surface,
+          --cf-theme-color-surface,
           var(--ct-color-gray-100, #f3f4f6)
         );
-        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
       }
 
       @keyframes messageSlideIn {
@@ -113,12 +113,12 @@ export class CFChatMessage extends BaseElement {
       }
 
       .message-user {
-        background-color: var(--ct-theme-color-primary, #3b82f6);
-        color: var(--ct-theme-color-primary-foreground, #ffffff);
+        background-color: var(--cf-theme-color-primary, #3b82f6);
+        color: var(--cf-theme-color-primary-foreground, #ffffff);
       }
 
       .message-assistant {
-        color: var(--ct-theme-color-text, #111827);
+        color: var(--cf-theme-color-text, #111827);
       }
 
       /* cf-markdown inherits color from parent */
@@ -132,12 +132,12 @@ export class CFChatMessage extends BaseElement {
         width: 32px;
         height: 32px;
         flex-shrink: 0;
-        margin-right: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
+        margin-right: var(--cf-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
       }
 
       :host([role="user"]) .message-avatar {
         margin-right: 0;
-        margin-left: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
+        margin-left: var(--cf-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
       }
 
       :host([role="user"]) .message-wrapper {
@@ -155,8 +155,8 @@ export class CFChatMessage extends BaseElement {
         width: 100%;
         height: 100%;
         border-radius: 50%;
-        background-color: var(--ct-theme-color-primary, #3b82f6);
-        color: var(--ct-theme-color-primary-foreground, #ffffff);
+        background-color: var(--cf-theme-color-primary, #3b82f6);
+        color: var(--cf-theme-color-primary-foreground, #ffffff);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -184,10 +184,10 @@ export class CFChatMessage extends BaseElement {
 
       /* Tool attachments */
       .tool-attachments {
-        margin-top: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
+        margin-top: var(--cf-theme-spacing, var(--ct-spacing-2, 0.5rem));
         display: flex;
         flex-direction: column;
-        gap: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
+        gap: var(--cf-theme-spacing, var(--ct-spacing-2, 0.5rem));
         width: 100%;
         max-width: 500px;
       }
@@ -195,10 +195,10 @@ export class CFChatMessage extends BaseElement {
       /* Message actions */
       .message-actions {
         display: flex;
-        gap: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
-        margin-top: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
+        gap: var(--cf-theme-spacing, var(--ct-spacing-2, 0.5rem));
+        margin-top: var(--cf-theme-spacing, var(--ct-spacing-2, 0.5rem));
         opacity: 0;
-        transition: opacity var(--ct-theme-animation-duration, 0.2s) ease;
+        transition: opacity var(--cf-theme-animation-duration, 0.2s) ease;
       }
 
       .message-bubble:hover .message-actions {
@@ -207,7 +207,7 @@ export class CFChatMessage extends BaseElement {
 
       /* Compact mode styles */
       :host([compact]) .message {
-        padding: var(--ct-theme-padding-compact, var(--ct-spacing-2, 0.5rem));
+        padding: var(--cf-theme-padding-compact, var(--ct-spacing-2, 0.5rem));
       }
 
       :host([compact]) .message-actions {
@@ -215,17 +215,17 @@ export class CFChatMessage extends BaseElement {
       }
 
       :host([compact]) .message-avatar {
-        margin-right: var(--ct-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
+        margin-right: var(--cf-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
       }
 
       :host([compact][role="user"]) .message-avatar {
         margin-right: 0;
-        margin-left: var(--ct-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
+        margin-left: var(--cf-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
       }
 
       :host([compact]) .tool-attachments {
-        margin-top: var(--ct-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
-        gap: var(--ct-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
+        margin-top: var(--cf-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
+        gap: var(--cf-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
       }
     `,
   ];
@@ -248,9 +248,9 @@ export class CFChatMessage extends BaseElement {
   @property({ type: Boolean, reflect: true })
   declare compact?: boolean;
 
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CTTheme;
+  declare theme?: CFTheme;
 
   constructor() {
     super();

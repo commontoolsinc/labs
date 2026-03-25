@@ -5,9 +5,9 @@ import { type CellHandle, NAME } from "@commonfabric/runtime-client";
 import { BaseElement } from "../../core/base-element.ts";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 import {
   type Mentionable,
@@ -79,23 +79,23 @@ export class CFPromptInput extends BaseElement {
 
         /* CSS variables for customization */
         --cf-prompt-input-gap: var(
-          --ct-theme-spacing-normal,
+          --cf-theme-spacing-normal,
           var(--ct-spacing-2, 0.5rem)
         );
         --cf-prompt-input-padding: var(
-          --ct-theme-spacing-loose,
+          --cf-theme-spacing-loose,
           var(--ct-spacing-3, 0.75rem)
         );
         --cf-prompt-input-border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-radius-md, 0.375rem)
         );
         --cf-prompt-input-border: var(
-          --ct-theme-color-border,
+          --cf-theme-color-border,
           var(--ct-border-color, #e2e8f0)
         );
         --cf-prompt-input-background: var(
-          --ct-theme-color-background,
+          --cf-theme-color-background,
           var(--ct-background, #ffffff)
         );
         --cf-prompt-input-min-height: 2.5rem;
@@ -111,17 +111,17 @@ export class CFPromptInput extends BaseElement {
         background: var(--cf-prompt-input-background);
         border: 1px solid var(--cf-prompt-input-border);
         border-radius: var(--cf-prompt-input-border-radius);
-        transition: all var(--ct-theme-animation-duration, 150ms)
+        transition: all var(--cf-theme-animation-duration, 150ms)
           cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .container:focus-within {
           border-color: var(
-            --ct-theme-color-primary,
+            --cf-theme-color-primary,
             var(--ct-color-primary, #3b82f6)
           );
           box-shadow: 0 0 0 0.5px
-            var(--ct-theme-color-primary, rgba(59, 130, 246, 0.1));
+            var(--cf-theme-color-primary, rgba(59, 130, 246, 0.1));
           }
 
           .input-row {
@@ -144,10 +144,10 @@ export class CFPromptInput extends BaseElement {
             min-height: var(--cf-prompt-input-min-height);
             max-height: var(--cf-prompt-input-max-height);
             resize: none;
-            font-family: var(--ct-theme-font-family, inherit);
+            font-family: var(--cf-theme-font-family, inherit);
             font-size: 0.875rem;
             line-height: 1.25rem;
-            color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+            color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
             overflow-y: auto;
           }
 
@@ -156,7 +156,7 @@ export class CFPromptInput extends BaseElement {
           }
 
           textarea::placeholder {
-            color: var(--ct-theme-color-text-muted, var(--ct-color-gray-400, #9ca3af));
+            color: var(--cf-theme-color-text-muted, var(--ct-color-gray-400, #9ca3af));
           }
 
           .send-button-wrapper {
@@ -165,14 +165,14 @@ export class CFPromptInput extends BaseElement {
             bottom: 0;
             display: flex;
             align-items: flex-end;
-            gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
+            gap: var(--cf-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
             padding-bottom: 0.125rem;
           }
 
           .controls-row {
             display: flex;
             align-items: center;
-            gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
+            gap: var(--cf-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
           }
 
           cf-button {
@@ -194,7 +194,7 @@ export class CFPromptInput extends BaseElement {
           /* Size variants */
           :host([size="sm"]) {
             --cf-prompt-input-padding: var(
-              --ct-theme-spacing-normal,
+              --cf-theme-spacing-normal,
               var(--ct-spacing-2, 0.5rem)
             );
             --cf-prompt-input-min-height: 2rem;
@@ -202,7 +202,7 @@ export class CFPromptInput extends BaseElement {
 
           :host([size="lg"]) {
             --cf-prompt-input-padding: var(
-              --ct-theme-spacing-loose,
+              --cf-theme-spacing-loose,
               var(--ct-spacing-4, 1rem)
             );
             --cf-prompt-input-min-height: 3rem;
@@ -211,11 +211,11 @@ export class CFPromptInput extends BaseElement {
           /* Compact variant - minimal padding */
           :host([variant="compact"]) {
             --cf-prompt-input-padding: var(
-              --ct-theme-spacing-normal,
+              --cf-theme-spacing-normal,
               var(--ct-spacing-2, 0.5rem)
             );
             --cf-prompt-input-gap: var(
-              --ct-theme-spacing-tight,
+              --cf-theme-spacing-tight,
               var(--ct-spacing-1, 0.25rem)
             );
           }
@@ -224,7 +224,7 @@ export class CFPromptInput extends BaseElement {
           .pills-list {
             display: flex;
             flex-wrap: wrap;
-            gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
+            gap: var(--cf-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
           }
 
           /* File upload styles */
@@ -235,21 +235,21 @@ export class CFPromptInput extends BaseElement {
             width: 1.5rem;
             height: 1.5rem;
             border-radius: var(
-              --ct-theme-border-radius,
+              --cf-theme-border-radius,
               var(--ct-radius-sm, 0.25rem)
             );
             cursor: pointer;
             transition: background-color 0.15s;
-            color: var(--ct-theme-color-text-muted, var(--ct-color-gray-500, #6b7280));
+            color: var(--cf-theme-color-text-muted, var(--ct-color-gray-500, #6b7280));
             font-size: 1rem;
           }
 
           .upload-button:hover {
             background: var(
-              --ct-theme-surface,
+              --cf-theme-surface,
               var(--ct-color-gray-100, #f3f4f6)
             );
-            color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+            color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
           }
 
           input[type="file"] {
@@ -263,26 +263,26 @@ export class CFPromptInput extends BaseElement {
             gap: 0.25rem;
             padding: 0.25rem 0.625rem;
             background: var(
-              --ct-theme-color-surface,
+              --cf-theme-color-surface,
               var(--ct-color-gray-100, #f5f5f5)
             );
             color: var(
-              --ct-theme-color-text,
+              --cf-theme-color-text,
               var(--ct-color-gray-900, #212121)
             );
             border: 1px solid
-              var(--ct-theme-color-border, var(--ct-color-gray-300, #e0e0e0));
+              var(--cf-theme-color-border, var(--ct-color-gray-300, #e0e0e0));
             border-radius: var(
-              --ct-theme-border-radius,
+              --cf-theme-border-radius,
               var(--ct-border-radius-full, 9999px)
             );
             font-size: 0.8125rem;
             line-height: 1;
-            font-family: var(--ct-theme-font-family, inherit);
+            font-family: var(--cf-theme-font-family, inherit);
             cursor: pointer;
             transition:
-              background-color var(--ct-theme-animation-duration, 200ms) ease,
-              border-color var(--ct-theme-animation-duration, 200ms) ease;
+              background-color var(--cf-theme-animation-duration, 200ms) ease,
+              border-color var(--cf-theme-animation-duration, 200ms) ease;
             appearance: none;
             -moz-appearance: none;
             -webkit-appearance: none;
@@ -294,20 +294,20 @@ export class CFPromptInput extends BaseElement {
 
           .model-select:hover {
             background: var(
-              --ct-theme-color-surface-hover,
+              --cf-theme-color-surface-hover,
               var(--ct-color-gray-200, #eeeeee)
             );
           }
 
           .model-select:focus {
-            border-color: var(--ct-theme-color-primary, #3b82f6);
+            border-color: var(--cf-theme-color-primary, #3b82f6);
             box-shadow: 0 0 0 0.5px
-              var(--ct-theme-color-primary, rgba(59, 130, 246, 0.1));
+              var(--cf-theme-color-primary, rgba(59, 130, 246, 0.1));
             }
 
             /* Embedded voice input - compact styling */
             .voice-wrapper cf-voice-input {
-              --ct-theme-spacing-normal: 0;
+              --cf-theme-spacing-normal: 0;
             }
 
             .voice-wrapper cf-voice-input::part(container) {
@@ -355,9 +355,9 @@ export class CFPromptInput extends BaseElement {
         declare model: CellHandle<string> | string | null;
         declare voice: boolean;
 
-        @consume({ context: themeContext, subscribe: true })
+        @consume({ context: cfThemeContext, subscribe: true })
         @property({ attribute: false })
-        declare theme?: CTTheme;
+        declare theme?: CFTheme;
 
         private _textareaElement?: HTMLElement;
         private _modelSelectElement?: HTMLSelectElement;
@@ -1030,9 +1030,9 @@ export class CFPromptInput extends BaseElement {
             <style>
             .mentions-dropdown {
               position: absolute;
-              background: var(--ct-theme-color-surface, #fff);
-              border: 1px solid var(--ct-theme-color-border, #e5e7eb);
-              border-radius: var(--ct-theme-border-radius, 0.375rem);
+              background: var(--cf-theme-color-surface, #fff);
+              border: 1px solid var(--cf-theme-color-border, #e5e7eb);
+              border-radius: var(--cf-theme-border-radius, 0.375rem);
               box-shadow: var(--ct-shadow-md, 0 10px 15px -3px rgba(0,0,0,0.1),
                 0 4px 6px -2px rgba(0,0,0,0.05));
               max-height: 200px;
@@ -1043,7 +1043,7 @@ export class CFPromptInput extends BaseElement {
             .mention-item {
               padding: 0.5rem 0.75rem;
               cursor: pointer;
-              border-bottom: 1px solid var(--ct-theme-color-border, #e5e7eb);
+              border-bottom: 1px solid var(--cf-theme-color-border, #e5e7eb);
               transition: background-color 0.1s;
             }
             .mention-item:last-child {
@@ -1051,11 +1051,11 @@ export class CFPromptInput extends BaseElement {
             }
             .mention-item:hover,
             .mention-item.selected {
-              background-color: var(--ct-theme-surface, #f3f4f6);
+              background-color: var(--cf-theme-surface, #f3f4f6);
             }
             .mention-name {
               font-weight: 500;
-              color: var(--ct-theme-color-text, #111827);
+              color: var(--cf-theme-color-text, #111827);
             }
             </style>
             <div class="mentions-dropdown" role="listbox">

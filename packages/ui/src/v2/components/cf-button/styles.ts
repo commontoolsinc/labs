@@ -3,63 +3,63 @@ import { css } from "lit";
 export const styles = css`
   :host {
     --cf-button-border-radius: var(
-      --ct-theme-border-radius,
+      --cf-theme-border-radius,
       var(--ct-border-radius-md, 0.375rem)
     );
     --cf-button-border-radius-full: var(
-      --ct-theme-border-radius-full,
+      --cf-theme-border-radius-full,
       var(--ct-border-radius-full, 9999px)
     );
-    --cf-button-font-family: var(--ct-theme-font-family, inherit);
-    --cf-button-animation-duration: var(--ct-theme-animation-duration, 0.2s);
-    --cf-button-spacing-tight: var(--ct-theme-spacing-tight, 0.25rem);
-    --cf-button-spacing-normal: var(--ct-theme-spacing-normal, 0.5rem);
-    --cf-button-spacing-loose: var(--ct-theme-spacing-loose, 1rem);
+    --cf-button-font-family: var(--cf-theme-font-family, inherit);
+    --cf-button-animation-duration: var(--cf-theme-animation-duration, 0.2s);
+    --cf-button-spacing-tight: var(--cf-theme-spacing-tight, 0.25rem);
+    --cf-button-spacing-normal: var(--cf-theme-spacing-normal, 0.5rem);
+    --cf-button-spacing-loose: var(--cf-theme-spacing-loose, 1rem);
     --cf-button-spacing-x-lg: 2rem;
     --cf-button-icon-size: 2.5rem;
     --cf-button-icon-padding: 0;
     --cf-button-color-primary: var(
-      --ct-theme-color-primary,
+      --cf-theme-color-primary,
       var(--ct-colors-primary-500, #3b82f6)
     );
     --cf-button-color-primary-foreground: var(
-      --ct-theme-color-primary-foreground,
+      --cf-theme-color-primary-foreground,
       #ffffff
     );
     --cf-button-color-secondary: var(
-      --ct-theme-color-secondary,
+      --cf-theme-color-secondary,
       var(--ct-colors-gray-100, #f3f4f6)
     );
     --cf-button-color-secondary-foreground: var(
-      --ct-theme-color-secondary-foreground,
+      --cf-theme-color-secondary-foreground,
       var(--ct-colors-gray-900, #111827)
     );
     --cf-button-color-error: var(
-      --ct-theme-color-error,
+      --cf-theme-color-error,
       var(--ct-colors-error, #dc2626)
     );
     --cf-button-color-error-foreground: var(
-      --ct-theme-color-error-foreground,
+      --cf-theme-color-error-foreground,
       #ffffff
     );
     --cf-button-color-border: var(
-      --ct-theme-color-border,
+      --cf-theme-color-border,
       var(--ct-colors-gray-300, #d1d5db)
     );
     --cf-button-color-surface: var(
-      --ct-theme-color-surface,
+      --cf-theme-color-surface,
       var(--ct-colors-gray-50, #f9fafb)
     );
     --cf-button-color-surface-hover: var(
-      --ct-theme-color-surface-hover,
+      --cf-theme-color-surface-hover,
       var(--ct-colors-gray-200, #e5e7eb)
     );
     --cf-button-color-text: var(
-      --ct-theme-color-text,
+      --cf-theme-color-text,
       var(--ct-colors-gray-900, #111827)
     );
     --cf-button-color-text-muted: var(
-      --ct-theme-color-text-muted,
+      --cf-theme-color-text-muted,
       var(--ct-colors-gray-500, #6b7280)
     );
 

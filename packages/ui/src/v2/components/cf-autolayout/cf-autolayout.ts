@@ -115,47 +115,47 @@ export class CFAutoLayout extends BaseElement {
     .sidebar-right {
       overflow: hidden;
       background: var(
-        --ct-theme-color-surface,
+        --cf-theme-color-surface,
         var(--ct-surface, #f1f5f9)
       );
-      padding: var(--ct-theme-spacing-normal, 0.5rem);
+      padding: var(--cf-theme-spacing-normal, 0.5rem);
       /* Visual separation and rounding on content-adjacent corners */
       border: none;
     }
     .sidebar-left {
       border-right: 1px solid
         var(
-          --ct-theme-color-border,
+          --cf-theme-color-border,
           #e5e7eb
         );
       border-top-right-radius: var(
-        --ct-theme-border-radius,
+        --cf-theme-border-radius,
         var(--ct-border-radius-md, 0.375rem)
       );
       border-bottom-right-radius: var(
-        --ct-theme-border-radius,
+        --cf-theme-border-radius,
         var(--ct-border-radius-md, 0.375rem)
       );
     }
     .sidebar-right {
       border-left: 1px solid
         var(
-          --ct-theme-color-border,
+          --cf-theme-color-border,
           #e5e7eb
         );
       border-top-left-radius: var(
-        --ct-theme-border-radius,
+        --cf-theme-border-radius,
         var(--ct-border-radius-md, 0.375rem)
       );
       border-bottom-left-radius: var(
-        --ct-theme-border-radius,
+        --cf-theme-border-radius,
         var(--ct-border-radius-md, 0.375rem)
       );
     }
 
     .content {
       background: var(
-        --ct-theme-color-background,
+        --cf-theme-color-background,
         #ffffff
       );
     }
@@ -168,7 +168,7 @@ export class CFAutoLayout extends BaseElement {
       .layout {
         display: grid;
         grid-template-columns: 1fr; /* default: only content */
-        gap: var(--ct-theme-spacing-loose, 1rem);
+        gap: var(--cf-theme-spacing-loose, 1rem);
       }
       .left-open {
         grid-template-columns: 280px 1fr;
@@ -184,21 +184,21 @@ export class CFAutoLayout extends BaseElement {
       .content {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: var(--ct-theme-spacing-loose, 1rem);
+        gap: var(--cf-theme-spacing-loose, 1rem);
       }
       /* Visual separators for default content items */
       .content > ::slotted(:not([slot])) {
         background: transparent;
         border: 1px solid
           var(
-            --ct-theme-color-border,
+            --cf-theme-color-border,
             #e5e7eb
           );
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
-        padding: var(--ct-theme-spacing-loose, 1rem);
+        padding: var(--cf-theme-spacing-loose, 1rem);
         box-sizing: border-box;
       }
 
@@ -279,14 +279,14 @@ export class CFAutoLayout extends BaseElement {
         width: min(80vw, 320px);
         max-width: 90vw;
         background: var(
-          --ct-theme-color-surface,
+          --cf-theme-color-surface,
           var(--ct-surface, #f1f5f9)
         );
         /*box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);*/
         transition: transform 0.25s ease;
         will-change: transform;
         z-index: 30;
-        padding: var(--ct-theme-spacing-normal, 0.5rem);
+        padding: var(--cf-theme-spacing-normal, 0.5rem);
       }
       @media (prefers-reduced-motion: reduce) {
         .sidebar-left,
@@ -339,15 +339,15 @@ export class CFAutoLayout extends BaseElement {
         align-items: center;
         gap: 0.25rem;
         background: var(
-          --ct-theme-color-surface,
+          --cf-theme-color-surface,
           var(--ct-surface, #f1f5f9)
         );
         border-top: 1px solid
           var(
-            --ct-theme-color-border,
+            --cf-theme-color-border,
             #e0e0e0
           );
-        padding: 0 var(--ct-theme-spacing-normal, 0.5rem);
+        padding: 0 var(--cf-theme-spacing-normal, 0.5rem);
         z-index: 40;
       }
       .mobile-bar.top {
@@ -356,7 +356,7 @@ export class CFAutoLayout extends BaseElement {
         border-top: none;
         border-bottom: 1px solid
           var(
-            --ct-theme-color-border,
+            --cf-theme-color-border,
             #e0e0e0
           );
         }
@@ -369,8 +369,8 @@ export class CFAutoLayout extends BaseElement {
           border: 0;
         }
         .mobile-bar .tab {
-          padding: var(--ct-theme-spacing-tight, 0.25rem)
-            var(--ct-theme-spacing-normal, 0.5rem);
+          padding: var(--cf-theme-spacing-tight, 0.25rem)
+            var(--cf-theme-spacing-normal, 0.5rem);
           border: none;
           background: none;
           cursor: pointer;

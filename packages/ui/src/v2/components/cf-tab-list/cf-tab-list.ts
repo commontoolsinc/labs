@@ -22,10 +22,10 @@ export class CFTabList extends BaseElement {
     css`
       :host {
         --cf-tab-list-border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-md)
         );
-        --cf-tab-list-color-surface: var(--ct-theme-color-surface, #f1f5f9);
+        --cf-tab-list-color-surface: var(--cf-theme-color-surface, #f1f5f9);
 
         display: flex;
         flex-shrink: 0;

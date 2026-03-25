@@ -35,7 +35,7 @@ export class CFTab extends BaseElement {
         align-items: center;
         justify-content: center;
         white-space: nowrap;
-        border-radius: var(--ct-theme-border-radius, var(--ct-border-radius-md));
+        border-radius: var(--cf-theme-border-radius, var(--ct-border-radius-md));
         padding: var(--ct-spacing-2) var(--ct-spacing-3);
         font-size: var(--ct-font-size-sm);
         font-weight: var(--ct-font-weight-medium);
@@ -44,18 +44,18 @@ export class CFTab extends BaseElement {
         cursor: pointer;
         background: transparent;
         border: none;
-        color: var(--ct-theme-color-text-muted, #6b7280);
+        color: var(--cf-theme-color-text-muted, #6b7280);
         font-family: inherit;
         position: relative;
       }
 
       .tab:hover:not(:disabled) {
-        color: var(--ct-theme-color-text, #111827);
+        color: var(--cf-theme-color-text, #111827);
       }
 
       .tab:focus-visible {
         outline: 2px solid
-          var(--ct-theme-color-primary, var(--ct-colors-primary-500));
+          var(--cf-theme-color-primary, var(--ct-colors-primary-500));
         outline-offset: 2px;
       }
 
@@ -65,7 +65,7 @@ export class CFTab extends BaseElement {
       }
 
       .tab[data-selected="true"] {
-        color: var(--ct-theme-color-text, #111827);
+        color: var(--cf-theme-color-text, #111827);
       }
 
       /* Indicator for selected state */
@@ -77,7 +77,7 @@ export class CFTab extends BaseElement {
         bottom: -1px;
         height: 2px;
         background-color: var(
-          --ct-theme-color-primary,
+          --cf-theme-color-primary,
           var(--ct-colors-primary-500)
         );
       }

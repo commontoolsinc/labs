@@ -6,9 +6,9 @@ import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 
 /**
@@ -54,9 +54,9 @@ export class CFButton extends BaseElement {
   declare disabled: boolean;
   declare type: "button" | "submit" | "reset";
 
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CTTheme;
+  declare theme?: CFTheme;
 
   constructor() {
     super();

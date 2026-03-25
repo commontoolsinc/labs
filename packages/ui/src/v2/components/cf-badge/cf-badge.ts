@@ -23,32 +23,32 @@ export class CFBadge extends BaseElement {
   static override styles = css`
     :host {
       --cf-badge-color-primary: var(
-        --ct-theme-color-primary,
+        --cf-theme-color-primary,
         hsl(212, 100%, 47%)
       );
       --cf-badge-color-primary-foreground: var(
-        --ct-theme-color-primary-foreground,
+        --cf-theme-color-primary-foreground,
         hsl(0, 0%, 100%)
       );
       --cf-badge-color-secondary: var(
-        --ct-theme-color-secondary,
+        --cf-theme-color-secondary,
         hsl(0, 0%, 96%)
       );
       --cf-badge-color-secondary-foreground: var(
-        --ct-theme-color-secondary-foreground,
+        --cf-theme-color-secondary-foreground,
         hsl(0, 0%, 9%)
       );
       --cf-badge-color-destructive: var(
-        --ct-theme-color-error,
+        --cf-theme-color-error,
         hsl(0, 100%, 50%)
       );
       --cf-badge-color-destructive-foreground: var(
-        --ct-theme-color-error-foreground,
+        --cf-theme-color-error-foreground,
         hsl(0, 0%, 100%)
       );
-      --cf-badge-color-border: var(--ct-theme-color-border, hsl(0, 0%, 89%));
-      --cf-badge-color-text: var(--ct-theme-color-text, hsl(0, 0%, 9%));
-      --cf-badge-color-ring: var(--ct-theme-color-primary, hsl(212, 100%, 47%));
+      --cf-badge-color-border: var(--cf-theme-color-border, hsl(0, 0%, 89%));
+      --cf-badge-color-text: var(--cf-theme-color-text, hsl(0, 0%, 9%));
+      --cf-badge-color-ring: var(--cf-theme-color-primary, hsl(212, 100%, 47%));
 
       display: inline-block;
       box-sizing: border-box;

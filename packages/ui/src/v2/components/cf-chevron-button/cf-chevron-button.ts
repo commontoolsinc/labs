@@ -44,16 +44,16 @@ export class CFChevronButton extends BaseElement {
         display: flex;
         align-items: center;
         justify-content: center;
-        color: var(--ct-theme-color-text-muted, var(--ct-color-gray-500, #999));
+        color: var(--cf-theme-color-text-muted, var(--ct-color-gray-500, #999));
         transition: color 200ms ease;
       }
 
       .chevron-button:hover {
-        color: var(--ct-theme-color-text, var(--ct-color-gray-700, #666));
+        color: var(--cf-theme-color-text, var(--ct-color-gray-700, #666));
       }
 
       .chevron-button:active {
-        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #333));
+        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #333));
       }
 
       .chevron-icon {

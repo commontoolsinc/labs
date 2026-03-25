@@ -4,26 +4,26 @@ import { provide } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
   mergeWithDefaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 
 /**
- * ct-theme — Provides a theme to a subtree and applies CSS vars.
+ * cf-theme — Provides a theme to a subtree and applies CSS vars.
  *
  * Usage:
- * <ct-theme .theme=${partialTheme}><slot/></ct-theme>
+ * <cf-theme .theme=${partialTheme}><slot/></cf-theme>
  *
  * The component merges a partial theme (pattern-style) with defaults,
  * provides the result via context, and sets CSS custom properties on
  * the host so descendants pick up tokens.
  *
- * @element ct-theme
+ * @element cf-theme
  */
-export class CTThemeProvider extends BaseElement {
+export class CFThemeProvider extends BaseElement {
   static override styles = css`
     :host {
       display: contents; /* do not add extra layout */
@@ -35,9 +35,9 @@ export class CTThemeProvider extends BaseElement {
   theme: any = {};
 
   /** Computed full theme that is provided to children */
-  @provide({ context: themeContext })
+  @provide({ context: cfThemeContext })
   @property({ attribute: false })
-  _computedTheme: CTTheme = defaultTheme;
+  _computedTheme: CFTheme = defaultTheme;
 
   #unsubs: Array<() => void> = [];
 
@@ -91,4 +91,4 @@ export class CTThemeProvider extends BaseElement {
   }
 }
 
-customElements.define("ct-theme", CTThemeProvider);
+customElements.define("cf-theme", CFThemeProvider);

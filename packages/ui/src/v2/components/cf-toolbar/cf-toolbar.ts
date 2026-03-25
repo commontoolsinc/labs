@@ -36,12 +36,12 @@ export class CFToolbar extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
-        --cf-toolbar-spacing-normal: var(--ct-theme-spacing-normal, 0.5rem);
-        --cf-toolbar-spacing-loose: var(--ct-theme-spacing-loose, 1rem);
-        --cf-toolbar-color-surface: var(--ct-theme-color-surface, #ffffff);
-        --cf-toolbar-color-text: var(--ct-theme-color-text, #0f172a);
+        --cf-toolbar-spacing-normal: var(--cf-theme-spacing-normal, 0.5rem);
+        --cf-toolbar-spacing-loose: var(--cf-theme-spacing-loose, 1rem);
+        --cf-toolbar-color-surface: var(--cf-theme-color-surface, #ffffff);
+        --cf-toolbar-color-text: var(--cf-theme-color-text, #0f172a);
         --cf-toolbar-color-border: var(
-          --ct-theme-color-border,
+          --cf-theme-color-border,
           var(--ct-colors-gray-200, #e5e7eb)
         );
 

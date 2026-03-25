@@ -8,9 +8,9 @@ import { createArrayCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 import { formatFileSize } from "../../utils/image-compression.ts";
 import "../cf-button/cf-button.ts";
@@ -104,7 +104,7 @@ export class CFFileInput extends BaseElement {
       .container {
         display: flex;
         flex-direction: column;
-        gap: var(--ct-theme-spacing-normal, 0.75rem);
+        gap: var(--cf-theme-spacing-normal, 0.75rem);
       }
 
       input[type="file"] {
@@ -114,20 +114,20 @@ export class CFFileInput extends BaseElement {
       .previews {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-        gap: var(--ct-theme-spacing-normal, 0.75rem);
+        gap: var(--cf-theme-spacing-normal, 0.75rem);
       }
 
       .preview-item {
         position: relative;
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
         overflow: hidden;
         border: 1px solid
-          var(--ct-theme-color-border, var(--ct-color-gray-200, #e5e7eb));
+          var(--cf-theme-color-border, var(--ct-color-gray-200, #e5e7eb));
         background: var(
-          --ct-theme-color-background,
+          --cf-theme-color-background,
           var(--ct-color-gray-50, #f9fafb)
         );
       }
@@ -159,7 +159,7 @@ export class CFFileInput extends BaseElement {
         gap: 0.5rem;
         padding: 1rem;
         background: var(
-          --ct-theme-color-background,
+          --cf-theme-color-background,
           var(--ct-color-gray-50, #f9fafb)
         );
       }
@@ -174,7 +174,7 @@ export class CFFileInput extends BaseElement {
         text-align: center;
         word-break: break-word;
         color: var(
-          --ct-theme-color-text-muted,
+          --cf-theme-color-text-muted,
           var(--ct-color-gray-600, #4b5563)
         );
       }
@@ -207,7 +207,7 @@ export class CFFileInput extends BaseElement {
         padding: 6px 8px;
         font-size: 0.75rem;
         color: var(
-          --ct-theme-color-text-muted,
+          --cf-theme-color-text-muted,
           var(--ct-color-gray-600, #4b5563)
         );
         white-space: nowrap;
@@ -221,7 +221,7 @@ export class CFFileInput extends BaseElement {
         justify-content: center;
         padding: 1rem;
         color: var(
-          --ct-theme-color-text-muted,
+          --cf-theme-color-text-muted,
           var(--ct-color-gray-600, #4b5563)
         );
         font-size: 0.875rem;
@@ -269,9 +269,9 @@ export class CFFileInput extends BaseElement {
   protected loading = false;
 
   // Theme consumption
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CTTheme;
+  declare theme?: CFTheme;
 
   protected _cellController = createArrayCellController<FileData>(this, {
     onChange: (_newFiles: FileData[], _oldFiles: FileData[]) => {

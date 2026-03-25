@@ -6,9 +6,9 @@ import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 
 /**
@@ -130,17 +130,17 @@ export class CFToolsChip extends BaseElement {
         gap: 0.375rem;
         padding: 0.25rem 0.625rem;
         background: var(
-          --ct-theme-color-surface,
+          --cf-theme-color-surface,
           var(--ct-colors-gray-100, #f5f5f5)
         );
         color: var(
-          --ct-theme-color-text,
+          --cf-theme-color-text,
           var(--ct-colors-gray-900, #212121)
         );
         border: 1px solid
-          var(--ct-theme-color-border, var(--ct-colors-gray-300, #e0e0e0));
+          var(--cf-theme-color-border, var(--ct-colors-gray-300, #e0e0e0));
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-full, 9999px)
         );
         font-size: 0.8125rem;
@@ -148,14 +148,14 @@ export class CFToolsChip extends BaseElement {
         cursor: pointer;
         user-select: none;
         transition:
-          background-color var(--ct-theme-animation-duration, 200ms) ease,
-          border-color var(--ct-theme-animation-duration, 200ms) ease,
-          transform var(--ct-theme-animation-duration, 200ms) ease;
+          background-color var(--cf-theme-animation-duration, 200ms) ease,
+          border-color var(--cf-theme-animation-duration, 200ms) ease,
+          transform var(--cf-theme-animation-duration, 200ms) ease;
         }
 
         .chip:hover {
           background: var(
-            --ct-theme-color-surface-hover,
+            --cf-theme-color-surface-hover,
             var(--ct-colors-gray-200, #eeeeee)
           );
         }
@@ -166,13 +166,13 @@ export class CFToolsChip extends BaseElement {
           height: 6px;
           border-radius: 50%;
           background: var(
-            --ct-theme-color-accent,
+            --cf-theme-color-accent,
             var(--ct-colors-primary-500, #2196f3)
           );
         }
 
         .count {
-          color: var(--ct-theme-color-text-muted, #6b7280);
+          color: var(--cf-theme-color-text-muted, #6b7280);
           font-variant-numeric: tabular-nums;
         }
 
@@ -185,17 +185,17 @@ export class CFToolsChip extends BaseElement {
           max-height: 60vh;
           overflow: auto;
           background: var(
-            --ct-theme-color-surface,
+            --cf-theme-color-surface,
             var(--ct-colors-gray-50, #fafafa)
           );
           color: var(
-            --ct-theme-color-text,
+            --cf-theme-color-text,
             var(--ct-colors-gray-900, #212121)
           );
           border: 1px solid
-            var(--ct-theme-color-border, var(--ct-colors-gray-300, #e0e0e0));
+            var(--cf-theme-color-border, var(--ct-colors-gray-300, #e0e0e0));
           border-radius: var(
-            --ct-theme-border-radius,
+            --cf-theme-border-radius,
             var(--ct-border-radius-lg, 0.5rem)
           );
           box-shadow: var(
@@ -209,8 +209,8 @@ export class CFToolsChip extends BaseElement {
           transform: translateY(-4px);
           pointer-events: none;
           transition:
-            opacity var(--ct-theme-animation-duration, 200ms) ease,
-            transform var(--ct-theme-animation-duration, 200ms) ease;
+            opacity var(--cf-theme-animation-duration, 200ms) ease,
+            transform var(--cf-theme-animation-duration, 200ms) ease;
           }
 
           :host([open]) .panel,
@@ -227,7 +227,7 @@ export class CFToolsChip extends BaseElement {
             gap: 0.5rem;
             padding: 0.25rem 0.25rem 0.5rem 0.25rem;
             border-bottom: 1px solid
-              var(--ct-theme-color-border, var(--ct-colors-gray-300, #e0e0e0));
+              var(--cf-theme-color-border, var(--ct-colors-gray-300, #e0e0e0));
             margin-bottom: 0.5rem;
           }
 
@@ -246,7 +246,7 @@ export class CFToolsChip extends BaseElement {
             gap: 0.25rem;
             padding: 0.375rem 0.5rem;
             border-radius: var(
-              --ct-theme-border-radius,
+              --cf-theme-border-radius,
               var(--ct-border-radius-md, 0.375rem)
             );
             background: transparent;
@@ -259,15 +259,15 @@ export class CFToolsChip extends BaseElement {
 
           .tool-desc {
             font-size: 0.75rem;
-            color: var(--ct-theme-color-text-muted, #6b7280);
+            color: var(--cf-theme-color-text-muted, #6b7280);
           }
 
           .schema {
-            font-family: var(--ct-theme-mono-font-family, monospace);
+            font-family: var(--cf-theme-mono-font-family, monospace);
             font-size: 0.72rem;
-            color: var(--ct-theme-color-text-muted, #6b7280);
+            color: var(--cf-theme-color-text-muted, #6b7280);
             border-left: 2px solid
-              var(--ct-theme-color-border-muted, var(--ct-colors-gray-300));
+              var(--cf-theme-color-border-muted, var(--ct-colors-gray-300));
             padding-left: 0.5rem;
             white-space: pre-wrap;
           }
@@ -313,9 +313,9 @@ export class CFToolsChip extends BaseElement {
       #closeTimer?: number;
 
       // Consume theme and keep overlay/popover state
-      @consume({ context: themeContext, subscribe: true })
+      @consume({ context: cfThemeContext, subscribe: true })
       @property({ attribute: false })
-      declare theme?: CTTheme;
+      declare theme?: CFTheme;
 
       #overlay: HTMLDivElement | null = null;
       #resizeObs?: ResizeObserver;
@@ -584,10 +584,10 @@ export class CFToolsChip extends BaseElement {
             max-width: 420px;
             max-height: 60vh;
             overflow: auto;
-            background: var(--ct-theme-color-surface, #fff);
-            color: var(--ct-theme-color-text, #0f172a);
-            border: 1px solid var(--ct-theme-color-border, #e5e7eb);
-            border-radius: var(--ct-theme-border-radius, 0.5rem);
+            background: var(--cf-theme-color-surface, #fff);
+            color: var(--cf-theme-color-text, #0f172a);
+            border: 1px solid var(--cf-theme-color-border, #e5e7eb);
+            border-radius: var(--cf-theme-border-radius, 0.5rem);
             box-shadow: var(--ct-shadow-md, 0 4px 6px -1px rgba(0,0,0,.1),
               0 2px 4px -1px rgba(0,0,0,.06));
             padding: 0.5rem;
@@ -598,20 +598,20 @@ export class CFToolsChip extends BaseElement {
           }
           .panel-header { display: flex; align-items: center;
             justify-content: space-between; gap: .5rem; padding: .25rem .25rem
-            .5rem .25rem; border-bottom: 1px solid var(--ct-theme-color-border,
+            .5rem .25rem; border-bottom: 1px solid var(--cf-theme-color-border,
             #e5e7eb); margin-bottom: .5rem; }
           .panel-title { font-size: .875rem; font-weight: 600; }
-          .count { color: var(--ct-theme-color-text-muted, #6b7280);
+          .count { color: var(--cf-theme-color-text-muted, #6b7280);
             font-variant-numeric: tabular-nums; }
           .tool-list { display: grid; gap: .5rem; }
           .tool-item { display: grid; gap: .25rem; padding: .375rem .5rem;
-            border-radius: var(--ct-theme-border-radius, .375rem); }
+            border-radius: var(--cf-theme-border-radius, .375rem); }
           .tool-name { font-size: .8125rem; font-weight: 600; }
           .tool-desc { font-size: .75rem;
-            color: var(--ct-theme-color-text-muted, #6b7280); }
-          .schema { font-family: var(--ct-theme-mono-font-family, monospace);
-            font-size: .72rem; color: var(--ct-theme-color-text-muted, #6b7280);
-            border-left: 2px solid var(--ct-theme-color-border-muted,#e5e7eb);
+            color: var(--cf-theme-color-text-muted, #6b7280); }
+          .schema { font-family: var(--cf-theme-mono-font-family, monospace);
+            font-size: .72rem; color: var(--cf-theme-color-text-muted, #6b7280);
+            border-left: 2px solid var(--cf-theme-color-border-muted,#e5e7eb);
             padding-left: .5rem; white-space: pre-wrap; }
           </style>
           <div

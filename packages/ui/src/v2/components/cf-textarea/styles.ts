@@ -8,21 +8,21 @@ export const textareaStyles = `
     width: 100%;
     
     /* Map to theme tokens */
-    --background: var(--ct-theme-color-background, #ffffff);
-    --foreground: var(--ct-theme-color-text, #0f172a);
-    --border: var(--ct-theme-color-border, #e2e8f0);
-    --ring: var(--ct-theme-color-primary, #3b82f6);
-    --destructive: var(--ct-theme-color-error, #dc2626);
-    --muted: var(--ct-theme-color-surface, #f8fafc);
-    --muted-foreground: var(--ct-theme-color-text-muted, #64748b);
-    --placeholder: var(--ct-theme-color-text-muted, #94a3b8);
+    --background: var(--cf-theme-color-background, #ffffff);
+    --foreground: var(--cf-theme-color-text, #0f172a);
+    --border: var(--cf-theme-color-border, #e2e8f0);
+    --ring: var(--cf-theme-color-primary, #3b82f6);
+    --destructive: var(--cf-theme-color-error, #dc2626);
+    --muted: var(--cf-theme-color-surface, #f8fafc);
+    --muted-foreground: var(--cf-theme-color-text-muted, #64748b);
+    --placeholder: var(--cf-theme-color-text-muted, #94a3b8);
     
     /* Textarea dimensions */
     --textarea-padding-x: 0.75rem;
     --textarea-padding-y: 0.5rem;
     --textarea-font-size: 0.875rem;
     --textarea-line-height: 1.25rem;
-    --textarea-border-radius: var(--ct-theme-border-radius, 0.375rem);
+    --textarea-border-radius: var(--cf-theme-border-radius, 0.375rem);
     --textarea-min-height: 5rem;
   }
 
@@ -39,7 +39,7 @@ export const textareaStyles = `
     background-color: var(--background);
     border: 1px solid var(--border);
     border-radius: var(--textarea-border-radius);
-    transition: all var(--ct-theme-animation-duration, 150ms)
+    transition: all var(--cf-theme-animation-duration, 150ms)
       var(--ct-transition-timing-ease);
     display: block;
     overflow: auto;
@@ -90,14 +90,14 @@ export const textareaStyles = `
     outline: 2px solid transparent;
     outline-offset: 2px;
     border-color: var(--ring);
-    box-shadow: 0 0 0 3px var(--ct-theme-color-primary, rgba(59, 130, 246, 0.15));
+    box-shadow: 0 0 0 3px var(--cf-theme-color-primary, rgba(59, 130, 246, 0.15));
   }
 
   textarea:focus-visible {
     outline: 2px solid transparent;
     outline-offset: 2px;
     border-color: var(--ring);
-    box-shadow: 0 0 0 3px var(--ct-theme-color-primary, rgba(59, 130, 246, 0.15));
+    box-shadow: 0 0 0 3px var(--cf-theme-color-primary, rgba(59, 130, 246, 0.15));
   }
 
   /* Disabled state */
@@ -122,7 +122,7 @@ export const textareaStyles = `
   textarea.error:focus,
   textarea.error:focus-visible {
     border-color: var(--destructive);
-    box-shadow: 0 0 0 3px var(--ct-theme-color-error, rgba(220, 38, 38, 0.1));
+    box-shadow: 0 0 0 3px var(--cf-theme-color-error, rgba(220, 38, 38, 0.1));
   }
 
   /* Scrollbar styling */
@@ -139,7 +139,7 @@ export const textareaStyles = `
   textarea::-webkit-scrollbar-thumb {
     background-color: var(--border);
     border-radius: calc(var(--textarea-border-radius) * 0.5);
-    transition: background-color var(--ct-theme-animation-duration, 150ms);
+    transition: background-color var(--cf-theme-animation-duration, 150ms);
   }
 
   textarea::-webkit-scrollbar-thumb:hover {

@@ -43,13 +43,13 @@ export class CFAttachmentsBar extends BaseElement {
       .attachments-list {
         display: flex;
         flex-wrap: wrap;
-        gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
+        gap: var(--cf-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
         align-items: center;
       }
 
       .empty-state {
         color: var(
-          --ct-theme-color-text-muted,
+          --cf-theme-color-text-muted,
           var(--ct-color-gray-400, #9ca3af)
         );
         font-size: 0.8125rem;

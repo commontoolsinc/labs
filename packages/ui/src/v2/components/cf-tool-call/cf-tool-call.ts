@@ -8,10 +8,10 @@ import type {
 } from "@commonfabric/api";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   resolveColor,
   resolveColorScheme,
-  themeContext,
 } from "../theme-context.ts";
 
 export type ToolCallState = "pending" | "success" | "error";
@@ -41,27 +41,27 @@ export class CFToolCall extends BaseElement {
       }
 
       .tool-call-container {
-        border: 1px solid var(--ct-theme-border, var(--ct-color-gray-200, #e5e7eb));
+        border: 1px solid var(--cf-theme-border, var(--ct-color-gray-200, #e5e7eb));
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius, 0.25rem)
         );
-        background-color: var(--ct-theme-surface, var(--ct-color-gray-50, #f9fafb));
+        background-color: var(--cf-theme-surface, var(--ct-color-gray-50, #f9fafb));
         overflow: hidden;
-        transition: all var(--ct-theme-animation-duration, 0.2s) ease;
+        transition: all var(--cf-theme-animation-duration, 0.2s) ease;
       }
 
       .tool-call-header {
         display: flex;
         align-items: center;
-        gap: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
-        padding: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem))
-          var(--ct-theme-spacing-loose, var(--ct-spacing-3, 0.75rem));
+        gap: var(--cf-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
+        padding: var(--cf-theme-spacing-normal, var(--ct-spacing-2, 0.5rem))
+          var(--cf-theme-spacing-loose, var(--ct-spacing-3, 0.75rem));
         cursor: pointer;
         user-select: none;
         font-size: 0.875rem;
         font-family: var(
-          --ct-theme-mono-font-family,
+          --cf-theme-mono-font-family,
           var(
             --ct-font-mono,
             ui-monospace,
@@ -73,7 +73,7 @@ export class CFToolCall extends BaseElement {
             monospace
           )
         );
-        color: var(--ct-theme-text, var(--ct-color-gray-700, #374151));
+        color: var(--cf-theme-text, var(--ct-color-gray-700, #374151));
         background: transparent;
         border: none;
         width: 100%;
@@ -82,7 +82,7 @@ export class CFToolCall extends BaseElement {
 
       .tool-call-header:hover {
         background-color: var(
-          --ct-theme-surface-hover,
+          --cf-theme-surface-hover,
           var(--ct-color-gray-100, #f3f4f6)
         );
       }
@@ -101,10 +101,10 @@ export class CFToolCall extends BaseElement {
       .tool-call-status {
         display: flex;
         align-items: center;
-        gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
+        gap: var(--cf-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
         font-size: 0.75rem;
         font-family: var(
-          --ct-theme-mono-font-family,
+          --cf-theme-mono-font-family,
           var(
             --ct-font-mono,
             ui-monospace,
@@ -121,8 +121,8 @@ export class CFToolCall extends BaseElement {
       .chevron {
         width: 16px;
         height: 16px;
-        transition: transform var(--ct-theme-animation-duration, 0.2s) ease;
-        color: var(--ct-theme-text-muted, var(--ct-color-gray-400, #9ca3af));
+        transition: transform var(--cf-theme-animation-duration, 0.2s) ease;
+        color: var(--cf-theme-text-muted, var(--ct-color-gray-400, #9ca3af));
       }
 
       .chevron.expanded {
@@ -131,20 +131,20 @@ export class CFToolCall extends BaseElement {
 
       .tool-call-content {
         border-top: 1px solid
-          var(--ct-theme-border, var(--ct-color-gray-200, #e5e7eb));
+          var(--cf-theme-border, var(--ct-color-gray-200, #e5e7eb));
         background-color: var(
-          --ct-theme-background,
+          --cf-theme-background,
           var(--ct-color-white, #ffffff)
         );
       }
 
       .tool-section {
-        padding: var(--ct-theme-spacing-loose, var(--ct-spacing-3, 0.75rem));
+        padding: var(--cf-theme-spacing-loose, var(--ct-spacing-3, 0.75rem));
       }
 
       .tool-section:not(:last-child) {
         border-bottom: 1px solid
-          var(--ct-theme-border-muted, var(--ct-color-gray-100, #f3f4f6));
+          var(--cf-theme-border-muted, var(--ct-color-gray-100, #f3f4f6));
         }
 
         .tool-section-title {
@@ -152,13 +152,13 @@ export class CFToolCall extends BaseElement {
           font-size: 0.75rem;
           text-transform: uppercase;
           letter-spacing: 0.025em;
-          color: var(--ct-theme-text-muted, var(--ct-color-gray-600, #4b5563));
-          margin-bottom: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
+          color: var(--cf-theme-text-muted, var(--ct-color-gray-600, #4b5563));
+          margin-bottom: var(--cf-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
         }
 
         .tool-section-content {
           font-family: var(
-            --ct-theme-mono-font-family,
+            --cf-theme-mono-font-family,
             var(
               --ct-font-mono,
               ui-monospace,
@@ -171,13 +171,13 @@ export class CFToolCall extends BaseElement {
             )
           );
           font-size: 0.75rem;
-          background-color: var(--ct-theme-surface, var(--ct-color-gray-50, #f9fafb));
-          border: 1px solid var(--ct-theme-border, var(--ct-color-gray-200, #e5e7eb));
+          background-color: var(--cf-theme-surface, var(--ct-color-gray-50, #f9fafb));
+          border: 1px solid var(--cf-theme-border, var(--ct-color-gray-200, #e5e7eb));
           border-radius: var(
-            --ct-theme-border-radius,
+            --cf-theme-border-radius,
             var(--ct-border-radius-sm, 0.125rem)
           );
-          padding: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
+          padding: var(--cf-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
           white-space: pre-wrap;
           word-break: break-word;
           overflow-x: auto;
@@ -187,25 +187,25 @@ export class CFToolCall extends BaseElement {
 
         /* Status styling */
         .status-pending {
-          color: var(--ct-theme-primary, var(--ct-color-blue-600, #2563eb));
+          color: var(--cf-theme-primary, var(--ct-color-blue-600, #2563eb));
         }
 
         .status-success {
-          color: var(--ct-theme-success, var(--ct-color-green-600, #16a34a));
+          color: var(--cf-theme-success, var(--ct-color-green-600, #16a34a));
         }
 
         .status-error {
-          color: var(--ct-theme-error, var(--ct-color-red-600, #dc2626));
+          color: var(--cf-theme-error, var(--ct-color-red-600, #dc2626));
         }
 
         .error-content {
-          color: var(--ct-theme-error, var(--ct-color-red-700, #b91c1c));
+          color: var(--cf-theme-error, var(--ct-color-red-700, #b91c1c));
           background-color: var(
-            --ct-theme-error-background,
+            --cf-theme-error-background,
             var(--ct-color-red-50, #fef2f2)
           );
           border-color: var(
-            --ct-theme-error-border,
+            --cf-theme-error-border,
             var(--ct-color-red-200, #fecaca)
           );
         }
@@ -221,9 +221,9 @@ export class CFToolCall extends BaseElement {
     @property({ type: Boolean, reflect: true })
     declare expanded: boolean;
 
-    @consume({ context: themeContext, subscribe: true })
+    @consume({ context: cfThemeContext, subscribe: true })
     @property({ attribute: false })
-    declare theme?: CTTheme;
+    declare theme?: CFTheme;
 
     constructor() {
       super();
@@ -255,11 +255,11 @@ export class CFToolCall extends BaseElement {
       // Add tool-call specific theme properties
       const colorScheme = resolveColorScheme(this.theme.colorScheme);
       this.style.setProperty(
-        "--ct-theme-error-background",
+        "--cf-theme-error-background",
         resolveColor(this.theme.colors.background, colorScheme),
       );
       this.style.setProperty(
-        "--ct-theme-error-border",
+        "--cf-theme-error-border",
         resolveColor(this.theme.colors.border, colorScheme),
       );
     }

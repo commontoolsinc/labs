@@ -401,13 +401,13 @@ export class CFPlaidLink extends BaseElement {
     BaseElement.baseStyles,
     css`
       .plaid-wrapper {
-        padding: var(--ct-theme-spacing-loose, 1.5rem);
+        padding: var(--cf-theme-spacing-loose, 1.5rem);
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-lg, 0.5rem)
         );
         background-color: var(
-          --ct-theme-color-surface,
+          --cf-theme-color-surface,
           var(--ct-color-white, #ffffff)
         );
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -415,27 +415,27 @@ export class CFPlaidLink extends BaseElement {
       }
 
       .connected-accounts {
-        margin-bottom: var(--ct-theme-spacing-loose, 1.5rem);
+        margin-bottom: var(--cf-theme-spacing-loose, 1.5rem);
       }
 
       .connected-accounts h3 {
-        margin: 0 0 var(--ct-theme-spacing-normal, 1rem);
-        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+        margin: 0 0 var(--cf-theme-spacing-normal, 1rem);
+        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
         font-size: 1.25rem;
         font-weight: 600;
       }
 
       .bank-item {
         border: 1px solid
-          var(--ct-theme-color-border, var(--ct-color-gray-300, #d1d5db));
+          var(--cf-theme-color-border, var(--ct-color-gray-300, #d1d5db));
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
-        padding: var(--ct-theme-spacing-normal, 1rem);
-        margin-bottom: var(--ct-theme-spacing-normal, 1rem);
+        padding: var(--cf-theme-spacing-normal, 1rem);
+        margin-bottom: var(--cf-theme-spacing-normal, 1rem);
         background-color: var(
-          --ct-theme-color-surface-hover,
+          --cf-theme-color-surface-hover,
           var(--ct-color-gray-50, #f9fafb)
         );
       }
@@ -444,48 +444,48 @@ export class CFPlaidLink extends BaseElement {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: var(--ct-theme-spacing-normal, 0.75rem);
+        margin-bottom: var(--cf-theme-spacing-normal, 0.75rem);
       }
 
       .bank-header h4 {
         margin: 0;
-        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
         font-size: 1.1rem;
         font-weight: 600;
       }
 
       .remove-button {
         background-color: var(
-          --ct-theme-color-error,
+          --cf-theme-color-error,
           var(--ct-color-red-600, #dc2626)
         );
         color: var(
-          --ct-theme-color-primary-foreground,
+          --cf-theme-color-primary-foreground,
           var(--ct-color-white, #ffffff)
         );
         border: none;
-        padding: var(--ct-theme-spacing-tight, 0.375rem)
-          var(--ct-theme-spacing-normal, 0.75rem);
+        padding: var(--cf-theme-spacing-tight, 0.375rem)
+          var(--cf-theme-spacing-normal, 0.75rem);
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-sm, 0.25rem)
         );
         cursor: pointer;
         font-size: 0.9rem;
-        font-family: var(--ct-theme-font-family, inherit);
-        transition: background-color var(--ct-theme-animation-duration, 0.2s) ease;
+        font-family: var(--cf-theme-font-family, inherit);
+        transition: background-color var(--cf-theme-animation-duration, 0.2s) ease;
       }
 
       .remove-button:hover {
         background-color: var(
-          --ct-theme-color-error,
+          --cf-theme-color-error,
           var(--ct-color-red-700, #b91c1c)
         );
       }
 
       .remove-button:disabled {
         background-color: var(
-          --ct-theme-color-border,
+          --cf-theme-color-border,
           var(--ct-color-gray-300, #d1d5db)
         );
         cursor: not-allowed;
@@ -494,38 +494,38 @@ export class CFPlaidLink extends BaseElement {
       .accounts-list {
         display: flex;
         flex-direction: column;
-        gap: var(--ct-theme-spacing-normal, 0.75rem);
+        gap: var(--cf-theme-spacing-normal, 0.75rem);
       }
 
       .account {
         background-color: var(
-          --ct-theme-color-surface,
+          --cf-theme-color-surface,
           var(--ct-color-white, #ffffff)
         );
         border: 1px solid
-          var(--ct-theme-color-border, var(--ct-color-gray-200, #e5e7eb));
+          var(--cf-theme-color-border, var(--ct-color-gray-200, #e5e7eb));
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
-        padding: var(--ct-theme-spacing-normal, 0.75rem);
+        padding: var(--cf-theme-spacing-normal, 0.75rem);
       }
 
       .account-info {
         display: flex;
-        gap: var(--ct-theme-spacing-normal, 0.75rem);
-        margin-bottom: var(--ct-theme-spacing-tight, 0.5rem);
+        gap: var(--cf-theme-spacing-normal, 0.75rem);
+        margin-bottom: var(--cf-theme-spacing-tight, 0.5rem);
         align-items: center;
       }
 
       .account-name {
         font-weight: 500;
-        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
       }
 
       .account-mask {
         color: var(
-          --ct-theme-color-text-muted,
+          --cf-theme-color-text-muted,
           var(--ct-color-gray-600, #6b7280)
         );
         font-size: 0.9rem;
@@ -534,9 +534,9 @@ export class CFPlaidLink extends BaseElement {
       .account-type {
         background-color: #e8f0fe;
         color: #1a73e8;
-        padding: 0.125rem var(--ct-theme-spacing-tight, 0.5rem);
+        padding: 0.125rem var(--cf-theme-spacing-tight, 0.5rem);
         border-radius: var(
-          --ct-theme-border-radius-full,
+          --cf-theme-border-radius-full,
           var(--ct-radius-full, 9999px)
         );
         font-size: 0.8rem;
@@ -545,33 +545,33 @@ export class CFPlaidLink extends BaseElement {
 
       .account-balance {
         display: flex;
-        gap: var(--ct-theme-spacing-normal, 1rem);
+        gap: var(--cf-theme-spacing-normal, 1rem);
         align-items: center;
         font-size: 0.95rem;
       }
 
       .balance-label {
         color: var(
-          --ct-theme-color-text-muted,
+          --cf-theme-color-text-muted,
           var(--ct-color-gray-600, #6b7280)
         );
       }
 
       .balance-amount {
         font-weight: 500;
-        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
       }
 
       .bank-footer {
-        margin-top: var(--ct-theme-spacing-normal, 0.75rem);
-        padding-top: var(--ct-theme-spacing-normal, 0.75rem);
+        margin-top: var(--cf-theme-spacing-normal, 0.75rem);
+        padding-top: var(--cf-theme-spacing-normal, 0.75rem);
         border-top: 1px solid
-          var(--ct-theme-color-border, var(--ct-color-gray-200, #e5e7eb));
+          var(--cf-theme-color-border, var(--ct-color-gray-200, #e5e7eb));
         }
 
         .last-updated {
           color: var(
-            --ct-theme-color-text-muted,
+            --cf-theme-color-text-muted,
             var(--ct-color-gray-600, #6b7280)
           );
           font-size: 0.85rem;
@@ -580,24 +580,24 @@ export class CFPlaidLink extends BaseElement {
         .action-section {
           display: flex;
           flex-direction: column;
-          gap: var(--ct-theme-spacing-normal, 1rem);
+          gap: var(--cf-theme-spacing-normal, 1rem);
         }
 
         .connect-button {
           background-color: #1db954;
           color: white;
           border: none;
-          padding: var(--ct-theme-spacing-normal, 0.75rem)
-            var(--ct-theme-spacing-loose, 1.5rem);
+          padding: var(--cf-theme-spacing-normal, 0.75rem)
+            var(--cf-theme-spacing-loose, 1.5rem);
           border-radius: var(
-            --ct-theme-border-radius,
+            --cf-theme-border-radius,
             var(--ct-border-radius-md, 0.375rem)
           );
           cursor: pointer;
           font-weight: 500;
           font-size: 1rem;
-          font-family: var(--ct-theme-font-family, inherit);
-          transition: background-color var(--ct-theme-animation-duration, 0.2s) ease;
+          font-family: var(--cf-theme-font-family, inherit);
+          transition: background-color var(--cf-theme-animation-duration, 0.2s) ease;
         }
 
         .connect-button:hover {
@@ -606,16 +606,16 @@ export class CFPlaidLink extends BaseElement {
 
         .connect-button:disabled {
           background-color: var(
-            --ct-theme-color-border,
+            --cf-theme-color-border,
             var(--ct-color-gray-300, #d1d5db)
           );
           cursor: not-allowed;
         }
 
         .status-message {
-          padding: var(--ct-theme-spacing-normal, 0.75rem);
+          padding: var(--cf-theme-spacing-normal, 0.75rem);
           border-radius: var(
-            --ct-theme-border-radius,
+            --cf-theme-border-radius,
             var(--ct-border-radius-md, 0.375rem)
           );
           background-color: #e8f5e9;

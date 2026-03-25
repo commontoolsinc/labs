@@ -63,7 +63,7 @@ export class CFCalendar extends BaseElement {
       .calendar-title {
         font-size: 0.875rem;
         font-weight: 600;
-        color: var(--ct-theme-color-text, #111827);
+        color: var(--cf-theme-color-text, #111827);
         text-align: center;
         flex: 1;
       }
@@ -75,20 +75,20 @@ export class CFCalendar extends BaseElement {
         width: 1.75rem;
         height: 1.75rem;
         border: none;
-        border-radius: var(--ct-theme-border-radius, 0.375rem);
+        border-radius: var(--cf-theme-border-radius, 0.375rem);
         background: transparent;
-        color: var(--ct-theme-color-text, #111827);
+        color: var(--cf-theme-color-text, #111827);
         cursor: pointer;
         transition: background-color 150ms ease, color 150ms ease;
         flex-shrink: 0;
       }
 
       .nav-button:hover {
-        background: var(--ct-theme-color-border, #e5e7eb);
+        background: var(--cf-theme-color-border, #e5e7eb);
       }
 
       .nav-button:focus {
-        outline: 2px solid var(--ct-theme-color-primary, #3b82f6);
+        outline: 2px solid var(--cf-theme-color-primary, #3b82f6);
         outline-offset: 2px;
       }
 
@@ -109,7 +109,7 @@ export class CFCalendar extends BaseElement {
         justify-content: center;
         font-size: 0.6875rem;
         font-weight: 500;
-        color: var(--ct-theme-color-text-secondary, #6b7280);
+        color: var(--cf-theme-color-text-secondary, #6b7280);
         height: 1.75rem;
       }
 
@@ -128,7 +128,7 @@ export class CFCalendar extends BaseElement {
         aspect-ratio: 1;
         min-width: 2rem;
         min-height: 2rem;
-        border-radius: var(--ct-theme-border-radius, 0.375rem);
+        border-radius: var(--cf-theme-border-radius, 0.375rem);
         font-size: 0.8125rem;
         cursor: pointer;
         position: relative;
@@ -137,16 +137,16 @@ export class CFCalendar extends BaseElement {
           color 150ms ease,
           opacity 150ms ease;
         border: 1.5px solid transparent;
-        color: var(--ct-theme-color-text, #111827);
+        color: var(--cf-theme-color-text, #111827);
         background: transparent;
       }
 
       .day-cell:hover:not(.day-disabled) {
-        background: var(--ct-theme-color-border, #e5e7eb);
+        background: var(--cf-theme-color-border, #e5e7eb);
       }
 
       .day-cell:focus {
-        outline: 2px solid var(--ct-theme-color-primary, #3b82f6);
+        outline: 2px solid var(--cf-theme-color-primary, #3b82f6);
         outline-offset: 2px;
       }
 
@@ -161,23 +161,23 @@ export class CFCalendar extends BaseElement {
       }
 
       .day-cell.day-today {
-        background: var(--ct-theme-color-primary, #3b82f6);
+        background: var(--cf-theme-color-primary, #3b82f6);
         color: #ffffff;
       }
 
       .day-cell.day-today:hover {
-        background: var(--ct-theme-color-primary, #3b82f6);
+        background: var(--cf-theme-color-primary, #3b82f6);
         filter: brightness(0.9);
       }
 
       .day-cell.day-selected:not(.day-today) {
-        border-color: var(--ct-theme-color-primary, #3b82f6);
-        color: var(--ct-theme-color-primary, #3b82f6);
+        border-color: var(--cf-theme-color-primary, #3b82f6);
+        color: var(--cf-theme-color-primary, #3b82f6);
       }
 
       .day-cell.day-today.day-selected {
         box-shadow:
-          0 0 0 2px var(--ct-theme-color-primary, #3b82f6),
+          0 0 0 2px var(--cf-theme-color-primary, #3b82f6),
           0 0 0 4px rgba(59, 130, 246, 0.2);
         }
 
@@ -189,7 +189,7 @@ export class CFCalendar extends BaseElement {
           width: 4px;
           height: 4px;
           border-radius: 50%;
-          background: var(--ct-theme-color-primary, #3b82f6);
+          background: var(--cf-theme-color-primary, #3b82f6);
           margin-top: 2px;
           flex-shrink: 0;
         }

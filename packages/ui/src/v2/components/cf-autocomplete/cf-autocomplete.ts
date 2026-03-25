@@ -5,9 +5,9 @@ import { BaseElement } from "../../core/base-element.ts";
 import { consume } from "@lit/context";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 import type { Schema } from "@commonfabric/api/schema";
@@ -195,46 +195,46 @@ export class CFAutocomplete extends BaseElement {
         padding: 0.5rem 0.75rem;
         font-size: 0.875rem;
         line-height: 1.25rem;
-        color: var(--ct-theme-color-text, #111827);
-        background-color: var(--ct-theme-color-background, #ffffff);
-        border: 1px solid var(--ct-theme-color-border, #e5e7eb);
+        color: var(--cf-theme-color-text, #111827);
+        background-color: var(--cf-theme-color-background, #ffffff);
+        border: 1px solid var(--cf-theme-color-border, #e5e7eb);
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
-        transition: all var(--ct-theme-animation-duration, 150ms)
+        transition: all var(--cf-theme-animation-duration, 150ms)
           var(--ct-transition-timing-ease);
-        font-family: var(--ct-theme-font-family, inherit);
+        font-family: var(--cf-theme-font-family, inherit);
       }
 
       input::placeholder {
-        color: var(--ct-theme-color-text-muted, #6b7280);
+        color: var(--cf-theme-color-text-muted, #6b7280);
       }
 
       input:hover:not(:disabled):not(:focus) {
-        border-color: var(--ct-theme-color-border, #d1d5db);
+        border-color: var(--cf-theme-color-border, #d1d5db);
       }
 
       input:focus {
         outline: none;
-        border-color: var(--ct-theme-color-primary, #3b82f6);
+        border-color: var(--cf-theme-color-primary, #3b82f6);
         box-shadow: 0 0 0 3px
-          var(--ct-theme-color-primary, rgba(59, 130, 246, 0.15));
+          var(--cf-theme-color-primary, rgba(59, 130, 246, 0.15));
         }
 
         input:disabled {
           cursor: not-allowed;
           opacity: 0.5;
-          background-color: var(--ct-theme-color-surface, #f1f5f9);
+          background-color: var(--cf-theme-color-surface, #f1f5f9);
         }
 
         /* Dropdown styling - uses fixed positioning to escape overflow:hidden containers */
         .dropdown {
           position: fixed;
-          background: var(--ct-theme-color-background, #ffffff);
-          border: 1px solid var(--ct-theme-color-border, #e5e7eb);
+          background: var(--cf-theme-color-background, #ffffff);
+          border: 1px solid var(--cf-theme-color-border, #e5e7eb);
           border-radius: var(
-            --ct-theme-border-radius,
+            --cf-theme-border-radius,
             var(--ct-border-radius-md, 0.375rem)
           );
           box-shadow:
@@ -260,11 +260,11 @@ export class CFAutocomplete extends BaseElement {
         }
 
         .option:hover {
-          background-color: var(--ct-theme-color-surface, #f1f5f9);
+          background-color: var(--cf-theme-color-surface, #f1f5f9);
         }
 
         .option.highlighted {
-          background-color: var(--ct-theme-color-primary, #3b82f6);
+          background-color: var(--cf-theme-color-primary, #3b82f6);
           color: white;
         }
 
@@ -278,13 +278,13 @@ export class CFAutocomplete extends BaseElement {
 
         .option-group {
           font-size: 0.75rem;
-          color: var(--ct-theme-color-text-muted, #6b7280);
+          color: var(--cf-theme-color-text-muted, #6b7280);
           margin-left: 0.5rem;
         }
 
         /* Custom value option */
         .option.custom {
-          border-top: 1px solid var(--ct-theme-color-border, #e5e7eb);
+          border-top: 1px solid var(--cf-theme-color-border, #e5e7eb);
           font-style: italic;
         }
 
@@ -292,7 +292,7 @@ export class CFAutocomplete extends BaseElement {
         .option.already-selected {
           cursor: pointer;
           opacity: 0.7;
-          background-color: var(--ct-theme-color-surface, #f1f5f9);
+          background-color: var(--cf-theme-color-surface, #f1f5f9);
         }
 
         .option.already-selected:hover {
@@ -307,7 +307,7 @@ export class CFAutocomplete extends BaseElement {
         .option.already-selected .status-label {
           font-size: 0.75rem;
           font-style: italic;
-          color: var(--ct-theme-color-text-muted, #6b7280);
+          color: var(--cf-theme-color-text-muted, #6b7280);
           margin-left: 0.5rem;
         }
 
@@ -333,7 +333,7 @@ export class CFAutocomplete extends BaseElement {
         }
 
         .selected-separator {
-          border-top: 1px solid var(--ct-theme-color-border, #e5e7eb);
+          border-top: 1px solid var(--cf-theme-color-border, #e5e7eb);
           margin-top: 0.25rem;
           padding-top: 0.25rem;
         }
@@ -342,7 +342,7 @@ export class CFAutocomplete extends BaseElement {
         .empty-state {
           padding: 0.75rem;
           text-align: center;
-          color: var(--ct-theme-color-text-muted, #6b7280);
+          color: var(--cf-theme-color-text-muted, #6b7280);
           font-size: 0.875rem;
         }
       `,
@@ -431,9 +431,9 @@ export class CFAutocomplete extends BaseElement {
     }
 
     // Theme consumption
-    @consume({ context: themeContext, subscribe: true })
+    @consume({ context: cfThemeContext, subscribe: true })
     @property({ attribute: false })
-    declare theme?: CTTheme;
+    declare theme?: CFTheme;
 
     override connectedCallback() {
       super.connectedCallback();

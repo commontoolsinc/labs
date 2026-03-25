@@ -8,18 +8,18 @@ import { css } from "lit";
 
 export const modalStyles = css`
   :host {
-    --cf-modal-color-background: var(--ct-theme-color-background, white);
-    --cf-modal-color-border: var(--ct-theme-color-border, #e5e7eb);
-    --cf-modal-color-surface: var(--ct-theme-color-surface, #fafafa);
+    --cf-modal-color-background: var(--cf-theme-color-background, white);
+    --cf-modal-color-border: var(--cf-theme-color-border, #e5e7eb);
+    --cf-modal-color-surface: var(--cf-theme-color-surface, #fafafa);
     --cf-modal-color-surface-hover: var(
-      --ct-theme-color-surface-hover,
+      --cf-theme-color-surface-hover,
       rgba(0, 0, 0, 0.05)
     );
-    --cf-modal-color-text: var(--ct-theme-color-text, #111827);
-    --cf-modal-color-text-muted: var(--ct-theme-color-text-muted, #6b7280);
-    --cf-modal-color-primary: var(--ct-theme-color-primary, #3b82f6);
-    --cf-modal-animation-duration: var(--ct-theme-animation-duration, 200ms);
-    --cf-modal-border-radius: var(--ct-theme-border-radius, 12px);
+    --cf-modal-color-text: var(--cf-theme-color-text, #111827);
+    --cf-modal-color-text-muted: var(--cf-theme-color-text-muted, #6b7280);
+    --cf-modal-color-primary: var(--cf-theme-color-primary, #3b82f6);
+    --cf-modal-animation-duration: var(--cf-theme-animation-duration, 200ms);
+    --cf-modal-border-radius: var(--cf-theme-border-radius, 12px);
 
     /* CSS custom properties for customization */
     --_backdrop-color: var(--cf-modal-backdrop-color, rgba(0, 0, 0, 0.5));

@@ -5,9 +5,9 @@ import { BaseElement } from "../../core/base-element.ts";
 import { consume } from "@lit/context";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 import { type CellHandle } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
@@ -64,19 +64,19 @@ export class CFSelect extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
-        --cf-select-color-text: var(--ct-theme-color-text, #111827);
-        --cf-select-color-background: var(--ct-theme-color-background, #ffffff);
-        --cf-select-color-border: var(--ct-theme-color-border, #e5e7eb);
-        --cf-select-color-border-hover: var(--ct-theme-color-border-muted, #d1d5db);
-        --cf-select-color-primary: var(--ct-theme-color-primary, #3b82f6);
+        --cf-select-color-text: var(--cf-theme-color-text, #111827);
+        --cf-select-color-background: var(--cf-theme-color-background, #ffffff);
+        --cf-select-color-border: var(--cf-theme-color-border, #e5e7eb);
+        --cf-select-color-border-hover: var(--cf-theme-color-border-muted, #d1d5db);
+        --cf-select-color-primary: var(--cf-theme-color-primary, #3b82f6);
         --cf-select-color-ring: rgba(59, 130, 246, 0.15);
-        --cf-select-color-surface: var(--ct-theme-color-surface, #f1f5f9);
+        --cf-select-color-surface: var(--cf-theme-color-surface, #f1f5f9);
         --cf-select-border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
-        --cf-select-animation-duration: var(--ct-theme-animation-duration, 150ms);
-        --cf-select-font-family: var(--ct-theme-font-family, inherit);
+        --cf-select-animation-duration: var(--cf-theme-animation-duration, 150ms);
+        --cf-select-font-family: var(--cf-theme-font-family, inherit);
 
         display: inline-block;
         width: 100%;
@@ -255,9 +255,9 @@ export class CFSelect extends BaseElement {
   }
 
   // Theme consumption
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CTTheme;
+  declare theme?: CFTheme;
 
   /* ---------- Render ---------- */
   override render() {

@@ -36,25 +36,25 @@ export class CFChip extends BaseElement {
         gap: 0.375rem;
         padding: 0.25rem 0.625rem;
         background: var(
-          --ct-theme-color-surface,
+          --cf-theme-color-surface,
           var(--ct-color-gray-100, #f5f5f5)
         );
         color: var(
-          --ct-theme-color-text,
+          --cf-theme-color-text,
           var(--ct-color-gray-900, #212121)
         );
         border: 1px solid
-          var(--ct-theme-color-border, var(--ct-color-gray-300, #e0e0e0));
+          var(--cf-theme-color-border, var(--ct-color-gray-300, #e0e0e0));
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-full, 9999px)
         );
         font-size: 0.8125rem;
         line-height: 1;
         user-select: none;
         transition:
-          background-color var(--ct-theme-animation-duration, 200ms) ease,
-          border-color var(--ct-theme-animation-duration, 200ms) ease;
+          background-color var(--cf-theme-animation-duration, 200ms) ease,
+          border-color var(--cf-theme-animation-duration, 200ms) ease;
         }
 
         .chip.interactive {
@@ -63,7 +63,7 @@ export class CFChip extends BaseElement {
 
         .chip.interactive:hover {
           background: var(
-            --ct-theme-color-surface-hover,
+            --cf-theme-color-surface-hover,
             var(--ct-color-gray-200, #eeeeee)
           );
         }
@@ -71,15 +71,15 @@ export class CFChip extends BaseElement {
         /* Variant: primary (blue - for mentions) */
         .chip.primary {
           background: var(
-            --ct-theme-color-primary-surface,
+            --cf-theme-color-primary-surface,
             var(--ct-color-blue-50, #eff6ff)
           );
           border-color: var(
-            --ct-theme-color-primary,
+            --cf-theme-color-primary,
             var(--ct-color-blue-200, #bfdbfe)
           );
           color: var(
-            --ct-theme-color-primary,
+            --cf-theme-color-primary,
             var(--ct-color-blue-700, #1d4ed8)
           );
         }
@@ -87,15 +87,15 @@ export class CFChip extends BaseElement {
         /* Variant: accent (purple - for clipboard) */
         .chip.accent {
           background: var(
-            --ct-theme-color-accent-surface,
+            --cf-theme-color-accent-surface,
             var(--ct-color-purple-50, #faf5ff)
           );
           border-color: var(
-            --ct-theme-color-accent,
+            --cf-theme-color-accent,
             var(--ct-color-purple-200, #e9d5ff)
           );
           color: var(
-            --ct-theme-color-accent,
+            --cf-theme-color-accent,
             var(--ct-color-purple-700, #7c3aed)
           );
         }

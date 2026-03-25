@@ -6,7 +6,7 @@ export const resizableHandleStyles = `
     position: relative;
     outline: none;
     background-color: hsl(var(--border, 240 5.9% 90%));
-    transition: background-color var(--ct-theme-animation-duration, 150ms)
+    transition: background-color var(--cf-theme-animation-duration, 150ms)
       var(--ct-transition-timing-ease);
   }
 
@@ -32,7 +32,7 @@ export const resizableHandleStyles = `
     height: 16px;
     position: relative;
     opacity: 0.5;
-    transition: opacity var(--ct-theme-animation-duration, 150ms)
+    transition: opacity var(--cf-theme-animation-duration, 150ms)
       var(--ct-transition-timing-ease);
   }
 

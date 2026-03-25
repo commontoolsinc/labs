@@ -35,18 +35,18 @@ export class CFSlider extends BaseElement {
   static override styles = css`
     :host {
       /* Default color values if not provided */
-      --cf-slider-color-background: var(--ct-theme-color-background, #ffffff);
-      --cf-slider-color-foreground: var(--ct-theme-color-text, #0f172a);
-      --cf-slider-color-border: var(--ct-theme-color-border, #e2e8f0);
-      --cf-slider-color-ring: var(--ct-theme-color-primary, #94a3b8);
-      --cf-slider-color-primary: var(--ct-theme-color-primary, #3b82f6);
+      --cf-slider-color-background: var(--cf-theme-color-background, #ffffff);
+      --cf-slider-color-foreground: var(--cf-theme-color-text, #0f172a);
+      --cf-slider-color-border: var(--cf-theme-color-border, #e2e8f0);
+      --cf-slider-color-ring: var(--cf-theme-color-primary, #94a3b8);
+      --cf-slider-color-primary: var(--cf-theme-color-primary, #3b82f6);
       --cf-slider-color-primary-foreground: var(
-        --ct-theme-color-primary-foreground,
+        --cf-theme-color-primary-foreground,
         #ffffff
       );
-      --cf-slider-color-muted: var(--ct-theme-color-surface, #f8fafc);
+      --cf-slider-color-muted: var(--cf-theme-color-surface, #f8fafc);
       --cf-slider-color-muted-foreground: var(
-        --ct-theme-color-text-muted,
+        --cf-theme-color-text-muted,
         #64748b
       );
 

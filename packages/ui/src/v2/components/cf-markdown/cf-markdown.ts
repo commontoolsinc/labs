@@ -9,8 +9,8 @@ import "../cf-copy-button/cf-copy-button.ts";
 import "../cf-cell-link/cf-cell-link.ts";
 import {
   applyThemeToElement,
-  type CTTheme,
-  themeContext,
+  type CFTheme,
+  cfThemeContext,
 } from "../theme-context.ts";
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 
@@ -55,13 +55,13 @@ export class CFMarkdown extends BaseElement {
         display: block;
         box-sizing: border-box;
         font-family: var(
-          --ct-theme-font-family,
+          --cf-theme-font-family,
           system-ui,
           -apple-system,
           sans-serif
         );
         line-height: 1.6;
-        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
       }
 
       *,
@@ -117,13 +117,13 @@ export class CFMarkdown extends BaseElement {
 
       .markdown-content h1 {
         font-size: 2em;
-        border-bottom: 1px solid var(--ct-theme-color-border, #e5e7eb);
+        border-bottom: 1px solid var(--cf-theme-color-border, #e5e7eb);
         padding-bottom: 0.3em;
       }
 
       .markdown-content h2 {
         font-size: 1.5em;
-        border-bottom: 1px solid var(--ct-theme-color-border, #e5e7eb);
+        border-bottom: 1px solid var(--cf-theme-color-border, #e5e7eb);
         padding-bottom: 0.3em;
       }
 
@@ -141,7 +141,7 @@ export class CFMarkdown extends BaseElement {
 
       .markdown-content h6 {
         font-size: 0.85em;
-        color: var(--ct-theme-color-text-muted, #6b7280);
+        color: var(--cf-theme-color-text-muted, #6b7280);
       }
 
       /* Inverse variant heading adjustments */
@@ -164,13 +164,13 @@ export class CFMarkdown extends BaseElement {
       }
 
       .markdown-content p:not(:last-child) {
-        margin-bottom: var(--ct-theme-spacing, var(--ct-spacing-3, 0.75rem));
+        margin-bottom: var(--cf-theme-spacing, var(--ct-spacing-3, 0.75rem));
       }
 
       /* Compact mode paragraph spacing */
       .markdown-content.compact p:not(:last-child) {
         margin-bottom: var(
-          --ct-theme-spacing-compact,
+          --cf-theme-spacing-compact,
           var(--ct-spacing-1, 0.25rem)
         );
       }
@@ -178,7 +178,7 @@ export class CFMarkdown extends BaseElement {
       /* Links */
       .markdown-content a {
         color: var(
-          --ct-theme-color-accent,
+          --cf-theme-color-accent,
           var(--ct-color-blue-500, #3b82f6)
         );
         text-decoration: none;
@@ -198,7 +198,7 @@ export class CFMarkdown extends BaseElement {
       /* Lists */
       .markdown-content ul,
       .markdown-content ol {
-        margin: var(--ct-theme-spacing, var(--ct-spacing-3, 0.75rem)) 0;
+        margin: var(--cf-theme-spacing, var(--ct-spacing-3, 0.75rem)) 0;
         padding-left: 2em;
       }
 
@@ -213,10 +213,10 @@ export class CFMarkdown extends BaseElement {
 
       /* Inline code */
       .markdown-content code {
-        background-color: var(--ct-theme-color-surface, #f9fafb);
+        background-color: var(--cf-theme-color-surface, #f9fafb);
         padding: 0.2em 0.4em;
-        border-radius: var(--ct-theme-border-radius, 0.375rem);
-        font-family: var(--ct-theme-mono-font-family, ui-monospace, monospace);
+        border-radius: var(--cf-theme-border-radius, 0.375rem);
+        font-family: var(--cf-theme-mono-font-family, ui-monospace, monospace);
         font-size: 0.875em;
       }
 
@@ -231,12 +231,12 @@ export class CFMarkdown extends BaseElement {
 
       /* Code blocks */
       .markdown-content pre {
-        background-color: var(--ct-theme-color-surface, #f9fafb);
-        padding: var(--ct-theme-padding-block, var(--ct-spacing-3, 0.75rem));
-        border-radius: var(--ct-theme-border-radius, 0.5rem);
-        border: 1px solid var(--ct-theme-color-border, #e5e7eb);
+        background-color: var(--cf-theme-color-surface, #f9fafb);
+        padding: var(--cf-theme-padding-block, var(--ct-spacing-3, 0.75rem));
+        border-radius: var(--cf-theme-border-radius, 0.5rem);
+        border: 1px solid var(--cf-theme-color-border, #e5e7eb);
         overflow-x: auto;
-        margin: var(--ct-theme-spacing, var(--ct-spacing-3, 0.75rem)) 0;
+        margin: var(--cf-theme-spacing, var(--ct-spacing-3, 0.75rem)) 0;
       }
 
       .markdown-content pre code {
@@ -265,10 +265,10 @@ export class CFMarkdown extends BaseElement {
 
       .code-copy-button {
         position: absolute;
-        top: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
-        right: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
+        top: var(--cf-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
+        right: var(--cf-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
         opacity: 0;
-        transition: opacity var(--ct-theme-animation-duration, 0.2s) ease;
+        transition: opacity var(--cf-theme-animation-duration, 0.2s) ease;
         z-index: 1;
       }
 
@@ -278,11 +278,11 @@ export class CFMarkdown extends BaseElement {
 
       /* Blockquotes */
       .markdown-content blockquote {
-        border-left: 4px solid var(--ct-theme-color-border, #e5e7eb);
-        margin: var(--ct-theme-spacing, var(--ct-spacing-3, 0.75rem)) 0;
-        padding-left: var(--ct-theme-padding, var(--ct-spacing-3, 0.75rem));
+        border-left: 4px solid var(--cf-theme-color-border, #e5e7eb);
+        margin: var(--cf-theme-spacing, var(--ct-spacing-3, 0.75rem)) 0;
+        padding-left: var(--cf-theme-padding, var(--ct-spacing-3, 0.75rem));
         font-style: italic;
-        color: var(--ct-theme-color-text-muted, #6b7280);
+        color: var(--cf-theme-color-text-muted, #6b7280);
       }
 
       .markdown-content blockquote p:last-child {
@@ -302,7 +302,7 @@ export class CFMarkdown extends BaseElement {
       /* Horizontal rules */
       .markdown-content hr {
         border: none;
-        border-top: 1px solid var(--ct-theme-color-border, #e5e7eb);
+        border-top: 1px solid var(--cf-theme-color-border, #e5e7eb);
         margin: 1.5em 0;
       }
 
@@ -317,18 +317,18 @@ export class CFMarkdown extends BaseElement {
       .markdown-content table {
         border-collapse: collapse;
         width: 100%;
-        margin: var(--ct-theme-spacing, var(--ct-spacing-3, 0.75rem)) 0;
+        margin: var(--cf-theme-spacing, var(--ct-spacing-3, 0.75rem)) 0;
       }
 
       .markdown-content th,
       .markdown-content td {
-        border: 1px solid var(--ct-theme-color-border, #e5e7eb);
+        border: 1px solid var(--cf-theme-color-border, #e5e7eb);
         padding: 0.5em 1em;
         text-align: left;
       }
 
       .markdown-content th {
-        background-color: var(--ct-theme-color-surface, #f9fafb);
+        background-color: var(--cf-theme-color-surface, #f9fafb);
         font-weight: 600;
       }
 
@@ -352,7 +352,7 @@ export class CFMarkdown extends BaseElement {
       .markdown-content img {
         max-width: 100%;
         height: auto;
-        border-radius: var(--ct-theme-border-radius, 0.5rem);
+        border-radius: var(--cf-theme-border-radius, 0.5rem);
       }
 
       /* Strong and emphasis */
@@ -384,9 +384,9 @@ export class CFMarkdown extends BaseElement {
   @property({ type: Boolean, reflect: true })
   declare compact: boolean;
 
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CTTheme;
+  declare theme?: CFTheme;
 
   private _unsubscribe: (() => void) | null = null;
 

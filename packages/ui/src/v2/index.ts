@@ -70,7 +70,7 @@ export * from "./components/ct-resizable-panel-group/index.ts";
 export * from "./components/cf-screen/index.ts";
 export * from "./components/cf-toolbar/index.ts";
 export * from "./components/cf-kbd/index.ts";
-export * from "./components/ct-theme/index.ts";
+export * from "./components/cf-theme/index.ts";
 export * from "./components/cf-scroll-area/index.ts";
 export * from "./components/cf-separator/index.ts";
 export * from "./components/cf-skeleton/index.ts";

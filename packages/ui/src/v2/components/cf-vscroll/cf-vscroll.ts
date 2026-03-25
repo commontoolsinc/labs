@@ -43,10 +43,10 @@ export class CFVScroll extends BaseElement {
 
   static override styles = css`
     :host {
-      --cf-vscroll-color-surface: var(--ct-theme-color-surface, #f1f5f9);
-      --cf-vscroll-color-thumb: var(--ct-theme-color-text-muted, #64748b);
-      --cf-vscroll-color-thumb-hover: var(--ct-theme-color-text, #475569);
-      --cf-vscroll-color-background: var(--ct-theme-color-background, #ffffff);
+      --cf-vscroll-color-surface: var(--cf-theme-color-surface, #f1f5f9);
+      --cf-vscroll-color-thumb: var(--cf-theme-color-text-muted, #64748b);
+      --cf-vscroll-color-thumb-hover: var(--cf-theme-color-text, #475569);
+      --cf-vscroll-color-background: var(--cf-theme-color-background, #ffffff);
 
       display: block;
       position: relative;

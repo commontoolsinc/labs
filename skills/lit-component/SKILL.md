@@ -132,15 +132,15 @@ import { consume } from "@lit/context";
 import { property } from "lit/decorators.js";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 
 export class MyComponent extends BaseElement {
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CTTheme;
+  declare theme?: CFTheme;
 
   override firstUpdated(changed: Map<string | number | symbol, unknown>) {
     super.firstUpdated(changed);
@@ -166,14 +166,14 @@ Then use theme CSS variables with fallbacks:
 ```css
 .button {
   background-color: var(
-    --ct-theme-color-primary,
+    --cf-theme-color-primary,
     var(--ct-colors-primary-500, #3b82f6)
   );
   border-radius: var(
-    --ct-theme-border-radius,
+    --cf-theme-border-radius,
     var(--ct-border-radius-md, 0.375rem)
   );
-  font-family: var(--ct-theme-font-family, inherit);
+  font-family: var(--cf-theme-font-family, inherit);
 }
 ```
 
@@ -367,8 +367,8 @@ Load these references as needed for detailed guidance:
 - **`references/component-patterns.md`** - Detailed patterns for each component
   category, file structure, type safety, styling conventions, event handling,
   and lifecycle methods
-- **`references/theme-system.md`** - Theme philosophy, `ct-theme` provider,
-  CTTheme interface, CSS variables, and theming patterns
+- **`references/theme-system.md`** - Theme philosophy, `cf-theme` provider,
+  CFTheme interface, CSS variables, and theming patterns
 - **`references/cell-integration.md`** - Comprehensive Cell integration patterns
   including subscriptions, mutations, array handling, and common pitfalls
 - **`references/advanced-patterns.md`** - Advanced architectural patterns
@@ -414,7 +414,7 @@ Study these components to understand architectural patterns:
 
 **Advanced patterns:**
 
-- **Context provider:** `ct-theme` - Ambient configuration with `@provide`,
+- **Context provider:** `cf-theme` - Ambient configuration with `@provide`,
   `display: contents`, reactive Cell subscriptions
 - **Runtime rendering:** `ct-render` - Pattern loading, UI extraction, lifecycle
   management

@@ -64,9 +64,9 @@ export class CFFab extends BaseElement {
         -webkit-backdrop-filter: blur(0px);
         pointer-events: none;
         transition:
-          background var(--ct-theme-animation-duration, 300ms) ease,
-          backdrop-filter var(--ct-theme-animation-duration, 300ms) ease,
-          -webkit-backdrop-filter var(--ct-theme-animation-duration, 300ms) ease;
+          background var(--cf-theme-animation-duration, 300ms) ease,
+          backdrop-filter var(--cf-theme-animation-duration, 300ms) ease,
+          -webkit-backdrop-filter var(--cf-theme-animation-duration, 300ms) ease;
         z-index: 998;
       }
 
@@ -191,7 +191,7 @@ export class CFFab extends BaseElement {
         position: relative;
         width: 240px;
         height: 32px;
-        background: var(--ct-theme-color-surface, #000);
+        background: var(--cf-theme-color-surface, #000);
         border-radius: 16px;
         /*box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1),
           0 4px 16px rgba(0, 0, 0, 0.08);*/
@@ -201,13 +201,13 @@ export class CFFab extends BaseElement {
         justify-content: center;
         overflow: hidden;
         transition:
-          width var(--ct-theme-animation-duration, 400ms)
+          width var(--cf-theme-animation-duration, 400ms)
           cubic-bezier(0.34, 1.56, 0.64, 1),
-          height var(--ct-theme-animation-duration, 400ms)
+          height var(--cf-theme-animation-duration, 400ms)
           cubic-bezier(0.34, 1.56, 0.64, 1),
-          border-radius var(--ct-theme-animation-duration, 400ms)
+          border-radius var(--cf-theme-animation-duration, 400ms)
           cubic-bezier(0.34, 1.56, 0.64, 1),
-          background var(--ct-theme-animation-duration, 300ms) ease;
+          background var(--cf-theme-animation-duration, 300ms) ease;
         }
 
         /* Collapsed state */
@@ -218,7 +218,7 @@ export class CFFab extends BaseElement {
 
         /* Variant: primary */
         :host([variant="primary"]) .fab {
-          background: var(--ct-theme-color-primary, #3b82f6);
+          background: var(--cf-theme-color-primary, #3b82f6);
         }
 
         /* Expanded state */
@@ -229,9 +229,9 @@ export class CFFab extends BaseElement {
           height: auto;
           border-radius: 12px;
           cursor: default;
-          background: var(--ct-theme-color-background, #fafafa);
+          background: var(--cf-theme-color-background, #fafafa);
           overflow: visible;
-          border: 1px solid var(--ct-theme-color-border, #e5e5e5);
+          border: 1px solid var(--cf-theme-color-border, #e5e5e5);
           box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
         }
 
@@ -292,8 +292,8 @@ export class CFFab extends BaseElement {
           opacity: 1;
           transform: scale(1);
           transition:
-            opacity calc(var(--ct-theme-animation-duration, 300ms) * 0.5) ease,
-            transform var(--ct-theme-animation-duration, 300ms)
+            opacity calc(var(--cf-theme-animation-duration, 300ms) * 0.5) ease,
+            transform var(--cf-theme-animation-duration, 300ms)
             cubic-bezier(0.34, 1.56, 0.64, 1);
           }
 
@@ -368,8 +368,8 @@ export class CFFab extends BaseElement {
             transform: scale(0.95);
             pointer-events: none;
             transition:
-              opacity calc(var(--ct-theme-animation-duration, 300ms) * 0.5) ease,
-              transform calc(var(--ct-theme-animation-duration, 300ms) * 0.5)
+              opacity calc(var(--cf-theme-animation-duration, 300ms) * 0.5) ease,
+              transform calc(var(--cf-theme-animation-duration, 300ms) * 0.5)
               cubic-bezier(0.34, 1.56, 0.64, 1);
             }
 
@@ -378,7 +378,7 @@ export class CFFab extends BaseElement {
               opacity: 1;
               transform: scale(1);
               pointer-events: auto;
-              transition-delay: calc(var(--ct-theme-animation-duration, 300ms) * 0.3);
+              transition-delay: calc(var(--cf-theme-animation-duration, 300ms) * 0.3);
             }
 
             :host([collapsing]) .fab-panel {

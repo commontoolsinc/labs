@@ -47,23 +47,23 @@ export class CFLoader extends BaseElement {
   static override styles = css`
     :host {
       --cf-loader-color-track: var(
-        --ct-theme-color-border,
+        --cf-theme-color-border,
         var(--ct-colors-gray-300, #e0e0e0)
       );
       --cf-loader-color-arc: var(
-        --ct-theme-color-primary,
+        --cf-theme-color-primary,
         var(--ct-colors-primary-500, #000)
       );
       --cf-loader-color-text: var(
-        --ct-theme-color-text-muted,
+        --cf-theme-color-text-muted,
         var(--ct-colors-gray-600, #666)
       );
       --cf-loader-color-surface: var(
-        --ct-theme-color-surface,
+        --cf-theme-color-surface,
         var(--ct-colors-gray-100, #f0f0f0)
       );
       --cf-loader-color-error: var(
-        --ct-theme-color-error,
+        --cf-theme-color-error,
         var(--ct-colors-error, #dc2626)
       );
 

@@ -28,7 +28,7 @@ Our `ui` package is a web component library implemented in `lit` that interopera
 
 # System Components
 
-## ct-theme
+## cf-theme
 
 Applies a set of theme variables to the entire subtree. Not all components respect the theme yet, but many do. See `packages/ui/src/v2/components/theme-context.ts`
 
@@ -44,9 +44,9 @@ const localTheme = {
 return {
   [NAME]: "Themed Piece",
   [UI]: (
-    <ct-theme theme={localTheme}>
+    <cf-theme theme={localTheme}>
       {/* all components in subtree are themed */}
-    </ct-theme>
+    </cf-theme>
   )
 }
 ```

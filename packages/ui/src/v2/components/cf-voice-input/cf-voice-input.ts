@@ -8,9 +8,9 @@ import { createCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 import { classMap } from "lit/directives/class-map.js";
 import "../cf-audio-visualizer/cf-audio-visualizer.ts";
@@ -122,7 +122,7 @@ export class CFVoiceInput extends BaseElement {
       .container {
         display: flex;
         flex-direction: column;
-        gap: var(--ct-theme-spacing-normal, 0.75rem);
+        gap: var(--cf-theme-spacing-normal, 0.75rem);
       }
 
       .recording-button {
@@ -133,11 +133,11 @@ export class CFVoiceInput extends BaseElement {
         height: 3rem;
         border-radius: 50%;
         background-color: var(
-          --ct-theme-color-surface,
+          --cf-theme-color-surface,
           var(--ct-color-gray-100, #f3f4f6)
         );
         border: 2px solid
-          var(--ct-theme-color-border, var(--ct-color-gray-300, #d1d5db));
+          var(--cf-theme-color-border, var(--ct-color-gray-300, #d1d5db));
         cursor: pointer;
         transition: all 0.2s ease;
         font-size: 1.5rem;
@@ -148,7 +148,7 @@ export class CFVoiceInput extends BaseElement {
 
       .recording-button:hover:not(:disabled) {
         background-color: var(
-          --ct-theme-color-surface-hover,
+          --cf-theme-color-surface-hover,
           var(--ct-color-gray-200, #e5e7eb)
         );
         transform: scale(1.05);
@@ -165,11 +165,11 @@ export class CFVoiceInput extends BaseElement {
 
       .recording-button.recording {
         background-color: var(
-          --ct-theme-color-error,
+          --cf-theme-color-error,
           var(--ct-color-red-500, #ef4444)
         );
         border-color: var(
-          --ct-theme-color-error,
+          --cf-theme-color-error,
           var(--ct-color-red-600, #dc2626)
         );
         animation: pulse 1.5s ease-in-out infinite;
@@ -188,18 +188,18 @@ export class CFVoiceInput extends BaseElement {
       .recording-status {
         display: flex;
         align-items: center;
-        gap: var(--ct-theme-spacing-tight, 0.5rem);
-        padding: var(--ct-theme-spacing-normal, 0.75rem);
+        gap: var(--cf-theme-spacing-tight, 0.5rem);
+        padding: var(--cf-theme-spacing-normal, 0.75rem);
         background-color: var(
-          --ct-theme-color-surface,
+          --cf-theme-color-surface,
           var(--ct-color-gray-50, #f9fafb)
         );
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
         font-size: 0.875rem;
-        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
       }
 
       .recording-indicator {
@@ -207,7 +207,7 @@ export class CFVoiceInput extends BaseElement {
         height: 8px;
         border-radius: 50%;
         background-color: var(
-          --ct-theme-color-error,
+          --cf-theme-color-error,
           var(--ct-color-red-500, #ef4444)
         );
         animation: pulse 1.5s ease-in-out infinite;
@@ -221,32 +221,32 @@ export class CFVoiceInput extends BaseElement {
       .processing {
         display: flex;
         align-items: center;
-        gap: var(--ct-theme-spacing-tight, 0.5rem);
-        padding: var(--ct-theme-spacing-normal, 0.75rem);
+        gap: var(--cf-theme-spacing-tight, 0.5rem);
+        padding: var(--cf-theme-spacing-normal, 0.75rem);
         background-color: var(
-          --ct-theme-color-surface,
+          --cf-theme-color-surface,
           var(--ct-color-blue-50, #eff6ff)
         );
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
         font-size: 0.875rem;
-        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
       }
 
       .error {
-        padding: var(--ct-theme-spacing-normal, 0.75rem);
+        padding: var(--cf-theme-spacing-normal, 0.75rem);
         background-color: var(
-          --ct-theme-color-error-surface,
+          --cf-theme-color-error-surface,
           var(--ct-color-red-50, #fef2f2)
         );
         color: var(
-          --ct-theme-color-error,
+          --cf-theme-color-error,
           var(--ct-color-red-700, #b91c1c)
         );
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
         font-size: 0.875rem;
@@ -304,9 +304,9 @@ export class CFVoiceInput extends BaseElement {
   @property({ type: String })
   private errorMessage = "";
 
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CTTheme;
+  declare theme?: CFTheme;
 
   private _cellController = createCellController<TranscriptionData | null>(
     this,
@@ -761,7 +761,7 @@ export class CFVoiceInput extends BaseElement {
                   <cf-audio-visualizer
                     ${ref(this.visualizerRef)}
                     bars="12"
-                    color="var(--ct-theme-color-primary, #3b82f6)"
+                    color="var(--cf-theme-color-primary, #3b82f6)"
                     height="40"
                   ></cf-audio-visualizer>
                 </div>

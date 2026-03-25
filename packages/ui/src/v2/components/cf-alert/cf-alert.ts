@@ -36,41 +36,41 @@ export class CFAlert extends BaseElement {
   static override styles = css`
     :host {
       /* Default color values if not provided */
-      --cf-alert-color-background: var(--ct-theme-color-background, #ffffff);
-      --cf-alert-color-foreground: var(--ct-theme-color-text, #0f172a);
-      --cf-alert-color-muted: var(--ct-theme-color-surface, #f8fafc);
+      --cf-alert-color-background: var(--cf-theme-color-background, #ffffff);
+      --cf-alert-color-foreground: var(--cf-theme-color-text, #0f172a);
+      --cf-alert-color-muted: var(--cf-theme-color-surface, #f8fafc);
       --cf-alert-color-muted-foreground: var(
-        --ct-theme-color-text-muted,
+        --cf-theme-color-text-muted,
         #64748b
       );
-      --cf-alert-color-primary: var(--ct-theme-color-primary, #0f172a);
+      --cf-alert-color-primary: var(--cf-theme-color-primary, #0f172a);
       --cf-alert-color-primary-foreground: var(
-        --ct-theme-color-primary-foreground,
+        --cf-theme-color-primary-foreground,
         #f8fafc
       );
-      --cf-alert-color-destructive: var(--ct-theme-color-error, #dc2626);
+      --cf-alert-color-destructive: var(--cf-theme-color-error, #dc2626);
       --cf-alert-color-destructive-foreground: var(
-        --ct-theme-color-error-foreground,
+        --cf-theme-color-error-foreground,
         #fef2f2
       );
-      --cf-alert-color-warning: var(--ct-theme-color-warning, #f59e0b);
+      --cf-alert-color-warning: var(--cf-theme-color-warning, #f59e0b);
       --cf-alert-color-warning-foreground: var(
-        --ct-theme-color-warning-foreground,
+        --cf-theme-color-warning-foreground,
         #fffbeb
       );
-      --cf-alert-color-warning-text: var(--ct-theme-color-text, #92400e);
-      --cf-alert-color-success: var(--ct-theme-color-success, #10b981);
+      --cf-alert-color-warning-text: var(--cf-theme-color-text, #92400e);
+      --cf-alert-color-success: var(--cf-theme-color-success, #10b981);
       --cf-alert-color-success-foreground: var(
-        --ct-theme-color-success-foreground,
+        --cf-theme-color-success-foreground,
         #f0fdf4
       );
-      --cf-alert-color-info: var(--ct-theme-color-primary, #3b82f6);
+      --cf-alert-color-info: var(--cf-theme-color-primary, #3b82f6);
       --cf-alert-color-info-foreground: var(
-        --ct-theme-color-primary-foreground,
+        --cf-theme-color-primary-foreground,
         #eff6ff
       );
-      --cf-alert-color-border: var(--ct-theme-color-border, #e2e8f0);
-      --cf-alert-color-ring: var(--ct-theme-color-primary, #94a3b8);
+      --cf-alert-color-border: var(--cf-theme-color-border, #e2e8f0);
+      --cf-alert-color-ring: var(--cf-theme-color-primary, #94a3b8);
 
       display: block;
     }

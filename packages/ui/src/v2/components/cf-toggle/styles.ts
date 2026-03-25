@@ -15,14 +15,14 @@ export const toggleStyles = `
     --cf-toggle-font-size-lg: 1rem;
 
     /* Default color values if not provided */
-    --cf-toggle-color-background: var(--ct-theme-color-background, #ffffff);
-    --cf-toggle-color-foreground: var(--ct-theme-color-text, #0f172a);
-    --cf-toggle-color-muted: var(--ct-theme-color-surface, #f8fafc);
-    --cf-toggle-color-muted-foreground: var(--ct-theme-color-text-muted, #64748b);
-    --cf-toggle-color-accent: var(--ct-theme-color-surface-hover, #f1f5f9);
-    --cf-toggle-color-accent-foreground: var(--ct-theme-color-text, #0f172a);
-    --cf-toggle-color-border: var(--ct-theme-color-border, #e2e8f0);
-    --cf-toggle-color-ring: var(--ct-theme-color-primary, #94a3b8);
+    --cf-toggle-color-background: var(--cf-theme-color-background, #ffffff);
+    --cf-toggle-color-foreground: var(--cf-theme-color-text, #0f172a);
+    --cf-toggle-color-muted: var(--cf-theme-color-surface, #f8fafc);
+    --cf-toggle-color-muted-foreground: var(--cf-theme-color-text-muted, #64748b);
+    --cf-toggle-color-accent: var(--cf-theme-color-surface-hover, #f1f5f9);
+    --cf-toggle-color-accent-foreground: var(--cf-theme-color-text, #0f172a);
+    --cf-toggle-color-border: var(--cf-theme-color-border, #e2e8f0);
+    --cf-toggle-color-ring: var(--cf-theme-color-primary, #94a3b8);
 
     display: inline-block;
   }

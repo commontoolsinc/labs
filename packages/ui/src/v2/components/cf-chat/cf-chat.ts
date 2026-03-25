@@ -13,11 +13,11 @@ import type {
 } from "@commonfabric/api";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
   getSemanticSpacing,
   mergeWithDefaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 
 // TODO(v2-token-migration): Migrate this component to component-level tokens,
@@ -62,7 +62,7 @@ const BuiltInLLMMessagesArraySchema = {
  *
  * @prop {CellHandle<BuiltInLLMMessage[]>|BuiltInLLMMessage[]} messages - Messages array or Cell containing messages
  * @prop {boolean} pending - Show animated typing indicator for assistant response
- * @prop {CTTheme} theme - Theme configuration for chat components
+ * @prop {CFTheme} theme - Theme configuration for chat components
  *
  * @example
  * <cf-chat .messages=${messagesCell} .pending=${true}></cf-chat>
@@ -104,41 +104,41 @@ export class CFChat extends BaseElement {
         display: flex;
         align-items: flex-start;
         margin-bottom: var(
-          --ct-theme-spacing-message-bottom,
+          --cf-theme-spacing-message-bottom,
           var(--ct-spacing-1, 0.25rem)
         );
       }
 
       .pending-bubble {
         background-color: var(
-          --ct-theme-surface,
+          --cf-theme-surface,
           var(--ct-color-gray-100, #f3f4f6)
         );
-        color: var(--ct-theme-text-muted, var(--ct-color-gray-900, #111827));
-        padding: var(--ct-theme-padding-bubble, var(--ct-spacing-3, 0.75rem))
-          var(--ct-theme-padding-bubble-horizontal, var(--ct-spacing-4, 1rem));
+        color: var(--cf-theme-text-muted, var(--ct-color-gray-900, #111827));
+        padding: var(--cf-theme-padding-bubble, var(--ct-spacing-3, 0.75rem))
+          var(--cf-theme-padding-bubble-horizontal, var(--ct-spacing-4, 1rem));
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-lg, 0.5rem)
         );
         border: 1px solid
-          var(--ct-theme-border-muted, var(--ct-color-gray-200, #e5e7eb));
+          var(--cf-theme-border-muted, var(--ct-color-gray-200, #e5e7eb));
         max-width: 70%;
         display: flex;
         align-items: center;
-        gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
+        gap: var(--cf-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
       }
 
       .typing-dots {
         display: flex;
-        gap: var(--ct-theme-spacing-tight, 4px);
+        gap: var(--cf-theme-spacing-tight, 4px);
       }
 
       .typing-dot {
         width: 8px;
         height: 8px;
         background-color: var(
-          --ct-theme-text-muted,
+          --cf-theme-text-muted,
           var(--ct-color-gray-400, #9ca3af)
         );
         border-radius: 50%;
@@ -191,13 +191,13 @@ export class CFChat extends BaseElement {
   declare theme: any; // Accept any theme object (partial or full)
 
   // Consume theme from provider (preferred). If no direct theme prop, use this.
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare parentTheme?: CTTheme;
+  declare parentTheme?: CFTheme;
 
   // Internal computed theme for applying CSS variables locally
   @property({ type: Object, attribute: false })
-  declare _computedTheme: CTTheme;
+  declare _computedTheme: CFTheme;
 
   constructor() {
     super();

@@ -5,18 +5,18 @@
 export const progressStyles = `
   :host {
     /* Default color values if not provided */
-    --cf-progress-color-background: var(--ct-theme-color-background, #ffffff);
-    --cf-progress-color-foreground: var(--ct-theme-color-text, #0f172a);
-    --cf-progress-color-track: var(--ct-theme-color-border, #e2e8f0);
-    --cf-progress-color-ring: var(--ct-theme-color-primary, #94a3b8);
-    --cf-progress-color-indicator: var(--ct-theme-color-primary, #3b82f6);
+    --cf-progress-color-background: var(--cf-theme-color-background, #ffffff);
+    --cf-progress-color-foreground: var(--cf-theme-color-text, #0f172a);
+    --cf-progress-color-track: var(--cf-theme-color-border, #e2e8f0);
+    --cf-progress-color-ring: var(--cf-theme-color-primary, #94a3b8);
+    --cf-progress-color-indicator: var(--cf-theme-color-primary, #3b82f6);
     --cf-progress-color-indicator-foreground: var(
-      --ct-theme-color-primary-foreground,
+      --cf-theme-color-primary-foreground,
       #ffffff
     );
-    --cf-progress-color-muted: var(--ct-theme-color-surface, #f8fafc);
+    --cf-progress-color-muted: var(--cf-theme-color-surface, #f8fafc);
     --cf-progress-color-muted-foreground: var(
-      --ct-theme-color-text-muted,
+      --cf-theme-color-text-muted,
       #64748b
     );
     
@@ -117,15 +117,15 @@ export const progressStyles = `
 
   /* Custom styling support */
   :host([variant="success"]) {
-    --cf-progress-color-indicator: var(--ct-theme-color-success, #22c55e);
+    --cf-progress-color-indicator: var(--cf-theme-color-success, #22c55e);
   }
 
   :host([variant="warning"]) {
-    --cf-progress-color-indicator: var(--ct-theme-color-warning, #f59e0b);
+    --cf-progress-color-indicator: var(--cf-theme-color-warning, #f59e0b);
   }
 
   :host([variant="error"]) {
-    --cf-progress-color-indicator: var(--ct-theme-color-error, #ef4444);
+    --cf-progress-color-indicator: var(--cf-theme-color-error, #ef4444);
   }
 
   :host([variant="info"]) {

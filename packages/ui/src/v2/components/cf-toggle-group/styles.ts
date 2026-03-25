@@ -5,8 +5,8 @@
 export const toggleGroupStyles = `
   :host {
     --cf-toggle-group-gap: 0;
-    --cf-toggle-group-color-border: var(--ct-theme-color-border, #e2e8f0);
-    --cf-toggle-group-color-background: var(--ct-theme-color-background, #ffffff);
+    --cf-toggle-group-color-border: var(--cf-theme-color-border, #e2e8f0);
+    --cf-toggle-group-color-background: var(--cf-theme-color-background, #ffffff);
 
     display: inline-flex;
   }

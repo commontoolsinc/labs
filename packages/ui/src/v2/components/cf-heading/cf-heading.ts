@@ -4,9 +4,9 @@ import { BaseElement } from "../../core/base-element.ts";
 import { consume } from "@lit/context";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 
 /**
@@ -25,9 +25,9 @@ export class CFHeading extends BaseElement {
     noMargin: { type: Boolean, reflect: true, attribute: "no-margin" },
   };
 
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CTTheme;
+  declare theme?: CFTheme;
 
   declare level: number;
   declare noMargin: boolean;
@@ -43,8 +43,8 @@ export class CFHeading extends BaseElement {
     css`
       :host {
         display: block;
-        color: var(--ct-theme-color-text, #111827);
-        font-family: var(--ct-theme-font-family, inherit);
+        color: var(--cf-theme-color-text, #111827);
+        font-family: var(--cf-theme-font-family, inherit);
       }
 
       .heading {
@@ -90,7 +90,7 @@ export class CFHeading extends BaseElement {
         font-size: var(--ct-font-size-base, 1rem);
         line-height: var(--ct-line-height-normal, 1.5);
         font-weight: var(--ct-font-weight-normal, 400);
-        color: var(--ct-theme-color-text-muted, #6b7280);
+        color: var(--cf-theme-color-text-muted, #6b7280);
       }
     `,
   ];

@@ -1,11 +1,11 @@
 # Advanced Component Patterns
 
 This document explores advanced patterns revealed by complex components like
-`ct-theme`, `ct-code-editor`, and `ct-outliner`.
+`cf-theme`, `ct-code-editor`, and `ct-outliner`.
 
 ## Architectural Principles
 
-### 1. Context Provision Pattern (`ct-theme`)
+### 1. Context Provision Pattern (`cf-theme`)
 
 **Philosophy:** Components should receive configuration from their environment,
 not just properties. Theme is ambient context that flows down the tree.
@@ -16,7 +16,7 @@ providing context.
 ```typescript
 import { provide } from "@lit/context";
 
-export class CTThemeProvider extends BaseElement {
+export class CFThemeProvider extends BaseElement {
   static override styles = css`
     :host {
       display: contents; /* Do not add extra layout */
@@ -26,9 +26,9 @@ export class CTThemeProvider extends BaseElement {
   @property({ attribute: false })
   theme: any = {};
 
-  @provide({ context: themeContext })
+  @provide({ context: cfThemeContext })
   @property({ attribute: false })
-  _computedTheme: CTTheme = defaultTheme;
+  _computedTheme: CFTheme = defaultTheme;
 
   private _recomputeAndApply() {
     // Merge partial theme with defaults (pattern-style support)

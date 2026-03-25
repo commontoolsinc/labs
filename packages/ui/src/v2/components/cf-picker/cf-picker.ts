@@ -37,14 +37,14 @@ export class CFPicker extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
-        --cf-picker-border-radius: var(--ct-theme-border-radius, 0.5rem);
-        --cf-picker-color-surface: var(--ct-theme-color-surface, #ffffff);
-        --cf-picker-color-text: var(--ct-theme-color-text, #111827);
-        --cf-picker-color-background: var(--ct-theme-color-background, #ffffff);
-        --cf-picker-color-primary: var(--ct-theme-color-primary, #3b82f6);
-        --cf-picker-color-border: var(--ct-theme-color-border, #e5e7eb);
+        --cf-picker-border-radius: var(--cf-theme-border-radius, 0.5rem);
+        --cf-picker-color-surface: var(--cf-theme-color-surface, #ffffff);
+        --cf-picker-color-text: var(--cf-theme-color-text, #111827);
+        --cf-picker-color-background: var(--cf-theme-color-background, #ffffff);
+        --cf-picker-color-primary: var(--cf-theme-color-primary, #3b82f6);
+        --cf-picker-color-border: var(--cf-theme-color-border, #e5e7eb);
         --cf-picker-color-text-secondary: var(
-          --ct-theme-color-text-secondary,
+          --cf-theme-color-text-secondary,
           #6b7280
         );
 

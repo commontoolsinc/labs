@@ -791,7 +791,7 @@ export const styles = css`
       top: var(--ct-spacing-2, 0.5rem);
       right: var(--ct-spacing-2, 0.5rem);
       border-radius: var(--ct-border-radius-sm, 0.25rem);
-      transition: all var(--ct-theme-animation-duration, 150ms)
+      transition: all var(--cf-theme-animation-duration, 150ms)
         var(--ct-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1));
       }
 
@@ -815,7 +815,7 @@ export const styles = css`
         background-color: var(--background, #ffffff);
         color: var(--foreground, #0f172a);
         border-bottom: 1px solid var(--border, #e2e8f0);
-        transition: all var(--ct-theme-animation-duration, 150ms)
+        transition: all var(--cf-theme-animation-duration, 150ms)
           var(--ct-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1));
         }
 

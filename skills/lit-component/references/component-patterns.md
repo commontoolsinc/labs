@@ -106,9 +106,9 @@ Components that capture user input.
 
 ```typescript
 export class CFButton extends BaseElement {
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CTTheme;
+  declare theme?: CFTheme;
 
   static override properties = {
     variant: { type: String },
@@ -259,7 +259,7 @@ Import types with `type` keyword when possible:
 
 ```typescript
 import type { Cell } from "@commonfabric/runner";
-import type { CTTheme } from "../theme-context.ts";
+import type { CFTheme } from "../theme-context.ts";
 ```
 
 ## Styling Conventions

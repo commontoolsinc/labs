@@ -45,7 +45,7 @@ export type SeparatorOrientation = "horizontal" | "vertical";
 export class CFSeparator extends BaseElement {
   static override styles = css`
     :host {
-      --cf-separator-color-border: var(--ct-theme-color-border, hsl(0, 0%, 89%));
+      --cf-separator-color-border: var(--cf-theme-color-border, hsl(0, 0%, 89%));
 
       display: block;
       box-sizing: border-box;

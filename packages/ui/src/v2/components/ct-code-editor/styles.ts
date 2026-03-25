@@ -2,15 +2,15 @@ import { css } from "lit";
 
 export const styles = css`
   :host {
-    --ct-code-editor-border-color: var(--ct-theme-color-border, #e5e7eb);
-    --ct-code-editor-border-radius: var(--ct-theme-border-radius, 0.375rem);
-    --ct-code-editor-font-size: var(--ct-theme-font-size, 0.875rem);
+    --ct-code-editor-border-color: var(--cf-theme-color-border, #e5e7eb);
+    --ct-code-editor-border-radius: var(--cf-theme-border-radius, 0.375rem);
+    --ct-code-editor-font-size: var(--cf-theme-font-size, 0.875rem);
     --ct-code-editor-font-family-mono: var(
-      --ct-theme-mono-font-family,
+      --cf-theme-mono-font-family,
       monospace
     );
     --ct-code-editor-font-family-prose: var(
-      --ct-theme-font-family,
+      --cf-theme-font-family,
       var(
         --ct-font-family-sans,
         -apple-system,
@@ -20,10 +20,10 @@ export const styles = css`
         sans-serif
       )
     );
-    --ct-code-editor-prose-font-size: var(--ct-theme-font-size, 1rem);
+    --ct-code-editor-prose-font-size: var(--cf-theme-font-size, 1rem);
     --ct-code-editor-focus-ring: var(--ring-alpha, hsla(212, 100%, 47%, 0.1));
     --ct-code-editor-transition-duration: var(
-      --ct-theme-animation-duration,
+      --cf-theme-animation-duration,
       150ms
     );
     --ct-code-editor-transition-ease: var(--ct-transition-timing-ease, ease);

@@ -7,9 +7,9 @@ import { createCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 import { classMap } from "lit/directives/class-map.js";
 
@@ -115,13 +115,13 @@ export class CFLocation extends BaseElement {
       .container {
         display: flex;
         flex-direction: column;
-        gap: var(--ct-theme-spacing-normal, 0.5rem);
+        gap: var(--cf-theme-spacing-normal, 0.5rem);
       }
 
       .button-row {
         display: flex;
         align-items: center;
-        gap: var(--ct-theme-spacing-normal, 0.5rem);
+        gap: var(--cf-theme-spacing-normal, 0.5rem);
       }
 
       .location-button {
@@ -129,23 +129,23 @@ export class CFLocation extends BaseElement {
         align-items: center;
         gap: 0.5rem;
         padding: 0.5rem 1rem;
-        border-radius: var(--ct-theme-border-radius, 0.375rem);
+        border-radius: var(--cf-theme-border-radius, 0.375rem);
         background-color: var(
-          --ct-theme-color-surface,
+          --cf-theme-color-surface,
           var(--ct-color-gray-100, #f3f4f6)
         );
         border: 1px solid
-          var(--ct-theme-color-border, var(--ct-color-gray-300, #d1d5db));
+          var(--cf-theme-color-border, var(--ct-color-gray-300, #d1d5db));
         cursor: pointer;
         transition: all 0.2s ease;
         font-size: 0.875rem;
         font-family: inherit;
-        color: var(--ct-theme-color-text, inherit);
+        color: var(--cf-theme-color-text, inherit);
       }
 
       .location-button:hover:not(:disabled) {
         background-color: var(
-          --ct-theme-color-surface-hover,
+          --cf-theme-color-surface-hover,
           var(--ct-color-gray-200, #e5e7eb)
         );
       }
@@ -161,22 +161,22 @@ export class CFLocation extends BaseElement {
 
       .location-button.requesting {
         background-color: var(
-          --ct-theme-color-primary-light,
+          --cf-theme-color-primary-light,
           var(--ct-color-blue-100, #dbeafe)
         );
         border-color: var(
-          --ct-theme-color-primary,
+          --cf-theme-color-primary,
           var(--ct-color-blue-500, #3b82f6)
         );
       }
 
       .location-button.watching {
         background-color: var(
-          --ct-theme-color-success-light,
+          --cf-theme-color-success-light,
           var(--ct-color-green-100, #dcfce7)
         );
         border-color: var(
-          --ct-theme-color-success,
+          --cf-theme-color-success,
           var(--ct-color-green-500, #22c55e)
         );
         animation: pulse 2s ease-in-out infinite;
@@ -200,8 +200,8 @@ export class CFLocation extends BaseElement {
         display: inline-block;
         width: 1rem;
         height: 1rem;
-        border: 2px solid var(--ct-theme-color-border, #d1d5db);
-        border-top-color: var(--ct-theme-color-primary, #3b82f6);
+        border: 2px solid var(--cf-theme-color-border, #d1d5db);
+        border-top-color: var(--cf-theme-color-primary, #3b82f6);
         border-radius: 50%;
         animation: spin 0.8s linear infinite;
       }
@@ -214,8 +214,8 @@ export class CFLocation extends BaseElement {
 
       .location-display {
         font-size: 0.75rem;
-        color: var(--ct-theme-color-text-muted, var(--ct-color-gray-500, #6b7280));
-        font-family: var(--ct-theme-font-mono, monospace);
+        color: var(--cf-theme-color-text-muted, var(--ct-color-gray-500, #6b7280));
+        font-family: var(--cf-theme-font-mono, monospace);
       }
 
       .location-display .coords {
@@ -229,21 +229,21 @@ export class CFLocation extends BaseElement {
 
       .error {
         padding: 0.5rem;
-        border-radius: var(--ct-theme-border-radius, 0.375rem);
+        border-radius: var(--cf-theme-border-radius, 0.375rem);
         background-color: var(
-          --ct-theme-color-error-light,
+          --cf-theme-color-error-light,
           var(--ct-color-red-100, #fee2e2)
         );
-        color: var(--ct-theme-color-error, var(--ct-color-red-600, #dc2626));
+        color: var(--cf-theme-color-error, var(--ct-color-red-600, #dc2626));
         font-size: 0.75rem;
       }
     `,
   ];
 
   // Theme context
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CTTheme;
+  declare theme?: CFTheme;
 
   // Cell binding for location data
   @property({ attribute: false })

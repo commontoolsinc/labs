@@ -5,9 +5,9 @@ import { BaseElement } from "../../core/base-element.ts";
 import { consume } from "@lit/context";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 import { type CellHandle } from "@commonfabric/runtime-client";
 import { stringSchema } from "@commonfabric/runner/schemas";
@@ -97,17 +97,17 @@ export class CFTextarea extends BaseElement {
 
   static override styles = css`
     :host {
-      --cf-textarea-color-background: var(--ct-theme-color-background, #ffffff);
-      --cf-textarea-color-text: var(--ct-theme-color-text, #0f172a);
-      --cf-textarea-color-border: var(--ct-theme-color-border, #e2e8f0);
-      --cf-textarea-color-primary: var(--ct-theme-color-primary, #3b82f6);
-      --cf-textarea-color-error: var(--ct-theme-color-error, #dc2626);
-      --cf-textarea-color-surface: var(--ct-theme-color-surface, #f1f5f9);
-      --cf-textarea-color-text-muted: var(--ct-theme-color-text-muted, #64748b);
+      --cf-textarea-color-background: var(--cf-theme-color-background, #ffffff);
+      --cf-textarea-color-text: var(--cf-theme-color-text, #0f172a);
+      --cf-textarea-color-border: var(--cf-theme-color-border, #e2e8f0);
+      --cf-textarea-color-primary: var(--cf-theme-color-primary, #3b82f6);
+      --cf-textarea-color-error: var(--cf-theme-color-error, #dc2626);
+      --cf-textarea-color-surface: var(--cf-theme-color-surface, #f1f5f9);
+      --cf-textarea-color-text-muted: var(--cf-theme-color-text-muted, #64748b);
       --cf-textarea-color-placeholder: #94a3b8;
-      --cf-textarea-border-radius: var(--ct-theme-border-radius, 0.375rem);
-      --cf-textarea-font-family: var(--ct-theme-font-family, inherit);
-      --cf-textarea-animation-duration: var(--ct-theme-animation-duration, 150ms);
+      --cf-textarea-border-radius: var(--cf-theme-border-radius, 0.375rem);
+      --cf-textarea-font-family: var(--cf-theme-font-family, inherit);
+      --cf-textarea-animation-duration: var(--cf-theme-animation-duration, 150ms);
 
       /* Default color values if not provided */
       --background: var(--cf-textarea-color-background, #ffffff);
@@ -289,9 +289,9 @@ export class CFTextarea extends BaseElement {
         `;
 
         // Theme consumption
-        @consume({ context: themeContext, subscribe: true })
+        @consume({ context: cfThemeContext, subscribe: true })
         @property({ attribute: false })
-        declare theme?: CTTheme;
+        declare theme?: CFTheme;
 
         // Cache + initial setup
         private _textarea: HTMLTextAreaElement | null = null;

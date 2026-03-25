@@ -2795,45 +2795,45 @@ interface CTHTMLElement extends CTDOM.HTMLElement {}
 // Extend this to add attributes to only the CT elements.
 interface CTHTMLAttributes<T> extends CTDOM.HTMLAttributes<T> {}
 
-// Minimal theme typing for ct-theme
-type CTColorToken = string | {
+// Minimal theme typing for cf-theme
+type CFColorToken = string | {
   light: string;
   dark: string;
 };
 
-interface CTThemeColors {
-  primary: CTColorToken;
-  primaryForeground: CTColorToken;
-  secondary: CTColorToken;
-  secondaryForeground: CTColorToken;
-  background: CTColorToken;
-  surface: CTColorToken;
-  surfaceHover: CTColorToken;
-  text: CTColorToken;
-  textMuted: CTColorToken;
-  border: CTColorToken;
-  borderMuted: CTColorToken;
-  success: CTColorToken;
-  successForeground: CTColorToken;
-  error: CTColorToken;
-  errorForeground: CTColorToken;
-  warning: CTColorToken;
-  warningForeground: CTColorToken;
-  accent: CTColorToken;
-  accentForeground: CTColorToken;
+interface CFThemeColors {
+  primary: CFColorToken;
+  primaryForeground: CFColorToken;
+  secondary: CFColorToken;
+  secondaryForeground: CFColorToken;
+  background: CFColorToken;
+  surface: CFColorToken;
+  surfaceHover: CFColorToken;
+  text: CFColorToken;
+  textMuted: CFColorToken;
+  border: CFColorToken;
+  borderMuted: CFColorToken;
+  success: CFColorToken;
+  successForeground: CFColorToken;
+  error: CFColorToken;
+  errorForeground: CFColorToken;
+  warning: CFColorToken;
+  warningForeground: CFColorToken;
+  accent: CFColorToken;
+  accentForeground: CFColorToken;
 }
 
-interface CTThemeDef {
+interface CFThemeDef {
   fontFamily: string;
   monoFontFamily: string;
   borderRadius: string;
   density: "compact" | "comfortable" | "spacious";
   colorScheme: "light" | "dark" | "auto";
   animationSpeed: "none" | "slow" | "normal" | "fast";
-  colors: CTThemeColors;
+  colors: CFThemeColors;
 }
 
-type CTThemeInput = Partial<CTThemeDef> & Record<string, unknown>;
+type CFThemeInput = Partial<CFThemeDef> & Record<string, unknown>;
 
 type CTEvent<T> = {
   detail: T;
@@ -2873,7 +2873,7 @@ interface CFPickerElement extends CTHTMLElement {}
 interface CFToolsChipElement extends CTHTMLElement {}
 interface CFHeadingElement extends CTHTMLElement {}
 interface CFCollapsibleElement extends CTHTMLElement {}
-interface CTThemeElement extends CTHTMLElement {}
+interface CFThemeElement extends CTHTMLElement {}
 interface CTCodeEditorElement extends CTHTMLElement {}
 interface CTCodeEditorLegacyElement extends CTHTMLElement {}
 interface CFScreenElement extends CTHTMLElement {}
@@ -3150,7 +3150,7 @@ interface CFLocationAttributes<T> extends CTHTMLAttributes<T> {
 interface CFChatAttributes<T> extends CTHTMLAttributes<T> {
   "$messages"?: CellLike<any>;
   "pending"?: boolean;
-  "theme"?: CTThemeInput;
+  "theme"?: CFThemeInput;
   "tools"?: any;
 }
 
@@ -3811,8 +3811,8 @@ interface CFCollapsibleAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-toggle"?: EventHandler<{ open: boolean }>;
 }
 
-interface CTThemeAttributes<T> extends CTHTMLAttributes<T> {
-  theme?: CTThemeInput;
+interface CFThemeAttributes<T> extends CTHTMLAttributes<T> {
+  theme?: CFThemeInput;
 }
 interface CTCodeEditorLegacyAttributes<T> extends CTHTMLAttributes<T> {
   "source"?: string;
@@ -4717,9 +4717,9 @@ declare global {
         CFCollapsibleAttributes<CFCollapsibleElement>,
         CFCollapsibleElement
       >;
-      "ct-theme": CTDOM.DetailedHTMLProps<
-        CTThemeAttributes<CTThemeElement>,
-        CTThemeElement
+      "cf-theme": CTDOM.DetailedHTMLProps<
+        CFThemeAttributes<CFThemeElement>,
+        CFThemeElement
       >;
       "ct-code-editor": CTDOM.DetailedHTMLProps<
         CTCodeEditorAttributes<CTCodeEditorElement>,

@@ -26,23 +26,23 @@ import { BaseElement } from "../../core/base-element.ts";
 export class CFCard extends BaseElement {
   static override styles = css`
     :host {
-      --cf-card-border-radius: var(--ct-theme-border-radius, 0.5rem);
-      --cf-card-animation-duration: var(--ct-theme-animation-duration, 150ms);
-      --cf-card-spacing-tight: var(--ct-theme-spacing-tight, 0.25rem);
-      --cf-card-spacing-loose: var(--ct-theme-spacing-loose, 1rem);
-      --cf-card-color-border: var(--ct-theme-color-border, hsl(0, 0%, 89%));
-      --cf-card-color-surface: var(--ct-theme-color-surface, hsl(0, 0%, 100%));
-      --cf-card-color-text: var(--ct-theme-color-text, hsl(0, 0%, 9%));
+      --cf-card-border-radius: var(--cf-theme-border-radius, 0.5rem);
+      --cf-card-animation-duration: var(--cf-theme-animation-duration, 150ms);
+      --cf-card-spacing-tight: var(--cf-theme-spacing-tight, 0.25rem);
+      --cf-card-spacing-loose: var(--cf-theme-spacing-loose, 1rem);
+      --cf-card-color-border: var(--cf-theme-color-border, hsl(0, 0%, 89%));
+      --cf-card-color-surface: var(--cf-theme-color-surface, hsl(0, 0%, 100%));
+      --cf-card-color-text: var(--cf-theme-color-text, hsl(0, 0%, 9%));
       --cf-card-color-hover-surface: var(
-        --ct-theme-color-surface-hover,
+        --cf-theme-color-surface-hover,
         hsl(0, 0%, 96%)
       );
       --cf-card-color-focus-ring: var(
-        --ct-theme-color-primary,
+        --cf-theme-color-primary,
         hsl(212, 100%, 47%)
       );
       --cf-card-color-muted-text: var(
-        --ct-theme-color-text-muted,
+        --cf-theme-color-text-muted,
         hsl(0, 0%, 45%)
       );
 

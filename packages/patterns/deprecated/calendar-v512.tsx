@@ -5274,11 +5274,11 @@ export default pattern<Input, Output>(
               }
 
               .month-year-selectors cf-select {
-                --ct-theme-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
-                --ct-theme-border-radius: 0;
-                --ct-theme-color-border: transparent;
-                --ct-theme-color-background: transparent;
-                --ct-theme-color-text: #1d1d1f;
+                --cf-theme-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+                --cf-theme-border-radius: 0;
+                --cf-theme-color-border: transparent;
+                --cf-theme-color-background: transparent;
+                --cf-theme-color-text: #1d1d1f;
                 font-size: 1.375rem;
                 font-weight: 600;
               }

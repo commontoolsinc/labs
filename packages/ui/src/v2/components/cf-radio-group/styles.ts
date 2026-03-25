@@ -12,10 +12,10 @@ export const radioGroupStyles = `
 
     /* Radio button styling */
     --radio-size: 1rem;
-    --radio-border-color: var(--ct-theme-color-border, #e2e8f0);
-    --radio-checked-color: var(--ct-theme-color-primary, #0f172a);
-    --radio-background: var(--ct-theme-color-background, #ffffff);
-    --radio-focus-ring: var(--ct-theme-color-primary, #94a3b8);
+    --radio-border-color: var(--cf-theme-color-border, #e2e8f0);
+    --radio-checked-color: var(--cf-theme-color-primary, #0f172a);
+    --radio-background: var(--cf-theme-color-background, #ffffff);
+    --radio-focus-ring: var(--cf-theme-color-primary, #94a3b8);
   }
 
   *,
@@ -69,10 +69,10 @@ export const radioGroupStyles = `
     gap: 0.5rem;
     cursor: pointer;
     user-select: none;
-    font-family: var(--ct-theme-font-family, inherit);
+    font-family: var(--cf-theme-font-family, inherit);
     font-size: 0.875rem;
     line-height: 1.25rem;
-    color: var(--ct-theme-color-text, #111827);
+    color: var(--cf-theme-color-text, #111827);
   }
 
   .radio-item.disabled {

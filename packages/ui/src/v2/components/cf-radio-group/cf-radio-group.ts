@@ -72,9 +72,9 @@ import { type CellHandle } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 
 // TODO(v2-token-migration): Migrate this component to component-level tokens,
@@ -162,9 +162,9 @@ export class CFRadioGroup extends BaseElement {
   }
 
   // Theme consumption
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CTTheme;
+  declare theme?: CFTheme;
 
   override firstUpdated() {
     // Initialize cell controller binding

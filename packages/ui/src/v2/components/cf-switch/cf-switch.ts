@@ -29,11 +29,11 @@ export class CFSwitch extends BaseElement {
   static override styles = css`
     :host {
       /* Default color values if not provided */
-      --cf-switch-color-background: var(--ct-theme-color-background, #ffffff);
-      --cf-switch-color-primary: var(--ct-theme-color-primary, #0f172a);
-      --cf-switch-color-border: var(--ct-theme-color-border, #e2e8f0);
-      --cf-switch-color-ring: var(--ct-theme-color-primary, #94a3b8);
-      --cf-switch-color-input: var(--ct-theme-color-border, #e2e8f0);
+      --cf-switch-color-background: var(--cf-theme-color-background, #ffffff);
+      --cf-switch-color-primary: var(--cf-theme-color-primary, #0f172a);
+      --cf-switch-color-border: var(--cf-theme-color-border, #e2e8f0);
+      --cf-switch-color-ring: var(--cf-theme-color-primary, #94a3b8);
+      --cf-switch-color-input: var(--cf-theme-color-border, #e2e8f0);
 
       display: inline-block;
       position: relative;

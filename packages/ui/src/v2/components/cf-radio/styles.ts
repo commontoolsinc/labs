@@ -40,7 +40,7 @@ export const radioStyles = `
     border: 1px solid var(--primary, #0f172a);
     border-radius: 50%; /* Full circle */
     background-color: var(--background, #fff);
-    transition: all var(--ct-theme-animation-duration, 150ms)
+    transition: all var(--cf-theme-animation-duration, 150ms)
       var(--ct-transition-timing-ease);
     display: flex;
     align-items: center;
@@ -64,7 +64,7 @@ export const radioStyles = `
     background-color: var(--primary, #0f172a);
     opacity: 0;
     transform: scale(0);
-    transition: all var(--ct-theme-animation-duration, 150ms)
+    transition: all var(--cf-theme-animation-duration, 150ms)
       var(--ct-transition-timing-ease);
   }
 

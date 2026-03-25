@@ -265,13 +265,13 @@ export class CFOAuth extends BaseElement {
     BaseElement.baseStyles,
     css`
       .oauth-wrapper {
-        padding: var(--ct-theme-spacing-loose, 1.5rem);
+        padding: var(--cf-theme-spacing-loose, 1.5rem);
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-lg, 0.5rem)
         );
         background-color: var(
-          --ct-theme-color-surface,
+          --cf-theme-color-surface,
           var(--ct-color-white, #ffffff)
         );
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -281,8 +281,8 @@ export class CFOAuth extends BaseElement {
       .profile-section {
         display: flex;
         align-items: center;
-        gap: var(--ct-theme-spacing-loose, 1.25rem);
-        margin-bottom: var(--ct-theme-spacing-loose, 1.5rem);
+        gap: var(--cf-theme-spacing-loose, 1.25rem);
+        margin-bottom: var(--cf-theme-spacing-loose, 1.5rem);
       }
 
       .profile-picture {
@@ -299,14 +299,14 @@ export class CFOAuth extends BaseElement {
       .user-name {
         margin: 0;
         font-size: 1.5rem;
-        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+        color: var(--cf-theme-color-text, var(--ct-color-gray-900, #111827));
         font-weight: 600;
       }
 
       .user-email {
         margin: 0.25rem 0 0;
         color: var(
-          --ct-theme-color-text-muted,
+          --cf-theme-color-text-muted,
           var(--ct-color-gray-600, #6b7280)
         );
       }
@@ -314,24 +314,24 @@ export class CFOAuth extends BaseElement {
       .action-section {
         display: flex;
         flex-direction: column;
-        gap: var(--ct-theme-spacing-normal, 1rem);
-        margin-bottom: var(--ct-theme-spacing-loose, 1.5rem);
+        gap: var(--cf-theme-spacing-normal, 1rem);
+        margin-bottom: var(--cf-theme-spacing-loose, 1.5rem);
       }
 
       .oauth-button {
         color: white;
         border: none;
-        padding: var(--ct-theme-spacing-normal, 0.75rem)
-          var(--ct-theme-spacing-loose, 1.5rem);
+        padding: var(--cf-theme-spacing-normal, 0.75rem)
+          var(--cf-theme-spacing-loose, 1.5rem);
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
         cursor: pointer;
         font-weight: 500;
         font-size: 1rem;
-        font-family: var(--ct-theme-font-family, inherit);
-        transition: background-color var(--ct-theme-animation-duration, 0.2s) ease;
+        font-family: var(--cf-theme-font-family, inherit);
+        transition: background-color var(--cf-theme-animation-duration, 0.2s) ease;
       }
 
       .oauth-button:hover {
@@ -340,16 +340,16 @@ export class CFOAuth extends BaseElement {
 
       .oauth-button:disabled {
         background-color: var(
-          --ct-theme-color-border,
+          --cf-theme-color-border,
           var(--ct-color-gray-300, #d1d5db)
         ) !important;
         cursor: not-allowed;
       }
 
       .status-message {
-        padding: var(--ct-theme-spacing-normal, 0.75rem);
+        padding: var(--cf-theme-spacing-normal, 0.75rem);
         border-radius: var(
-          --ct-theme-border-radius,
+          --cf-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
         background-color: var(--cf-oauth-status-bg, #f0f4f8);
@@ -359,14 +359,14 @@ export class CFOAuth extends BaseElement {
 
       .oauth-button.logout {
         background-color: var(
-          --ct-theme-color-error,
+          --cf-theme-color-error,
           var(--ct-color-red-600, #dc2626)
         ) !important;
       }
 
       .oauth-button.logout:hover {
         background-color: var(
-          --ct-theme-color-error,
+          --cf-theme-color-error,
           var(--ct-color-red-700, #b91c1c)
         ) !important;
       }

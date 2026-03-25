@@ -31,13 +31,13 @@ export class CFLinkPreview extends BaseElement {
 
       .preview-card {
         display: block;
-        border-radius: var(--ct-theme-border-radius, 0.5rem);
+        border-radius: var(--cf-theme-border-radius, 0.5rem);
         border: 1px solid var(--border, hsl(0, 0%, 89%));
         background-color: var(--card, hsl(0, 0%, 100%));
         color: var(--card-foreground, hsl(0, 0%, 9%));
         overflow: hidden;
         text-decoration: none;
-        transition: all var(--ct-theme-animation-duration, 150ms)
+        transition: all var(--cf-theme-animation-duration, 150ms)
           cubic-bezier(0.4, 0, 0.2, 1);
         }
 
@@ -54,7 +54,7 @@ export class CFLinkPreview extends BaseElement {
 
           /* Loading state */
           .preview-card.loading {
-            padding: var(--ct-theme-spacing-loose, 1rem);
+            padding: var(--cf-theme-spacing-loose, 1rem);
           }
 
           .skeleton-image {
@@ -68,8 +68,8 @@ export class CFLinkPreview extends BaseElement {
             );
             background-size: 200% 100%;
             animation: shimmer 1.5s infinite;
-            border-radius: calc(var(--ct-theme-border-radius, 0.5rem) * 0.5);
-            margin-bottom: var(--ct-theme-spacing-loose, 1rem);
+            border-radius: calc(var(--cf-theme-border-radius, 0.5rem) * 0.5);
+            margin-bottom: var(--cf-theme-spacing-loose, 1rem);
           }
 
           .skeleton-text {
@@ -82,7 +82,7 @@ export class CFLinkPreview extends BaseElement {
             );
             background-size: 200% 100%;
             animation: shimmer 1.5s infinite;
-            border-radius: calc(var(--ct-theme-border-radius, 0.5rem) * 0.25);
+            border-radius: calc(var(--cf-theme-border-radius, 0.5rem) * 0.25);
             margin-bottom: 0.5rem;
           }
 
@@ -101,7 +101,7 @@ export class CFLinkPreview extends BaseElement {
 
           /* Fallback state */
           .preview-card.fallback {
-            padding: var(--ct-theme-spacing-loose, 1rem);
+            padding: var(--cf-theme-spacing-loose, 1rem);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -128,7 +128,7 @@ export class CFLinkPreview extends BaseElement {
           }
 
           .preview-body {
-            padding: var(--ct-theme-spacing-loose, 1rem);
+            padding: var(--cf-theme-spacing-loose, 1rem);
           }
 
           .preview-title {

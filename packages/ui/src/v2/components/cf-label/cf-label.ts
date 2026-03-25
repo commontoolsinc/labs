@@ -22,8 +22,8 @@ import { BaseElement } from "../../core/base-element.ts";
 export class CFLabel extends BaseElement {
   static override styles = css`
     :host {
-      --cf-label-color-text: var(--ct-theme-color-text, hsl(0, 0%, 9%));
-      --cf-label-color-required: var(--ct-theme-color-error, hsl(0, 100%, 50%));
+      --cf-label-color-text: var(--cf-theme-color-text, hsl(0, 0%, 9%));
+      --cf-label-color-required: var(--cf-theme-color-error, hsl(0, 100%, 50%));
 
       display: inline-block;
       box-sizing: border-box;

@@ -20,20 +20,20 @@ export class CFUpdater extends BaseElement {
     css`
       :host {
         --button-background: var(
-          --ct-theme-color-primary,
+          --cf-theme-color-primary,
           var(--ct-color-primary, #3b82f6)
         );
         --button-color: var(
-          --ct-theme-color-primary-foreground,
+          --cf-theme-color-primary-foreground,
           var(--ct-color-white, #ffffff)
         );
         --button-height: 2.5rem;
         --button-success-background: var(
-          --ct-theme-color-success,
+          --cf-theme-color-success,
           var(--ct-color-green-600, #16a34a)
         );
         --button-error-background: var(
-          --ct-theme-color-error,
+          --cf-theme-color-error,
           var(--ct-color-red-600, #dc2626)
         );
         display: block;
@@ -50,7 +50,7 @@ export class CFUpdater extends BaseElement {
         cursor: pointer;
         display: flex;
         font-size: 0.875rem;
-        font-family: var(--ct-theme-font-family, inherit);
+        font-family: var(--cf-theme-font-family, inherit);
         font-weight: 500;
         height: var(--button-height);
         justify-content: center;
@@ -60,7 +60,7 @@ export class CFUpdater extends BaseElement {
         text-align: center;
         text-wrap: nowrap;
         width: 100%;
-        transition: all var(--ct-theme-animation-duration, 0.2s) ease;
+        transition: all var(--cf-theme-animation-duration, 0.2s) ease;
       }
 
       .button[data-state="pending"] {
