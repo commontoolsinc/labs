@@ -394,17 +394,17 @@ However, these are correctness improvements, not regressions.
 
 ## Files Changed Summary
 
-| File                                                                | Change                                    |
-| ------------------------------------------------------------------- | ----------------------------------------- |
-| `src/transformers/expression-rewrite/types.ts`                      | Add `inSafeContext` to interfaces         |
-| `src/transformers/opaque-ref-jsx.ts`                                | Remove early return, pass `inSafeContext` |
-| `src/transformers/expression-rewrite/rewrite-expression.ts`         | Pass `inSafeContext` through              |
-| `src/transformers/expression-rewrite/emitters/binary-expression.ts` | Guard fallback derive                     |
-| `src/transformers/expression-rewrite/emitters/call-expression.ts`   | Guard fallback derive                     |
-| `src/transformers/expression-rewrite/emitters/property-access.ts`   | Early return in safe context              |
-| `src/transformers/expression-rewrite/emitters/template-expression.ts` | Early return in safe context            |
-| `src/transformers/expression-rewrite/emitters/conditional-expression.ts` | Early return in safe context        |
-| `src/transformers/expression-rewrite/emitters/element-access-expression.ts` | Early return in safe context     |
-| `src/transformers/expression-rewrite/emitters/prefix-unary-expression.ts` | Early return in safe context       |
-| `src/transformers/expression-rewrite/emitters/container-expression.ts` | Early return in safe context          |
-| `test/*.test.ts`                                                    | Add new test cases                        |
+| File                                                                        | Change                                    |
+| --------------------------------------------------------------------------- | ----------------------------------------- |
+| `src/transformers/expression-rewrite/types.ts`                              | Add `inSafeContext` to interfaces         |
+| `src/transformers/opaque-ref-jsx.ts`                                        | Remove early return, pass `inSafeContext` |
+| `src/transformers/expression-rewrite/rewrite-expression.ts`                 | Pass `inSafeContext` through              |
+| `src/transformers/expression-rewrite/emitters/binary-expression.ts`         | Guard fallback derive                     |
+| `src/transformers/expression-rewrite/emitters/call-expression.ts`           | Guard fallback derive                     |
+| `src/transformers/expression-rewrite/emitters/property-access.ts`           | Early return in safe context              |
+| `src/transformers/expression-rewrite/emitters/template-expression.ts`       | Early return in safe context              |
+| `src/transformers/expression-rewrite/emitters/conditional-expression.ts`    | Early return in safe context              |
+| `src/transformers/expression-rewrite/emitters/element-access-expression.ts` | Early return in safe context              |
+| `src/transformers/expression-rewrite/emitters/prefix-unary-expression.ts`   | Early return in safe context              |
+| `src/transformers/expression-rewrite/emitters/container-expression.ts`      | Early return in safe context              |
+| `test/*.test.ts`                                                            | Add new test cases                        |
