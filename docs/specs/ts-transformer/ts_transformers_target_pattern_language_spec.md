@@ -69,13 +69,13 @@ Each construct family is classified as one of:
 | Receiver-method calls inside JSX expressions, explicit computation callbacks, or supported collection callbacks | Supported | Receiver methods are valid in local authored expression contexts such as JSX interpolation, `computed` / `derive` / `action` / `lift` / `handler` callbacks, and supported collection callbacks |
 | Event-handler JSX attributes | Supported | Event handlers form an explicit callback boundary; they are part of the language but not part of ordinary expression-site lowering |
 | Dynamic key access inside JSX expressions, explicit computation callbacks, supported collection callbacks, or structural binding forms | Supported | Dynamic access like `selectedScopes[key]` is valid in local authored expression contexts or in binding forms that preserve the dynamic key directly |
-| Bare dynamic key access in top-level pattern-facing code | Unsupported | Forms like `input[key]` as a direct top-level pattern-body traversal are outside the intended declarative language and should move into JSX, an explicit computation callback, or another local value expression |
+| Bare dynamic key access in top-level pattern-facing code | Unsupported | Forms like `input[key]` as a direct top-level pattern-body traversal are outside the intended declarative language and should move into JSX, an explicit computation callback, a supported collection callback, or a structural binding form |
 | Cell-style `.key(...)` traversal on explicitly cell-like values | Supported | When the authored value is truly `Cell`/`Writable`/`Stream`-like, `.key(...)` remains part of that value's direct API rather than an implementation artifact |
 | Cell-style `.get()` reads on explicitly cell-like values inside JSX expressions or explicit computation callbacks | Supported | Eager cell reads remain valid in JSX interpolation and explicit computation callbacks such as `computed`, `derive`, `action`, `lift`, and `handler` |
 | Foreign callback / imperative container roots in JSX | Unsupported | Shapes like `[0, 1].forEach(() => list.map(...))` are not part of the intended reactive language core and should move into supported value expressions, wrappers, or helpers |
 | Residual callback-container pass-through behavior for invalid programs | Compatibility-only | Some invalid callback-container shapes may still survive as plain JS in current emitted output, but that is residual implementation behavior rather than supported language policy |
 | Optional-call on reactive receivers | Unsupported | Optional-call forms are outside the intended language because they are difficult to lower without semantic ambiguity |
-| Direct non-JSX receiver-method calls on reactive values in pattern bodies | Unsupported | These should be moved into JSX, an explicit computation callback, helper control flow, or another local value expression instead of being treated as first-class pattern-body syntax |
+| Direct non-JSX receiver-method calls on reactive values in pattern bodies | Unsupported | These should be moved into JSX, an explicit computation callback, helper control flow, or a supported collection callback instead of being treated as first-class pattern-body syntax |
 | Direct top-level `.get()` reads in pattern-owned reactive context | Unsupported | Even on true cell-like values, eager `.get()` reads should move into JSX or an explicit computation callback such as `computed`, `derive`, `action`, `lift`, or `handler` rather than living directly in the top-level declarative pattern body |
 | `.get()` on ordinary opaque/reactive values | Unsupported | Pattern inputs, `computed` results, `derive` results, and other ordinary reactive values should be read directly rather than through `.get()` |
 | Statement-boundary imperative constructs in top-level pattern-owned code (`let`, loops, function creation, early return) | Unsupported | Top-level pattern context is intentionally declarative; imperative statement structure belongs in explicit callback bodies such as `computed`, `action`, `lift`, or `handler` |
@@ -220,6 +220,14 @@ The real rule is:
 - ordinary opaque/reactive values should still prefer direct property access
   and canonical lowered traversal rather than authored `.get()`
 
+One explicit open design question remains here:
+
+- whether authored helper control flow like `ifElse(show, count.get(), 0)`
+  should join the supported `.get()` contexts for true cell-like values
+  instead of remaining in the current conservative rejected bucket
+- current implementation rejects that shape, but this spec does not yet treat
+  that rejection as settled target-language policy
+
 ## 6. Immediate Classification Questions To Refine Next
 
 These families should be the first explicit follow-up questions for v2:
@@ -234,6 +242,9 @@ These families should be the first explicit follow-up questions for v2:
 4. whether the current explicit-cell `.key(...)` / `.get()` boundary is the
    right long-term authored API surface, or whether it should be narrowed or
    documented more aggressively relative to ordinary opaque/property access
+5. whether true cell `.get()` reads should also be supported in authored helper
+   control flow (`ifElse`, `when`, `unless`), rather than only in JSX and
+   explicit computation callbacks
 
 ## 7. Use This Spec
 
