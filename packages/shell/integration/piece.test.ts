@@ -46,6 +46,12 @@ describe("shell piece tests", () => {
 
     const resultCell = cc.manager().getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink(() => {});
+
+    await waitFor(async () => (await piece.result.get(["value"])) === 0);
+    await waitFor(async () => {
+      const reloadedPiece = await cc.get(pieceId, true);
+      return (await reloadedPiece.result.get(["value"])) === 0;
+    });
   });
 
   afterAll(async () => {
