@@ -2679,6 +2679,10 @@ export class Scheduler {
     // Check if action has opted out of auto-debounce
     if (this.noDebounce.get(action)) return;
 
+    // Auto-debouncing computations in push mode makes observable derived state
+    // lag behind writes. Keep auto-debounce for effects only.
+    if (!this.effects.has(action)) return;
+
     // Check if already has a manual debounce set
     if (this.actionDebounce.has(action)) return;
 

@@ -250,6 +250,50 @@ describe("debounce and throttling", () => {
     // so we mainly verify the infrastructure is in place
   });
 
+  it("should not auto-debounce computations even when they are slow", () => {
+    const computation: Action = () => {};
+    runtime.scheduler.subscribe(computation, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
+
+    const scheduler = runtime.scheduler as any;
+    scheduler.actionStats.set(scheduler.getActionId(computation), {
+      runCount: 3,
+      totalTime: 180,
+      averageTime: 60,
+      lastRunTime: 60,
+      lastRunTimestamp: performance.now(),
+    });
+
+    scheduler.maybeAutoDebounce(computation);
+
+    expect(runtime.scheduler.getDebounce(computation)).toBeUndefined();
+  });
+
+  it("should auto-debounce slow effects after threshold runs", () => {
+    const effect: Action = () => {};
+    runtime.scheduler.subscribe(effect, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, { isEffect: true });
+
+    const scheduler = runtime.scheduler as any;
+    scheduler.actionStats.set(scheduler.getActionId(effect), {
+      runCount: 3,
+      totalTime: 180,
+      averageTime: 60,
+      lastRunTime: 60,
+      lastRunTimestamp: performance.now(),
+    });
+
+    scheduler.maybeAutoDebounce(effect);
+
+    expect(runtime.scheduler.getDebounce(effect)).toBe(100);
+  });
+
   it("should not auto-debounce fast actions", async () => {
     const cell = runtime.getCell<number>(space, "fast-action", undefined, tx);
     cell.set(0);
