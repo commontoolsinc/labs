@@ -321,9 +321,8 @@ export class RuntimeInternals extends EventTarget {
       buildHash,
     });
 
-    // Wait for PieceManager to sync
-    await client.synced();
-
+    // Expose a usable RuntimeInternals immediately. Callers that need
+    // storage/piece-manager convergence should await `rt.synced()` explicitly.
     return new RuntimeInternals(
       client,
       session.space,
