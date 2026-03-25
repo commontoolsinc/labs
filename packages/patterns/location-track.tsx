@@ -11,7 +11,7 @@
  * TODO: Consider increasing remove button tap target to 44x44px for mobile accessibility (currently 32x32px)
  * TODO: Add export functionality (GPX, GeoJSON, CSV)
  * TODO: Add virtualization for large point lists (100+ points)
- * TODO: Expose continuous tracking mode from ct-location
+ * TODO: Expose continuous tracking mode from cf-location
  * TODO: Add schema fields for altitudeAccuracy, heading, speed
  * TODO: Consider adding to "place" template or creating "trip" template
  */
@@ -90,7 +90,7 @@ export interface LocationTrackModuleInput {
 // ===== Handlers =====
 
 /**
- * Handler for when ct-location emits a new location
+ * Handler for when cf-location emits a new location
  * Appends the location to the array
  */
 const handleLocationUpdate = handler<
@@ -170,7 +170,7 @@ export const LocationTrackModule = pattern<
   LocationTrackModuleInput,
   LocationTrackModuleInput
 >(({ locations, label }) => {
-  // Local writable cell for ct-location binding (not stored)
+  // Local writable cell for cf-location binding (not stored)
   const currentCapture = Writable.of<LocationPoint | null>(null);
 
   // Computed display text
@@ -214,9 +214,9 @@ export const LocationTrackModule = pattern<
           <label style={{ fontSize: "12px", color: "#6b7280" }}>
             Capture Location
           </label>
-          <ct-location
+          <cf-location
             $location={currentCapture}
-            onct-location-update={handleLocationUpdate({ locations })}
+            oncf-location-update={handleLocationUpdate({ locations })}
           />
         </cf-vstack>
 

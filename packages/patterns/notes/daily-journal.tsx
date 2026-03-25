@@ -393,10 +393,10 @@ ${notesXml}
 
                   {/* Mini calendar */}
                   <cf-card>
-                    <ct-calendar
+                    <cf-calendar
                       $value={selectedDate}
                       markedDates={datesWithNotes}
-                      onct-change={handleCalendarChange({
+                      oncf-change={handleCalendarChange({
                         entries,
                         template,
                         selectedDate,

@@ -66,7 +66,7 @@ type _ValidateLocationData = Schema<
 const _validateLocationData: _ValidateLocationData = true;
 
 /**
- * CTLocation - Browser Geolocation API wrapper component
+ * CFLocation - Browser Geolocation API wrapper component
  *
  * TODO: Add throttling option for watch mode to prevent excessive updates (1-10Hz possible)
  * TODO: Improve error messages with actionable guidance (e.g., "enable location in settings")
@@ -75,7 +75,7 @@ const _validateLocationData: _ValidateLocationData = true;
  * TODO: Add maxWatchDuration and auto-stop for continuous mode safety
  * TODO: Document in docs/common/COMPONENTS.md
  *
- * @element ct-location
+ * @element cf-location
  *
  * @attr {boolean} enableHighAccuracy - Request high accuracy GPS (default: false)
  * @attr {number} timeout - Timeout in milliseconds (default: 10000)
@@ -83,21 +83,21 @@ const _validateLocationData: _ValidateLocationData = true;
  * @attr {boolean} continuous - Enable watch mode for continuous updates (default: false)
  * @attr {boolean} disabled - Disable location requests (default: false)
  *
- * @fires ct-location-start - Location request started. detail: { timestamp: number }
- * @fires ct-location-update - New location received. detail: { location: LocationData }
- * @fires ct-location-error - Location error occurred. detail: { error: GeolocationPositionError, message: string }
- * @fires ct-change - Location data changed. detail: { location: LocationData | null }
+ * @fires cf-location-start - Location request started. detail: { timestamp: number }
+ * @fires cf-location-update - New location received. detail: { location: LocationData }
+ * @fires cf-location-error - Location error occurred. detail: { error: GeolocationPositionError, message: string }
+ * @fires cf-change - Location data changed. detail: { location: LocationData | null }
  *
  * @example
- * <ct-location $location={location}></ct-location>
+ * <cf-location $location={location}></cf-location>
  *
  * @example With high accuracy
- * <ct-location $location={location} enableHighAccuracy></ct-location>
+ * <cf-location $location={location} enableHighAccuracy></cf-location>
  *
  * @example Continuous tracking
- * <ct-location $location={location} continuous></ct-location>
+ * <cf-location $location={location} continuous></cf-location>
  */
-export class CTLocation extends BaseElement {
+export class CFLocation extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -277,7 +277,7 @@ export class CTLocation extends BaseElement {
   private _cellController = createCellController<LocationData | null>(this, {
     timing: { strategy: "immediate" },
     onChange: (newValue) => {
-      this.emit("ct-change", { location: newValue });
+      this.emit("cf-change", { location: newValue });
     },
   });
 
@@ -339,7 +339,7 @@ export class CTLocation extends BaseElement {
 
     this._state = "requesting";
     this._errorMessage = "";
-    this.emit("ct-location-start", { timestamp: Date.now() });
+    this.emit("cf-location-start", { timestamp: Date.now() });
 
     return new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition(
@@ -348,7 +348,7 @@ export class CTLocation extends BaseElement {
           const locationData = this._positionToLocationData(position);
           this._cellController.setValue(locationData);
           this._state = "idle";
-          this.emit("ct-location-update", { location: locationData });
+          this.emit("cf-location-update", { location: locationData });
           resolve(locationData);
         },
         (error) => {
@@ -387,14 +387,14 @@ export class CTLocation extends BaseElement {
 
     this._state = "watching";
     this._errorMessage = "";
-    this.emit("ct-location-start", { timestamp: Date.now() });
+    this.emit("cf-location-start", { timestamp: Date.now() });
 
     this._watchId = navigator.geolocation.watchPosition(
       (position) => {
         if (!this.isConnected) return;
         const locationData = this._positionToLocationData(position);
         this._cellController.setValue(locationData);
-        this.emit("ct-location-update", { location: locationData });
+        this.emit("cf-location-update", { location: locationData });
       },
       (error) => {
         if (!this.isConnected) return;
@@ -450,7 +450,7 @@ export class CTLocation extends BaseElement {
     }
 
     this._errorMessage = message;
-    this.emit("ct-location-error", { error, message });
+    this.emit("cf-location-error", { error, message });
   }
 
   private _handleButtonClick() {

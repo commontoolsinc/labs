@@ -2889,7 +2889,7 @@ interface CFModalElement extends CTHTMLElement {}
 interface CFModalProviderElement extends CTHTMLElement {}
 interface CFChevronButtonElement extends CTHTMLElement {}
 interface CFCardElement extends CTHTMLElement {}
-interface CTCalendarElement extends CTHTMLElement {}
+interface CFCalendarElement extends CTHTMLElement {}
 interface CTQuestionElement extends CTHTMLElement {}
 interface CFAlertElement extends CTHTMLElement {}
 interface CFVStackElement extends CTHTMLElement {}
@@ -2925,7 +2925,7 @@ interface CFPieceElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CFVoiceInputElement extends CTHTMLElement {}
 interface CFAudioVisualizerElement extends CTHTMLElement {}
-interface CTLocationElement extends CTHTMLElement {}
+interface CFLocationElement extends CTHTMLElement {}
 interface CFWebhookElement extends CTHTMLElement {}
 interface CFSecretViewerElement extends CTHTMLElement {}
 interface CTRouterElement extends CTHTMLElement {}
@@ -3133,17 +3133,17 @@ interface CTDotMarkAttributes<T> extends CTHTMLAttributes<T> {
   "label"?: string;
 }
 
-interface CTLocationAttributes<T> extends CTHTMLAttributes<T> {
+interface CFLocationAttributes<T> extends CTHTMLAttributes<T> {
   "$location"?: CellLike<any>;
   "enableHighAccuracy"?: boolean;
   "timeout"?: number;
   "maximumAge"?: number;
   "continuous"?: boolean;
   "disabled"?: boolean;
-  "onct-location-start"?: EventHandler<any>;
-  "onct-location-update"?: EventHandler<any>;
-  "onct-location-error"?: EventHandler<any>;
-  "onct-change"?: EventHandler<any>;
+  "oncf-location-start"?: EventHandler<any>;
+  "oncf-location-update"?: EventHandler<any>;
+  "oncf-location-error"?: EventHandler<any>;
+  "oncf-change"?: EventHandler<any>;
 }
 
 interface CFChatAttributes<T> extends CTHTMLAttributes<T> {
@@ -3345,7 +3345,7 @@ interface CTLinkAttributes<T> extends CTHTMLAttributes<T> {
   "to": string;
 }
 
-interface CTCalendarAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCalendarAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: CellLike<string> | string;
   "$value"?: CellLike<string>;
   "markedDates"?: CellLike<string[]> | string[];
@@ -3353,8 +3353,8 @@ interface CTCalendarAttributes<T> extends CTHTMLAttributes<T> {
   "min"?: string;
   "max"?: string;
   "disabled"?: boolean;
-  "onct-change"?: EventHandler<{ value: string; oldValue: string }>;
-  "onct-month-change"?: EventHandler<{ year: number; month: number }>;
+  "oncf-change"?: EventHandler<{ value: string; oldValue: string }>;
+  "oncf-month-change"?: EventHandler<{ year: number; month: number }>;
 }
 
 interface CTQuestionAttributes<T> extends CTHTMLAttributes<T> {
@@ -4772,9 +4772,9 @@ declare global {
         CTLinkAttributes<CTLinkElement>,
         CTLinkElement
       >;
-      "ct-calendar": CTDOM.DetailedHTMLProps<
-        CTCalendarAttributes<CTCalendarElement>,
-        CTCalendarElement
+      "cf-calendar": CTDOM.DetailedHTMLProps<
+        CFCalendarAttributes<CFCalendarElement>,
+        CFCalendarElement
       >;
       "ct-question": CTDOM.DetailedHTMLProps<
         CTQuestionAttributes<CTQuestionElement>,
@@ -4876,9 +4876,9 @@ declare global {
         CFAudioVisualizerAttributes<CFAudioVisualizerElement>,
         CFAudioVisualizerElement
       >;
-      "ct-location": CTDOM.DetailedHTMLProps<
-        CTLocationAttributes<CTLocationElement>,
-        CTLocationElement
+      "cf-location": CTDOM.DetailedHTMLProps<
+        CFLocationAttributes<CFLocationElement>,
+        CFLocationElement
       >;
       "cf-fragment": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CFFragmentElement>,

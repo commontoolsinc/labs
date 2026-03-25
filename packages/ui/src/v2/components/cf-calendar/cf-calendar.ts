@@ -10,12 +10,12 @@ import { type CellHandle } from "@commonfabric/runtime-client";
 // matching the prior phase-1 token migration pattern.
 
 /**
- * CTCalendar - Month-grid mini calendar component
+ * CFCalendar - Month-grid mini calendar component
  *
  * Displays a monthly calendar grid with navigation, day selection,
  * and optional dot indicators for marked dates.
  *
- * @element ct-calendar
+ * @element cf-calendar
  *
  * @attr {boolean} disabled - Whether the calendar is disabled
  * @attr {string} min - YYYY-MM-DD minimum selectable date
@@ -24,14 +24,14 @@ import { type CellHandle } from "@commonfabric/runtime-client";
  * @prop {CellHandle<string> | string} value - Selected date in YYYY-MM-DD format
  * @prop {CellHandle<string[]> | string[]} markedDates - Dates with dot indicators
  *
- * @fires ct-change - Fired when a day is clicked: { value, oldValue }
- * @fires ct-month-change - Fired when navigating months: { year, month }
+ * @fires cf-change - Fired when a day is clicked: { value, oldValue }
+ * @fires cf-month-change - Fired when navigating months: { year, month }
  *
  * @example
  * const selectedDate = Cell.of("2024-03-15");
- * html`<ct-calendar .value=${selectedDate}></ct-calendar>`
+ * html`<cf-calendar .value=${selectedDate}></cf-calendar>`
  */
-export class CTCalendar extends BaseElement {
+export class CFCalendar extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -367,7 +367,7 @@ export class CTCalendar extends BaseElement {
       } else {
         this._viewMonth -= 1;
       }
-      this.emit("ct-month-change", {
+      this.emit("cf-month-change", {
         year: this._viewYear,
         month: this._viewMonth,
       });
@@ -381,7 +381,7 @@ export class CTCalendar extends BaseElement {
       } else {
         this._viewMonth += 1;
       }
-      this.emit("ct-month-change", {
+      this.emit("cf-month-change", {
         year: this._viewYear,
         month: this._viewMonth,
       });
@@ -393,7 +393,7 @@ export class CTCalendar extends BaseElement {
       const oldValue = this._getValue();
       if (dateStr === oldValue) return;
       this._valueCellController.setValue(dateStr);
-      this.emit("ct-change", { value: dateStr, oldValue });
+      this.emit("cf-change", { value: dateStr, oldValue });
     }
 
     private _handleKeyDown = (event: KeyboardEvent): void => {
@@ -439,7 +439,7 @@ export class CTCalendar extends BaseElement {
         case "Enter":
         case " ":
           event.preventDefault();
-          this.emit("ct-change", { value: current, oldValue: current });
+          this.emit("cf-change", { value: current, oldValue: current });
           return;
         default:
           return;
@@ -453,13 +453,13 @@ export class CTCalendar extends BaseElement {
         ) {
           this._viewYear = date.getFullYear();
           this._viewMonth = date.getMonth();
-          this.emit("ct-month-change", {
+          this.emit("cf-month-change", {
             year: this._viewYear,
             month: this._viewMonth,
           });
         }
         this._valueCellController.setValue(newDateStr);
-        this.emit("ct-change", { value: newDateStr, oldValue: current });
+        this.emit("cf-change", { value: newDateStr, oldValue: current });
         this.requestUpdate();
       }
     };
@@ -479,7 +479,7 @@ export class CTCalendar extends BaseElement {
       const weekdays = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
       return html`
-        <div class="calendar" data-ct-calendar>
+        <div class="calendar" data-cf-calendar>
           <div class="calendar-header">
             <button
               class="nav-button"
@@ -487,7 +487,7 @@ export class CTCalendar extends BaseElement {
               ?disabled="${this.disabled}"
               aria-label="Previous month"
               tabindex="-1"
-              data-ct-calendar-prev
+              data-cf-calendar-prev
             >
               <svg
                 viewBox="0 0 24 24"
@@ -509,7 +509,7 @@ export class CTCalendar extends BaseElement {
               ?disabled="${this.disabled}"
               aria-label="Next month"
               tabindex="-1"
-              data-ct-calendar-next
+              data-cf-calendar-next
             >
               <svg
                 viewBox="0 0 24 24"
@@ -564,7 +564,7 @@ export class CTCalendar extends BaseElement {
                   aria-disabled="${isDisabled}"
                   tabindex="${isSelected ? "0" : "-1"}"
                   @click="${() => this._selectDate(dateStr)}"
-                  data-ct-calendar-day="${dateStr}"
+                  data-cf-calendar-day="${dateStr}"
                 >
                   <span class="day-number">${day}</span>
                   ${hasMarker
@@ -583,6 +583,6 @@ export class CTCalendar extends BaseElement {
 
   declare global {
     interface HTMLElementTagNameMap {
-      "ct-calendar": CTCalendar;
+      "cf-calendar": CFCalendar;
     }
   }

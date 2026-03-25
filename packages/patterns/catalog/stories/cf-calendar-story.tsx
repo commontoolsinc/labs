@@ -18,7 +18,7 @@ export default pattern<CalendarStoryInput, CalendarStoryOutput>(() => {
   const maxDate = Writable.of("");
 
   return {
-    [NAME]: "ct-calendar Story",
+    [NAME]: "cf-calendar Story",
     [UI]: (
       <div style={{ padding: "1rem" }}>
         <div
@@ -28,7 +28,7 @@ export default pattern<CalendarStoryInput, CalendarStoryOutput>(() => {
             padding: "1rem",
           }}
         >
-          <ct-calendar
+          <cf-calendar
             $value={selectedDate}
             markedDates={[
               "2026-03-10",
