@@ -156,7 +156,7 @@ export function schemaWithoutProperties(
   for (const name of names) {
     if (copy) {
       delete copy[name];
-    } else if (name in schema) {
+    } else if (Object.hasOwn(schema, name)) {
       // First time we've found a `name` in need of deletion.
       copy = { ...schema };
       delete copy[name];
