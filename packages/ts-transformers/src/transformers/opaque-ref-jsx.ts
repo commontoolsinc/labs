@@ -1,10 +1,6 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
-import {
-  createDataFlowAnalyzer,
-  isEventHandlerJsxAttribute,
-  visitEachChildWithJsx,
-} from "../ast/mod.ts";
+import { createDataFlowAnalyzer, visitEachChildWithJsx } from "../ast/mod.ts";
 import {
   classifyJsxExpressionSiteRoute,
   rewriteExpressionSite,
@@ -23,17 +19,12 @@ export class OpaqueRefJSXTransformer extends Transformer {
 }
 
 function transform(context: TransformationContext): ts.SourceFile {
-  const checker = context.checker;
   const analyze = createDataFlowAnalyzer(context.checker);
 
   const visit: ts.Visitor = (node) => {
     if (ts.isJsxExpression(node)) {
       // Skip empty JSX expressions (like JSX comments {/* ... */})
       if (!node.expression) {
-        return visitEachChildWithJsx(node, visit, context.tsContext);
-      }
-
-      if (isEventHandlerJsxAttribute(node, checker)) {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
@@ -117,21 +108,6 @@ function transform(context: TransformationContext): ts.SourceFile {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      const result = rewriteFallbackJsxExpressionSite({
-        expression: node.expression,
-        context,
-        analyze,
-        visit,
-      });
-
-      if (result) {
-        return context.factory.createJsxExpression(
-          node.dotDotDotToken,
-          result,
-        );
-      }
-
-      // No rewrite needed, but visit children to transform nested expressions
       return visitEachChildWithJsx(node, visit, context.tsContext);
     }
 
