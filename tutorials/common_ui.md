@@ -340,7 +340,7 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Interactive / Complex Components
 
-- interactive: `cf-collapsible`, `ct-tab-list`, `ct-canvas`
+- interactive: `cf-collapsible`, `cf-tab-list`, `ct-canvas`
 
 - complex/integrated (cell interop): `ct-code-editor`, `ct-outliner`
 	- gap: editable table rows
@@ -352,4 +352,4 @@ You can mix-and-match the above components to achieve practically any (standard)
 # Unused/Unproven Components
 
 - stale: `ct-aspect-ratio`, `ct-draggable`, `cf-form`, `ct-grid`, `cf-hgroup`, `ct-input-otp`, `cf-message-input`, `cf-progress`, `cf-radio`, `cf-radio-group`, `cf-slider`, `cf-switch`, `cf-tile`, `cf-toggle`, `cf-toggle-group`, `cf-vgroup`
-- superfluous: `ct-resizeable-handle`, `ct-resizable-panel`, `ct-resizeable-panel-group`, `ct-scroll-area`, `ct-tabs`/`ct-tab-list`/`ct-tab-panel`
+- superfluous: `ct-resizeable-handle`, `ct-resizable-panel`, `ct-resizeable-panel-group`, `ct-scroll-area`, `cf-tabs`/`cf-tab-list`/`cf-tab-panel`

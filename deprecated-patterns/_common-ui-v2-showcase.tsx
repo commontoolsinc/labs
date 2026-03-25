@@ -282,28 +282,28 @@ export default pattern(
             <h2>11. Tabs Component</h2>
             <p style="color: #64748b; margin-bottom: 1rem;">Tabbed interface</p>
 
-            <ct-tabs default-value="tab1">
-              <ct-tab-list>
-                <ct-tab value="tab1">Account</ct-tab>
-                <ct-tab value="tab2">Password</ct-tab>
-                <ct-tab value="tab3">Settings</ct-tab>
-              </ct-tab-list>
+            <cf-tabs default-value="tab1">
+              <cf-tab-list>
+                <cf-tab value="tab1">Account</cf-tab>
+                <cf-tab value="tab2">Password</cf-tab>
+                <cf-tab value="tab3">Settings</cf-tab>
+              </cf-tab-list>
 
-              <ct-tab-panel value="tab1">
+              <cf-tab-panel value="tab1">
                 <h3>Account Information</h3>
                 <p>Manage your account details and preferences here.</p>
-              </ct-tab-panel>
+              </cf-tab-panel>
 
-              <ct-tab-panel value="tab2">
+              <cf-tab-panel value="tab2">
                 <h3>Password Settings</h3>
                 <p>Update your password and security settings.</p>
-              </ct-tab-panel>
+              </cf-tab-panel>
 
-              <ct-tab-panel value="tab3">
+              <cf-tab-panel value="tab3">
                 <h3>General Settings</h3>
                 <p>Configure your application preferences.</p>
-              </ct-tab-panel>
-            </ct-tabs>
+              </cf-tab-panel>
+            </cf-tabs>
           </section>
 
           {/* Accordion Component */}
@@ -313,31 +313,31 @@ export default pattern(
               Collapsible content panels
             </p>
 
-            <ct-accordion>
-              <ct-accordion-item value="item-1">
+            <cf-accordion>
+              <cf-accordion-item value="item-1">
                 <div slot="trigger">What is Common UI?</div>
                 <div slot="content">
                   Common UI is a collection of web components that follow modern
                   design principles.
                 </div>
-              </ct-accordion-item>
+              </cf-accordion-item>
 
-              <ct-accordion-item value="item-2">
+              <cf-accordion-item value="item-2">
                 <div slot="trigger">How do I use these components?</div>
                 <div slot="content">
                   Simply import the components and use them as custom HTML
                   elements in your markup.
                 </div>
-              </ct-accordion-item>
+              </cf-accordion-item>
 
-              <ct-accordion-item value="item-3">
+              <cf-accordion-item value="item-3">
                 <div slot="trigger">Are they framework agnostic?</div>
                 <div slot="content">
                   Yes! These web components work with any framework or vanilla
                   JavaScript.
                 </div>
-              </ct-accordion-item>
-            </ct-accordion>
+              </cf-accordion-item>
+            </cf-accordion>
           </section>
 
           {/* Separator Component */}

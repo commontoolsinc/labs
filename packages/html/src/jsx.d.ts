@@ -2940,14 +2940,14 @@ interface CTBarMarkElement extends CTHTMLElement {}
 interface CTDotMarkElement extends CTHTMLElement {}
 
 // Tab components
-interface CTTabsElement extends CTHTMLElement {}
-interface CTTabElement extends CTHTMLElement {}
-interface CTTabListElement extends CTHTMLElement {}
-interface CTTabPanelElement extends CTHTMLElement {}
+interface CFTabsElement extends CTHTMLElement {}
+interface CFTabElement extends CTHTMLElement {}
+interface CFTabListElement extends CTHTMLElement {}
+interface CFTabPanelElement extends CTHTMLElement {}
 
 // Accordion components
-interface CTAccordionElement extends CTHTMLElement {}
-interface CTAccordionItemElement extends CTHTMLElement {}
+interface CFAccordionElement extends CTHTMLElement {}
+interface CFAccordionItemElement extends CTHTMLElement {}
 
 // Form components
 interface CFFormElement extends CTHTMLElement {}
@@ -3850,42 +3850,42 @@ interface CFAutoLayoutAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 // Tab component attributes
-interface CTTabsAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTabsAttributes<T> extends CTHTMLAttributes<T> {
   "$value"?: CellLike<string>; // Bidirectional cell binding
   "value"?: string; // Plain string value (use $value for cells)
   "orientation"?:
     | "horizontal"
     | "vertical"
     | CellLike<"horizontal" | "vertical">;
-  "onct-change"?: EventHandler<{ value: string; oldValue: string }>;
+  "oncf-change"?: EventHandler<{ value: string; oldValue: string }>;
 }
 
-interface CTTabAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTabAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: string; // Tab identifier (plain string, no cell binding needed)
   "disabled"?: boolean | CellLike<boolean>;
   "selected"?: boolean | CellLike<boolean>;
 }
 
-interface CTTabListAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTabListAttributes<T> extends CTHTMLAttributes<T> {
   "orientation"?:
     | "horizontal"
     | "vertical"
     | CellLike<"horizontal" | "vertical">;
 }
 
-interface CTTabPanelAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTabPanelAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: string; // Panel identifier (plain string, no cell binding needed)
 }
 
 // Accordion component attributes
-interface CTAccordionAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAccordionAttributes<T> extends CTHTMLAttributes<T> {
   "type"?: "single" | "multiple" | CellLike<"single" | "multiple">;
   "value"?: string | string[] | CellLike<string | string[]>;
   "collapsible"?: boolean | CellLike<boolean>;
-  "onct-change"?: EventHandler<{ value: string | string[] }>;
+  "oncf-change"?: EventHandler<{ value: string | string[] }>;
 }
 
-interface CTAccordionItemAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAccordionItemAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: string | CellLike<string>;
   "disabled"?: boolean | CellLike<boolean>;
   "expanded"?: boolean | CellLike<boolean>;
@@ -4914,31 +4914,31 @@ declare global {
       >;
 
       // Tab components
-      "ct-tabs": CTDOM.DetailedHTMLProps<
-        CTTabsAttributes<CTTabsElement>,
-        CTTabsElement
+      "cf-tabs": CTDOM.DetailedHTMLProps<
+        CFTabsAttributes<CFTabsElement>,
+        CFTabsElement
       >;
-      "ct-tab": CTDOM.DetailedHTMLProps<
-        CTTabAttributes<CTTabElement>,
-        CTTabElement
+      "cf-tab": CTDOM.DetailedHTMLProps<
+        CFTabAttributes<CFTabElement>,
+        CFTabElement
       >;
-      "ct-tab-list": CTDOM.DetailedHTMLProps<
-        CTTabListAttributes<CTTabListElement>,
-        CTTabListElement
+      "cf-tab-list": CTDOM.DetailedHTMLProps<
+        CFTabListAttributes<CFTabListElement>,
+        CFTabListElement
       >;
-      "ct-tab-panel": CTDOM.DetailedHTMLProps<
-        CTTabPanelAttributes<CTTabPanelElement>,
-        CTTabPanelElement
+      "cf-tab-panel": CTDOM.DetailedHTMLProps<
+        CFTabPanelAttributes<CFTabPanelElement>,
+        CFTabPanelElement
       >;
 
       // Accordion components
-      "ct-accordion": CTDOM.DetailedHTMLProps<
-        CTAccordionAttributes<CTAccordionElement>,
-        CTAccordionElement
+      "cf-accordion": CTDOM.DetailedHTMLProps<
+        CFAccordionAttributes<CFAccordionElement>,
+        CFAccordionElement
       >;
-      "ct-accordion-item": CTDOM.DetailedHTMLProps<
-        CTAccordionItemAttributes<CTAccordionItemElement>,
-        CTAccordionItemElement
+      "cf-accordion-item": CTDOM.DetailedHTMLProps<
+        CFAccordionItemAttributes<CFAccordionItemElement>,
+        CFAccordionItemElement
       >;
 
       // Form components

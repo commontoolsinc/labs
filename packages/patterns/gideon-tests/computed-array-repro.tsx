@@ -54,13 +54,13 @@ export default pattern<Input, Output>(({ items }) => {
     [UI]: (
       <cf-screen>
         <cf-vstack slot="header" gap="2">
-          <ct-tabs $value={filter}>
-            <ct-tab-list>
-              <ct-tab value="all">All</ct-tab>
-              <ct-tab value="pending">Pending</ct-tab>
-              <ct-tab value="done">Done</ct-tab>
-            </ct-tab-list>
-          </ct-tabs>
+          <cf-tabs $value={filter}>
+            <cf-tab-list>
+              <cf-tab value="all">All</cf-tab>
+              <cf-tab value="pending">Pending</cf-tab>
+              <cf-tab value="done">Done</cf-tab>
+            </cf-tab-list>
+          </cf-tabs>
         </cf-vstack>
 
         <cf-vscroll flex>

@@ -2,30 +2,30 @@ import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTAccordion - Collapsible content panels
+ * CFAccordion - Collapsible content panels
  *
- * @element ct-accordion
+ * @element cf-accordion
  *
  * @attr {string} type - "single" | "multiple" - Whether one or multiple panels can be open
  * @attr {string|string[]} value - Currently open panel(s)
  * @attr {boolean} collapsible - Allow closing all panels (for single type)
  *
- * @slot - Default slot for ct-accordion-item elements
+ * @slot - Default slot for cf-accordion-item elements
  *
- * @fires ct-change - Fired on expand/collapse with detail: { value }
+ * @fires cf-change - Fired on expand/collapse with detail: { value }
  *
  * @example
- * <ct-accordion type="single" collapsible>
- *   <ct-accordion-item value="item1">
+ * <cf-accordion type="single" collapsible>
+ *   <cf-accordion-item value="item1">
  *     <div slot="trigger">Section 1</div>
  *     <div slot="content">Content 1</div>
- *   </ct-accordion-item>
- * </ct-accordion>
+ *   </cf-accordion-item>
+ * </cf-accordion>
  */
 
 export type AccordionType = "single" | "multiple";
 
-export class CTAccordion extends BaseElement {
+export class CFAccordion extends BaseElement {
   static override properties = {
     type: { type: String },
     value: { type: String },
@@ -65,7 +65,7 @@ export class CTAccordion extends BaseElement {
 
     // Listen for item toggle events
     this.addEventListener(
-      "ct-accordion-toggle",
+      "cf-accordion-toggle",
       this.handleItemToggle as EventListener,
     );
 
@@ -83,7 +83,7 @@ export class CTAccordion extends BaseElement {
   override disconnectedCallback() {
     super.disconnectedCallback();
     this.removeEventListener(
-      "ct-accordion-toggle",
+      "cf-accordion-toggle",
       this.handleItemToggle as EventListener,
     );
   }
@@ -141,14 +141,14 @@ export class CTAccordion extends BaseElement {
     this.value = newValue;
 
     // Emit change event
-    this.emit("ct-change", {
+    this.emit("cf-change", {
       value: this.value,
       type: this.type,
     });
   };
 
   private updateItemStates(): void {
-    const items = this.querySelectorAll("ct-accordion-item");
+    const items = this.querySelectorAll("cf-accordion-item");
     const values = Array.isArray(this.value)
       ? this.value
       : [this.value].filter(Boolean);
@@ -170,7 +170,7 @@ export class CTAccordion extends BaseElement {
    * Get all accordion items
    */
   get items(): NodeListOf<Element> {
-    return this.querySelectorAll("ct-accordion-item");
+    return this.querySelectorAll("cf-accordion-item");
   }
 
   /**
@@ -178,7 +178,7 @@ export class CTAccordion extends BaseElement {
    */
   expandAll(): void {
     if (this.type === "multiple") {
-      const items = this.querySelectorAll("ct-accordion-item");
+      const items = this.querySelectorAll("cf-accordion-item");
       const values: string[] = [];
       items.forEach((item) => {
         const value = item.getAttribute("value");
@@ -198,4 +198,4 @@ export class CTAccordion extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-accordion", CTAccordion);
+globalThis.customElements.define("cf-accordion", CFAccordion);

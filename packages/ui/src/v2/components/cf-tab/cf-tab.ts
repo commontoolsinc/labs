@@ -2,9 +2,9 @@ import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTTab - Individual tab button component used within ct-tab-list
+ * CFTab - Individual tab button component used within cf-tab-list
  *
- * @element ct-tab
+ * @element cf-tab
  *
  * @attr {string} value - Unique identifier for the tab
  * @attr {boolean} disabled - Whether the tab is disabled
@@ -15,9 +15,9 @@ import { BaseElement } from "../../core/base-element.ts";
  * @fires tab-click - Fired when tab is clicked with detail: { tab }
  *
  * @example
- * <ct-tab value="profile" selected>Profile</ct-tab>
+ * <cf-tab value="profile" selected>Profile</cf-tab>
  */
-export class CTTab extends BaseElement {
+export class CFTab extends BaseElement {
   static override properties = {
     value: { type: String, reflect: true },
     disabled: { type: Boolean },
@@ -83,7 +83,7 @@ export class CTTab extends BaseElement {
       }
 
       /* Vertical orientation styles */
-      :host-context(ct-tab-list[orientation="vertical"])
+      :host-context(cf-tab-list[orientation="vertical"])
         .tab[data-selected="true"]::after {
         top: 0;
         bottom: 0;
@@ -192,4 +192,4 @@ export class CTTab extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-tab", CTTab);
+globalThis.customElements.define("cf-tab", CFTab);

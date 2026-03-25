@@ -2,30 +2,30 @@ import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTTabList - Container component for tab buttons
+ * CFTabList - Container component for tab buttons
  *
- * @element ct-tab-list
+ * @element cf-tab-list
  *
  * @attr {string} orientation - Layout orientation: "horizontal" | "vertical" (default: "horizontal")
  *
- * @slot - Default slot for ct-tab elements
+ * @slot - Default slot for cf-tab elements
  *
  * @example
- * <ct-tab-list orientation="horizontal">
- *   <ct-tab value="tab1">Tab 1</ct-tab>
- *   <ct-tab value="tab2">Tab 2</ct-tab>
- * </ct-tab-list>
+ * <cf-tab-list orientation="horizontal">
+ *   <cf-tab value="tab1">Tab 1</cf-tab>
+ *   <cf-tab value="tab2">Tab 2</cf-tab>
+ * </cf-tab-list>
  */
-export class CTTabList extends BaseElement {
+export class CFTabList extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
       :host {
-        --ct-tab-list-border-radius: var(
+        --cf-tab-list-border-radius: var(
           --ct-theme-border-radius,
           var(--ct-border-radius-md)
         );
-        --ct-tab-list-color-surface: var(--ct-theme-color-surface, #f1f5f9);
+        --cf-tab-list-color-surface: var(--ct-theme-color-surface, #f1f5f9);
 
         display: flex;
         flex-shrink: 0;
@@ -35,8 +35,8 @@ export class CTTabList extends BaseElement {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border-radius: var(--ct-tab-list-border-radius, var(--ct-border-radius-md));
-        background-color: var(--ct-tab-list-color-surface, #f1f5f9);
+        border-radius: var(--cf-tab-list-border-radius, var(--ct-border-radius-md));
+        background-color: var(--cf-tab-list-color-surface, #f1f5f9);
         padding: var(--ct-spacing-1);
         height: 2.5rem;
         gap: 0.125rem;
@@ -53,7 +53,7 @@ export class CTTabList extends BaseElement {
       }
 
       /* Ensure proper spacing for vertical tabs */
-      .tab-list[data-orientation="vertical"] ::slotted(ct-tab) {
+      .tab-list[data-orientation="vertical"] ::slotted(cf-tab) {
         width: 100%;
         justify-content: flex-start;
       }
@@ -96,4 +96,4 @@ export class CTTabList extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-tab-list", CTTabList);
+globalThis.customElements.define("cf-tab-list", CFTabList);

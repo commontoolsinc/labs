@@ -17,8 +17,8 @@ export * from "./utils/index.ts";
 export * from "./styles/index.ts";
 
 // Component exports
-export * from "./components/ct-accordion/index.ts";
-export * from "./components/ct-accordion-item/index.ts";
+export * from "./components/cf-accordion/index.ts";
+export * from "./components/cf-accordion-item/index.ts";
 export * from "./components/cf-heading/index.ts";
 export * from "./components/cf-alert/index.ts";
 export * from "./components/cf-autocomplete/index.ts";
@@ -77,10 +77,10 @@ export * from "./components/cf-skeleton/index.ts";
 export * from "./components/cf-slider/index.ts";
 export * from "./components/cf-switch/index.ts";
 export * from "./components/ct-svg/index.ts";
-export * from "./components/ct-tab/index.ts";
-export * from "./components/ct-tab-list/index.ts";
-export * from "./components/ct-tab-panel/index.ts";
-export * from "./components/ct-tabs/index.ts";
+export * from "./components/cf-tab/index.ts";
+export * from "./components/cf-tab-list/index.ts";
+export * from "./components/cf-tab-panel/index.ts";
+export * from "./components/cf-tabs/index.ts";
 export * from "./components/cf-loader/index.ts";
 export * from "./components/ct-location/index.ts";
 export * from "./components/ct-map/index.ts";

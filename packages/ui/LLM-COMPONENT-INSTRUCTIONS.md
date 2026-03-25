@@ -280,29 +280,29 @@ shadcn/ui design system. All components:
 <cf-skeleton style="width: 200px; height: 20px"></cf-skeleton>
 ```
 
-### 18. ct-accordion
+### 18. cf-accordion
 
-**Purpose**: Collapsible content panels **Tag**: `<ct-accordion>`
+**Purpose**: Collapsible content panels **Tag**: `<cf-accordion>`
 **Attributes**:
 
 - `type` - "single" | "multiple"
 - `value` - string | string[] (open items)
 - `collapsible` - boolean (for single type) **Events**:
-- `ct-change` - Fired on expand/collapse with detail: `{ value }` **Slots**:
-  Default slot for ct-accordion-item elements **Example**:
+- `cf-change` - Fired on expand/collapse with detail: `{ value }` **Slots**:
+  Default slot for cf-accordion-item elements **Example**:
 
 ```html
-<ct-accordion type="single" collapsible>
-  <ct-accordion-item value="item1">
+<cf-accordion type="single" collapsible>
+  <cf-accordion-item value="item1">
     <div slot="trigger">Section 1</div>
     <div slot="content">Content 1</div>
-  </ct-accordion-item>
-</ct-accordion>
+  </cf-accordion-item>
+</cf-accordion>
 ```
 
-### 19. ct-accordion-item
+### 19. cf-accordion-item
 
-**Purpose**: Individual accordion panel **Tag**: `<ct-accordion-item>`
+**Purpose**: Individual accordion panel **Tag**: `<cf-accordion-item>`
 **Attributes**:
 
 - `value` - string (required, unique identifier)
@@ -321,42 +321,42 @@ shadcn/ui design system. All components:
 - `trigger` - Clickable trigger element
 - `content` - Collapsible content
 
-### 21. ct-tabs
+### 21. cf-tabs
 
-**Purpose**: Tabbed interface container **Tag**: `<ct-tabs>` **Attributes**:
+**Purpose**: Tabbed interface container **Tag**: `<cf-tabs>` **Attributes**:
 
 - `default-value` - string (initially active tab)
 - `orientation` - "horizontal" | "vertical" **Events**:
-- `ct-change` - Fired on tab change with detail: `{ value }` **Slots**: Default
-  slot for ct-tab-list and ct-tab-panel elements **Example**:
+- `cf-change` - Fired on tab change with detail: `{ value }` **Slots**: Default
+  slot for cf-tab-list and cf-tab-panel elements **Example**:
 
 ```html
-<ct-tabs default-value="tab1">
-  <ct-tab-list>
-    <ct-tab value="tab1">Tab 1</ct-tab>
-    <ct-tab value="tab2">Tab 2</ct-tab>
-  </ct-tab-list>
-  <ct-tab-panel value="tab1">Content 1</ct-tab-panel>
-  <ct-tab-panel value="tab2">Content 2</ct-tab-panel>
-</ct-tabs>
+<cf-tabs default-value="tab1">
+  <cf-tab-list>
+    <cf-tab value="tab1">Tab 1</cf-tab>
+    <cf-tab value="tab2">Tab 2</cf-tab>
+  </cf-tab-list>
+  <cf-tab-panel value="tab1">Content 1</cf-tab-panel>
+  <cf-tab-panel value="tab2">Content 2</cf-tab-panel>
+</cf-tabs>
 ```
 
-### 22. ct-tab-list
+### 22. cf-tab-list
 
-**Purpose**: Container for tab buttons **Tag**: `<ct-tab-list>` **Slots**:
-Default slot for ct-tab elements
+**Purpose**: Container for tab buttons **Tag**: `<cf-tab-list>` **Slots**:
+Default slot for cf-tab elements
 
-### 23. ct-tab
+### 23. cf-tab
 
-**Purpose**: Individual tab button **Tag**: `<ct-tab>` **Attributes**:
+**Purpose**: Individual tab button **Tag**: `<cf-tab>` **Attributes**:
 
 - `value` - string (required)
 - `disabled` - boolean **Events**:
 - `click` - Native click event
 
-### 24. ct-tab-panel
+### 24. cf-tab-panel
 
-**Purpose**: Tab content panel **Tag**: `<ct-tab-panel>` **Attributes**:
+**Purpose**: Tab content panel **Tag**: `<cf-tab-panel>` **Attributes**:
 
 - `value` - string (required, matches tab value) **Slots**: Default slot for
   content
@@ -616,16 +616,16 @@ Same as cf-hstack **Example**:
     </ct-grid>
   </cf-card>
 
-  <ct-tabs default-value="overview">
-    <ct-tab-list>
-      <ct-tab value="overview">Overview</ct-tab>
-      <ct-tab value="analytics">Analytics</ct-tab>
-      <ct-tab value="reports">Reports</ct-tab>
-    </ct-tab-list>
-    <ct-tab-panel value="overview">
+  <cf-tabs default-value="overview">
+    <cf-tab-list>
+      <cf-tab value="overview">Overview</cf-tab>
+      <cf-tab value="analytics">Analytics</cf-tab>
+      <cf-tab value="reports">Reports</cf-tab>
+    </cf-tab-list>
+    <cf-tab-panel value="overview">
       <!-- Overview content -->
-    </ct-tab-panel>
-  </ct-tabs>
+    </cf-tab-panel>
+  </cf-tabs>
 </cf-vstack>
 ```
 

@@ -3,48 +3,48 @@ import { type CellHandle } from "@commonfabric/runtime-client";
 import { stringSchema } from "@commonfabric/runner/schemas";
 import { BaseElement } from "../../core/base-element.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
-import type { CTTab } from "../ct-tab/ct-tab.ts";
-import type { CTTabPanel } from "../ct-tab-panel/ct-tab-panel.ts";
+import type { CFTab } from "../cf-tab/cf-tab.ts";
+import type { CFTabPanel } from "../cf-tab-panel/cf-tab-panel.ts";
 
 /**
- * CTTabs - Container component that manages tab navigation and content panels
+ * CFTabs - Container component that manages tab navigation and content panels
  *
- * @element ct-tabs
+ * @element cf-tabs
  *
  * @attr {string} value - Currently selected tab value (plain string)
  * @prop {CellHandle<string>|string} value - Selected tab value (supports Cell for two-way binding)
  * @attr {string} orientation - Tab orientation: "horizontal" | "vertical" (default: "horizontal")
  *
- * @slot - Default slot for ct-tab-list and ct-tab-panel elements
+ * @slot - Default slot for cf-tab-list and cf-tab-panel elements
  *
- * @fires ct-change - Fired when selected tab changes with detail: { value, oldValue }
+ * @fires cf-change - Fired when selected tab changes with detail: { value, oldValue }
  *
  * @example Plain string value
- * <ct-tabs value="tab1">
- *   <ct-tab-list>
- *     <ct-tab value="tab1">Tab 1</ct-tab>
- *     <ct-tab value="tab2">Tab 2</ct-tab>
- *   </ct-tab-list>
- *   <ct-tab-panel value="tab1">Content 1</ct-tab-panel>
- *   <ct-tab-panel value="tab2">Content 2</ct-tab-panel>
- * </ct-tabs>
+ * <cf-tabs value="tab1">
+ *   <cf-tab-list>
+ *     <cf-tab value="tab1">Tab 1</cf-tab>
+ *     <cf-tab value="tab2">Tab 2</cf-tab>
+ *   </cf-tab-list>
+ *   <cf-tab-panel value="tab1">Content 1</cf-tab-panel>
+ *   <cf-tab-panel value="tab2">Content 2</cf-tab-panel>
+ * </cf-tabs>
  *
  * @example With Cell binding ($value for two-way binding)
  * const activeTab = cell("tab1");
- * <ct-tabs $value={activeTab}>
+ * <cf-tabs $value={activeTab}>
  *   ...
- * </ct-tabs>
+ * </cf-tabs>
  */
-export class CTTabs extends BaseElement {
+export class CFTabs extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
       :host {
         display: flex;
         flex-direction: column;
-        width: var(--ct-tabs-width, 100%);
+        width: var(--cf-tabs-width, 100%);
         min-height: 0;
-        flex: var(--ct-tabs-flex, 1);
+        flex: var(--cf-tabs-flex, 1);
       }
 
       .tabs {
@@ -64,22 +64,22 @@ export class CTTabs extends BaseElement {
       }
 
       /* Ensure proper layout for slotted content */
-      ::slotted(ct-tab-list) {
+      ::slotted(cf-tab-list) {
         flex-shrink: 0;
       }
 
-      ::slotted(ct-tab-panel) {
+      ::slotted(cf-tab-panel) {
         flex: 1;
       }
 
       /* Handle vertical orientation */
-      .tabs[data-orientation="vertical"] ::slotted(ct-tab-list) {
+      .tabs[data-orientation="vertical"] ::slotted(cf-tab-list) {
         flex-direction: column;
         height: 100%;
       }
 
       /* Ensure panels are properly hidden */
-      ::slotted(ct-tab-panel[hidden]) {
+      ::slotted(cf-tab-panel[hidden]) {
         display: none !important;
       }
     `,
@@ -107,7 +107,7 @@ export class CTTabs extends BaseElement {
       this.updateTabSelection();
 
       // Emit change event
-      this.emit("ct-change", { value: newValue, oldValue });
+      this.emit("cf-change", { value: newValue, oldValue });
     },
   });
 
@@ -181,11 +181,11 @@ export class CTTabs extends BaseElement {
   }
 
   private getTabs(): NodeListOf<Element> {
-    return this.querySelectorAll("ct-tab");
+    return this.querySelectorAll("cf-tab");
   }
 
   private getTabPanels(): NodeListOf<Element> {
-    return this.querySelectorAll("ct-tab-panel");
+    return this.querySelectorAll("cf-tab-panel");
   }
 
   private _pendingRetry: number | null = null;
@@ -198,7 +198,7 @@ export class CTTabs extends BaseElement {
     // When tabs exist in DOM but the VDOM framework hasn't set their properties yet,
     // defer selection until the next frame when properties will be available.
     // This handles the timing gap between DOM element creation and property assignment.
-    if (tabs.length > 0 && (tabs[0] as CTTab).value === undefined) {
+    if (tabs.length > 0 && (tabs[0] as CFTab).value === undefined) {
       if (this._pendingRetry !== null) {
         cancelAnimationFrame(this._pendingRetry);
       }
@@ -215,31 +215,31 @@ export class CTTabs extends BaseElement {
     // Update tabs - use property access instead of getAttribute
     // because JSX sets properties, not attributes
     tabs.forEach((tab) => {
-      const tabValue = (tab as CTTab).value;
+      const tabValue = (tab as CFTab).value;
       if (tabValue === currentValue) {
         hasMatch = true;
         tab.setAttribute("aria-selected", "true");
         tab.setAttribute("data-selected", "true");
-        (tab as CTTab).selected = true;
+        (tab as CFTab).selected = true;
       } else {
         tab.setAttribute("aria-selected", "false");
         tab.removeAttribute("data-selected");
-        (tab as CTTab).selected = false;
+        (tab as CFTab).selected = false;
       }
     });
 
     // Update panels - use property access instead of getAttribute
     // because JSX sets properties, not attributes
     panels.forEach((panel) => {
-      const panelValue = (panel as CTTabPanel).value;
+      const panelValue = (panel as CFTabPanel).value;
       if (panelValue === currentValue) {
         panel.removeAttribute("hidden");
         panel.setAttribute("data-selected", "true");
-        (panel as CTTabPanel).hidden = false;
+        (panel as CFTabPanel).hidden = false;
       } else {
         panel.setAttribute("hidden", "");
         panel.removeAttribute("data-selected");
-        (panel as CTTabPanel).hidden = true;
+        (panel as CFTabPanel).hidden = true;
       }
     });
 
@@ -250,8 +250,8 @@ export class CTTabs extends BaseElement {
   }
 
   private handleSlotChange = () => {
-    // Set up listener on ct-tab-list's internal slot when it appears.
-    // ct-tab elements are nested inside ct-tab-list (not direct children of ct-tabs),
+    // Set up listener on cf-tab-list's internal slot when it appears.
+    // cf-tab elements are nested inside cf-tab-list (not direct children of cf-tabs),
     // so we need to listen to the inner slot to detect when tabs are added.
     this.setupTabListSlotListener();
 
@@ -261,23 +261,23 @@ export class CTTabs extends BaseElement {
   private _tabListSlotListenerSetup = false;
 
   /**
-   * Sets up a slotchange listener on ct-tab-list's internal slot.
-   * This is necessary because ct-tab elements are slotted into ct-tab-list,
-   * not directly into ct-tabs. Without this listener, we wouldn't know when
+   * Sets up a slotchange listener on cf-tab-list's internal slot.
+   * This is necessary because cf-tab elements are slotted into cf-tab-list,
+   * not directly into cf-tabs. Without this listener, we wouldn't know when
    * tabs are actually added to the DOM.
    */
   private setupTabListSlotListener(): void {
     if (this._tabListSlotListenerSetup) return;
 
-    const tabList = this.querySelector("ct-tab-list") as
+    const tabList = this.querySelector("cf-tab-list") as
       | (Element & { updateComplete?: Promise<boolean> })
       | null;
     if (!tabList) return;
 
-    // Wait for ct-tab-list to have its shadow DOM ready
+    // Wait for cf-tab-list to have its shadow DOM ready
     const tabListSlot = tabList.shadowRoot?.querySelector("slot");
     if (!tabListSlot) {
-      // ct-tab-list hasn't rendered yet, retry after it updates
+      // cf-tab-list hasn't rendered yet, retry after it updates
       tabList.updateComplete?.then(() => {
         this.setupTabListSlotListener();
       });
@@ -297,7 +297,7 @@ export class CTTabs extends BaseElement {
   }
 
   private handleTabClick = (event: CustomEvent<{ tab: Element }>) => {
-    const tab = event.detail.tab as CTTab;
+    const tab = event.detail.tab as CFTab;
 
     // Use property access instead of getAttribute because JSX sets properties
     if (tab && tab.value && !tab.disabled) {
@@ -305,7 +305,7 @@ export class CTTabs extends BaseElement {
 
       if (currentValue !== tab.value) {
         // Use cell controller to set value - this handles both Cell and plain values
-        // and triggers onChange callback which emits ct-change event
+        // and triggers onChange callback which emits cf-change event
         this._cellController.setValue(tab.value);
       }
     }
@@ -314,9 +314,9 @@ export class CTTabs extends BaseElement {
   private handleKeydown = (event: KeyboardEvent): void => {
     // Only handle keyboard navigation when focus is on a tab
     const target = event.target as HTMLElement;
-    if (target.tagName !== "CT-TAB") return;
+    if (target.tagName !== "CF-TAB") return;
 
-    const tabs = Array.from(this.getTabs()) as CTTab[];
+    const tabs = Array.from(this.getTabs()) as CFTab[];
     // Use property access instead of getAttribute because JSX sets properties
     const enabledTabs = tabs.filter((tab) => !tab.disabled);
 
@@ -384,8 +384,8 @@ export class CTTabs extends BaseElement {
     const tabs = this.getTabs();
     // Use property access instead of getAttribute because JSX sets properties
     const firstEnabledTab = Array.from(tabs).find(
-      (tab) => !(tab as CTTab).disabled,
-    ) as CTTab | undefined;
+      (tab) => !(tab as CFTab).disabled,
+    ) as CFTab | undefined;
 
     if (firstEnabledTab?.value) {
       this._cellController.setValue(firstEnabledTab.value);
@@ -399,8 +399,8 @@ export class CTTabs extends BaseElement {
     const tabs = this.getTabs();
     // Use property access instead of getAttribute because JSX sets properties
     const enabledTabs = Array.from(tabs).filter((tab) =>
-      !(tab as CTTab).disabled
-    ) as CTTab[];
+      !(tab as CFTab).disabled
+    ) as CFTab[];
     const lastTab = enabledTabs[enabledTabs.length - 1];
     if (lastTab?.value) {
       this._cellController.setValue(lastTab.value);
@@ -408,4 +408,4 @@ export class CTTabs extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-tabs", CTTabs);
+globalThis.customElements.define("cf-tabs", CFTabs);

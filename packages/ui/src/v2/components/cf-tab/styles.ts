@@ -51,7 +51,7 @@ export const tabStyles = `
   }
 
   /* Vertical orientation adjustments */
-  :host-context(ct-tab-list[orientation="vertical"]) .tab {
+  :host-context(cf-tab-list[orientation="vertical"]) .tab {
     width: 100%;
     justify-content: flex-start;
   }

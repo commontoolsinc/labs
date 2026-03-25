@@ -29,7 +29,7 @@ import MarkdownStory from "./cf-markdown-story.tsx";
 import LoaderStory from "./cf-loader-story.tsx";
 import SkeletonStory from "./cf-skeleton-story.tsx";
 import CollapsibleStory from "./cf-collapsible-story.tsx";
-import TabsStory from "./ct-tabs-story.tsx";
+import TabsStory from "./cf-tabs-story.tsx";
 import ChartStory from "./ct-chart-story.tsx";
 
 // deno-lint-ignore no-empty-interface

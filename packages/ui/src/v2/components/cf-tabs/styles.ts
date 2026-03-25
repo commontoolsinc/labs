@@ -23,22 +23,22 @@ export const tabsStyles = `
   }
 
   /* Ensure proper layout for slotted content */
-  ::slotted(ct-tab-list) {
+  ::slotted(cf-tab-list) {
     flex-shrink: 0;
   }
 
-  ::slotted(ct-tab-panel) {
+  ::slotted(cf-tab-panel) {
     flex: 1;
   }
 
   /* Handle vertical orientation */
-  .tabs[data-orientation="vertical"] ::slotted(ct-tab-list) {
+  .tabs[data-orientation="vertical"] ::slotted(cf-tab-list) {
     flex-direction: column;
     height: 100%;
   }
 
   /* Ensure panels are properly hidden */
-  ::slotted(ct-tab-panel[hidden]) {
+  ::slotted(cf-tab-panel[hidden]) {
     display: none !important;
   }
 `;

@@ -61,8 +61,8 @@ registerAllComponents();
 
 - **Forms**: `cf-button`, `cf-input`, `cf-textarea`, `cf-checkbox`, `cf-radio`,
   `cf-switch`, `cf-toggle`, `cf-slider`
-- **Layout**: `cf-card`, `cf-separator`, `ct-accordion`, `cf-collapsible`,
-  `ct-tabs`, `ct-scroll-area`
+- **Layout**: `cf-card`, `cf-separator`, `cf-accordion`, `cf-collapsible`,
+  `cf-tabs`, `ct-scroll-area`
 - **Feedback**: `cf-alert`, `cf-badge`, `cf-progress`, `cf-skeleton`, `cf-label`
 - **Data**: `ct-table`, `cf-form`, `ct-input-otp`
 - **Display**: `ct-aspect-ratio`, `ct-resizable-panel-group`

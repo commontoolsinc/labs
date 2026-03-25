@@ -30,7 +30,7 @@ export const tabListStyles = `
   }
 
   /* Remove default button spacing in vertical orientation */
-  .tab-list[data-orientation="vertical"] ::slotted(ct-tab) {
+  .tab-list[data-orientation="vertical"] ::slotted(cf-tab) {
     width: 100%;
   }
 `;

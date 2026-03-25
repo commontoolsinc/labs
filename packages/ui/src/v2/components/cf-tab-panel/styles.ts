@@ -38,7 +38,7 @@ export const tabPanelStyles = `
   }
 
   /* Vertical orientation adjustments */
-  :host-context(ct-tabs[orientation="vertical"]) .tab-panel {
+  :host-context(cf-tabs[orientation="vertical"]) .tab-panel {
     margin-left: var(--ct-spacing-4);
   }
 `;

@@ -13,7 +13,7 @@ export default pattern<TabsStoryInput, TabsStoryOutput>(() => {
   const activeTab = Writable.of("one");
 
   return {
-    [NAME]: "ct-tabs Story",
+    [NAME]: "cf-tabs Story",
     [UI]: (
       <div
         style={{
@@ -21,34 +21,34 @@ export default pattern<TabsStoryInput, TabsStoryOutput>(() => {
           maxWidth: "400px",
         }}
       >
-        <ct-tabs $value={activeTab}>
-          <ct-tab-list>
-            <ct-tab value="one">Tab One</ct-tab>
-            <ct-tab value="two">Tab Two</ct-tab>
-            <ct-tab value="three" disabled>Disabled</ct-tab>
-          </ct-tab-list>
-          <ct-tab-panel value="one">
+        <cf-tabs $value={activeTab}>
+          <cf-tab-list>
+            <cf-tab value="one">Tab One</cf-tab>
+            <cf-tab value="two">Tab Two</cf-tab>
+            <cf-tab value="three" disabled>Disabled</cf-tab>
+          </cf-tab-list>
+          <cf-tab-panel value="one">
             <div style="padding: 16px; font-size: 13px; color: #666;">
               Content for Tab One. Keyboard navigable with arrow keys.
             </div>
-          </ct-tab-panel>
-          <ct-tab-panel value="two">
+          </cf-tab-panel>
+          <cf-tab-panel value="two">
             <div style="padding: 16px; font-size: 13px; color: #666;">
               Content for Tab Two.
             </div>
-          </ct-tab-panel>
-          <ct-tab-panel value="three">
+          </cf-tab-panel>
+          <cf-tab-panel value="three">
             <div style="padding: 16px; font-size: 13px; color: #666;">
               Content for disabled tab (not reachable).
             </div>
-          </ct-tab-panel>
-        </ct-tabs>
+          </cf-tab-panel>
+        </cf-tabs>
       </div>
     ),
     controls: (
       <div style={{ color: "#6b7280", fontSize: "13px", padding: "8px 12px" }}>
-        No interactive controls. Composed of ct-tabs, ct-tab-list, ct-tab, and
-        ct-tab-panel.
+        No interactive controls. Composed of cf-tabs, cf-tab-list, cf-tab, and
+        cf-tab-panel.
       </div>
     ),
   };

@@ -525,17 +525,17 @@ export default pattern<Input, Output>(
           </div>
 
           {/* Navigation tabs */}
-          <ct-tabs $value={currentSection}>
-            <ct-tab-list>
-              <ct-tab value="map">Map</ct-tab>
-              <ct-tab value="aisles">Aisles</ct-tab>
-              <ct-tab value="departments">Depts</ct-tab>
-              <ct-tab value="corrections">Fixes</ct-tab>
-              <ct-tab value="outline">Outline</ct-tab>
-            </ct-tab-list>
+          <cf-tabs $value={currentSection}>
+            <cf-tab-list>
+              <cf-tab value="map">Map</cf-tab>
+              <cf-tab value="aisles">Aisles</cf-tab>
+              <cf-tab value="departments">Depts</cf-tab>
+              <cf-tab value="corrections">Fixes</cf-tab>
+              <cf-tab value="outline">Outline</cf-tab>
+            </cf-tab-list>
 
             {/* MAP SECTION */}
-            <ct-tab-panel value="map">
+            <cf-tab-panel value="map">
               <cf-vscroll flex showScrollbar fadeEdges>
                 <cf-vstack gap="3" style="padding: 1rem; max-width: 800px;">
                   {/* CSS for store map */}
@@ -1416,10 +1416,10 @@ export default pattern<Input, Output>(
                   </cf-hstack>
                 </cf-vstack>
               </cf-vscroll>
-            </ct-tab-panel>
+            </cf-tab-panel>
 
             {/* AISLES SECTION */}
-            <ct-tab-panel value="aisles">
+            <cf-tab-panel value="aisles">
               <cf-vscroll flex showScrollbar fadeEdges>
                 <cf-vstack gap="2" style="padding: 1rem; max-width: 800px;">
                   {/* Gap warning */}
@@ -1729,10 +1729,10 @@ export default pattern<Input, Output>(
                   </cf-card>
                 </cf-vstack>
               </cf-vscroll>
-            </ct-tab-panel>
+            </cf-tab-panel>
 
             {/* DEPARTMENTS SECTION */}
-            <ct-tab-panel value="departments">
+            <cf-tab-panel value="departments">
               <cf-vscroll flex showScrollbar fadeEdges>
                 <cf-vstack gap="2" style="padding: 1rem; max-width: 800px;">
                   {/* Department list - unassigned shown first, assigned at bottom */}
@@ -2109,10 +2109,10 @@ export default pattern<Input, Output>(
                   ))}
                 </cf-vstack>
               </cf-vscroll>
-            </ct-tab-panel>
+            </cf-tab-panel>
 
             {/* CORRECTIONS SECTION */}
-            <ct-tab-panel value="corrections">
+            <cf-tab-panel value="corrections">
               <cf-vscroll flex showScrollbar fadeEdges>
                 <cf-vstack gap="2" style="padding: 1rem; max-width: 800px;">
                   <cf-card>
@@ -2214,10 +2214,10 @@ export default pattern<Input, Output>(
                   )}
                 </cf-vstack>
               </cf-vscroll>
-            </ct-tab-panel>
+            </cf-tab-panel>
 
             {/* OUTLINE SECTION */}
-            <ct-tab-panel value="outline">
+            <cf-tab-panel value="outline">
               <cf-vscroll flex showScrollbar fadeEdges>
                 <cf-vstack gap="2" style="padding: 1rem; max-width: 800px;">
                   <cf-card>
@@ -2250,8 +2250,8 @@ export default pattern<Input, Output>(
                   </cf-card>
                 </cf-vstack>
               </cf-vscroll>
-            </ct-tab-panel>
-          </ct-tabs>
+            </cf-tab-panel>
+          </cf-tabs>
         </cf-screen>
       ),
       storeName,

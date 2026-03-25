@@ -3,9 +3,9 @@ import { classMap } from "lit/directives/class-map.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTAccordionItem - Individual accordion panel
+ * CFAccordionItem - Individual accordion panel
  *
- * @element ct-accordion-item
+ * @element cf-accordion-item
  *
  * @attr {string} value - Unique identifier (required)
  * @attr {boolean} disabled - Whether the item is disabled
@@ -14,15 +14,15 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot trigger - Clickable header
  * @slot - Default slot for content
  *
- * @fires ct-accordion-toggle - Fired when toggled with detail: { value, expanded }
+ * @fires cf-accordion-toggle - Fired when toggled with detail: { value, expanded }
  *
  * @example
- * <ct-accordion-item value="item1">
+ * <cf-accordion-item value="item1">
  *   <div slot="trigger">Section Title</div>
  *   <div>Section content goes here</div>
- * </ct-accordion-item>
+ * </cf-accordion-item>
  */
-export class CTAccordionItem extends BaseElement {
+export class CFAccordionItem extends BaseElement {
   static override properties = {
     value: { type: String },
     disabled: { type: Boolean },
@@ -242,7 +242,7 @@ export class CTAccordionItem extends BaseElement {
     const newExpanded = !this.expanded;
 
     // Emit toggle event for parent accordion to handle
-    this.emit("ct-accordion-toggle", {
+    this.emit("cf-accordion-toggle", {
       value: this.value,
       expanded: newExpanded,
     });
@@ -254,7 +254,7 @@ export class CTAccordionItem extends BaseElement {
   expand(): void {
     if (!this.expanded && !this.disabled) {
       this.expanded = true;
-      this.emit("ct-accordion-toggle", {
+      this.emit("cf-accordion-toggle", {
         value: this.value,
         expanded: true,
       });
@@ -267,7 +267,7 @@ export class CTAccordionItem extends BaseElement {
   collapse(): void {
     if (this.expanded && !this.disabled) {
       this.expanded = false;
-      this.emit("ct-accordion-toggle", {
+      this.emit("cf-accordion-toggle", {
         value: this.value,
         expanded: false,
       });
@@ -275,4 +275,4 @@ export class CTAccordionItem extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-accordion-item", CTAccordionItem);
+globalThis.customElements.define("cf-accordion-item", CFAccordionItem);

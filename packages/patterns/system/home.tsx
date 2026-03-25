@@ -124,14 +124,14 @@ export default pattern((_) => {
           home<strong>space</strong>
         </h1>
 
-        <ct-tabs $value={activeTab}>
-          <ct-tab-list>
-            <ct-tab value="spaces">Spaces</ct-tab>
-            <ct-tab value="favorites">Favorites</ct-tab>
-            <ct-tab value="profile">Profile</ct-tab>
-          </ct-tab-list>
-          <ct-tab-panel value="favorites">{favoritesComponent}</ct-tab-panel>
-          <ct-tab-panel value="profile">
+        <cf-tabs $value={activeTab}>
+          <cf-tab-list>
+            <cf-tab value="spaces">Spaces</cf-tab>
+            <cf-tab value="favorites">Favorites</cf-tab>
+            <cf-tab value="profile">Profile</cf-tab>
+          </cf-tab-list>
+          <cf-tab-panel value="favorites">{favoritesComponent}</cf-tab-panel>
+          <cf-tab-panel value="profile">
             <cf-vstack gap="4" style={{ padding: "1rem" }}>
               <h2 style={{ margin: 0, fontSize: "16px" }}>Profile Summary</h2>
 
@@ -156,8 +156,8 @@ export default pattern((_) => {
                 </span>
               </cf-vstack>
             </cf-vstack>
-          </ct-tab-panel>
-          <ct-tab-panel value="spaces">
+          </cf-tab-panel>
+          <cf-tab-panel value="spaces">
             <cf-vstack gap="4" style={{ padding: "1rem" }}>
               <h2 style={{ margin: 0, fontSize: "16px" }}>My Spaces</h2>
 
@@ -235,8 +235,8 @@ export default pattern((_) => {
                 </span>
               </cf-vstack>
             </cf-vstack>
-          </ct-tab-panel>
-        </ct-tabs>
+          </cf-tab-panel>
+        </cf-tabs>
       </cf-screen>
     ),
 

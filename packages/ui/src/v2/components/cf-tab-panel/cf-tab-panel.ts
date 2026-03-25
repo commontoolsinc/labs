@@ -2,9 +2,9 @@ import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTTabPanel - Content panel component associated with a tab
+ * CFTabPanel - Content panel component associated with a tab
  *
- * @element ct-tab-panel
+ * @element cf-tab-panel
  *
  * @attr {string} value - Unique identifier matching the associated tab's value
  * @attr {boolean} hidden - Whether the panel is hidden
@@ -12,12 +12,12 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot - Default slot for panel content
  *
  * @example
- * <ct-tab-panel value="profile">
+ * <cf-tab-panel value="profile">
  *   <h2>Profile Content</h2>
  *   <p>Your profile information goes here.</p>
- * </ct-tab-panel>
+ * </cf-tab-panel>
  */
-export class CTTabPanel extends BaseElement {
+export class CFTabPanel extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -58,7 +58,7 @@ export class CTTabPanel extends BaseElement {
       }
 
       /* Vertical orientation - adjust spacing */
-      :host-context(ct-tabs[orientation="vertical"]) {
+      :host-context(cf-tabs[orientation="vertical"]) {
         margin-top: 0;
         margin-left: var(--ct-spacing-6);
       }
@@ -119,10 +119,10 @@ export class CTTabPanel extends BaseElement {
     if (!this.value) return;
 
     // Find the associated tab with the same value
-    const parentTabs = this.closest("ct-tabs");
+    const parentTabs = this.closest("cf-tabs");
     if (parentTabs) {
       const associatedTab = parentTabs.querySelector(
-        `ct-tab[value="${this.value}"]`,
+        `cf-tab[value="${this.value}"]`,
       );
       if (associatedTab && !associatedTab.id) {
         // Generate an ID if the tab doesn't have one
@@ -156,4 +156,4 @@ export class CTTabPanel extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-tab-panel", CTTabPanel);
+globalThis.customElements.define("cf-tab-panel", CFTabPanel);

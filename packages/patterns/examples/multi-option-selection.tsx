@@ -101,25 +101,25 @@ export default pattern<Input, Result>(
 
           <cf-card>
             <h4>
-              <code>ct-tabs</code>
+              <code>cf-tabs</code>
             </h4>
             <p>Tabs use $value binding for the active tab</p>
-            <ct-tabs $value={activeTab}>
-              <ct-tab-list>
-                <ct-tab value="tab1">First Tab</ct-tab>
-                <ct-tab value="tab2">Second Tab</ct-tab>
-                <ct-tab value="tab3">Third Tab</ct-tab>
-              </ct-tab-list>
-              <ct-tab-panel value="tab1">
+            <cf-tabs $value={activeTab}>
+              <cf-tab-list>
+                <cf-tab value="tab1">First Tab</cf-tab>
+                <cf-tab value="tab2">Second Tab</cf-tab>
+                <cf-tab value="tab3">Third Tab</cf-tab>
+              </cf-tab-list>
+              <cf-tab-panel value="tab1">
                 <p>Content for the first tab panel.</p>
-              </ct-tab-panel>
-              <ct-tab-panel value="tab2">
+              </cf-tab-panel>
+              <cf-tab-panel value="tab2">
                 <p>Content for the second tab panel.</p>
-              </ct-tab-panel>
-              <ct-tab-panel value="tab3">
+              </cf-tab-panel>
+              <cf-tab-panel value="tab3">
                 <p>Content for the third tab panel.</p>
-              </ct-tab-panel>
-            </ct-tabs>
+              </cf-tab-panel>
+            </cf-tabs>
             <p>Active tab: {activeTab}</p>
           </cf-card>
         </cf-vstack>

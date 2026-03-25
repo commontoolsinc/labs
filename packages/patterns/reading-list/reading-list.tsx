@@ -165,15 +165,15 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
             <cf-heading level={4}>Reading List ({totalCount})</cf-heading>
           </cf-hstack>
 
-          <ct-tabs $value={filterStatus}>
-            <ct-tab-list>
-              <ct-tab value="all">All</ct-tab>
-              <ct-tab value="want">Want</ct-tab>
-              <ct-tab value="reading">Reading</ct-tab>
-              <ct-tab value="finished">Done</ct-tab>
-              <ct-tab value="abandoned">Dropped</ct-tab>
-            </ct-tab-list>
-          </ct-tabs>
+          <cf-tabs $value={filterStatus}>
+            <cf-tab-list>
+              <cf-tab value="all">All</cf-tab>
+              <cf-tab value="want">Want</cf-tab>
+              <cf-tab value="reading">Reading</cf-tab>
+              <cf-tab value="finished">Done</cf-tab>
+              <cf-tab value="abandoned">Dropped</cf-tab>
+            </cf-tab-list>
+          </cf-tabs>
         </cf-vstack>
 
         <cf-vscroll flex showScrollbar fadeEdges>

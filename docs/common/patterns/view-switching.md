@@ -108,19 +108,19 @@ This is useful when:
 
 ## Approach 3: Tabs
 
-For simple tabbed UIs, `ct-tabs` handles string-based view switching as a built-in:
+For simple tabbed UIs, `cf-tabs` handles string-based view switching as a built-in:
 
 ```tsx
 const activeTab = Writable.of("spaces").for("activeTab");
 
-<ct-tabs $value={activeTab}>
-  <ct-tab-list>
-    <ct-tab value="spaces">Spaces</ct-tab>
-    <ct-tab value="favorites">Favorites</ct-tab>
-  </ct-tab-list>
-  <ct-tab-panel value="spaces">{spacesView}</ct-tab-panel>
-  <ct-tab-panel value="favorites">{favoritesView}</ct-tab-panel>
-</ct-tabs>
+<cf-tabs $value={activeTab}>
+  <cf-tab-list>
+    <cf-tab value="spaces">Spaces</cf-tab>
+    <cf-tab value="favorites">Favorites</cf-tab>
+  </cf-tab-list>
+  <cf-tab-panel value="spaces">{spacesView}</cf-tab-panel>
+  <cf-tab-panel value="favorites">{favoritesView}</cf-tab-panel>
+</cf-tabs>
 ```
 
 The `.for("activeTab")` call makes the tab state durable (persisted by key). See `packages/patterns/system/home.tsx`.
@@ -131,7 +131,7 @@ The `.for("activeTab")` call makes the tab state durable (persisted by key). See
 |---|---|
 | Known set of views, menu/sidebar navigation | Switch on a string |
 | Selecting from dynamic data (list items, search results) | Cell pointer |
-| Simple tabbed layout with static panels | `ct-tabs` |
+| Simple tabbed layout with static panels | `cf-tabs` |
 | Rendering cells you don't control (grids, embeds) | Cell pointer + `ct-render` |
 
 ## See Also
