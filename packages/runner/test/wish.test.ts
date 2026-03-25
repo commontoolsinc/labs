@@ -1582,6 +1582,7 @@ describe("wish built-in", () => {
         (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
         await tx.commit();
+        await runtime.storageManager.synced();
         await runtime.idle();
         tx = runtime.edit();
 
@@ -1620,6 +1621,7 @@ describe("wish built-in", () => {
         (otherSpaceCell as any).key("defaultPattern").set(otherDefaultPattern);
 
         await tx.commit();
+        await runtime.storageManager.synced();
         await runtime.idle();
         tx = runtime.edit();
 
@@ -1643,6 +1645,9 @@ describe("wish built-in", () => {
         );
         const result = runtime.run(tx, wishPattern, {}, resultCell);
         await tx.commit();
+        await runtime.idle();
+        await runtime.storageManager.synced();
+        await runtime.idle();
         tx = runtime.edit();
 
         await result.pull();
@@ -1681,6 +1686,7 @@ describe("wish built-in", () => {
         );
 
         await tx.commit();
+        await runtime.storageManager.synced();
         await runtime.idle();
         tx = runtime.edit();
 
@@ -1719,6 +1725,7 @@ describe("wish built-in", () => {
         (otherSpaceCell as any).key("defaultPattern").set(otherDefaultPattern);
 
         await tx.commit();
+        await runtime.storageManager.synced();
         await runtime.idle();
         tx = runtime.edit();
 
@@ -1742,6 +1749,9 @@ describe("wish built-in", () => {
         );
         const result = runtime.run(tx, wishPattern, {}, resultCell);
         await tx.commit();
+        await runtime.idle();
+        await runtime.storageManager.synced();
+        await runtime.idle();
         tx = runtime.edit();
 
         await result.pull();
