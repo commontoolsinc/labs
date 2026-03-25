@@ -107,6 +107,22 @@ describe("StitchHub", () => {
       assertEquals(msg.docs["doc:x"], { count: 1 });
     });
 
+    it("returns the full doc value regardless of selector path", async () => {
+      const a = openSession(hub);
+      await a.send(commit([op("doc:x", { name: "Alice", age: 30 })]));
+      await a.recv(); // accepted
+
+      const b = openSession(hub);
+      // path describes where the schema applies within the doc, not a projection.
+      await b.send({
+        type: "subscribe",
+        selector: { "doc:x": { path: ["name"], schema: { type: "string" } } },
+      });
+      const msg = await b.recv() as ServerSubscribed;
+      // Full document, not just the value at path.
+      assertEquals(msg.docs["doc:x"], { name: "Alice", age: 30 });
+    });
+
     it("serverSeq in subscribed response matches current canonical seq", async () => {
       const a = openSession(hub);
       await a.send(commit([op("doc:x", 1)]));
