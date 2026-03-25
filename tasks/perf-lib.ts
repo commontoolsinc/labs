@@ -585,6 +585,20 @@ export function extractMetrics(
       metrics.set("job: Test and Build", makeSample(jobDuration));
     }
 
+    // New parallelized job names (after CI restructure)
+    if (normalizedJobName === "Build Binaries") {
+      metrics.set("job: Build Binaries", makeSample(jobDuration));
+    }
+    if (normalizedJobName === "Test") {
+      metrics.set("job: Test", makeSample(jobDuration));
+    }
+    if (normalizedJobName === "Type Check") {
+      metrics.set("job: Type Check", makeSample(jobDuration));
+    }
+    if (normalizedJobName === "Lint and Format") {
+      metrics.set("job: Lint and Format", makeSample(jobDuration));
+    }
+
     for (const step of job.steps) {
       const stepDuration = durationSeconds(step.started_at, step.completed_at);
       if (stepDuration <= 0) continue;
