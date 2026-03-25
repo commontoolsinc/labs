@@ -2,8 +2,8 @@ import { css, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 
-@customElement("ct-canvas")
-export class CtCanvas extends BaseElement {
+@customElement("cf-canvas")
+export class CFCanvas extends BaseElement {
   @property({ type: Number })
   width = 800;
   @property({ type: Number })
@@ -45,7 +45,7 @@ export class CtCanvas extends BaseElement {
     const y = Math.round(event.clientY - rect.top);
 
     // Emit event using BaseElement's emit method
-    this.emit("ct-canvas-click", { x, y });
+    this.emit("cf-canvas-click", { x, y });
   }
 
   override render() {
@@ -64,6 +64,6 @@ export class CtCanvas extends BaseElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "ct-canvas": CtCanvas;
+    "cf-canvas": CFCanvas;
   }
 }

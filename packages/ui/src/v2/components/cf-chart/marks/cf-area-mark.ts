@@ -1,15 +1,15 @@
 /**
- * ct-area-mark - Area mark element for ct-chart.
+ * cf-area-mark - Area mark element for cf-chart.
  *
  * Headless config holder. Renders nothing visible.
- * The parent ct-chart reads properties and renders the area SVG.
+ * The parent cf-chart reads properties and renders the area SVG.
  *
- * @element ct-area-mark
+ * @element cf-area-mark
  */
 import type { CurveType, MarkType } from "../types.ts";
 import { MarkElement } from "./base-mark.ts";
 
-export class CTAreaMark extends MarkElement {
+export class CFAreaMark extends MarkElement {
   readonly markType: MarkType = "area";
 
   static override properties = {
@@ -34,10 +34,10 @@ export class CTAreaMark extends MarkElement {
   }
 }
 
-customElements.define("ct-area-mark", CTAreaMark);
+customElements.define("cf-area-mark", CFAreaMark);
 
 declare global {
   interface HTMLElementTagNameMap {
-    "ct-area-mark": CTAreaMark;
+    "cf-area-mark": CFAreaMark;
   }
 }

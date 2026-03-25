@@ -2918,7 +2918,7 @@ interface CFFragmentElement extends CTHTMLElement {}
 interface CFUpdaterElement extends CTHTMLElement {}
 interface CFGoogleOAuthElement extends CTHTMLElement {}
 interface CFOAuthElement extends CTHTMLElement {}
-interface CTCanvasElement extends CTHTMLElement {}
+interface CFCanvasElement extends CTHTMLElement {}
 interface CFDraggableElement extends CTHTMLElement {}
 interface CFPlaidLinkElement extends CTHTMLElement {}
 interface CFPieceElement extends CTHTMLElement {}
@@ -2933,11 +2933,11 @@ interface CTRouteElement extends CTHTMLElement {}
 interface CFLinkElement extends CTHTMLElement {}
 
 // Chart components
-interface CTChartElement extends CTHTMLElement {}
-interface CTLineMarkElement extends CTHTMLElement {}
-interface CTAreaMarkElement extends CTHTMLElement {}
-interface CTBarMarkElement extends CTHTMLElement {}
-interface CTDotMarkElement extends CTHTMLElement {}
+interface CFChartElement extends CTHTMLElement {}
+interface CFLineMarkElement extends CTHTMLElement {}
+interface CFAreaMarkElement extends CTHTMLElement {}
+interface CFBarMarkElement extends CTHTMLElement {}
+interface CFDotMarkElement extends CTHTMLElement {}
 
 // Tab components
 interface CFTabsElement extends CTHTMLElement {}
@@ -2991,10 +2991,10 @@ interface CFDraggableAttributes<T> extends CTHTMLAttributes<T> {
   "onpositionchange"?: EventHandler<any>;
 }
 
-interface CTCanvasAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCanvasAttributes<T> extends CTHTMLAttributes<T> {
   "width"?: string | number;
   "height"?: string | number;
-  "onct-canvas-click"?: EventHandler<any>;
+  "oncf-canvas-click"?: EventHandler<any>;
 }
 
 interface CFPlaidLinkAttributes<T> extends CTHTMLAttributes<T> {
@@ -3062,7 +3062,7 @@ interface CFAudioVisualizerAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 // Chart component attributes
-interface CTChartAttributes<T> extends CTHTMLAttributes<T> {
+interface CFChartAttributes<T> extends CTHTMLAttributes<T> {
   "height"?: number;
   "marks"?: any[] | CellLike<any[]>;
   "$marks"?: any[] | CellLike<any[]>;
@@ -3084,12 +3084,12 @@ interface CTChartAttributes<T> extends CTHTMLAttributes<T> {
   "yDomain"?: [number, number];
   "padding"?: number | [number, number, number, number];
   "crosshair"?: boolean;
-  "onct-hover"?: EventHandler<any>;
-  "onct-click"?: EventHandler<any>;
-  "onct-leave"?: EventHandler<any>;
+  "oncf-hover"?: EventHandler<any>;
+  "oncf-click"?: EventHandler<any>;
+  "oncf-leave"?: EventHandler<any>;
 }
 
-interface CTLineMarkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFLineMarkAttributes<T> extends CTHTMLAttributes<T> {
   "data"?: any[] | CellLike<any[]>;
   "$data"?: any[] | CellLike<any[]>;
   "x"?: string;
@@ -3100,7 +3100,7 @@ interface CTLineMarkAttributes<T> extends CTHTMLAttributes<T> {
   "label"?: string;
 }
 
-interface CTAreaMarkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAreaMarkAttributes<T> extends CTHTMLAttributes<T> {
   "data"?: any[] | CellLike<any[]>;
   "$data"?: any[] | CellLike<any[]>;
   "x"?: string;
@@ -3113,7 +3113,7 @@ interface CTAreaMarkAttributes<T> extends CTHTMLAttributes<T> {
   "label"?: string;
 }
 
-interface CTBarMarkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFBarMarkAttributes<T> extends CTHTMLAttributes<T> {
   "data"?: any[] | CellLike<any[]>;
   "$data"?: any[] | CellLike<any[]>;
   "x"?: string;
@@ -3124,7 +3124,7 @@ interface CTBarMarkAttributes<T> extends CTHTMLAttributes<T> {
   "label"?: string;
 }
 
-interface CTDotMarkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFDotMarkAttributes<T> extends CTHTMLAttributes<T> {
   "data"?: any[] | CellLike<any[]>;
   "$data"?: any[] | CellLike<any[]>;
   "x"?: string;
@@ -4873,9 +4873,9 @@ declare global {
         CTHTMLAttributes<CTCTCollapsibleElement>,
         CTCTCollapsibleElement
       >;
-      "ct-canvas": CTDOM.DetailedHTMLProps<
-        CTCanvasAttributes<CTCanvasElement>,
-        CTCanvasElement
+      "cf-canvas": CTDOM.DetailedHTMLProps<
+        CFCanvasAttributes<CFCanvasElement>,
+        CFCanvasElement
       >;
       "cf-draggable": CTDOM.DetailedHTMLProps<
         CFDraggableAttributes<CFDraggableElement>,
@@ -5087,25 +5087,25 @@ declare global {
       >;
 
       // Chart components
-      "ct-chart": CTDOM.DetailedHTMLProps<
-        CTChartAttributes<CTChartElement>,
-        CTChartElement
+      "cf-chart": CTDOM.DetailedHTMLProps<
+        CFChartAttributes<CFChartElement>,
+        CFChartElement
       >;
-      "ct-line-mark": CTDOM.DetailedHTMLProps<
-        CTLineMarkAttributes<CTLineMarkElement>,
-        CTLineMarkElement
+      "cf-line-mark": CTDOM.DetailedHTMLProps<
+        CFLineMarkAttributes<CFLineMarkElement>,
+        CFLineMarkElement
       >;
-      "ct-area-mark": CTDOM.DetailedHTMLProps<
-        CTAreaMarkAttributes<CTAreaMarkElement>,
-        CTAreaMarkElement
+      "cf-area-mark": CTDOM.DetailedHTMLProps<
+        CFAreaMarkAttributes<CFAreaMarkElement>,
+        CFAreaMarkElement
       >;
-      "ct-bar-mark": CTDOM.DetailedHTMLProps<
-        CTBarMarkAttributes<CTBarMarkElement>,
-        CTBarMarkElement
+      "cf-bar-mark": CTDOM.DetailedHTMLProps<
+        CFBarMarkAttributes<CFBarMarkElement>,
+        CFBarMarkElement
       >;
-      "ct-dot-mark": CTDOM.DetailedHTMLProps<
-        CTDotMarkAttributes<CTDotMarkElement>,
-        CTDotMarkElement
+      "cf-dot-mark": CTDOM.DetailedHTMLProps<
+        CFDotMarkAttributes<CFDotMarkElement>,
+        CFDotMarkElement
       >;
     }
   }

@@ -1,15 +1,15 @@
 /**
- * ct-bar-mark - Bar mark element for ct-chart.
+ * cf-bar-mark - Bar mark element for cf-chart.
  *
  * Headless config holder. Renders nothing visible.
- * The parent ct-chart reads properties and renders the bar SVG.
+ * The parent cf-chart reads properties and renders the bar SVG.
  *
- * @element ct-bar-mark
+ * @element cf-bar-mark
  */
 import type { MarkType } from "../types.ts";
 import { MarkElement } from "./base-mark.ts";
 
-export class CTBarMark extends MarkElement {
+export class CFBarMark extends MarkElement {
   readonly markType: MarkType = "bar";
 
   static override properties = {
@@ -28,10 +28,10 @@ export class CTBarMark extends MarkElement {
   }
 }
 
-customElements.define("ct-bar-mark", CTBarMark);
+customElements.define("cf-bar-mark", CFBarMark);
 
 declare global {
   interface HTMLElementTagNameMap {
-    "ct-bar-mark": CTBarMark;
+    "cf-bar-mark": CFBarMark;
   }
 }

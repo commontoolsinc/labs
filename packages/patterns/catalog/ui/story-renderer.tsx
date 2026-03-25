@@ -36,7 +36,7 @@ import SkeletonStory from "../stories/cf-skeleton-story.tsx";
 import CollapsibleStory from "../stories/cf-collapsible-story.tsx";
 import TabListStory from "../stories/cf-tab-list-story.tsx";
 import TabsStory from "../stories/cf-tabs-story.tsx";
-import ChartStory from "../stories/ct-chart-story.tsx";
+import ChartStory from "../stories/cf-chart-story.tsx";
 import NoteStory from "../stories/note-story.tsx";
 import KitchenSinkStory from "../stories/kitchen-sink-story.tsx";
 import ChatStory from "../stories/cf-chat-story.tsx";

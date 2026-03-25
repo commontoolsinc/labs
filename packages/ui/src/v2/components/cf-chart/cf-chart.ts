@@ -1,10 +1,10 @@
 /**
- * ct-chart - SVG charting container component.
+ * cf-chart - SVG charting container component.
  *
  * Discovers child mark elements via slotchange, collects their data,
  * computes scales, and renders all marks as SVG groups.
  *
- * @element ct-chart
+ * @element cf-chart
  *
  * @attr {number} height - Chart height in px (default: 200). Width is responsive.
  * @attr {MarkConfig[]} marks - Programmatic marks (rendered below child marks)
@@ -16,9 +16,9 @@
  * @attr {[min, max]} yDomain - Override y domain
  * @attr {boolean} crosshair - Show crosshair on hover (default: true)
  *
- * @fires ct-hover - Hover with nearest data point
- * @fires ct-click - Click with nearest data point
- * @fires ct-leave - Mouse leaves chart area
+ * @fires cf-hover - Hover with nearest data point
+ * @fires cf-click - Click with nearest data point
+ * @fires cf-leave - Mouse leaves chart area
  */
 import { html, svg, PropertyValues } from "lit";
 import { type CellHandle } from "@commonfabric/runtime-client";
@@ -50,10 +50,10 @@ import {
 } from "./lib/interaction.ts";
 
 // Import mark elements to ensure they're registered
-import "./marks/ct-line-mark.ts";
-import "./marks/ct-area-mark.ts";
-import "./marks/ct-bar-mark.ts";
-import "./marks/ct-dot-mark.ts";
+import "./marks/cf-line-mark.ts";
+import "./marks/cf-area-mark.ts";
+import "./marks/cf-bar-mark.ts";
+import "./marks/cf-dot-mark.ts";
 
 const RESIZE_DEBOUNCE_MS = 100;
 const DEFAULT_HEIGHT = 200;
@@ -65,7 +65,7 @@ function resolveAxisConfig(opt: AxisOption | undefined): AxisConfig | null {
   return opt;
 }
 
-export class CTChart extends BaseElement {
+export class CFChart extends BaseElement {
   static override styles = [BaseElement.baseStyles, chartStyles];
 
   static override properties = {
@@ -336,7 +336,7 @@ export class CTChart extends BaseElement {
       this.requestUpdate();
     }
 
-    this.emit("ct-hover", detail);
+    this.emit("cf-hover", detail);
   }
 
   private _handleClick(
@@ -354,14 +354,14 @@ export class CTChart extends BaseElement {
       plotX, plotY, allMarks, xScale, yScale, xType,
     );
 
-    this.emit("ct-click", detail);
+    this.emit("cf-click", detail);
   }
 
   private _handleMouseLeave = (): void => {
     this._crosshairX = null;
     this._tooltipInfo = null;
     this.requestUpdate();
-    this.emit("ct-leave", {});
+    this.emit("cf-leave", {});
   };
 
   // === Slot management ===
@@ -435,10 +435,10 @@ export class CTChart extends BaseElement {
   }
 }
 
-customElements.define("ct-chart", CTChart);
+customElements.define("cf-chart", CFChart);
 
 declare global {
   interface HTMLElementTagNameMap {
-    "ct-chart": CTChart;
+    "cf-chart": CFChart;
   }
 }

@@ -33,77 +33,77 @@ export default pattern(() => {
     [NAME]: "Chart Demo",
     [UI]: (
       <div style="display: flex; flex-direction: column; gap: 24px; padding: 16px;">
-        <h2>ct-chart Demo</h2>
+        <h2>cf-chart Demo</h2>
 
         {/* Sparkline */}
         <div>
           <h3>Sparkline (inline, no axes)</h3>
           <div style="display: flex; align-items: center; gap: 8px;">
             <span>Trend:</span>
-            <ct-chart height={24} style="width: 100px;">
-              <ct-line-mark $data={sparklineData} color="#22c55e" />
-            </ct-chart>
+            <cf-chart height={24} style="width: 100px;">
+              <cf-line-mark $data={sparklineData} color="#22c55e" />
+            </cf-chart>
           </div>
         </div>
 
         {/* Line chart with axes + grid + labels */}
         <div>
           <h3>Line Chart (with labels and grid)</h3>
-          <ct-chart
+          <cf-chart
             height={200}
             xAxis={{ label: "Date" }}
             yAxis={{ label: "Price ($)", grid: true }}
           >
-            <ct-line-mark
+            <cf-line-mark
               $data={priceData}
               x="date"
               y="price"
               color="#3b82f6"
               label="Price"
             />
-          </ct-chart>
+          </cf-chart>
         </div>
 
         {/* Layered area + line */}
         <div>
           <h3>Area + Line (layered)</h3>
-          <ct-chart height={200} xAxis yAxis>
-            <ct-area-mark
+          <cf-chart height={200} xAxis yAxis>
+            <cf-area-mark
               $data={priceData}
               x="date"
               y="price"
               color="#3b82f6"
               opacity={0.15}
             />
-            <ct-line-mark
+            <cf-line-mark
               $data={priceData}
               x="date"
               y="price"
               color="#3b82f6"
               label="Price"
             />
-          </ct-chart>
+          </cf-chart>
         </div>
 
         {/* Bar chart */}
         <div>
           <h3>Bar Chart</h3>
-          <ct-chart height={200} xAxis yAxis>
-            <ct-bar-mark
+          <cf-chart height={200} xAxis yAxis>
+            <cf-bar-mark
               $data={monthlyData}
               x="month"
               y="revenue"
               color="#22c55e"
               label="Revenue"
             />
-          </ct-chart>
+          </cf-chart>
         </div>
 
         {/* Dot/scatter */}
         <div>
           <h3>Scatter Plot</h3>
-          <ct-chart height={200} xAxis yAxis>
-            <ct-dot-mark
+          <cf-chart height={200} xAxis yAxis>
+            <cf-dot-mark
               $data={priceData}
               x="date"
               y="price"
@@ -111,7 +111,7 @@ export default pattern(() => {
               radius={3}
               label="Price"
             />
-          </ct-chart>
+          </cf-chart>
         </div>
       </div>
     ),

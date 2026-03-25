@@ -340,7 +340,7 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Interactive / Complex Components
 
-- interactive: `cf-collapsible`, `cf-tab-list`, `ct-canvas`
+- interactive: `cf-collapsible`, `cf-tab-list`, `cf-canvas`
 
 - complex/integrated (cell interop): `ct-code-editor`, `ct-outliner`
 	- gap: editable table rows

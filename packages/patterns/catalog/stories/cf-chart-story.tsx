@@ -28,7 +28,7 @@ export default pattern<ChartStoryInput, ChartStoryOutput>(() => {
   ];
 
   return {
-    [NAME]: "ct-chart Story",
+    [NAME]: "cf-chart Story",
     [UI]: (
       <div
         style={{
@@ -49,15 +49,15 @@ export default pattern<ChartStoryInput, ChartStoryOutput>(() => {
           >
             Line Chart
           </div>
-          <ct-chart height={200} xAxis yAxis>
-            <ct-line-mark
+          <cf-chart height={200} xAxis yAxis>
+            <cf-line-mark
               data={lineData}
               x="month"
               y="value"
               color="#6366f1"
               label="Monthly"
             />
-          </ct-chart>
+          </cf-chart>
         </div>
 
         <div>
@@ -71,22 +71,22 @@ export default pattern<ChartStoryInput, ChartStoryOutput>(() => {
           >
             Area + Line Chart
           </div>
-          <ct-chart height={200} xAxis yAxis>
-            <ct-area-mark
+          <cf-chart height={200} xAxis yAxis>
+            <cf-area-mark
               data={lineData}
               x="month"
               y="value"
               color="#22c55e"
               opacity={0.15}
             />
-            <ct-line-mark
+            <cf-line-mark
               data={lineData}
               x="month"
               y="value"
               color="#22c55e"
               label="Trend"
             />
-          </ct-chart>
+          </cf-chart>
         </div>
 
         <div>
@@ -100,15 +100,15 @@ export default pattern<ChartStoryInput, ChartStoryOutput>(() => {
           >
             Bar Chart
           </div>
-          <ct-chart height={200} xAxis yAxis>
-            <ct-bar-mark
+          <cf-chart height={200} xAxis yAxis>
+            <cf-bar-mark
               data={barData}
               x="category"
               y="count"
               color="#f59e0b"
               label="Count"
             />
-          </ct-chart>
+          </cf-chart>
         </div>
 
         <div>
@@ -122,15 +122,15 @@ export default pattern<ChartStoryInput, ChartStoryOutput>(() => {
           >
             Sparkline
           </div>
-          <ct-chart height={32} style="width: 120px;">
-            <ct-line-mark data={[1, 3, 2, 5, 4, 7, 6, 8]} color="#ef4444" />
-          </ct-chart>
+          <cf-chart height={32} style="width: 120px;">
+            <cf-line-mark data={[1, 3, 2, 5, 4, 7, 6, 8]} color="#ef4444" />
+          </cf-chart>
         </div>
       </div>
     ),
     controls: (
       <div style={{ color: "#6b7280", fontSize: "13px", padding: "8px 12px" }}>
-        No interactive controls. This story shows ct-chart variations.
+        No interactive controls. This story shows cf-chart variations.
       </div>
     ),
   };

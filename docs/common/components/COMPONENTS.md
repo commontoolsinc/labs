@@ -462,19 +462,19 @@ const mapData = {
 
 ---
 
-## ct-chart
+## cf-chart
 
-SVG charting components. Compose mark elements inside a `ct-chart` container.
+SVG charting components. Compose mark elements inside a `cf-chart` container.
 
 ### Elements
 
-- **`ct-chart`** - Container that discovers child marks, computes scales, renders SVG
-- **`ct-line-mark`** - Line series
-- **`ct-area-mark`** - Filled area
-- **`ct-bar-mark`** - Bar/column chart
-- **`ct-dot-mark`** - Scatter/dot plot
+- **`cf-chart`** - Container that discovers child marks, computes scales, renders SVG
+- **`cf-line-mark`** - Line series
+- **`cf-area-mark`** - Filled area
+- **`cf-bar-mark`** - Bar/column chart
+- **`cf-dot-mark`** - Scatter/dot plot
 
-### ct-chart Properties
+### cf-chart Properties
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
@@ -498,56 +498,56 @@ SVG charting components. Compose mark elements inside a `ct-chart` container.
 | `color` | `string` | `"#6366f1"` | Stroke/fill color |
 | `label` | `string` | - | Label for tooltip |
 
-**ct-line-mark** adds: `strokeWidth` (default 2), `curve` (`"linear"`, `"step"`, `"monotone"`, `"natural"`)
+**cf-line-mark** adds: `strokeWidth` (default 2), `curve` (`"linear"`, `"step"`, `"monotone"`, `"natural"`)
 
-**ct-area-mark** adds: `opacity` (default 0.2), `curve`, `y2` (baseline)
+**cf-area-mark** adds: `opacity` (default 0.2), `curve`, `y2` (baseline)
 
-**ct-bar-mark** adds: `opacity` (default 1), `barPadding` (0-1, default 0.2)
+**cf-bar-mark** adds: `opacity` (default 1), `barPadding` (0-1, default 0.2)
 
-**ct-dot-mark** adds: `radius` (default 3)
+**cf-dot-mark** adds: `radius` (default 3)
 
 ### Events
 
 | Event | Detail | Description |
 |-------|--------|-------------|
-| `ct-hover` | `{ x, y, dataX, dataY, nearest }` | Mouse over chart |
-| `ct-click` | `{ x, y, dataX, dataY, nearest }` | Chart clicked |
-| `ct-leave` | `{}` | Mouse left chart |
+| `cf-hover` | `{ x, y, dataX, dataY, nearest }` | Mouse over chart |
+| `cf-click` | `{ x, y, dataX, dataY, nearest }` | Chart clicked |
+| `cf-leave` | `{}` | Mouse left chart |
 
 ### Usage
 
 ```tsx
 // Sparkline (inline, no axes)
-<ct-chart height={24} style="width: 80px;">
-  <ct-line-mark $data={trend} color="green" />
-</ct-chart>
+<cf-chart height={24} style="width: 80px;">
+  <cf-line-mark $data={trend} color="green" />
+</cf-chart>
 
 // Line chart with axes
-<ct-chart height={200} xAxis yAxis>
-  <ct-line-mark $data={prices} x="date" y="price" color="blue" label="AAPL" />
-</ct-chart>
+<cf-chart height={200} xAxis yAxis>
+  <cf-line-mark $data={prices} x="date" y="price" color="blue" label="AAPL" />
+</cf-chart>
 
 // Layered area + line
-<ct-chart height={200} xAxis yAxis>
-  <ct-area-mark $data={prices} x="date" y="price" color="blue" opacity={0.15} />
-  <ct-line-mark $data={prices} x="date" y="price" color="blue" />
-</ct-chart>
+<cf-chart height={200} xAxis yAxis>
+  <cf-area-mark $data={prices} x="date" y="price" color="blue" opacity={0.15} />
+  <cf-line-mark $data={prices} x="date" y="price" color="blue" />
+</cf-chart>
 
 // Bar chart
-<ct-chart height={200} xAxis yAxis>
-  <ct-bar-mark $data={monthly} x="month" y="revenue" color="green" label="Revenue" />
-</ct-chart>
+<cf-chart height={200} xAxis yAxis>
+  <cf-bar-mark $data={monthly} x="month" y="revenue" color="green" label="Revenue" />
+</cf-chart>
 
 // Multi-series
-<ct-chart height={300} xAxis yAxis>
-  <ct-line-mark $data={appl} x="date" y="price" color="blue" label="AAPL" />
-  <ct-line-mark $data={goog} x="date" y="price" color="red" label="GOOG" />
-</ct-chart>
+<cf-chart height={300} xAxis yAxis>
+  <cf-line-mark $data={appl} x="date" y="price" color="blue" label="AAPL" />
+  <cf-line-mark $data={goog} x="date" y="price" color="red" label="GOOG" />
+</cf-chart>
 
 // Simple number array (auto-indexed x)
-<ct-chart height={100}>
-  <ct-line-mark $data={[1, 3, 2, 5, 4, 7, 6]} color="#22c55e" />
-</ct-chart>
+<cf-chart height={100}>
+  <cf-line-mark $data={[1, 3, 2, 5, 4, 7, 6]} color="#22c55e" />
+</cf-chart>
 ```
 
 ### Notes
@@ -571,4 +571,4 @@ SVG elements (`<svg>`, `<path>`, `<circle>`, etc.) are not in the JSX type defin
 </svg>
 ```
 
-**Workarounds:** Use `ct-chart` for data visualization, styled `<div>` elements for simple graphics, or text sparklines (`▁▂▃▄▅▆▇█`).
+**Workarounds:** Use `cf-chart` for data visualization, styled `<div>` elements for simple graphics, or text sparklines (`▁▂▃▄▅▆▇█`).

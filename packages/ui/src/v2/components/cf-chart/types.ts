@@ -1,5 +1,5 @@
 /**
- * Shared types for ct-chart components
+ * Shared types for cf-chart components
  */
 
 /** Supported scale types for x-axis */
@@ -78,7 +78,7 @@ export interface ChartPadding {
   left: number;
 }
 
-/** Event detail for ct-hover */
+/** Event detail for cf-hover */
 export interface ChartHoverDetail {
   x: number;
   y: number;
@@ -91,7 +91,7 @@ export interface ChartHoverDetail {
   } | null;
 }
 
-/** Event detail for ct-click */
+/** Event detail for cf-click */
 export interface ChartClickDetail {
   x: number;
   y: number;

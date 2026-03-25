@@ -30,7 +30,7 @@ import LoaderStory from "./cf-loader-story.tsx";
 import SkeletonStory from "./cf-skeleton-story.tsx";
 import CollapsibleStory from "./cf-collapsible-story.tsx";
 import TabsStory from "./cf-tabs-story.tsx";
-import ChartStory from "./ct-chart-story.tsx";
+import ChartStory from "./cf-chart-story.tsx";
 
 // deno-lint-ignore no-empty-interface
 interface KitchenSinkStoryInput {}

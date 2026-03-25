@@ -3,7 +3,7 @@
  *
  * Mark elements render nothing visible (display: none). They act as
  * declarative config holders (like <source>, <option>, <track>).
- * The parent ct-chart reads their properties and renders all SVG.
+ * The parent cf-chart reads their properties and renders all SVG.
  */
 import { css, LitElement, PropertyValues } from "lit";
 import { type CellHandle } from "@commonfabric/runtime-client";
@@ -74,7 +74,7 @@ export abstract class MarkElement extends LitElement {
     this._notifyChart();
   }
 
-  /** Dispatch event to notify parent ct-chart of config changes */
+  /** Dispatch event to notify parent cf-chart of config changes */
   protected _notifyChart(): void {
     this.dispatchEvent(
       new CustomEvent("mark-update", {

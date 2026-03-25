@@ -152,10 +152,10 @@ export const UserSession = pattern<
           </div>
           <hr />
           <div>
-            <ct-canvas
+            <cf-canvas
               width="800"
               height="600"
-              onct-canvas-click={handleCanvasClick({ messages, user })}
+              oncf-canvas-click={handleCanvasClick({ messages, user })}
             >
               {messages.map((m, index) => {
                 return (
@@ -196,7 +196,7 @@ export const UserSession = pattern<
                   </cf-draggable>
                 );
               })}
-            </ct-canvas>
+            </cf-canvas>
           </div>
         </div>
       ),

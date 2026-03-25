@@ -1,15 +1,15 @@
 /**
- * ct-line-mark - Line mark element for ct-chart.
+ * cf-line-mark - Line mark element for cf-chart.
  *
  * Headless config holder. Renders nothing visible.
- * The parent ct-chart reads properties and renders the line SVG.
+ * The parent cf-chart reads properties and renders the line SVG.
  *
- * @element ct-line-mark
+ * @element cf-line-mark
  */
 import type { CurveType, MarkType } from "../types.ts";
 import { MarkElement } from "./base-mark.ts";
 
-export class CTLineMark extends MarkElement {
+export class CFLineMark extends MarkElement {
   readonly markType: MarkType = "line";
 
   static override properties = {
@@ -28,10 +28,10 @@ export class CTLineMark extends MarkElement {
   }
 }
 
-customElements.define("ct-line-mark", CTLineMark);
+customElements.define("cf-line-mark", CFLineMark);
 
 declare global {
   interface HTMLElementTagNameMap {
-    "ct-line-mark": CTLineMark;
+    "cf-line-mark": CFLineMark;
   }
 }
