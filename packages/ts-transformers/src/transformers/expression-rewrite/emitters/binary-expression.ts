@@ -4,8 +4,8 @@ import type { Emitter } from "../types.ts";
 import {
   createReactiveWrapperForExpression,
   filterRelevantDataFlows,
-} from "../helpers.ts";
-import { shouldDeferFallbackMapReceiverRewrite } from "../fallback-rewrite.ts";
+} from "../rewrite-helpers.ts";
+import { shouldDeferFallbackMapReceiverRewrite } from "../fallback-array-method-rewrite.ts";
 import {
   assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,

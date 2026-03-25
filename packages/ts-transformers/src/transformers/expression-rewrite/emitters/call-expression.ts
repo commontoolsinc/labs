@@ -11,7 +11,7 @@ import {
 import {
   createReactiveWrapperForExpression,
   filterRelevantDataFlows,
-} from "../helpers.ts";
+} from "../rewrite-helpers.ts";
 import { rewriteHelperOwnedExpression } from "./helper-owned-expression.ts";
 
 function getConditionalHelperArgLabel(

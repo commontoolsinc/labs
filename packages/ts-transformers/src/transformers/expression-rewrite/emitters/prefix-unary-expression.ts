@@ -4,7 +4,7 @@ import type { Emitter } from "../types.ts";
 import {
   createReactiveWrapperForExpression,
   filterRelevantDataFlows,
-} from "../helpers.ts";
+} from "../rewrite-helpers.ts";
 import { normalizeDataFlows } from "../../../ast/mod.ts";
 
 export const emitPrefixUnaryExpression: Emitter = ({

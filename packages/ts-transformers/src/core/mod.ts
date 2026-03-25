@@ -8,7 +8,7 @@
  * TypeRegistry (WeakMap<ts.Node, ts.Type>)
  *   Preserves original Type when schema-injection creates synthetic TypeNodes
  *   that may not survive round-tripping through checker.getTypeFromTypeNode().
- *   Writers: derive-strategy, array-method-utils, builtins/derive, opaque-ref/helpers
+ *   Writers: derive-strategy, array-method-utils, builtins/derive, expression-rewrite/rewrite-helpers
  *   Readers: computed transformer, schema-generator, type-inference, ast/utils
  *
  * mapCallbackRegistry (WeakSet<ts.Node>)
@@ -20,13 +20,13 @@
  * syntheticComputeCallbackRegistry (WeakSet<ts.Node>)
  *   Marks callbacks introduced by synthetic compute wrappers (e.g. JSX branch
  *   wrapping) so later phases can treat reused authored nodes as compute-owned.
- *   Writers: context.markAsSyntheticComputeCallback() (called by opaque-ref/helpers)
+ *   Writers: context.markAsSyntheticComputeCallback() (called by expression-rewrite/rewrite-helpers)
  *   Readers: context.isSyntheticComputeCallback() (called by reactive-context classifier)
  *
  * syntheticComputeOwnedNodeRegistry (WeakSet<ts.Node>)
  *   Marks authored subtrees that have been moved under a synthetic compute
  *   wrapper so later phases can override stale source-context classification.
- *   Writers: context.markSyntheticComputeOwnedSubtree() (called by opaque-ref/helpers)
+ *   Writers: context.markSyntheticComputeOwnedSubtree() (called by expression-rewrite/rewrite-helpers)
  *   Readers: context.isSyntheticComputeOwnedNode() (called by reactive-context classifier)
  *
  * SchemaHints (WeakMap<ts.Node, SchemaHint>)

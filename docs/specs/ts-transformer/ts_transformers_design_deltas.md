@@ -422,9 +422,9 @@ fields/defaults unless an explicit author opt-in narrowing model is introduced.
 - `packages/ts-transformers/src/ast/reactive-context.ts`
 - `packages/ts-transformers/src/ast/type-inference.ts`
   (`isReactiveArrayMapCall`)
-- `packages/ts-transformers/src/transformers/opaque-ref-jsx.ts`
-- `packages/ts-transformers/src/transformers/opaque-ref/emitters/binary-expression.ts`
-- `packages/ts-transformers/src/transformers/opaque-ref/emitters/conditional-expression.ts`
+- `packages/ts-transformers/src/transformers/jsx-expression-site-router.ts`
+- `packages/ts-transformers/src/transformers/expression-rewrite/emitters/binary-expression.ts`
+- `packages/ts-transformers/src/transformers/expression-rewrite/emitters/conditional-expression.ts`
 - `packages/ts-transformers/src/closures/strategies/map-strategy.ts`
 - `packages/ts-transformers/src/ast/call-kind.ts`
 - `packages/ts-transformers/src/ast/dataflow.ts` (or successor capability graph)

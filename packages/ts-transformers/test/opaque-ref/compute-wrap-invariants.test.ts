@@ -3,7 +3,7 @@ import ts from "typescript";
 
 import { createDataFlowAnalyzer } from "../../src/ast/mod.ts";
 import { TransformationContext } from "../../src/core/mod.ts";
-import { findPendingComputeWrapCandidate } from "../../src/transformers/opaque-ref/emitters/compute-wrap-invariants.ts";
+import { findPendingComputeWrapCandidate } from "../../src/transformers/expression-rewrite/emitters/compute-wrap-invariants.ts";
 
 function createProgramAndContext(source: string): {
   sourceFile: ts.SourceFile;

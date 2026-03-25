@@ -4,7 +4,7 @@ import type { EmitterContext } from "../types.ts";
 import {
   createReactiveWrapperForExpression,
   filterRelevantDataFlows,
-} from "../helpers.ts";
+} from "../rewrite-helpers.ts";
 import { isSafeEventHandlerCall } from "../../../ast/mod.ts";
 
 export function emitPropertyAccess(

@@ -30,7 +30,7 @@ import {
 import {
   createReactiveWrapperForExpression,
   filterRelevantDataFlows,
-} from "./opaque-ref/helpers.ts";
+} from "./expression-rewrite/rewrite-helpers.ts";
 import {
   addBindingTargetSymbols,
   collectLocalOpaqueRootSymbols,
@@ -42,7 +42,7 @@ import {
 import {
   assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
-} from "./opaque-ref/emitters/compute-wrap-invariants.ts";
+} from "./expression-rewrite/emitters/compute-wrap-invariants.ts";
 
 const KNOWN_PATH_TERMINAL_METHODS = new Set([
   "set",

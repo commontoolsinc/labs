@@ -14,13 +14,13 @@ import {
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
-import { rewriteExpression } from "./opaque-ref/mod.ts";
-import { shouldDeferFallbackMapReceiverRewrite } from "./opaque-ref/fallback-rewrite.ts";
+import { rewriteExpression } from "./expression-rewrite/mod.ts";
+import { shouldDeferFallbackMapReceiverRewrite } from "./expression-rewrite/fallback-array-method-rewrite.ts";
 import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
-import type { AnalyzeFn } from "./opaque-ref/types.ts";
+import type { AnalyzeFn } from "./expression-rewrite/types.ts";
 import {
   isJsxLocalRewriteContainer,
-} from "./opaque-ref/emitters/compute-wrap-invariants.ts";
+} from "./expression-rewrite/emitters/compute-wrap-invariants.ts";
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
 import type {
   ExpressionContainerKind,
