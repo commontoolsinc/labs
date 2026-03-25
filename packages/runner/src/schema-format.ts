@@ -7,6 +7,7 @@
  */
 
 import type { JSONSchema } from "commontools";
+import { schemaWithoutProperties } from "@commontools/data-model/schema-utils";
 
 export interface SchemaFormatOptions {
   /** Definitions map for resolving $ref references */
@@ -129,7 +130,7 @@ export function schemaToTypeString(
   if (s.asStream) {
     // Stream handler: ({ props }) => void
     const innerType = schemaToTypeString(
-      { ...s, asStream: undefined } as JSONSchema,
+      schemaWithoutProperties(s, "asStream"),
       nextOpts,
     );
     return `(${innerType}) => void`;
@@ -138,7 +139,7 @@ export function schemaToTypeString(
   if (s.asCell) {
     // Cell wrapper: Cell<T>
     const innerType = schemaToTypeString(
-      { ...s, asCell: undefined } as JSONSchema,
+      schemaWithoutProperties(s, "asCell"),
       nextOpts,
     );
     return `Cell<${innerType}>`;
