@@ -436,8 +436,9 @@ export class CellBridge {
       await this.addPieceToSpace(state, piece, spaceName);
     }
 
-    // pieces/.index.json
+    // pieces/.index.json and pieces/pieces.json
     this.updateIndexJson(state);
+    await this.updatePiecesJson(state);
 
     // Subscribe to piece list changes so new/removed pieces update the tree
     const piecesCell = await manager.getPieces();
@@ -635,6 +636,7 @@ export class CellBridge {
 
     // Update index and invalidate
     this.updateIndexJson(state);
+    await this.updatePiecesJson(state);
     if (this.onInvalidate) {
       // Invalidate child entries under pieces/
       const invalidNames = [
@@ -646,6 +648,7 @@ export class CellBridge {
           return "";
         }),
         ".index.json",
+        "pieces.json",
       ];
       this.onInvalidate(state.piecesIno, invalidNames);
       // Also invalidate "pieces" entry on the space dir so readdir refreshes
@@ -656,6 +659,53 @@ export class CellBridge {
       this.onInvalidateInode(state.piecesIno);
     }
     this.updateStatus();
+  }
+
+  /** Update the pieces/pieces.json manifest for a space. */
+  private async updatePiecesJson(state: SpaceState): Promise<void> {
+    const entries: Array<{
+      id: string;
+      name: string;
+      pattern: string;
+      summary: string;
+    }> = [];
+
+    for (const [name, id] of state.pieceMap) {
+      const piece = state.pieceControllers.get(name);
+      if (!piece) continue;
+
+      let pattern = "";
+      try {
+        const meta = await piece.getPatternMeta();
+        pattern = meta?.patternName || "";
+      } catch {
+        // Pattern meta not always available
+      }
+
+      let summary = "";
+      try {
+        const result = await piece.result.get() as
+          | Record<string, unknown>
+          | null;
+        const raw = result?.summary;
+        if (typeof raw === "string") summary = raw;
+      } catch {
+        // Summary not always available
+      }
+
+      entries.push({ id, name, pattern, summary });
+    }
+
+    const existingIno = this.tree.lookup(state.piecesIno, "pieces.json");
+    if (existingIno !== undefined) {
+      this.tree.clear(existingIno);
+    }
+    this.tree.addFile(
+      state.piecesIno,
+      "pieces.json",
+      JSON.stringify(entries, null, 2),
+      "object",
+    );
   }
 
   /** Update the pieces/.index.json file for a space. */
@@ -984,8 +1034,9 @@ export class CellBridge {
               state.pieceSubs.set(newName, subs);
             }
 
-            // Rebuild .index.json.
+            // Rebuild .index.json and pieces.json.
             this.updateIndexJson(state);
+            this.updatePiecesJson(state).catch(() => {});
 
             // Invalidate kernel cache.
             if (this.onInvalidate) {
@@ -993,6 +1044,7 @@ export class CellBridge {
                 currentName,
                 newName,
                 ".index.json",
+                "pieces.json",
               ]);
               this.onInvalidate(state.spaceIno, ["pieces"]);
             }

@@ -64,11 +64,6 @@ function summarizeForDisplay(value: unknown): unknown {
 
 function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
   if (literalArgs.length > 0) {
-    if (literalArgs[0] === "--json") {
-      throw new ValidationError(
-        'ct piece call reads JSON by default; pass inline JSON or stdin without "--json"',
-      );
-    }
     return literalArgs;
   }
 
@@ -89,9 +84,9 @@ function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
   }
 
   if (tail[0] === "--json") {
-    throw new ValidationError(
-      'ct piece call reads JSON by default; pass inline JSON or stdin without "--json"',
-    );
+    // --json is a no-op: ct piece call reads JSON by default.
+    // Treat it as if no argument was passed (read from stdin).
+    return ["--json"];
   }
 
   if (tail.length > 1) {
@@ -707,6 +702,10 @@ JSON VALUES: Strings need quotes: echo '"hello"' | ct piece set ...`,
     `Run the "search" tool using schema-derived flags after "--".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option(
+    "--json",
+    "Input/output format (JSON is the only supported format; this flag is a no-op)",
+  )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
