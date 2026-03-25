@@ -17,8 +17,8 @@ jobs:
   # ---------------------------------------------------------------------------
   # Tier 0 – These jobs all start immediately with no dependencies
   # ---------------------------------------------------------------------------
-  lint-and-format:
-    name: "Lint and Format"
+  check:
+    name: "Check"
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout repository
@@ -35,19 +35,6 @@ jobs:
 
       - name: 🧹 Lint codebase
         run: deno lint
-
-  type-check:
-    name: "Type Check"
-    runs-on: ubuntu-latest
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🦕 Setup Deno
-        uses: ./.github/actions/deno-setup
-
-      - name: 🔍 Verify lock file & install dependencies
-        run: deno install --frozen=true
 
       - name: 🔎 Type check codebase
         run: deno task check
@@ -319,8 +306,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     needs:
-      - lint-and-format
-      - type-check
+      - check
       - test
       - build-binaries
       - package-integration-test
@@ -355,8 +341,7 @@ jobs:
     needs:
       [
         "test",
-        "lint-and-format",
-        "type-check",
+        "check",
         "pattern-integration-test",
         "pattern-unit-test",
         "package-integration-test",
@@ -571,8 +556,7 @@ jobs:
     needs:
       [
         "test",
-        "lint-and-format",
-        "type-check",
+        "check",
         "pattern-integration-test",
         "pattern-unit-test",
         "package-integration-test",
