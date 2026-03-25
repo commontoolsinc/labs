@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { encode } from "@commonfabric/utils/encoding";
-import { checkStderr, cf } from "./utils.ts";
+import { cf, checkStderr } from "./utils.ts";
 import { Identity } from "@commonfabric/identity";
 
 const PKCS8_KEY = `-----BEGIN PRIVATE KEY-----

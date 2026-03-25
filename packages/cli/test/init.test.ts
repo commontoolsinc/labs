@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 import { exists } from "@std/fs/exists";
-import { checkStderr, cf } from "./utils.ts";
+import { cf, checkStderr } from "./utils.ts";
 
 describe("cli init", () => {
   it("Initializes workspace", async () => {

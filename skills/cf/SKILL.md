@@ -9,8 +9,8 @@ description: Guide for using the cf (Common Fabric) CLI to interact with pieces,
 
 # CF CLI
 
-The `cf` CLI is the command-line interface for Common Fabric. **Use `--help` for current
-commands:**
+The `cf` CLI is the command-line interface for Common Fabric. **Use `--help` for
+current commands:**
 
 ```bash
 deno task cf --help           # Top-level commands

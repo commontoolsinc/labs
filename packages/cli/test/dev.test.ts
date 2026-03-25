@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { bytesToLines, checkStderr, cf } from "./utils.ts";
+import { bytesToLines, cf, checkStderr } from "./utils.ts";
 
 describe("cli dev", () => {
   it("Executes a package", async () => {

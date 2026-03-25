@@ -1,5 +1,9 @@
 import { Identity } from "@commonfabric/identity";
-import { type Cell, type MemorySpace, type Runtime } from "@commonfabric/runner";
+import {
+  type Cell,
+  type MemorySpace,
+  type Runtime,
+} from "@commonfabric/runner";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,

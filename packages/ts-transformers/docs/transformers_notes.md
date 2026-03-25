@@ -6,9 +6,9 @@ _Last updated: 2025-09-23_
 
 `@commonfabric/ts-transformers` now houses our TypeScript AST transformers. The
 package exposes the modular OpaqueRef rewrite we ship to pattern authors (via
-`createModularOpaqueRefTransformer`), and `@commonfabric/js-runtime` now consumes
-that implementation directly. This document captures the current implementation,
-outstanding gaps, and the focused roadmap we intend to pursue.
+`createModularOpaqueRefTransformer`), and `@commonfabric/js-runtime` now
+consumes that implementation directly. This document captures the current
+implementation, outstanding gaps, and the focused roadmap we intend to pursue.
 
 ## Current Implementation
 

@@ -1,4 +1,8 @@
-import { type Cell, type MemorySpace, type Runtime } from "@commonfabric/runner";
+import {
+  type Cell,
+  type MemorySpace,
+  type Runtime,
+} from "@commonfabric/runner";
 import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
 import { ID, type JSONSchema } from "@commonfabric/runner";
 import {

@@ -2,7 +2,6 @@
 // disable lint for this type
 // deno-lint-ignore-file ban-types
 import type {
-  Cell,
   CELL_LIKE,
   CellLike,
   JSXElement,
