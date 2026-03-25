@@ -347,7 +347,7 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 ## Chat Components
 
-- chat: `ct-chat`, `ct-prompt-input`, `ct-chat-message`, `ct-tool-call`, `ct-tools-chip`
+- chat: `ct-chat`, `cf-prompt-input`, `ct-chat-message`, `ct-tool-call`, `ct-tools-chip`
 
 # Unused/Unproven Components
 

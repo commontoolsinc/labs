@@ -254,11 +254,11 @@ Use the user context above to personalize your suggestions when relevant.`;
         style={computed(() => (hasPendingQuestion ? "" : "display:none"))}
         onct-answer={onQuestionAnswer({ addMessage, pendingQuestion })}
       />
-      <ct-prompt-input
+      <cf-prompt-input
         placeholder="Refine suggestion..."
         pending={pending}
         style={computed(() => (showRefine.get() ? "" : "display:none"))}
-        onct-send={sendMessage({ addMessage })}
+        oncf-send={sendMessage({ addMessage })}
       />
     </div>
   );

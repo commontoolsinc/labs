@@ -100,7 +100,7 @@ export * from "./components/cf-vscroll/index.ts";
 export * from "./components/cf-vstack/index.ts";
 export * from "./components/cf-select/index.ts";
 export * from "./components/cf-message-input/cf-message-input.ts";
-export * from "./components/ct-prompt-input/index.ts";
+export * from "./components/cf-prompt-input/index.ts";
 export * from "./components/ct-keybind/index.ts";
 export * from "./components/ct-tools-chip/index.ts";
 export * from "./components/keyboard-context.ts";

@@ -252,12 +252,12 @@ ${profileSection}`;
               </cf-hstack>,
               <span />,
             )}
-            <ct-prompt-input
+            <cf-prompt-input
               placeholder="Paste text to capture..."
               pending={pending}
               $mentionable={mentionable}
-              onct-send={sendMessage({ addMessage })}
-              onct-stop={cancelGeneration}
+              oncf-send={sendMessage({ addMessage })}
+              oncf-stop={cancelGeneration}
             />
           </div>
         </cf-screen>

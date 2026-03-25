@@ -38,10 +38,10 @@ export interface ModelItem {
 }
 
 /**
- * CTPromptInput - Enhanced textarea input component with @-mentions and attachments support
+ * CFPromptInput - Enhanced textarea input component with @-mentions and attachments support
  * Based on cf-message-input but with multiline support and prompt-specific features
  *
- * @element ct-prompt-input
+ * @element cf-prompt-input
  *
  * @attr {string} placeholder - Placeholder text for the textarea
  * @attr {string} buttonText - Text for the send button (default: "Send")
@@ -55,21 +55,21 @@ export interface ModelItem {
  * @attr {ModelItem[]} modelItems - Array of model options for the model picker
  * @attr {CellHandle<string>|string} model - Selected model value (supports Cell binding)
  *
- * @fires ct-send - Fired when send button is clicked or Enter is pressed. detail: { text: string, attachments: PromptAttachment[], mentions: [] }
- * @fires ct-stop - Fired when stop button is clicked during pending state
+ * @fires cf-send - Fired when send button is clicked or Enter is pressed. detail: { text: string, attachments: PromptAttachment[], mentions: [] }
+ * @fires cf-stop - Fired when stop button is clicked during pending state
  * @fires cf-input - Fired when textarea value changes. detail: { value: string }
- * @fires ct-attachment-add - Fired when an attachment is added (file uploaded, clipboard). detail: { attachment: PromptAttachment }
- * @fires ct-attachment-remove - Fired when an attachment is removed from the composer. detail: { id: string }
+ * @fires cf-attachment-add - Fired when an attachment is added (file uploaded, clipboard). detail: { attachment: PromptAttachment }
+ * @fires cf-attachment-remove - Fired when an attachment is removed from the composer. detail: { id: string }
  *
  * @example
- * <ct-prompt-input
+ * <cf-prompt-input
  *   placeholder="Ask me anything..."
  *   button-text="Send"
  *   .mentionable=${mentionableCell}
- *   @ct-send="${(e) => console.log(e.detail.text, e.detail.mentions)}"
- * ></ct-prompt-input>
+ *   @cf-send="${(e) => console.log(e.detail.text, e.detail.mentions)}"
+ * ></cf-prompt-input>
  */
-export class CTPromptInput extends BaseElement {
+export class CFPromptInput extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -78,39 +78,39 @@ export class CTPromptInput extends BaseElement {
         width: 100%;
 
         /* CSS variables for customization */
-        --ct-prompt-input-gap: var(
+        --cf-prompt-input-gap: var(
           --ct-theme-spacing-normal,
           var(--ct-spacing-2, 0.5rem)
         );
-        --ct-prompt-input-padding: var(
+        --cf-prompt-input-padding: var(
           --ct-theme-spacing-loose,
           var(--ct-spacing-3, 0.75rem)
         );
-        --ct-prompt-input-border-radius: var(
+        --cf-prompt-input-border-radius: var(
           --ct-theme-border-radius,
           var(--ct-radius-md, 0.375rem)
         );
-        --ct-prompt-input-border: var(
+        --cf-prompt-input-border: var(
           --ct-theme-color-border,
           var(--ct-border-color, #e2e8f0)
         );
-        --ct-prompt-input-background: var(
+        --cf-prompt-input-background: var(
           --ct-theme-color-background,
           var(--ct-background, #ffffff)
         );
-        --ct-prompt-input-min-height: 2.5rem;
-        --ct-prompt-input-max-height: 12rem;
+        --cf-prompt-input-min-height: 2.5rem;
+        --cf-prompt-input-max-height: 12rem;
       }
 
       .container {
         position: relative;
         display: flex;
         flex-direction: column;
-        gap: var(--ct-prompt-input-gap);
-        padding: var(--ct-prompt-input-padding);
-        background: var(--ct-prompt-input-background);
-        border: 1px solid var(--ct-prompt-input-border);
-        border-radius: var(--ct-prompt-input-border-radius);
+        gap: var(--cf-prompt-input-gap);
+        padding: var(--cf-prompt-input-padding);
+        background: var(--cf-prompt-input-background);
+        border: 1px solid var(--cf-prompt-input-border);
+        border-radius: var(--cf-prompt-input-border-radius);
         transition: all var(--ct-theme-animation-duration, 150ms)
           cubic-bezier(0.4, 0, 0.2, 1);
         }
@@ -141,8 +141,8 @@ export class CTPromptInput extends BaseElement {
             border: none;
             background: transparent;
             padding: 0;
-            min-height: var(--ct-prompt-input-min-height);
-            max-height: var(--ct-prompt-input-max-height);
+            min-height: var(--cf-prompt-input-min-height);
+            max-height: var(--cf-prompt-input-max-height);
             resize: none;
             font-family: var(--ct-theme-font-family, inherit);
             font-size: 0.875rem;
@@ -193,28 +193,28 @@ export class CTPromptInput extends BaseElement {
 
           /* Size variants */
           :host([size="sm"]) {
-            --ct-prompt-input-padding: var(
+            --cf-prompt-input-padding: var(
               --ct-theme-spacing-normal,
               var(--ct-spacing-2, 0.5rem)
             );
-            --ct-prompt-input-min-height: 2rem;
+            --cf-prompt-input-min-height: 2rem;
           }
 
           :host([size="lg"]) {
-            --ct-prompt-input-padding: var(
+            --cf-prompt-input-padding: var(
               --ct-theme-spacing-loose,
               var(--ct-spacing-4, 1rem)
             );
-            --ct-prompt-input-min-height: 3rem;
+            --cf-prompt-input-min-height: 3rem;
           }
 
           /* Compact variant - minimal padding */
           :host([variant="compact"]) {
-            --ct-prompt-input-padding: var(
+            --cf-prompt-input-padding: var(
               --ct-theme-spacing-normal,
               var(--ct-spacing-2, 0.5rem)
             );
-            --ct-prompt-input-gap: var(
+            --cf-prompt-input-gap: var(
               --ct-theme-spacing-tight,
               var(--ct-spacing-1, 0.25rem)
             );
@@ -503,11 +503,10 @@ export class CTPromptInput extends BaseElement {
           this.attachments.clear();
 
           // Emit the send event
-          this.emit("ct-send", {
+          this.emit("cf-send", {
             text,
             attachments,
             mentions: [], // Mentions are now in the text as markdown links
-            // Backward compatibility
             message: text,
           });
         }
@@ -518,7 +517,7 @@ export class CTPromptInput extends BaseElement {
           if (this.disabled) return;
 
           // Emit the stop event
-          this.emit("ct-stop");
+          this.emit("cf-stop");
         }
 
         private _handleKeyDown(event: KeyboardEvent) {
@@ -562,7 +561,7 @@ export class CTPromptInput extends BaseElement {
                 textarea.scrollHeight,
                 parseFloat(
                   getComputedStyle(this).getPropertyValue(
-                    "--ct-prompt-input-max-height",
+                    "--cf-prompt-input-max-height",
                   ) || "12rem",
                 ) * 16,
               )
@@ -702,7 +701,7 @@ export class CTPromptInput extends BaseElement {
                       ${this.pending
                         ? html`
                           <cf-button
-                            id="ct-prompt-input-stop-button"
+                            id="cf-prompt-input-stop-button"
                             variant="secondary"
                             size="${this.size === "sm"
                               ? "sm"
@@ -718,7 +717,7 @@ export class CTPromptInput extends BaseElement {
                         `
                         : html`
                           <cf-button
-                            id="ct-prompt-input-send-button"
+                            id="cf-prompt-input-send-button"
                             variant="primary"
                             size="${this.size === "sm"
                               ? "sm"
@@ -814,7 +813,7 @@ export class CTPromptInput extends BaseElement {
          */
         addAttachment(attachment: PromptAttachment): void {
           this.attachments.set(attachment.id, attachment);
-          this.emit("ct-attachment-add", { attachment });
+          this.emit("cf-attachment-add", { attachment });
           this.requestUpdate();
         }
 
@@ -823,7 +822,7 @@ export class CTPromptInput extends BaseElement {
          */
         removeAttachment(id: string): void {
           this.attachments.delete(id);
-          this.emit("ct-attachment-remove", { id });
+          this.emit("cf-attachment-remove", { id });
           this.requestUpdate();
         }
 
@@ -904,7 +903,7 @@ export class CTPromptInput extends BaseElement {
                 textarea.scrollHeight,
                 parseFloat(
                   getComputedStyle(this).getPropertyValue(
-                    "--ct-prompt-input-max-height",
+                    "--cf-prompt-input-max-height",
                   ) || "12rem",
                 ) * 16,
               )
@@ -994,7 +993,7 @@ export class CTPromptInput extends BaseElement {
           el.style.inset = "0 auto auto 0";
           el.style.zIndex = "1000";
           el.style.pointerEvents = "auto";
-          el.dataset.ctPromptInputMentionsOverlay = "";
+          el.dataset.cfPromptInputMentionsOverlay = "";
           document.body.appendChild(el);
           this._mentionsOverlay = el;
           applyThemeToElement(el, this.theme ?? defaultTheme);
@@ -1164,4 +1163,4 @@ export class CTPromptInput extends BaseElement {
         }
       }
 
-      globalThis.customElements.define("ct-prompt-input", CTPromptInput);
+      globalThis.customElements.define("cf-prompt-input", CFPromptInput);

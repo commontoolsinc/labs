@@ -136,10 +136,10 @@ export default pattern<ChatStoryInput, ChatStoryOutput>(() => {
 
         {/* Prompt input */}
         <div style={{ borderTop: "1px solid #e6e9ed", padding: "8px" }}>
-          <ct-prompt-input
+          <cf-prompt-input
             placeholder="Ask the assistant..."
             pending={pending}
-            onct-send={sendMessage({ messages })}
+            oncf-send={sendMessage({ messages })}
           />
         </div>
       </div>

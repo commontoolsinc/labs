@@ -144,11 +144,11 @@ When done, call presentResult with your structured findings.`,
           <h3>{computed(() => (result?.sources?.length ? "Sources" : ""))}</h3>
           <p>{computed(() => result?.sources?.join("\n") ?? "")}</p>
         </div>
-        <ct-prompt-input
+        <cf-prompt-input
           placeholder="Refine research..."
           pending={pending}
           style={computed(() => (showRefine.get() ? "" : "display:none"))}
-          onct-send={sendMessage({ addMessage })}
+          oncf-send={sendMessage({ addMessage })}
         />
       </div>
     ),

@@ -2909,7 +2909,7 @@ interface CTSendMessageElement extends CTHTMLElement {}
 interface CTTextElement extends CTHTMLElement {}
 interface CTTableElement extends CTHTMLElement {}
 interface CFTagsElement extends CTHTMLElement {}
-interface CTPromptInputElement extends CTHTMLElement {}
+interface CFPromptInputElement extends CTHTMLElement {}
 interface CTChatElement extends CTHTMLElement {}
 interface CTMessageBeadsElement extends CTHTMLElement {}
 interface CTAttachmentsBarElement extends CTHTMLElement {}
@@ -3169,7 +3169,7 @@ interface CTMessageBeadsAttributes<T> extends CTHTMLAttributes<T> {
   "onct-refine"?: EventHandler<any>;
 }
 
-interface CTPromptInputAttributes<T> extends CTHTMLAttributes<T> {
+interface CFPromptInputAttributes<T> extends CTHTMLAttributes<T> {
   "placeholder"?: string;
   "buttonText"?: string;
   "value"?: string;
@@ -3182,6 +3182,21 @@ interface CTPromptInputAttributes<T> extends CTHTMLAttributes<T> {
   "autoResize"?: boolean;
   "pending"?: boolean;
   "voice"?: boolean;
+  "oncf-send"?: EventHandler<{
+    text: string;
+    attachments: Array<{
+      id: string;
+      name: string;
+      type: "file" | "clipboard";
+      data?: unknown;
+    }>;
+    mentions: any[];
+    message: string;
+  }>;
+  "oncf-stop"?: EventHandler<{}>;
+  "oncf-input"?: EventHandler<{ value: string }>;
+  "oncf-attachment-add"?: EventHandler<{ attachment: unknown }>;
+  "oncf-attachment-remove"?: EventHandler<{ id: string }>;
 }
 
 interface CTAttachmentsBarAttributes<T> extends CTHTMLAttributes<T> {
@@ -4799,9 +4814,9 @@ declare global {
         CFTagsAttributes<CFTagsElement>,
         CFTagsElement
       >;
-      "ct-prompt-input": CTDOM.DetailedHTMLProps<
-        CTPromptInputAttributes<CTPromptInputElement>,
-        CTPromptInputElement
+      "cf-prompt-input": CTDOM.DetailedHTMLProps<
+        CFPromptInputAttributes<CFPromptInputElement>,
+        CFPromptInputElement
       >;
       "ct-chat": CTDOM.DetailedHTMLProps<
         CTChatAttributes<CTChatElement>,

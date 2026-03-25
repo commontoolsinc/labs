@@ -198,15 +198,15 @@ export default pattern<ChatInput, ChatOutput>(
     const title = TitleGenerator({ model, messages });
 
     const promptInput = (
-      <ct-prompt-input
+      <cf-prompt-input
         slot="footer"
         placeholder="Ask the LLM a question..."
         pending={pending}
         $mentionable={mentionable}
         modelItems={items}
         $model={model}
-        onct-send={sendMessage({ addMessage })}
-        onct-stop={cancelGeneration}
+        oncf-send={sendMessage({ addMessage })}
+        oncf-stop={cancelGeneration}
       />
     );
 

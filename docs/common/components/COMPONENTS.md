@@ -289,12 +289,12 @@ with `/of:` prefix (see [mentionable](../conventions/mentionable.md)).
 
 ---
 
-## ct-prompt-input
+## cf-prompt-input
 
 Multiline textarea with `@`-mention autocomplete, attachments, and voice input.
 
 ```tsx
-<ct-prompt-input
+<cf-prompt-input
   $mentionable={mentionable}
   placeholder="Type @ to mention..."
   buttonText="Send"

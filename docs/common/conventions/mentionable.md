@@ -1,7 +1,7 @@
 # Mentionables
 
 Mentionables are pieces that a pattern exposes for discovery by other patterns
-and UI components. They power `@`-mention autocomplete in `ct-prompt-input` and
+and UI components. They power `@`-mention autocomplete in `cf-prompt-input` and
 `[[`-mention autocomplete in `ct-code-editor`.
 
 ## Exporting Mentionables
@@ -64,14 +64,14 @@ See [wish](wish.md) for full documentation.
 
 ## Consuming Mentionables in UI Components
 
-### ct-prompt-input (`@`-mentions)
+### cf-prompt-input (`@`-mentions)
 
-Pass the mentionable cell to `ct-prompt-input` via the `$mentionable` attribute:
+Pass the mentionable cell to `cf-prompt-input` via the `$mentionable` attribute:
 
 ```tsx
 const mentionable = wish<MentionablePiece[]>({ query: "#mentionable" }).result;
 
-<ct-prompt-input
+<cf-prompt-input
   $mentionable={mentionable}
   placeholder="Type @ to mention..."
 />
@@ -124,7 +124,7 @@ the runtime to resolve `@link` indirection before delivering values:
 ```tsx
 import { MentionableArraySchema } from "../../core/mentionable.ts";
 
-// In MentionController (used by ct-prompt-input):
+// In MentionController (used by cf-prompt-input):
 this._mentionableTyped = this._mentionable.asSchema<MentionableArray>(
   MentionableArraySchema,
 );
@@ -161,7 +161,7 @@ The system uses two link formats for mentions, depending on context:
 
 | Format | Example | Used by |
 |--------|---------|---------|
-| Markdown link | `[Note](/of:bafyabc123)` | `ct-prompt-input`, LLM dialog, `cf-markdown` |
+| Markdown link | `[Note](/of:bafyabc123)` | `cf-prompt-input`, LLM dialog, `cf-markdown` |
 | Wiki-link | `[[Note (bafyabc123)]]` | `ct-code-editor`, `note-md.tsx` |
 
 ### Markdown links (`/of:...`)
@@ -200,7 +200,7 @@ wish("#mentionable")  ──►  $mentionable prop    ──►  @link array
                            │
                     ┌──────┴──────┐
                     ▼             ▼
-             ct-prompt-input  ct-code-editor
+             cf-prompt-input  ct-code-editor
              MentionController   (own impl)
                     │             │
                     ▼             ▼
