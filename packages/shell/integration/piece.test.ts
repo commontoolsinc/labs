@@ -65,6 +65,20 @@ describe("shell piece tests", () => {
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
+      },
+      identity,
+    });
+
+    await waitFor(async () => {
+      return await page.evaluate(() => !!globalThis.commontools?.rt);
+    });
+
+    await page.evaluate(async (spaceName, pieceId) => {
+      await globalThis.app.setView({ spaceName, pieceId });
+    }, { args: [SPACE_NAME, pieceId] });
+    await shell.waitForState({
+      view: {
+        spaceName: SPACE_NAME,
         pieceId,
       },
       identity,
