@@ -693,7 +693,7 @@ export default pattern<Input, Output>(
             null,
           )}
 
-          <ct-oauth
+          <cf-oauth
             $auth={auth}
             scopes={scopes}
             provider="airtable"
@@ -2093,7 +2093,7 @@ Import only what you need from the above list. Define \`type Secret<T> = T;\` lo
 
 Use \`ct-*\` custom elements:
 
-- \`<ct-oauth $auth={auth} scopes={scopes} provider="..." providerLabel="..." brandColor="..." loginEndpoint="..." tokenField="...">\` — OAuth flow component
+- \`<cf-oauth $auth={auth} scopes={scopes} provider="..." providerLabel="..." brandColor="..." loginEndpoint="..." tokenField="...">\` — OAuth flow component
 - \`<cf-checkbox $checked={cell}>Label</cf-checkbox>\` — Checkbox with bidirectional binding
 - \`<cf-input $value={cell} placeholder="..." />\` — Text input with bidirectional binding
 - \`<cf-select $value={cell} items={[{label, value}]} />\` — Select dropdown
@@ -2123,7 +2123,7 @@ For a provider named "acme":
 packages/patterns/acme/
   acme-importer.tsx          # Main importer pattern
   core/
-    acme-auth.tsx            # Auth pattern (thin, uses ct-oauth)
+    acme-auth.tsx            # Auth pattern (thin, uses cf-oauth)
     util/
       acme-auth-manager.tsx  # Auth manager (token lifecycle, wish-based discovery)
       acme-client.ts         # Typed API client with pagination + retry
@@ -2272,7 +2272,7 @@ file in a fenced code block with the file path as a comment on the first line.
 
 ## File 1: \`packages/patterns/${providerName}/core/${providerName}-auth.tsx\`
 
-A thin auth pattern that wraps the \`<ct-oauth>\` component. Follow the Airtable
+A thin auth pattern that wraps the \`<cf-oauth>\` component. Follow the Airtable
 auth reference exactly, adapting for ${providerLabel}. Uses shared utilities
 from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
 
@@ -2288,7 +2288,7 @@ from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
 - Use the \`#${
     hashTag.slice(1)
   }\` tag in the Output interface JSDoc comment for wish() discovery
-- Use \`<ct-oauth>\` with:
+- Use \`<cf-oauth>\` with:
   - \`provider="${providerName}"\`
   - \`providerLabel="${providerLabel}"\`
   - \`brandColor="${brandColor}"\`

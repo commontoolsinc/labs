@@ -81,12 +81,12 @@ describe("google calendar importer e2e", () => {
       identity,
     });
 
-    // Step 2: Wait for the ct-google-oauth element and its button
+    // Step 2: Wait for the cf-google-oauth element and its button
     // The button text is "Authenticate with Google" inside shadow DOM
     console.log("Waiting for Google OAuth component...");
     await waitFor(async () => {
       try {
-        // The button is inside ct-google-oauth shadow DOM
+        // The button is inside cf-google-oauth shadow DOM
         const buttons = await page.$$("button", { strategy: "pierce" });
         for (const btn of buttons) {
           const text = await btn.innerText();

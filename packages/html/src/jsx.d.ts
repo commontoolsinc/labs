@@ -2916,11 +2916,11 @@ interface CFAttachmentsBarElement extends CTHTMLElement {}
 interface CTCTCollapsibleElement extends CTHTMLElement {}
 interface CFFragmentElement extends CTHTMLElement {}
 interface CTUpdaterElement extends CTHTMLElement {}
-interface CTGoogleOAuthElement extends CTHTMLElement {}
-interface CTOAuthElement extends CTHTMLElement {}
+interface CFGoogleOAuthElement extends CTHTMLElement {}
+interface CFOAuthElement extends CTHTMLElement {}
 interface CTCanvasElement extends CTHTMLElement {}
 interface CTDraggableElement extends CTHTMLElement {}
-interface CTPlaidLinkElement extends CTHTMLElement {}
+interface CFPlaidLinkElement extends CTHTMLElement {}
 interface CFPieceElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CFVoiceInputElement extends CTHTMLElement {}
@@ -2996,17 +2996,17 @@ interface CTCanvasAttributes<T> extends CTHTMLAttributes<T> {
   "onct-canvas-click"?: EventHandler<any>;
 }
 
-interface CTPlaidLinkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFPlaidLinkAttributes<T> extends CTHTMLAttributes<T> {
   "$auth"?: any;
   "products"?: string[];
 }
 
-interface CTGoogleOAuthAttributes<T> extends CTHTMLAttributes<T> {
+interface CFGoogleOAuthAttributes<T> extends CTHTMLAttributes<T> {
   "$auth"?: any;
   "scopes"?: string[];
 }
 
-interface CTOAuthAttributes<T> extends CTHTMLAttributes<T> {
+interface CFOAuthAttributes<T> extends CTHTMLAttributes<T> {
   "$auth"?: any;
   "scopes"?: string[];
   "provider"?: string;
@@ -4892,17 +4892,17 @@ declare global {
         CTUpdaterAttributes<CTUpdaterElement>,
         CTUpdaterElement
       >;
-      "ct-google-oauth": CTDOM.DetailedHTMLProps<
-        CTGoogleOAuthAttributes<CTGoogleOAuthElement>,
-        CTGoogleOAuthElement
+      "cf-google-oauth": CTDOM.DetailedHTMLProps<
+        CFGoogleOAuthAttributes<CFGoogleOAuthElement>,
+        CFGoogleOAuthElement
       >;
-      "ct-oauth": CTDOM.DetailedHTMLProps<
-        CTOAuthAttributes<CTOAuthElement>,
-        CTOAuthElement
+      "cf-oauth": CTDOM.DetailedHTMLProps<
+        CFOAuthAttributes<CFOAuthElement>,
+        CFOAuthElement
       >;
-      "ct-plaid-link": CTDOM.DetailedHTMLProps<
-        CTPlaidLinkAttributes<CTPlaidLinkElement>,
-        CTPlaidLinkElement
+      "cf-plaid-link": CTDOM.DetailedHTMLProps<
+        CFPlaidLinkAttributes<CFPlaidLinkElement>,
+        CFPlaidLinkElement
       >;
       "cf-webhook": CTDOM.DetailedHTMLProps<
         CFWebhookAttributes<CFWebhookElement>,

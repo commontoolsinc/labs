@@ -637,7 +637,7 @@ export default pattern<Input, Output>(
             null,
           )}
 
-          <ct-oauth
+          <cf-oauth
             $auth={auth}
             scopes={scopes}
             provider="airtable"

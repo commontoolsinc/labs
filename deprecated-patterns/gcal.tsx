@@ -675,7 +675,7 @@ export default pattern(
               </cf-button>
             </cf-vstack>
           </cf-hstack>
-          <ct-google-oauth
+          <cf-google-oauth
             $auth={auth}
             scopes={[
               "email",

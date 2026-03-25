@@ -84,7 +84,7 @@ export default pattern<Input, Output>(
               )}
           </div>
 
-          <ct-google-oauth
+          <cf-google-oauth
             $auth={auth}
             scopes={[
               "email",

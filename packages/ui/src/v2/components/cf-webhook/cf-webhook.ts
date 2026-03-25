@@ -16,7 +16,7 @@ export interface WebhookConfig {
  *
  * Creates and manages a webhook endpoint. The component handles all API
  * interaction internally — patterns never call /api/webhooks directly.
- * Follows the same model as ct-google-oauth: the pattern passes a cell
+ * Follows the same model as cf-google-oauth: the pattern passes a cell
  * handle, the component manages the lifecycle.
  *
  * The component creates the confidential config cell internally so the

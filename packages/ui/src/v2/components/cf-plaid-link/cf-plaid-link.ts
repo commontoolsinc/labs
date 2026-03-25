@@ -35,17 +35,17 @@ export interface PlaidAuthData {
 }
 
 /**
- * CTPlaidLink - Plaid banking integration component
+ * CFPlaidLink - Plaid banking integration component
  *
- * @element ct-plaid-link
+ * @element cf-plaid-link
  *
  * @attr {CellHandle<PlaidAuthData>} auth - Cell containing Plaid authentication data
  * @attr {string[]} products - Array of Plaid products to use (default: ['transactions'])
  *
  * @example
- * <ct-plaid-link .auth=${authCell} .products=${['transactions', 'auth']}></ct-plaid-link>
+ * <cf-plaid-link .auth=${authCell} .products=${['transactions', 'auth']}></cf-plaid-link>
  */
-export class CTPlaidLink extends BaseElement {
+export class CFPlaidLink extends BaseElement {
   static override properties = {
     auth: { type: Object },
     products: { type: Array },
@@ -378,7 +378,7 @@ export class CTPlaidLink extends BaseElement {
           <button
             @click="${this.handleConnectClick}"
             ?disabled="${this.isLoading || !this.plaidScriptLoaded}"
-            class="connecf-button"
+            class="connect-button"
           >
             ${this.isLoading
               ? "Processing..."
@@ -583,7 +583,7 @@ export class CTPlaidLink extends BaseElement {
           gap: var(--ct-theme-spacing-normal, 1rem);
         }
 
-        .connecf-button {
+        .connect-button {
           background-color: #1db954;
           color: white;
           border: none;
@@ -600,11 +600,11 @@ export class CTPlaidLink extends BaseElement {
           transition: background-color var(--ct-theme-animation-duration, 0.2s) ease;
         }
 
-        .connecf-button:hover {
+        .connect-button:hover {
           background-color: #1aa34a;
         }
 
-        .connecf-button:disabled {
+        .connect-button:disabled {
           background-color: var(
             --ct-theme-color-border,
             var(--ct-color-gray-300, #d1d5db)
@@ -627,4 +627,4 @@ export class CTPlaidLink extends BaseElement {
     ];
   }
 
-  globalThis.customElements.define("ct-plaid-link", CTPlaidLink);
+  globalThis.customElements.define("cf-plaid-link", CFPlaidLink);

@@ -19,12 +19,12 @@ export interface OAuthData {
 }
 
 /**
- * CTOauth - Generic OAuth authentication component
+ * CFOAuth - Generic OAuth authentication component
  *
  * Parameterized by provider name, brand color, and login endpoint.
  * Works with any OAuth2 provider that follows the shared oauth2-common pattern.
  *
- * @element ct-oauth
+ * @element cf-oauth
  *
  * @attr {CellHandle<OAuthData>} auth - Cell containing authentication data
  * @attr {string[]} scopes - Array of OAuth scopes to request
@@ -34,7 +34,7 @@ export interface OAuthData {
  * @attr {string} loginEndpoint - API endpoint for login (e.g. "/api/integrations/airtable-oauth/login")
  * @attr {string} tokenField - Field name for access token in auth data ("accessToken" or "token")
  */
-export class CTOauth extends BaseElement {
+export class CFOAuth extends BaseElement {
   static override properties = {
     auth: { type: Object },
     authStatus: { type: String },
@@ -352,8 +352,8 @@ export class CTOauth extends BaseElement {
           --ct-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
-        background-color: var(--ct-oauth-status-bg, #f0f4f8);
-        color: var(--ct-oauth-status-color, #333);
+        background-color: var(--cf-oauth-status-bg, #f0f4f8);
+        color: var(--cf-oauth-status-color, #333);
         font-size: 0.9rem;
       }
 
@@ -374,4 +374,4 @@ export class CTOauth extends BaseElement {
   ];
 }
 
-globalThis.customElements.define("ct-oauth", CTOauth);
+globalThis.customElements.define("cf-oauth", CFOAuth);

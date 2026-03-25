@@ -1,5 +1,5 @@
-import { CTOauth } from "../ct-oauth/ct-oauth.ts";
-import type { OAuthData } from "../ct-oauth/ct-oauth.ts";
+import { CFOAuth } from "../cf-oauth/cf-oauth.ts";
+import type { OAuthData } from "../cf-oauth/cf-oauth.ts";
 
 /**
  * Re-export OAuthData as AuthData for backward compatibility.
@@ -7,19 +7,19 @@ import type { OAuthData } from "../ct-oauth/ct-oauth.ts";
 export type AuthData = OAuthData;
 
 /**
- * CTGoogleOauth - Google OAuth authentication component
+ * CFGoogleOAuth - Google OAuth authentication component
  *
- * Thin wrapper around the generic ct-oauth component with Google-specific defaults.
+ * Thin wrapper around the generic cf-oauth component with Google-specific defaults.
  *
- * @element ct-google-oauth
+ * @element cf-google-oauth
  *
  * @attr {CellHandle<AuthData>} auth - Cell containing authentication data
  * @attr {string[]} scopes - Array of OAuth scopes to request
  *
  * @example
- * <ct-google-oauth .auth=${authCell} .scopes=${['email', 'profile']}></ct-google-oauth>
+ * <cf-google-oauth .auth=${authCell} .scopes=${['email', 'profile']}></cf-google-oauth>
  */
-export class CTGoogleOauth extends CTOauth {
+export class CFGoogleOAuth extends CFOAuth {
   constructor() {
     super();
     this.provider = "google";
@@ -30,4 +30,4 @@ export class CTGoogleOauth extends CTOauth {
   }
 }
 
-globalThis.customElements.define("ct-google-oauth", CTGoogleOauth);
+globalThis.customElements.define("cf-google-oauth", CFGoogleOAuth);

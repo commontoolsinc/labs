@@ -731,7 +731,7 @@ export default pattern<Input, Output>(
             null,
           )}
 
-          <ct-google-oauth
+          <cf-google-oauth
             $auth={auth}
             scopes={scopes}
           />
