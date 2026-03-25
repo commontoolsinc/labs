@@ -463,23 +463,25 @@ The real rule is:
 - ordinary opaque/reactive values should still prefer direct property access
   and canonical lowered traversal rather than authored `.get()`
 
-## 6. Immediate Classification Questions To Refine Next
+## 6. Remaining Design Questions
 
-These families should be the first explicit follow-up questions for v2:
+These are the main semantic questions still worth revisiting after the current
+v1 draft:
 
-1. whether the supported dynamic-key bucket is now phrased clearly enough in
-   authored-context terms like JSX, explicit computation callbacks, and
-   collection callbacks, or still leaks too much implementation detail
-2. whether the current receiver-method split is the right long-term boundary, or
-   whether any narrow direct non-JSX receiver-method forms deserve promotion
-3. whether the remaining invalid-program callback-container pass-through should
-   be removed from implementation once diagnostics are in place
-4. whether the current explicit-cell `.key(...)` / `.get()` boundary is the
-   right long-term authored API surface, or whether it should be narrowed or
+1. whether any narrow direct non-JSX receiver-method forms deserve promotion,
+   or whether the current “move them into JSX or an explicit callback”
+   boundary should stay strict
+2. whether the remaining invalid-program callback-container pass-through should
+   be removed entirely from implementation now that diagnostics exist
+3. whether the explicit-cell `.key(...)` / `.get()` boundary is the right
+   long-term authored API surface, or whether it should be narrowed or
    documented more aggressively relative to ordinary opaque/property access
-5. whether the current true-cell `.get()` support should remain limited to JSX,
-   helper control flow, and explicit computation callbacks, or whether any
-   broader direct pattern-body eager-read forms deserve support
+4. whether true-cell eager reads should remain limited to JSX, helper control
+   flow, and explicit computation callbacks, or whether any broader direct
+   pattern-body eager-read forms deserve support
+5. whether optional-call on reactive receivers should remain outside the
+   language permanently, or whether there is a future explicit semantics worth
+   supporting
 
 ## 7. Use This Spec
 
