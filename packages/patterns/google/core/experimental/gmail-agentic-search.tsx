@@ -24,10 +24,10 @@
  * ```
  */
 import {
+  action,
   Default,
   derive,
   generateObject,
-  getPatternEnvironment,
   handler,
   ifElse,
   NAME,
@@ -59,8 +59,6 @@ import type {
 // Re-export Auth type for convenience
 export type { Auth } from "../gmail-importer.tsx";
 import type { Auth } from "../gmail-importer.tsx";
-
-const _env = getPatternEnvironment();
 
 // Debug flag for development - disable in production
 const DEBUG_AGENT = false;
@@ -356,19 +354,6 @@ export interface GmailAgenticSearchOutput {
 // MODULE-SCOPE HANDLERS
 // Handlers must be defined at module scope, not inside patterns.
 // ============================================================================
-
-// Handler to create a new GmailSearchRegistry piece
-const createSearchRegistryHandler = handler<unknown, Record<string, never>>(
-  () => {
-    if (DEBUG_AGENT) {
-      console.log("[GmailAgenticSearch] Creating new search registry piece");
-    }
-    const registryPiece = GmailSearchRegistry({
-      queries: [],
-    });
-    return navigateTo(registryPiece);
-  },
-);
 
 // Handler to change account type (writes to local writable cell)
 const setAccountTypeHandler = handler<
@@ -989,32 +974,6 @@ const _updateSanitizedQueryHandler = handler<
   }
 });
 
-// Handler to create a new GoogleAuth piece (module scope)
-const createGoogleAuthHandler = handler(() => {
-  const authPiece = GoogleAuth({
-    selectedScopes: {
-      gmail: true,
-      gmailSend: false,
-      gmailModify: false,
-      calendar: false,
-      calendarWrite: false,
-      drive: false,
-      docs: false,
-      contacts: false,
-    },
-    auth: {
-      token: "",
-      tokenType: "",
-      scope: [],
-      expiresIn: 0,
-      expiresAt: 0,
-      refreshToken: "",
-      user: { email: "", name: "", picture: "" },
-    },
-  });
-  return navigateTo(authPiece);
-});
-
 // ============================================================================
 // PATTERN
 // ============================================================================
@@ -1234,11 +1193,42 @@ const GmailAgenticSearch = pattern<
 
     // Note: Scope warnings are handled by authFullUI via createGoogleAuth utility
 
-    // Use module-scope handler for creating GoogleAuth
-    const createGoogleAuth = createGoogleAuthHandler;
+    const createGoogleAuth = action(() =>
+      navigateTo(
+        GoogleAuth({
+          selectedScopes: {
+            gmail: true,
+            gmailSend: false,
+            gmailModify: false,
+            calendar: false,
+            calendarWrite: false,
+            drive: false,
+            docs: false,
+            contacts: false,
+          },
+          auth: {
+            token: "",
+            tokenType: "",
+            scope: [],
+            expiresIn: 0,
+            expiresAt: 0,
+            refreshToken: "",
+            user: { email: "", name: "", picture: "" },
+          },
+        }),
+      )
+    );
 
-    // Use module-scope handlers
-    const createSearchRegistry = createSearchRegistryHandler;
+    const createSearchRegistry = action(() => {
+      if (DEBUG_AGENT) {
+        console.log("[GmailAgenticSearch] Creating new search registry piece");
+      }
+      return navigateTo(
+        GmailSearchRegistry({
+          queries: [],
+        }),
+      );
+    });
     // Pre-bind handler with required state - bound handlers work in JSX but not in derive callbacks
     const boundSetAccountType = setAccountTypeHandler({
       selectedType: selectedAccountType,
@@ -2130,9 +2120,6 @@ When you're done searching, STOP calling tools and produce your final structured
     // and called directly with all parameters in onClick handlers (no pre-binding needed)
     // Note: localQueriesExpanded/toggleLocalQueries removed - using native <details>/<summary> instead
 
-    // Pre-bind handler for creating registry
-    const boundCreateSearchRegistry = createSearchRegistry({});
-
     // Local Queries UI - collapsible list of saved queries
     // Uses native <details>/<summary> to avoid nested derive closure issues
     // (see superstition: 2025-12-06-use-native-details-summary-for-expand-collapse.md)
@@ -2904,7 +2891,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                         it with tag #gmailSearchRegistry.
                                       </div>
                                       <cf-button
-                                        onClick={boundCreateSearchRegistry}
+                                        onClick={createSearchRegistry}
                                         variant="secondary"
                                         size="sm"
                                       >

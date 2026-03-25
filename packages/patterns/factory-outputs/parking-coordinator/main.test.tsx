@@ -15,7 +15,7 @@
  *
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, computed, pattern, safeDateNow } from "commonfabric";
 import ParkingCoordinator, { DEFAULT_SPOTS } from "./main.tsx";
 import type { ParkingSpot, Person, SpotRequest } from "./main.tsx";
 
@@ -26,14 +26,17 @@ const toLocalDateStr = (d: Date): string =>
     String(d.getDate()).padStart(2, "0")
   }`;
 
-const TODAY = toLocalDateStr(new Date());
-const TOMORROW = (() => {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
+function addDays(timestamp: number, days: number): string {
+  const d = new Date(timestamp);
+  d.setDate(d.getDate() + days);
   return toLocalDateStr(d);
-})();
+}
 
 export default pattern(() => {
+  const now = safeDateNow();
+  const today = toLocalDateStr(new Date(now));
+  const tomorrow = addDays(now, 1);
+
   // ============================================================
   // Subject 1: People Management
   // ============================================================
@@ -247,27 +250,27 @@ export default pattern(() => {
 
   // Alice requests today → gets default spot "5"
   const action_alice_request = action(() => {
-    s4.submitRequest.send({ personName: "Alice", date: TODAY });
+    s4.submitRequest.send({ personName: "Alice", date: today });
   });
 
   // Bob requests today → spot "5" taken by Alice, tries prefs "1", "12" → gets "1"
   const action_bob_request = action(() => {
-    s4.submitRequest.send({ personName: "Bob", date: TODAY });
+    s4.submitRequest.send({ personName: "Bob", date: today });
   });
 
   // Carol requests today → no prefs, no default → gets "12" (last remaining)
   const action_carol_request = action(() => {
-    s4.submitRequest.send({ personName: "Carol", date: TODAY });
+    s4.submitRequest.send({ personName: "Carol", date: today });
   });
 
   // Alice duplicate request for today → rejected
   const action_alice_dupe = action(() => {
-    s4.submitRequest.send({ personName: "Alice", date: TODAY });
+    s4.submitRequest.send({ personName: "Alice", date: today });
   });
 
   // Alice requests tomorrow (no conflicts)
   const action_alice_tomorrow = action(() => {
-    s4.submitRequest.send({ personName: "Alice", date: TOMORROW });
+    s4.submitRequest.send({ personName: "Alice", date: tomorrow });
   });
 
   const assert_s4_no_requests = computed(() => len(s4.requests) === 0);
@@ -275,7 +278,7 @@ export default pattern(() => {
   // After Alice requests today
   const assert_s4_alice_allocated = computed(() => {
     const req = s4.requests.find((r: SpotRequest) =>
-      r.personName === "Alice" && r.date === TODAY
+      r.personName === "Alice" && r.date === today
     );
     return req?.status === "allocated" && req?.assignedSpot === "5" &&
       req?.autoAllocated === true;
@@ -284,7 +287,7 @@ export default pattern(() => {
   // After Bob requests today
   const assert_s4_bob_allocated_pref = computed(() => {
     const req = s4.requests.find((r: SpotRequest) =>
-      r.personName === "Bob" && r.date === TODAY
+      r.personName === "Bob" && r.date === today
     );
     return req?.status === "allocated" && req?.assignedSpot === "1";
   });
@@ -292,7 +295,7 @@ export default pattern(() => {
   // After Carol requests today (only "12" left)
   const assert_s4_carol_allocated = computed(() => {
     const req = s4.requests.find((r: SpotRequest) =>
-      r.personName === "Carol" && r.date === TODAY
+      r.personName === "Carol" && r.date === today
     );
     return req?.status === "allocated" && req?.assignedSpot === "12";
   });
@@ -300,7 +303,7 @@ export default pattern(() => {
   // Alice dupe: still only one Alice request for today (no new one added)
   const assert_s4_alice_still_one_today = computed(() => {
     const aliceToday = s4.requests.filter((r: SpotRequest) =>
-      r.personName === "Alice" && r.date === TODAY
+      r.personName === "Alice" && r.date === today
     );
     return len(aliceToday) === 1;
   });
@@ -313,7 +316,7 @@ export default pattern(() => {
   // Alice tomorrow gets allocated (any spot)
   const assert_s4_alice_tomorrow_allocated = computed(() => {
     const req = s4.requests.find((r: SpotRequest) =>
-      r.personName === "Alice" && r.date === TOMORROW
+      r.personName === "Alice" && r.date === tomorrow
     );
     return req?.status === "allocated" && req?.assignedSpot !== "";
   });
@@ -337,7 +340,7 @@ export default pattern(() => {
       {
         id: "r1",
         personName: "Alice",
-        date: TODAY,
+        date: today,
         status: "allocated",
         assignedSpot: "1",
         autoAllocated: true,
@@ -345,7 +348,7 @@ export default pattern(() => {
       {
         id: "r2",
         personName: "Bob",
-        date: TODAY,
+        date: today,
         status: "allocated",
         assignedSpot: "5",
         autoAllocated: true,
@@ -353,7 +356,7 @@ export default pattern(() => {
       {
         id: "r3",
         personName: "Carol",
-        date: TODAY,
+        date: today,
         status: "allocated",
         assignedSpot: "12",
         autoAllocated: true,
@@ -362,12 +365,12 @@ export default pattern(() => {
   });
 
   const action_dave_request_denied = action(() => {
-    s5.submitRequest.send({ personName: "Dave", date: TODAY });
+    s5.submitRequest.send({ personName: "Dave", date: today });
   });
 
   const assert_s5_dave_denied = computed(() => {
     const req = s5.requests.find((r: SpotRequest) =>
-      r.personName === "Dave" && r.date === TODAY
+      r.personName === "Dave" && r.date === today
     );
     return req?.status === "denied" && req?.assignedSpot === "";
   });
@@ -382,7 +385,7 @@ export default pattern(() => {
       {
         id: "rx1",
         personName: "Alice",
-        date: TODAY,
+        date: today,
         status: "allocated",
         assignedSpot: "5",
         autoAllocated: true,
@@ -413,13 +416,13 @@ export default pattern(() => {
   });
 
   const action_admin_override_bob_spot5 = action(() => {
-    s7.adminOverride.send({ spotNumber: "5", date: TODAY, personName: "Bob" });
+    s7.adminOverride.send({ spotNumber: "5", date: today, personName: "Bob" });
   });
 
   const assert_s7_bob_override = computed(() => {
     return s7.requests.some(
       (r: SpotRequest) =>
-        r.personName === "Bob" && r.date === TODAY && r.assignedSpot === "5" &&
+        r.personName === "Bob" && r.date === today && r.assignedSpot === "5" &&
         r.autoAllocated === false && r.status === "allocated",
     );
   });
@@ -428,7 +431,7 @@ export default pattern(() => {
   const action_admin_override_alice_spot5 = action(() => {
     s7.adminOverride.send({
       spotNumber: "5",
-      date: TODAY,
+      date: today,
       personName: "Alice",
     });
   });

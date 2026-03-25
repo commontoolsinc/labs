@@ -102,6 +102,58 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts canonical compiled named reexports from imports", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "./dep"], function (require, exports, dep_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    Object.defineProperty(exports, "foo", { enumerable: true, get: function () { return dep_1.foo; } });
+    exports.default = 42;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts canonical compiled export-star reexports in authored modules", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "./dep"], function (require, exports, dep_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    __exportStar(dep_1, exports);
+    exports.default = 42;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts safe top-level classes in compiled authored modules", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    class Counter {
+      constructor() {
+        this.value = 1;
+      }
+      next() {
+        return this.value + parseInt("2", 10);
+      }
+    }
+    exports.default = (0, commontools_1.lift)(() => new Counter().next());
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("accepts pure ambient global helper captures in compiled callbacks", () => {
     const bundle = `
 ((runtimeDeps = {}) => {

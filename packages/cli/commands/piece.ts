@@ -735,26 +735,32 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
-    setQuietMode(!!options.quiet);
-    const pieceConfig = parsePieceOptions(options);
-    const rawArgs = pieceCallRawArgs(tail, this.getLiteralArgs());
-    const result = await executePieceCallable(
-      pieceConfig,
-      callableName,
-      rawArgs,
-    );
-    if (result.helpText) {
-      render(result.helpText);
-      return;
-    }
-    if (result.outputText) {
-      render(result.outputText);
-      return;
-    }
-    render(`Called handler "${callableName}" on piece ${pieceConfig.piece}`);
-    hint(cliText(`NEXT STEPS:
+    try {
+      setQuietMode(!!options.quiet);
+      const pieceConfig = parsePieceOptions(options);
+      const rawArgs = pieceCallRawArgs(tail, this.getLiteralArgs());
+      const result = await executePieceCallable(
+        pieceConfig,
+        callableName,
+        rawArgs,
+      );
+      if (result.helpText) {
+        render(result.helpText);
+        return;
+      }
+      if (result.outputText) {
+        render(result.outputText);
+        return;
+      }
+      render(`Called handler "${callableName}" on piece ${pieceConfig.piece}`);
+      hint(cliText(`NEXT STEPS:
   → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
   → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(message);
+      Deno.exit(1);
+    }
   })
   /* piece rm */
   .command("rm", "Remove a piece")

@@ -128,7 +128,8 @@ function shouldWrapTopLevelExpression(
     return isTrustedDataHelperCall(expr) ||
       isImmediatelyInvokedFunction(expr) ||
       isIntrinsicCtDataCall(expr) ||
-      isTopLevelLocalHelperCall(expr, localCallableBindings);
+      isTopLevelLocalHelperCall(expr, localCallableBindings) ||
+      ts.isPropertyAccessExpression(unwrapExpression(expr.expression));
   }
 
   if (ts.isNewExpression(expr)) {

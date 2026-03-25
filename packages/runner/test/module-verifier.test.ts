@@ -119,6 +119,48 @@ describe("verifyProgramModuleScope()", () => {
     expect(() => verifyProgramModuleScope(program)).not.toThrow();
   });
 
+  it("ignores JSX intrinsic tags in callback capture analysis", () => {
+    const program: Program = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { pattern } from "commontools";',
+            "export default pattern(() => {",
+            "  return { ui: <div><ct-screen>Hello</ct-screen></div> };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).not.toThrow();
+  });
+
+  it("accepts safe top-level classes captured by trusted callbacks", () => {
+    const program: Program = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { lift } from "commontools";',
+            "class Counter {",
+            "  value = 1;",
+            "  next() {",
+            '    return this.value + parseInt("2", 10);',
+            "  }",
+            "}",
+            "export default lift(() => new Counter().next());",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).not.toThrow();
+  });
+
   it("accepts __ct_data() with intrinsic collection helpers and local helpers", () => {
     const program: Program = {
       main: "/main.ts",

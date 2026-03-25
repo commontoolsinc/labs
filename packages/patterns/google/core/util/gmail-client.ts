@@ -17,8 +17,6 @@
  */
 import { getPatternEnvironment, nonPrivateRandom, Writable } from "commonfabric";
 
-const env = getPatternEnvironment();
-
 // Re-export the Auth type for convenience
 export type { Auth } from "../gmail-importer.tsx";
 import type { Auth } from "../gmail-importer.tsx";
@@ -75,14 +73,61 @@ export interface FullEmail {
 // HELPERS
 // ============================================================================
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 function debugLog(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.log("[GmailClient]", ...args);
 }
 
 function debugWarn(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.warn("[GmailClient]", ...args);
+}
+
+function decodeBase64Utf8(data: string): string {
+  const sanitized = data.replace(/-/g, "+").replace(/_/g, "/");
+  const binaryString = atob(sanitized);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+function extractTextFromPayload(payload: any): string {
+  if (payload.body?.data) {
+    try {
+      return decodeBase64Utf8(payload.body.data);
+    } catch {
+      return "";
+    }
+  }
+  if (payload.parts) {
+    for (const p of payload.parts) {
+      if (p.mimeType === "text/plain" && p.body?.data) {
+        try {
+          return decodeBase64Utf8(p.body.data);
+        } catch {
+          continue;
+        }
+      }
+    }
+    for (const p of payload.parts) {
+      if (p.mimeType === "text/html" && p.body?.data) {
+        try {
+          const html = decodeBase64Utf8(p.body.data);
+          return html
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+        } catch {
+          continue;
+        }
+      }
+    }
+    for (const p of payload.parts) {
+      const nested = extractTextFromPayload(p);
+      if (nested) return nested;
+    }
+  }
+  return "";
 }
 
 // ============================================================================
@@ -150,6 +195,7 @@ export class GmailClient {
     }
 
     debugLog(this.debugMode, "Refreshing auth token directly...");
+    const env = getPatternEnvironment();
 
     const res = await fetch(
       new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
@@ -523,19 +569,6 @@ Accept: application/json
   }
 
   /**
-   * Decode base64url-encoded string with proper UTF-8 handling.
-   */
-  private decodeBase64Utf8(data: string): string {
-    const sanitized = data.replace(/-/g, "+").replace(/_/g, "/");
-    const binaryString = atob(sanitized);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    return new TextDecoder("utf-8").decode(bytes);
-  }
-
-  /**
    * Parse a raw Gmail message into SimpleEmail format.
    */
   private parseMessage(message: any): SimpleEmail | null {
@@ -548,50 +581,7 @@ Accept: application/json
           h.name.toLowerCase() === name.toLowerCase(),
       )?.value || "";
 
-    // Extract body text
-    const extractText = (payload: any): string => {
-      if (payload.body?.data) {
-        try {
-          return this.decodeBase64Utf8(payload.body.data);
-        } catch {
-          return "";
-        }
-      }
-      if (payload.parts) {
-        // Try plain text first
-        for (const p of payload.parts) {
-          if (p.mimeType === "text/plain" && p.body?.data) {
-            try {
-              return this.decodeBase64Utf8(p.body.data);
-            } catch {
-              continue;
-            }
-          }
-        }
-        // Try HTML if no plain text
-        for (const p of payload.parts) {
-          if (p.mimeType === "text/html" && p.body?.data) {
-            try {
-              const html = this.decodeBase64Utf8(p.body.data);
-              return html
-                .replace(/<[^>]+>/g, " ")
-                .replace(/\s+/g, " ")
-                .trim();
-            } catch {
-              continue;
-            }
-          }
-        }
-        // Recurse into nested parts
-        for (const p of payload.parts) {
-          const nested = extractText(p);
-          if (nested) return nested;
-        }
-      }
-      return "";
-    };
-
-    const body = extractText(message.payload);
+    const body = extractTextFromPayload(message.payload);
 
     return {
       id: message.id,
@@ -664,8 +654,6 @@ Accept: application/json
       throw new Error(`Gmail API error: ${status} ${statusText}`);
     }
 
-    await sleep(this.delay);
-
     if (status === 401) {
       await this.refreshAuth();
     } else if (status === 429) {
@@ -674,7 +662,6 @@ Accept: application/json
         this.debugMode,
         `Rate limited, incrementing delay to ${this.delay}`,
       );
-      await sleep(this.delay);
     }
 
     return this.googleRequest(url, _options, retries - 1);
@@ -770,6 +757,7 @@ export async function validateAndRefreshToken(
     }
 
     try {
+      const env = getPatternEnvironment();
       const res = await fetch(
         new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
         {

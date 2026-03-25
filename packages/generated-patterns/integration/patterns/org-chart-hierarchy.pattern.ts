@@ -128,6 +128,13 @@ const sanitizeMembers = (value: unknown): OrgMember[] => {
     .sort((left, right) => left.id.localeCompare(right.id));
 };
 
+const sortTree = (list: OrgChartNode[]) => {
+  list.sort((left, right) => left.id.localeCompare(right.id));
+  for (const entry of list) {
+    sortTree(entry.reports);
+  }
+};
+
 const buildHierarchy = (members: readonly OrgMember[]): OrgChartNode[] => {
   const nodes = new Map<string, OrgChartNode>();
   for (const member of members) {
@@ -147,12 +154,6 @@ const buildHierarchy = (members: readonly OrgMember[]): OrgChartNode[] => {
       roots.push(node);
     }
   }
-  const sortTree = (list: OrgChartNode[]) => {
-    list.sort((left, right) => left.id.localeCompare(right.id));
-    for (const entry of list) {
-      sortTree(entry.reports);
-    }
-  };
   sortTree(roots);
   return roots;
 };

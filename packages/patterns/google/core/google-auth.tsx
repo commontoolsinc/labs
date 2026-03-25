@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  __ct_data,
   computed,
   Default,
   handler,
@@ -28,30 +29,34 @@ import {
 } from "../../auth/auth-ui-helpers.tsx";
 
 // Scope mapping for Google APIs
-const SCOPE_MAP = {
-  gmail: "https://www.googleapis.com/auth/gmail.readonly",
-  gmailSend: "https://www.googleapis.com/auth/gmail.send",
-  gmailModify: "https://www.googleapis.com/auth/gmail.modify",
-  calendar: "https://www.googleapis.com/auth/calendar.readonly",
-  calendarWrite: "https://www.googleapis.com/auth/calendar.events",
-  drive: "https://www.googleapis.com/auth/drive",
-  docs: "https://www.googleapis.com/auth/documents.readonly",
-  contacts: "https://www.googleapis.com/auth/contacts.readonly",
-} as const;
+const SCOPE_MAP = __ct_data(
+  {
+    gmail: "https://www.googleapis.com/auth/gmail.readonly",
+    gmailSend: "https://www.googleapis.com/auth/gmail.send",
+    gmailModify: "https://www.googleapis.com/auth/gmail.modify",
+    calendar: "https://www.googleapis.com/auth/calendar.readonly",
+    calendarWrite: "https://www.googleapis.com/auth/calendar.events",
+    drive: "https://www.googleapis.com/auth/drive",
+    docs: "https://www.googleapis.com/auth/documents.readonly",
+    contacts: "https://www.googleapis.com/auth/contacts.readonly",
+  } as const,
+);
 
-const SCOPE_DESCRIPTIONS = {
-  gmail: "Gmail (read emails)",
-  gmailSend: "Gmail (send emails)",
-  gmailModify: "Gmail (add/remove labels)",
-  calendar: "Calendar (read events)",
-  calendarWrite: "Calendar (create/edit/delete events)",
-  drive: "Drive (read/write files & comments)",
-  docs: "Docs (read document content)",
-  contacts: "Contacts (read contacts)",
-} as const;
+const SCOPE_DESCRIPTIONS = __ct_data(
+  {
+    gmail: "Gmail (read emails)",
+    gmailSend: "Gmail (send emails)",
+    gmailModify: "Gmail (add/remove labels)",
+    calendar: "Calendar (read events)",
+    calendarWrite: "Calendar (create/edit/delete events)",
+    drive: "Drive (read/write files & comments)",
+    docs: "Docs (read document content)",
+    contacts: "Contacts (read contacts)",
+  } as const,
+);
 
 // Short names for scope summary display in previewUI
-const SCOPE_SHORT_NAMES: Record<string, string> = {
+const SCOPE_SHORT_NAMES: Record<string, string> = __ct_data({
   "https://www.googleapis.com/auth/gmail.readonly": "Gmail",
   "https://www.googleapis.com/auth/gmail.send": "Gmail Send",
   "https://www.googleapis.com/auth/gmail.modify": "Gmail",
@@ -60,10 +65,10 @@ const SCOPE_SHORT_NAMES: Record<string, string> = {
   "https://www.googleapis.com/auth/drive": "Drive",
   "https://www.googleapis.com/auth/documents.readonly": "Docs",
   "https://www.googleapis.com/auth/contacts.readonly": "Contacts",
-};
+});
 
 // Short names for scope keys (for configured scopes summary)
-const SCOPE_KEY_SHORT_NAMES: Record<string, string> = {
+const SCOPE_KEY_SHORT_NAMES: Record<string, string> = __ct_data({
   gmail: "Gmail",
   gmailSend: "Gmail",
   gmailModify: "Gmail",
@@ -72,7 +77,7 @@ const SCOPE_KEY_SHORT_NAMES: Record<string, string> = {
   drive: "Drive",
   docs: "Docs",
   contacts: "Contacts",
-};
+});
 
 /**
  * Helper to create preview UI for picker display.

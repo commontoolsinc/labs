@@ -22,7 +22,7 @@
  */
 
 import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
-import type { Opaque } from "commontools";
+import { __ct_data, type Opaque } from "commontools";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import AirtableAuth from "../airtable-auth.tsx";
 
@@ -49,25 +49,31 @@ export type ScopeKey =
   | "webhook:manage";
 
 /** Human-readable scope descriptions */
-export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> = {
-  "data.records:read": "Read records",
-  "data.records:write": "Write records",
-  "data.recordComments:read": "Read record comments",
-  "data.recordComments:write": "Write record comments",
-  "schema.bases:read": "Read base schemas",
-  "schema.bases:write": "Write base schemas",
-  "webhook:manage": "Manage webhooks",
-};
+const AIRTABLE_SCOPE_DESCRIPTIONS = __ct_data(
+  {
+    "data.records:read": "Read records",
+    "data.records:write": "Write records",
+    "data.recordComments:read": "Read record comments",
+    "data.recordComments:write": "Write record comments",
+    "schema.bases:read": "Read base schemas",
+    "schema.bases:write": "Write base schemas",
+    "webhook:manage": "Manage webhooks",
+  } as const,
+);
+export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> =
+  AIRTABLE_SCOPE_DESCRIPTIONS;
 
 /** Unified scope registry for the auth manager factory */
-const SCOPES: AuthManagerDescriptor["scopes"] = Object.fromEntries(
-  Object.entries(SCOPE_DESCRIPTIONS).map(([key, desc]) => [
-    key,
-    { description: desc, scopeString: key },
-  ]),
+const SCOPES: AuthManagerDescriptor["scopes"] = __ct_data(
+  Object.fromEntries(
+    Object.entries(SCOPE_DESCRIPTIONS).map(([key, desc]) => [
+      key,
+      { description: desc, scopeString: key },
+    ]),
+  ),
 );
 
-const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
+const AirtableAuthManagerDescriptor: AuthManagerDescriptor = __ct_data({
   name: "airtable",
   displayName: "Airtable",
   brandColor: "#18BFFF",
@@ -75,7 +81,7 @@ const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
   tokenField: "accessToken",
   scopes: SCOPES,
   hasAvatarSupport: false,
-};
+});
 
 export function AirtableAuthManager(
   input: Opaque<

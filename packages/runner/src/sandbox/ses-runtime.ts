@@ -228,7 +228,7 @@ let sesInitialized = false;
 const DEFAULT_LOCKDOWN_OPTIONS: SESLockdownOptions = {
   errorTaming: "safe",
   errorTrapping: "platform",
-  reporting: "platform",
+  reporting: "none",
   unhandledRejectionTrapping: "report",
   regExpTaming: "safe",
   localeTaming: "safe",

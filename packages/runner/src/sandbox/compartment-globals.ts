@@ -13,6 +13,7 @@ function createCompatibilityGlobals(): Record<string, unknown> {
       "Headers",
       "Request",
       "Response",
+      "structuredClone",
       "TextDecoder",
       "TextEncoder",
       "URL",

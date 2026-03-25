@@ -47,6 +47,7 @@ const SAFE_GLOBAL_IDENTIFIERS = new Set([
   "NaN",
   "Number",
   "Object",
+  "Promise",
   "Request",
   "RegExp",
   "Response",
@@ -61,12 +62,16 @@ const SAFE_GLOBAL_IDENTIFIERS = new Set([
   "atob",
   "btoa",
   "console",
+  "decodeURIComponent",
+  "encodeURIComponent",
   "fetch",
   "globalThis",
   "isFinite",
   "isNaN",
   "parseFloat",
   "parseInt",
+  "Promise",
+  "structuredClone",
   "undefined",
 ]);
 const CT_DATA_GLOBAL_CALLS = new Set([
@@ -78,6 +83,7 @@ const CT_DATA_GLOBAL_CALLS = new Set([
   "isNaN",
   "parseFloat",
   "parseInt",
+  "structuredClone",
 ]);
 const CT_DATA_STATIC_CALLS = new Map<string, ReadonlySet<string>>([
   ["Array", new Set(["from"])],
@@ -87,6 +93,7 @@ const CT_DATA_PURE_METHOD_NAMES = new Set([
   "entries",
   "filter",
   "flatMap",
+  "find",
   "forEach",
   "get",
   "getFullYear",
@@ -95,8 +102,13 @@ const CT_DATA_PURE_METHOD_NAMES = new Set([
   "indexOf",
   "join",
   "keys",
+  "localeCompare",
   "map",
+  "padStart",
+  "replace",
+  "replaceAll",
   "slice",
+  "split",
   "test",
   "toLowerCase",
   "toUpperCase",
@@ -154,6 +166,7 @@ export function verifyProgramModuleScope(program: Program): void {
     rejectDynamicImportExpressions(sourceFile, sourceFile);
     predeclareImports(sourceFile, env);
     predeclareFunctions(sourceFile, env);
+    predeclareClasses(sourceFile, env);
     predeclareVariables(sourceFile, env);
 
     for (const statement of sourceFile.statements) {
@@ -328,6 +341,20 @@ function predeclareFunctions(
   }
 }
 
+function predeclareClasses(
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+): void {
+  for (const statement of sourceFile.statements) {
+    if (ts.isClassDeclaration(statement) && statement.name) {
+      env.set(statement.name.text, {
+        kind: "data",
+        captureSafe: true,
+      });
+    }
+  }
+}
+
 function predeclareVariables(
   sourceFile: ts.SourceFile,
   env: Map<string, BindingInfo>,
@@ -365,6 +392,11 @@ function verifyTopLevelStatement(
     return;
   }
 
+  if (ts.isClassDeclaration(statement)) {
+    verifyTopLevelClass(statement, sourceFile, env, pendingCaptureChecks);
+    return;
+  }
+
   if (ts.isVariableStatement(statement)) {
     verifyVariableStatement(
       statement,
@@ -387,7 +419,6 @@ function verifyTopLevelStatement(
 
   if (
     ts.isEnumDeclaration(statement) ||
-    ts.isClassDeclaration(statement) ||
     ts.isModuleDeclaration(statement)
   ) {
     throw verificationError(
@@ -443,6 +474,54 @@ function verifyTopLevelFunction(
     fn: statement,
     nodeForError: statement,
   });
+}
+
+function verifyTopLevelClass(
+  statement: ts.ClassDeclaration,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  pendingCaptureChecks: PendingCaptureCheck[],
+): void {
+  if (!statement.name) {
+    throw verificationError(
+      sourceFile,
+      statement,
+      "Top-level class declarations must be named in SES mode",
+    );
+  }
+
+  env.set(statement.name.text, {
+    kind: "data",
+    captureSafe: true,
+  });
+
+  for (const clause of statement.heritageClauses ?? []) {
+    for (const type of clause.types) {
+      verifyTrustedValueExpression(type.expression, sourceFile, env);
+    }
+  }
+
+  for (const member of statement.members) {
+    if (
+      ts.isMethodDeclaration(member) ||
+      ts.isGetAccessorDeclaration(member) ||
+      ts.isSetAccessorDeclaration(member) ||
+      ts.isConstructorDeclaration(member)
+    ) {
+      pendingCaptureChecks.push({
+        fn: member,
+        nodeForError: member,
+      });
+      continue;
+    }
+
+    if (ts.isPropertyDeclaration(member)) {
+      if (member.initializer) {
+        verifyTrustedValueExpression(member.initializer, sourceFile, env);
+      }
+      continue;
+    }
+  }
 }
 
 function verifyVariableStatement(
@@ -1094,6 +1173,12 @@ function isReferenceIdentifier(node: ts.Identifier): boolean {
     ts.isImportClause(parent) ||
     ts.isImportSpecifier(parent) ||
     ts.isExportSpecifier(parent) ||
+    ts.isJsxAttribute(parent) && parent.name === node ||
+    (
+        ts.isJsxOpeningElement(parent) ||
+        ts.isJsxSelfClosingElement(parent) ||
+        ts.isJsxClosingElement(parent)
+      ) && parent.tagName === node ||
     ts.isTypeReferenceNode(parent) ||
     ts.isExpressionWithTypeArguments(parent) ||
     ts.isQualifiedName(parent) ||
@@ -2124,6 +2209,7 @@ function verifyCompiledAuthoredFactory(
   rejectDynamicImportExpressions(body, sourceFile);
   predeclareCompiledFactoryDependencies(factory, dependencySpecifiers, env);
   predeclareFunctionsFromStatements(body.statements, env);
+  predeclareClassesFromStatements(body.statements, env);
   predeclareVariablesFromStatements(body.statements, env);
 
   for (const statement of body.statements) {
@@ -2142,6 +2228,18 @@ function verifyCompiledAuthoredFactory(
       continue;
     }
 
+    if (isCompiledNamedReexportStatement(statement)) {
+      verifyCompiledNamedReexportStatement(statement, sourceFile, env);
+      continue;
+    }
+
+    if (
+      isCompiledExportStarStatement(statement) ||
+      isCompiledDefaultReexportStatement(statement)
+    ) {
+      continue;
+    }
+
     if (isCompiledExportAssignment(statement)) {
       verifyCompiledExportAssignment(
         statement.expression,
@@ -2154,6 +2252,11 @@ function verifyCompiledAuthoredFactory(
 
     if (ts.isFunctionDeclaration(statement)) {
       verifyTopLevelFunction(statement, env, pendingCaptureChecks);
+      continue;
+    }
+
+    if (ts.isClassDeclaration(statement)) {
+      verifyTopLevelClass(statement, sourceFile, env, pendingCaptureChecks);
       continue;
     }
 
@@ -2269,6 +2372,20 @@ function predeclareFunctionsFromStatements(
         kind: "function",
         functionNode: statement,
         hardeningHelper: isFunctionHardeningHelperDeclaration(statement),
+      });
+    }
+  }
+}
+
+function predeclareClassesFromStatements(
+  statements: readonly ts.Statement[],
+  env: Map<string, BindingInfo>,
+): void {
+  for (const statement of statements) {
+    if (ts.isClassDeclaration(statement) && statement.name) {
+      env.set(statement.name.text, {
+        kind: "data",
+        captureSafe: true,
       });
     }
   }
@@ -2411,34 +2528,140 @@ function isCompiledExportStarStatement(statement: ts.Statement): boolean {
 }
 
 function isCompiledDefaultReexportStatement(statement: ts.Statement): boolean {
-  if (!ts.isExpressionStatement(statement)) return false;
+  const reexport = getCompiledReexportStatement(statement);
+  if (!reexport || reexport.exportedName !== "default") return false;
+  return !!reexport.targetExpression;
+}
+
+function isCompiledNamedReexportStatement(statement: ts.Statement): boolean {
+  const reexport = getCompiledReexportStatement(statement);
+  return !!reexport &&
+    reexport.exportedName !== "__esModule" &&
+    reexport.exportedName !== "default";
+}
+
+function verifyCompiledNamedReexportStatement(
+  statement: ts.Statement,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+): void {
+  const reexport = getCompiledReexportStatement(statement);
+  if (!reexport) {
+    throw verificationError(
+      sourceFile,
+      statement,
+      "Compiled named reexports must use canonical getters",
+    );
+  }
+
+  const binding = classifyCompiledReexportTarget(
+    reexport.targetExpression,
+    sourceFile,
+    env,
+  );
+  env.set(reexport.exportedName, cloneBindingInfo(binding));
+}
+
+function getCompiledReexportStatement(
+  statement: ts.Statement,
+): { exportedName: string; targetExpression: ts.Expression } | undefined {
+  if (!ts.isExpressionStatement(statement)) return undefined;
   const expr = statement.expression;
-  if (!ts.isCallExpression(expr)) return false;
+  if (!ts.isCallExpression(expr)) return undefined;
   if (
     !ts.isPropertyAccessExpression(expr.expression) ||
     !ts.isIdentifier(expr.expression.expression) ||
     expr.expression.expression.text !== "Object" ||
     expr.expression.name.text !== "defineProperty"
   ) {
-    return false;
+    return undefined;
   }
   if (
     expr.arguments.length !== 3 ||
     !ts.isIdentifier(expr.arguments[0]) ||
     expr.arguments[0].text !== "exports" ||
-    !ts.isStringLiteral(expr.arguments[1]) ||
-    expr.arguments[1].text !== "default"
+    !ts.isStringLiteral(expr.arguments[1])
   ) {
-    return false;
+    return undefined;
   }
   const descriptor = unwrapExpression(expr.arguments[2]);
-  if (!ts.isObjectLiteralExpression(descriptor)) return false;
-  return descriptor.properties.some((property) =>
-    ts.isGetAccessorDeclaration(property) ||
-    ts.isPropertyAssignment(property) &&
+  if (!ts.isObjectLiteralExpression(descriptor)) return undefined;
+
+  for (const property of descriptor.properties) {
+    if (ts.isGetAccessorDeclaration(property)) {
+      if (
+        property.parameters.length === 0 &&
+        property.body?.statements.length === 1 &&
+        ts.isReturnStatement(property.body.statements[0]) &&
+        property.body.statements[0].expression
+      ) {
+        return {
+          exportedName: expr.arguments[1].text,
+          targetExpression: property.body.statements[0].expression,
+        };
+      }
+      continue;
+    }
+
+    if (
+      ts.isPropertyAssignment(property) &&
       ts.isIdentifier(property.name) &&
-      property.name.text === "get" &&
-      isFunctionLikeExpression(unwrapExpression(property.initializer))
+      property.name.text === "get"
+    ) {
+      const getter = unwrapExpression(property.initializer);
+      if (
+        isFunctionLikeExpression(getter) &&
+        getter.parameters.length === 0 &&
+        getter.body &&
+        ts.isBlock(getter.body) &&
+        getter.body.statements.length === 1 &&
+        ts.isReturnStatement(getter.body.statements[0]) &&
+        getter.body.statements[0].expression
+      ) {
+        return {
+          exportedName: expr.arguments[1].text,
+          targetExpression: getter.body.statements[0].expression,
+        };
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function classifyCompiledReexportTarget(
+  expression: ts.Expression,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+): BindingInfo {
+  const target = unwrapExpression(expression);
+
+  if (ts.isIdentifier(target)) {
+    const binding = env.get(target.text);
+    if (binding?.kind === "import") {
+      return cloneBindingInfo(binding);
+    }
+    throw verificationError(
+      sourceFile,
+      target,
+      "Compiled reexport getters must return imported bindings",
+    );
+  }
+
+  if (
+    ts.isPropertyAccessExpression(target) ||
+    ts.isElementAccessExpression(target)
+  ) {
+    const binding = classifyReferenceExpression(target, sourceFile, env);
+    if (binding.kind === "import") {
+      return binding;
+    }
+  }
+
+  throw verificationError(
+    sourceFile,
+    target,
+    "Compiled reexport getters must return imported bindings",
   );
 }
 

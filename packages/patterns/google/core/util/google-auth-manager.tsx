@@ -27,7 +27,7 @@
  */
 
 import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
-import type { Opaque } from "commontools";
+import { __ct_data, type Opaque } from "commontools";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import GoogleAuth from "../google-auth.tsx";
 
@@ -44,43 +44,51 @@ export type {
 export type { Auth } from "../google-auth.tsx";
 
 /** Scope mapping for Google APIs - friendly names to URLs */
-export const SCOPE_MAP = {
-  gmail: "https://www.googleapis.com/auth/gmail.readonly",
-  gmailSend: "https://www.googleapis.com/auth/gmail.send",
-  gmailModify: "https://www.googleapis.com/auth/gmail.modify",
-  calendar: "https://www.googleapis.com/auth/calendar.readonly",
-  calendarWrite: "https://www.googleapis.com/auth/calendar.events",
-  drive: "https://www.googleapis.com/auth/drive",
-  docs: "https://www.googleapis.com/auth/documents.readonly",
-  contacts: "https://www.googleapis.com/auth/contacts.readonly",
-} as const;
+const GOOGLE_SCOPE_MAP = __ct_data(
+  {
+    gmail: "https://www.googleapis.com/auth/gmail.readonly",
+    gmailSend: "https://www.googleapis.com/auth/gmail.send",
+    gmailModify: "https://www.googleapis.com/auth/gmail.modify",
+    calendar: "https://www.googleapis.com/auth/calendar.readonly",
+    calendarWrite: "https://www.googleapis.com/auth/calendar.events",
+    drive: "https://www.googleapis.com/auth/drive",
+    docs: "https://www.googleapis.com/auth/documents.readonly",
+    contacts: "https://www.googleapis.com/auth/contacts.readonly",
+  } as const,
+);
+export const SCOPE_MAP = GOOGLE_SCOPE_MAP;
 
 /** Human-readable scope descriptions */
-export const SCOPE_DESCRIPTIONS = {
-  gmail: "Gmail (read emails)",
-  gmailSend: "Gmail (send emails)",
-  gmailModify: "Gmail (add/remove labels)",
-  calendar: "Calendar (read events)",
-  calendarWrite: "Calendar (create/edit/delete events)",
-  drive: "Drive (read/write files & comments)",
-  docs: "Docs (read document content)",
-  contacts: "Contacts (read contacts)",
-} as const;
+const GOOGLE_SCOPE_DESCRIPTIONS = __ct_data(
+  {
+    gmail: "Gmail (read emails)",
+    gmailSend: "Gmail (send emails)",
+    gmailModify: "Gmail (add/remove labels)",
+    calendar: "Calendar (read events)",
+    calendarWrite: "Calendar (create/edit/delete events)",
+    drive: "Drive (read/write files & comments)",
+    docs: "Docs (read document content)",
+    contacts: "Contacts (read contacts)",
+  } as const,
+);
+export const SCOPE_DESCRIPTIONS = GOOGLE_SCOPE_DESCRIPTIONS;
 
-export type ScopeKey = keyof typeof SCOPE_MAP;
+export type ScopeKey = keyof typeof GOOGLE_SCOPE_MAP;
 
 /** Account type for multi-account support */
 export type AccountType = "default" | "personal" | "work";
 
 /** Unified scope registry for the auth manager factory */
-const SCOPES: AuthManagerDescriptor["scopes"] = Object.fromEntries(
-  Object.entries(SCOPE_MAP).map(([key, url]) => [
-    key,
-    { description: SCOPE_DESCRIPTIONS[key as ScopeKey], scopeString: url },
-  ]),
+const SCOPES: AuthManagerDescriptor["scopes"] = __ct_data(
+  Object.fromEntries(
+    Object.entries(SCOPE_MAP).map(([key, url]) => [
+      key,
+      { description: SCOPE_DESCRIPTIONS[key as ScopeKey], scopeString: url },
+    ]),
+  ),
 );
 
-const GoogleAuthManagerDescriptor: AuthManagerDescriptor = {
+const GoogleAuthManagerDescriptor: AuthManagerDescriptor = __ct_data({
   name: "google",
   displayName: "Google",
   brandColor: "#4285f4",
@@ -92,7 +100,7 @@ const GoogleAuthManagerDescriptor: AuthManagerDescriptor = {
   tokenField: "token",
   scopes: SCOPES,
   hasAvatarSupport: true,
-};
+});
 
 export function GoogleAuthManager(
   input: Opaque<

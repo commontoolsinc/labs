@@ -33,7 +33,7 @@ function evaluateMathExpression(source: string): number {
   let index = 0;
 
   function skipWhitespace() {
-    while (source[index] === " " || source[index] === "\t") {
+    while (index < source.length && /\s/u.test(source[index])) {
       index += 1;
     }
   }
