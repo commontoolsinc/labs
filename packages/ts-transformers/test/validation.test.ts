@@ -1272,6 +1272,43 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
     assertEquals(errors.length, 0, "Map callback inside JSX should be allowed");
   });
 
+  await t.step("allows value-returning array callback inside JSX", async () => {
+    const source = `/// <cts-enable />
+      import { pattern, h } from "commontools";
+
+      interface Item { id: number; name: string; }
+
+      export default pattern<{ items: Item[] }>(({ items }) => {
+        return <div>{items.find((item) => item.id === 1)?.name}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Value-returning array callbacks inside JSX should be allowed",
+    );
+  });
+
+  await t.step("errors on foreign callback container inside JSX", async () => {
+    const source = `/// <cts-enable />
+      import { pattern, h } from "commontools";
+
+      export default pattern<{ list: string[] }>(({ list }) => {
+        return <div>{[0, 1].forEach(() => list.map((item) => item))}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertHasErrorType(errors, "pattern-context:callback-container");
+  });
+
   await t.step("allows map callback outside JSX in pattern body", async () => {
     const source = `/// <cts-enable />
       import { pattern, OpaqueRef } from "commontools";

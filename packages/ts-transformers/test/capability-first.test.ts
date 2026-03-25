@@ -76,17 +76,22 @@ const p = pattern(({ show, foo, bar }) => ifElse(show, computed(() => foo ? "A" 
 );
 
 Deno.test(
-  "Capability-first: map in compute context from JSX wrapper does not rewrite",
+  "Capability-first diagnostics: foreign callback container in JSX is unsupported",
   async () => {
     const source = `/// <cts-enable />
 import { pattern } from "commontools";
 const p = pattern(({ list }: { list: string[] }) => <div>{[0, 1].forEach(() => list.map((item) => item))}</div>);
 `;
 
-    const output = await transformSource(source);
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
 
-    assertStringIncludes(output, "list.map((item) => item)");
-    assert(!output.includes(".mapWithPattern("));
+    const callbackContainerDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:callback-container"
+    );
+
+    assertEquals(callbackContainerDiagnostics.length, 1);
   },
 );
 

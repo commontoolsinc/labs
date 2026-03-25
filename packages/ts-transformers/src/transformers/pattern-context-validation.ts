@@ -626,9 +626,6 @@ export class PatternContextValidationTransformer extends Transformer {
     context: TransformationContext,
     checker: ts.TypeChecker,
   ): void {
-    // Skip if inside JSX (including map callbacks, event handlers)
-    if (this.isInsideJsx(node)) return;
-
     // Skip if inside safe wrapper callback (computed, action, derive, lift, handler)
     if (isInsideSafeCallbackWrapper(node, checker, context)) return;
 
@@ -638,6 +635,24 @@ export class PatternContextValidationTransformer extends Transformer {
 
     // Only error if inside restricted context (pattern/render)
     if (!isInsideRestrictedContext(node, checker, context)) return;
+
+    if (this.isInsideJsx(node)) {
+      if (this.isSupportedJsxCallback(node, checker)) {
+        return;
+      }
+
+      if (this.isJsxCallbackArgument(node)) {
+        context.reportDiagnostic({
+          severity: "error",
+          type: "pattern-context:callback-container",
+          message:
+            `Callbacks passed to unsupported containers in pattern-facing JSX are not supported. ` +
+            `Use a supported array method/value call, an event handler, or move this work into computed(() => ...), derive(...), or a helper.`,
+          node,
+        });
+      }
+      return;
+    }
 
     context.reportDiagnostic({
       severity: "error",
@@ -691,6 +706,98 @@ export class PatternContextValidationTransformer extends Transformer {
     }
 
     return false;
+  }
+
+  private isJsxCallbackArgument(
+    node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
+  ): boolean {
+    if (ts.isFunctionDeclaration(node)) return false;
+    const parent = node.parent;
+    return !!parent && ts.isCallExpression(parent) &&
+      parent.arguments.includes(node);
+  }
+
+  private isSupportedJsxCallback(
+    node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
+    checker: ts.TypeChecker,
+  ): boolean {
+    if (ts.isFunctionDeclaration(node)) {
+      return false;
+    }
+
+    const jsxParent = node.parent;
+    if (
+      ts.isJsxExpression(jsxParent) &&
+      ts.isJsxAttribute(jsxParent.parent) &&
+      jsxParent.parent.name.getText().startsWith("on")
+    ) {
+      return true;
+    }
+
+    const parent = node.parent;
+    if (
+      !parent || !ts.isCallExpression(parent) ||
+      !parent.arguments.includes(node)
+    ) {
+      return false;
+    }
+
+    const callKind = detectCallKind(parent, checker);
+    if (
+      callKind?.kind === "array-method" ||
+      callKind?.kind === "derive" ||
+      callKind?.kind === "pattern-tool"
+    ) {
+      return true;
+    }
+
+    if (callKind?.kind === "builder") {
+      return callKind.builderName === "computed" ||
+        callKind.builderName === "action" ||
+        callKind.builderName === "lift" ||
+        callKind.builderName === "handler";
+    }
+
+    return this.isValueReturningArrayCallbackCall(parent, checker);
+  }
+
+  private isValueReturningArrayCallbackCall(
+    call: ts.CallExpression,
+    checker: ts.TypeChecker,
+  ): boolean {
+    const signature = checker.getResolvedSignature(call);
+    const declaration = signature?.declaration;
+    if (!signature || !declaration) {
+      return false;
+    }
+
+    const owner = this.findDeclarationOwnerName(declaration);
+    if (owner !== "Array" && owner !== "ReadonlyArray") {
+      return false;
+    }
+
+    const returnType = checker.getReturnTypeOfSignature(signature);
+    return (returnType.flags & ts.TypeFlags.Void) === 0;
+  }
+
+  private findDeclarationOwnerName(node: ts.Node): string | undefined {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (
+        ts.isInterfaceDeclaration(current) ||
+        ts.isClassDeclaration(current) ||
+        ts.isTypeAliasDeclaration(current)
+      ) {
+        if (current.name) {
+          return current.name.text;
+        }
+      }
+      if (ts.isSourceFile(current)) {
+        break;
+      }
+      current = current.parent;
+    }
+    return undefined;
   }
 
   private isComputedLikeCallback(
