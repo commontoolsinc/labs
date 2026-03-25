@@ -47,7 +47,7 @@ import {
 } from "../util/google-auth-manager.tsx";
 import GoogleAuth from "../google-auth.tsx";
 import {
-  GmailClient,
+  gmailClient,
   validateAndRefreshTokenCrossPiece,
 } from "../util/gmail-client.ts";
 import GmailSearchRegistry from "./gmail-search-registry.tsx";
@@ -564,8 +564,8 @@ const searchGmailHandler = handler<
         };
       }
 
-      // Use GmailClient with the auth cell and onRefresh callback
-      const client = new GmailClient(state.auth, {
+      // Use gmailClient with the auth cell and onRefresh callback
+      const client = gmailClient(state.auth, {
         debugMode: false,
         onRefresh,
       });

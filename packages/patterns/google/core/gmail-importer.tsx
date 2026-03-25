@@ -19,7 +19,7 @@ import {
 type Secret<T> = T;
 type Confidential<T> = T;
 
-import { GmailClient } from "./util/gmail-client.ts";
+import { type GmailClient, gmailClient } from "./util/gmail-client.ts";
 import {
   createGoogleAuth,
   type ScopeKey,
@@ -162,7 +162,7 @@ const _updateLimit = handler<
   state.limit.set(parseInt(detail?.value ?? "100") || 0);
 });
 
-// GmailClient is now imported from ./util/gmail-client.ts
+// gmailClient is now imported from ./util/gmail-client.ts
 // This enables code reuse with gmail-agentic-search and ensures
 // consistent token refresh behavior across all Gmail patterns.
 
@@ -735,7 +735,7 @@ export async function process(
     return;
   }
 
-  const client = new GmailClient(auth, { debugMode });
+  const client = gmailClient(auth, { debugMode });
   const currentHistoryId = state.historyId.get();
 
   let newHistoryId: string | null = null;

@@ -9,9 +9,9 @@
  *
  * Usage:
  * ```typescript
- * import { GmailClient } from "./util/gmail-client.ts";
+ * import { gmailClient } from "./util/gmail-client.ts";
  *
- * const client = new GmailClient(authCell, { debugMode: true });
+ * const client = gmailClient(authCell, { debugMode: true });
  * const emails = await client.searchEmails("from:amazon.com", 20);
  * ```
  */
@@ -141,60 +141,81 @@ function extractTextFromPayload(payload: any): string {
  * Do NOT pass a derived auth cell - use property access (piece.auth) instead.
  * See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
  */
-export class GmailClient {
-  private auth: Writable<Auth>;
-  private retries: number;
-  private delay: number;
-  private delayIncrement: number;
-  private debugMode: boolean;
-  private onRefresh?: () => Promise<void>;
+export interface GmailClient {
+  getProfile(): Promise<{
+    emailAddress: string;
+    messagesTotal: number;
+    threadsTotal: number;
+    historyId: string;
+  }>;
+  searchEmails(query: string, maxResults?: number): Promise<SimpleEmail[]>;
+  listMessages(
+    gmailFilterQuery?: string,
+    maxResults?: number,
+  ): Promise<{ id: string; threadId?: string }[]>;
+  fetchEmail(
+    maxResults?: number,
+    gmailFilterQuery?: string,
+  ): Promise<{ id: string; threadId?: string }[]>;
+  fetchBatch(messages: { id: string }[]): Promise<any[]>;
+  fetchMessagesByIds(messageIds: string[]): Promise<any[]>;
+  getAttachment(messageId: string, attachmentId: string): Promise<string>;
+  getAttachmentsBatch(
+    attachments: Array<{ messageId: string; attachmentId: string }>,
+  ): Promise<
+    Array<{
+      messageId: string;
+      attachmentId: string;
+      data: string | null;
+      success: boolean;
+    }>
+  >;
+  fetchHistory(
+    startHistoryId: string,
+    labelId?: string,
+    maxResults?: number,
+  ): Promise<{
+    history?: Array<{
+      id: string;
+      messages?: Array<{ id: string; threadId: string }>;
+      messagesAdded?: Array<{
+        message: { id: string; threadId: string; labelIds: string[] };
+      }>;
+      messagesDeleted?: Array<{ message: { id: string; threadId: string } }>;
+      labelsAdded?: Array<{ message: { id: string }; labelIds: string[] }>;
+      labelsRemoved?: Array<{ message: { id: string }; labelIds: string[] }>;
+    }>;
+    historyId: string;
+    nextPageToken?: string;
+  }>;
+}
 
-  constructor(
-    auth: Writable<Auth>,
-    {
-      retries = 3,
-      delay = 1000,
-      delayIncrement = 100,
-      debugMode = false,
-      onRefresh,
-    }: GmailClientConfig = {},
-  ) {
-    this.auth = auth;
-    this.retries = retries;
-    this.delay = delay;
-    this.delayIncrement = delayIncrement;
-    this.debugMode = debugMode;
-    this.onRefresh = onRefresh;
-  }
+export function gmailClient(
+  auth: Writable<Auth>,
+  {
+    retries = 3,
+    delay: initialDelay = 1000,
+    delayIncrement = 100,
+    debugMode = false,
+    onRefresh,
+  }: GmailClientConfig = {},
+): GmailClient {
+  let delay = initialDelay;
 
-  /**
-   * Refresh the OAuth token using the refresh token.
-   * Updates the auth cell with new token data.
-   *
-   * If an external onRefresh callback was provided, it will be used instead
-   * of direct cell update. This enables cross-piece refresh where direct
-   * cell writes would fail due to transaction isolation.
-   */
-  private async refreshAuth(): Promise<void> {
-    // If an external refresh callback was provided, use it
-    // (for cross-piece refresh via streams)
-    if (this.onRefresh) {
-      debugLog(
-        this.debugMode,
-        "Refreshing auth token via external callback...",
-      );
-      await this.onRefresh();
-      debugLog(this.debugMode, "Auth token refreshed via external callback");
+  async function refreshAuth(): Promise<void> {
+    if (onRefresh) {
+      debugLog(debugMode, "Refreshing auth token via external callback...");
+      await onRefresh();
+      debugLog(debugMode, "Auth token refreshed via external callback");
       return;
     }
 
-    // Fall back to direct refresh (only works if auth cell is writable)
-    const refreshToken = this.auth.get().refreshToken;
+    const refreshToken = auth.get().refreshToken;
     if (!refreshToken) {
       throw new Error("No refresh token available");
     }
 
-    debugLog(this.debugMode, "Refreshing auth token directly...");
+    debugLog(debugMode, "Refreshing auth token directly...");
     const env = getPatternEnvironment();
 
     const res = await fetch(
@@ -211,14 +232,98 @@ export class GmailClient {
 
     const json = await res.json();
     const authData = json.tokenInfo as Auth;
-    this.auth.update(authData);
-    debugLog(this.debugMode, "Auth token refreshed successfully");
+    auth.update(authData);
+    debugLog(debugMode, "Auth token refreshed successfully");
   }
 
-  /**
-   * Get the Gmail user profile.
-   */
-  async getProfile(): Promise<{
+  function parseMessage(message: any): SimpleEmail | null {
+    if (!message?.payload) return null;
+
+    const headers = message.payload.headers || [];
+    const getHeader = (name: string) =>
+      headers.find(
+        (h: { name: string; value: string }) =>
+          h.name.toLowerCase() === name.toLowerCase(),
+      )?.value || "";
+
+    const body = extractTextFromPayload(message.payload);
+
+    return {
+      id: message.id,
+      threadId: message.threadId,
+      subject: getHeader("Subject"),
+      from: getHeader("From"),
+      date: getHeader("Date"),
+      snippet: message.snippet || "",
+      body: body.substring(0, 5000),
+      labelIds: message.labelIds,
+    };
+  }
+
+  async function googleRequest(
+    url: URL,
+    _options?: RequestInit,
+    _retries?: number,
+  ): Promise<Response> {
+    const token = auth.get().token;
+    if (!token) {
+      throw new Error("No authorization token.");
+    }
+
+    const remainingRetries = _retries ?? retries;
+    const options = _options ?? {};
+    options.headers = new Headers(options.headers);
+    options.headers.set("Authorization", `Bearer ${token}`);
+
+    if (options.body && typeof options.body === "string") {
+      options.body = options.body.replace(
+        /Authorization: Bearer [^\n]*/g,
+        `Authorization: Bearer ${token}`,
+      );
+    }
+
+    const res = await fetch(url, options);
+    let { ok, status, statusText } = res;
+
+    if (options.method === "POST") {
+      try {
+        const json = await res.clone().json();
+        if (json?.error?.code) {
+          ok = false;
+          status = json.error.code;
+          statusText = json.error?.message;
+        }
+      } catch (_) {
+        // Not JSON, probably a real success
+      }
+    }
+
+    if (ok) {
+      debugLog(debugMode, `${url}: ${status} ${statusText}`);
+      return res;
+    }
+
+    debugWarn(
+      debugMode,
+      `${url}: ${status} ${statusText}`,
+      `Remaining retries: ${remainingRetries}`,
+    );
+
+    if (remainingRetries === 0) {
+      throw new Error(`Gmail API error: ${status} ${statusText}`);
+    }
+
+    if (status === 401) {
+      await refreshAuth();
+    } else if (status === 429) {
+      delay += delayIncrement;
+      debugLog(debugMode, `Rate limited, incrementing delay to ${delay}`);
+    }
+
+    return googleRequest(url, _options, remainingRetries - 1);
+  }
+
+  async function getProfile(): Promise<{
     emailAddress: string;
     messagesTotal: number;
     threadsTotal: number;
@@ -227,43 +332,11 @@ export class GmailClient {
     const url = new URL(
       "https://gmail.googleapis.com/gmail/v1/users/me/profile",
     );
-    const res = await this.googleRequest(url);
+    const res = await googleRequest(url);
     return await res.json();
   }
 
-  /**
-   * Search for emails matching a Gmail query.
-   * Returns simplified email objects with body text.
-   */
-  async searchEmails(
-    query: string,
-    maxResults: number = 20,
-  ): Promise<SimpleEmail[]> {
-    // Step 1: Get message IDs matching the query
-    const messages = await this.listMessages(query, maxResults);
-    if (messages.length === 0) {
-      return [];
-    }
-
-    debugLog(
-      this.debugMode,
-      `Found ${messages.length} messages for query: ${query}`,
-    );
-
-    // Step 2: Fetch full message content
-    const fullMessages = await this.fetchBatch(messages);
-
-    // Step 3: Parse into SimpleEmail format
-    return fullMessages.map((msg) => this.parseMessage(msg)).filter(
-      Boolean,
-    ) as SimpleEmail[];
-  }
-
-  /**
-   * List message IDs matching a query (without fetching full content).
-   * Alias: fetchEmail (for backwards compatibility with gmail-importer)
-   */
-  async listMessages(
+  async function listMessages(
     gmailFilterQuery: string = "in:INBOX",
     maxResults: number = 100,
   ): Promise<{ id: string; threadId?: string }[]> {
@@ -273,35 +346,29 @@ export class GmailClient {
       }&maxResults=${maxResults}`,
     );
 
-    const res = await this.googleRequest(url);
+    const res = await googleRequest(url);
     const json = await res.json();
 
     if (!json || !("messages" in json) || !Array.isArray(json.messages)) {
-      debugLog(this.debugMode, `No messages found in response`);
+      debugLog(debugMode, "No messages found in response");
       return [];
     }
 
     return json.messages;
   }
 
-  /**
-   * Alias for listMessages - for backwards compatibility with gmail-importer.
-   */
-  fetchEmail(
+  function fetchEmail(
     maxResults: number = 100,
     gmailFilterQuery: string = "in:INBOX",
   ): Promise<{ id: string; threadId?: string }[]> {
-    return this.listMessages(gmailFilterQuery, maxResults);
+    return listMessages(gmailFilterQuery, maxResults);
   }
 
-  /**
-   * Fetch full message content for multiple message IDs using batch API.
-   */
-  async fetchBatch(messages: { id: string }[]): Promise<any[]> {
+  async function fetchBatch(messages: { id: string }[]): Promise<any[]> {
     if (messages.length === 0) return [];
 
     const boundary = `batch_${nonPrivateRandom().toString(36).substring(2)}`;
-    debugLog(this.debugMode, `Processing batch of ${messages.length} messages`);
+    debugLog(debugMode, `Processing batch of ${messages.length} messages`);
 
     const batchBody = messages
       .map(
@@ -318,7 +385,7 @@ Accept: application/json
       )
       .join("") + `--${boundary}--`;
 
-    const batchResponse = await this.googleRequest(
+    const batchResponse = await googleRequest(
       new URL("https://gmail.googleapis.com/batch/gmail/v1"),
       {
         method: "POST",
@@ -331,11 +398,10 @@ Accept: application/json
 
     const responseText = await batchResponse.text();
     debugLog(
-      this.debugMode,
+      debugMode,
       `Received batch response of length: ${responseText.length}`,
     );
 
-    // Parse batch response
     const HTTP_RES_REGEX = /HTTP\/\d\.\d (\d\d\d) ([^\n]*)/;
     const parts = responseText
       .split(`--batch_`)
@@ -360,7 +426,7 @@ Accept: application/json
             }
             if (httpStatus > 0 && httpStatus >= 400) {
               debugWarn(
-                this.debugMode,
+                debugMode,
                 `Non-successful HTTP status code (${httpStatus}) in batch: ${httpMessage}`,
               );
               return null;
@@ -370,49 +436,33 @@ Accept: application/json
           const jsonContent = part.slice(jsonStart).trim();
           return JSON.parse(jsonContent);
         } catch (error) {
-          if (this.debugMode) console.error("Error parsing batch part:", error);
+          if (debugMode) console.error("Error parsing batch part:", error);
           return null;
         }
       })
       .filter((part) => part !== null);
 
-    debugLog(this.debugMode, `Parsed ${parts.length} messages from batch`);
+    debugLog(debugMode, `Parsed ${parts.length} messages from batch`);
     return parts;
   }
 
-  /**
-   * Fetch message content by IDs (convenience wrapper around fetchBatch).
-   */
-  async fetchMessagesByIds(messageIds: string[]): Promise<any[]> {
-    return await this.fetchBatch(messageIds.map((id) => ({ id })));
+  async function fetchMessagesByIds(messageIds: string[]): Promise<any[]> {
+    return await fetchBatch(messageIds.map((id) => ({ id })));
   }
 
-  /**
-   * Fetch a message attachment by ID.
-   * Used to resolve inline image attachments (cid: references in HTML).
-   * Returns base64url-encoded attachment data.
-   */
-  async getAttachment(
+  async function getAttachment(
     messageId: string,
     attachmentId: string,
   ): Promise<string> {
     const url = new URL(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/attachments/${attachmentId}`,
     );
-    const res = await this.googleRequest(url);
+    const res = await googleRequest(url);
     const json = await res.json();
-    return json.data; // base64url encoded
+    return json.data;
   }
 
-  /**
-   * Fetch multiple attachments in a single batch request.
-   * PERFORMANCE: Uses Gmail batch API to fetch all attachments in parallel,
-   * significantly faster than sequential getAttachment() calls.
-   *
-   * @param attachments Array of { messageId, attachmentId } to fetch
-   * @returns Array of { messageId, attachmentId, data, success } results
-   */
-  async getAttachmentsBatch(
+  async function getAttachmentsBatch(
     attachments: Array<{ messageId: string; attachmentId: string }>,
   ): Promise<
     Array<{
@@ -424,24 +474,22 @@ Accept: application/json
   > {
     if (attachments.length === 0) return [];
 
-    // For small batches, parallel individual requests may be faster than batch API overhead
     if (attachments.length <= 2) {
-      const results = await Promise.all(
+      return await Promise.all(
         attachments.map(async ({ messageId, attachmentId }) => {
           try {
-            const data = await this.getAttachment(messageId, attachmentId);
+            const data = await getAttachment(messageId, attachmentId);
             return { messageId, attachmentId, data, success: true };
           } catch {
             return { messageId, attachmentId, data: null, success: false };
           }
         }),
       );
-      return results;
     }
 
     const boundary = `batch_${nonPrivateRandom().toString(36).substring(2)}`;
     debugLog(
-      this.debugMode,
+      debugMode,
       `Processing attachment batch of ${attachments.length} items`,
     );
 
@@ -461,7 +509,7 @@ Accept: application/json
       .join("") + `--${boundary}--`;
 
     try {
-      const batchResponse = await this.googleRequest(
+      const batchResponse = await googleRequest(
         new URL("https://gmail.googleapis.com/batch/gmail/v1"),
         {
           method: "POST",
@@ -474,12 +522,10 @@ Accept: application/json
 
       const responseText = await batchResponse.text();
       debugLog(
-        this.debugMode,
+        debugMode,
         `Received attachment batch response of length: ${responseText.length}`,
       );
 
-      // Parse batch response - similar to fetchBatch but for attachments
-      // Use exact boundary to avoid false splits on attachment data containing "--batch_"
       const parts = responseText.split(`--${boundary}`).slice(1, -1);
 
       return attachments.map(({ messageId, attachmentId }, index) => {
@@ -499,7 +545,7 @@ Accept: application/json
 
           if (parsed.error) {
             debugLog(
-              this.debugMode,
+              debugMode,
               `Attachment batch error for ${attachmentId}: ${parsed.error.message}`,
             );
             return { messageId, attachmentId, data: null, success: false };
@@ -516,8 +562,7 @@ Accept: application/json
         }
       });
     } catch (error) {
-      debugLog(this.debugMode, `Attachment batch request failed:`, error);
-      // Return all as failed
+      debugLog(debugMode, "Attachment batch request failed:", error);
       return attachments.map(({ messageId, attachmentId }) => ({
         messageId,
         attachmentId,
@@ -527,10 +572,7 @@ Accept: application/json
     }
   }
 
-  /**
-   * Fetch Gmail history for incremental sync.
-   */
-  async fetchHistory(
+  async function fetchHistory(
     startHistoryId: string,
     labelId?: string,
     maxResults: number = 100,
@@ -557,10 +599,10 @@ Accept: application/json
       url.searchParams.set("labelId", labelId);
     }
 
-    debugLog(this.debugMode, `Fetching history from: ${url.toString()}`);
-    const res = await this.googleRequest(url);
+    debugLog(debugMode, `Fetching history from: ${url.toString()}`);
+    const res = await googleRequest(url);
     const json = await res.json();
-    debugLog(this.debugMode, `History API returned:`, {
+    debugLog(debugMode, "History API returned:", {
       historyId: json.historyId,
       historyCount: json.history?.length || 0,
       hasNextPageToken: !!json.nextPageToken,
@@ -568,104 +610,36 @@ Accept: application/json
     return json;
   }
 
-  /**
-   * Parse a raw Gmail message into SimpleEmail format.
-   */
-  private parseMessage(message: any): SimpleEmail | null {
-    if (!message?.payload) return null;
-
-    const headers = message.payload.headers || [];
-    const getHeader = (name: string) =>
-      headers.find(
-        (h: { name: string; value: string }) =>
-          h.name.toLowerCase() === name.toLowerCase(),
-      )?.value || "";
-
-    const body = extractTextFromPayload(message.payload);
-
-    return {
-      id: message.id,
-      threadId: message.threadId,
-      subject: getHeader("Subject"),
-      from: getHeader("From"),
-      date: getHeader("Date"),
-      snippet: message.snippet || "",
-      body: body.substring(0, 5000), // Limit body size
-      labelIds: message.labelIds,
-    };
-  }
-
-  /**
-   * Make an authenticated request to the Gmail API.
-   * Handles 401 (token refresh) and 429 (rate limit) automatically.
-   */
-  private async googleRequest(
-    url: URL,
-    _options?: RequestInit,
-    _retries?: number,
-  ): Promise<Response> {
-    const token = this.auth.get().token;
-    if (!token) {
-      throw new Error("No authorization token.");
+  async function searchEmails(
+    query: string,
+    maxResults: number = 20,
+  ): Promise<SimpleEmail[]> {
+    const messages = await listMessages(query, maxResults);
+    if (messages.length === 0) {
+      return [];
     }
 
-    const retries = _retries ?? this.retries;
-    const options = _options ?? {};
-    options.headers = new Headers(options.headers);
-    options.headers.set("Authorization", `Bearer ${token}`);
-
-    // Rewrite authorization in body for batch requests
-    if (options.body && typeof options.body === "string") {
-      options.body = options.body.replace(
-        /Authorization: Bearer [^\n]*/g,
-        `Authorization: Bearer ${token}`,
-      );
-    }
-
-    const res = await fetch(url, options);
-    let { ok, status, statusText } = res;
-
-    // Batch requests may return 200 with error in body
-    if (options.method === "POST") {
-      try {
-        const json = await res.clone().json();
-        if (json?.error?.code) {
-          ok = false;
-          status = json.error.code;
-          statusText = json.error?.message;
-        }
-      } catch (_) {
-        // Not JSON, probably a real success
-      }
-    }
-
-    if (ok) {
-      debugLog(this.debugMode, `${url}: ${status} ${statusText}`);
-      return res;
-    }
-
-    debugWarn(
-      this.debugMode,
-      `${url}: ${status} ${statusText}`,
-      `Remaining retries: ${retries}`,
+    debugLog(
+      debugMode,
+      `Found ${messages.length} messages for query: ${query}`,
     );
-
-    if (retries === 0) {
-      throw new Error(`Gmail API error: ${status} ${statusText}`);
-    }
-
-    if (status === 401) {
-      await this.refreshAuth();
-    } else if (status === 429) {
-      this.delay += this.delayIncrement;
-      debugLog(
-        this.debugMode,
-        `Rate limited, incrementing delay to ${this.delay}`,
-      );
-    }
-
-    return this.googleRequest(url, _options, retries - 1);
+    const fullMessages = await fetchBatch(messages);
+    return fullMessages.map((msg) => parseMessage(msg)).filter(
+      Boolean,
+    ) as SimpleEmail[];
   }
+
+  return {
+    getProfile,
+    searchEmails,
+    listMessages,
+    fetchEmail,
+    fetchBatch,
+    fetchMessagesByIds,
+    getAttachment,
+    getAttachmentsBatch,
+    fetchHistory,
+  };
 }
 
 /**
