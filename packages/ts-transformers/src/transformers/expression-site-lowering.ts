@@ -19,7 +19,6 @@ import { shouldDeferFallbackMapReceiverRewrite } from "./opaque-ref/fallback-rew
 import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
 import type { AnalyzeFn } from "./opaque-ref/types.ts";
 import {
-  findPendingComputeWrapCandidate,
   isJsxLocalRewriteContainer,
 } from "./opaque-ref/emitters/compute-wrap-invariants.ts";
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
@@ -50,12 +49,6 @@ export type JsxExpressionSiteRoute =
       | "dynamic-element-access-root"
       | "helper-call-root"
       | "object-literal-root";
-  }
-  | {
-    route: "legacy-jsx";
-    reason:
-      | "legacy-control-flow-branch-local"
-      | "contains-reactive-array-method-subexpression";
   }
   | {
     route: "skip";
@@ -465,76 +458,6 @@ function isSharedPreClosureDeferredArrayMethodControlFlowExpression(
     isOwnedDeferredJsxArrayMethodRoot(current.whenFalse, context, analyze);
 }
 
-function requiresLegacyJsxControlFlowHandling(
-  expression: ts.Expression,
-  context: TransformationContext,
-  analyze: AnalyzeFn,
-): boolean {
-  const branchRequiresLegacyHandling = (
-    branch: ts.Expression,
-    allowWholeBranchValueWrap: boolean,
-  ): boolean => {
-    const currentBranch = unwrapExpression(branch);
-
-    if (isJsxLocalRewriteContainer(branch)) {
-      return false;
-    }
-
-    if (isControlFlowRewriteExpression(branch)) {
-      const branchRoute = classifyJsxExpressionSiteRoute(
-        branch,
-        context,
-        analyze,
-      );
-      if (branchRoute.route !== "skip") {
-        return branchRoute.route === "legacy-jsx";
-      }
-    }
-
-    if (
-      ts.isCallExpression(currentBranch) &&
-      classifyOpaquePathTerminalCall(currentBranch)
-    ) {
-      return false;
-    }
-
-    if (containsReactiveArrayMethodSubexpression(branch, context, analyze)) {
-      return true;
-    }
-
-    if (isPostClosureWrapperRewriteExpression(branch, context)) {
-      return false;
-    }
-
-    if (
-      allowWholeBranchValueWrap &&
-      !ts.isCallExpression(currentBranch)
-    ) {
-      return false;
-    }
-
-    return !!findPendingComputeWrapCandidate(branch, analyze, context);
-  };
-
-  const current = getControlFlowRewriteExpression(expression);
-  if (!current) {
-    return false;
-  }
-
-  if (ts.isConditionalExpression(current)) {
-    const branches = [current.whenTrue, current.whenFalse];
-    return branches.some((branch) =>
-      branchRequiresLegacyHandling(branch, true)
-    );
-  }
-
-  if (isLogicalBinaryExpression(current)) {
-    return branchRequiresLegacyHandling(current.right, false);
-  }
-
-  return false;
-}
-
 export function getExpressionContainerKind(
   expression: ts.Expression,
 ): ExpressionContainerKind | undefined {
@@ -882,9 +805,7 @@ export function classifyJsxExpressionSiteRoute(
       return { route: "shared-pre-closure" };
     }
 
-    return requiresLegacyJsxControlFlowHandling(expression, context, analyze)
-      ? { route: "legacy-jsx", reason: "legacy-control-flow-branch-local" }
-      : { route: "shared-post-closure" };
+    return { route: "shared-post-closure" };
   }
 
   if (siteInfo.callRootKind === "free-function") {
@@ -924,16 +845,7 @@ export function classifyJsxExpressionSiteRoute(
       return { route: "shared-post-closure" };
     }
 
-    return containsReactiveArrayMethodSubexpression(
-        expression,
-        context,
-        analyze,
-      )
-      ? {
-        route: "legacy-jsx",
-        reason: "contains-reactive-array-method-subexpression",
-      }
-      : { route: "shared-post-closure" };
+    return { route: "shared-post-closure" };
   }
 
   if (!isPostClosureJsxWrapperRewriteExpression(expression, context)) {
@@ -941,15 +853,7 @@ export function classifyJsxExpressionSiteRoute(
   }
 
   if (containsReactiveArrayMethodSubexpression(expression, context, analyze)) {
-    return (
-        siteInfo.reactiveContext.owner === "pattern" ||
-        siteInfo.reactiveContext.owner === "render"
-      )
-      ? { route: "shared-post-closure" }
-      : {
-        route: "legacy-jsx",
-        reason: "contains-reactive-array-method-subexpression",
-      };
+    return { route: "shared-post-closure" };
   }
 
   return { route: "shared-post-closure" };
