@@ -24,7 +24,7 @@ shadcn/ui design system. All components:
 - `size` - "default" | "sm" | "lg" | "icon"
 - `disabled` - boolean
 - `type` - "button" | "submit" | "reset" **Events**:
-- `ct-click` - Fired on click with detail: `{ variant, size }` **Slots**:
+- `cf-click` - Fired on click with detail: `{ variant, size }` **Slots**:
   Default slot for button content **Example**:
 
 ```html
@@ -631,11 +631,11 @@ Same as cf-hstack **Example**:
 
 ## Event Handling Patterns
 
-All components emit custom events with the `ct-` prefix. Event details are
+All components emit custom events with the `cf-` prefix. Event details are
 always in the `detail` property:
 
 ```javascript
-document.querySelector("cf-button").addEventListener("ct-click", (e) => {
+document.querySelector("cf-button").addEventListener("cf-click", (e) => {
   console.log("Button clicked:", e.detail);
 });
 

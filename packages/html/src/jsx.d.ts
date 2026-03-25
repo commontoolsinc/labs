@@ -15,19 +15,19 @@ import type {
  */
 type Booleanish = boolean | "true" | "false";
 
-// DOM-ish types for the CT runtime.
+// DOM-ish types for the CF runtime.
 // The DOM is not directly available within the runtime, but the JSX
 // produced must be typed. This defines DOM types like React or Preact,
 // with a subset of supported features, and cannot rely on globals
 // existing like `HTMLElement` from TypeScript's `dom` lib.
-declare namespace CTDOM {
+declare namespace CFDOM {
   /**
    * @see {@link https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes/crossorigin MDN}
    */
   type CrossOrigin = "anonymous" | "use-credentials" | "" | undefined;
 
   /**
-   * Stub out `HTMLElement` in a raw CT environment.
+   * Stub out `HTMLElement` in a raw CF environment.
    * Extend other subclasses for usage in types.
    * TBD how we want to interact with DOM elements within a sandbox.
    * Maybe some of these elements should inherit from each other.
@@ -1771,7 +1771,7 @@ declare namespace CTDOM {
     | (string & {});
 
   export interface HTMLAttributes<T> extends AriaAttributes, DOMAttributes<T> {
-    // CT extensions
+    // CF extensions
     "onClick"?: EventHandler<unknown>;
     "onChange"?: EventHandler<unknown>;
     "children"?: RenderNode | undefined;
@@ -1804,7 +1804,7 @@ declare namespace CTDOM {
       | "search"
       | "send"
       | undefined;
-    hidden?: Booleanish; // CT addition to be compatible with our component usage of `hidden`
+    hidden?: Booleanish; // CF addition to be compatible with our component usage of `hidden`
     id?: string | undefined;
     lang?: string | undefined;
     nonce?: string | undefined;
@@ -2790,9 +2790,9 @@ declare namespace CTDOM {
   }
 }
 
-interface CTHTMLElement extends CTDOM.HTMLElement {}
-// Extend this to add attributes to only the CT elements.
-interface CTHTMLAttributes<T> extends CTDOM.HTMLAttributes<T> {}
+interface CFHTMLElement extends CFDOM.HTMLElement {}
+// Extend this to add attributes to only the CF elements.
+interface CFHTMLAttributes<T> extends CFDOM.HTMLAttributes<T> {}
 
 // Minimal theme typing for cf-theme
 type CFColorToken = string | {
@@ -2834,13 +2834,13 @@ interface CFThemeDef {
 
 type CFThemeInput = Partial<CFThemeDef> & Record<string, unknown>;
 
-type CTEvent<T> = {
+type CFEvent<T> = {
   detail: T;
 };
 
 type EventHandler<T> =
-  | CellLike<CTEvent<T> | T>
-  | ((event: CTEvent<T>) => void)
+  | CellLike<CFEvent<T> | T>
+  | ((event: CFEvent<T>) => void)
   | (() => void)
   | Stream<T>
   | Stream<void>;
@@ -2848,132 +2848,132 @@ type EventHandler<T> =
 // `Charm` is not a pattern type.
 type Charm = any;
 
-interface CFCellLinkElement extends CTHTMLElement {}
-interface CFSpaceLinkElement extends CTHTMLElement {}
-interface CFLoaderElement extends CTHTMLElement {}
-interface CFInputElement extends CTHTMLElement {}
-interface CFLinkPreviewElement extends CTHTMLElement {}
-interface CFTextAreaElement extends CTHTMLElement {}
-interface CFFileInputElement extends CTHTMLElement {}
-interface CFImageInputElement extends CTHTMLElement {}
-interface CFInputLegacyElement extends CTHTMLElement {}
-interface CFCheckboxElement extends CTHTMLElement {}
-interface CFAutocompleteElement extends CTHTMLElement {}
-interface CFSelectElement extends CTHTMLElement {}
-interface CFRadioGroupElement extends CTHTMLElement {}
-interface CFPickerElement extends CTHTMLElement {}
-interface CFToolsChipElement extends CTHTMLElement {}
-interface CFHeadingElement extends CTHTMLElement {}
-interface CFCollapsibleElement extends CTHTMLElement {}
-interface CFThemeElement extends CTHTMLElement {}
-interface CFCodeEditorElement extends CTHTMLElement {}
-interface CFCodeEditorLegacyElement extends CTHTMLElement {}
-interface CFScreenElement extends CTHTMLElement {}
-interface CFAutostartElement extends CTHTMLElement {}
-interface CFAutoLayoutElement extends CTHTMLElement {}
-interface CFButtonElement extends CTHTMLElement {}
-interface CFCopyButtonElement extends CTHTMLElement {}
-interface CFFileDownloadElement extends CTHTMLElement {}
-interface CFIFrameElement extends CTHTMLElement {}
-interface CFHStackElement extends CTHTMLElement {}
-interface CFFabElement extends CTHTMLElement {}
-interface CFModalElement extends CTHTMLElement {}
-interface CFModalProviderElement extends CTHTMLElement {}
-interface CFChevronButtonElement extends CTHTMLElement {}
-interface CFCardElement extends CTHTMLElement {}
-interface CFCalendarElement extends CTHTMLElement {}
-interface CFQuestionElement extends CTHTMLElement {}
-interface CFAlertElement extends CTHTMLElement {}
-interface CFVStackElement extends CTHTMLElement {}
-interface CFMessageInputElement extends CTHTMLElement {}
-interface CFToolbarElement extends CTHTMLElement {}
-interface CFKbdElement extends CTHTMLElement {}
-interface CFKeybindElement extends CTHTMLElement {}
-interface CFRenderElement extends CTHTMLElement {}
-interface CFCellContextElement extends CTHTMLElement {}
-interface CFDragSourceElement extends CTHTMLElement {}
-interface CFDropZoneElement extends CTHTMLElement {}
-interface CFChatMessageElement extends CTHTMLElement {}
-interface CFMarkdownElement extends CTHTMLElement {}
-interface CFSvgElement extends CTHTMLElement {}
-interface CFVScrollElement extends CTHTMLElement {}
-interface CTSendMessageElement extends CTHTMLElement {}
-interface CFTableElement extends CTHTMLElement {}
-interface CFTagsElement extends CTHTMLElement {}
-interface CFPromptInputElement extends CTHTMLElement {}
-interface CFChatElement extends CTHTMLElement {}
-interface CFMessageBeadsElement extends CTHTMLElement {}
-interface CFAttachmentsBarElement extends CTHTMLElement {}
-interface CFFragmentElement extends CTHTMLElement {}
-interface CFUpdaterElement extends CTHTMLElement {}
-interface CFGoogleOAuthElement extends CTHTMLElement {}
-interface CFOAuthElement extends CTHTMLElement {}
-interface CFCanvasElement extends CTHTMLElement {}
-interface CFDraggableElement extends CTHTMLElement {}
-interface CFPlaidLinkElement extends CTHTMLElement {}
-interface CFPieceElement extends CTHTMLElement {}
-interface CFIFrameElement extends CTHTMLElement {}
-interface CFVoiceInputElement extends CTHTMLElement {}
-interface CFAudioVisualizerElement extends CTHTMLElement {}
-interface CFLocationElement extends CTHTMLElement {}
-interface CFWebhookElement extends CTHTMLElement {}
-interface CFSecretViewerElement extends CTHTMLElement {}
-interface CFRouterElement extends CTHTMLElement {}
-interface CTRouteElement extends CTHTMLElement {}
-interface CFLinkElement extends CTHTMLElement {}
+interface CFCellLinkElement extends CFHTMLElement {}
+interface CFSpaceLinkElement extends CFHTMLElement {}
+interface CFLoaderElement extends CFHTMLElement {}
+interface CFInputElement extends CFHTMLElement {}
+interface CFLinkPreviewElement extends CFHTMLElement {}
+interface CFTextAreaElement extends CFHTMLElement {}
+interface CFFileInputElement extends CFHTMLElement {}
+interface CFImageInputElement extends CFHTMLElement {}
+interface CFInputLegacyElement extends CFHTMLElement {}
+interface CFCheckboxElement extends CFHTMLElement {}
+interface CFAutocompleteElement extends CFHTMLElement {}
+interface CFSelectElement extends CFHTMLElement {}
+interface CFRadioGroupElement extends CFHTMLElement {}
+interface CFPickerElement extends CFHTMLElement {}
+interface CFToolsChipElement extends CFHTMLElement {}
+interface CFHeadingElement extends CFHTMLElement {}
+interface CFCollapsibleElement extends CFHTMLElement {}
+interface CFThemeElement extends CFHTMLElement {}
+interface CFCodeEditorElement extends CFHTMLElement {}
+interface CFCodeEditorLegacyElement extends CFHTMLElement {}
+interface CFScreenElement extends CFHTMLElement {}
+interface CFAutostartElement extends CFHTMLElement {}
+interface CFAutoLayoutElement extends CFHTMLElement {}
+interface CFButtonElement extends CFHTMLElement {}
+interface CFCopyButtonElement extends CFHTMLElement {}
+interface CFFileDownloadElement extends CFHTMLElement {}
+interface CFIFrameElement extends CFHTMLElement {}
+interface CFHStackElement extends CFHTMLElement {}
+interface CFFabElement extends CFHTMLElement {}
+interface CFModalElement extends CFHTMLElement {}
+interface CFModalProviderElement extends CFHTMLElement {}
+interface CFChevronButtonElement extends CFHTMLElement {}
+interface CFCardElement extends CFHTMLElement {}
+interface CFCalendarElement extends CFHTMLElement {}
+interface CFQuestionElement extends CFHTMLElement {}
+interface CFAlertElement extends CFHTMLElement {}
+interface CFVStackElement extends CFHTMLElement {}
+interface CFMessageInputElement extends CFHTMLElement {}
+interface CFToolbarElement extends CFHTMLElement {}
+interface CFKbdElement extends CFHTMLElement {}
+interface CFKeybindElement extends CFHTMLElement {}
+interface CFRenderElement extends CFHTMLElement {}
+interface CFCellContextElement extends CFHTMLElement {}
+interface CFDragSourceElement extends CFHTMLElement {}
+interface CFDropZoneElement extends CFHTMLElement {}
+interface CFChatMessageElement extends CFHTMLElement {}
+interface CFMarkdownElement extends CFHTMLElement {}
+interface CFSvgElement extends CFHTMLElement {}
+interface CFVScrollElement extends CFHTMLElement {}
+interface CFSendMessageElement extends CFHTMLElement {}
+interface CFTableElement extends CFHTMLElement {}
+interface CFTagsElement extends CFHTMLElement {}
+interface CFPromptInputElement extends CFHTMLElement {}
+interface CFChatElement extends CFHTMLElement {}
+interface CFMessageBeadsElement extends CFHTMLElement {}
+interface CFAttachmentsBarElement extends CFHTMLElement {}
+interface CFFragmentElement extends CFHTMLElement {}
+interface CFUpdaterElement extends CFHTMLElement {}
+interface CFGoogleOAuthElement extends CFHTMLElement {}
+interface CFOAuthElement extends CFHTMLElement {}
+interface CFCanvasElement extends CFHTMLElement {}
+interface CFDraggableElement extends CFHTMLElement {}
+interface CFPlaidLinkElement extends CFHTMLElement {}
+interface CFPieceElement extends CFHTMLElement {}
+interface CFIFrameElement extends CFHTMLElement {}
+interface CFVoiceInputElement extends CFHTMLElement {}
+interface CFAudioVisualizerElement extends CFHTMLElement {}
+interface CFLocationElement extends CFHTMLElement {}
+interface CFWebhookElement extends CFHTMLElement {}
+interface CFSecretViewerElement extends CFHTMLElement {}
+interface CFRouterElement extends CFHTMLElement {}
+interface CFRouteElement extends CFHTMLElement {}
+interface CFLinkElement extends CFHTMLElement {}
 
 // Chart components
-interface CFChartElement extends CTHTMLElement {}
-interface CFLineMarkElement extends CTHTMLElement {}
-interface CFAreaMarkElement extends CTHTMLElement {}
-interface CFBarMarkElement extends CTHTMLElement {}
-interface CFDotMarkElement extends CTHTMLElement {}
+interface CFChartElement extends CFHTMLElement {}
+interface CFLineMarkElement extends CFHTMLElement {}
+interface CFAreaMarkElement extends CFHTMLElement {}
+interface CFBarMarkElement extends CFHTMLElement {}
+interface CFDotMarkElement extends CFHTMLElement {}
 
 // Tab components
-interface CFTabsElement extends CTHTMLElement {}
-interface CFTabElement extends CTHTMLElement {}
-interface CFTabListElement extends CTHTMLElement {}
-interface CFTabPanelElement extends CTHTMLElement {}
+interface CFTabsElement extends CFHTMLElement {}
+interface CFTabElement extends CFHTMLElement {}
+interface CFTabListElement extends CFHTMLElement {}
+interface CFTabPanelElement extends CFHTMLElement {}
 
 // Accordion components
-interface CFAccordionElement extends CTHTMLElement {}
-interface CFAccordionItemElement extends CTHTMLElement {}
+interface CFAccordionElement extends CFHTMLElement {}
+interface CFAccordionItemElement extends CFHTMLElement {}
 
 // Form components
-interface CFFormElement extends CTHTMLElement {}
-interface CFSliderElement extends CTHTMLElement {}
-interface CFSwitchElement extends CTHTMLElement {}
-interface CFToggleElement extends CTHTMLElement {}
-interface CFToggleGroupElement extends CTHTMLElement {}
-interface CFRadioElement extends CTHTMLElement {}
-interface CFInputOTPElement extends CTHTMLElement {}
-interface CFLabelElement extends CTHTMLElement {}
+interface CFFormElement extends CFHTMLElement {}
+interface CFSliderElement extends CFHTMLElement {}
+interface CFSwitchElement extends CFHTMLElement {}
+interface CFToggleElement extends CFHTMLElement {}
+interface CFToggleGroupElement extends CFHTMLElement {}
+interface CFRadioElement extends CFHTMLElement {}
+interface CFInputOTPElement extends CFHTMLElement {}
+interface CFLabelElement extends CFHTMLElement {}
 
 // Display components
-interface CFBadgeElement extends CTHTMLElement {}
-interface CFChipElement extends CTHTMLElement {}
-interface CFProgressElement extends CTHTMLElement {}
-interface CFSkeletonElement extends CTHTMLElement {}
-interface CFSeparatorElement extends CTHTMLElement {}
-interface CFTileElement extends CTHTMLElement {}
+interface CFBadgeElement extends CFHTMLElement {}
+interface CFChipElement extends CFHTMLElement {}
+interface CFProgressElement extends CFHTMLElement {}
+interface CFSkeletonElement extends CFHTMLElement {}
+interface CFSeparatorElement extends CFHTMLElement {}
+interface CFTileElement extends CFHTMLElement {}
 
 // Layout components
-interface CFGridElement extends CTHTMLElement {}
-interface CFHGroupElement extends CTHTMLElement {}
-interface CFVGroupElement extends CTHTMLElement {}
-interface CFAspectRatioElement extends CTHTMLElement {}
+interface CFGridElement extends CFHTMLElement {}
+interface CFHGroupElement extends CFHTMLElement {}
+interface CFVGroupElement extends CFHTMLElement {}
+interface CFAspectRatioElement extends CFHTMLElement {}
 
 // Resizable components
-interface CFResizablePanelElement extends CTHTMLElement {}
-interface CFResizablePanelGroupElement extends CTHTMLElement {}
-interface CFResizableHandleElement extends CTHTMLElement {}
+interface CFResizablePanelElement extends CFHTMLElement {}
+interface CFResizablePanelGroupElement extends CFHTMLElement {}
+interface CFResizableHandleElement extends CFHTMLElement {}
 
 // Other components
-interface CFHScrollElement extends CTHTMLElement {}
-interface CFScrollAreaElement extends CTHTMLElement {}
-interface CFToolCallElement extends CTHTMLElement {}
+interface CFHScrollElement extends CFHTMLElement {}
+interface CFScrollAreaElement extends CFHTMLElement {}
+interface CFToolCallElement extends CFHTMLElement {}
 
-interface CFDraggableAttributes<T> extends CTHTMLAttributes<T> {
+interface CFDraggableAttributes<T> extends CFHTMLAttributes<T> {
   "key"?: number;
   "x"?: EventHandler<any>;
   "y"?: EventHandler<any>;
@@ -2981,23 +2981,23 @@ interface CFDraggableAttributes<T> extends CTHTMLAttributes<T> {
   "onpositionchange"?: EventHandler<any>;
 }
 
-interface CFCanvasAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCanvasAttributes<T> extends CFHTMLAttributes<T> {
   "width"?: string | number;
   "height"?: string | number;
   "oncf-canvas-click"?: EventHandler<any>;
 }
 
-interface CFPlaidLinkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFPlaidLinkAttributes<T> extends CFHTMLAttributes<T> {
   "$auth"?: any;
   "products"?: string[];
 }
 
-interface CFGoogleOAuthAttributes<T> extends CTHTMLAttributes<T> {
+interface CFGoogleOAuthAttributes<T> extends CFHTMLAttributes<T> {
   "$auth"?: any;
   "scopes"?: string[];
 }
 
-interface CFOAuthAttributes<T> extends CTHTMLAttributes<T> {
+interface CFOAuthAttributes<T> extends CFHTMLAttributes<T> {
   "$auth"?: any;
   "scopes"?: string[];
   "provider"?: string;
@@ -3007,29 +3007,29 @@ interface CFOAuthAttributes<T> extends CTHTMLAttributes<T> {
   "tokenField"?: string;
 }
 
-interface CFWebhookAttributes<T> extends CTHTMLAttributes<T> {
+interface CFWebhookAttributes<T> extends CFHTMLAttributes<T> {
   "name"?: string;
   "$inbox"?: CellLike<any>;
   "$config"?: CellLike<any>;
 }
 
-interface CFSecretViewerAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSecretViewerAttributes<T> extends CFHTMLAttributes<T> {
   "label"?: string;
   "value"?: string;
   "trailing-chars"?: number;
 }
 
-interface CFUpdaterAttributes<T> extends CTHTMLAttributes<T> {
+interface CFUpdaterAttributes<T> extends CFHTMLAttributes<T> {
   "integration"?: string;
   "$state"?: CellLike<any>;
 }
 
-interface CFPieceAttributes<T> extends CTHTMLAttributes<T> {
+interface CFPieceAttributes<T> extends CFHTMLAttributes<T> {
   "piece-id"?: string;
   "space-name"?: string;
 }
 
-interface CFVoiceInputAttributes<T> extends CTHTMLAttributes<T> {
+interface CFVoiceInputAttributes<T> extends CFHTMLAttributes<T> {
   "$transcription"?: CellLike<any>;
   "recordingMode"?: "hold" | "toggle";
   "autoTranscribe"?: boolean;
@@ -3045,14 +3045,14 @@ interface CFVoiceInputAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-change"?: EventHandler<any>;
 }
 
-interface CFAudioVisualizerAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAudioVisualizerAttributes<T> extends CFHTMLAttributes<T> {
   "bars"?: number;
   "color"?: string;
   "height"?: number;
 }
 
 // Chart component attributes
-interface CFChartAttributes<T> extends CTHTMLAttributes<T> {
+interface CFChartAttributes<T> extends CFHTMLAttributes<T> {
   "height"?: number;
   "marks"?: any[] | CellLike<any[]>;
   "$marks"?: any[] | CellLike<any[]>;
@@ -3079,7 +3079,7 @@ interface CFChartAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-leave"?: EventHandler<any>;
 }
 
-interface CFLineMarkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFLineMarkAttributes<T> extends CFHTMLAttributes<T> {
   "data"?: any[] | CellLike<any[]>;
   "$data"?: any[] | CellLike<any[]>;
   "x"?: string;
@@ -3090,7 +3090,7 @@ interface CFLineMarkAttributes<T> extends CTHTMLAttributes<T> {
   "label"?: string;
 }
 
-interface CFAreaMarkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAreaMarkAttributes<T> extends CFHTMLAttributes<T> {
   "data"?: any[] | CellLike<any[]>;
   "$data"?: any[] | CellLike<any[]>;
   "x"?: string;
@@ -3103,7 +3103,7 @@ interface CFAreaMarkAttributes<T> extends CTHTMLAttributes<T> {
   "label"?: string;
 }
 
-interface CFBarMarkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFBarMarkAttributes<T> extends CFHTMLAttributes<T> {
   "data"?: any[] | CellLike<any[]>;
   "$data"?: any[] | CellLike<any[]>;
   "x"?: string;
@@ -3114,7 +3114,7 @@ interface CFBarMarkAttributes<T> extends CTHTMLAttributes<T> {
   "label"?: string;
 }
 
-interface CFDotMarkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFDotMarkAttributes<T> extends CFHTMLAttributes<T> {
   "data"?: any[] | CellLike<any[]>;
   "$data"?: any[] | CellLike<any[]>;
   "x"?: string;
@@ -3124,7 +3124,7 @@ interface CFDotMarkAttributes<T> extends CTHTMLAttributes<T> {
   "label"?: string;
 }
 
-interface CFLocationAttributes<T> extends CTHTMLAttributes<T> {
+interface CFLocationAttributes<T> extends CFHTMLAttributes<T> {
   "$location"?: CellLike<any>;
   "enableHighAccuracy"?: boolean;
   "timeout"?: number;
@@ -3137,21 +3137,21 @@ interface CFLocationAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-change"?: EventHandler<any>;
 }
 
-interface CFChatAttributes<T> extends CTHTMLAttributes<T> {
+interface CFChatAttributes<T> extends CFHTMLAttributes<T> {
   "$messages"?: CellLike<any>;
   "pending"?: boolean;
   "theme"?: CFThemeInput;
   "tools"?: any;
 }
 
-interface CFMessageBeadsAttributes<T> extends CTHTMLAttributes<T> {
+interface CFMessageBeadsAttributes<T> extends CFHTMLAttributes<T> {
   "$messages"?: CellLike<any>;
   "pending"?: boolean;
   "label"?: string;
   "oncf-refine"?: EventHandler<any>;
 }
 
-interface CFPromptInputAttributes<T> extends CTHTMLAttributes<T> {
+interface CFPromptInputAttributes<T> extends CFHTMLAttributes<T> {
   "placeholder"?: string;
   "buttonText"?: string;
   "value"?: string;
@@ -3181,25 +3181,25 @@ interface CFPromptInputAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-attachment-remove"?: EventHandler<{ id: string }>;
 }
 
-interface CFAttachmentsBarAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAttachmentsBarAttributes<T> extends CFHTMLAttributes<T> {
   "removable"?: boolean;
   "pinnedCells"?: any;
   "oncf-remove"?: EventHandler<{ id: string }>;
   "oncf-click"?: EventHandler<{ id: string; attachment: any }>;
 }
 
-interface CFTagsAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTagsAttributes<T> extends CFHTMLAttributes<T> {
   "tags"?: string[];
   "readonly"?: boolean;
   "oncf-change"?: EventHandler<{ tags: string[] }>;
 }
 
-interface CFToolbarAttributes<T> extends CTHTMLAttributes<T> {
+interface CFToolbarAttributes<T> extends CFHTMLAttributes<T> {
   "dense"?: boolean;
   "sticky"?: boolean;
 }
 
-interface CFTableAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTableAttributes<T> extends CFHTMLAttributes<T> {
   "striped"?: boolean;
   "bordered"?: boolean;
   "size"?: "sm" | "md" | "lg";
@@ -3212,7 +3212,7 @@ interface CFTableAttributes<T> extends CTHTMLAttributes<T> {
   }>;
 }
 
-type CFKeybindAttributes<T> = Omit<CTHTMLAttributes<T>, "key"> & {
+type CFKeybindAttributes<T> = Omit<CFHTMLAttributes<T>, "key"> & {
   "name"?: string;
   "code"?: string; // Could be tighter e.g. `Key${string}`
   "ctrl"?: boolean;
@@ -3253,7 +3253,7 @@ type TailwindNumberType =
   | "16"
   | "20"
   | "24";
-interface CFStackAttributes<T> extends CTHTMLAttributes<T> {
+interface CFStackAttributes<T> extends CFHTMLAttributes<T> {
   "gap"?: TailwindNumberType;
   "padding"?: TailwindNumberType;
   "align"?: "start" | "center" | "end" | "stretch" | "baseline";
@@ -3262,19 +3262,19 @@ interface CFStackAttributes<T> extends CTHTMLAttributes<T> {
   "reverse"?: boolean;
 }
 
-interface CTStackLegacyAttributes<T> extends CTHTMLAttributes<T> {
+interface CTStackLegacyAttributes<T> extends CFHTMLAttributes<T> {
   "gap"?: "sm" | "md" | "lg" | "xl" | "none";
   "pad"?: "md" | "lg" | "xl" | "2xl";
 }
 
-interface CFMessageInputAttributes<T> extends CTHTMLAttributes<T> {
+interface CFMessageInputAttributes<T> extends CFHTMLAttributes<T> {
   "name"?: string;
   "placeholder"?: string;
   "appearance"?: "rounded";
   "oncf-send"?: EventHandler<{ message: string }>;
 }
 
-interface CTSendMessageAttributes<T> extends CTHTMLAttributes<T> {
+interface CTSendMessageAttributes<T> extends CFHTMLAttributes<T> {
   "name"?: string;
   "value"?: any;
   "placeholder"?: string;
@@ -3283,7 +3283,7 @@ interface CTSendMessageAttributes<T> extends CTHTMLAttributes<T> {
   "inline"?: Booleanish;
 }
 
-interface CFScrollAttributes<T> extends CTHTMLAttributes<T> {
+interface CFScrollAttributes<T> extends CFHTMLAttributes<T> {
   "flex"?: boolean;
   "showScrollbar"?: boolean;
   "fadeEdges"?: boolean;
@@ -3298,19 +3298,19 @@ interface CFScrollAttributes<T> extends CTHTMLAttributes<T> {
   }>;
 }
 
-interface CFCellLinkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCellLinkAttributes<T> extends CFHTMLAttributes<T> {
   "link"?: string;
   "$cell": CellLike<any>;
   "spaceName"?: string;
 }
 
-interface CFSpaceLinkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSpaceLinkAttributes<T> extends CFHTMLAttributes<T> {
   "spaceName"?: string;
   "spaceDid"?: string;
   "label"?: string;
 }
 
-interface CFChatMessageAttributes<T> extends CTHTMLAttributes<T> {
+interface CFChatMessageAttributes<T> extends CFHTMLAttributes<T> {
   "role"?: "user" | "assistant";
   "content"?: string;
   "avatar"?: string;
@@ -3319,7 +3319,7 @@ interface CFChatMessageAttributes<T> extends CTHTMLAttributes<T> {
   "pending"?: boolean;
 }
 
-interface CFMarkdownAttributes<T> extends CTHTMLAttributes<T> {
+interface CFMarkdownAttributes<T> extends CFHTMLAttributes<T> {
   "content"?: string;
   "$content"?: CellLike<string>;
   "variant"?: "default" | "inverse";
@@ -3328,31 +3328,31 @@ interface CFMarkdownAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-checkbox-change"?: EventHandler<{ index: number; checked: boolean }>;
 }
 
-interface CFSvgAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSvgAttributes<T> extends CFHTMLAttributes<T> {
   "content"?: string;
   "$content"?: CellLike<string>;
 }
 
-interface CFAlertAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAlertAttributes<T> extends CFHTMLAttributes<T> {
   "variant"?: "default" | "destructive" | "warning" | "success" | "info";
   "dismissible"?: boolean;
   "oncf-dismiss"?: EventHandler<{}>;
 }
 
-interface CFCardAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCardAttributes<T> extends CFHTMLAttributes<T> {
   "clickable"?: boolean;
 }
 
-interface CFRouterAttributes<T> extends CTHTMLAttributes<T> {
+interface CFRouterAttributes<T> extends CFHTMLAttributes<T> {
   "path"?: CellLike<string> | string;
   "$path"?: CellLike<string>;
 }
 
-interface CFLinkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFLinkAttributes<T> extends CFHTMLAttributes<T> {
   "to": string;
 }
 
-interface CFCalendarAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCalendarAttributes<T> extends CFHTMLAttributes<T> {
   "value"?: CellLike<string> | string;
   "$value"?: CellLike<string>;
   "markedDates"?: CellLike<string[]> | string[];
@@ -3364,13 +3364,13 @@ interface CFCalendarAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-month-change"?: EventHandler<{ year: number; month: number }>;
 }
 
-interface CFQuestionAttributes<T> extends CTHTMLAttributes<T> {
+interface CFQuestionAttributes<T> extends CFHTMLAttributes<T> {
   "question"?: CellLike<string>;
   "options"?: CellLike<string[]>;
   "oncf-answer"?: EventHandler<{ answer: string }>;
 }
 
-interface CFButtonAttributes<T> extends CTHTMLAttributes<T> {
+interface CFButtonAttributes<T> extends CFHTMLAttributes<T> {
   "variant"?:
     | "default"
     | "primary"
@@ -3386,7 +3386,7 @@ interface CFButtonAttributes<T> extends CTHTMLAttributes<T> {
   "type"?: "button" | "submit" | "reset";
 }
 
-interface CFCopyButtonAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCopyButtonAttributes<T> extends CFHTMLAttributes<T> {
   "text": string | Record<string, string>;
   "variant"?:
     | "primary"
@@ -3404,7 +3404,7 @@ interface CFCopyButtonAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-copy-error"?: EventHandler<{ error: Error; text: string }>;
 }
 
-interface CFFileDownloadAttributes<T> extends CTHTMLAttributes<T> {
+interface CFFileDownloadAttributes<T> extends CFHTMLAttributes<T> {
   "$data"?: CellLike<string>;
   "data"?: string;
   "$filename"?: CellLike<string>;
@@ -3443,12 +3443,12 @@ interface CFFileDownloadAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-autosave-error"?: EventHandler<{ error: Error }>;
 }
 
-interface CFIframeAttributes<T> extends CTHTMLAttributes<T> {
+interface CFIframeAttributes<T> extends CFHTMLAttributes<T> {
   "src": string;
   "$context": CellLike<any>;
 }
 
-interface CFRenderAttributes<T> extends CTHTMLAttributes<T> {
+interface CFRenderAttributes<T> extends CFHTMLAttributes<T> {
   "$cell": CellLike<any>;
   "variant"?:
     | "default"
@@ -3460,13 +3460,13 @@ interface CFRenderAttributes<T> extends CTHTMLAttributes<T> {
     | "embedded";
 }
 
-interface CFCellContextAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCellContextAttributes<T> extends CFHTMLAttributes<T> {
   "$cell": CellLike<any>;
   "label"?: string;
   "inline"?: boolean;
 }
 
-interface CFDragSourceAttributes<T> extends CTHTMLAttributes<T> {
+interface CFDragSourceAttributes<T> extends CFHTMLAttributes<T> {
   "$cell": CellLike<any>;
   "type"?: string;
   "disabled"?: boolean;
@@ -3474,7 +3474,7 @@ interface CFDragSourceAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-drag-end"?: EventHandler<{ cell: any }>;
 }
 
-interface CFDropZoneAttributes<T> extends CTHTMLAttributes<T> {
+interface CFDropZoneAttributes<T> extends CFHTMLAttributes<T> {
   "accept"?: string;
   "oncf-drag-enter"?: EventHandler<{ sourceCell: any; type?: string }>;
   "oncf-drag-leave"?: EventHandler<{}>;
@@ -3487,7 +3487,7 @@ interface CFDropZoneAttributes<T> extends CTHTMLAttributes<T> {
   >;
 }
 
-interface CFLoaderAttributes<T> extends CTHTMLAttributes<T> {
+interface CFLoaderAttributes<T> extends CFHTMLAttributes<T> {
   "size"?: "sm" | "md" | "lg";
   "show-elapsed"?: boolean;
   "show-stop"?: boolean;
@@ -3495,7 +3495,7 @@ interface CFLoaderAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-stop"?: EventHandler<{}>;
 }
 
-interface CFFabAttributes<T> extends CTHTMLAttributes<T> {
+interface CFFabAttributes<T> extends CFHTMLAttributes<T> {
   "expanded"?: boolean;
   "variant"?: "default" | "primary";
   "position"?:
@@ -3513,7 +3513,7 @@ interface CFFabAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-fab-escape"?: EventHandler<{}>;
 }
 
-interface CFModalAttributes<T> extends CTHTMLAttributes<T> {
+interface CFModalAttributes<T> extends CFHTMLAttributes<T> {
   "$open"?: CellLike<boolean> | boolean;
   "dismissable"?: boolean;
   "size"?: "sm" | "md" | "lg" | "full";
@@ -3525,15 +3525,15 @@ interface CFModalAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-modal-closed"?: EventHandler<void>;
 }
 
-interface CFModalProviderAttributes<T> extends CTHTMLAttributes<T> {}
+interface CFModalProviderAttributes<T> extends CFHTMLAttributes<T> {}
 
-interface CFChevronButtonAttributes<T> extends CTHTMLAttributes<T> {
+interface CFChevronButtonAttributes<T> extends CFHTMLAttributes<T> {
   "expanded"?: boolean;
   "loading"?: boolean;
   "oncf-toggle"?: EventHandler<void>;
 }
 
-interface CFInputAttributes<T> extends CTHTMLAttributes<T> {
+interface CFInputAttributes<T> extends CFHTMLAttributes<T> {
   "$value"?: CellLike<string | number | null | undefined>;
   "customStyle"?: string; // bf: I think this is going to go away one day soon
   "type"?:
@@ -3587,11 +3587,11 @@ interface CFInputAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-invalid"?: any;
 }
 
-interface CFLinkPreviewAttributes<T> extends CTHTMLAttributes<T> {
+interface CFLinkPreviewAttributes<T> extends CFHTMLAttributes<T> {
   "url"?: CellLike<string> | string;
 }
 
-interface CFTextAreaAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTextAreaAttributes<T> extends CFHTMLAttributes<T> {
   "$value"?: CellLike<string | undefined>;
   "value"?: CellLike<string> | string;
   "placeholder"?: string;
@@ -3632,14 +3632,14 @@ interface CFTextAreaAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-submit"?: EventHandler<{ value: string; name: string }>;
 }
 
-interface CFInputLegacyAttributes<T> extends CTHTMLAttributes<T> {
+interface CFInputLegacyAttributes<T> extends CFHTMLAttributes<T> {
   "value"?: CellLike<string>;
   "placeholder"?: string;
   "appearance"?: string;
   "customStyle"?: string;
 }
 
-interface CFFileInputAttributes<T> extends CTHTMLAttributes<T> {
+interface CFFileInputAttributes<T> extends CFHTMLAttributes<T> {
   "multiple"?: boolean;
   "maxFiles"?: number;
   "accept"?: string;
@@ -3666,7 +3666,7 @@ interface CFFileInputAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-error"?: EventHandler<any>;
 }
 
-interface CFImageInputAttributes<T> extends CTHTMLAttributes<T> {
+interface CFImageInputAttributes<T> extends CFHTMLAttributes<T> {
   "multiple"?: boolean;
   "maxImages"?: number;
   "maxSizeBytes"?: number;
@@ -3693,7 +3693,7 @@ interface CFImageInputAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-error"?: EventHandler<any>;
 }
 
-interface CFCheckboxAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCheckboxAttributes<T> extends CFHTMLAttributes<T> {
   "$checked"?: CellLike<boolean>;
   "checked"?: boolean;
   "disabled"?: boolean;
@@ -3703,7 +3703,7 @@ interface CFCheckboxAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-change"?: EventHandler<any>;
 }
 
-interface CFAutocompleteAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAutocompleteAttributes<T> extends CFHTMLAttributes<T> {
   "$value"?: CellLike<string | string[]>;
   "items": {
     value: string;
@@ -3732,7 +3732,7 @@ interface CFAutocompleteAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-close"?: EventHandler<void>;
 }
 
-interface CFSelectAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSelectAttributes<T> extends CFHTMLAttributes<T> {
   "$value": CellLike<any | any[]>;
   "items": { label: string; value: any }[];
   "multiple"?: boolean;
@@ -3748,7 +3748,7 @@ interface CFSelectAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-blur"?: EventHandler<any>;
 }
 
-interface CFRadioGroupAttributes<T> extends CTHTMLAttributes<T> {
+interface CFRadioGroupAttributes<T> extends CFHTMLAttributes<T> {
   "$value"?: CellLike<any>;
   "value"?: any;
   "items"?: { label: string; value: any; disabled?: boolean }[];
@@ -3760,7 +3760,7 @@ interface CFRadioGroupAttributes<T> extends CTHTMLAttributes<T> {
   >;
 }
 
-interface CFPickerAttributes<T> extends CTHTMLAttributes<T> {
+interface CFPickerAttributes<T> extends CFHTMLAttributes<T> {
   "$selectedIndex"?: CellLike<number>;
   "$items": CellLike<any[]>;
   "disabled"?: boolean;
@@ -3773,7 +3773,7 @@ interface CFPickerAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-blur"?: EventHandler<any>;
 }
 
-interface CFToolsChipAttributes<T> extends CTHTMLAttributes<T> {
+interface CFToolsChipAttributes<T> extends CFHTMLAttributes<T> {
   "label"?: string;
   "show-count"?: boolean;
   "open-on-hover"?: boolean;
@@ -3792,21 +3792,21 @@ interface CFToolsChipAttributes<T> extends CTHTMLAttributes<T> {
     | Record<string, { handler?: unknown; pattern?: unknown } | any>;
 }
 
-interface CFHeadingAttributes<T> extends CTHTMLAttributes<T> {
+interface CFHeadingAttributes<T> extends CFHTMLAttributes<T> {
   "level"?: number;
   "no-margin"?: boolean;
 }
 
-interface CFCollapsibleAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCollapsibleAttributes<T> extends CFHTMLAttributes<T> {
   "open"?: boolean;
   "disabled"?: boolean;
   "oncf-toggle"?: EventHandler<{ open: boolean }>;
 }
 
-interface CFThemeAttributes<T> extends CTHTMLAttributes<T> {
+interface CFThemeAttributes<T> extends CFHTMLAttributes<T> {
   theme?: CFThemeInput;
 }
-interface CFCodeEditorLegacyAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCodeEditorLegacyAttributes<T> extends CFHTMLAttributes<T> {
   "source"?: string;
   "language"?:
     | "text/css"
@@ -3820,7 +3820,7 @@ interface CFCodeEditorLegacyAttributes<T> extends CTHTMLAttributes<T> {
   "errors"?: any[];
 }
 
-interface CFCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "$value"?: CellLike<string>;
   "value"?: string;
   "language"?:
@@ -3854,11 +3854,11 @@ interface CFCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "onbacklink-create"?: any;
 }
 
-interface CFAutostartAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAutostartAttributes<T> extends CFHTMLAttributes<T> {
   "onstart"?: any;
 }
 
-interface CFAutoLayoutAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAutoLayoutAttributes<T> extends CFHTMLAttributes<T> {
   "tabNames"?: string[];
   "leftOpen"?: boolean;
   "rightOpen"?: boolean;
@@ -3867,7 +3867,7 @@ interface CFAutoLayoutAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 // Tab component attributes
-interface CFTabsAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTabsAttributes<T> extends CFHTMLAttributes<T> {
   "$value"?: CellLike<string>; // Bidirectional cell binding
   "value"?: string; // Plain string value (use $value for cells)
   "orientation"?:
@@ -3877,39 +3877,39 @@ interface CFTabsAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-change"?: EventHandler<{ value: string; oldValue: string }>;
 }
 
-interface CFTabAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTabAttributes<T> extends CFHTMLAttributes<T> {
   "value"?: string; // Tab identifier (plain string, no cell binding needed)
   "disabled"?: boolean | CellLike<boolean>;
   "selected"?: boolean | CellLike<boolean>;
 }
 
-interface CFTabListAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTabListAttributes<T> extends CFHTMLAttributes<T> {
   "orientation"?:
     | "horizontal"
     | "vertical"
     | CellLike<"horizontal" | "vertical">;
 }
 
-interface CFTabPanelAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTabPanelAttributes<T> extends CFHTMLAttributes<T> {
   "value"?: string; // Panel identifier (plain string, no cell binding needed)
 }
 
 // Accordion component attributes
-interface CFAccordionAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAccordionAttributes<T> extends CFHTMLAttributes<T> {
   "type"?: "single" | "multiple" | CellLike<"single" | "multiple">;
   "value"?: string | string[] | CellLike<string | string[]>;
   "collapsible"?: boolean | CellLike<boolean>;
   "oncf-change"?: EventHandler<{ value: string | string[] }>;
 }
 
-interface CFAccordionItemAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAccordionItemAttributes<T> extends CFHTMLAttributes<T> {
   "value"?: string | CellLike<string>;
   "disabled"?: boolean | CellLike<boolean>;
   "expanded"?: boolean | CellLike<boolean>;
 }
 
 // Form component attributes
-interface CFFormAttributes<T> extends CTHTMLAttributes<T> {
+interface CFFormAttributes<T> extends CFHTMLAttributes<T> {
   "method"?: "GET" | "POST" | CellLike<"GET" | "POST">;
   "action"?: string | CellLike<string>;
   "oncf-submit"?: EventHandler<any>;
@@ -3918,7 +3918,7 @@ interface CFFormAttributes<T> extends CTHTMLAttributes<T> {
   }>;
 }
 
-interface CFSliderAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSliderAttributes<T> extends CFHTMLAttributes<T> {
   "value"?: number | CellLike<number>;
   "$value"?: CellLike<number>;
   "min"?: number | CellLike<number>;
@@ -3933,7 +3933,7 @@ interface CFSliderAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-change"?: EventHandler<{ value: number; oldValue: number }>;
 }
 
-interface CFSwitchAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSwitchAttributes<T> extends CFHTMLAttributes<T> {
   "checked"?: boolean | CellLike<boolean>;
   "$checked"?: CellLike<boolean>;
   "disabled"?: boolean | CellLike<boolean>;
@@ -3942,7 +3942,7 @@ interface CFSwitchAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-change"?: EventHandler<{ checked: boolean }>;
 }
 
-interface CFToggleAttributes<T> extends CTHTMLAttributes<T> {
+interface CFToggleAttributes<T> extends CFHTMLAttributes<T> {
   "pressed"?: boolean | CellLike<boolean>;
   "$pressed"?: CellLike<boolean>;
   "disabled"?: boolean | CellLike<boolean>;
@@ -3951,7 +3951,7 @@ interface CFToggleAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-change"?: EventHandler<{ pressed: boolean }>;
 }
 
-interface CFToggleGroupAttributes<T> extends CTHTMLAttributes<T> {
+interface CFToggleGroupAttributes<T> extends CFHTMLAttributes<T> {
   "type"?: "single" | "multiple" | CellLike<"single" | "multiple">;
   "value"?: string | string[] | CellLike<string | string[]>;
   "$value"?: CellLike<string | string[]>;
@@ -3959,7 +3959,7 @@ interface CFToggleGroupAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-change"?: EventHandler<{ value: string | string[] }>;
 }
 
-interface CFRadioAttributes<T> extends CTHTMLAttributes<T> {
+interface CFRadioAttributes<T> extends CFHTMLAttributes<T> {
   "checked"?: boolean | CellLike<boolean>;
   "disabled"?: boolean | CellLike<boolean>;
   "value"?: string | CellLike<string>;
@@ -3967,7 +3967,7 @@ interface CFRadioAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-change"?: EventHandler<{ checked: boolean; value: string }>;
 }
 
-interface CFInputOTPAttributes<T> extends CTHTMLAttributes<T> {
+interface CFInputOTPAttributes<T> extends CFHTMLAttributes<T> {
   "length"?: number | CellLike<number>;
   "value"?: string | CellLike<string>;
   "$value"?: CellLike<string>;
@@ -3980,7 +3980,7 @@ interface CFInputOTPAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-complete"?: EventHandler<{ value: string }>;
 }
 
-interface CFLabelAttributes<T> extends CTHTMLAttributes<T> {
+interface CFLabelAttributes<T> extends CFHTMLAttributes<T> {
   "for"?: string | CellLike<string>;
   "required"?: boolean | CellLike<boolean>;
   "disabled"?: boolean | CellLike<boolean>;
@@ -3991,7 +3991,7 @@ interface CFLabelAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 // Display component attributes
-interface CFBadgeAttributes<T> extends CTHTMLAttributes<T> {
+interface CFBadgeAttributes<T> extends CFHTMLAttributes<T> {
   "variant"?:
     | "default"
     | "secondary"
@@ -4002,7 +4002,7 @@ interface CFBadgeAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-remove"?: EventHandler<{}>;
 }
 
-interface CFChipAttributes<T> extends CTHTMLAttributes<T> {
+interface CFChipAttributes<T> extends CFHTMLAttributes<T> {
   "label"?: string | CellLike<string>;
   "variant"?:
     | "default"
@@ -4015,13 +4015,13 @@ interface CFChipAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-click"?: EventHandler<{}>;
 }
 
-interface CFProgressAttributes<T> extends CTHTMLAttributes<T> {
+interface CFProgressAttributes<T> extends CFHTMLAttributes<T> {
   "value"?: number | CellLike<number>;
   "max"?: number | CellLike<number>;
   "indeterminate"?: boolean | CellLike<boolean>;
 }
 
-interface CFSkeletonAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSkeletonAttributes<T> extends CFHTMLAttributes<T> {
   "variant"?:
     | "default"
     | "text"
@@ -4032,7 +4032,7 @@ interface CFSkeletonAttributes<T> extends CTHTMLAttributes<T> {
   "height"?: string | CellLike<string>;
 }
 
-interface CFSeparatorAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSeparatorAttributes<T> extends CFHTMLAttributes<T> {
   "orientation"?:
     | "horizontal"
     | "vertical"
@@ -4040,7 +4040,7 @@ interface CFSeparatorAttributes<T> extends CTHTMLAttributes<T> {
   "decorative"?: boolean | CellLike<boolean>;
 }
 
-interface CFTileAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTileAttributes<T> extends CFHTMLAttributes<T> {
   "item"?: any | CellLike<any>;
   "summary"?: string | CellLike<string>;
   "clickable"?: boolean | CellLike<boolean>;
@@ -4048,7 +4048,7 @@ interface CFTileAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 // Layout component attributes
-interface CFGridAttributes<T> extends CTHTMLAttributes<T> {
+interface CFGridAttributes<T> extends CFHTMLAttributes<T> {
   "columns"?: string | CellLike<string>;
   "rows"?: string | CellLike<string>;
   "gap"?: string | CellLike<string>;
@@ -4061,7 +4061,7 @@ interface CFGridAttributes<T> extends CTHTMLAttributes<T> {
   "padding"?: string | CellLike<string>;
 }
 
-interface CFHGroupAttributes<T> extends CTHTMLAttributes<T> {
+interface CFHGroupAttributes<T> extends CFHTMLAttributes<T> {
   "gap"?: "sm" | "md" | "lg" | CellLike<"sm" | "md" | "lg">;
   "wrap"?: boolean | CellLike<boolean>;
   "align"?:
@@ -4081,7 +4081,7 @@ interface CFHGroupAttributes<T> extends CTHTMLAttributes<T> {
     | CellLike<"start" | "center" | "end" | "between" | "around" | "evenly">;
 }
 
-interface CFVGroupAttributes<T> extends CTHTMLAttributes<T> {
+interface CFVGroupAttributes<T> extends CFHTMLAttributes<T> {
   "gap"?: "sm" | "md" | "lg" | CellLike<"sm" | "md" | "lg">;
   "align"?:
     | "start"
@@ -4099,28 +4099,28 @@ interface CFVGroupAttributes<T> extends CTHTMLAttributes<T> {
     | CellLike<"start" | "center" | "end" | "between" | "around" | "evenly">;
 }
 
-interface CFAspectRatioAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAspectRatioAttributes<T> extends CFHTMLAttributes<T> {
   "ratio"?: string | CellLike<string>;
 }
 
 // Resizable component attributes
-interface CFResizablePanelAttributes<T> extends CTHTMLAttributes<T> {
+interface CFResizablePanelAttributes<T> extends CFHTMLAttributes<T> {
   "minSize"?: number | CellLike<number>;
   "defaultSize"?: number | CellLike<number>;
   "maxSize"?: number | CellLike<number>;
   "collapsible"?: boolean | CellLike<boolean>;
 }
 
-interface CFResizablePanelGroupAttributes<T> extends CTHTMLAttributes<T> {
+interface CFResizablePanelGroupAttributes<T> extends CFHTMLAttributes<T> {
   "direction"?: "horizontal" | "vertical" | CellLike<"horizontal" | "vertical">;
 }
 
-interface CFResizableHandleAttributes<T> extends CTHTMLAttributes<T> {
+interface CFResizableHandleAttributes<T> extends CFHTMLAttributes<T> {
   "withHandle"?: boolean | CellLike<boolean>;
 }
 
 // Other component attributes
-interface CFScrollAreaAttributes<T> extends CTHTMLAttributes<T> {
+interface CFScrollAreaAttributes<T> extends CFHTMLAttributes<T> {
   "orientation"?:
     | "vertical"
     | "horizontal"
@@ -4128,7 +4128,7 @@ interface CFScrollAreaAttributes<T> extends CTHTMLAttributes<T> {
     | CellLike<"vertical" | "horizontal" | "both">;
 }
 
-interface CFToolCallAttributes<T> extends CTHTMLAttributes<T> {
+interface CFToolCallAttributes<T> extends CFHTMLAttributes<T> {
   "call"?: any | CellLike<any>;
   "result"?: any | CellLike<any>;
   "expanded"?: boolean | CellLike<boolean>;
@@ -4180,7 +4180,7 @@ interface CFMapValue {
   polylines?: CFMapPolyline[];
 }
 
-interface CFMapAttributes<T> extends CTHTMLAttributes<T> {
+interface CFMapAttributes<T> extends CFHTMLAttributes<T> {
   "value"?: CFMapValue | CellLike<CFMapValue>;
   "$value"?: CFMapValue | CellLike<CFMapValue>;
   "center"?: CFMapLatLng | CellLike<CFMapLatLng | null> | null;
@@ -4219,7 +4219,7 @@ interface CFMapAttributes<T> extends CTHTMLAttributes<T> {
   ) => void;
 }
 
-interface CFMapElement extends CTHTMLElement {}
+interface CFMapElement extends CFHTMLElement {}
 
 /**
  * Typings for native DOM elements.
@@ -4228,406 +4228,406 @@ interface CFMapElement extends CTHTMLElement {}
  */
 interface DOMIntrinsicElements {
   // HTML
-  a: CTDOM.DetailedHTMLProps<
-    CTDOM.AnchorHTMLAttributes<CTDOM.HTMLAnchorElement>,
-    CTDOM.HTMLAnchorElement
-  >;
-  abbr: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  address: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  area: CTDOM.DetailedHTMLProps<
-    CTDOM.AreaHTMLAttributes<CTDOM.HTMLAreaElement>,
-    CTDOM.HTMLAreaElement
-  >;
-  article: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  aside: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  audio: CTDOM.DetailedHTMLProps<
-    CTDOM.AudioHTMLAttributes<CTDOM.HTMLAudioElement>,
-    CTDOM.HTMLAudioElement
-  >;
-  b: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  base: CTDOM.DetailedHTMLProps<
-    CTDOM.BaseHTMLAttributes<CTDOM.HTMLBaseElement>,
-    CTDOM.HTMLBaseElement
-  >;
-  bdi: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  bdo: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  big: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  blockquote: CTDOM.DetailedHTMLProps<
-    CTDOM.BlockquoteHTMLAttributes<CTDOM.HTMLQuoteElement>,
-    CTDOM.HTMLQuoteElement
-  >;
-  body: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLBodyElement>,
-    CTDOM.HTMLBodyElement
-  >;
-  br: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLBRElement>,
-    CTDOM.HTMLBRElement
-  >;
-  button: CTDOM.DetailedHTMLProps<
-    CTDOM.ButtonHTMLAttributes<CTDOM.HTMLButtonElement>,
-    CTDOM.HTMLButtonElement
-  >;
-  canvas: CTDOM.DetailedHTMLProps<
-    CTDOM.CanvasHTMLAttributes<CTDOM.HTMLCanvasElement>,
-    CTDOM.HTMLCanvasElement
-  >;
-  caption: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  center: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  cite: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  code: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  col: CTDOM.DetailedHTMLProps<
-    CTDOM.ColHTMLAttributes<CTDOM.HTMLTableColElement>,
-    CTDOM.HTMLTableColElement
-  >;
-  colgroup: CTDOM.DetailedHTMLProps<
-    CTDOM.ColgroupHTMLAttributes<CTDOM.HTMLTableColElement>,
-    CTDOM.HTMLTableColElement
-  >;
-  data: CTDOM.DetailedHTMLProps<
-    CTDOM.DataHTMLAttributes<CTDOM.HTMLDataElement>,
-    CTDOM.HTMLDataElement
-  >;
-  datalist: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLDataListElement>,
-    CTDOM.HTMLDataListElement
-  >;
-  dd: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  del: CTDOM.DetailedHTMLProps<
-    CTDOM.DelHTMLAttributes<CTDOM.HTMLModElement>,
-    CTDOM.HTMLModElement
-  >;
-  details: CTDOM.DetailedHTMLProps<
-    CTDOM.DetailsHTMLAttributes<CTDOM.HTMLDetailsElement>,
-    CTDOM.HTMLDetailsElement
-  >;
-  dfn: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  dialog: CTDOM.DetailedHTMLProps<
-    CTDOM.DialogHTMLAttributes<CTDOM.HTMLDialogElement>,
-    CTDOM.HTMLDialogElement
-  >;
-  div: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLDivElement>,
-    CTDOM.HTMLDivElement
-  >;
-  dl: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLDListElement>,
-    CTDOM.HTMLDListElement
-  >;
-  dt: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  em: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  embed: CTDOM.DetailedHTMLProps<
-    CTDOM.EmbedHTMLAttributes<CTDOM.HTMLEmbedElement>,
-    CTDOM.HTMLEmbedElement
-  >;
-  fieldset: CTDOM.DetailedHTMLProps<
-    CTDOM.FieldsetHTMLAttributes<CTDOM.HTMLFieldSetElement>,
-    CTDOM.HTMLFieldSetElement
-  >;
-  figcaption: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  figure: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  footer: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  form: CTDOM.DetailedHTMLProps<
-    CTDOM.FormHTMLAttributes<CTDOM.HTMLFormElement>,
-    CTDOM.HTMLFormElement
-  >;
-  h1: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLHeadingElement>,
-    CTDOM.HTMLHeadingElement
-  >;
-  h2: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLHeadingElement>,
-    CTDOM.HTMLHeadingElement
-  >;
-  h3: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLHeadingElement>,
-    CTDOM.HTMLHeadingElement
-  >;
-  h4: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLHeadingElement>,
-    CTDOM.HTMLHeadingElement
-  >;
-  h5: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLHeadingElement>,
-    CTDOM.HTMLHeadingElement
-  >;
-  h6: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLHeadingElement>,
-    CTDOM.HTMLHeadingElement
-  >;
-  head: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLHeadElement>,
-    CTDOM.HTMLHeadElement
-  >;
-  header: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  hgroup: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  hr: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLHRElement>,
-    CTDOM.HTMLHRElement
-  >;
-  html: CTDOM.DetailedHTMLProps<
-    CTDOM.HtmlHTMLAttributes<CTDOM.HTMLHtmlElement>,
-    CTDOM.HTMLHtmlElement
-  >;
-  i: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  iframe: CTDOM.DetailedHTMLProps<
-    CTDOM.IframeHTMLAttributes<CTDOM.HTMLIFrameElement>,
-    CTDOM.HTMLIFrameElement
-  >;
-  img: CTDOM.DetailedHTMLProps<
-    CTDOM.ImgHTMLAttributes<CTDOM.HTMLImageElement>,
-    CTDOM.HTMLImageElement
-  >;
-  input: CTDOM.DetailedHTMLProps<
-    CTDOM.InputHTMLAttributes<CTDOM.HTMLInputElement>,
-    CTDOM.HTMLInputElement
-  >;
-  ins: CTDOM.DetailedHTMLProps<
-    CTDOM.InsHTMLAttributes<CTDOM.HTMLModElement>,
-    CTDOM.HTMLModElement
-  >;
-  kbd: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  keygen: CTDOM.DetailedHTMLProps<
-    CTDOM.KeygenHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  label: CTDOM.DetailedHTMLProps<
-    CTDOM.LabelHTMLAttributes<CTDOM.HTMLLabelElement>,
-    CTDOM.HTMLLabelElement
-  >;
-  legend: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLLegendElement>,
-    CTDOM.HTMLLegendElement
-  >;
-  li: CTDOM.DetailedHTMLProps<
-    CTDOM.LiHTMLAttributes<CTDOM.HTMLLIElement>,
-    CTDOM.HTMLLIElement
-  >;
-  link: CTDOM.DetailedHTMLProps<
-    CTDOM.LinkHTMLAttributes<CTDOM.HTMLLinkElement>,
-    CTDOM.HTMLLinkElement
-  >;
-  main: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  map: CTDOM.DetailedHTMLProps<
-    CTDOM.MapHTMLAttributes<CTDOM.HTMLMapElement>,
-    CTDOM.HTMLMapElement
-  >;
-  mark: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  menu: CTDOM.DetailedHTMLProps<
-    CTDOM.MenuHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  menuitem: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  meta: CTDOM.DetailedHTMLProps<
-    CTDOM.MetaHTMLAttributes<CTDOM.HTMLMetaElement>,
-    CTDOM.HTMLMetaElement
-  >;
-  meter: CTDOM.DetailedHTMLProps<
-    CTDOM.MeterHTMLAttributes<CTDOM.HTMLMeterElement>,
-    CTDOM.HTMLMeterElement
-  >;
-  nav: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  noindex: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  noscript: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  object: CTDOM.DetailedHTMLProps<
-    CTDOM.ObjectHTMLAttributes<CTDOM.HTMLObjectElement>,
-    CTDOM.HTMLObjectElement
-  >;
-  ol: CTDOM.DetailedHTMLProps<
-    CTDOM.OlHTMLAttributes<CTDOM.HTMLOListElement>,
-    CTDOM.HTMLOListElement
-  >;
-  optgroup: CTDOM.DetailedHTMLProps<
-    CTDOM.OptgroupHTMLAttributes<CTDOM.HTMLOptGroupElement>,
-    CTDOM.HTMLOptGroupElement
-  >;
-  option: CTDOM.DetailedHTMLProps<
-    CTDOM.OptionHTMLAttributes<CTDOM.HTMLOptionElement>,
-    CTDOM.HTMLOptionElement
-  >;
-  output: CTDOM.DetailedHTMLProps<
-    CTDOM.OutputHTMLAttributes<CTDOM.HTMLOutputElement>,
-    CTDOM.HTMLOutputElement
-  >;
-  p: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLParagraphElement>,
-    CTDOM.HTMLParagraphElement
-  >;
-  param: CTDOM.DetailedHTMLProps<
-    CTDOM.ParamHTMLAttributes<CTDOM.HTMLParamElement>,
-    CTDOM.HTMLParamElement
-  >;
-  picture: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  pre: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLPreElement>,
-    CTDOM.HTMLPreElement
-  >;
-  progress: CTDOM.DetailedHTMLProps<
-    CTDOM.ProgressHTMLAttributes<CTDOM.HTMLProgressElement>,
-    CTDOM.HTMLProgressElement
-  >;
-  q: CTDOM.DetailedHTMLProps<
-    CTDOM.QuoteHTMLAttributes<CTDOM.HTMLQuoteElement>,
-    CTDOM.HTMLQuoteElement
-  >;
-  rp: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  rt: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  ruby: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  s: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  samp: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  search: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  slot: CTDOM.DetailedHTMLProps<
-    CTDOM.SlotHTMLAttributes<CTDOM.HTMLSlotElement>,
-    CTDOM.HTMLSlotElement
-  >;
-  script: CTDOM.DetailedHTMLProps<
-    CTDOM.ScriptHTMLAttributes<CTDOM.HTMLScriptElement>,
-    CTDOM.HTMLScriptElement
-  >;
-  section: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  select: CTDOM.DetailedHTMLProps<
-    CTDOM.SelectHTMLAttributes<CTDOM.HTMLSelectElement>,
-    CTDOM.HTMLSelectElement
-  >;
-  small: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  source: CTDOM.DetailedHTMLProps<
-    CTDOM.SourceHTMLAttributes<CTDOM.HTMLSourceElement>,
-    CTDOM.HTMLSourceElement
-  >;
-  span: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLSpanElement>,
-    CTDOM.HTMLSpanElement
-  >;
-  strong: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  style: CTDOM.DetailedHTMLProps<
-    CTDOM.StyleHTMLAttributes<CTDOM.HTMLStyleElement>,
-    CTDOM.HTMLStyleElement
-  >;
-  sub: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  summary: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  sup: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  table: CTDOM.DetailedHTMLProps<
-    CTDOM.TableHTMLAttributes<CTDOM.HTMLTableElement>,
-    CTDOM.HTMLTableElement
-  >;
-  template: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLTemplateElement>,
-    CTDOM.HTMLTemplateElement
-  >;
-  tbody: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLTableSectionElement>,
-    CTDOM.HTMLTableSectionElement
-  >;
-  td: CTDOM.DetailedHTMLProps<
-    CTDOM.TdHTMLAttributes<CTDOM.HTMLTableDataCellElement>,
-    CTDOM.HTMLTableDataCellElement
-  >;
-  textarea: CTDOM.DetailedHTMLProps<
-    CTDOM.TextareaHTMLAttributes<CTDOM.HTMLTextAreaElement>,
-    CTDOM.HTMLTextAreaElement
-  >;
-  tfoot: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLTableSectionElement>,
-    CTDOM.HTMLTableSectionElement
-  >;
-  th: CTDOM.DetailedHTMLProps<
-    CTDOM.ThHTMLAttributes<CTDOM.HTMLTableHeaderCellElement>,
-    CTDOM.HTMLTableHeaderCellElement
-  >;
-  thead: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLTableSectionElement>,
-    CTDOM.HTMLTableSectionElement
-  >;
-  time: CTDOM.DetailedHTMLProps<
-    CTDOM.TimeHTMLAttributes<CTDOM.HTMLTimeElement>,
-    CTDOM.HTMLTimeElement
-  >;
-  title: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLTitleElement>,
-    CTDOM.HTMLTitleElement
-  >;
-  tr: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLTableRowElement>,
-    CTDOM.HTMLTableRowElement
-  >;
-  track: CTDOM.DetailedHTMLProps<
-    CTDOM.TrackHTMLAttributes<CTDOM.HTMLTrackElement>,
-    CTDOM.HTMLTrackElement
-  >;
-  u: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  ul: CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTDOM.HTMLUListElement>,
-    CTDOM.HTMLUListElement
-  >;
-  "var": CTDOM.DetailedHTMLProps<
-    CTHTMLAttributes<CTHTMLElement>,
-    CTHTMLElement
-  >;
-  video: CTDOM.DetailedHTMLProps<
-    CTDOM.VideoHTMLAttributes<CTDOM.HTMLVideoElement>,
-    CTDOM.HTMLVideoElement
-  >;
-  wbr: CTDOM.DetailedHTMLProps<CTHTMLAttributes<CTHTMLElement>, CTHTMLElement>;
-  webview: CTDOM.DetailedHTMLProps<
-    CTDOM.WebViewHTMLAttributes<CTDOM.HTMLWebViewElement>,
-    CTDOM.HTMLWebViewElement
+  a: CFDOM.DetailedHTMLProps<
+    CFDOM.AnchorHTMLAttributes<CFDOM.HTMLAnchorElement>,
+    CFDOM.HTMLAnchorElement
+  >;
+  abbr: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  address: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  area: CFDOM.DetailedHTMLProps<
+    CFDOM.AreaHTMLAttributes<CFDOM.HTMLAreaElement>,
+    CFDOM.HTMLAreaElement
+  >;
+  article: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  aside: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  audio: CFDOM.DetailedHTMLProps<
+    CFDOM.AudioHTMLAttributes<CFDOM.HTMLAudioElement>,
+    CFDOM.HTMLAudioElement
+  >;
+  b: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  base: CFDOM.DetailedHTMLProps<
+    CFDOM.BaseHTMLAttributes<CFDOM.HTMLBaseElement>,
+    CFDOM.HTMLBaseElement
+  >;
+  bdi: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  bdo: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  big: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  blockquote: CFDOM.DetailedHTMLProps<
+    CFDOM.BlockquoteHTMLAttributes<CFDOM.HTMLQuoteElement>,
+    CFDOM.HTMLQuoteElement
+  >;
+  body: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLBodyElement>,
+    CFDOM.HTMLBodyElement
+  >;
+  br: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLBRElement>,
+    CFDOM.HTMLBRElement
+  >;
+  button: CFDOM.DetailedHTMLProps<
+    CFDOM.ButtonHTMLAttributes<CFDOM.HTMLButtonElement>,
+    CFDOM.HTMLButtonElement
+  >;
+  canvas: CFDOM.DetailedHTMLProps<
+    CFDOM.CanvasHTMLAttributes<CFDOM.HTMLCanvasElement>,
+    CFDOM.HTMLCanvasElement
+  >;
+  caption: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  center: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  cite: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  code: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  col: CFDOM.DetailedHTMLProps<
+    CFDOM.ColHTMLAttributes<CFDOM.HTMLTableColElement>,
+    CFDOM.HTMLTableColElement
+  >;
+  colgroup: CFDOM.DetailedHTMLProps<
+    CFDOM.ColgroupHTMLAttributes<CFDOM.HTMLTableColElement>,
+    CFDOM.HTMLTableColElement
+  >;
+  data: CFDOM.DetailedHTMLProps<
+    CFDOM.DataHTMLAttributes<CFDOM.HTMLDataElement>,
+    CFDOM.HTMLDataElement
+  >;
+  datalist: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLDataListElement>,
+    CFDOM.HTMLDataListElement
+  >;
+  dd: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  del: CFDOM.DetailedHTMLProps<
+    CFDOM.DelHTMLAttributes<CFDOM.HTMLModElement>,
+    CFDOM.HTMLModElement
+  >;
+  details: CFDOM.DetailedHTMLProps<
+    CFDOM.DetailsHTMLAttributes<CFDOM.HTMLDetailsElement>,
+    CFDOM.HTMLDetailsElement
+  >;
+  dfn: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  dialog: CFDOM.DetailedHTMLProps<
+    CFDOM.DialogHTMLAttributes<CFDOM.HTMLDialogElement>,
+    CFDOM.HTMLDialogElement
+  >;
+  div: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLDivElement>,
+    CFDOM.HTMLDivElement
+  >;
+  dl: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLDListElement>,
+    CFDOM.HTMLDListElement
+  >;
+  dt: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  em: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  embed: CFDOM.DetailedHTMLProps<
+    CFDOM.EmbedHTMLAttributes<CFDOM.HTMLEmbedElement>,
+    CFDOM.HTMLEmbedElement
+  >;
+  fieldset: CFDOM.DetailedHTMLProps<
+    CFDOM.FieldsetHTMLAttributes<CFDOM.HTMLFieldSetElement>,
+    CFDOM.HTMLFieldSetElement
+  >;
+  figcaption: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  figure: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  footer: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  form: CFDOM.DetailedHTMLProps<
+    CFDOM.FormHTMLAttributes<CFDOM.HTMLFormElement>,
+    CFDOM.HTMLFormElement
+  >;
+  h1: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLHeadingElement>,
+    CFDOM.HTMLHeadingElement
+  >;
+  h2: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLHeadingElement>,
+    CFDOM.HTMLHeadingElement
+  >;
+  h3: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLHeadingElement>,
+    CFDOM.HTMLHeadingElement
+  >;
+  h4: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLHeadingElement>,
+    CFDOM.HTMLHeadingElement
+  >;
+  h5: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLHeadingElement>,
+    CFDOM.HTMLHeadingElement
+  >;
+  h6: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLHeadingElement>,
+    CFDOM.HTMLHeadingElement
+  >;
+  head: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLHeadElement>,
+    CFDOM.HTMLHeadElement
+  >;
+  header: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  hgroup: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  hr: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLHRElement>,
+    CFDOM.HTMLHRElement
+  >;
+  html: CFDOM.DetailedHTMLProps<
+    CFDOM.HtmlHTMLAttributes<CFDOM.HTMLHtmlElement>,
+    CFDOM.HTMLHtmlElement
+  >;
+  i: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  iframe: CFDOM.DetailedHTMLProps<
+    CFDOM.IframeHTMLAttributes<CFDOM.HTMLIFrameElement>,
+    CFDOM.HTMLIFrameElement
+  >;
+  img: CFDOM.DetailedHTMLProps<
+    CFDOM.ImgHTMLAttributes<CFDOM.HTMLImageElement>,
+    CFDOM.HTMLImageElement
+  >;
+  input: CFDOM.DetailedHTMLProps<
+    CFDOM.InputHTMLAttributes<CFDOM.HTMLInputElement>,
+    CFDOM.HTMLInputElement
+  >;
+  ins: CFDOM.DetailedHTMLProps<
+    CFDOM.InsHTMLAttributes<CFDOM.HTMLModElement>,
+    CFDOM.HTMLModElement
+  >;
+  kbd: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  keygen: CFDOM.DetailedHTMLProps<
+    CFDOM.KeygenHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  label: CFDOM.DetailedHTMLProps<
+    CFDOM.LabelHTMLAttributes<CFDOM.HTMLLabelElement>,
+    CFDOM.HTMLLabelElement
+  >;
+  legend: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLLegendElement>,
+    CFDOM.HTMLLegendElement
+  >;
+  li: CFDOM.DetailedHTMLProps<
+    CFDOM.LiHTMLAttributes<CFDOM.HTMLLIElement>,
+    CFDOM.HTMLLIElement
+  >;
+  link: CFDOM.DetailedHTMLProps<
+    CFDOM.LinkHTMLAttributes<CFDOM.HTMLLinkElement>,
+    CFDOM.HTMLLinkElement
+  >;
+  main: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  map: CFDOM.DetailedHTMLProps<
+    CFDOM.MapHTMLAttributes<CFDOM.HTMLMapElement>,
+    CFDOM.HTMLMapElement
+  >;
+  mark: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  menu: CFDOM.DetailedHTMLProps<
+    CFDOM.MenuHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  menuitem: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  meta: CFDOM.DetailedHTMLProps<
+    CFDOM.MetaHTMLAttributes<CFDOM.HTMLMetaElement>,
+    CFDOM.HTMLMetaElement
+  >;
+  meter: CFDOM.DetailedHTMLProps<
+    CFDOM.MeterHTMLAttributes<CFDOM.HTMLMeterElement>,
+    CFDOM.HTMLMeterElement
+  >;
+  nav: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  noindex: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  noscript: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  object: CFDOM.DetailedHTMLProps<
+    CFDOM.ObjectHTMLAttributes<CFDOM.HTMLObjectElement>,
+    CFDOM.HTMLObjectElement
+  >;
+  ol: CFDOM.DetailedHTMLProps<
+    CFDOM.OlHTMLAttributes<CFDOM.HTMLOListElement>,
+    CFDOM.HTMLOListElement
+  >;
+  optgroup: CFDOM.DetailedHTMLProps<
+    CFDOM.OptgroupHTMLAttributes<CFDOM.HTMLOptGroupElement>,
+    CFDOM.HTMLOptGroupElement
+  >;
+  option: CFDOM.DetailedHTMLProps<
+    CFDOM.OptionHTMLAttributes<CFDOM.HTMLOptionElement>,
+    CFDOM.HTMLOptionElement
+  >;
+  output: CFDOM.DetailedHTMLProps<
+    CFDOM.OutputHTMLAttributes<CFDOM.HTMLOutputElement>,
+    CFDOM.HTMLOutputElement
+  >;
+  p: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLParagraphElement>,
+    CFDOM.HTMLParagraphElement
+  >;
+  param: CFDOM.DetailedHTMLProps<
+    CFDOM.ParamHTMLAttributes<CFDOM.HTMLParamElement>,
+    CFDOM.HTMLParamElement
+  >;
+  picture: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  pre: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLPreElement>,
+    CFDOM.HTMLPreElement
+  >;
+  progress: CFDOM.DetailedHTMLProps<
+    CFDOM.ProgressHTMLAttributes<CFDOM.HTMLProgressElement>,
+    CFDOM.HTMLProgressElement
+  >;
+  q: CFDOM.DetailedHTMLProps<
+    CFDOM.QuoteHTMLAttributes<CFDOM.HTMLQuoteElement>,
+    CFDOM.HTMLQuoteElement
+  >;
+  rp: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  rt: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  ruby: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  s: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  samp: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  search: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  slot: CFDOM.DetailedHTMLProps<
+    CFDOM.SlotHTMLAttributes<CFDOM.HTMLSlotElement>,
+    CFDOM.HTMLSlotElement
+  >;
+  script: CFDOM.DetailedHTMLProps<
+    CFDOM.ScriptHTMLAttributes<CFDOM.HTMLScriptElement>,
+    CFDOM.HTMLScriptElement
+  >;
+  section: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  select: CFDOM.DetailedHTMLProps<
+    CFDOM.SelectHTMLAttributes<CFDOM.HTMLSelectElement>,
+    CFDOM.HTMLSelectElement
+  >;
+  small: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  source: CFDOM.DetailedHTMLProps<
+    CFDOM.SourceHTMLAttributes<CFDOM.HTMLSourceElement>,
+    CFDOM.HTMLSourceElement
+  >;
+  span: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLSpanElement>,
+    CFDOM.HTMLSpanElement
+  >;
+  strong: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  style: CFDOM.DetailedHTMLProps<
+    CFDOM.StyleHTMLAttributes<CFDOM.HTMLStyleElement>,
+    CFDOM.HTMLStyleElement
+  >;
+  sub: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  summary: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  sup: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  table: CFDOM.DetailedHTMLProps<
+    CFDOM.TableHTMLAttributes<CFDOM.HTMLTableElement>,
+    CFDOM.HTMLTableElement
+  >;
+  template: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLTemplateElement>,
+    CFDOM.HTMLTemplateElement
+  >;
+  tbody: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLTableSectionElement>,
+    CFDOM.HTMLTableSectionElement
+  >;
+  td: CFDOM.DetailedHTMLProps<
+    CFDOM.TdHTMLAttributes<CFDOM.HTMLTableDataCellElement>,
+    CFDOM.HTMLTableDataCellElement
+  >;
+  textarea: CFDOM.DetailedHTMLProps<
+    CFDOM.TextareaHTMLAttributes<CFDOM.HTMLTextAreaElement>,
+    CFDOM.HTMLTextAreaElement
+  >;
+  tfoot: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLTableSectionElement>,
+    CFDOM.HTMLTableSectionElement
+  >;
+  th: CFDOM.DetailedHTMLProps<
+    CFDOM.ThHTMLAttributes<CFDOM.HTMLTableHeaderCellElement>,
+    CFDOM.HTMLTableHeaderCellElement
+  >;
+  thead: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLTableSectionElement>,
+    CFDOM.HTMLTableSectionElement
+  >;
+  time: CFDOM.DetailedHTMLProps<
+    CFDOM.TimeHTMLAttributes<CFDOM.HTMLTimeElement>,
+    CFDOM.HTMLTimeElement
+  >;
+  title: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLTitleElement>,
+    CFDOM.HTMLTitleElement
+  >;
+  tr: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLTableRowElement>,
+    CFDOM.HTMLTableRowElement
+  >;
+  track: CFDOM.DetailedHTMLProps<
+    CFDOM.TrackHTMLAttributes<CFDOM.HTMLTrackElement>,
+    CFDOM.HTMLTrackElement
+  >;
+  u: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  ul: CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFDOM.HTMLUListElement>,
+    CFDOM.HTMLUListElement
+  >;
+  "var": CFDOM.DetailedHTMLProps<
+    CFHTMLAttributes<CFHTMLElement>,
+    CFHTMLElement
+  >;
+  video: CFDOM.DetailedHTMLProps<
+    CFDOM.VideoHTMLAttributes<CFDOM.HTMLVideoElement>,
+    CFDOM.HTMLVideoElement
+  >;
+  wbr: CFDOM.DetailedHTMLProps<CFHTMLAttributes<CFHTMLElement>, CFHTMLElement>;
+  webview: CFDOM.DetailedHTMLProps<
+    CFDOM.WebViewHTMLAttributes<CFDOM.HTMLWebViewElement>,
+    CFDOM.HTMLWebViewElement
   >;
 }
 
@@ -4641,441 +4641,441 @@ declare global {
 
     interface IntrinsicElements extends DOMIntrinsicElements {
       //[elemName: string]: any;
-      "cf-cell-link": CTDOM.DetailedHTMLProps<
+      "cf-cell-link": CFDOM.DetailedHTMLProps<
         CFCellLinkAttributes<CFCellLinkElement>,
         CFCellLinkElement
       >;
-      "cf-space-link": CTDOM.DetailedHTMLProps<
+      "cf-space-link": CFDOM.DetailedHTMLProps<
         CFSpaceLinkAttributes<CFSpaceLinkElement>,
         CFSpaceLinkElement
       >;
-      "cf-loader": CTDOM.DetailedHTMLProps<
+      "cf-loader": CFDOM.DetailedHTMLProps<
         CFLoaderAttributes<CFLoaderElement>,
         CFLoaderElement
       >;
-      "cf-input": CTDOM.DetailedHTMLProps<
+      "cf-input": CFDOM.DetailedHTMLProps<
         CFInputAttributes<CFInputElement>,
         CFInputElement
       >;
-      "cf-link-preview": CTDOM.DetailedHTMLProps<
+      "cf-link-preview": CFDOM.DetailedHTMLProps<
         CFLinkPreviewAttributes<CFLinkPreviewElement>,
         CFLinkPreviewElement
       >;
-      "cf-textarea": CTDOM.DetailedHTMLProps<
+      "cf-textarea": CFDOM.DetailedHTMLProps<
         CFTextAreaAttributes<CFTextAreaElement>,
         CFTextAreaElement
       >;
-      "cf-file-input": CTDOM.DetailedHTMLProps<
+      "cf-file-input": CFDOM.DetailedHTMLProps<
         CFFileInputAttributes<CFFileInputElement>,
         CFFileInputElement
       >;
-      "cf-image-input": CTDOM.DetailedHTMLProps<
+      "cf-image-input": CFDOM.DetailedHTMLProps<
         CFImageInputAttributes<CFImageInputElement>,
         CFImageInputElement
       >;
-      "cf-checkbox": CTDOM.DetailedHTMLProps<
+      "cf-checkbox": CFDOM.DetailedHTMLProps<
         CFCheckboxAttributes<CFCheckboxElement>,
         CFCheckboxElement
       >;
-      "cf-autocomplete": CTDOM.DetailedHTMLProps<
+      "cf-autocomplete": CFDOM.DetailedHTMLProps<
         CFAutocompleteAttributes<CFAutocompleteElement>,
         CFAutocompleteElement
       >;
-      "cf-select": CTDOM.DetailedHTMLProps<
+      "cf-select": CFDOM.DetailedHTMLProps<
         CFSelectAttributes<CFSelectElement>,
         CFSelectElement
       >;
-      "cf-radio-group": CTDOM.DetailedHTMLProps<
+      "cf-radio-group": CFDOM.DetailedHTMLProps<
         CFRadioGroupAttributes<CFRadioGroupElement>,
         CFRadioGroupElement
       >;
-      "cf-picker": CTDOM.DetailedHTMLProps<
+      "cf-picker": CFDOM.DetailedHTMLProps<
         CFPickerAttributes<CFPickerElement>,
         CFPickerElement
       >;
-      "cf-tools-chip": CTDOM.DetailedHTMLProps<
+      "cf-tools-chip": CFDOM.DetailedHTMLProps<
         CFToolsChipAttributes<CFToolsChipElement>,
         CFToolsChipElement
       >;
-      "cf-heading": CTDOM.DetailedHTMLProps<
+      "cf-heading": CFDOM.DetailedHTMLProps<
         CFHeadingAttributes<CFHeadingElement>,
         CFHeadingElement
       >;
-      "cf-collapsible": CTDOM.DetailedHTMLProps<
+      "cf-collapsible": CFDOM.DetailedHTMLProps<
         CFCollapsibleAttributes<CFCollapsibleElement>,
         CFCollapsibleElement
       >;
-      "cf-theme": CTDOM.DetailedHTMLProps<
+      "cf-theme": CFDOM.DetailedHTMLProps<
         CFThemeAttributes<CFThemeElement>,
         CFThemeElement
       >;
-      "cf-code-editor": CTDOM.DetailedHTMLProps<
+      "cf-code-editor": CFDOM.DetailedHTMLProps<
         CFCodeEditorAttributes<CFCodeEditorElement>,
         CFCodeEditorElement
       >;
-      "cf-screen": CTDOM.DetailedHTMLProps<
-        CTHTMLAttributes<CFScreenElement>,
+      "cf-screen": CFDOM.DetailedHTMLProps<
+        CFHTMLAttributes<CFScreenElement>,
         CFScreenElement
       >;
-      "cf-autostart": CTDOM.DetailedHTMLProps<
+      "cf-autostart": CFDOM.DetailedHTMLProps<
         CFAutostartAttributes<CFAutostartElement>,
         CFAutostartElement
       >;
-      "cf-autolayout": CTDOM.DetailedHTMLProps<
+      "cf-autolayout": CFDOM.DetailedHTMLProps<
         CFAutoLayoutAttributes<CFAutoLayoutElement>,
         CFAutoLayoutElement
       >;
-      "cf-button": CTDOM.DetailedHTMLProps<
+      "cf-button": CFDOM.DetailedHTMLProps<
         CFButtonAttributes<CFButtonElement>,
         CFButtonElement
       >;
-      "cf-copy-button": CTDOM.DetailedHTMLProps<
+      "cf-copy-button": CFDOM.DetailedHTMLProps<
         CFCopyButtonAttributes<CFCopyButtonElement>,
         CFCopyButtonElement
       >;
-      "cf-fab": CTDOM.DetailedHTMLProps<
+      "cf-fab": CFDOM.DetailedHTMLProps<
         CFFabAttributes<CFFabElement>,
         CFFabElement
       >;
-      "cf-modal": CTDOM.DetailedHTMLProps<
+      "cf-modal": CFDOM.DetailedHTMLProps<
         CFModalAttributes<CFModalElement>,
         CFModalElement
       >;
-      "cf-modal-provider": CTDOM.DetailedHTMLProps<
+      "cf-modal-provider": CFDOM.DetailedHTMLProps<
         CFModalProviderAttributes<CFModalProviderElement>,
         CFModalProviderElement
       >;
-      "cf-file-download": CTDOM.DetailedHTMLProps<
+      "cf-file-download": CFDOM.DetailedHTMLProps<
         CFFileDownloadAttributes<CFFileDownloadElement>,
         CFFileDownloadElement
       >;
-      "cf-chevron-button": CTDOM.DetailedHTMLProps<
+      "cf-chevron-button": CFDOM.DetailedHTMLProps<
         CFChevronButtonAttributes<CFChevronButtonElement>,
         CFChevronButtonElement
       >;
-      "cf-message-input": CTDOM.DetailedHTMLProps<
+      "cf-message-input": CFDOM.DetailedHTMLProps<
         CFMessageInputAttributes<CFMessageInputElement>,
         CFMessageInputElement
       >;
-      "cf-chat-message": CTDOM.DetailedHTMLProps<
+      "cf-chat-message": CFDOM.DetailedHTMLProps<
         CFChatMessageAttributes<CFChatMessageElement>,
         CFChatMessageElement
       >;
-      "cf-markdown": CTDOM.DetailedHTMLProps<
+      "cf-markdown": CFDOM.DetailedHTMLProps<
         CFMarkdownAttributes<CFMarkdownElement>,
         CFMarkdownElement
       >;
-      "cf-card": CTDOM.DetailedHTMLProps<
+      "cf-card": CFDOM.DetailedHTMLProps<
         CFCardAttributes<CFCardElement>,
         CFCardElement
       >;
-      "cf-router": CTDOM.DetailedHTMLProps<
+      "cf-router": CFDOM.DetailedHTMLProps<
         CFRouterAttributes<CFRouterElement>,
         CFRouterElement
       >;
-      "cf-link": CTDOM.DetailedHTMLProps<
+      "cf-link": CFDOM.DetailedHTMLProps<
         CFLinkAttributes<CFLinkElement>,
         CFLinkElement
       >;
-      "cf-calendar": CTDOM.DetailedHTMLProps<
+      "cf-calendar": CFDOM.DetailedHTMLProps<
         CFCalendarAttributes<CFCalendarElement>,
         CFCalendarElement
       >;
-      "cf-question": CTDOM.DetailedHTMLProps<
+      "cf-question": CFDOM.DetailedHTMLProps<
         CFQuestionAttributes<CFQuestionElement>,
         CFQuestionElement
       >;
-      "cf-toolbar": CTDOM.DetailedHTMLProps<
+      "cf-toolbar": CFDOM.DetailedHTMLProps<
         CFToolbarAttributes<CFToolbarElement>,
         CFToolbarElement
       >;
-      "cf-kbd": CTDOM.DetailedHTMLProps<
-        CTHTMLAttributes<CFKbdElement>,
+      "cf-kbd": CFDOM.DetailedHTMLProps<
+        CFHTMLAttributes<CFKbdElement>,
         CFKbdElement
       >;
-      "cf-keybind": CTDOM.DetailedHTMLProps<
+      "cf-keybind": CFDOM.DetailedHTMLProps<
         CFKeybindAttributes<CFKeybindElement>,
         CFKeybindElement
       >;
-      "cf-render": CTDOM.DetailedHTMLProps<
+      "cf-render": CFDOM.DetailedHTMLProps<
         CFRenderAttributes<CFRenderElement>,
         CFRenderElement
       >;
-      "cf-cell-context": CTDOM.DetailedHTMLProps<
+      "cf-cell-context": CFDOM.DetailedHTMLProps<
         CFCellContextAttributes<CFCellContextElement>,
         CFCellContextElement
       >;
-      "cf-drag-source": CTDOM.DetailedHTMLProps<
+      "cf-drag-source": CFDOM.DetailedHTMLProps<
         CFDragSourceAttributes<CFDragSourceElement>,
         CFDragSourceElement
       >;
-      "cf-drop-zone": CTDOM.DetailedHTMLProps<
+      "cf-drop-zone": CFDOM.DetailedHTMLProps<
         CFDropZoneAttributes<CFDropZoneElement>,
         CFDropZoneElement
       >;
-      "cf-vscroll": CTDOM.DetailedHTMLProps<
+      "cf-vscroll": CFDOM.DetailedHTMLProps<
         CFScrollAttributes<CFVScrollElement>,
         CFVScrollElement
       >;
-      "cf-hscroll": CTDOM.DetailedHTMLProps<
+      "cf-hscroll": CFDOM.DetailedHTMLProps<
         CFScrollAttributes<CFHScrollElement>,
         CFHScrollElement
       >;
-      "cf-table": CTDOM.DetailedHTMLProps<
+      "cf-table": CFDOM.DetailedHTMLProps<
         CFTableAttributes<CFTableElement>,
         CFTableElement
       >;
-      "cf-tags": CTDOM.DetailedHTMLProps<
+      "cf-tags": CFDOM.DetailedHTMLProps<
         CFTagsAttributes<CFTagsElement>,
         CFTagsElement
       >;
-      "cf-prompt-input": CTDOM.DetailedHTMLProps<
+      "cf-prompt-input": CFDOM.DetailedHTMLProps<
         CFPromptInputAttributes<CFPromptInputElement>,
         CFPromptInputElement
       >;
-      "cf-chat": CTDOM.DetailedHTMLProps<
+      "cf-chat": CFDOM.DetailedHTMLProps<
         CFChatAttributes<CFChatElement>,
         CFChatElement
       >;
-      "cf-message-beads": CTDOM.DetailedHTMLProps<
+      "cf-message-beads": CFDOM.DetailedHTMLProps<
         CFMessageBeadsAttributes<CFMessageBeadsElement>,
         CFMessageBeadsElement
       >;
-      "cf-attachments-bar": CTDOM.DetailedHTMLProps<
+      "cf-attachments-bar": CFDOM.DetailedHTMLProps<
         CFAttachmentsBarAttributes<CFAttachmentsBarElement>,
         CFAttachmentsBarElement
       >;
-      "cf-canvas": CTDOM.DetailedHTMLProps<
+      "cf-canvas": CFDOM.DetailedHTMLProps<
         CFCanvasAttributes<CFCanvasElement>,
         CFCanvasElement
       >;
-      "cf-draggable": CTDOM.DetailedHTMLProps<
+      "cf-draggable": CFDOM.DetailedHTMLProps<
         CFDraggableAttributes<CFDraggableElement>,
         CFDraggableElement
       >;
-      "cf-alert": CTDOM.DetailedHTMLProps<
+      "cf-alert": CFDOM.DetailedHTMLProps<
         CFAlertAttributes<CFAlertElement>,
         CFAlertElement
       >;
-      "os-container": CTDOM.DetailedHTMLProps<
-        CTHTMLAttributes<CTHTMLElement>,
-        CTHTMLElement
+      "os-container": CFDOM.DetailedHTMLProps<
+        CFHTMLAttributes<CFHTMLElement>,
+        CFHTMLElement
       >;
-      "cf-piece": CTDOM.DetailedHTMLProps<
+      "cf-piece": CFDOM.DetailedHTMLProps<
         CFPieceAttributes<CFPieceElement>,
         CFPieceElement
       >;
-      "cf-voice-input": CTDOM.DetailedHTMLProps<
+      "cf-voice-input": CFDOM.DetailedHTMLProps<
         CFVoiceInputAttributes<CFVoiceInputElement>,
         CFVoiceInputElement
       >;
-      "cf-audio-visualizer": CTDOM.DetailedHTMLProps<
+      "cf-audio-visualizer": CFDOM.DetailedHTMLProps<
         CFAudioVisualizerAttributes<CFAudioVisualizerElement>,
         CFAudioVisualizerElement
       >;
-      "cf-location": CTDOM.DetailedHTMLProps<
+      "cf-location": CFDOM.DetailedHTMLProps<
         CFLocationAttributes<CFLocationElement>,
         CFLocationElement
       >;
-      "cf-fragment": CTDOM.DetailedHTMLProps<
-        CTHTMLAttributes<CFFragmentElement>,
+      "cf-fragment": CFDOM.DetailedHTMLProps<
+        CFHTMLAttributes<CFFragmentElement>,
         CFFragmentElement
       >;
-      "cf-iframe": CTDOM.DetailedHTMLProps<
+      "cf-iframe": CFDOM.DetailedHTMLProps<
         CFIframeAttributes<CFIFrameElement>,
         CFIFrameElement
       >;
-      "cf-updater": CTDOM.DetailedHTMLProps<
+      "cf-updater": CFDOM.DetailedHTMLProps<
         CFUpdaterAttributes<CFUpdaterElement>,
         CFUpdaterElement
       >;
-      "cf-google-oauth": CTDOM.DetailedHTMLProps<
+      "cf-google-oauth": CFDOM.DetailedHTMLProps<
         CFGoogleOAuthAttributes<CFGoogleOAuthElement>,
         CFGoogleOAuthElement
       >;
-      "cf-oauth": CTDOM.DetailedHTMLProps<
+      "cf-oauth": CFDOM.DetailedHTMLProps<
         CFOAuthAttributes<CFOAuthElement>,
         CFOAuthElement
       >;
-      "cf-plaid-link": CTDOM.DetailedHTMLProps<
+      "cf-plaid-link": CFDOM.DetailedHTMLProps<
         CFPlaidLinkAttributes<CFPlaidLinkElement>,
         CFPlaidLinkElement
       >;
-      "cf-webhook": CTDOM.DetailedHTMLProps<
+      "cf-webhook": CFDOM.DetailedHTMLProps<
         CFWebhookAttributes<CFWebhookElement>,
         CFWebhookElement
       >;
-      "cf-secret-viewer": CTDOM.DetailedHTMLProps<
+      "cf-secret-viewer": CFDOM.DetailedHTMLProps<
         CFSecretViewerAttributes<CFSecretViewerElement>,
         CFSecretViewerElement
       >;
-      "cf-hstack": CTDOM.DetailedHTMLProps<
+      "cf-hstack": CFDOM.DetailedHTMLProps<
         CFStackAttributes<CFHStackElement>,
         CFHStackElement
       >;
-      "cf-vstack": CTDOM.DetailedHTMLProps<
+      "cf-vstack": CFDOM.DetailedHTMLProps<
         CFStackAttributes<CFVStackElement>,
         CFVStackElement
       >;
 
       // Tab components
-      "cf-tabs": CTDOM.DetailedHTMLProps<
+      "cf-tabs": CFDOM.DetailedHTMLProps<
         CFTabsAttributes<CFTabsElement>,
         CFTabsElement
       >;
-      "cf-tab": CTDOM.DetailedHTMLProps<
+      "cf-tab": CFDOM.DetailedHTMLProps<
         CFTabAttributes<CFTabElement>,
         CFTabElement
       >;
-      "cf-tab-list": CTDOM.DetailedHTMLProps<
+      "cf-tab-list": CFDOM.DetailedHTMLProps<
         CFTabListAttributes<CFTabListElement>,
         CFTabListElement
       >;
-      "cf-tab-panel": CTDOM.DetailedHTMLProps<
+      "cf-tab-panel": CFDOM.DetailedHTMLProps<
         CFTabPanelAttributes<CFTabPanelElement>,
         CFTabPanelElement
       >;
 
       // Accordion components
-      "cf-accordion": CTDOM.DetailedHTMLProps<
+      "cf-accordion": CFDOM.DetailedHTMLProps<
         CFAccordionAttributes<CFAccordionElement>,
         CFAccordionElement
       >;
-      "cf-accordion-item": CTDOM.DetailedHTMLProps<
+      "cf-accordion-item": CFDOM.DetailedHTMLProps<
         CFAccordionItemAttributes<CFAccordionItemElement>,
         CFAccordionItemElement
       >;
 
       // Form components
-      "cf-form": CTDOM.DetailedHTMLProps<
+      "cf-form": CFDOM.DetailedHTMLProps<
         CFFormAttributes<CFFormElement>,
         CFFormElement
       >;
-      "cf-slider": CTDOM.DetailedHTMLProps<
+      "cf-slider": CFDOM.DetailedHTMLProps<
         CFSliderAttributes<CFSliderElement>,
         CFSliderElement
       >;
-      "cf-switch": CTDOM.DetailedHTMLProps<
+      "cf-switch": CFDOM.DetailedHTMLProps<
         CFSwitchAttributes<CFSwitchElement>,
         CFSwitchElement
       >;
-      "cf-svg": CTDOM.DetailedHTMLProps<
+      "cf-svg": CFDOM.DetailedHTMLProps<
         CFSvgAttributes<CFSvgElement>,
         CFSvgElement
       >;
-      "cf-toggle": CTDOM.DetailedHTMLProps<
+      "cf-toggle": CFDOM.DetailedHTMLProps<
         CFToggleAttributes<CFToggleElement>,
         CFToggleElement
       >;
-      "cf-toggle-group": CTDOM.DetailedHTMLProps<
+      "cf-toggle-group": CFDOM.DetailedHTMLProps<
         CFToggleGroupAttributes<CFToggleGroupElement>,
         CFToggleGroupElement
       >;
-      "cf-radio": CTDOM.DetailedHTMLProps<
+      "cf-radio": CFDOM.DetailedHTMLProps<
         CFRadioAttributes<CFRadioElement>,
         CFRadioElement
       >;
-      "cf-input-otp": CTDOM.DetailedHTMLProps<
+      "cf-input-otp": CFDOM.DetailedHTMLProps<
         CFInputOTPAttributes<CFInputOTPElement>,
         CFInputOTPElement
       >;
-      "cf-label": CTDOM.DetailedHTMLProps<
+      "cf-label": CFDOM.DetailedHTMLProps<
         CFLabelAttributes<CFLabelElement>,
         CFLabelElement
       >;
 
       // Display components
-      "cf-badge": CTDOM.DetailedHTMLProps<
+      "cf-badge": CFDOM.DetailedHTMLProps<
         CFBadgeAttributes<CFBadgeElement>,
         CFBadgeElement
       >;
-      "cf-chip": CTDOM.DetailedHTMLProps<
+      "cf-chip": CFDOM.DetailedHTMLProps<
         CFChipAttributes<CFChipElement>,
         CFChipElement
       >;
-      "cf-progress": CTDOM.DetailedHTMLProps<
+      "cf-progress": CFDOM.DetailedHTMLProps<
         CFProgressAttributes<CFProgressElement>,
         CFProgressElement
       >;
-      "cf-skeleton": CTDOM.DetailedHTMLProps<
+      "cf-skeleton": CFDOM.DetailedHTMLProps<
         CFSkeletonAttributes<CFSkeletonElement>,
         CFSkeletonElement
       >;
-      "cf-separator": CTDOM.DetailedHTMLProps<
+      "cf-separator": CFDOM.DetailedHTMLProps<
         CFSeparatorAttributes<CFSeparatorElement>,
         CFSeparatorElement
       >;
-      "cf-tile": CTDOM.DetailedHTMLProps<
+      "cf-tile": CFDOM.DetailedHTMLProps<
         CFTileAttributes<CFTileElement>,
         CFTileElement
       >;
 
       // Layout components
-      "cf-grid": CTDOM.DetailedHTMLProps<
+      "cf-grid": CFDOM.DetailedHTMLProps<
         CFGridAttributes<CFGridElement>,
         CFGridElement
       >;
-      "cf-hgroup": CTDOM.DetailedHTMLProps<
+      "cf-hgroup": CFDOM.DetailedHTMLProps<
         CFHGroupAttributes<CFHGroupElement>,
         CFHGroupElement
       >;
-      "cf-vgroup": CTDOM.DetailedHTMLProps<
+      "cf-vgroup": CFDOM.DetailedHTMLProps<
         CFVGroupAttributes<CFVGroupElement>,
         CFVGroupElement
       >;
-      "cf-aspect-ratio": CTDOM.DetailedHTMLProps<
+      "cf-aspect-ratio": CFDOM.DetailedHTMLProps<
         CFAspectRatioAttributes<CFAspectRatioElement>,
         CFAspectRatioElement
       >;
 
       // Resizable components
-      "cf-resizable-panel": CTDOM.DetailedHTMLProps<
+      "cf-resizable-panel": CFDOM.DetailedHTMLProps<
         CFResizablePanelAttributes<CFResizablePanelElement>,
         CFResizablePanelElement
       >;
-      "cf-resizable-panel-group": CTDOM.DetailedHTMLProps<
+      "cf-resizable-panel-group": CFDOM.DetailedHTMLProps<
         CFResizablePanelGroupAttributes<CFResizablePanelGroupElement>,
         CFResizablePanelGroupElement
       >;
-      "cf-resizable-handle": CTDOM.DetailedHTMLProps<
+      "cf-resizable-handle": CFDOM.DetailedHTMLProps<
         CFResizableHandleAttributes<CFResizableHandleElement>,
         CFResizableHandleElement
       >;
 
       // Other components
-      "cf-scroll-area": CTDOM.DetailedHTMLProps<
+      "cf-scroll-area": CFDOM.DetailedHTMLProps<
         CFScrollAreaAttributes<CFScrollAreaElement>,
         CFScrollAreaElement
       >;
-      "cf-tool-call": CTDOM.DetailedHTMLProps<
+      "cf-tool-call": CFDOM.DetailedHTMLProps<
         CFToolCallAttributes<CFToolCallElement>,
         CFToolCallElement
       >;
 
       // Map component
-      "cf-map": CTDOM.DetailedHTMLProps<
+      "cf-map": CFDOM.DetailedHTMLProps<
         CFMapAttributes<CFMapElement>,
         CFMapElement
       >;
 
       // Chart components
-      "cf-chart": CTDOM.DetailedHTMLProps<
+      "cf-chart": CFDOM.DetailedHTMLProps<
         CFChartAttributes<CFChartElement>,
         CFChartElement
       >;
-      "cf-line-mark": CTDOM.DetailedHTMLProps<
+      "cf-line-mark": CFDOM.DetailedHTMLProps<
         CFLineMarkAttributes<CFLineMarkElement>,
         CFLineMarkElement
       >;
-      "cf-area-mark": CTDOM.DetailedHTMLProps<
+      "cf-area-mark": CFDOM.DetailedHTMLProps<
         CFAreaMarkAttributes<CFAreaMarkElement>,
         CFAreaMarkElement
       >;
-      "cf-bar-mark": CTDOM.DetailedHTMLProps<
+      "cf-bar-mark": CFDOM.DetailedHTMLProps<
         CFBarMarkAttributes<CFBarMarkElement>,
         CFBarMarkElement
       >;
-      "cf-dot-mark": CTDOM.DetailedHTMLProps<
+      "cf-dot-mark": CFDOM.DetailedHTMLProps<
         CFDotMarkAttributes<CFDotMarkElement>,
         CFDotMarkElement
       >;

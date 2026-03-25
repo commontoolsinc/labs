@@ -17,7 +17,7 @@ export class XSpinnerElement extends LitElement {
       animation: rotate 1s infinite;
       height: 50px;
       width: 50px;
-      /* CT ADDITIONS */
+      /* Common Fabric additions */
       user-select: none;
       margin: 0 auto;
       display: block;

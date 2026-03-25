@@ -72,7 +72,7 @@ navigates to it (creating it if it doesn't exist yet).
 
 The home space's default pattern is the home experience itself — by default,
 `/api/patterns/system/home.tsx`. You can replace it with a custom pattern using
-the CT CLI:
+the CF CLI:
 
 ```bash
 # Deploy a custom home pattern

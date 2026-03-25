@@ -41,7 +41,7 @@ The same env vars work for all entry points:
   `felt.config.ts` defines, read from globals in `src/lib/env.ts`.
 - **Background charm service** (`packages/background-charm-service`): parsed in
   `src/env.ts` and threaded to worker processes via IPC.
-- **CT CLI** (`packages/cli`): the `ct` CLI reads experimental flags from the
+- **CF CLI** (`packages/cli`): the `cf` CLI reads experimental flags from the
   environment when constructing its `Runtime` instance.
 
 **Important:** Because the shell uses build-time injection, toggling flags for

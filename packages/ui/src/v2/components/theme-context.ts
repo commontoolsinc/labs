@@ -145,7 +145,7 @@ export function getSemanticSpacing(
   const baseValue = BASE_SPACING[size];
   const scaledValue = baseValue * scale;
 
-  // Map to closest ct-spacing level for compatibility
+  // Map to the closest spacing level for compatibility
   const spacingLevel = Math.min(4, Math.round(scaledValue * 4));
   const fallback = `${scaledValue}rem`;
 
@@ -507,6 +507,6 @@ export function applyThemeToElement(
 }
 
 /**
- * Context for sharing theme across CT components
+ * Context for sharing theme across Common Fabric components
  */
 export const cfThemeContext = createContext<CFTheme>("cf-theme");

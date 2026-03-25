@@ -189,8 +189,8 @@ packages/ui/
 ### Event Handling
 
 ```javascript
-// V2 events (ct- prefix)
-document.querySelector("cf-button").addEventListener("ct-click", (e) => {
+// V2 events (cf- prefix)
+document.querySelector("cf-button").addEventListener("cf-click", (e) => {
   console.log("Button clicked:", e.detail);
 });
 

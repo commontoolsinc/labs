@@ -61,10 +61,10 @@ export interface ModalManager {
 }
 
 /**
- * Context for sharing ModalManager across CT components
+ * Context for sharing ModalManager across Common Fabric components
  */
 export const modalContext = createContext<ModalManager | undefined>(
-  Symbol("ct.modal-manager"),
+  Symbol("cf.modal-manager"),
 );
 
 /** Base z-index for modals (above cf-fab's 999) */

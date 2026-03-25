@@ -8,7 +8,7 @@ const logger = getLogger("shell.navigation", {
 
 export type NavigationCommand = AppView;
 
-const NavigationEventName = "ct-navigate";
+const NavigationEventName = "cf-navigate";
 
 class NavigationEvent extends CustomEvent<NavigationCommand> {
   command: NavigationCommand;
@@ -22,7 +22,7 @@ export function navigate(command: NavigationCommand) {
   globalThis.dispatchEvent(new NavigationEvent(command));
 }
 
-const UpdatePageTitleEventName = "ct-update-page-title";
+const UpdatePageTitleEventName = "cf-update-page-title";
 
 class UpdatePageTitleEvent extends CustomEvent<string> {
   title: string;

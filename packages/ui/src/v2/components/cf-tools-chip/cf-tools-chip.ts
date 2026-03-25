@@ -554,7 +554,7 @@ export class CFToolsChip extends BaseElement {
         el.style.inset = "0 auto auto 0";
         el.style.zIndex = "1000";
         el.style.pointerEvents = "none"; // enable internal panel to control
-        el.dataset.ctToolsChipOverlay = "";
+        el.dataset.cfToolsChipOverlay = "";
         document.body.appendChild(el);
         this.#overlay = el;
         applyThemeToElement(el, this.theme ?? defaultTheme);
