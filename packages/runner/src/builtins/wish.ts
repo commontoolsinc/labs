@@ -614,7 +614,7 @@ function errorUI(message: string): VNode {
 }
 
 function cellLinkUI(cell: Cell<unknown>): VNode {
-  return h("ct-cell-link", { $cell: cell });
+  return h("cf-cell-link", { $cell: cell });
 }
 
 const TARGET_SCHEMA = toDeepFrozenSchema(
@@ -884,7 +884,7 @@ export function wish(
 
           if (uniqueResultCells.length === 1 || headless) {
             // Single result or headless mode - fast path with unified shape
-            // Prefer the result cell's own [UI]; fall back to ct-cell-link
+            // Prefer the result cell's own [UI]; fall back to cf-cell-link
             const resultUI = uniqueResultCells[0].key(UI).get();
             wishFlowLogger.debug(`wish/send-fast/${queryKey}`, () => [
               `[WISH FAST PATH] source=${sourceKey}`,

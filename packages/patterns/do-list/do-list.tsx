@@ -302,7 +302,7 @@ const DoItemCard = pattern<
             >
               {attachments.map((att: any) => (
                 <cf-hstack gap="0" align="center">
-                  <ct-cell-link $cell={att} />
+                  <cf-cell-link $cell={att} />
                   <cf-button
                     variant="ghost"
                     size="sm"

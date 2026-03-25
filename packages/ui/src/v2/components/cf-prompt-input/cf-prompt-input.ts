@@ -16,7 +16,7 @@ import {
 import { MentionController } from "../../core/mention-controller.ts";
 import { createCellController } from "../../core/cell-controller.ts";
 import "../cf-button/cf-button.ts";
-import "../ct-chip/ct-chip.ts";
+import "../cf-chip/cf-chip.ts";
 import "../ct-voice-input/ct-voice-input.ts";
 
 /**
@@ -866,16 +866,16 @@ export class CFPromptInput extends BaseElement {
             <div class="pills-list">
               ${attachmentsArray.map((attachment) =>
                 html`
-                  <ct-chip
+                  <cf-chip
                     variant="${this._getAttachmentVariant(attachment.type)}"
                     removable
-                    @ct-remove="${() => this.removeAttachment(attachment.id)}"
+                    @cf-remove="${() => this.removeAttachment(attachment.id)}"
                   >
                     ${attachment.name}
                     <span slot="icon">${this._getAttachmentIcon(
                       attachment.type,
                     )}</span>
-                  </ct-chip>
+                  </cf-chip>
                 `
               )}
             </div>

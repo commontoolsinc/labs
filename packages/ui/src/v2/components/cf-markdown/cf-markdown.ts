@@ -6,7 +6,7 @@ import { classMap } from "lit/directives/class-map.js";
 import { marked } from "marked";
 import { BaseElement } from "../../core/base-element.ts";
 import "../cf-copy-button/cf-copy-button.ts";
-import "../ct-cell-link/ct-cell-link.ts";
+import "../cf-cell-link/cf-cell-link.ts";
 import {
   applyThemeToElement,
   type CTTheme,
@@ -417,7 +417,7 @@ export class CFMarkdown extends BaseElement {
     // Wrap code blocks with copy buttons
     renderedHtml = this._wrapCodeBlocksWithCopyButtons(renderedHtml);
 
-    // Replace cell links with ct-cell-link
+    // Replace cell links with cf-cell-link
     renderedHtml = this._replaceCellLinks(renderedHtml);
 
     // TODO(CT-1088): XSS VULNERABILITY - This component uses unsafeHTML without sanitization!
@@ -427,7 +427,7 @@ export class CFMarkdown extends BaseElement {
     //
     // Options to fix this:
     // 1. Add DOMPurify back with proper lockfile management
-    // 2. Implement our own sanitizer that allows our custom elements (ct-cell-link, cf-copy-button)
+    // 2. Implement our own sanitizer that allows our custom elements (cf-cell-link, cf-copy-button)
     // 3. Find an alternative sanitization library
     //
     // For now, only use this component with trusted markdown content!
@@ -444,9 +444,9 @@ export class CFMarkdown extends BaseElement {
     return html.replace(
       /<a href="(\/[a-zA-Z0-9]+:[^"]+)">([^<]*)<\/a>/g,
       (_match, link, text) => {
-        return `<ct-cell-link link="${link}" label="${
+        return `<cf-cell-link link="${link}" label="${
           this._escapeForAttribute(text)
-        }"></ct-cell-link>`;
+        }"></cf-cell-link>`;
       },
     );
   }

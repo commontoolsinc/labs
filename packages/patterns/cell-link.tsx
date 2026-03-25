@@ -13,8 +13,8 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
       [NAME]: title,
       [UI]: (
         <div>
-          <h1>ct-cell-link test</h1>
-          <ct-cell-link $cell={note} />
+          <h1>cf-cell-link test</h1>
+          <cf-cell-link $cell={note} />
         </div>
       ),
     };

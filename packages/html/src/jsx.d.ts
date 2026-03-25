@@ -2856,8 +2856,8 @@ type OutlinerNode = {
 };
 
 interface CTOutlinerElement extends CTHTMLElement {}
-interface CTCellLinkElement extends CTHTMLElement {}
-interface CTSpaceLinkElement extends CTHTMLElement {}
+interface CFCellLinkElement extends CTHTMLElement {}
+interface CFSpaceLinkElement extends CTHTMLElement {}
 interface CFLoaderElement extends CTHTMLElement {}
 interface CFInputElement extends CTHTMLElement {}
 interface CTLinkPreviewElement extends CTHTMLElement {}
@@ -2961,7 +2961,7 @@ interface CFLabelElement extends CTHTMLElement {}
 
 // Display components
 interface CFBadgeElement extends CTHTMLElement {}
-interface CTChipElement extends CTHTMLElement {}
+interface CFChipElement extends CTHTMLElement {}
 interface CFProgressElement extends CTHTMLElement {}
 interface CFSkeletonElement extends CTHTMLElement {}
 interface CFSeparatorElement extends CTHTMLElement {}
@@ -3300,13 +3300,13 @@ interface CTOutlinerAttributes<T> extends CTHTMLAttributes<T> {
   "oncharm-link-click"?: EventHandler<{ charm: Cell<Charm> }>;
 }
 
-interface CTCellLinkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCellLinkAttributes<T> extends CTHTMLAttributes<T> {
   "link"?: string;
   "$cell": CellLike<any>;
   "spaceName"?: string;
 }
 
-interface CTSpaceLinkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSpaceLinkAttributes<T> extends CTHTMLAttributes<T> {
   "spaceName"?: string;
   "spaceDid"?: string;
   "label"?: string;
@@ -3987,7 +3987,7 @@ interface CFBadgeAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-remove"?: EventHandler<{}>;
 }
 
-interface CTChipAttributes<T> extends CTHTMLAttributes<T> {
+interface CFChipAttributes<T> extends CTHTMLAttributes<T> {
   "label"?: string | CellLike<string>;
   "variant"?:
     | "default"
@@ -3996,8 +3996,8 @@ interface CTChipAttributes<T> extends CTHTMLAttributes<T> {
     | CellLike<"default" | "primary" | "accent">;
   "removable"?: boolean | CellLike<boolean>;
   "interactive"?: boolean | CellLike<boolean>;
-  "onct-remove"?: EventHandler<{}>;
-  "onct-click"?: EventHandler<{}>;
+  "oncf-remove"?: EventHandler<{}>;
+  "oncf-click"?: EventHandler<{}>;
 }
 
 interface CFProgressAttributes<T> extends CTHTMLAttributes<T> {
@@ -4626,13 +4626,13 @@ declare global {
 
     interface IntrinsicElements extends DOMIntrinsicElements {
       //[elemName: string]: any;
-      "ct-cell-link": CTDOM.DetailedHTMLProps<
-        CTCellLinkAttributes<CTCellLinkElement>,
-        CTCellLinkElement
+      "cf-cell-link": CTDOM.DetailedHTMLProps<
+        CFCellLinkAttributes<CFCellLinkElement>,
+        CFCellLinkElement
       >;
-      "ct-space-link": CTDOM.DetailedHTMLProps<
-        CTSpaceLinkAttributes<CTSpaceLinkElement>,
-        CTSpaceLinkElement
+      "cf-space-link": CTDOM.DetailedHTMLProps<
+        CFSpaceLinkAttributes<CFSpaceLinkElement>,
+        CFSpaceLinkElement
       >;
       "ct-outliner": CTDOM.DetailedHTMLProps<
         CTOutlinerAttributes<CTOutlinerElement>,
@@ -4986,9 +4986,9 @@ declare global {
         CFBadgeAttributes<CFBadgeElement>,
         CFBadgeElement
       >;
-      "ct-chip": CTDOM.DetailedHTMLProps<
-        CTChipAttributes<CTChipElement>,
-        CTChipElement
+      "cf-chip": CTDOM.DetailedHTMLProps<
+        CFChipAttributes<CFChipElement>,
+        CFChipElement
       >;
       "cf-progress": CTDOM.DetailedHTMLProps<
         CFProgressAttributes<CFProgressElement>,

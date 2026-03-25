@@ -1,6 +1,6 @@
 import { type CellHandle, UI } from "@commonfabric/runtime-client";
 import { render } from "@commonfabric/html/client";
-import "../components/ct-cell-link/ct-cell-link.ts";
+import "../components/cf-cell-link/cf-cell-link.ts";
 
 /**
  * State information for an active drag operation.
@@ -172,7 +172,7 @@ export function subscribeToDrag(listener: DragListener): () => void {
 /**
  * Create a drag preview element for a cell.
  * Uses the cell's [UI] property if available, otherwise falls back to
- * a static ct-cell-link pill.
+ * a static cf-cell-link pill.
  *
  * @param cell - The CellHandle to create a preview for
  * @returns The preview element (not yet added to DOM)
@@ -210,7 +210,7 @@ export function createDragPreview(cell: CellHandle): HTMLElement {
 }
 
 function _addFallbackPreview(container: HTMLElement, cell: CellHandle) {
-  const link = document.createElement("ct-cell-link");
+  const link = document.createElement("cf-cell-link");
   link.cell = cell;
   link.isStatic = true;
   container.appendChild(link);

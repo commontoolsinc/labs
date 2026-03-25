@@ -1165,7 +1165,7 @@ type EventListOutput = {
 View and manage favorited pieces with tags. Uses the wish system to query
 `#favorites` and allows removing items.
 
-**Keywords:** favorites, wish, ct-cell-link
+**Keywords:** favorites, wish, cf-cell-link
 
 ### Input Schema
 

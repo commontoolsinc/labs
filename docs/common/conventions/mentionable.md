@@ -171,7 +171,7 @@ segments are encoded per RFC 6901 (JSON Pointer): `~` becomes `~0`, `/`
 becomes `~1`.
 
 `cf-markdown` converts rendered `<a href="/of:...">` elements into
-interactive `<ct-cell-link>` components.
+interactive `<cf-cell-link>` components.
 
 ### Wiki-links (`[[Name (id)]]`)
 
@@ -213,5 +213,5 @@ wish("#mentionable")  ──►  $mentionable prop    ──►  @link array
                                   │
                                   ▼
                               cf-markdown renders
-                              as ct-cell-link
+                              as cf-cell-link
 ```

@@ -218,7 +218,7 @@ export default pattern<Record<string, never>>((_) => {
                   }}
                 >
                   {entry.snapshot.name}:{" "}
-                  {entry.subject && <ct-cell-link $cell={entry.subject} />}
+                  {entry.subject && <cf-cell-link $cell={entry.subject} />}
                 </div>
               )}
 

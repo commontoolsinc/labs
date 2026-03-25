@@ -58,7 +58,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
     const hasBacklinks = computed(() => (note?.backlinks?.length ?? 0) > 0);
 
     // Convert [[Name (id)]] wiki-links to markdown links [Name](/of:id)
-    // cf-markdown will then convert these to clickable ct-cell-link components
+    // cf-markdown will then convert these to clickable cf-cell-link components
     // Use content prop if provided, otherwise fall back to note.content
     const processedContent = computed(() => {
       const raw = content?.get?.() ?? note?.content ?? "";
@@ -134,7 +134,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
             oncf-checkbox-change={handleCheckboxToggle}
           />
 
-          {/* Backlinks section - ct-chips at bottom */}
+          {/* Backlinks section - cf-chips at bottom */}
           <div
             style={{
               display: computed(() => (hasBacklinks ? "block" : "none")),
@@ -158,10 +158,10 @@ export default pattern<NoteMdInput, NoteMdOutput>(
             </span>
             <cf-hstack gap="2" wrap>
               {note?.backlinks?.map((piece) => (
-                <ct-chip
+                <cf-chip
                   label={piece?.[NAME] ?? "Untitled"}
                   interactive
-                  onct-click={handleBacklinkClick({ piece })}
+                  oncf-click={handleBacklinkClick({ piece })}
                 />
               ))}
             </cf-hstack>

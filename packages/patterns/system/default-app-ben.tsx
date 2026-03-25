@@ -317,7 +317,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
           <div slot="start">
             <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>
           </div>
-          <ct-cell-link
+          <cf-cell-link
             $cell={index}
             slot="end"
             style={{
@@ -328,8 +328,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             }}
           >
             Mentions
-          </ct-cell-link>
-          <ct-cell-link
+          </cf-cell-link>
+          <cf-cell-link
             $cell={summaryIdx}
             slot="end"
             style={{
@@ -340,8 +340,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             }}
           >
             Search
-          </ct-cell-link>
-          <ct-cell-link
+          </cf-cell-link>
+          <cf-cell-link
             $cell={knowledgeGraph}
             slot="end"
             style={{
@@ -352,8 +352,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             }}
           >
             Graph
-          </ct-cell-link>
-          <ct-cell-link
+          </cf-cell-link>
+          <cf-cell-link
             $cell={suggestionHistoryViewer}
             slot="end"
             style={{
@@ -364,7 +364,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             }}
           >
             History
-          </ct-cell-link>
+          </cf-cell-link>
 
           <div slot="end">
             <cf-button
@@ -451,7 +451,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             <div style={{ flex: "1", minWidth: "0" }}>
               <cf-vstack gap="4">
                 <h3 style={{ margin: "0", fontSize: "16px" }}>Do List</h3>
-                <ct-cell-link $cell={doList} />
+                <cf-cell-link $cell={doList} />
                 {doList.compactUI}
               </cf-vstack>
             </div>
@@ -462,7 +462,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                 <cf-vstack gap="4" style={{ marginBottom: "16px" }}>
                   <cf-hstack gap="2" align="center">
                     <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
-                    <ct-cell-link $cell={recentGridView} />
+                    <cf-cell-link $cell={recentGridView} />
                   </cf-hstack>
                   <ct-table full-width hover>
                     <tbody>
@@ -470,7 +470,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                         <tr>
                           <td>
                             <cf-cell-context $cell={piece}>
-                              <ct-cell-link $cell={piece} />
+                              <cf-cell-link $cell={piece} />
                             </cf-cell-context>
                           </td>
                         </tr>
@@ -484,7 +484,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
               <cf-vstack gap="4">
                 <cf-hstack gap="2" align="center">
                   <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
-                  <ct-cell-link $cell={gridView} />
+                  <cf-cell-link $cell={gridView} />
                 </cf-hstack>
 
                 <ct-table full-width hover>
@@ -500,7 +500,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                       const link = (
                         <ct-drag-source $cell={piece} type="note">
                           <cf-cell-context $cell={piece}>
-                            <ct-cell-link $cell={piece} />
+                            <cf-cell-link $cell={piece} />
                           </cf-cell-context>
                         </ct-drag-source>
                       );

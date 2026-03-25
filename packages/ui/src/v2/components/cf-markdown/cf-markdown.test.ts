@@ -36,7 +36,7 @@ describe("cf-markdown", () => {
     expect(rendered).toContain("<strong>world</strong>");
   });
 
-  it("should replace LLM-friendly links with ct-cell-link", () => {
+  it("should replace LLM-friendly links with cf-cell-link", () => {
     const el = new CFMarkdown();
     const link = "/of:bafyabc123/path";
     const markdown = `Check this [Link](${link})`;
@@ -44,7 +44,7 @@ describe("cf-markdown", () => {
     const rendered = (el as any)._renderMarkdown(markdown);
 
     expect(rendered).toContain(
-      `<ct-cell-link link="${link}" label="Link"></ct-cell-link>`,
+      `<cf-cell-link link="${link}" label="Link"></cf-cell-link>`,
     );
   });
 

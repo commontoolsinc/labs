@@ -11,7 +11,7 @@ interface ChipStoryOutput {
 
 export default pattern<ChipStoryInput, ChipStoryOutput>(() => {
   return {
-    [NAME]: "ct-chip Story",
+    [NAME]: "cf-chip Story",
     [UI]: (
       <div
         style={{
@@ -22,11 +22,11 @@ export default pattern<ChipStoryInput, ChipStoryOutput>(() => {
           flexWrap: "wrap",
         }}
       >
-        <ct-chip label="Default" />
-        <ct-chip label="Primary" variant="primary" />
-        <ct-chip label="Accent" variant="accent" />
-        <ct-chip label="Removable" removable />
-        <ct-chip label="Interactive" interactive />
+        <cf-chip label="Default" />
+        <cf-chip label="Primary" variant="primary" />
+        <cf-chip label="Accent" variant="accent" />
+        <cf-chip label="Removable" removable />
+        <cf-chip label="Interactive" interactive />
       </div>
     ),
     controls: (

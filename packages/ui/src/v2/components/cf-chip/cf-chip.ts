@@ -3,26 +3,26 @@ import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTChip - Reusable pill/chip component
+ * CFChip - Reusable pill/chip component
  *
- * @element ct-chip
+ * @element cf-chip
  *
  * @attr {string} label - Chip label text to display
  * @attr {string} variant - Visual variant: "default" | "primary" | "accent" (default: "default")
  * @attr {boolean} removable - Whether to show remove button (default: false)
  * @attr {boolean} interactive - Whether chip is clickable (default: false)
  *
- * @fires ct-remove - Fired when remove button is clicked
- * @fires ct-click - Fired when chip is clicked (if interactive)
+ * @fires cf-remove - Fired when remove button is clicked
+ * @fires cf-click - Fired when chip is clicked (if interactive)
  *
  * @slot icon - Optional icon before the label
  * @slot - Main content (overrides label)
  *
  * @example
- * <ct-chip label="Tools" variant="default"></ct-chip>
- * <ct-chip label="Alice" variant="primary" removable></ct-chip>
+ * <cf-chip label="Tools" variant="default"></cf-chip>
+ * <cf-chip label="Alice" variant="primary" removable></cf-chip>
  */
-export class CTChip extends BaseElement {
+export class CFChip extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -148,12 +148,12 @@ export class CTChip extends BaseElement {
 
     private _handleRemove(e: Event): void {
       e.stopPropagation();
-      this.emit("ct-remove");
+      this.emit("cf-remove");
     }
 
     private _handleClick(): void {
       if (this.interactive) {
-        this.emit("ct-click");
+        this.emit("cf-click");
       }
     }
 
@@ -180,4 +180,4 @@ export class CTChip extends BaseElement {
     }
   }
 
-  customElements.define("ct-chip", CTChip);
+  customElements.define("cf-chip", CFChip);

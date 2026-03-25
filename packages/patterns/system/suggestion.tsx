@@ -229,7 +229,7 @@ Use the user context above to personalize your suggestions when relevant.`;
           result: llmResult,
         })}
       />
-      <ct-cell-link
+      <cf-cell-link
         $cell={llmResult}
         style={computed(() => (llmResult ? "" : "display:none"))}
       />

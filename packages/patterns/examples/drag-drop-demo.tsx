@@ -100,7 +100,7 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
                   </div>
                 </ct-drag-source>
               ))}
-              <ct-cell-link $cell={counter} />
+              <cf-cell-link $cell={counter} />
             </div>
           </div>
 

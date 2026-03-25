@@ -391,7 +391,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
               {allEdges.map((edge) => (
                 <tr>
                   <td style={{ fontWeight: "500", whiteSpace: "nowrap" }}>
-                    <ct-cell-link $cell={edge.from} />
+                    <cf-cell-link $cell={edge.from} />
                   </td>
                   <td
                     style={{
@@ -403,7 +403,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
                     {edge.description}
                   </td>
                   <td style={{ fontWeight: "500", whiteSpace: "nowrap" }}>
-                    <ct-cell-link $cell={edge.to} />
+                    <cf-cell-link $cell={edge.to} />
                   </td>
                 </tr>
               ))}

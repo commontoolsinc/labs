@@ -55,7 +55,7 @@ export default pattern<Input>(({ pieces, [SELF]: self }) => {
               </div>
             </div>
             <div style={{ padding: "8px" }}>
-              <ct-cell-link $cell={piece} />
+              <cf-cell-link $cell={piece} />
             </div>
           </div>
         ))}

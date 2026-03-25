@@ -420,7 +420,7 @@ ${notesXml}
                       </cf-button>
                     </div>
                     {sortedEntries.map((entry: any) => (
-                      <ct-cell-link $cell={entry} />
+                      <cf-cell-link $cell={entry} />
                     ))}
                   </cf-vstack>
                 </cf-vstack>

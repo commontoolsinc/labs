@@ -2,7 +2,7 @@ import { css, html, PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
-import "../ct-chip/ct-chip.ts";
+import "../cf-chip/cf-chip.ts";
 import {
   type CellHandle,
   CellRef,
@@ -21,23 +21,23 @@ import {
 } from "../../core/drag-state.ts";
 
 /**
- * CTCellLink - Renders a link or cell as a clickable, draggable pill
+ * CFCellLink - Renders a link or cell as a clickable, draggable pill
  *
  * Every cell link is a drag source by default. Set `static` to suppress
  * drag behavior (used in drag previews to avoid recursion).
  *
- * @element ct-cell-link
+ * @element cf-cell-link
  *
  * @property {string} link - The serialized path to a cell (e.g. /of:bafy.../path)
  * @property {CellHandle} cell - The live Cell reference
  * @property {boolean} static - Suppress drag behavior
  *
  * @example
- * <ct-cell-link .link=${"/of:bafy.../path"}></ct-cell-link>
- * <ct-cell-link .cell=${myCell}></ct-cell-link>
- * <ct-cell-link .cell=${myCell} static></ct-cell-link>
+ * <cf-cell-link .link=${"/of:bafy.../path"}></cf-cell-link>
+ * <cf-cell-link .cell=${myCell}></cf-cell-link>
+ * <cf-cell-link .cell=${myCell} static></cf-cell-link>
  */
-export class CTCellLink extends BaseElement {
+export class CFCellLink extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -46,12 +46,12 @@ export class CTCellLink extends BaseElement {
         vertical-align: middle;
       }
 
-      ct-chip {
+      cf-chip {
         cursor: pointer;
         max-width: 100%;
       }
 
-      :host(.dragging) ct-chip {
+      :host(.dragging) cf-chip {
         cursor: grabbing;
         opacity: 0.5;
       }
@@ -328,22 +328,22 @@ export class CTCellLink extends BaseElement {
       : (this._handle || "Unknown Link");
 
     return html`
-      <ct-chip
+      <cf-chip
         variant="primary"
         interactive
         @pointerdown="${this._onPointerDown}"
         @click="${this._handleClick}"
       >
         ${displayText}
-      </ct-chip>
+      </cf-chip>
     `;
   }
 }
 
-globalThis.customElements.define("ct-cell-link", CTCellLink);
+globalThis.customElements.define("cf-cell-link", CFCellLink);
 
 declare global {
   interface HTMLElementTagNameMap {
-    "ct-cell-link": CTCellLink;
+    "cf-cell-link": CFCellLink;
   }
 }

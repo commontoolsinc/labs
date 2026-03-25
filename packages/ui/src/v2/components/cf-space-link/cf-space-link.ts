@@ -1,25 +1,25 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import "../ct-chip/ct-chip.ts";
+import "../cf-chip/cf-chip.ts";
 import type { DID } from "@commonfabric/identity";
 import { navigate } from "@commonfabric/shell/shared";
 
 /**
- * CTSpaceLink - Renders a space as a clickable pill that navigates to the space
+ * CFSpaceLink - Renders a space as a clickable pill that navigates to the space
  *
- * @element ct-space-link
+ * @element cf-space-link
  *
  * @property {string} spaceName - The human-readable space name (optional)
  * @property {DID} spaceDid - The space DID (required for navigation fallback)
  * @property {string} label - Custom display text (optional)
  *
  * @example
- * <ct-space-link spaceName="my-space"></ct-space-link>
- * <ct-space-link spaceDid="did:key:z6Mk..."></ct-space-link>
- * <ct-space-link spaceName="my-space" spaceDid="did:key:z6Mk..." label="My Space"></ct-space-link>
+ * <cf-space-link spaceName="my-space"></cf-space-link>
+ * <cf-space-link spaceDid="did:key:z6Mk..."></cf-space-link>
+ * <cf-space-link spaceName="my-space" spaceDid="did:key:z6Mk..." label="My Space"></cf-space-link>
  */
-export class CTSpaceLink extends BaseElement {
+export class CFSpaceLink extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -28,7 +28,7 @@ export class CTSpaceLink extends BaseElement {
         vertical-align: middle;
       }
 
-      ct-chip {
+      cf-chip {
         cursor: pointer;
         max-width: 100%;
       }
@@ -70,21 +70,21 @@ export class CTSpaceLink extends BaseElement {
       : "Unknown Space";
 
     return html`
-      <ct-chip
+      <cf-chip
         variant="primary"
         interactive
         @click="${this._handleClick}"
       >
         ${displayText}
-      </ct-chip>
+      </cf-chip>
     `;
   }
 }
 
-globalThis.customElements.define("ct-space-link", CTSpaceLink);
+globalThis.customElements.define("cf-space-link", CFSpaceLink);
 
 declare global {
   interface HTMLElementTagNameMap {
-    "ct-space-link": CTSpaceLink;
+    "cf-space-link": CFSpaceLink;
   }
 }

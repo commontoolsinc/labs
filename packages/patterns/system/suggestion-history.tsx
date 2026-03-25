@@ -98,7 +98,7 @@ const SuggestionHistory = pattern<Input, Output>(() => {
                 </div>
               </div>
               <div style={{ padding: "8px" }}>
-                <ct-cell-link $cell={entry.result} />
+                <cf-cell-link $cell={entry.result} />
                 <div
                   style={{
                     fontSize: "12px",

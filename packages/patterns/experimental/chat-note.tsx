@@ -489,13 +489,13 @@ const ChatNote = pattern<Input, Output>(
               >
                 In:
               </span>
-              <ct-chip
+              <cf-chip
                 label={computed(() => {
                   const p = (self as any).parentNotebook;
                   return p?.[NAME] ?? p?.title ?? "Notebook";
                 })}
                 interactive
-                onct-click={goToParent({ self })}
+                oncf-click={goToParent({ self })}
               />
             </cf-hstack>
 

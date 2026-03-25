@@ -396,10 +396,10 @@ const Note = pattern<NoteInput, NoteOutput>(
               >
                 In:
               </span>
-              <ct-chip
+              <cf-chip
                 label={parentNotebookLabel}
                 interactive
-                onct-click={goToParent}
+                oncf-click={goToParent}
               />
             </cf-hstack>
 

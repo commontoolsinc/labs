@@ -21,7 +21,7 @@ import MessageInputStory from "./cf-message-input-story.tsx";
 import ToolbarStory from "./cf-toolbar-story.tsx";
 import HeadingStory from "./cf-heading-story.tsx";
 import LabelStory from "./cf-label-story.tsx";
-import ChipStory from "./ct-chip-story.tsx";
+import ChipStory from "./cf-chip-story.tsx";
 import BadgeStory from "./cf-badge-story.tsx";
 import AlertStory from "./cf-alert-story.tsx";
 import SeparatorStory from "./cf-separator-story.tsx";

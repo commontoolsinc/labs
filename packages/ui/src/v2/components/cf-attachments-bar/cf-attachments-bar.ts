@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import "../ct-chip/ct-chip.ts";
+import "../cf-chip/cf-chip.ts";
 import { isCellHandle } from "@commonfabric/runtime-client";
 
 /**
@@ -117,19 +117,19 @@ export class CFAttachmentsBar extends BaseElement {
         ${this.pinnedCells.map(
           (attachment) =>
             html`
-              <ct-chip
+              <cf-chip
                 variant="${this._getVariant(attachment.type)}"
                 ?removable="${this.removable &&
                   (attachment.removable !== false)}"
                 interactive
-                @ct-remove="${(e: Event) =>
+                @cf-remove="${(e: Event) =>
                   this._handleRemove(attachment.id, e)}"
-                @ct-click="${() =>
+                @cf-click="${() =>
                   this._handleClick(attachment.id, attachment)}"
               >
                 ${attachment.name}
                 <span slot="icon">${this._getIcon(attachment.type)}</span>
-              </ct-chip>
+              </cf-chip>
             `,
         )}
       </div>

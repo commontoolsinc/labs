@@ -1010,7 +1010,7 @@ IMPORTANT:
                 {spaces.map((space) => (
                   <cf-hstack gap="2" align="center">
                     <div style={{ flex: "1" }}>
-                      <ct-space-link
+                      <cf-space-link
                         spaceName={space.name}
                         spaceDid={space.did}
                       />

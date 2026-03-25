@@ -133,10 +133,10 @@ const EntryRow = pattern<Entry, { [UI]: VNode }>(({ piece, backlinks }) => {
     [UI]: (
       <cf-card>
         <cf-vstack gap="1">
-          <ct-cell-link $cell={piece} />
+          <cf-cell-link $cell={piece} />
           <cf-hstack gap="2" style={{ paddingLeft: "8px", flexWrap: "wrap" }}>
             {backlinks.map((link) => (
-              <ct-cell-link
+              <cf-cell-link
                 $cell={link}
                 style={{
                   fontSize: "12px",

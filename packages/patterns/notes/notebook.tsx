@@ -978,10 +978,10 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                   >
                     In:
                   </span>
-                  <ct-chip
+                  <cf-chip
                     label={parentNotebookLabel}
                     interactive
-                    onct-click={goToParentAction}
+                    oncf-click={goToParentAction}
                   />
                 </cf-hstack>
                 {/* Spacer when no parent */}
@@ -1193,7 +1193,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                                     })}
                                   >
                                     <cf-cell-context $cell={note}>
-                                      <ct-chip
+                                      <cf-chip
                                         label={note?.[NAME] ??
                                           note?.title ??
                                           "Untitled"}

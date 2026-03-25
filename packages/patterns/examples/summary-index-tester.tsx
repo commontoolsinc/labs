@@ -65,7 +65,7 @@ export default pattern<Record<string, never>>((_) => {
               {filtered.map((entry) => (
                 <tr>
                   <td style={{ fontWeight: "500", whiteSpace: "nowrap" }}>
-                    <ct-cell-link $cell={entry.piece} />
+                    <cf-cell-link $cell={entry.piece} />
                   </td>
                   <td
                     style={{

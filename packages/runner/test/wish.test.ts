@@ -708,7 +708,7 @@ describe("wish built-in", () => {
       expect(missingResult?.error).toMatch(/no query/);
     });
 
-    it("returns cell UI or ct-cell-link fallback on success", async () => {
+    it("returns cell UI or cf-cell-link fallback on success", async () => {
       const spaceCell = runtime.getCell(space, space).withTx(tx);
       const spaceData = { testField: "space cell value" };
       spaceCell.set(spaceData);
@@ -743,10 +743,10 @@ describe("wish built-in", () => {
       expect(wishResult?.error).toBeUndefined();
       expect(wishResult?.result).toEqual(spaceData);
 
-      // Plain data has no [UI], so falls back to ct-cell-link
+      // Plain data has no [UI], so falls back to cf-cell-link
       const ui = wishResult?.[UI] as { type: string; name: string; props: any };
       expect(ui?.type).toEqual("vnode");
-      expect(ui?.name).toEqual("ct-cell-link");
+      expect(ui?.name).toEqual("cf-cell-link");
       expect(ui?.props?.$cell).toBeDefined();
     });
 

@@ -49,7 +49,7 @@ export default pattern<Record<string, never>>((_) => {
           <cf-cell-context $cell={item.cell}>
             <cf-vstack gap="2">
               <cf-hstack gap="2" align="center">
-                <ct-cell-link $cell={item.cell} spaceName={item.spaceName} />
+                <cf-cell-link $cell={item.cell} spaceName={item.spaceName} />
                 <cf-button
                   variant="destructive"
                   size="sm"
