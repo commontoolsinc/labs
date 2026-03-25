@@ -1021,3 +1021,149 @@ Deno.test("memory v2 server flushes session sync before returning conflicts", as
     await server.close();
   }
 });
+
+Deno.test("memory v2 server processes back-to-back websocket messages in receive order before returning conflicts", async () => {
+  const server = createServer(
+    "memory://memory-v2-server-conflict-receive-order",
+    20,
+  );
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-conflict-receive-order";
+  const originalTransact = server.transact.bind(server);
+  const releaseTx2 = Promise.withResolvers<void>();
+
+  (server as unknown as {
+    transact(
+      message: Parameters<Server["transact"]>[0],
+    ): ReturnType<Server["transact"]>;
+  }).transact = async (message) => {
+    if (message.requestId === "tx-2") {
+      await releaseTx2.promise;
+    }
+    return await originalTransact(message);
+  };
+
+  try {
+    await connection.receive(JSON.stringify({
+      type: "hello",
+      protocol: MEMORY_V2_PROTOCOL,
+    }));
+    shiftMessage(messages);
+
+    await connection.receive(JSON.stringify({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+    }));
+    const opened = assertResponse<{ sessionId: string }>(
+      shiftMessage(messages),
+    );
+    const sessionId = opened.ok!.sessionId;
+
+    await connection.receive(JSON.stringify({
+      type: "session.watch.set",
+      requestId: "watch-1",
+      space,
+      sessionId,
+      watches: [{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }],
+    }));
+    shiftMessage(messages);
+
+    await connection.receive(JSON.stringify({
+      type: "transact",
+      requestId: "tx-1",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { version: 1 } },
+        }],
+      },
+    }));
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-1");
+
+    const tx2 = connection.receive(JSON.stringify({
+      type: "transact",
+      requestId: "tx-2",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { version: 3 } },
+        }],
+      },
+    }));
+    await tick();
+
+    const tx3 = connection.receive(JSON.stringify({
+      type: "transact",
+      requestId: "tx-3",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 3,
+        reads: {
+          confirmed: [{
+            id: "of:doc:1",
+            path: [],
+            seq: 1,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { version: 2 } },
+        }],
+      },
+    }));
+
+    releaseTx2.resolve();
+    await Promise.all([tx2, tx3]);
+
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-2");
+
+    const effect = assertEffect(shiftMessage(messages));
+    assertEquals(effect.effect.toSeq, 2);
+    assertEquals(effect.effect.upserts, [{
+      branch: "",
+      id: "of:doc:1",
+      seq: 2,
+      doc: {
+        value: { version: 3 },
+      },
+    }]);
+
+    const rejected = assertResponse<any>(shiftMessage(messages));
+    assertEquals(rejected.requestId, "tx-3");
+    assertEquals(rejected.error, {
+      name: "ConflictError",
+      message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
+    });
+    assertEquals(messages.length, 0);
+  } finally {
+    await server.close();
+  }
+});

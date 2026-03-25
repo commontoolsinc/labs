@@ -287,6 +287,7 @@ class Connection {
   #ready = false;
   #closed = false;
   #sessionIds = new Set<string>();
+  #receiving: Promise<void> = Promise.resolve();
 
   constructor(private readonly server: Server, private readonly send: Send) {}
 
@@ -295,6 +296,15 @@ class Connection {
   }
 
   async receive(payload: string): Promise<void> {
+    const previous = this.#receiving;
+    const current = previous.catch(() => undefined).then(() =>
+      this.receiveOrdered(payload)
+    );
+    this.#receiving = current.then(() => undefined, () => undefined);
+    return await current;
+  }
+
+  private async receiveOrdered(payload: string): Promise<void> {
     if (this.#closed) {
       return;
     }
