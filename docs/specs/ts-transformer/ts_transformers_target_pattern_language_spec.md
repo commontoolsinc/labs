@@ -203,6 +203,124 @@ Why:
 - inner plain arrays stay plain JS and are not implicitly promoted into
   pattern-owned collection operators
 
+## 4.2 Common Relocation Patterns
+
+When an authored form is unsupported, the right answer is usually to move it
+into a context that already has a clear language meaning.
+
+### Top-Level Receiver Method -> JSX Or Computation Callback
+
+**Avoid**
+
+```ts
+pattern(({ user }) => ({
+  upper: user.name.toUpperCase(),
+}));
+```
+
+**Prefer**
+
+```ts
+pattern(({ user }) => ({
+  upper: computed(() => user.name.toUpperCase()),
+}));
+```
+
+or:
+
+```tsx
+pattern(({ user }) => ({
+  [UI]: <div>{user.name.toUpperCase()}</div>,
+}));
+```
+
+### Top-Level Eager `.get()` -> Helper Control Flow Or Computation Callback
+
+**Avoid**
+
+```ts
+pattern(({ count }) => ({
+  value: count.get(),
+}));
+```
+
+**Prefer**
+
+```ts
+pattern(({ count, show }) => ({
+  value: ifElse(show, count.get(), 0),
+}));
+```
+
+or:
+
+```ts
+pattern(({ count }) => ({
+  value: computed(() => count.get()),
+}));
+```
+
+### Bare Dynamic Key Access -> JSX, Callback, Or Structural Binding
+
+**Avoid**
+
+```ts
+pattern(({ selectedScopes, key }) => ({
+  value: selectedScopes[key],
+}));
+```
+
+**Prefer**
+
+```tsx
+pattern(({ selectedScopes, key }) => ({
+  [UI]: <div>{selectedScopes[key]}</div>,
+}));
+```
+
+or:
+
+```ts
+pattern(({ selectedScopes, key }) =>
+  computed(() => selectedScopes[key])
+);
+```
+
+### Foreign Callback Container -> Supported Wrapper Or Helper
+
+**Avoid**
+
+```tsx
+<div>{[0, 1].forEach(() => list.map((item) => item))}</div>
+```
+
+**Prefer**
+
+```tsx
+<div>{computed(() => list.map((item) => item))}</div>
+```
+
+or move the imperative container entirely outside the pattern-facing expression
+site into a named helper or handler.
+
+### Optional-Call -> Explicit Nullish Control Flow
+
+**Avoid**
+
+```ts
+pattern(({ maybeFn, value }) => ({
+  result: maybeFn?.(value),
+}));
+```
+
+**Prefer**
+
+```ts
+pattern(({ maybeFn, value }) => ({
+  result: computed(() => maybeFn == null ? undefined : maybeFn(value)),
+}));
+```
+
 ## 5. Construct Notes
 
 ## 5.1 JSX Is A Routing Boundary, Not A Separate Semantic World
