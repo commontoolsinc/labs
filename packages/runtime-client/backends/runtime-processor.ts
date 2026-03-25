@@ -390,8 +390,9 @@ export class RuntimeProcessor {
       throw new Error(`Could not connect to "${data.apiUrl}"`);
     }
 
+    // Allow the worker to acknowledge initialization immediately. Consumers
+    // that need storage/piece-manager convergence should call `synced()`.
     pieceManager = new PieceManager(session, runtime);
-    await pieceManager.synced();
     const cc = new PiecesController(pieceManager);
 
     return new RuntimeProcessor(
