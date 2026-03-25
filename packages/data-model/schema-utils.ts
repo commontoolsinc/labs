@@ -2,8 +2,13 @@
  * Runtime utilities for working with JSONSchema values.
  */
 
-import type { JSONSchema, JSONSchemaObj } from "@commontools/api";
+import type {
+  JSONSchema,
+  JSONSchemaMutable,
+  JSONSchemaObj,
+} from "@commontools/api";
 import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
+import { cloneIfNecessary } from "./fabric-value.ts";
 
 /**
  * Indicates if the given (nullable) schema is in fact a non-trivial schema. A
@@ -83,4 +88,84 @@ export function toDeepFrozenSchema<T extends JSONSchema>(
   }
 
   return Object.freeze(schemaObj) as T;
+}
+
+/**
+ * Return a deep mutable copy of a JSONSchema. Boolean and `undefined` schemas
+ * are returned as `{}` when `forceObject` is `true`; boolean schemas are
+ * returned as-is otherwise, and `undefined` returns `{}`.
+ *
+ * Note: do not use this on proxy-wrapped schemas from the runtime — those
+ * sites should continue using `JSON.parse(JSON.stringify(...))` until the
+ * modern data-model flag graduates.
+ */
+export function cloneSchemaMutable(
+  schema: JSONSchema | undefined,
+  forceObject: true,
+): JSONSchemaMutable;
+export function cloneSchemaMutable(
+  schema: JSONSchema | undefined,
+  forceObject?: false,
+): JSONSchemaMutable | boolean;
+export function cloneSchemaMutable(
+  schema: JSONSchema | undefined,
+  forceObject: boolean = false,
+): JSONSchemaMutable | boolean {
+  if (schema === undefined) return {};
+  if (typeof schema === "boolean") return forceObject ? {} : schema;
+  return cloneIfNecessary(schema, {
+    frozen: false,
+    deep: true,
+  }) as JSONSchemaMutable;
+}
+
+/**
+ * Return a frozen shallow copy of a schema with the given property overrides
+ * applied.
+ *
+ * - `undefined` and `true` ("accept everything") are treated as `{}` before
+ *   applying overrides.
+ * - `false` ("reject everything") short-circuits: no overrides can make a
+ *   "never" schema accept anything, so `false` is returned as-is.
+ */
+export function schemaWithProperties(
+  schema: JSONSchema | undefined,
+  overrides: JSONSchemaObj,
+): JSONSchema {
+  if (schema === false) return false;
+  const base = (schema === undefined || schema === true) ? {} : schema;
+  return toDeepFrozenSchema({ ...base, ...overrides }, true);
+}
+
+/**
+ * Return a deep-frozen shallow copy of a schema with the named properties
+ * removed.
+ *
+ * `undefined` is treated as `true` (JSON Schema "accept everything").
+ * Boolean schemas are returned as-is (no properties to remove).
+ */
+export function schemaWithoutProperties(
+  schema: JSONSchema | undefined,
+  ...names: string[]
+): JSONSchema {
+  if (schema === undefined) return true;
+  if (typeof schema === "boolean") return schema;
+
+  let copy: Record<string, unknown> | null = null;
+
+  for (const name of names) {
+    if (copy) {
+      delete copy[name];
+    } else if (name in schema) {
+      // First time we've found a `name` in need of deletion.
+      copy = { ...schema };
+      delete copy[name];
+    }
+  }
+
+  // Note: Still have to deep-freeze in the `!copy` case, though it will be a
+  // no-op if `schema` was already deep-frozen.
+  return copy
+    ? toDeepFrozenSchema(copy as JSONSchemaObj, true)
+    : toDeepFrozenSchema(schema);
 }

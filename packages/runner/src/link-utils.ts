@@ -512,7 +512,10 @@ function recursiveStripAsCellStreamOrOpaqueFromSchema(
   // Mark as in-progress
   context.inProgress.add(schema);
 
-  // Create a copy to avoid mutating the original
+  // TODO(danfuzz): This shallow-copy-then-mutate pattern will need vetting
+  // before turning on modern data-model.
+  // Shallow copy — only top-level keys are deleted/replaced; children are
+  // handled by recursive calls that create their own copies.
   const result: any = { ...schema };
 
   // Remove asCell and asStream flags from this level
