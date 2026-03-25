@@ -116,25 +116,6 @@ export type ServerMessage =
 import { StitchDb } from "./stitch-db.ts";
 
 // ---------------------------------------------------------------------------
-// Per-document revision window
-// ---------------------------------------------------------------------------
-
-/**
- * In-memory sliding window for one document.
- *
- * `revisions` is a sparse map — it only contains entries for serverSeqs at
- * which the document was actually written. The most recent entry at or before
- * a given serverSeq is the document's value as of that point.
- *
- * `floor` is the minimum serverSeq any currently-subscribed client has
- * acknowledged. Revisions strictly below this value can be discarded.
- */
-type DocWindow = {
-  revisions: Map<number, unknown>;
-  floor: number;
-};
-
-// ---------------------------------------------------------------------------
 // SpaceHub
 // ---------------------------------------------------------------------------
 
@@ -148,13 +129,16 @@ class SpaceHub {
   readonly db: StitchDb;
   readonly #sessions = new Set<StitchSession>();
 
-  /** In-memory revision window per document. */
-  readonly #docWindows = new Map<string, DocWindow>();
+  /** In-memory snapshots: serverSeq → docId → value. */
+  readonly #snapshots = new Map<number, Map<string, unknown>>();
 
-  /**
-   * docId → set of sessions subscribed to that document.
-   * Used to compute the per-doc floor as min(session.echoedServerSeq).
-   */
+  /** Space-level commit history: serverSeq → ops, retained within the sliding window. */
+  readonly #commits = new Map<number, CommitOp[]>();
+  get commits(): ReadonlyMap<number, CommitOp[]> {
+    return this.#commits;
+  }
+
+  /** docId → set of sessions subscribed to that document. */
   readonly #docSubscribers = new Map<string, Set<StitchSession>>();
 
   /**
@@ -175,10 +159,7 @@ class SpaceHub {
     this.#sessions.add(session);
   }
 
-  /**
-   * Remove a session and release its floor contribution from every document it
-   * was subscribed to. Call this when the WebSocket connection closes.
-   */
+  /** Remove a session. Call this when the WebSocket connection closes. */
   disconnect(session: StitchSession): void {
     this.#sessions.delete(session);
     const docs = this.#sessionDocs.get(session);
@@ -204,13 +185,14 @@ class SpaceHub {
   // Snapshot window management
   // -------------------------------------------------------------------------
 
-  /**
-   * Record a revision for `docId` at `serverSeq`. Call this for every `set`
-   * op after a commit is accepted.
-   */
+  recordCommit(serverSeq: number, ops: CommitOp[]): void {
+    this.#commits.set(serverSeq, ops);
+  }
+
   recordRevision(docId: string, serverSeq: number, value: unknown): void {
-    const w = this.#getOrCreateWindow(docId);
-    w.revisions.set(serverSeq, value);
+    let snapshot = this.#snapshots.get(serverSeq);
+    if (!snapshot) this.#snapshots.set(serverSeq, snapshot = new Map());
+    snapshot.set(docId, value);
   }
 
   /**
@@ -218,11 +200,12 @@ class SpaceHub {
    * The floor is derived from session.echoedServerSeq, not stored separately.
    */
   trackSubscription(session: StitchSession, docId: string): void {
-    this.#docSubscribers.getOrInsertComputed(docId, () => new Set()).add(
-      session,
-    );
-    this.#sessionDocs.getOrInsertComputed(session, () => new Set()).add(docId);
-    this.#gcWindow(docId);
+    let subs = this.#docSubscribers.get(docId);
+    if (!subs) this.#docSubscribers.set(docId, subs = new Set());
+    subs.add(session);
+    let docs = this.#sessionDocs.get(session);
+    if (!docs) this.#sessionDocs.set(session, docs = new Set());
+    docs.add(docId);
   }
 
   /**
@@ -234,15 +217,24 @@ class SpaceHub {
     this.#sessionDocs.get(session)?.delete(docId);
   }
 
-  /**
-   * The client's echoedServerSeq has advanced — recompute the floor for every
-   * document the session is subscribed to and GC revisions below the new floor.
-   */
-  notifyFloorAdvanced(session: StitchSession): void {
-    const docs = this.#sessionDocs.get(session);
-    if (!docs) return;
-    for (const docId of docs) {
-      this.#gcWindow(docId);
+  /** The client's echoedServerSeq has advanced — GC snapshots and commits. */
+  notifyFloorAdvanced(_session: StitchSession): void {
+    for (const [seq, snapshot] of this.#snapshots) {
+      for (const docId of snapshot.keys()) {
+        const subscribers = this.#docSubscribers.get(docId);
+        const needed = subscribers &&
+          [...subscribers].some((s) => s.echoedServerSeq <= seq);
+        if (!needed) snapshot.delete(docId);
+      }
+      if (snapshot.size === 0) this.#snapshots.delete(seq);
+    }
+    for (const [seq, ops] of this.#commits) {
+      const needed = ops.some((op) => {
+        const subscribers = this.#docSubscribers.get(op.id);
+        return subscribers &&
+          [...subscribers].some((s) => s.echoedServerSeq <= seq);
+      });
+      if (!needed) this.#commits.delete(seq);
     }
   }
 
@@ -250,43 +242,11 @@ class SpaceHub {
   // Private helpers
   // -------------------------------------------------------------------------
 
-  #getOrCreateWindow(docId: string): DocWindow {
-    return this.#docWindows.getOrInsertComputed(
-      docId,
-      () => ({ revisions: new Map(), floor: 0 }),
-    );
-  }
-
   #removeSubscriber(session: StitchSession, docId: string): void {
     const subscribers = this.#docSubscribers.get(docId);
     if (!subscribers) return;
     subscribers.delete(session);
-    if (subscribers.size === 0) {
-      this.#docSubscribers.delete(docId);
-      this.#docWindows.delete(docId);
-    } else {
-      this.#gcWindow(docId);
-    }
-  }
-
-  /**
-   * Recompute the floor for `docId` as min(session.echoedServerSeq) across
-   * all subscribers, then discard revisions below the new floor.
-   */
-  #gcWindow(docId: string): void {
-    const subscribers = this.#docSubscribers.get(docId);
-    const w = this.#docWindows.get(docId);
-    if (!subscribers || !w) return;
-
-    const newFloor = Math.min(
-      ...[...subscribers].map((s) => s.echoedServerSeq),
-    );
-    if (newFloor > w.floor) {
-      w.floor = newFloor;
-      for (const seq of w.revisions.keys()) {
-        if (seq < newFloor) w.revisions.delete(seq);
-      }
-    }
+    if (subscribers.size === 0) this.#docSubscribers.delete(docId);
   }
 }
 
@@ -454,30 +414,27 @@ class StitchSession {
     }
 
     // Rule 2: Staleness — reject if any doc in the read set was written by a
-    // foreign commit between msg.serverSeq and the current serverSeq.
-    const db = this.#hub.db;
-    const currentSeq = db.currentServerSeq();
-
-    if (msg.readSet.length > 0 && msg.serverSeq < currentSeq) {
-      const integratedServerSeqs = new Set(this.#integratedSeqs.values());
-      const intervening = db.getCommitsBetween(msg.serverSeq, currentSeq);
-
-      for (const commit of intervening) {
-        // Skip this client's own previously integrated commits.
-        if (integratedServerSeqs.has(commit.server_seq)) continue;
-        if (overlaps(msg.readSet, commit.ops)) {
-          this.#rejectedSeqs.set(msg.clientSeq, {
-            serverSeq: msg.serverSeq,
-            commit: msg,
-          });
-          this.#send({ type: "rejected", clientSeq: msg.clientSeq });
-          return;
-        }
+    // foreign commit after msg.serverSeq, using the in-memory revision window.
+    if (msg.readSet.length > 0) {
+      const ownSeqs = new Set(this.#integratedSeqs.values());
+      if (
+        [...this.#hub.commits].some(([seq, ops]) =>
+          seq > msg.serverSeq && !ownSeqs.has(seq) && overlaps(msg.readSet, ops)
+        )
+      ) {
+        this.#rejectedSeqs.set(msg.clientSeq, {
+          serverSeq: msg.serverSeq,
+          commit: msg,
+        });
+        this.#send({ type: "rejected", clientSeq: msg.clientSeq });
+        return;
       }
     }
 
     // Accept: write to DB atomically, record revisions, and notify.
+    const db = this.#hub.db;
     const newServerSeq = db.acceptCommit("", msg.ops, msg.signature);
+    this.#hub.recordCommit(newServerSeq, msg.ops);
     for (const op of msg.ops) {
       if (op.op === "set") {
         this.#hub.recordRevision(op.id, newServerSeq, op.value);

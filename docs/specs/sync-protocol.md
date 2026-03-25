@@ -106,17 +106,17 @@ Since the server processes commits sequentially and the WebSocket stream is orde
 
 A client's `serverSeq` may lag behind the true server `serverSeq` for commits on unsubscribed documents. This is correct behaviour — a client can only reference subscribed documents in its `readSet`, so commits on unsubscribed documents are irrelevant to its staleness checks.
 
-### Revision window
+### Snapshot window
 
-The server maintains in-memory revisions for each document independently, retaining versions back to the minimum `serverSeq` across all clients currently subscribed to that document. A client only contributes to a document's revision floor if it is subscribed to that document — unsubscribed clients cannot reference a document in a `readSet` and therefore have no bearing on how far back its revisions need to be retained.
+The server maintains in-memory snapshots indexed by `serverSeq`, each capturing the state of every document written in that commit. Only the latest value per document is persisted to the database; older snapshots exist only in memory. A client that disconnects and reconnects must re-subscribe from scratch, receiving a fresh copy of the document at the current `serverSeq`.
 
-The `serverSeq` returned in a `subscribed` response establishes that client's initial floor for each doc in the response. As the client advances its `serverSeq` via subsequent messages, the per-document floors rise and older revisions are discarded. Only the latest value per document is persisted to the database; older revisions exist only in memory. A client that disconnects and reconnects must re-subscribe from scratch, receiving a fresh copy of the document at the current `serverSeq`.
+Alongside snapshots, the server retains the ops for each accepted commit, also keyed by `serverSeq`. These are used to check read/write overlap when evaluating staleness.
 
-A client must never send a `serverSeq` older than the revision floor for any document in its read set. Since the floor is the minimum `serverSeq` across all connected clients, and a well-behaved client's `serverSeq` is monotonically increasing, this condition can only occur if the client is misbehaving. The server should disconnect such clients immediately.
+GC is per-entry rather than based on a global floor. A document entry in a snapshot is retained only while at least one client subscribed to that document has an `echoedServerSeq` at or below the snapshot's `serverSeq`; once no such client exists the entry is removed, and the snapshot itself is dropped when it becomes empty. Commit ops follow the same rule: a commit is retained only while at least one subscriber to any of its written documents has an `echoedServerSeq` at or below the commit's `serverSeq`.
 
 ### Client eviction
 
-Any client — whether stalled or actively connected but slow to advance its `serverSeq` — can pin the revision floor for documents it is subscribed to. The memory cost is proportional to the commit rate on those documents. A client subscribed only to quiet documents imposes negligible cost regardless of its responsiveness, while a client subscribed to high-traffic documents can cause the revision window to grow significantly.
+A client that is slow to advance its `serverSeq` keeps snapshot and commit entries alive for the documents it is subscribed to. The memory cost is proportional to the commit rate on those specific documents, not all documents in the space.
 
 The server should disconnect clients based on the memory overhead they are actually causing. Tracking per-client memory contribution and evicting the worst offenders above a threshold is a more targeted policy than a blanket timeout. This applies equally to stalled clients and to legitimately active clients that cannot keep up with the commit rate on their subscribed documents.
 
@@ -142,7 +142,7 @@ The server checks whether any of the commit's reads have been invalidated by com
 
 The server must also check `rejectedSeqs` for any entries whose `serverSeq` matches `message.serverSeq` and whose writes overlap with the commit's reads. These represent commits from this client that were rejected at the same server state the current commit is based on — the client's optimistic view included those writes, but they never entered canonical history, so the revision comparison alone would not detect the conflict.
 
-In practice, this check uses the in-memory revision window rather than scanning the commits table. The server compares the revision at `message.serverSeq` against the current revision for the relevant reads, disregarding any differences attributable to commits in `integratedSeqs`. Since clients below the revision floor are disconnected as misbehaving, `message.serverSeq` is always within the window.
+In practice, this check uses the in-memory snapshot window rather than scanning the commits table. The server scans the retained commit ops for any entry with a `serverSeq` greater than `message.serverSeq` whose ops overlap with the commit's read set, excluding entries in `integratedSeqs`. Since `message.serverSeq` is always within the window for well-behaved clients, no database scan is required.
 
 ### 3. Garbage collection
 
@@ -205,14 +205,14 @@ Everything else is ephemeral and reset on reconnection:
   ws:              WebSocket,
   serverSeq:       number,                   // latest serverSeq echoed by this client
   rejectedSeqs:    Map<number, { serverSeq: number, commit: Commit }>,  // clientSeq -> rejected commit
-  integratedSeqs:  Map<[number, number], number>,  // (clientSeq, serverSeq at submission) -> serverSeq at acceptance
+  integratedSeqs:  Map<string, number>,      // `${clientSeq}:${serverSeq}` -> serverSeq at acceptance
   subscriptions:   Set<string>,             // matched docIds from active selectors
 }
 
-// per subscribed document
+// per space
 {
-  revisions: Map<number, any>,              // serverSeq -> revision, sliding window
-  floor:     number,                        // min serverSeq across subscribed clients
+  snapshots: Map<number, Map<string, any>>, // serverSeq -> docId -> value, sliding window
+  commits:   Map<number, CommitOp[]>,       // serverSeq -> ops, sliding window
 }
 ```
 

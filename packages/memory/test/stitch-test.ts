@@ -273,6 +273,86 @@ describe("StitchHub", () => {
   });
 
   // -------------------------------------------------------------------------
+  // conflict detection
+  // -------------------------------------------------------------------------
+
+  describe("conflict detection", () => {
+    it("rejection propagates to later commits whose reads overlap with rejected writes", async () => {
+      const a = openSession(hub);
+      const b = openSession(hub);
+
+      await a.send({ type: "subscribe", selector: sub("doc:x") });
+      await a.recv(); // subscribed at s0
+
+      // B writes doc:x first.
+      await b.send(commit([op("doc:x", 1)]));
+      await b.recv(); // accepted at s1
+      await a.recv(); // update(s1)
+
+      // A1: reads doc:x (stale), writes doc:y.
+      await a.send(commit([op("doc:y", "a1")], ["doc:x"], 0));
+      // A2: reads doc:y (written by rejected A1) — should be rejected via pending chain.
+      await a.send(commit([op("doc:z", "a2")], ["doc:y"], 0));
+
+      assertEquals((await a.recv()).type, "rejected"); // A1: stale read
+      assertEquals((await a.recv()).type, "rejected"); // A2: pending chain
+    });
+
+    it("independent commit survives when reads do not overlap with rejected writes", async () => {
+      const a = openSession(hub);
+      const b = openSession(hub);
+
+      await a.send({ type: "subscribe", selector: sub("doc:x") });
+      await a.recv(); // subscribed at s0
+
+      // B writes doc:x first.
+      await b.send(commit([op("doc:x", 1)]));
+      await b.recv(); // accepted at s1
+      await a.recv(); // update(s1)
+
+      // A1: reads doc:x (stale), writes doc:y — rejected.
+      await a.send(commit([op("doc:y", "a1")], ["doc:x"], 0));
+      // A2: reads doc:z (no overlap with A1's writes) — should be accepted.
+      await a.send(commit([op("doc:w", "a2")], ["doc:z"], 0));
+
+      assertEquals((await a.recv()).type, "rejected"); // A1: stale read
+      assertEquals((await a.recv()).type, "accepted"); // A2: independent
+    });
+
+    it("appendix example: staleness, chain propagation, and independent survival", async () => {
+      const a = openSession(hub);
+      const b = openSession(hub);
+
+      await a.send({
+        type: "subscribe",
+        selector: sub("doc:count", "doc:label", "doc:name"),
+      });
+      await a.recv(); // subscribed at s0
+
+      // B commits a blind write to doc:count.
+      await b.send(commit([op("doc:count", 1)]));
+      await b.recv(); // accepted at s1
+      await a.recv(); // update(s1, count=1)
+
+      // A sends three commits in flight, all based on serverSeq 0.
+      // A1: reads doc:count (stale), writes doc:label.
+      await a.send(commit([op("doc:label", "a1")], ["doc:count"], 0));
+      // A2: reads doc:count + doc:label (stale + overlaps rejected A1's writes).
+      await a.send(
+        commit([op("doc:color", "a2")], ["doc:count", "doc:label"], 0),
+      );
+      // A3: reads doc:name (untouched, no overlap with any rejected writes).
+      await a.send(commit([op("doc:icon", "a3")], ["doc:name"], 0));
+
+      assertEquals((await a.recv()).type, "rejected"); // A1: count stale
+      assertEquals((await a.recv()).type, "rejected"); // A2: pending chain via label
+      const r3 = await a.recv() as ServerAccepted;
+      assertEquals(r3.type, "accepted"); // A3: independent
+      assertEquals(r3.serverSeq, 2);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // floor advancement and GC (observed indirectly via continued correct behaviour)
   // -------------------------------------------------------------------------
 
