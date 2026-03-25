@@ -40,6 +40,7 @@ describe("shell piece tests", () => {
       );
     piece = await cc.create(
       program,
+      { start: true },
     );
     pieceId = piece.id;
 
@@ -58,50 +59,73 @@ describe("shell piece tests", () => {
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-      },
-      identity,
-    });
-
-    await shell.goto({
-      frontendUrl: FRONTEND_URL,
-      view: {
-        spaceName: SPACE_NAME,
         pieceId,
       },
       identity,
     });
 
-    // Helper to wait for expected counter text
     const waitForCounterText = async (expected: string) => {
       await waitFor(async () => {
-        try {
-          const handle = await page.waitForSelector("#counter-result", {
-            strategy: "pierce",
-            timeout: 500,
-          });
-          const text = await handle.evaluate((el: HTMLElement) =>
-            el.textContent?.trim()
-          );
-          return text === expected;
-        } catch (_) {
-          return false;
-        }
+        const text = await page.evaluate((expected) => {
+          const find = (
+            root: Document | ShadowRoot,
+            selector: string,
+          ): Element | null => {
+            const direct = root.querySelector(selector);
+            if (direct) {
+              return direct;
+            }
+
+            for (const el of root.querySelectorAll("*")) {
+              if (el.shadowRoot) {
+                const nested = find(el.shadowRoot, selector);
+                if (nested) {
+                  return nested;
+                }
+              }
+            }
+
+            return null;
+          };
+
+          const el = find(document, "#counter-result");
+          return el?.textContent?.trim() === expected;
+        }, { args: [expected] });
+        return text;
       });
     };
 
-    // Helper to click button, retrying if element is stale
     const clickDecrement = async () => {
       await waitFor(async () => {
-        try {
-          const button = await page.waitForSelector("#counter-decrement", {
-            strategy: "pierce",
-            timeout: 500,
-          });
-          await button.click();
+        return await page.evaluate(() => {
+          const find = (
+            root: Document | ShadowRoot,
+            selector: string,
+          ): Element | null => {
+            const direct = root.querySelector(selector);
+            if (direct) {
+              return direct;
+            }
+
+            for (const el of root.querySelectorAll("*")) {
+              if (el.shadowRoot) {
+                const nested = find(el.shadowRoot, selector);
+                if (nested) {
+                  return nested;
+                }
+              }
+            }
+
+            return null;
+          };
+
+          const button = find(document, "#counter-decrement");
+          if (!(button instanceof HTMLElement)) {
+            return false;
+          }
+          button.click();
           return true;
-        } catch (_) {
-          return false;
-        }
+        });
       });
     };
 
