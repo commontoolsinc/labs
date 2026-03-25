@@ -1,9 +1,6 @@
 import ts from "typescript";
-import type {
-  GenerationContext,
-  SchemaDefinition,
-  TypeFormatter,
-} from "../interface.ts";
+import type { JSONSchemaMutable } from "@commontools/api";
+import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import {
   cloneSchemaDefinition,
   getNativeTypeSchema,
@@ -36,7 +33,7 @@ const logger = getLogger("schema-generator.object", {
 function getWrapperSchemaFromCallable(
   type: ts.Type,
   checker: ts.TypeChecker,
-): SchemaDefinition | undefined {
+): JSONSchemaMutable | undefined {
   const callSignatures = type.getCallSignatures();
   if (callSignatures.length === 0) return undefined;
 
@@ -86,7 +83,7 @@ export class ObjectFormatter implements TypeFormatter {
     return context.typeChecker.typeToString(type) === "object";
   }
 
-  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
+  formatType(type: ts.Type, context: GenerationContext): JSONSchemaMutable {
     const checker = context.typeChecker;
 
     // If this is the TS `object` type (unknown object shape), emit a permissive
@@ -103,7 +100,7 @@ export class ObjectFormatter implements TypeFormatter {
     // Do not early-return for empty object types. Instead, try to enumerate
     // properties via the checker to allow type literals to surface members.
 
-    const properties: Record<string, SchemaDefinition> = {};
+    const properties: Record<string, JSONSchemaMutable> = {};
     const required: string[] = [];
 
     const props = checker.getPropertiesOfType(type);
@@ -166,7 +163,7 @@ export class ObjectFormatter implements TypeFormatter {
       }
 
       // Delegate to the main generator (specific formatters handle wrappers/defaults)
-      const generated: SchemaDefinition = this.schemaGenerator.formatChildType(
+      const generated: JSONSchemaMutable = this.schemaGenerator.formatChildType(
         resolvedPropType,
         context,
         propTypeNode,
@@ -193,7 +190,7 @@ export class ObjectFormatter implements TypeFormatter {
       properties[propName] = generated;
     }
 
-    const schema: SchemaDefinition = { type: "object", properties };
+    const schema: JSONSchemaMutable = { type: "object", properties };
 
     // Handle string/number index signatures → additionalProperties with description
     const stringIndex = checker.getIndexTypeOfType(type, ts.IndexKind.String);
@@ -238,7 +235,7 @@ export class ObjectFormatter implements TypeFormatter {
         }
       }
       (schema as Record<string, unknown>).additionalProperties =
-        apSchema as SchemaDefinition;
+        apSchema as JSONSchemaMutable;
     }
     if (required.length > 0) schema.required = required;
 
@@ -248,7 +245,7 @@ export class ObjectFormatter implements TypeFormatter {
   private lookupBuiltInSchema(
     type: ts.Type,
     checker: ts.TypeChecker,
-  ): SchemaDefinition | boolean | undefined {
+  ): JSONSchemaMutable | boolean | undefined {
     const builtin = getNativeTypeSchema(type, checker);
     return builtin === undefined ? undefined : cloneSchemaDefinition(builtin);
   }

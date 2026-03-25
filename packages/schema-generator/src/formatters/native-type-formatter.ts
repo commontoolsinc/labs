@@ -1,11 +1,8 @@
 import ts from "typescript";
-import type {
-  GenerationContext,
-  SchemaDefinition,
-  TypeFormatter,
-} from "../interface.ts";
+import type { JSONSchemaMutable } from "@commontools/api";
+import type { GenerationContext, TypeFormatter } from "../interface.ts";
 
-const NATIVE_TYPE_SCHEMAS: Record<string, SchemaDefinition | boolean> = {
+const NATIVE_TYPE_SCHEMAS: Record<string, JSONSchemaMutable | boolean> = {
   // This schema is embedded in the code, so we can have simpler links.
   VNode: { $ref: "https://commonfabric.org/schemas/vnode.json" },
   Date: { type: "string", format: "date-time" },
@@ -45,7 +42,7 @@ export class NativeTypeFormatter implements TypeFormatter {
     return NativeTypeFormatter.isNativeType(typeName);
   }
 
-  formatType(type: ts.Type, _context: GenerationContext): SchemaDefinition {
+  formatType(type: ts.Type, _context: GenerationContext): JSONSchemaMutable {
     const typeName = NativeTypeFormatter.getTypeName(type);
     const schema = NATIVE_TYPE_SCHEMAS[typeName!];
     return (typeof schema === "boolean" ? schema : structuredClone(schema!));

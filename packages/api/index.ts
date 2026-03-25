@@ -1366,10 +1366,10 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T;
 
 /**
- * A deep-mutable variant of `JSONSchemaObj`. Recursively strips `readonly`
+ * A deep-mutable variant of `JSONSchema`. Recursively strips `readonly`
  * from all properties, making the schema safe to build up incrementally.
  */
-export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
+export type JSONSchemaMutable = Mutable<JSONSchema>;
 
 /**
  * Selects a sub-path within a document, optionally paired with a schema

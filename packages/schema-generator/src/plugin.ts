@@ -45,8 +45,5 @@ export function createSchemaTransformerV2() {
  * Alternative export for direct usage
  */
 export { SchemaGenerator };
-export type {
-  GenerationContext,
-  SchemaDefinition,
-  TypeFormatter,
-} from "./interface.ts";
+export type { GenerationContext, TypeFormatter } from "./interface.ts";
+export type { JSONSchemaMutable } from "@commontools/api";
