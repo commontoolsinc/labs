@@ -1,8 +1,15 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
 import { toFileUrl } from "@std/path";
-import { applyCommit, close, type Engine, open } from "../v2/engine.ts";
+import {
+  applyCommit,
+  close,
+  createBranch,
+  type Engine,
+  open,
+} from "../v2/engine.ts";
 import {
   extendTrackedGraph,
+  queryGraph,
   refreshTrackedGraph,
   trackGraph,
 } from "../v2/query.ts";
@@ -323,6 +330,157 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
     });
 
     assertEquals(tracked.state.manager.readCount, 4);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 queryGraph honors atSeq and since", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-history";
+  const fixture = createGraphFixture(space);
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: fixture.docs.map((doc) => ({
+          op: "set" as const,
+          id: doc.id,
+          value: { value: doc.value },
+        })),
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: fixture.rootId,
+          value: { value: fixture.expandedRootValue },
+        }],
+      },
+    });
+
+    const historical = queryGraph(space, engine, {
+      roots: [{
+        id: fixture.rootId,
+        selector: {
+          path: [],
+          schema: fixture.schema,
+        },
+      }],
+      atSeq: 1,
+    });
+    assertEquals(
+      historical.entities.map((entity) => entity.id),
+      fixture.initialReachableIds,
+    );
+
+    const incremental = queryGraph(space, engine, {
+      roots: [{
+        id: fixture.rootId,
+        selector: {
+          path: [],
+          schema: fixture.schema,
+        },
+      }],
+      since: 1,
+    });
+    assertEquals(
+      incremental.entities.map((entity) => entity.id),
+      [fixture.rootId],
+    );
+
+    const combined = queryGraph(space, engine, {
+      roots: [{
+        id: fixture.rootId,
+        selector: {
+          path: [],
+          schema: fixture.schema,
+        },
+      }],
+      atSeq: 2,
+      since: 1,
+    });
+    assertEquals(
+      combined.entities.map((entity) => entity.id),
+      [fixture.rootId],
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 queryGraph supports branch-scoped atSeq reads", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-branch-history";
+  const rootId = "of:branch-root";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: rootId,
+          value: { value: { version: "base" } },
+        }],
+      },
+    });
+    createBranch(engine, "feature");
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        branch: "feature",
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: rootId,
+          value: { value: { version: "feature" } },
+        }],
+      },
+    });
+
+    const result = queryGraph(space, engine, {
+      branch: "feature",
+      atSeq: 1,
+      roots: [{
+        id: rootId,
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+    });
+
+    assertEquals(result.entities, [{
+      branch: "feature",
+      id: rootId,
+      seq: 1,
+      document: {
+        value: {
+          version: "base",
+        },
+      },
+    }]);
   } finally {
     close(engine);
     await Deno.remove(path);

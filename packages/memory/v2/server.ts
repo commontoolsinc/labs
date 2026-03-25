@@ -86,8 +86,7 @@ const sameSnapshot = (
   return left.branch === right.branch &&
     left.id === right.id &&
     left.seq === right.seq &&
-    left.deleted === right.deleted &&
-    JSON.stringify(left.doc ?? null) === JSON.stringify(right.doc ?? null);
+    left.deleted === right.deleted;
 };
 
 const isEmptySync = (sync: SessionSync): boolean =>
@@ -662,12 +661,43 @@ export class Server {
       const engine = await this.openEngine(message.space);
       const previousKeys = new Set(session.watches.map((watch) => watch.id));
       const nextWatches = mergeWatchesById(session.watches, message.watches);
+      const replacesExisting = message.watches.some((watch) =>
+        previousKeys.has(watch.id)
+      );
+
+      if (replacesExisting) {
+        const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
+          message.space,
+          nextWatches,
+          engine,
+        );
+        const sync = buildDiffSync(
+          session.entities,
+          entities,
+          session.lastSyncedSeq,
+          serverSeq,
+        );
+        session.watches = nextWatches;
+        session.graphs = graphs;
+        session.entities = entities;
+        session.lastSyncedSeq = serverSeq;
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: {
+            serverSeq,
+            sync,
+          },
+        };
+      }
+
       const newWatches = nextWatches.filter((watch) =>
         !previousKeys.has(watch.id)
       );
 
       if (newWatches.length === 0) {
         const serverSeq = Engine.serverSeq(engine);
+        session.watches = nextWatches;
         return {
           type: "response",
           requestId: message.requestId,

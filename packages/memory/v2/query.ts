@@ -45,7 +45,16 @@ export class EngineObjectManager implements ObjectStorageManager {
   constructor(
     private readonly engine: Engine.Engine,
     private readonly branch: string,
+    private readonly readSeq?: number,
   ) {}
+
+  readState(id: string): Engine.EntityState | null {
+    return Engine.readState(this.engine, {
+      id,
+      branch: this.branch,
+      ...(this.readSeq === undefined ? {} : { seq: this.readSeq }),
+    });
+  }
 
   load(address: { id: string; type: string }): IAttestation | null {
     const key = `${address.id}/${address.type}`;
@@ -60,10 +69,7 @@ export class EngineObjectManager implements ObjectStorageManager {
       return null;
     }
 
-    const state = Engine.readState(this.engine, {
-      id: address.id,
-      branch: this.branch,
-    });
+    const state = this.readState(address.id);
     this.#readCount++;
     if (state === null || state.document === null) {
       this.#missing.add(key);
@@ -131,11 +137,14 @@ export interface QueryGraphReuseContext {
   managers?: Map<string, EngineObjectManager>;
 }
 
+export interface TrackGraphOptions {
+  readSeq?: number;
+}
+
 const snapshotForDocKey = (
   space: string,
-  engine: Engine.Engine,
-  branch: string,
   manager: EngineObjectManager,
+  branch: string,
   key: QueryDocKey,
 ): EntitySnapshot | null => {
   if (!key.startsWith(`${space}/`)) {
@@ -146,12 +155,7 @@ const snapshotForDocKey = (
     return null;
   }
   const detail = manager.detail({ id, type });
-  const state = detail === undefined
-    ? Engine.readState(engine, {
-      id,
-      branch,
-    })
-    : null;
+  const state = detail === undefined ? manager.readState(id) : null;
   return {
     branch,
     id,
@@ -166,18 +170,16 @@ const snapshotForDocKey = (
 
 const entitiesFromTracker = (
   space: string,
-  engine: Engine.Engine,
-  branch: string,
   tracker: MapSetStringToPathSelectors,
   manager: EngineObjectManager,
+  branch: string,
 ): Map<QueryDocKey, EntitySnapshot> => {
   const entities = new Map<QueryDocKey, EntitySnapshot>();
   for (const [key] of tracker) {
     const snapshot = snapshotForDocKey(
       space,
-      engine,
-      branch,
       manager,
+      branch,
       key as QueryDocKey,
     );
     if (snapshot !== null) {
@@ -192,15 +194,19 @@ export const trackGraph = (
   engine: Engine.Engine,
   query: GraphQuery,
   reuse?: QueryGraphReuseContext,
+  options: TrackGraphOptions = {},
 ): {
   serverSeq: number;
   state: TrackedGraphState;
 } => {
   const branch = query.branch ?? "";
-  let manager = reuse?.managers?.get(branch);
+  const managerKey = options.readSeq === undefined
+    ? branch
+    : `${branch}\0${options.readSeq}`;
+  let manager = reuse?.managers?.get(managerKey);
   if (manager === undefined) {
-    manager = new EngineObjectManager(engine, branch);
-    reuse?.managers?.set(branch, manager);
+    manager = new EngineObjectManager(engine, branch, options.readSeq);
+    reuse?.managers?.set(managerKey, manager);
   }
   const tracker = new CompoundCycleTracker<
     Immutable<StorableDatum>,
@@ -239,10 +245,9 @@ export const trackGraph = (
       tracker: schemaTracker,
       entities: entitiesFromTracker(
         space,
-        engine,
-        branch,
         schemaTracker,
         manager,
+        branch,
       ),
       memo: sharedMemo,
       manager,
@@ -299,9 +304,8 @@ export const extendTrackedGraph = (
     }
     const snapshot = snapshotForDocKey(
       space,
-      engine,
-      state.branch,
       manager,
+      state.branch,
       key,
     );
     if (snapshot === null) {
@@ -326,12 +330,14 @@ export const queryGraph = (
   serverSeq: number;
   entities: EntitySnapshot[];
 } => {
-  const tracked = trackGraph(space, engine, query, reuse);
+  const tracked = trackGraph(space, engine, query, reuse, {
+    readSeq: query.atSeq,
+  });
   return {
     serverSeq: tracked.serverSeq,
-    entities: [...tracked.state.entities.values()].toSorted((left, right) =>
-      left.id.localeCompare(right.id)
-    ),
+    entities: [...tracked.state.entities.values()]
+      .filter((entity) => query.since === undefined || entity.seq > query.since)
+      .toSorted((left, right) => left.id.localeCompare(right.id)),
   };
 };
 
@@ -391,9 +397,8 @@ export const refreshTrackedGraph = (
     }
     const snapshot = snapshotForDocKey(
       space,
-      engine,
-      state.branch,
       manager,
+      state.branch,
       key,
     );
     if (snapshot === null) {

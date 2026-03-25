@@ -107,6 +107,40 @@ Deno.test("memory v2 server reports cross-space session id conflicts as protocol
   }
 });
 
+Deno.test("memory v2 server rejects unsafe spaces before opening a store", async () => {
+  const server = createServer("memory://memory-v2-server-unsafe-space");
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+
+  try {
+    await connection.receive(JSON.stringify({
+      type: "hello",
+      protocol: MEMORY_V2_PROTOCOL,
+    }));
+    assertEquals(shiftMessage(messages), {
+      type: "hello.ok",
+      protocol: MEMORY_V2_PROTOCOL,
+    });
+
+    await connection.receive(JSON.stringify({
+      type: "session.open",
+      requestId: "open-unsafe",
+      space: "../../evil",
+      session: {},
+    }));
+    assertEquals(shiftMessage(messages), {
+      type: "response",
+      requestId: "open-unsafe",
+      error: {
+        name: "ProtocolError",
+        message: "Invalid memory space identifier for store path: ../../evil",
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 server opens sessions, commits documents, and answers graph queries", async () => {
   const server = createServer("memory://memory-v2-server-basic");
   const messages: ServerMessage[] = [];
@@ -776,6 +810,185 @@ Deno.test("memory v2 server can bootstrap watches with session.watch.add", async
       ["of:doc:1"],
     );
     assertEquals(watch.ok?.sync.removes, []);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server replaces existing watch ids during session.watch.add", async () => {
+  const server = createServer("memory://memory-v2-server-watch-add-replace");
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-server-watch-add-replace";
+
+  try {
+    await connection.receive(JSON.stringify({
+      type: "hello",
+      protocol: MEMORY_V2_PROTOCOL,
+    }));
+    shiftMessage(messages);
+
+    await connection.receive(JSON.stringify({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+    }));
+    const opened = assertResponse<{ sessionId: string }>(
+      shiftMessage(messages),
+    );
+    const sessionId = opened.ok!.sessionId;
+
+    await connection.receive(JSON.stringify({
+      type: "transact",
+      requestId: "seed",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { one: 1 } },
+        }, {
+          op: "set",
+          id: "of:doc:2",
+          value: { value: { two: 2 } },
+        }],
+      },
+    }));
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
+
+    await connection.receive(JSON.stringify({
+      type: "session.watch.set",
+      requestId: "watch-1",
+      space,
+      sessionId,
+      watches: [{
+        id: "shared",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }],
+    }));
+    assertEquals(
+      assertResponse<any>(shiftMessage(messages)).ok?.sync.upserts.map((
+        entry: { id: string },
+      ) => entry.id),
+      ["of:doc:1"],
+    );
+
+    await connection.receive(JSON.stringify({
+      type: "session.watch.add",
+      requestId: "watch-2",
+      space,
+      sessionId,
+      watches: [{
+        id: "shared",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }, {
+            id: "of:doc:2",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }],
+    }));
+    const broadened = assertResponse<any>(shiftMessage(messages));
+    assertEquals(
+      broadened.ok?.sync.upserts.map((entry: { id: string }) => entry.id),
+      ["of:doc:2"],
+    );
+    assertEquals(broadened.ok?.sync.removes, []);
+
+    await connection.receive(JSON.stringify({
+      type: "session.watch.add",
+      requestId: "watch-3",
+      space,
+      sessionId,
+      watches: [{
+        id: "shared",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }],
+    }));
+    const narrowed = assertResponse<any>(shiftMessage(messages));
+    assertEquals(narrowed.ok?.sync.upserts, []);
+    assertEquals(narrowed.ok?.sync.removes, [{
+      branch: "",
+      id: "of:doc:2",
+    }]);
+
+    await connection.receive(JSON.stringify({
+      type: "session.watch.add",
+      requestId: "watch-4",
+      space,
+      sessionId,
+      watches: [{
+        id: "shared",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }],
+    }));
+    const unchanged = assertResponse<any>(shiftMessage(messages));
+    assertEquals(unchanged.ok?.sync.upserts, []);
+    assertEquals(unchanged.ok?.sync.removes, []);
+
+    await connection.receive(JSON.stringify({
+      type: "transact",
+      requestId: "update-doc-2",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:2",
+          value: { value: { two: 3 } },
+        }],
+      },
+    }));
+    assertEquals(
+      assertResponse<any>(shiftMessage(messages)).requestId,
+      "update-doc-2",
+    );
+
+    await tick();
+    assertEquals(messages, []);
   } finally {
     await server.close();
   }

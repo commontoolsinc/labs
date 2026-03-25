@@ -1,6 +1,7 @@
 import { deepFreeze } from "@commontools/data-model/deep-freeze";
 import { unclaimed } from "@commontools/memory/fact";
 import type { PatchOp } from "@commontools/memory/v2";
+import { encodePointer, pathsOverlap } from "../../../memory/v2/path.ts";
 import {
   getExperimentalStorableConfig,
   isArrayIndexPropertyName,
@@ -246,31 +247,6 @@ const collapseEmptyJsonDocumentEnvelope = (
 };
 
 const EMPTY_META = Object.freeze({});
-
-const isPrefixPath = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean => {
-  if (prefix.length > path.length) {
-    return false;
-  }
-  return prefix.every((segment, index) => path[index] === segment);
-};
-
-const pathsOverlap = (
-  left: readonly string[],
-  right: readonly string[],
-): boolean => isPrefixPath(left, right) || isPrefixPath(right, left);
-
-const encodePointer = (path: readonly string[]): string => {
-  if (path.length === 0) {
-    return "";
-  }
-  return `/${
-    path.map((segment) => segment.replaceAll("~", "~0").replaceAll("/", "~1"))
-      .join("/")
-  }`;
-};
 
 const isJSONPatchValue = (
   value: StorableDatum | undefined,

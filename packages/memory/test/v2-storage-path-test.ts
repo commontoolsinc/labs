@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { resolveSpaceStoreUrl } from "../memory.ts";
 
 Deno.test("resolveSpaceStoreUrl keeps v1 directory mode unchanged", () => {
@@ -28,5 +28,25 @@ Deno.test("resolveSpaceStoreUrl uses a sibling engine directory in single-file m
   assertEquals(
     resolveSpaceStoreUrl(file, subject, "v2").href,
     new URL(`file:///tmp/ct-memory/space.engine-v3/${subject}.sqlite`).href,
+  );
+});
+
+Deno.test("resolveSpaceStoreUrl rejects traversal-like subjects", () => {
+  const root = new URL("file:///tmp/ct-memory/");
+
+  assertThrows(
+    () => resolveSpaceStoreUrl(root, "../../evil" as any, "v2"),
+    Error,
+    "Invalid memory space identifier for store path",
+  );
+  assertThrows(
+    () => resolveSpaceStoreUrl(root, "nested/space" as any, "v2"),
+    Error,
+    "Invalid memory space identifier for store path",
+  );
+  assertThrows(
+    () => resolveSpaceStoreUrl(root, ".." as any, "v2"),
+    Error,
+    "Invalid memory space identifier for store path",
   );
 });

@@ -1,5 +1,6 @@
 import type { JSONValue } from "../interface.ts";
 import type { PatchOp } from "../v2.ts";
+import { encodePointer, parsePointer } from "./path.ts";
 
 type JSONObject = Record<string, JSONValue>;
 type JSONContainer = JSONObject | JSONValue[];
@@ -215,27 +216,6 @@ const getCreatableParent = (
 
 const createContainer = (nextSegment: string): JSONContainer => {
   return isArraySegment(nextSegment) || nextSegment === "-" ? [] : {};
-};
-
-export const parsePointer = (path: string): string[] => {
-  if (path === "") {
-    return [];
-  }
-  if (!path.startsWith("/")) {
-    throw new Error(`invalid JSON pointer: ${path}`);
-  }
-  return path.slice(1).split("/").map((segment) =>
-    segment.replaceAll("~1", "/").replaceAll("~0", "~")
-  );
-};
-
-const encodePointer = (path: string[]): string => {
-  return path.length === 0
-    ? ""
-    : `/${
-      path.map((segment) => segment.replaceAll("~", "~0").replaceAll("/", "~1"))
-        .join("/")
-    }`;
 };
 
 const parseArrayIndex = (segment: string): number => {

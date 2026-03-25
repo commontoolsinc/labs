@@ -329,11 +329,28 @@ export interface Options extends ServiceOptions {
   store: URL;
 }
 
+const assertSafeStoreSubject = (subject: Subject): void => {
+  const value = String(subject);
+  if (
+    value.length === 0 ||
+    value.includes("\0") ||
+    value.includes("/") ||
+    value.includes("\\") ||
+    value === "." ||
+    value === ".."
+  ) {
+    throw new globalThis.Error(
+      `Invalid memory space identifier for store path: ${value}`,
+    );
+  }
+};
+
 export const resolveSpaceStoreUrl = (
   store: URL,
   subject: Subject,
   memoryVersion: MemoryVersion = getDefaultMemoryVersion(),
 ): URL => {
+  assertSafeStoreSubject(subject);
   const storePath = store.protocol === "file:"
     ? Path.fromFileUrl(store)
     : store.pathname;

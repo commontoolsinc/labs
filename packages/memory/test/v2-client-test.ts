@@ -7,7 +7,7 @@ import {
   type SessionSync,
   toDocumentPath,
 } from "../v2.ts";
-import { connect, loopback, type Transport } from "../v2/client.ts";
+import { connect, loopback, type Transport, WatchView } from "../v2/client.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
 
 Deno.test("memory v2 client watch sets expand to previously hidden graph nodes", async () => {
@@ -275,6 +275,69 @@ Deno.test("memory v2 client coalesces watch ack bursts", async () => {
   } finally {
     await client.close();
   }
+});
+
+Deno.test("memory v2 watch view keeps emitted snapshots incrementally ordered", async () => {
+  const view = WatchView.fromSync({
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:doc:b",
+      seq: 1,
+      doc: { value: { label: "b" } },
+    }, {
+      branch: "",
+      id: "of:doc:a",
+      seq: 1,
+      doc: { value: { label: "a" } },
+    }],
+    removes: [],
+  });
+
+  assertEquals(
+    view.entities.map((entity) => entity.id),
+    ["of:doc:a", "of:doc:b"],
+  );
+
+  const syncs = view.subscribeSync();
+  const snapshots = view.subscribe();
+  view.applySync({
+    type: "sync",
+    fromSeq: 1,
+    toSeq: 2,
+    upserts: [{
+      branch: "",
+      id: "of:doc:c",
+      seq: 2,
+      doc: { value: { label: "c" } },
+    }, {
+      branch: "",
+      id: "of:doc:a",
+      seq: 2,
+      doc: { value: { label: "a2" } },
+    }],
+    removes: [{
+      branch: "",
+      id: "of:doc:b",
+    }],
+  }, true);
+
+  const nextSync = await syncs.next();
+  assertEquals(nextSync.done, false);
+  assertEquals((nextSync.value as SessionSync).toSeq, 2);
+
+  const nextSnapshot = await snapshots.next();
+  assertEquals(nextSnapshot.done, false);
+  assertEquals(
+    nextSnapshot.value.entities.map((entity: EntitySnapshot) => entity.id),
+    ["of:doc:a", "of:doc:c"],
+  );
+  assertEquals(
+    view.entities.map((entity) => entity.id),
+    ["of:doc:a", "of:doc:c"],
+  );
 });
 
 Deno.test("memory v2 client close settles a pending ack flush", async () => {

@@ -591,7 +591,8 @@ export class WatchView {
   #pending = new Set<PromiseWithResolvers<IteratorResult<GraphQueryResult>>>();
   #syncQueue: SessionSync[] = [];
   #syncPending = new Set<PromiseWithResolvers<IteratorResult<SessionSync>>>();
-  #entities = new Map<string, EntitySnapshot>();
+  #entityPositions = new Map<string, number>();
+  #orderedEntities: EntitySnapshot[] = [];
   #closed = false;
   #serverSeq = 0;
 
@@ -602,10 +603,7 @@ export class WatchView {
   }
 
   get entities(): EntitySnapshot[] {
-    return [...this.#entities.values()].sort((left, right) =>
-      left.branch.localeCompare(right.branch) ||
-      left.id.localeCompare(right.id)
-    );
+    return [...this.#orderedEntities];
   }
 
   get serverSeq(): number {
@@ -636,7 +634,7 @@ export class WatchView {
 
   applySync(sync: SessionSync, emit: boolean): void {
     for (const upsert of sync.upserts) {
-      this.#entities.set(watchKey(upsert.branch, upsert.id), {
+      this.upsertEntity({
         branch: upsert.branch,
         id: upsert.id,
         seq: upsert.seq,
@@ -644,7 +642,7 @@ export class WatchView {
       });
     }
     for (const remove of sync.removes) {
-      this.#entities.delete(watchKey(remove.branch, remove.id));
+      this.removeEntity(remove.branch, remove.id);
     }
     this.#serverSeq = Math.max(this.#serverSeq, sync.toSeq);
     if (emit) {
@@ -660,7 +658,7 @@ export class WatchView {
   snapshot(): GraphQueryResult {
     return {
       serverSeq: this.#serverSeq,
-      entities: this.entities,
+      entities: [...this.#orderedEntities],
     };
   }
 
@@ -731,6 +729,58 @@ export class WatchView {
     this.#syncPending.clear();
     this.#queue = [];
     this.#syncQueue = [];
+  }
+
+  private upsertEntity(entity: EntitySnapshot): void {
+    const key = watchKey(entity.branch, entity.id);
+    const existingIndex = this.#entityPositions.get(key);
+    if (existingIndex !== undefined) {
+      this.#orderedEntities[existingIndex] = entity;
+      return;
+    }
+
+    const insertIndex = this.findInsertIndex(entity.branch, entity.id);
+    this.#orderedEntities.splice(insertIndex, 0, entity);
+    this.#entityPositions.set(key, insertIndex);
+    this.reindexFrom(insertIndex + 1);
+  }
+
+  private removeEntity(branch: string, id: string): void {
+    const key = watchKey(branch, id);
+    const existingIndex = this.#entityPositions.get(key);
+    if (existingIndex === undefined) {
+      return;
+    }
+
+    this.#orderedEntities.splice(existingIndex, 1);
+    this.#entityPositions.delete(key);
+    this.reindexFrom(existingIndex);
+  }
+
+  private findInsertIndex(branch: string, id: string): number {
+    let low = 0;
+    let high = this.#orderedEntities.length;
+
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      const current = this.#orderedEntities[mid]!;
+      const compared = current.branch.localeCompare(branch) ||
+        current.id.localeCompare(id);
+      if (compared < 0) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+
+    return low;
+  }
+
+  private reindexFrom(start: number): void {
+    for (let index = start; index < this.#orderedEntities.length; index += 1) {
+      const entity = this.#orderedEntities[index]!;
+      this.#entityPositions.set(watchKey(entity.branch, entity.id), index);
+    }
   }
 }
 

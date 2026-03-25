@@ -3,7 +3,8 @@ import { fromDigest } from "merkle-reference";
 import { sha256 } from "@commontools/data-model/sha256-impl";
 import type { JSONValue } from "../interface.ts";
 import { refer } from "../reference.ts";
-import { applyPatch, parsePointer } from "./patch.ts";
+import { applyPatch } from "./patch.ts";
+import { parentPath, parsePointer, pathsOverlap } from "./path.ts";
 import {
   type Blob,
   type BranchName,
@@ -1112,25 +1113,6 @@ const touchedPathsForPatch = (patch: PatchOp): string[][] => {
     case "splice":
       return [parsePointer(patch.path)];
   }
-};
-
-const pathsOverlap = (
-  left: readonly string[],
-  right: readonly string[],
-): boolean => isPrefixPath(left, right) || isPrefixPath(right, left);
-
-const isPrefixPath = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean => {
-  if (prefix.length > path.length) {
-    return false;
-  }
-  return prefix.every((segment, index) => path[index] === segment);
-};
-
-const parentPath = (path: readonly string[]): string[] => {
-  return path.length === 0 ? [] : [...path.slice(0, -1)];
 };
 
 const selectCommitRevisions = (
