@@ -165,7 +165,6 @@ export function verifyProgramModuleScope(program: Program): void {
     rejectDynamicImportExpressions(sourceFile, sourceFile);
     predeclareImports(sourceFile, env);
     predeclareFunctions(sourceFile, env);
-    predeclareClasses(sourceFile, env);
     predeclareVariables(sourceFile, env);
 
     for (const statement of sourceFile.statements) {
@@ -355,20 +354,6 @@ function predeclareFunctions(
   }
 }
 
-function predeclareClasses(
-  sourceFile: ts.SourceFile,
-  env: Map<string, BindingInfo>,
-): void {
-  for (const statement of sourceFile.statements) {
-    if (ts.isClassDeclaration(statement) && statement.name) {
-      env.set(statement.name.text, {
-        kind: "data",
-        captureSafe: true,
-      });
-    }
-  }
-}
-
 function predeclareVariables(
   sourceFile: ts.SourceFile,
   env: Map<string, BindingInfo>,
@@ -407,8 +392,11 @@ function verifyTopLevelStatement(
   }
 
   if (ts.isClassDeclaration(statement)) {
-    verifyTopLevelClass(statement, sourceFile, env, pendingCaptureChecks);
-    return;
+    throw verificationError(
+      sourceFile,
+      statement,
+      "Top-level class declarations are not allowed in SES mode",
+    );
   }
 
   if (ts.isVariableStatement(statement)) {
@@ -488,54 +476,6 @@ function verifyTopLevelFunction(
     fn: statement,
     nodeForError: statement,
   });
-}
-
-function verifyTopLevelClass(
-  statement: ts.ClassDeclaration,
-  sourceFile: ts.SourceFile,
-  env: Map<string, BindingInfo>,
-  pendingCaptureChecks: PendingCaptureCheck[],
-): void {
-  if (!statement.name) {
-    throw verificationError(
-      sourceFile,
-      statement,
-      "Top-level class declarations must be named in SES mode",
-    );
-  }
-
-  env.set(statement.name.text, {
-    kind: "data",
-    captureSafe: true,
-  });
-
-  for (const clause of statement.heritageClauses ?? []) {
-    for (const type of clause.types) {
-      verifyTrustedValueExpression(type.expression, sourceFile, env);
-    }
-  }
-
-  for (const member of statement.members) {
-    if (
-      ts.isMethodDeclaration(member) ||
-      ts.isGetAccessorDeclaration(member) ||
-      ts.isSetAccessorDeclaration(member) ||
-      ts.isConstructorDeclaration(member)
-    ) {
-      pendingCaptureChecks.push({
-        fn: member,
-        nodeForError: member,
-      });
-      continue;
-    }
-
-    if (ts.isPropertyDeclaration(member)) {
-      if (member.initializer) {
-        verifyTrustedValueExpression(member.initializer, sourceFile, env);
-      }
-      continue;
-    }
-  }
 }
 
 function verifyVariableStatement(
@@ -2246,7 +2186,6 @@ function verifyCompiledAuthoredFactory(
   rejectDynamicImportExpressions(body, sourceFile);
   predeclareCompiledFactoryDependencies(factory, dependencySpecifiers, env);
   predeclareFunctionsFromStatements(body.statements, env);
-  predeclareClassesFromStatements(body.statements, env);
   predeclareVariablesFromStatements(body.statements, env);
 
   for (const statement of body.statements) {
@@ -2293,8 +2232,11 @@ function verifyCompiledAuthoredFactory(
     }
 
     if (ts.isClassDeclaration(statement)) {
-      verifyTopLevelClass(statement, sourceFile, env, pendingCaptureChecks);
-      continue;
+      throw verificationError(
+        sourceFile,
+        statement,
+        "Top-level class declarations are not allowed in SES mode",
+      );
     }
 
     if (ts.isVariableStatement(statement)) {
@@ -2409,20 +2351,6 @@ function predeclareFunctionsFromStatements(
         kind: "function",
         functionNode: statement,
         hardeningHelper: isFunctionHardeningHelperDeclaration(statement),
-      });
-    }
-  }
-}
-
-function predeclareClassesFromStatements(
-  statements: readonly ts.Statement[],
-  env: Map<string, BindingInfo>,
-): void {
-  for (const statement of statements) {
-    if (ts.isClassDeclaration(statement) && statement.name) {
-      env.set(statement.name.text, {
-        kind: "data",
-        captureSafe: true,
       });
     }
   }

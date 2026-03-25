@@ -157,7 +157,7 @@ describe("verifyProgramModuleScope()", () => {
     expect(() => verifyProgramModuleScope(program)).not.toThrow();
   });
 
-  it("accepts safe top-level classes captured by trusted callbacks", () => {
+  it("rejects top-level class declarations", () => {
     const program: Program = {
       main: "/main.ts",
       files: [
@@ -177,7 +177,9 @@ describe("verifyProgramModuleScope()", () => {
       ],
     };
 
-    expect(() => verifyProgramModuleScope(program)).not.toThrow();
+    expect(() => verifyProgramModuleScope(program)).toThrow(
+      "Top-level class declarations are not allowed in SES mode",
+    );
   });
 
   it("accepts __ct_data() with intrinsic collection helpers and local helpers", () => {

@@ -100,24 +100,41 @@ describe("plain-data sandbox helper", () => {
   });
 
   it("accepts proxy-wrapped plain objects by snapshotting them", () => {
+    let reads = 0;
+    const target = {
+      count: 1,
+      nested: { ok: true },
+    };
     const source = new Proxy(
+      target,
       {
-        count: 1,
-        nested: { ok: true },
+        get(innerTarget, key, receiver) {
+          if (key === "count" || key === "nested") {
+            reads += 1;
+          }
+          return Reflect.get(innerTarget, key, receiver);
+        },
       },
-      {},
     );
 
     const result = freezeVerifiedPlainData(
       source,
     ) as Record<string, unknown>;
 
+    const readsAfterSnapshot = reads;
     expect(result).toEqual({
       count: 1,
       nested: { ok: true },
     });
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.nested as object)).toBe(true);
+
+    expect(result.count).toBe(1);
+    expect(result.nested).toEqual({ ok: true });
+    expect(reads).toBe(readsAfterSnapshot);
+
+    target.count = 2;
+    expect(result.count).toBe(1);
   });
 
   it("preserves sparse arrays and extra array properties", () => {

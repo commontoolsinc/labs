@@ -6,7 +6,7 @@
 - AI-assisted specification
 
 ## Last Updated
-2026-03-24
+2026-03-25
 
 This document is the sole authoritative SES sandboxing specification for the
 current reimplementation effort. It supersedes prior divergence notes and
@@ -212,6 +212,12 @@ following categories:
 3. Verified module-safe data that is hardened before exposure
 4. Type-only and import/export declarations
 
+Authored top-level class declarations are rejected in v1. They are neither
+plain data nor trusted builders, and they create mutable prototype/static state
+that violates the invocation-isolation goal. If class-like behavior is needed,
+it must arrive through trusted runtime imports rather than authored module
+scope.
+
 All surviving top-level bindings should be normalized into a small canonical
 wrapper language before trusted verification. The wrappers are not trusted on
 their own; they exist so the verifier can recognize a tiny emitted grammar
@@ -373,6 +379,11 @@ synchronous control flow and local mutation of ephemeral locals, as long as they
 do not reach out to builder/runtime capabilities and the surviving result still
 passes module-safe-data validation.
 
+Proxy-backed values and accessor-backed values are also allowed as transient
+snapshot sources. Their traps/getters may run during one-time snapshot
+materialization, but the surviving exported value must be a copied inert graph
+with no live proxy or accessor behavior remaining.
+
 A data initializer MUST NOT call:
 
 - trusted builder entrypoints such as `pattern`, `lift`, or `handler`
@@ -421,17 +432,16 @@ The default rejected domain includes:
 - `Date`
 - class instances
 - `Map` / `Set` subclasses
-- proxies
-- objects with accessors
 - platform capability objects
 
-Externally observable module-load side effects are disallowed except for
-sandboxed `console` output, which is separately controlled and treated as a
-debugging/observability channel rather than a surviving state channel. Trusted
-graph construction during active builder execution is allowed as part of pattern
-assembly, but data-category initializers must remain inert apart from console
-output. This is enforced by giving authored code a narrower module-load
-authority surface than the runtime's later execution environment.
+The required security property is about the surviving exported graph, not about
+forbidding every transient effect that can happen while snapshotting it.
+Trusted graph construction during active builder execution is allowed as part of
+pattern assembly, and the current implementation may also trigger effects caused
+by proxy traps/getters during `__ct_data(...)` snapshotting. This is accepted in
+the current baseline, especially while ambient `fetch()` remains temporarily
+available. The exported value that survives module load must still be copied and
+inert.
 
 For `Map` and `Set`, the checker/freezer must not rely on `harden()` alone.
 The surviving value must have immutable collection semantics: mutators such as
@@ -440,9 +450,9 @@ survives module load.
 
 `__ct_data(...)` validates the result that survives module load, not the full
 semantics of the computation that produced it. This is acceptable under the
-current threat model because data-category code may only observe already-verified
-module-safe bindings and the only tolerated externally observable side effect in
-that context is sandboxed console output.
+current threat model because the sandboxing contract for this path is about the
+surviving copied value rather than forbidding all transient effects during
+snapshot evaluation.
 
 #### 4.2.4 Type-Only Syntax
 
@@ -832,6 +842,8 @@ Ambient Compartment globals for authored modules must stay intentionally narrow:
 - temporary compatibility forwarding for `fetch` and adjacent web request
   globals (`URL`, `URLSearchParams`, `Headers`, `Request`, `Response`) used by
   legacy importer/auth code paths
+- a frozen compartment `globalThis`, so authored code cannot rebind or extend
+  installed global bindings
 
 Ambient globals available to authored module code in v1 MUST NOT include:
 
@@ -844,9 +856,9 @@ Ambient globals available to authored module code in v1 MUST NOT include:
 The current implementation still forwards ambient `fetch` plus the adjacent web
 request globals needed to use it as a migration shim. That shim is transitional
 and should be removed once importer/auth flows are fully routed through
-runtime-managed capabilities. The verifier continues to reject direct top-level
-module-load `fetch(...)` execution; the shim is for authored callbacks and
-other deferred code paths.
+runtime-managed capabilities. While the shim exists, direct `fetch()` may still
+run during authored module assembly or `__ct_data(...)` snapshotting, in
+addition to deferred callback execution.
 
 #### 5.3.2 Trusted Runtime Modules via `runtimeDeps`
 
@@ -894,7 +906,9 @@ must execute inside a smaller Compartment with:
 - only the minimal globals required to call the function
 - no AMD loader state
 - no runtime-module dependency injection
-- no ambient host capabilities
+- the same temporary compatibility web globals (`fetch`, `Headers`, `Request`,
+  `Response`, `URL`, `URLSearchParams`) currently exposed in authored SES
+  compartments
 - no shared mutable state other than explicit trusted runtime objects passed in
 
 A standalone `evaluateStringSync()` utility may still exist for trusted
@@ -2217,8 +2231,10 @@ module surface in v1. Reintroducing them requires separate scoped work.
 2. **Direct `fetch()`**: A temporary compatibility shim currently exposes
    ambient `fetch()` and the adjacent web request globals it depends on inside
    SES compartments because existing importer/auth flows still rely on them.
-   This should be deprecated in favor of runtime-managed graph constructors
-   such as `fetchData()` plus an explicit egress policy.
+   This currently applies to authored module assembly, `__ct_data(...)`
+   snapshotting, and lazy callback rehydration. It should be deprecated in
+   favor of runtime-managed graph constructors such as `fetchData()` plus an
+   explicit egress policy.
 
 ### 11.4 Escape Hatch Analysis
 
@@ -2226,12 +2242,12 @@ Potential escape routes and their status:
 
 | Vector | Status | Notes |
 |--------|--------|-------|
-| `eval()` | Blocked | SES removes `eval` from Compartment globals |
-| `Function()` | Blocked | SES removes `Function` constructor |
+| `eval()` | Allowed inside SES compartments | Current lockdown uses `evalTaming: "safe-eval"` |
+| `Function()` | Allowed inside SES compartments | Same `safe-eval` policy as `eval()` |
 | `import()` | Rejected in v1 | Dynamic imports are deferred and verifier-rejected |
 | Prototype access | Blocked | Frozen prototypes |
 | ambient web-fetch globals | Temporarily allowed | Compatibility shim in authored SES compartments; planned deprecation |
-| `globalThis` | Controlled | Custom minimal Compartment globals |
+| `globalThis` | Controlled | Custom minimal Compartment globals; runtime freezes the compartment global object after installing bindings |
 
 ---
 

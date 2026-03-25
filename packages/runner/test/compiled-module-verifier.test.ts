@@ -163,7 +163,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
-  it("accepts safe top-level classes in compiled authored modules", () => {
+  it("rejects top-level class declarations in compiled authored modules", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
   define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
@@ -182,7 +182,9 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 });
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Top-level class declarations are not allowed in SES mode",
+    );
   });
 
   it("accepts pure ambient global helper captures in compiled callbacks", () => {
