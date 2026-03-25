@@ -75,7 +75,7 @@ Each construct family is classified as one of:
 | Foreign callback / imperative container roots in JSX | Unsupported | Shapes like `[0, 1].forEach(() => list.map(...))` are not part of the intended reactive language core and should move into supported value expressions, wrappers, or helpers |
 | Residual callback-container pass-through behavior for invalid programs | Compatibility-only | Some invalid callback-container shapes may still survive as plain JS in current emitted output, but that is residual implementation behavior rather than supported language policy |
 | Optional-call on reactive receivers | Unsupported | Optional-call forms are outside the intended language because they are difficult to lower without semantic ambiguity |
-| Direct non-JSX receiver-method calls on reactive values in pattern bodies | Unsupported | These should be moved into JSX, an explicit computation callback, helper control flow, or a supported collection callback instead of being treated as first-class pattern-body syntax |
+| Direct non-JSX receiver-method calls on reactive values in top-level pattern-body expression sites | Supported | Value-like receiver-method roots at top-level object-property, call-argument, variable-initializer, array-element, or return-expression sites lower to derived local value expressions |
 | Direct top-level `.get()` reads in pattern-owned reactive context | Unsupported | Even on true cell-like values, eager `.get()` reads should move into JSX or an explicit computation callback such as `computed`, `derive`, `action`, `lift`, or `handler` rather than living directly in the top-level declarative pattern body |
 | `.get()` on ordinary opaque/reactive values | Unsupported | Pattern inputs, `computed` results, `derive` results, and other ordinary reactive values should be read directly rather than through `.get()` |
 | Statement-boundary imperative constructs in top-level pattern-owned code (`let`, loops, function creation, early return) | Unsupported | Top-level pattern context is intentionally declarative; imperative statement structure belongs in explicit callback bodies such as `computed`, `action`, `lift`, or `handler` |
@@ -111,8 +111,8 @@ pattern(({ user, count }) => ({
 Why:
 
 - top-level helper control flow is part of the language
-- top-level receiver-method calls and eager `.get()` reads are not
-- move those into JSX, authored helper control flow, or an explicit
+- top-level receiver-method roots are supported at lowerable non-JSX
+- eager `.get()` reads still move into JSX, authored helper control flow, or an explicit
   computation callback
 
 ### JSX Expressions
@@ -412,7 +412,7 @@ Receiver-method calls are also not one single language category.
 The intended split is:
 
 1. **direct top-level non-JSX pattern-body receiver calls**
-   - not part of the target language
+   - part of the target language at lowerable top-level expression sites
    - examples:
      - `{ upper: state.name.toUpperCase() }`
      - `const upper = identity(state.name.trim())` in top-level pattern code
@@ -431,7 +431,7 @@ The intended split is:
 
 So the language should not be read as “receiver methods are unsupported.” The
 real rule is that **receiver methods are supported in explicit local expression
-contexts, but not yet as bare top-level pattern-body syntax or as bare
+contexts and at lowerable top-level non-JSX pattern sites, but not yet as bare
 non-JSX collection-callback roots**.
 
 ## 5.7 `.key(...)` And `.get()` Are Cell-Semantics-Split

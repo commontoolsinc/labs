@@ -694,6 +694,47 @@ function isSupportedHelperOwnedReceiverMethodRoot(
     siteInfo.reactiveContext.owner === "render";
 }
 
+function isSupportedPatternOwnedReceiverMethodRoot(
+  expression: ts.Expression,
+  siteInfo: ExpressionSitePolicyInfo,
+): expression is ts.CallExpression {
+  if (
+    !ts.isCallExpression(expression) ||
+    siteInfo.callRootKind !== "receiver-method"
+  ) {
+    return false;
+  }
+
+  if (siteInfo.arrayMethodOwned || siteInfo.helperBoundaryKind) {
+    return false;
+  }
+
+  if (classifyOpaquePathTerminalCall(expression)) {
+    return false;
+  }
+
+  const callee = expression.expression;
+  if (
+    (ts.isPropertyAccessExpression(callee) ||
+      ts.isElementAccessExpression(callee)) &&
+    callee.questionDotToken
+  ) {
+    return false;
+  }
+
+  if (
+    (ts.isPropertyAccessExpression(callee) ||
+      ts.isElementAccessExpression(callee)) &&
+    ts.isCallExpression(callee.expression) &&
+    classifyOpaquePathTerminalCall(callee.expression)
+  ) {
+    return false;
+  }
+
+  return siteInfo.reactiveContext.owner === "pattern" ||
+    siteInfo.reactiveContext.owner === "render";
+}
+
 function isDeferredJsxArrayMethodExpression(
   expression: ts.Expression,
   context: TransformationContext,
@@ -1042,7 +1083,8 @@ function canRewriteExpressionSite(
     containerKind !== "jsx-expression" &&
     !siteInfo.controlFlowRewriteRoot &&
     !isSharedPostClosureCallRoot(expression, context, analyze) &&
-    !isPostClosureWrapperRewriteExpression(expression, context)
+    !isPostClosureWrapperRewriteExpression(expression, context) &&
+    !isSupportedPatternOwnedReceiverMethodRoot(expression, siteInfo)
   ) {
     return false;
   }
@@ -1051,7 +1093,8 @@ function canRewriteExpressionSite(
     containerKind !== "jsx-expression" &&
     !siteInfo.controlFlowRewriteRoot &&
     !isSharedPostClosureCallRoot(expression, context, analyze) &&
-    !isEligiblePatternOwnedWrapperCallbackSite(expression, context, analyze)
+    !isEligiblePatternOwnedWrapperCallbackSite(expression, context, analyze) &&
+    !isSupportedPatternOwnedReceiverMethodRoot(expression, siteInfo)
   ) {
     return false;
   }

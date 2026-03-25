@@ -649,7 +649,7 @@ Deno.test(
 
 Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   await t.step(
-    "errors on top-level object-property receiver method call in pattern body",
+    "allows top-level object-property receiver method call in pattern body",
     async () => {
       const source = `/// <cts-enable />
       import { pattern } from "commontools";
@@ -662,20 +662,12 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      const receiverErrors = errors.filter((error) =>
-        error.type === "pattern-context:receiver-method-call"
-      );
-      assertEquals(errors.length, 1);
-      assertEquals(receiverErrors.length, 1);
-      assertEquals(
-        receiverErrors[0]!.type,
-        "pattern-context:receiver-method-call",
-      );
+      assertEquals(errors.length, 0);
     },
   );
 
   await t.step(
-    "errors on top-level call-argument receiver method call in pattern body",
+    "allows top-level call-argument receiver method call in pattern body",
     async () => {
       const source = `/// <cts-enable />
       import { pattern } from "commontools";
@@ -691,15 +683,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      const receiverErrors = errors.filter((error) =>
-        error.type === "pattern-context:receiver-method-call"
-      );
-      assertEquals(errors.length, 1);
-      assertEquals(receiverErrors.length, 1);
-      assertEquals(
-        receiverErrors[0]!.type,
-        "pattern-context:receiver-method-call",
-      );
+      assertEquals(errors.length, 0);
     },
   );
 

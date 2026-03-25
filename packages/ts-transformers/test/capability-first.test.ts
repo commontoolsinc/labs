@@ -3122,6 +3122,57 @@ export default pattern<{ count: number; show: boolean }>(({ count, show }) => ({
 );
 
 Deno.test(
+  "Capability-first: top-level object-property receiver-method root lowers reactively",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+export default pattern<{ name: string }>((state) => ({
+  upper: state.name.trim(),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "upper: __ctHelpers.derive(");
+    assertStringIncludes(output, "({ state }) => state.name.trim()");
+    assert(
+      !output.includes("upper: state.name.trim()"),
+      "expected top-level receiver-method root to be reactively lowered",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: top-level call-argument receiver-method root lowers reactively",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+const identity = <T,>(value: T) => value;
+
+export default pattern<{ name: string }>((state) => {
+  const upper = identity(state.name.trim());
+  return { upper };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "identity(__ctHelpers.derive(");
+    assertStringIncludes(output, "({ state }) => state.name.trim()");
+    assert(
+      !output.includes("identity(state.name.trim())"),
+      "expected top-level call-argument receiver-method root to be reactively lowered",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: authored ifElse Writable.get() branch lowers reactively",
   async () => {
     const source = `/// <cts-enable />
