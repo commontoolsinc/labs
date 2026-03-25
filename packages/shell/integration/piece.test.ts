@@ -52,6 +52,14 @@ describe("shell piece tests", () => {
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
+      },
+      identity,
+    });
+
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: {
+        spaceName: SPACE_NAME,
         pieceId,
       },
       identity,
