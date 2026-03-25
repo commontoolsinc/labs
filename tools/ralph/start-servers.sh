@@ -2,7 +2,7 @@
 
 # Start toolshed server in background
 echo "Starting toolshed server..."
-SHELL_PORT=$(grep -o '"shell": [0-9]*' /app/labs/ports.json | grep -o '[0-9]*') || { echo "Error: ports.json missing .shell" >&2; exit 1; }
+SHELL_PORT=$(jq -e '.shell' /app/labs/ports.json) || { echo "Error: ports.json missing .shell" >&2; exit 1; }
 cd /app/labs/packages/toolshed && SHELL_URL=http://localhost:$SHELL_PORT deno task dev &
 TOOLSHED_PID=$!
 
