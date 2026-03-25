@@ -1532,6 +1532,30 @@ async function clickButtonWithText(
   }
 }
 
+async function clickPieceLinkWithText(
+  page: Page,
+  searchText: string,
+): Promise<boolean> {
+  try {
+    const links = await page.$$(
+      "#header-space, #header-space-link, .header-space, a",
+      {
+        strategy: "pierce",
+      },
+    );
+    for (const link of links) {
+      const text = await link.innerText();
+      if (text?.trim().includes(searchText)) {
+        await link.click();
+        return true;
+      }
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
 // Helper to find note in list using regex pattern
 async function findNoteInList(page: Page): Promise<boolean> {
   try {
