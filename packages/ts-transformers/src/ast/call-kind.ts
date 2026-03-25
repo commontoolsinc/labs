@@ -273,8 +273,9 @@ export function classifyArrayMethodResultSinkCall(
     const resolved = symbol
       ? (resolveAlias(symbol, checker, new Set()) ?? symbol)
       : undefined;
+    const declarations = resolved?.getDeclarations() ?? [];
 
-    for (const declaration of resolved?.getDeclarations() ?? []) {
+    for (const declaration of declarations) {
       if (!hasIdentifierName(declaration)) continue;
 
       const owner = findOwnerName(declaration);
@@ -290,6 +291,10 @@ export function classifyArrayMethodResultSinkCall(
           receiverLowered: receiverMethod.lowered,
         };
       }
+    }
+
+    if (declarations.length > 0) {
+      return undefined;
     }
   }
 

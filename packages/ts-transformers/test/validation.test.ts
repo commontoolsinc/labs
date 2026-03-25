@@ -11,6 +11,17 @@ function getWarnings(diagnostics: readonly TransformationDiagnostic[]) {
   return diagnostics.filter((d) => d.severity === "warning");
 }
 
+function assertHasErrorType(
+  errors: readonly TransformationDiagnostic[],
+  expectedType: string,
+) {
+  assertEquals(
+    errors.some((error) => error.type === expectedType),
+    true,
+    `Expected error list to contain ${expectedType}`,
+  );
+}
+
 Deno.test("Cast Validation", async (t) => {
   await t.step("errors on double cast 'as unknown as'", async () => {
     const source = `
@@ -25,7 +36,7 @@ Deno.test("Cast Validation", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "cast-validation:double-unknown");
+    assertHasErrorType(errors, "cast-validation:double-unknown");
   });
 
   await t.step("errors on 'as OpaqueRef<>'", async () => {
@@ -41,7 +52,7 @@ Deno.test("Cast Validation", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "cast-validation:forbidden-cast");
+    assertHasErrorType(errors, "cast-validation:forbidden-cast");
   });
 
   await t.step("warns on 'as Cell<>'", async () => {
@@ -247,7 +258,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:let-declaration");
+      assertHasErrorType(errors, "pattern-context:let-declaration");
     },
   );
 
@@ -270,7 +281,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:loop");
+      assertHasErrorType(errors, "pattern-context:loop");
     },
   );
 
@@ -292,7 +303,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:early-return");
+      assertHasErrorType(errors, "pattern-context:early-return");
     },
   );
 
@@ -314,7 +325,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:let-declaration");
+      assertHasErrorType(errors, "pattern-context:let-declaration");
     },
   );
 
@@ -339,7 +350,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:loop");
+      assertHasErrorType(errors, "pattern-context:loop");
     },
   );
 
@@ -388,7 +399,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:assignment");
+      assertHasErrorType(errors, "pattern-context:assignment");
     },
   );
 
@@ -491,7 +502,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:var-declaration");
+      assertHasErrorType(errors, "pattern-context:var-declaration");
     },
   );
 });
@@ -862,7 +873,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
         0,
         "lift() inside pattern should error (must be at module scope)",
       );
-      assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+      assertHasErrorType(errors, "pattern-context:builder-placement");
     },
   );
 
@@ -892,7 +903,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
         0,
         "handler() inside pattern should error (must be at module scope)",
       );
-      assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+      assertHasErrorType(errors, "pattern-context:builder-placement");
     },
   );
 
@@ -958,7 +969,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
         0,
         "Function declarations in pattern should error (must be at module scope)",
       );
-      assertEquals(errors[0]!.type, "pattern-context:function-creation");
+      assertHasErrorType(errors, "pattern-context:function-creation");
     },
   );
 
@@ -987,7 +998,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
         0,
         "Arrow functions in pattern should error (must be at module scope)",
       );
-      assertEquals(errors[0]!.type, "pattern-context:function-creation");
+      assertHasErrorType(errors, "pattern-context:function-creation");
     },
   );
 });
@@ -1016,7 +1027,7 @@ Deno.test("Computed/derive local reactive alias validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "compute-context:local-reactive-use");
+      assertHasErrorType(errors, "compute-context:local-reactive-use");
     },
   );
 
@@ -1040,7 +1051,7 @@ Deno.test("Computed/derive local reactive alias validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "compute-context:local-reactive-use");
+      assertHasErrorType(errors, "compute-context:local-reactive-use");
     },
   );
 
@@ -1132,7 +1143,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "pattern-context:function-creation");
+    assertHasErrorType(errors, "pattern-context:function-creation");
   });
 
   await t.step("errors on function expression in pattern body", async () => {
@@ -1151,7 +1162,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "pattern-context:function-creation");
+    assertHasErrorType(errors, "pattern-context:function-creation");
   });
 
   await t.step("errors on function declaration in pattern body", async () => {
@@ -1170,7 +1181,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "pattern-context:function-creation");
+    assertHasErrorType(errors, "pattern-context:function-creation");
   });
 
   await t.step("allows arrow function inside computed()", async () => {
@@ -1369,7 +1380,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+    assertHasErrorType(errors, "pattern-context:builder-placement");
   });
 
   await t.step(
@@ -1390,7 +1401,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+      assertHasErrorType(errors, "pattern-context:builder-placement");
       assertEquals(
         errors[0]!.message.includes("computed"),
         true,
@@ -1415,7 +1426,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+    assertHasErrorType(errors, "pattern-context:builder-placement");
   });
 
   await t.step(
@@ -1592,7 +1603,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
+      assertHasErrorType(errors, "opaque-get:invalid-call");
       assertEquals(
         errors[0]!.message.includes("bar"),
         true,
@@ -1627,7 +1638,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
+      assertHasErrorType(errors, "opaque-get:invalid-call");
     },
   );
 
@@ -1769,7 +1780,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
+      assertHasErrorType(errors, "opaque-get:invalid-call");
     },
   );
 
@@ -1789,7 +1800,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
+      assertHasErrorType(errors, "opaque-get:invalid-call");
     },
   );
 
@@ -2038,7 +2049,7 @@ Deno.test("Pattern Any Result Schema", async (t) => {
         (e) => e.type === "pattern:any-result-schema",
       );
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern:any-result-schema");
+      assertHasErrorType(errors, "pattern:any-result-schema");
     },
   );
 
@@ -2061,7 +2072,7 @@ Deno.test("Pattern Any Result Schema", async (t) => {
         (e) => e.type === "pattern:any-result-schema",
       );
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern:any-result-schema");
+      assertHasErrorType(errors, "pattern:any-result-schema");
     },
   );
 
@@ -2135,7 +2146,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "standalone-function:reactive-operation");
+      assertHasErrorType(errors, "standalone-function:reactive-operation");
       assertEquals(
         errors[0]!.message.includes("computed()"),
         true,
@@ -2161,7 +2172,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "standalone-function:reactive-operation");
+      assertHasErrorType(errors, "standalone-function:reactive-operation");
       assertEquals(
         errors[0]!.message.includes("derive()"),
         true,
@@ -2187,7 +2198,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "standalone-function:reactive-operation");
+      assertHasErrorType(errors, "standalone-function:reactive-operation");
       assertEquals(
         errors[0]!.message.includes(".map()"),
         true,

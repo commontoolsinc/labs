@@ -2,7 +2,11 @@ import ts from "typescript";
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 
-import { detectCallKind, isReactiveOriginCall } from "../../src/ast/mod.ts";
+import {
+  classifyArrayMethodResultSinkCall,
+  detectCallKind,
+  isReactiveOriginCall,
+} from "../../src/ast/mod.ts";
 import { analyzeExpression } from "./harness.ts";
 
 function getCallExpression(
@@ -103,6 +107,23 @@ declare const collection: {
     );
 
     assertEquals(detectCallKind(call, checker), undefined);
+  });
+
+  it("does not classify custom map(...).join(...) chains as array sinks", () => {
+    const { call, checker } = getCallExpression(
+      'collection.map((item) => item + 1).join(",")',
+      {
+        prelude: `
+declare const collection: {
+  map<T>(fn: (item: number) => T): {
+    join(separator: string): string;
+  };
+};
+        `,
+      },
+    );
+
+    assertEquals(classifyArrayMethodResultSinkCall(call, checker), undefined);
   });
 
   it("recognises fetchData as a reactive origin call", () => {
