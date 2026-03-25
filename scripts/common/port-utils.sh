@@ -19,6 +19,10 @@ get_pids_on_port() {
 
 # Read base ports from ports.json at repo root
 read_base_ports() {
+    if ! command -v jq &>/dev/null; then
+        echo "Error: jq is required but not found. Install with: brew install jq" >&2
+        exit 1
+    fi
     local ports_file
     ports_file="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/ports.json"
     if [[ ! -f "$ports_file" ]]; then
