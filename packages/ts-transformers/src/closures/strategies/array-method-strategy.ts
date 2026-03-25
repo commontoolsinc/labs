@@ -141,7 +141,7 @@ export function assertValidSyntheticComputeOwnedArrayMethodContext(
 
   throw new Error(
     [
-      "Internal Common Tools compiler error: synthetic compute-owned array method retained a non-compute context.",
+      "Internal Common Fabric compiler error: synthetic compute-owned array method retained a non-compute context.",
       "This is a bug in the compiler, not in your code. Please report it to the maintainers.",
       `Method call: \`${getNodeSnippet(methodCall, context.sourceFile)}\``,
       `Reactive context: ${contextInfo.kind} (${contextInfo.owner})`,

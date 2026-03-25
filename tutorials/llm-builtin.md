@@ -36,7 +36,7 @@ import {
   UI,
 } from "commonfabric";
 ```
-Notice line 1 begins with `/// <cts-enable`, which is important because it enables the Common Tools AST Transformer. This allows you to use TypeScript types for many of the function parameters instead of passing in JSONSchema which can be quite verbose and difficult to read; it also enables automatic transformation of patterns you write to forms that use the reactive wrappers `derive` and `ifElse` without you having to write them yourself. We generally have this at the start of all patterns.
+Notice line 1 begins with `/// <cts-enable`, which is important because it enables the Common Fabric AST Transformer. This allows you to use TypeScript types for many of the function parameters instead of passing in JSONSchema which can be quite verbose and difficult to read; it also enables automatic transformation of patterns you write to forms that use the reactive wrappers `derive` and `ifElse` without you having to write them yourself. We generally have this at the start of all patterns.
 
 The next step is to append our pattern function to the code, right after the imports. You can see `pattern` imported on line 32 in the code snippet above ([](#imports)). This is the main entry point for your pattern, you can think of it like *main()* in many languages.
 Normally, the pattern function takes in extra arguments, but for now, we'll leave it empty.

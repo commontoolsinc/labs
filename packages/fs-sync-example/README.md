@@ -1,6 +1,6 @@
 # fs-sync-example
 
-A working example of bidirectional sync between a Common Tools pattern and the
+A working example of bidirectional sync between a Common Fabric pattern and the
 filesystem. A todo list UI syncs with a markdown file (`/tmp/todos.md`) via a
 daemon process.
 
@@ -43,13 +43,13 @@ daemon process.
 
 # 2. Deploy the pattern
 deno task cf piece new src/todo-list-pattern.tsx \
-  -i ~/.ct/main.key -a http://localhost:8000 -s my-space
+  -i ~/.cf/main.key -a http://localhost:8000 -s my-space
 
 # 3. Start the sync daemon
 deno run --allow-all src/run-daemon.ts \
   --piece <PIECE_ID> \
   --api-url http://localhost:8000 \
-  --identity ~/.ct/main.key \
+  --identity ~/.cf/main.key \
   --space my-space \
   --file /tmp/todos.md
 ```

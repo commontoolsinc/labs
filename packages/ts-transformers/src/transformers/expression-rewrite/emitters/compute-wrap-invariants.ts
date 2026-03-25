@@ -86,7 +86,7 @@ function throwComputeWrapCompilerBug(
   const culpritContext = context.getReactiveContext(culprit);
   throw new Error(
     [
-      `Internal Common Tools compiler error: ${containerLabel} compute-wrap decision disagreed with reactive-context classification.`,
+      `Internal Common Fabric compiler error: ${containerLabel} compute-wrap decision disagreed with reactive-context classification.`,
       "This is a bug in the compiler, not in your code. Please report it to the maintainers.",
       message,
       `Culprit: ${ts.SyntaxKind[culprit.kind]} \`${

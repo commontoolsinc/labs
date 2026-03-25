@@ -1,5 +1,6 @@
 /// <cts-enable />
-// Teaching example: CTS (CommonTools TypeScript) generates JSON Schemas from the
+// Teaching example: CTS (Common Fabric TypeScript) generates JSON Schemas from
+// the
 // TypeScript types below. Patterns use typed inputs/outputs, and handlers take
 // explicit `Cell<T>` parameters; the transform emits the correct asCell schema
 // automatically where mutation is required.

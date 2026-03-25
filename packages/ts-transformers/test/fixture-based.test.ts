@@ -101,7 +101,7 @@ const configs: FixtureConfig[] = [
 
 const staticCache = new StaticCacheFS();
 const commonfabric = await staticCache.getText("types/commonfabric.d.ts");
-const commontoolsSchema = await staticCache.getText(
+const commonfabricSchema = await staticCache.getText(
   "types/commonfabric-schema.d.ts",
 );
 const FIXTURES_ROOT = "./test/fixtures";
@@ -203,7 +203,7 @@ if (!Deno.env.get("SKIP_INPUT_CHECK")) {
     const result = await batchTypeCheckFixtures(allFixtures, {
       types: {
         "commonfabric.d.ts": commonfabric,
-        "commonfabric-schema.d.ts": commontoolsSchema,
+        "commonfabric-schema.d.ts": commonfabricSchema,
       },
     });
 
@@ -262,7 +262,7 @@ for (const config of configs) {
         {
           types: {
             "commonfabric.d.ts": commonfabric,
-            "commonfabric-schema.d.ts": commontoolsSchema,
+            "commonfabric-schema.d.ts": commonfabricSchema,
           },
           typeCheck: !Deno.env.get("SKIP_INPUT_CHECK"),
           precomputedDiagnostics,

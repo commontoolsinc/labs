@@ -47,7 +47,7 @@ const program = ts.createProgram([testFile], compilerOptions, host);
 const checker = program.getTypeChecker();
 const sourceFile = program.getSourceFile(testFile)!;
 
-console.log("=== NULL ELIMINATION - ACTUAL COMMONTOOLS TYPES ===\n");
+console.log("=== NULL ELIMINATION - ACTUAL COMMON FABRIC TYPES ===\n");
 
 const typesToCheck = [
   "Direct", "DirectInner", "DirectGet",
