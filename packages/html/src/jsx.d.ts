@@ -2849,13 +2849,6 @@ type EventHandler<T> =
 // `Charm` is not a pattern type.
 type Charm = any;
 
-type OutlinerNode = {
-  body: string;
-  children: OutlinerNode[];
-  attachments: Charm[];
-};
-
-interface CTOutlinerElement extends CTHTMLElement {}
 interface CFCellLinkElement extends CTHTMLElement {}
 interface CFSpaceLinkElement extends CTHTMLElement {}
 interface CFLoaderElement extends CTHTMLElement {}
@@ -2906,14 +2899,12 @@ interface CFMarkdownElement extends CTHTMLElement {}
 interface CFSvgElement extends CTHTMLElement {}
 interface CFVScrollElement extends CTHTMLElement {}
 interface CTSendMessageElement extends CTHTMLElement {}
-interface CTTextElement extends CTHTMLElement {}
 interface CFTableElement extends CTHTMLElement {}
 interface CFTagsElement extends CTHTMLElement {}
 interface CFPromptInputElement extends CTHTMLElement {}
 interface CFChatElement extends CTHTMLElement {}
 interface CFMessageBeadsElement extends CTHTMLElement {}
 interface CFAttachmentsBarElement extends CTHTMLElement {}
-interface CTCTCollapsibleElement extends CTHTMLElement {}
 interface CFFragmentElement extends CTHTMLElement {}
 interface CFUpdaterElement extends CTHTMLElement {}
 interface CFGoogleOAuthElement extends CTHTMLElement {}
@@ -3306,12 +3297,6 @@ interface CFScrollAttributes<T> extends CTHTMLAttributes<T> {
     scrollWidth?: number;
     clientWidth?: number;
   }>;
-}
-
-interface CTOutlinerAttributes<T> extends CTHTMLAttributes<T> {
-  "$value": CellLike<{ root: OutlinerNode }>;
-  "$mentionable"?: CellLike<Charm[]>;
-  "oncharm-link-click"?: EventHandler<{ charm: Cell<Charm> }>;
 }
 
 interface CFCellLinkAttributes<T> extends CTHTMLAttributes<T> {
@@ -4665,10 +4650,6 @@ declare global {
         CFSpaceLinkAttributes<CFSpaceLinkElement>,
         CFSpaceLinkElement
       >;
-      "ct-outliner": CTDOM.DetailedHTMLProps<
-        CTOutlinerAttributes<CTOutlinerElement>,
-        CTOutlinerElement
-      >;
       "cf-loader": CTDOM.DetailedHTMLProps<
         CFLoaderAttributes<CFLoaderElement>,
         CFLoaderElement
@@ -4841,10 +4822,6 @@ declare global {
         CFScrollAttributes<CFHScrollElement>,
         CFHScrollElement
       >;
-      "ct-text": CTDOM.DetailedHTMLProps<
-        CTHTMLAttributes<CTTextElement>,
-        CTTextElement
-      >;
       "cf-table": CTDOM.DetailedHTMLProps<
         CFTableAttributes<CFTableElement>,
         CFTableElement
@@ -4868,10 +4845,6 @@ declare global {
       "cf-attachments-bar": CTDOM.DetailedHTMLProps<
         CFAttachmentsBarAttributes<CFAttachmentsBarElement>,
         CFAttachmentsBarElement
-      >;
-      "ct-ct-collapsible": CTDOM.DetailedHTMLProps<
-        CTHTMLAttributes<CTCTCollapsibleElement>,
-        CTCTCollapsibleElement
       >;
       "cf-canvas": CTDOM.DetailedHTMLProps<
         CFCanvasAttributes<CFCanvasElement>,

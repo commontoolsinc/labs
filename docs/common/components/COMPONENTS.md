@@ -183,24 +183,6 @@ const gridView = GridView({ items });
 
 See [composition](../patterns/composition.md) for more on pattern composition.
 
----
-
-## ct-outliner
-
-Tree structure editor. See `packages/patterns/page.tsx` for complete example.
-
-```tsx
-type OutlinerNode = {
-  body: Default<string, "">;
-  children: Default<any[], []>;
-  attachments: Default<any[], []>;
-};
-
-<ct-outliner $value={outline} />
-```
-
----
-
 ## cf-cell-context
 
 Debugging tool for inspecting cell values. See [CELL_CONTEXT.md](CELL_CONTEXT.md).

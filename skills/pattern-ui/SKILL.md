@@ -16,9 +16,9 @@ Only do this AFTER all logic is verified and tests pass.
 
 ## Available Components
 
-Layout: `cf-screen`, `cf-vstack`, `cf-hstack`, `ct-box` Input: `cf-input`,
-`cf-textarea`, `cf-checkbox`, `cf-select` Action: `cf-button` Display:
-`ct-text`, `ct-status-pill`
+Layout: `cf-screen`, `cf-vstack`, `cf-hstack` Input: `cf-input`, `cf-textarea`,
+`cf-checkbox`, `cf-select` Action: `cf-button` Display: `cf-label`,
+`cf-heading`, `cf-badge`, `cf-alert`
 
 ## Key Patterns
 

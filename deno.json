@@ -76,7 +76,6 @@
       ".claude/",
       ".beads/",
       "./packages/static/assets",
-      "./packages/ui/src/v2/components/ct-outliner",
       "./packages/vendor-astral",
       "./packages/patterns-saves-backup/",
       "./tmp/",

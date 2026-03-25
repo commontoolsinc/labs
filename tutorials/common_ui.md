@@ -162,9 +162,12 @@ When to use: toolbars, column layouts, grouping icons and buttons and text toget
 </cf-hstack>
 ```
 
-## ct-zstack
+## Layered Layouts (gap)
 
-Currently missing, would allow similar control for layering items on top of one another. [Swift UI ZStack](https://developer.apple.com/documentation/swiftui/zstack).
+There is no dedicated z-stack primitive right now. For overlapping content, use
+plain positioned HTML/CSS inside the existing `cf-*` layout primitives. See
+[SwiftUI ZStack](https://developer.apple.com/documentation/swiftui/zstack) for
+the intended shape of this missing abstraction.
 
 ## cf-vscroll
 
@@ -253,9 +256,11 @@ Will attempt to lay out the children provided as best it can. Provides two slots
 
 `cf-grid` has not been used in production and likely doesn't work, but the intention is to wrap the [CSS Grid API](https://grid.malven.co/) and blend in ideas from [Swift UI Grid](https://developer.apple.com/documentation/swiftui/grid).
 
-## ct-spacer (missing)
+## Spacer (gap)
 
-[Swift UI Spacer](https://developer.apple.com/documentation/swiftui/spacer)
+There is no dedicated spacer primitive right now. Use flex growth on a plain
+element when you need one side of a stack to push the other side away. See
+[SwiftUI Spacer](https://developer.apple.com/documentation/swiftui/spacer).
 
 ## Composed Layouts
 
@@ -271,7 +276,7 @@ You can mix-and-match the above components to achieve practically any (standard)
             <cf-hstack gap="1">
                 <icon>question</icon>
                 <button>hello</button>
-                <ct-spacer />
+                <div style="flex: 1"></div>
                 <button>hello</button>
             </cf-hstack>
 
@@ -301,20 +306,20 @@ You can mix-and-match the above components to achieve practically any (standard)
 # Visual Components
 
 - typesetting: `cf-label`, `cf-heading`
-	- gap: `ct-text` for themed paragraph usecase (`p` works)
+	- gap: themed paragraph/text primitive (`p` works)
 	- <p>, <Text>
 
-- gap: `ct-icon` (and `cf-label` has an optional in-built icon)
+- gap: icon primitive (and `cf-label` has an optional in-built icon)
     - gap: icon set?
 
 - visual: `cf-kbd`, `cf-separator`, `cf-table`, `cf-tool-call`
-	- gap: `ct-img` or `ct-media`
+	- gap: media/image primitive
 
 # Input Components
 
 - input: `cf-button`, `cf-select`, `cf-input`, `cf-textarea`, `cf-checkbox`, `cf-tags`
-	- gap: `ct-search` which has an autocomplete menu
-	- gap: `ct-file-picker`
+	- gap: search input with autocomplete menu
+	- gap: dedicated file picker
 	- redundant: common-send-message, cf-message-input (?)
 	    - this is JUST a button and an input
 		- the "right" way is:
@@ -342,7 +347,8 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 - interactive: `cf-collapsible`, `cf-tab-list`, `cf-canvas`
 
-- complex/integrated (cell interop): `cf-code-editor`, legacy `ct-outliner`
+- complex/integrated (cell interop): `cf-code-editor`
+	- gap: tree/outliner editor
 	- gap: editable table rows
 
 ## Chat Components

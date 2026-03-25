@@ -1,7 +1,7 @@
 # Advanced Component Patterns
 
 This document explores advanced patterns revealed by complex components like
-`cf-theme`, `cf-code-editor`, and `ct-outliner`.
+`cf-theme`, `cf-code-editor`, and historical outliner implementations.
 
 ## Architectural Principles
 
@@ -285,7 +285,7 @@ this.mentionController.setup({
 
 ---
 
-### 4. Path-Based Operations Pattern (`ct-outliner`)
+### 4. Path-Based Operations Pattern (legacy outliner)
 
 **Philosophy:** For tree structures, use paths (arrays of indices) instead of
 direct references to enable operations that work with both immutable state and
@@ -363,7 +363,7 @@ supports editing.
 
 ---
 
-### 5. Diff-Based Rendering Pattern (`ct-outliner`)
+### 5. Diff-Based Rendering Pattern (legacy outliner)
 
 **Philosophy:** For complex nested structures, calculate minimal diffs to update
 only what changed rather than re-rendering everything.

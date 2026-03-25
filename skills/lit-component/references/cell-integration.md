@@ -292,6 +292,7 @@ repeat(items, (item, index) => `${index}-${item.title}`, ...)
 See these components for complete examples demonstrating Cell integration
 patterns:
 
-- `ct-outliner` - Path-based operations, diff-based rendering with Cells
+- Legacy outliner implementations - Path-based operations, diff-based rendering
+  with Cells
 - `cf-code-editor` - Bidirectional sync between Cell values and CodeMirror state
 - `cf-render` - Pattern loading and UI extraction with Cell subscriptions

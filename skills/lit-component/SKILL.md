@@ -420,8 +420,9 @@ Study these components to understand architectural patterns:
   management
 - **Third-party integration:** `cf-code-editor` - CodeMirror lifecycle,
   Compartments, bidirectional sync, CellController
-- **Tree operations:** `ct-outliner` - Path-based operations, diff-based
-  rendering, keyboard commands, MentionController
+- **Legacy tree editor patterns:** historical outliner implementation -
+  Path-based operations, diff-based rendering, keyboard commands,
+  MentionController
 
 Each component reveals deeper patterns - study them not just for API but for
 architectural principles.
