@@ -110,7 +110,7 @@ const id = await Identity.fromMnemonic(mnemonic, { implementation: "noble" });
 await Deno.writeFile("./browser.key", id.toPkcs8());
 '
 
-# 3. Use that key with ct
+# 3. Use that key with cf
 cf piece set-home -i ./browser.key -a http://localhost:8000 ./my-home.tsx
 ```
 

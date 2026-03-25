@@ -106,7 +106,7 @@
 
 ### 1. Generate a stable `cf` shim for the shebang line, but do not gate on direct shell execution
 
-The repo does not ship a real `ct` binary path; developers often launch the CLI via `deno task cf`. Rendered callable files still need a deterministic first line:
+The repo does not ship a real `cf` binary path; developers often launch the CLI via `deno task cf`. Rendered callable files still need a deterministic first line:
 
 ```text
 #!/absolute/path/to/generated/cf-shim exec
@@ -549,7 +549,7 @@ Tool:
 
 Keep this local to `cf exec`; do not refactor `llm-dialog`.
 
-- [ ] **Step 4: Wire the command into `ct`**
+- [ ] **Step 4: Wire the command into `cf`**
 
 Add:
 

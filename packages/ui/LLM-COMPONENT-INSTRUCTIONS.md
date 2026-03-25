@@ -1,16 +1,17 @@
 # LLM Component Composition Guide
 
 This document provides comprehensive component specifications for Language
-Models to assist with web component composition using the Common CT library.
+Models to assist with web component composition using the Common Fabric UI
+library.
 
 ## Component Library Overview
 
-The Common CT library provides 39 secure web components that follow the
+The Common Fabric UI library provides 39 secure web components that follow the
 shadcn/ui design system. All components:
 
-- Use custom element tags prefixed with `ct-`
+- Use custom element tags prefixed with `cf-`
 - Support Shadow DOM encapsulation
-- Emit custom events prefixed with `ct-`
+- Emit custom events prefixed with `cf-`
 - Follow strict security constraints (no external resources, limited events)
 
 ## Component Reference
@@ -430,8 +431,8 @@ Default slot for cf-tab elements
 `<cf-resizable-panel-group>` **Attributes**:
 
 - `direction` - "horizontal" | "vertical" **Events**:
-- `ct-layout` - Fired on resize with detail: `{ sizes }` **Slots**: Default slot
-  for panels and handles
+- `cf-resize` - Fired on resize with detail: `{ panels }` **Slots**: Default
+  slot for panels and handles
 
 ### 30. cf-resizable-panel
 

@@ -66,18 +66,18 @@ deno task cf piece step ...
 deno task cf piece inspect ...
 
 # Or mount the space and execute the mounted callable file
-deno task cf fuse mount /tmp/ct ...
-head -n1 /tmp/ct/<space>/pieces/<piece>/result/addItem.handler
-deno task cf exec /tmp/ct/<space>/pieces/<piece>/result/addItem.handler --help
-deno task cf exec /tmp/ct/<space>/pieces/<piece>/result/addItem.handler --title "Test Item"
+deno task cf fuse mount /tmp/cf ...
+head -n1 /tmp/cf/<space>/pieces/<piece>/result/addItem.handler
+deno task cf exec /tmp/cf/<space>/pieces/<piece>/result/addItem.handler --help
+deno task cf exec /tmp/cf/<space>/pieces/<piece>/result/addItem.handler --title "Test Item"
 
 # Mounted tools surface as .tool files and run through cf exec
-head -n1 /tmp/ct/<space>/pieces/<piece>/result/search.tool
-deno task cf exec /tmp/ct/<space>/pieces/<piece>/result/search.tool --help
-deno task cf exec /tmp/ct/<space>/pieces/<piece>/result/search.tool --query "demo"
+head -n1 /tmp/cf/<space>/pieces/<piece>/result/search.tool
+deno task cf exec /tmp/cf/<space>/pieces/<piece>/result/search.tool --help
+deno task cf exec /tmp/cf/<space>/pieces/<piece>/result/search.tool --query "demo"
 
 # The same callable files also exist under entities/<piece-id>/
-deno task cf exec /tmp/ct/<space>/entities/<piece-id>/result/search.tool --query "demo"
+deno task cf exec /tmp/cf/<space>/entities/<piece-id>/result/search.tool --query "demo"
 ```
 
 ## Workflow

@@ -20,7 +20,7 @@ security constraints.
 ```
 src/
 ├── index.ts          # Main entry (exports both v1 and v2, with v2 as default)
-└── v2/              # New shadcn-inspired components (ct- prefix)
+└── v2/              # New shadcn-inspired components (cf- prefix)
     ├── components/  # 39 modern components
     ├── core/        # Base element class
     ├── styles/      # Design tokens and shared styles
@@ -46,7 +46,7 @@ registerAllComponents();
 ### Use in HTML
 
 ```html
-<!-- V2 Components (ct- prefix) -->
+<!-- V2 Components (cf- prefix) -->
 <cf-button variant="primary">Click Me</cf-button>
 <cf-input type="email" placeholder="Enter email"></cf-input>
 <cf-card>
@@ -132,7 +132,7 @@ packages/ui/
 │   │   ├── components/      # common-* components
 │   │   └── index.ts
 │   └── v2/                  # Modern components
-│       ├── components/      # cf-* and remaining ct-* components
+│       ├── components/      # cf-* components
 │       ├── core/            # BaseElement class
 │       ├── styles/          # Shared styles
 │       ├── utils/           # Utilities
