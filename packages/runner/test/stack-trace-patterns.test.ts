@@ -239,3 +239,69 @@ Deno.test("lift error stack has multiple frames with correct source line", async
   await runtime.dispose();
   await storageManager.close();
 });
+
+Deno.test("mapWithPattern synthetic pattern callsite keeps authored source lines", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL("http://localhost"),
+    storageManager,
+  });
+
+  const MAP_LINE = 6;
+  const THROW_LINE = 7;
+  const source = [
+    "/// <cts-enable />",
+    'import { pattern, UI } from "commontools";',
+    "interface Item { id: string; }",
+    "interface State { items: Item[]; }",
+    "export default pattern<State>((state) => ({",
+    "  [UI]: <div>{state.items.map((item) => {",
+    "    throw new Error('map boom');",
+    "  })}</div>,",
+    "}));",
+  ].join("\n");
+
+  const program = makeProgram(source);
+  const { id, jsScript } = await runtime.harness.compile(program);
+
+  let capturedError: Error | null = null;
+  try {
+    await runtime.harness.evaluate(id, jsScript, program.files);
+  } catch (error) {
+    if (error instanceof Error) {
+      capturedError = error;
+    } else {
+      throw error;
+    }
+  }
+
+  assertEquals(capturedError !== null, true, "error should have been caught");
+  assertEquals(capturedError!.message, "map boom");
+
+  const stack = runtime.harness.parseStack(capturedError!.stack ?? "");
+  const frames = stack.split("\n").filter((l) => l.trim().startsWith("at "));
+  const sourceFrames = frames.filter((line) => line.includes("main.tsx"));
+
+  assertMatch(
+    sourceFrames[0] ?? "",
+    new RegExp(`main\\.tsx:${THROW_LINE}:\\d+`),
+    `first source frame should reference main.tsx:${THROW_LINE}, got:\n${
+      sourceFrames[0]
+    }`,
+  );
+  assertMatch(
+    sourceFrames[1] ?? "",
+    new RegExp(`main\\.tsx:${MAP_LINE}:\\d+`),
+    `map helper callsite should reference main.tsx:${MAP_LINE}, got:\n${
+      sourceFrames[1]
+    }`,
+  );
+  assertEquals(
+    sourceFrames.some((line) => line.includes("main.tsx:1:23")),
+    false,
+    `stack should not collapse to main.tsx:1:23:\n${stack}`,
+  );
+
+  await runtime.dispose();
+  await storageManager.close();
+});
