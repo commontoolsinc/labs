@@ -7,9 +7,24 @@
  */
 
 import type { FabricDatum } from "@commontools/data-model/fabric-value";
-import type { Immutable } from "@commontools/utils/types";
-import type { SchemaPathSelector, URI } from "./interface.ts";
+import { type Immutable, isRecord } from "@commontools/utils/types";
+import type { MemorySpace, SchemaPathSelector, URI } from "./interface.ts";
 export type { SchemaPathSelector };
+import { ContextualFlowControl, type JSONSchema } from "@commontools/runner";
+import {
+  CompoundCycleTracker,
+  getAtPath,
+  type IAttestation,
+  type IMemorySpaceValueAttestation,
+  ManagedStorageTransaction,
+  MapSetStringToPathSelectors,
+  type ObjectStorageManager,
+  SchemaObjectTraverser,
+} from "@commontools/runner/traverse";
+import { ExtendedStorageTransaction } from "../runner/src/storage/extended-storage-transaction.ts";
+
+/** MIME type used for all stitch documents. */
+const THE = "application/json";
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -116,6 +131,123 @@ export type ServerMessage =
 import { StitchDb } from "./stitch-db.ts";
 
 // ---------------------------------------------------------------------------
+// Schema traversal helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * ObjectStorageManager backed by a StitchDb — used during subscribe to walk
+ * schema links and discover related documents.
+ */
+class StitchObjectManager implements ObjectStorageManager {
+  readonly #db: StitchDb;
+
+  constructor(db: StitchDb) {
+    this.#db = db;
+  }
+
+  load(address: { id: string; type: string }): IAttestation | null {
+    if (address.type !== THE) return null;
+    const row = this.#db.getDoc(address.id);
+    if (row === null) return null;
+    return {
+      address: {
+        id: address.id as URI,
+        type: address.type as typeof THE,
+        path: [],
+      },
+      value: row.value as Immutable<FabricDatum>,
+    };
+  }
+}
+
+/**
+ * Walk the schema links of a single document using `SchemaObjectTraverser`
+ * and return the set of all document IDs reachable from it (including the
+ * root doc itself).
+ */
+function collectLinkedDocIds(
+  db: StitchDb,
+  spaceDid: string,
+  uri: URI,
+  selector: SchemaPathSelector,
+): Set<string> {
+  const row = db.getDoc(uri);
+  // If selector has no schema, or the doc doesn't exist / lacks a value
+  // wrapper, just return the root doc id.
+  if (
+    selector.schema === false ||
+    selector.schema === undefined ||
+    row === null ||
+    !isRecord(row.value) ||
+    !("value" in row.value)
+  ) {
+    return new Set([uri]);
+  }
+
+  const manager = new StitchObjectManager(db);
+  const managedTx = new ManagedStorageTransaction(manager);
+  const tx = new ExtendedStorageTransaction(managedTx);
+  const tracker = new CompoundCycleTracker<
+    Immutable<FabricDatum>,
+    JSONSchema | undefined
+  >();
+  const cfc = new ContextualFlowControl();
+  const schemaTracker = new MapSetStringToPathSelectors(true);
+
+  // Selector path from the client is relative to the value portion of the
+  // document (e.g. []).  The traversal machinery expects it to be relative to
+  // the fact's `is` field, so we prepend "value".
+  const adjustedSelector: SchemaPathSelector = {
+    schema: selector.schema,
+    path: ["value", ...selector.path],
+  };
+
+  const rootDoc: IMemorySpaceValueAttestation = {
+    address: {
+      id: uri,
+      type: THE,
+      space: spaceDid as MemorySpace,
+      path: ["value"],
+    },
+    value: (row.value as { value: Immutable<FabricDatum> }).value,
+  };
+
+  // getAtPath handles any pointer indirection at the root.
+  const [navDoc, navSelector] = getAtPath(
+    tx,
+    rootDoc,
+    adjustedSelector.path.slice(1), // strip "value" prefix consumed by rootDoc
+    tracker,
+    cfc,
+    schemaTracker,
+    adjustedSelector,
+  );
+
+  if (navSelector !== undefined && navDoc.value !== undefined) {
+    const traverser = new SchemaObjectTraverser(
+      tx,
+      navSelector,
+      tracker,
+      schemaTracker,
+      cfc,
+    );
+    traverser.traverse(navDoc);
+  }
+
+  // schemaTracker keys have the form `${space}/${id}/${type}`.
+  // Extract just the doc ids belonging to this space.
+  const prefix = `${spaceDid}/`;
+  const suffix = `/${THE}`;
+  const docIds = new Set<string>([uri]);
+  for (const [key] of schemaTracker) {
+    if (key.startsWith(prefix) && key.endsWith(suffix)) {
+      docIds.add(key.slice(prefix.length, key.length - suffix.length));
+    }
+  }
+  return docIds;
+}
+
+// ---------------------------------------------------------------------------
 // SpaceHub
 // ---------------------------------------------------------------------------
 
@@ -127,6 +259,7 @@ import { StitchDb } from "./stitch-db.ts";
  */
 class SpaceHub {
   readonly db: StitchDb;
+  readonly spaceDid: string;
   readonly #sessions = new Set<StitchSession>();
 
   /** In-memory snapshots: serverSeq → docId → value. */
@@ -147,8 +280,9 @@ class SpaceHub {
    */
   readonly #sessionDocs = new Map<StitchSession, Set<string>>();
 
-  constructor(db: StitchDb) {
+  constructor(db: StitchDb, spaceDid: string) {
     this.db = db;
+    this.spaceDid = spaceDid;
   }
 
   // -------------------------------------------------------------------------
@@ -270,7 +404,7 @@ export class StitchHub {
     let space = this.#spaces.get(spaceDid);
     if (!space) {
       const dbPath = new URL(`./${spaceDid}.sqlite`, this.#store).pathname;
-      space = new SpaceHub(StitchDb.open(dbPath));
+      space = new SpaceHub(StitchDb.open(dbPath), spaceDid);
       this.#spaces.set(spaceDid, space);
     }
     return space;
@@ -366,19 +500,31 @@ class StitchSession {
     const serverSeq = db.currentServerSeq();
     const docs: Record<string, unknown> = {};
 
-    for (const key of Object.keys(msg.selector)) {
+    for (const [key, selector] of Object.entries(msg.selector)) {
       if (key === "*") {
         this.#wildcardSubscription = true;
-      } else {
-        this.#subscriptions.add(key);
-        const row = db.getDoc(key);
+        continue;
+      }
+
+      // Walk the schema links of this doc to discover all reachable docs that
+      // should be included in the initial snapshot.
+      const linkedIds = collectLinkedDocIds(
+        db,
+        this.#hub.spaceDid,
+        key as URI,
+        selector,
+      );
+
+      for (const docId of linkedIds) {
+        if (this.#subscriptions.has(docId)) continue;
+        this.#subscriptions.add(docId);
+        const row = db.getDoc(docId);
         if (row !== null) {
-          docs[key] = row.value;
-          // Seed the window with the current value so the floor has something
-          // to anchor to from the moment this client subscribes.
-          this.#hub.recordRevision(key, row.server_seq, row.value);
+          docs[docId] = row.value;
+          // Seed the revision window so the floor has something to anchor to.
+          this.#hub.recordRevision(docId, row.server_seq, row.value);
         }
-        this.#hub.trackSubscription(this, key);
+        this.#hub.trackSubscription(this, docId);
       }
     }
 
