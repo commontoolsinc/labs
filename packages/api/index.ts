@@ -1355,6 +1355,17 @@ export type JSONSchemaObj = {
   };
 };
 
+/** Recursively removes `readonly` from all properties of `T`. */
+type DeepMutable<T> = T extends ReadonlyArray<infer U> ? DeepMutable<U>[]
+  : T extends object ? ({ -readonly [P in keyof T]: DeepMutable<T[P]> })
+  : T;
+
+/**
+ * A deep-mutable variant of `JSONSchemaObj`. Recursively strips `readonly`
+ * from all properties, making the schema safe to build up incrementally.
+ */
+export type JSONSchemaMutable = DeepMutable<JSONSchemaObj>;
+
 /**
  * Selects a sub-path within a document, optionally paired with a schema
  * that describes the value at that path. Used by the storage/sync layer

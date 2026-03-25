@@ -1,4 +1,4 @@
-import { isRecord, type Mutable } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 import type { PatternBuilder } from "./pattern.ts";
 
 import type {
@@ -105,6 +105,7 @@ export type {
   IStreamable,
   JSONObject,
   JSONSchema,
+  JSONSchemaMutable,
   JSONSchemaObj,
   JSONSchemaTypes,
   JSONValue,
@@ -130,8 +131,6 @@ export type {
   VNode,
 } from "@commontools/api";
 export type { Schema, SchemaWithoutCell } from "@commontools/api/schema";
-
-export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
 
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
