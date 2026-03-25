@@ -169,12 +169,11 @@ export class ObjectFormatter implements TypeFormatter {
       }
 
       // Delegate to the main generator (specific formatters handle wrappers/defaults)
-      const generated: JSONSchemaMutableOrBoolean = this.schemaGenerator
-        .formatChildType(
-          resolvedPropType,
-          context,
-          propTypeNode,
-        );
+      const generated = this.schemaGenerator.formatChildType(
+        resolvedPropType,
+        context,
+        propTypeNode,
+      );
       // Attach property description from JSDoc (if any)
       const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
       if (text && isRecord(generated)) {
