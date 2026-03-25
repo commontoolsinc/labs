@@ -92,7 +92,7 @@ export default pattern<ChatStoryInput, ChatStoryOutput>(() => {
   const messages = Writable.of(sampleMessages);
 
   return {
-    [NAME]: "ct-chat Story",
+    [NAME]: "cf-chat Story",
     [UI]: (
       <div
         style={{
@@ -120,7 +120,7 @@ export default pattern<ChatStoryInput, ChatStoryOutput>(() => {
             pending={pending}
             style="flex: 1;"
           />
-          <ct-tools-chip tools={sampleTools} />
+          <cf-tools-chip tools={sampleTools} />
         </div>
 
         {/* Chat messages */}
@@ -131,7 +131,7 @@ export default pattern<ChatStoryInput, ChatStoryOutput>(() => {
           fadeEdges
           snapToBottom
         >
-          <ct-chat $messages={messages} pending={pending} />
+          <cf-chat $messages={messages} pending={pending} />
         </cf-vscroll>
 
         {/* Prompt input */}

@@ -1,29 +1,29 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CTChatMessage } from "./ct-chat-message.ts";
+import { CFChatMessage } from "./cf-chat-message.ts";
 
-describe("ct-chat-message", () => {
+describe("cf-chat-message", () => {
   it("should be defined", () => {
-    expect(CTChatMessage).toBeDefined();
+    expect(CFChatMessage).toBeDefined();
   });
 
   it("should create element instance", () => {
-    const element = new CTChatMessage();
-    expect(element).toBeInstanceOf(CTChatMessage);
+    const element = new CFChatMessage();
+    expect(element).toBeInstanceOf(CFChatMessage);
   });
 
   it("should have default role of user", () => {
-    const element = new CTChatMessage();
+    const element = new CFChatMessage();
     expect(element.role).toBe("user");
   });
 
   it("should have streaming disabled by default", () => {
-    const element = new CTChatMessage();
+    const element = new CFChatMessage();
     expect(element.streaming).toBe(false);
   });
 
   it("should extract text content from string", () => {
-    const el = new CTChatMessage();
+    const el = new CFChatMessage();
     el.content = "Hello world";
 
     const text = (el as any)._extractTextContent();
@@ -32,7 +32,7 @@ describe("ct-chat-message", () => {
   });
 
   it("should extract text content from array with text parts", () => {
-    const el = new CTChatMessage();
+    const el = new CFChatMessage();
     el.content = [
       { type: "text", text: "Hello" },
       { type: "text", text: "world" },
@@ -44,7 +44,7 @@ describe("ct-chat-message", () => {
   });
 
   it("should return empty string for empty content", () => {
-    const el = new CTChatMessage();
+    const el = new CFChatMessage();
     el.content = "";
 
     const text = (el as any)._extractTextContent();
@@ -53,5 +53,5 @@ describe("ct-chat-message", () => {
   });
 
   // Note: Markdown rendering is now tested in cf-markdown.test.ts
-  // ct-chat-message delegates to cf-markdown component
+  // cf-chat-message delegates to cf-markdown component
 });

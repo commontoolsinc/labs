@@ -52,7 +52,7 @@ keywords/features.
 - chatbot.tsx: Full-featured chatbot with LLM integration and attachments
   - **Data types**: array of LLM messages, array of attachments (objects), array
     of pieces
-  - **Keywords**: llmDialog, handler, derive, wish, ct-chat, cf-prompt-input,
+  - **Keywords**: llmDialog, handler, derive, wish, cf-chat, cf-prompt-input,
     cf-select, Stream, generateObject
 
 - cheeseboard.tsx: Fetch and display pizza schedule from web

@@ -12,9 +12,9 @@ import {
 } from "../theme-context.ts";
 
 /**
- * CTToolsChip - Rounded pill that reveals a read-only tool list on hover/tap.
+ * CFToolsChip - Rounded pill that reveals a read-only tool list on hover/tap.
  *
- * @element ct-tools-chip
+ * @element cf-tools-chip
  *
  * @attr {string} label - Chip label to display, defaults to "Tools".
  * @attr {boolean} show-count - Show the number of tools beside the label.
@@ -29,11 +29,11 @@ import {
  *
  * @example
  * // With plain array
- * <ct-tools-chip tools=${tools} label="Workspace" />
+ * <cf-tools-chip tools=${tools} label="Workspace" />
  *
  * @example
  * // With CellHandle for reactive updates
- * <ct-tools-chip $tools=${toolsCell} label="Workspace" />
+ * <cf-tools-chip $tools=${toolsCell} label="Workspace" />
  */
 export type ToolsChipTool = {
   name: string;
@@ -102,7 +102,7 @@ const ToolsArraySchema = {
   ],
 } as const satisfies JSONSchema;
 
-export class CTToolsChip extends BaseElement {
+export class CFToolsChip extends BaseElement {
   /* ---------- Cell controller for tools binding ---------- */
   private _cellController = createCellController<ToolsInput>(this, {
     timing: { strategy: "immediate" },
@@ -737,6 +737,6 @@ export class CTToolsChip extends BaseElement {
       }
     }
 
-    globalThis.customElements.define("ct-tools-chip", CTToolsChip);
+    globalThis.customElements.define("cf-tools-chip", CFToolsChip);
 
-    export type { CTToolsChip as CTToolsChipElement };
+    export type { CFToolsChip as CFToolsChipElement };

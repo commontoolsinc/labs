@@ -2870,7 +2870,7 @@ interface CFAutocompleteElement extends CTHTMLElement {}
 interface CFSelectElement extends CTHTMLElement {}
 interface CFRadioGroupElement extends CTHTMLElement {}
 interface CFPickerElement extends CTHTMLElement {}
-interface CTToolsChipElement extends CTHTMLElement {}
+interface CFToolsChipElement extends CTHTMLElement {}
 interface CFHeadingElement extends CTHTMLElement {}
 interface CFCollapsibleElement extends CTHTMLElement {}
 interface CTThemeElement extends CTHTMLElement {}
@@ -2901,7 +2901,7 @@ interface CFRenderElement extends CTHTMLElement {}
 interface CFCellContextElement extends CTHTMLElement {}
 interface CTDragSourceElement extends CTHTMLElement {}
 interface CTDropZoneElement extends CTHTMLElement {}
-interface CTChatMessageElement extends CTHTMLElement {}
+interface CFChatMessageElement extends CTHTMLElement {}
 interface CFMarkdownElement extends CTHTMLElement {}
 interface CTSvgElement extends CTHTMLElement {}
 interface CFVScrollElement extends CTHTMLElement {}
@@ -2910,7 +2910,7 @@ interface CTTextElement extends CTHTMLElement {}
 interface CTTableElement extends CTHTMLElement {}
 interface CFTagsElement extends CTHTMLElement {}
 interface CFPromptInputElement extends CTHTMLElement {}
-interface CTChatElement extends CTHTMLElement {}
+interface CFChatElement extends CTHTMLElement {}
 interface CTMessageBeadsElement extends CTHTMLElement {}
 interface CTAttachmentsBarElement extends CTHTMLElement {}
 interface CTCTCollapsibleElement extends CTHTMLElement {}
@@ -3155,7 +3155,7 @@ interface CTLocationAttributes<T> extends CTHTMLAttributes<T> {
   "onct-change"?: EventHandler<any>;
 }
 
-interface CTChatAttributes<T> extends CTHTMLAttributes<T> {
+interface CFChatAttributes<T> extends CTHTMLAttributes<T> {
   "$messages"?: CellLike<any>;
   "pending"?: boolean;
   "theme"?: CTThemeInput;
@@ -3310,7 +3310,7 @@ interface CTSpaceLinkAttributes<T> extends CTHTMLAttributes<T> {
   "label"?: string;
 }
 
-interface CTChatMessageAttributes<T> extends CTHTMLAttributes<T> {
+interface CFChatMessageAttributes<T> extends CTHTMLAttributes<T> {
   "role"?: "user" | "assistant";
   "content"?: string;
   "avatar"?: string;
@@ -3754,7 +3754,7 @@ interface CFPickerAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-blur"?: EventHandler<any>;
 }
 
-interface CTToolsChipAttributes<T> extends CTHTMLAttributes<T> {
+interface CFToolsChipAttributes<T> extends CTHTMLAttributes<T> {
   "label"?: string;
   "show-count"?: boolean;
   "open-on-hover"?: boolean;
@@ -4674,9 +4674,9 @@ declare global {
         CFPickerAttributes<CFPickerElement>,
         CFPickerElement
       >;
-      "ct-tools-chip": CTDOM.DetailedHTMLProps<
-        CTToolsChipAttributes<CTToolsChipElement>,
-        CTToolsChipElement
+      "cf-tools-chip": CTDOM.DetailedHTMLProps<
+        CFToolsChipAttributes<CFToolsChipElement>,
+        CFToolsChipElement
       >;
       "cf-heading": CTDOM.DetailedHTMLProps<
         CFHeadingAttributes<CFHeadingElement>,
@@ -4738,9 +4738,9 @@ declare global {
         CFMessageInputAttributes<CFMessageInputElement>,
         CFMessageInputElement
       >;
-      "ct-chat-message": CTDOM.DetailedHTMLProps<
-        CTChatMessageAttributes<CTChatMessageElement>,
-        CTChatMessageElement
+      "cf-chat-message": CTDOM.DetailedHTMLProps<
+        CFChatMessageAttributes<CFChatMessageElement>,
+        CFChatMessageElement
       >;
       "cf-markdown": CTDOM.DetailedHTMLProps<
         CFMarkdownAttributes<CFMarkdownElement>,
@@ -4818,9 +4818,9 @@ declare global {
         CFPromptInputAttributes<CFPromptInputElement>,
         CFPromptInputElement
       >;
-      "ct-chat": CTDOM.DetailedHTMLProps<
-        CTChatAttributes<CTChatElement>,
-        CTChatElement
+      "cf-chat": CTDOM.DetailedHTMLProps<
+        CFChatAttributes<CFChatElement>,
+        CFChatElement
       >;
       "ct-message-beads": CTDOM.DetailedHTMLProps<
         CTMessageBeadsAttributes<CTMessageBeadsElement>,

@@ -686,11 +686,11 @@ export class CTFab extends BaseElement {
             ${this.showPreview && !this.expanded && previewMsg
               ? html`
                 <div class="preview-notification">
-                  <ct-chat-message
+                  <cf-chat-message
                     role="assistant"
                     compact
                     .content="${previewMsg}"
-                  ></ct-chat-message>
+                  ></cf-chat-message>
                 </div>
               `
               : nothing}

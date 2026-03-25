@@ -330,7 +330,7 @@ Be matter-of-fact. Prefer action to explanation.`;
                       style="cursor: pointer;"
                     >
                       <cf-cell-context $cell={latestAssistantMessage}>
-                        <ct-chat-message
+                        <cf-chat-message
                           role="assistant"
                           compact
                           content={latestAssistantMessage ?? ""}

@@ -39,7 +39,7 @@ import TabsStory from "../stories/ct-tabs-story.tsx";
 import ChartStory from "../stories/ct-chart-story.tsx";
 import NoteStory from "../stories/note-story.tsx";
 import KitchenSinkStory from "../stories/kitchen-sink-story.tsx";
-import ChatStory from "../stories/ct-chat-story.tsx";
+import ChatStory from "../stories/cf-chat-story.tsx";
 import CalendarStory from "../stories/ct-calendar-story.tsx";
 import RadioStory from "../stories/cf-radio-story.tsx";
 import AutocompleteStory from "../stories/cf-autocomplete-story.tsx";

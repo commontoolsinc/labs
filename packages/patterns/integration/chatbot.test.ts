@@ -64,7 +64,7 @@ describe("Chat pattern test", () => {
       });
 
       // Check for the message input
-      const messageInput = await page.waitForSelector("cf-message-input", {
+      const messageInput = await page.waitForSelector("cf-prompt-input", {
         strategy: "pierce",
       });
       assert(messageInput, "Should find message input element");
@@ -90,7 +90,7 @@ describe("Chat pattern test", () => {
       const page = shell.page();
 
       // Find the message input component
-      const messageInput = await page.waitForSelector("cf-message-input", {
+      const messageInput = await page.waitForSelector("cf-prompt-input", {
         strategy: "pierce",
       });
       assert(messageInput, "Should find message input");
@@ -111,7 +111,7 @@ describe("Chat pattern test", () => {
 
       // Click the send button by ID
       const sendButton = await page.waitForSelector(
-        "#cf-message-input-send-button",
+        "#cf-prompt-input-send-button",
         {
           strategy: "pierce",
         },
@@ -125,8 +125,8 @@ describe("Chat pattern test", () => {
       });
       assert(chatHistory, "Should find chat history container");
 
-      // Wait for user message to appear as ct-chat-message element
-      const userMessage = await page.waitForSelector("ct-chat-message", {
+      // Wait for user message to appear as cf-chat-message element
+      const userMessage = await page.waitForSelector("cf-chat-message", {
         strategy: "pierce",
       });
       assert(userMessage, "Should find user message element");
@@ -153,16 +153,16 @@ describe("Chat pattern test", () => {
       });
       assert(chatHistory, "Should find chat history container");
 
-      // Wait for assistant response (second ct-chat-message)
+      // Wait for assistant response (second cf-chat-message)
       await waitFor(async () => {
-        const messages = await page.$$("ct-chat-message", {
+        const messages = await page.$$("cf-chat-message", {
           strategy: "pierce",
         });
         return messages.length >= 2;
       }, { timeout: 30000 });
 
       // Get all chat messages using pierce strategy
-      const allMessages = await page.$$("ct-chat-message", {
+      const allMessages = await page.$$("cf-chat-message", {
         strategy: "pierce",
       });
       assert(allMessages.length >= 2, "Should have at least 2 chat messages");
@@ -211,7 +211,7 @@ describe("Chat pattern test", () => {
 
       // Click the send button by ID
       const sendButton = await page.waitForSelector(
-        "#cf-message-input-send-button",
+        "#cf-prompt-input-send-button",
         {
           strategy: "pierce",
         },
@@ -224,14 +224,14 @@ describe("Chat pattern test", () => {
 
       // Wait for new assistant response - at least 4 messages total
       await waitFor(async () => {
-        const messages = await page.$$("ct-chat-message", {
+        const messages = await page.$$("cf-chat-message", {
           strategy: "pierce",
         });
         return messages.length >= 4;
       }, { timeout: 60000 });
 
       // Get all chat messages to verify sequence
-      const chatMessages = await page.$$("ct-chat-message", {
+      const chatMessages = await page.$$("cf-chat-message", {
         strategy: "pierce",
       });
       const messages = await Promise.all(
@@ -266,7 +266,7 @@ describe("Chat pattern test", () => {
       const page = shell.page();
 
       // Verify we have messages before clearing
-      const messagesBefore = await page.$$("ct-chat-message", {
+      const messagesBefore = await page.$$("cf-chat-message", {
         strategy: "pierce",
       });
       assert(messagesBefore.length > 0, "Should have messages before clearing");
@@ -280,14 +280,14 @@ describe("Chat pattern test", () => {
 
       // Wait for chat to clear
       await waitFor(async () => {
-        const messages = await page.$$("ct-chat-message", {
+        const messages = await page.$$("cf-chat-message", {
           strategy: "pierce",
         });
         return messages.length === 0;
       });
 
       // Verify chat history is now empty
-      const messagesAfter = await page.$$("ct-chat-message", {
+      const messagesAfter = await page.$$("cf-chat-message", {
         strategy: "pierce",
       });
       assertEquals(

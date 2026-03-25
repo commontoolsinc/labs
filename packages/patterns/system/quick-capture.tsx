@@ -228,7 +228,7 @@ ${profileSection}`;
               />
               {ifElse(
                 hasMessages,
-                <ct-chat $messages={messages} pending={pending} />,
+                <cf-chat $messages={messages} pending={pending} />,
                 <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
                   Paste text, meeting notes, or ideas below. The agent will
                   break them into linked notes.

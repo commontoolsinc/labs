@@ -218,7 +218,7 @@ export default pattern<ChatInput, ChatOutput>(
         fadeEdges
         snapToBottom
       >
-        <ct-chat
+        <cf-chat
           theme={theme}
           $messages={messages}
           pending={pending}
@@ -231,7 +231,7 @@ export default pattern<ChatInput, ChatOutput>(
         <cf-cell-context $cell={pinnedCells}>
           <ct-attachments-bar pinnedCells={pinnedCells} />
         </cf-cell-context>
-        <ct-tools-chip $tools={flattenedTools} />
+        <cf-tools-chip $tools={flattenedTools} />
         <cf-button
           variant="pill"
           type="button"

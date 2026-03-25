@@ -24,7 +24,7 @@ export interface MenuPosition {
 
 /**
  * Calculate optimal menu position with viewport clamping and flip behavior.
- * Based on logic from ct-tools-chip component.
+ * Based on logic from cf-tools-chip component.
  */
 export function calculateMenuPosition(
   anchorRect: DOMRect,

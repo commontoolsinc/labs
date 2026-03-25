@@ -19,9 +19,9 @@ import {
 } from "../theme-context.ts";
 
 /**
- * CTChatMessage - Chat message component with markdown support
+ * CFChatMessage - Chat message component with markdown support
  *
- * @element ct-chat-message
+ * @element cf-chat-message
  *
  * @attr {string} role - The role of the message sender ("user" | "assistant")
  * @attr {string|array} content - The message content (supports markdown and structured content)
@@ -30,17 +30,17 @@ import {
  * @attr {boolean} compact - Hides the copy button and collapses spacing around the message
  *
  * @example
- * <ct-chat-message
+ * <cf-chat-message
  *   role="user"
  *   content="Hello, how are you?"
- * ></ct-chat-message>
+ * ></cf-chat-message>
  *
- * <ct-chat-message
+ * <cf-chat-message
  *   role="assistant"
  *   content="I'm doing well, thank you for asking!"
- * ></ct-chat-message>
+ * ></cf-chat-message>
  */
-export class CTChatMessage extends BaseElement {
+export class CFChatMessage extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -400,4 +400,4 @@ export class CTChatMessage extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-chat-message", CTChatMessage);
+globalThis.customElements.define("cf-chat-message", CFChatMessage);

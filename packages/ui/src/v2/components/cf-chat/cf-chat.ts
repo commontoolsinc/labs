@@ -4,7 +4,7 @@ import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
-import "../ct-chat-message/ct-chat-message.ts";
+import "../cf-chat-message/cf-chat-message.ts";
 import "../ct-tool-call/ct-tool-call.ts";
 import type {
   BuiltInLLMMessage,
@@ -56,18 +56,18 @@ const BuiltInLLMMessagesArraySchema = {
 } as const satisfies JSONSchema;
 
 /**
- * CTChat - Chat container that handles message flow and tool call correlation
+ * CFChat - Chat container that handles message flow and tool call correlation
  *
- * @element ct-chat
+ * @element cf-chat
  *
  * @prop {CellHandle<BuiltInLLMMessage[]>|BuiltInLLMMessage[]} messages - Messages array or Cell containing messages
  * @prop {boolean} pending - Show animated typing indicator for assistant response
  * @prop {CTTheme} theme - Theme configuration for chat components
  *
  * @example
- * <ct-chat .messages=${messagesCell} .pending=${true}></ct-chat>
+ * <cf-chat .messages=${messagesCell} .pending=${true}></cf-chat>
  */
-export class CTChat extends BaseElement {
+export class CFChat extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -173,7 +173,7 @@ export class CTChat extends BaseElement {
       this.requestUpdate();
       // Emit event for parent scroll containers
       this.dispatchEvent(
-        new CustomEvent("ct-chat-updated", {
+        new CustomEvent("cf-chat-updated", {
           bubbles: true,
           composed: true,
         }),
@@ -381,10 +381,10 @@ export class CTChat extends BaseElement {
 
         return html`
           <div class="${this._getMessageGroupClasses(messageIndex)}">
-            <ct-chat-message
+            <cf-chat-message
               .role="${message.role}"
               .content="${enhancedContent}"
-            ></ct-chat-message>
+            ></cf-chat-message>
           </div>
         `;
       }
@@ -392,10 +392,10 @@ export class CTChat extends BaseElement {
 
     return html`
       <div class="${this._getMessageGroupClasses(messageIndex)}">
-        <ct-chat-message
+        <cf-chat-message
           .role="${message.role}"
           .content="${message.content}"
-        ></ct-chat-message>
+        ></cf-chat-message>
       </div>
     `;
   }
@@ -427,7 +427,7 @@ export class CTChat extends BaseElement {
     // Emit event when pending state changes
     if (changed.has("pending")) {
       this.dispatchEvent(
-        new CustomEvent("ct-chat-updated", {
+        new CustomEvent("cf-chat-updated", {
           bubbles: true,
           composed: true,
         }),
@@ -446,4 +446,4 @@ export class CTChat extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-chat", CTChat);
+globalThis.customElements.define("cf-chat", CFChat);
