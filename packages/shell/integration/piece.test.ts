@@ -64,80 +64,75 @@ describe("shell piece tests", () => {
       identity,
     });
 
-    const waitForCounterText = async (expected: string) => {
+    const waitForPieceValue = async (expected: number) => {
       await waitFor(async () => {
-        const text = await page.evaluate((expected) => {
-          const find = (
-            root: Document | ShadowRoot,
-            selector: string,
-          ): Element | null => {
-            const direct = root.querySelector(selector);
-            if (direct) {
-              return direct;
+        return await page.evaluate(async (expected, expectedPieceId) => {
+          const rootView = document.querySelector("x-root-view");
+          const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
+            | {
+              _patterns?: {
+                value?: {
+                  activePattern?: {
+                    id(): string;
+                    cell(): {
+                      key(name: string): {
+                        sync(): Promise<unknown>;
+                        get(): unknown;
+                      };
+                    };
+                  };
+                };
+              };
             }
+            | null;
+          const activePattern = appView?._patterns?.value?.activePattern;
+          if (!activePattern || activePattern.id() !== expectedPieceId) {
+            return false;
+          }
 
-            for (const el of root.querySelectorAll("*")) {
-              if (el.shadowRoot) {
-                const nested = find(el.shadowRoot, selector);
-                if (nested) {
-                  return nested;
-                }
-              }
-            }
-
-            return null;
-          };
-
-          const el = find(document, "#counter-result");
-          return el?.textContent?.trim() === expected;
-        }, { args: [expected] });
-        return text;
+          const valueCell = activePattern.cell().key("value");
+          await valueCell.sync();
+          return valueCell.get() === expected;
+        }, { args: [expected, pieceId] });
       });
     };
 
     const clickDecrement = async () => {
       await waitFor(async () => {
-        return await page.evaluate(() => {
-          const find = (
-            root: Document | ShadowRoot,
-            selector: string,
-          ): Element | null => {
-            const direct = root.querySelector(selector);
-            if (direct) {
-              return direct;
+        return await page.evaluate(async (expectedPieceId) => {
+          const rootView = document.querySelector("x-root-view");
+          const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
+            | {
+              _patterns?: {
+                value?: {
+                  activePattern?: {
+                    id(): string;
+                    cell(): {
+                      key(name: string): {
+                        send(value: unknown): Promise<void>;
+                      };
+                    };
+                  };
+                };
+              };
             }
-
-            for (const el of root.querySelectorAll("*")) {
-              if (el.shadowRoot) {
-                const nested = find(el.shadowRoot, selector);
-                if (nested) {
-                  return nested;
-                }
-              }
-            }
-
-            return null;
-          };
-
-          const button = find(document, "#counter-decrement");
-          if (!(button instanceof HTMLElement)) {
+            | null;
+          const activePattern = appView?._patterns?.value?.activePattern;
+          if (!activePattern || activePattern.id() !== expectedPieceId) {
             return false;
           }
-          button.click();
+          await activePattern.cell().key("decrement").send(undefined);
           return true;
-        });
+        }, { args: [pieceId] });
       });
     };
 
-    // Wait for initial state
-    await waitForCounterText("Counter is the 0th number");
+    await waitForPieceValue(0);
 
-    // Click decrement and wait for -1
     await clickDecrement();
-    await waitForCounterText("Counter is the -1th number");
+    await waitForPieceValue(-1);
 
-    // Click decrement again and wait for -2
     await clickDecrement();
-    await waitForCounterText("Counter is the -2th number");
+    await waitForPieceValue(-2);
   });
 });
