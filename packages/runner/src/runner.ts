@@ -145,21 +145,24 @@ export class Runner {
       this.setupInternal(providedTx, patternOrModule, argument, resultCell);
       return Promise.resolve(resultCell);
     } else {
-      // Ignore errors after retrying for now, as outside the tx, we'll see the
-      // latest true value, it just lost the ract against someone else changing
-      // the pattern or argument. Correct action is anyhow similar to what would
-      // have happened if the write succeeded and was immediately overwritten.
+      // Ignore retry/commit errors after retrying for now, as outside the tx,
+      // we'll see the latest true value; it just lost the race against someone
+      // else changing the pattern or argument. Correct action is anyhow similar
+      // to what would have happened if the write succeeded and was immediately
+      // overwritten. Still surface real callback failures from setupInternal so
+      // callers don't silently continue after a broken setup.
       return this.runtime.editWithRetry((tx) => {
         this.setupInternal(tx, patternOrModule, argument, resultCell);
       }).then(({ error }) => {
         if (error) {
-          if (error.name === "StorageTransactionAborted") {
+          if (
+            error.name === "StorageTransactionAborted" &&
+            error.message.startsWith("editWithRetry action threw:")
+          ) {
             throw error.reason instanceof Error
               ? error.reason
               : new Error(error.message);
           }
-
-          throw new Error(error.message);
         }
 
         return resultCell;

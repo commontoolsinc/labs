@@ -955,6 +955,67 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 1 });
   });
 
+  it("setup ignores exhausted retry errors and still resolves", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { path: ["internal", "output"] } } },
+      nodes: [],
+    };
+
+    const resultCell = runtime.getCell(space, "setup ignores retry errors");
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    runtime.editWithRetry = (() =>
+      Promise.resolve({
+        error: {
+          name: "StorageTransactionAborted" as const,
+          message: "always-fail",
+          reason: "always-fail",
+        },
+      })) as typeof runtime.editWithRetry;
+
+    try {
+      await expect(runtime.setup(undefined, pattern, { input: 1 }, resultCell))
+        .resolves.toBe(resultCell);
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
+
+  it("setup rethrows callback failures from editWithRetry", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { path: ["internal", "output"] } } },
+      nodes: [],
+    };
+
+    const resultCell = runtime.getCell(space, "setup rethrows callback errors");
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    const thrown = new Error("boom");
+    runtime.editWithRetry = (() =>
+      Promise.resolve({
+        error: {
+          name: "StorageTransactionAborted" as const,
+          message: `editWithRetry action threw: ${thrown}`,
+          reason: thrown,
+        },
+      })) as typeof runtime.editWithRetry;
+
+    try {
+      await expect(runtime.setup(undefined, pattern, { input: 1 }, resultCell))
+        .rejects.toThrow("boom");
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
+
   it("setup with same pattern updates argument without restart", async () => {
     const pattern: Pattern = {
       argumentSchema: {
