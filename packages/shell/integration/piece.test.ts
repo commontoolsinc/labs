@@ -69,9 +69,83 @@ describe("shell piece tests", () => {
       identity,
     });
 
-    await waitFor(async () => {
-      return await page.evaluate(() => !!globalThis.commontools?.rt);
-    });
+    const logDebugSnapshot = async (label: string) => {
+      console.log(label, {
+        shellState: await shell.state(),
+        pieceValue: await piece.result.get(["value"]),
+        page: await page.evaluate(() => {
+          const rootView = document.querySelector("x-root-view");
+          const typedRootView = rootView as
+            | {
+              _rt?: {
+                status?: unknown;
+                value?: unknown;
+                error?: {
+                  message?: string;
+                };
+              };
+              app?: {
+                identity?: unknown;
+              };
+            }
+            | null;
+          const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
+            | {
+              _patterns?: {
+                status?: unknown;
+                value?: {
+                  activePattern?: {
+                    id(): string;
+                  };
+                };
+              };
+              _selectedPattern?: {
+                status?: unknown;
+                value?: {
+                  id(): string;
+                };
+              };
+              _spaceRootPattern?: {
+                status?: unknown;
+                value?: {
+                  id(): string;
+                };
+              };
+              _patternError?: {
+                message?: string;
+              };
+            }
+            | null;
+          return {
+            href: globalThis.location.href,
+            hasRuntime: !!globalThis.commontools?.rt,
+            hasRootView: !!rootView,
+            rootRuntimeStatus: typedRootView?._rt?.status,
+            hasRootRuntimeValue: !!typedRootView?._rt?.value,
+            rootRuntimeError: typedRootView?._rt?.error?.message,
+            rootHasIdentity: !!typedRootView?.app?.identity,
+            hasAppView: !!appView,
+            patternsStatus: appView?._patterns?.status,
+            selectedPatternStatus: appView?._selectedPattern?.status,
+            spaceRootPatternStatus: appView?._spaceRootPattern?.status,
+            activePatternId: appView?._patterns?.value?.activePattern?.id?.(),
+            selectedPatternId: appView?._selectedPattern?.value?.id?.(),
+            spaceRootPatternId: appView?._spaceRootPattern?.value?.id?.(),
+            patternError: appView?._patternError?.message,
+            bodyText: document.body.textContent?.trim().slice(0, 200),
+          };
+        }),
+      });
+    };
+
+    try {
+      await waitFor(async () => {
+        return await page.evaluate(() => !!globalThis.commontools?.rt);
+      });
+    } catch (error) {
+      await logDebugSnapshot("shell piece runtime debug");
+      throw error;
+    }
 
     await page.evaluate(async (spaceName, pieceId) => {
       await globalThis.app.setView({ spaceName, pieceId });
@@ -108,57 +182,6 @@ describe("shell piece tests", () => {
           const activePattern = appView?._patterns?.value?.activePattern;
           return !!activePattern && activePattern.id() === expectedPieceId;
         }, { args: [pieceId] });
-      });
-    };
-
-    const logDebugSnapshot = async (label: string) => {
-      console.log(label, {
-        shellState: await shell.state(),
-        pieceValue: await piece.result.get(["value"]),
-        page: await page.evaluate(() => {
-          const rootView = document.querySelector("x-root-view");
-          const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
-            | {
-              _patterns?: {
-                status?: unknown;
-                value?: {
-                  activePattern?: {
-                    id(): string;
-                  };
-                };
-              };
-              _selectedPattern?: {
-                status?: unknown;
-                value?: {
-                  id(): string;
-                };
-              };
-              _spaceRootPattern?: {
-                status?: unknown;
-                value?: {
-                  id(): string;
-                };
-              };
-              _patternError?: {
-                message?: string;
-              };
-            }
-            | null;
-          return {
-            href: globalThis.location.href,
-            hasRuntime: !!globalThis.commontools?.rt,
-            hasRootView: !!rootView,
-            hasAppView: !!appView,
-            patternsStatus: appView?._patterns?.status,
-            selectedPatternStatus: appView?._selectedPattern?.status,
-            spaceRootPatternStatus: appView?._spaceRootPattern?.status,
-            activePatternId: appView?._patterns?.value?.activePattern?.id?.(),
-            selectedPatternId: appView?._selectedPattern?.value?.id?.(),
-            spaceRootPatternId: appView?._spaceRootPattern?.value?.id?.(),
-            patternError: appView?._patternError?.message,
-            bodyText: document.body.textContent?.trim().slice(0, 200),
-          };
-        }),
       });
     };
 
