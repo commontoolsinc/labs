@@ -3176,6 +3176,70 @@ export default pattern<{ name: string; show: boolean }>(({ name, show }) => ({
 );
 
 Deno.test(
+  "Capability-first: helper-owned child key references stay structural",
+  async () => {
+    const source = `/// <cts-enable />
+import { Cell, Default, handler, lift, pattern, Stream } from "commontools";
+
+const childIncrement = handler(
+  (event: { amount?: number } | undefined, context: { value: Cell<number> }) => {
+    const amount = typeof event?.amount === "number" ? event.amount : 1;
+    context.value.set((context.value.get() ?? 0) + amount);
+  },
+);
+
+const forward = handler(
+  (_event: unknown, context: { increment: Stream<{ amount?: number }> }) => {
+    context.increment.send({ amount: 1 });
+  },
+);
+
+const childCounter = pattern<{ value: Default<number, 0> }>(({ value }) => ({
+  value,
+  increment: childIncrement({ value }),
+}));
+
+const sum = lift((input: { left: number; right: number }) => input.left + input.right);
+
+export default pattern<{ left: Default<number, 0>; right: Default<number, 0> }>(
+  ({ left, right }) => {
+    const leftChild = childCounter({ value: left });
+    const rightChild = childCounter({ value: right });
+
+    return {
+      total: sum({
+        left: leftChild.key("value"),
+        right: rightChild.key("value"),
+      }),
+      forward: forward({ increment: rightChild.key("increment") }),
+    };
+  },
+);
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, 'left: leftChild.key("value")');
+    assertStringIncludes(output, 'right: rightChild.key("value")');
+    assertStringIncludes(output, 'increment: rightChild.key("increment")');
+    assert(
+      !output.includes(
+        '__ctHelpers.computed((): any => leftChild.key("value"))',
+      ),
+      "expected child value cell reference to stay structural inside helper-owned arguments",
+    );
+    assert(
+      !output.includes(
+        '__ctHelpers.computed((): any => rightChild.key("increment"))',
+      ),
+      "expected child stream reference to stay structural inside helper-owned arguments",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: JSX authored ifElse Writable.get() branch lowers reactively",
   async () => {
     const source = `/// <cts-enable />

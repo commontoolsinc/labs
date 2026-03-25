@@ -4,8 +4,8 @@ import { createDataFlowAnalyzer, visitEachChildWithJsx } from "../ast/mod.ts";
 import {
   classifyJsxExpressionSiteRoute,
   rewriteExpressionSite,
-  rewriteOwnedPreClosureJsxExpressionSite,
   rewriteOpaquePathTerminalJsxExpressionSite,
+  rewriteOwnedPreClosureJsxExpressionSite,
 } from "./expression-site-lowering.ts";
 
 export class JsxExpressionSiteRouterTransformer extends Transformer {

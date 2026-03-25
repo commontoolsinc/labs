@@ -686,6 +686,10 @@ function isSupportedHelperOwnedReceiverMethodRoot(
     return false;
   }
 
+  if (classifyOpaquePathTerminalCall(expression)) {
+    return false;
+  }
+
   return siteInfo.reactiveContext.owner === "pattern" ||
     siteInfo.reactiveContext.owner === "render";
 }
