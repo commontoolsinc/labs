@@ -83,6 +83,8 @@ type WishContext = {
   parentCell: Cell<any>;
   spaceCell?: Cell<unknown>;
   scope?: ("~" | "." | string)[];
+  /** Cached #now cell to avoid non-idempotent re-runs from Date.now() */
+  nowCell?: Cell<unknown>;
 };
 
 type BaseResolution = {
@@ -414,13 +416,17 @@ function resolveSpaceTarget(
         `Wish now target "${formatTarget(parsed)}" is not recognized.`,
       );
     }
-    const nowCell = ctx.runtime.getImmutableCell(
-      ctx.parentCell.space,
-      Date.now(),
-      undefined,
-      ctx.tx,
-    );
-    return [{ cell: nowCell }];
+    // Cache the #now cell per wish instance so that sync re-runs don't
+    // create a new immutable cell each time (Date.now() changes each call).
+    if (!ctx.nowCell) {
+      ctx.nowCell = ctx.runtime.getImmutableCell(
+        ctx.parentCell.space,
+        Date.now(),
+        undefined,
+        ctx.tx,
+      );
+    }
+    return [{ cell: ctx.nowCell }];
   }
 
   const pathForKey: Record<string, readonly string[]> = {
@@ -554,6 +560,10 @@ export function wish(
   parentCell: Cell<any>,
   runtime: Runtime,
 ): Action {
+  // Per-instance cached #now cell — prevents non-idempotent re-runs from
+  // Date.now() producing a different value each time the sync action fires.
+  let nowCell: Cell<unknown> | undefined;
+
   // Per-instance suggestion pattern result cell
   let suggestionPatternInput:
     | {
@@ -654,8 +664,10 @@ export function wish(
         try {
           const parsed = parseWishTarget(query);
           parsed.path = [...parsed.path, ...(path ?? [])];
-          const ctx: WishContext = { runtime, tx, parentCell, scope };
+          const ctx: WishContext = { runtime, tx, parentCell, scope, nowCell };
           const baseResolutions = resolveBase(parsed, ctx);
+          // Persist #now cell across re-runs to avoid non-idempotent loops
+          if (ctx.nowCell) nowCell = ctx.nowCell;
 
           if (baseResolutions.length === 0) {
             // No matches yet — data may still be loading. Send a pending
