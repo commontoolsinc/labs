@@ -314,9 +314,6 @@ async function buildCli(config: BuildConfig): Promise<void> {
     console.error("Failed to build background charm service binary");
     Deno.exit(1);
   }
-  // Keep a ct-named copy for the remaining internal pipeline surfaces that
-  // have not been migrated yet.
-  await Deno.copyFile(config.distPath("cf"), config.distPath("ct"));
   console.log("CLI binary built successfully");
 }
 
