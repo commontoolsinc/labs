@@ -6,6 +6,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { NAME } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -20,6 +21,7 @@ describe("Pattern Runner - Regressions", () => {
   let derive: ReturnType<typeof createBuilder>["commonfabric"]["derive"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let ifElse: ReturnType<typeof createBuilder>["commonfabric"]["ifElse"];
+  let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -35,6 +37,7 @@ describe("Pattern Runner - Regressions", () => {
       derive,
       pattern,
       ifElse,
+      handler,
     } = commonfabric);
   });
 
@@ -114,5 +117,85 @@ describe("Pattern Runner - Regressions", () => {
     expect(afterMapped).toHaveLength(2);
     expect(afterMapped[0]).toBe("A"); // A was visible
     expect(afterMapped[1]).toBe(null); // B was hidden, null preserved correctly
+  });
+
+  it("keeps Notebook NAME current after createNote without an extra timer turn in v2", async () => {
+    await tx.commit();
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+    });
+    tx = runtime.edit();
+
+    const notePattern = pattern<{ title: string }>(({ title }) => ({
+      title,
+      [NAME]: derive(title, (value: string) => `📝 ${value}`),
+    }));
+
+    const createNote = handler<
+      void,
+      { notes: Array<ReturnType<typeof notePattern>> }
+    >(
+      (_, { notes }) => {
+        const newNote = notePattern({ title: "Stream Created Note" });
+        notes.push(newNote);
+      },
+      { proxy: true },
+    );
+
+    const notebookLikePattern = pattern<{
+      title: string;
+      notes: Array<ReturnType<typeof notePattern>>;
+    }>(({ title, notes }) => {
+      const noteCount = derive(
+        notes,
+        (items: Array<{ title: string }>) => items.length,
+      );
+      const displayName = derive(
+        { title, noteCount },
+        ({ title, noteCount }: { title: string; noteCount: number }) =>
+          `📓 ${title} (${noteCount})`,
+      );
+      return {
+        title,
+        notes,
+        noteCount,
+        [NAME]: displayName,
+        createNote: createNote({ notes }),
+      };
+    });
+
+    const resultCell = runtime.getCell<any>(
+      space,
+      "ct-notebook-name-regression",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, notebookLikePattern, {
+      title: "Test Notebook",
+      notes: [],
+    }, resultCell);
+    await tx.commit();
+
+    await runtime.idle();
+    await storageManager.synced();
+    await runtime.idle();
+
+    expect(result.key("noteCount").get()).toBe(0);
+    expect(result.key(NAME).get()).toBe("📓 Test Notebook (0)");
+
+    result.key("createNote").send();
+
+    await runtime.idle();
+    await storageManager.synced();
+    await runtime.idle();
+
+    expect(result.key("noteCount").get()).toBe(1);
+    expect(result.key(NAME).get()).toBe("📓 Test Notebook (1)");
   });
 });
