@@ -664,7 +664,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                   Found <strong>{recordCount}</strong>{" "}
                   records in this space. Copy the JSON below to save your data.
                 </p>
-                <ct-file-download
+                <cf-file-download
                   $data={exportedJson}
                   filename={`record-backup-${
                     new Date().toISOString().slice(0, 10)
@@ -674,7 +674,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                   allowAutosave
                 >
                   Download Backup
-                </ct-file-download>
+                </cf-file-download>
                 <ct-code-editor
                   $value={exportedJson}
                   language="application/json"

@@ -1,8 +1,8 @@
-# Auto-Save Feature Plan for ct-file-download
+# Auto-Save Feature Plan for cf-file-download
 
 ## Overview
 
-Add an opt-in auto-save mode to `ct-file-download` that allows users to
+Add an opt-in auto-save mode to `cf-file-download` that allows users to
 automatically back up data to a chosen folder at regular intervals. This
 provides resilience against system instability by creating timestamped backup
 files.
@@ -11,7 +11,7 @@ files.
 
 ### Enabling Auto-Save
 
-1. User **Option+clicks** (Alt+click on Windows) on a `ct-file-download` button
+1. User **Option+clicks** (Alt+click on Windows) on a `cf-file-download` button
    that has `allow-autosave` attribute
 2. File System Access API's folder picker opens
 3. User selects a folder
@@ -64,14 +64,14 @@ Opt-in flag that enables the Option+click auto-save behavior.
 
 ```html
 <!-- Auto-save enabled -->
-<ct-file-download allow-autosave $data="{backupData}" filename="backup.json">
+<cf-file-download allow-autosave $data="{backupData}" filename="backup.json">
   Download Backup
-</ct-file-download>
+</cf-file-download>
 
 <!-- Auto-save NOT enabled (default) -->
-<ct-file-download $data="{exportData}" filename="export.json">
+<cf-file-download $data="{exportData}" filename="export.json">
   Export
-</ct-file-download>
+</cf-file-download>
 ```
 
 ---
@@ -168,12 +168,12 @@ private static readonly AUTOSAVE_INTERVAL = 60_000; // 60 seconds
 ### Phase 5: Events
 
 14. **Add new custom events**
-    - `ct-autosave-enabled`: Fired when autosave mode activates
+    - `cf-autosave-enabled`: Fired when autosave mode activates
       - Detail: `{ directoryName: string }`
-    - `ct-autosave-disabled`: Fired when autosave mode deactivates
-    - `ct-autosave-success`: Fired on successful auto-save
+    - `cf-autosave-disabled`: Fired when autosave mode deactivates
+    - `cf-autosave-success`: Fired on successful auto-save
       - Detail: `{ filename: string, size: number }`
-    - `ct-autosave-error`: Fired on auto-save failure
+    - `cf-autosave-error`: Fired on auto-save failure
       - Detail: `{ error: Error }`
 
 ### Phase 6: Persistence (Nice-to-Have)
@@ -189,13 +189,13 @@ private static readonly AUTOSAVE_INTERVAL = 60_000; // 60 seconds
 
 ### Modified Files
 
-1. **`ct-file-download.ts`** - Main implementation
+1. **`cf-file-download.ts`** - Main implementation
    - Add properties, state, methods
    - Update click handler
    - Update render method
    - Add lifecycle handlers
 
-2. **`ct-file-download.test.ts`** - Tests
+2. **`cf-file-download.test.ts`** - Tests
    - Test Option+click behavior
    - Test autosave timer
    - Test visual states

@@ -15,7 +15,7 @@ export const LinkPreview = pattern<LinkPreviewInput, LinkPreviewInput>(
             $value={url}
             placeholder="Enter a URL..."
           />
-          <ct-link-preview url={url} />
+          <cf-link-preview url={url} />
         </cf-vstack>
       ),
       url,

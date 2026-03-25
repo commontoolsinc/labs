@@ -3,6 +3,7 @@ import { state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle } from "@commonfabric/runtime-client";
 import { createStringCellController } from "../../core/cell-controller.ts";
+import "../cf-button/cf-button.ts";
 
 /**
  * File System Access API types
@@ -54,13 +55,13 @@ const MIME_EXTENSIONS: Record<string, string> = {
 };
 
 /**
- * CTFileDownload - File download button with automatic visual feedback
+ * CFFileDownload - File download button with automatic visual feedback
  *
  * Triggers a file download from string data. The component encapsulates
  * the blob/ObjectURL/anchor download pattern, allowing patterns to trigger
  * downloads without directly accessing globalThis or browser DOM APIs.
  *
- * @element ct-file-download
+ * @element cf-file-download
  *
  * @property {string|CellHandle<string>} data - Content to download (required)
  * @property {string|CellHandle<string>} filename - Download filename (auto-generated if not provided)
@@ -75,43 +76,43 @@ const MIME_EXTENSIONS: Record<string, string> = {
  * @attr {boolean} icon-only - Only show icon, no text (default: false)
  * @attr {boolean} allow-autosave - Enable Option+click to activate auto-save mode (default: false)
  *
- * @fires ct-download-success - Fired when download succeeds
+ * @fires cf-download-success - Fired when download succeeds
  *   Detail: { filename: string, size: number, mimeType: string }
- * @fires ct-download-error - Fired when download fails
+ * @fires cf-download-error - Fired when download fails
  *   Detail: { error: Error, filename: string }
- * @fires ct-autosave-enabled - Fired when auto-save mode is activated
+ * @fires cf-autosave-enabled - Fired when auto-save mode is activated
  *   Detail: { directoryName: string }
- * @fires ct-autosave-disabled - Fired when auto-save mode is deactivated
- * @fires ct-autosave-success - Fired when auto-save completes successfully
+ * @fires cf-autosave-disabled - Fired when auto-save mode is deactivated
+ * @fires cf-autosave-success - Fired when auto-save completes successfully
  *   Detail: { filename: string, size: number }
- * @fires ct-autosave-error - Fired when auto-save fails
+ * @fires cf-autosave-error - Fired when auto-save fails
  *   Detail: { error: Error }
  *
  * @slot - Button label text (optional, defaults based on state)
  *
  * @example
  * // Basic usage
- * <ct-file-download data="Hello World" filename="hello.txt">Download</ct-file-download>
+ * <cf-file-download data="Hello World" filename="hello.txt">Download</cf-file-download>
  *
  * // With Cell binding (in pattern)
- * <ct-file-download
+ * <cf-file-download
  *   $data={exportData}
  *   $filename={exportFilename}
  *   mime-type="application/json"
- * >Export</ct-file-download>
+ * >Export</cf-file-download>
  *
  * // Icon only
- * <ct-file-download data="data" filename="file.txt" icon-only></ct-file-download>
+ * <cf-file-download data="data" filename="file.txt" icon-only></cf-file-download>
  *
  * // Base64 binary data
- * <ct-file-download
+ * <cf-file-download
  *   data={imageBase64}
  *   filename="image.png"
  *   mime-type="image/png"
  *   base64
- * >Download Image</ct-file-download>
+ * >Download Image</cf-file-download>
  */
-export class CTFileDownload extends BaseElement {
+export class CFFileDownload extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -463,7 +464,7 @@ export class CTFileDownload extends BaseElement {
       this._lastSavedData = this._getDataValue();
       this._isDirty = false;
 
-      this.emit("ct-autosave-enabled", {
+      this.emit("cf-autosave-enabled", {
         directoryName: dirHandle.name,
       });
 
@@ -488,7 +489,7 @@ export class CTFileDownload extends BaseElement {
       clearTimeout(this._autosaveTimer);
       this._autosaveTimer = null;
     }
-    this.emit("ct-autosave-disabled", {});
+    this.emit("cf-autosave-disabled", {});
   }
 
   /**
@@ -506,12 +507,12 @@ export class CTFileDownload extends BaseElement {
       const blob = this._createBlob(data);
 
       // Check file size limit to prevent hanging on huge files
-      if (blob.size > CTFileDownload.MAX_FILE_SIZE) {
+      if (blob.size > CFFileDownload.MAX_FILE_SIZE) {
         throw new Error(
           `File size (${
             Math.round(blob.size / 1024 / 1024)
           }MB) exceeds maximum allowed (${
-            Math.round(CTFileDownload.MAX_FILE_SIZE / 1024 / 1024)
+            Math.round(CFFileDownload.MAX_FILE_SIZE / 1024 / 1024)
           }MB)`,
         );
       }
@@ -554,7 +555,7 @@ export class CTFileDownload extends BaseElement {
         }
       }
 
-      this.emit("ct-autosave-success", {
+      this.emit("cf-autosave-success", {
         filename,
         size: blob.size,
       });
@@ -567,7 +568,7 @@ export class CTFileDownload extends BaseElement {
         this._showNotAvailableFeedback("Folder access revoked");
       }
 
-      this.emit("ct-autosave-error", {
+      this.emit("cf-autosave-error", {
         error: error as Error,
       });
     }
@@ -585,7 +586,7 @@ export class CTFileDownload extends BaseElement {
 
     this._autosaveTimer = setTimeout(() => {
       this._performAutosave();
-    }, CTFileDownload.AUTOSAVE_INTERVAL);
+    }, CFFileDownload.AUTOSAVE_INTERVAL);
   }
 
   /**
@@ -646,7 +647,7 @@ export class CTFileDownload extends BaseElement {
 
     // Check for empty data
     if (!data) {
-      this.emit("ct-download-error", {
+      this.emit("cf-download-error", {
         error: new Error("No data to download"),
         filename,
       });
@@ -661,12 +662,12 @@ export class CTFileDownload extends BaseElement {
       const blob = this._createBlob(data);
 
       // Check file size limit
-      if (blob.size > CTFileDownload.MAX_FILE_SIZE) {
+      if (blob.size > CFFileDownload.MAX_FILE_SIZE) {
         throw new Error(
           `File size (${
             Math.round(blob.size / 1024 / 1024)
           }MB) exceeds maximum allowed (${
-            Math.round(CTFileDownload.MAX_FILE_SIZE / 1024 / 1024)
+            Math.round(CFFileDownload.MAX_FILE_SIZE / 1024 / 1024)
           }MB)`,
         );
       }
@@ -684,14 +685,14 @@ export class CTFileDownload extends BaseElement {
       // Delay URL revocation to ensure download starts in all browsers
       setTimeout(
         () => URL.revokeObjectURL(url),
-        CTFileDownload.URL_REVOKE_DELAY,
+        CFFileDownload.URL_REVOKE_DELAY,
       );
 
       // Update state for visual feedback
       this._downloaded = true;
       this._downloading = false;
 
-      this.emit("ct-download-success", {
+      this.emit("cf-download-success", {
         filename,
         size: blob.size,
         mimeType: this.mimeType,
@@ -706,7 +707,7 @@ export class CTFileDownload extends BaseElement {
       }, this.feedbackDuration);
     } catch (error) {
       this._downloading = false;
-      this.emit("ct-download-error", {
+      this.emit("cf-download-error", {
         error: error as Error,
         filename,
       });
@@ -815,4 +816,4 @@ export class CTFileDownload extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-file-download", CTFileDownload);
+globalThis.customElements.define("cf-file-download", CFFileDownload);

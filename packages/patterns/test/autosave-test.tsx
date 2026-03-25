@@ -45,7 +45,7 @@ export default pattern<State, Output>((state) => {
             Update Data
           </cf-button>
 
-          <ct-file-download
+          <cf-file-download
             data-testid="autosave-btn"
             allowAutosave
             $data={state.data}
@@ -54,9 +54,9 @@ export default pattern<State, Output>((state) => {
             variant="primary"
           >
             Download (Option+click for autosave)
-          </ct-file-download>
+          </cf-file-download>
 
-          <ct-file-download
+          <cf-file-download
             data-testid="no-autosave-btn"
             $data={state.data}
             filename="no-autosave.txt"
@@ -64,7 +64,7 @@ export default pattern<State, Output>((state) => {
             variant="secondary"
           >
             No Autosave Button
-          </ct-file-download>
+          </cf-file-download>
         </div>
 
         <div style="margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px;">

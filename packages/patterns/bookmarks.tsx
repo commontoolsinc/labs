@@ -3,7 +3,7 @@
  * Bookmarks - A pattern for collecting and browsing URLs/bookmarks.
  *
  * Displays saved links in a searchable grid with rich previews using
- * ct-link-preview. Users can add URLs, search across titles/descriptions/URLs,
+ * cf-link-preview. Users can add URLs, search across titles/descriptions/URLs,
  * and remove bookmarks.
  *
  * Keywords: bookmarks, links, collection, urls, grid, preview, search
@@ -100,7 +100,7 @@ export const Bookmarks = pattern<BookmarksInput, BookmarksOutput>(
                   overflow: "hidden",
                 }}
               >
-                <ct-link-preview url={bookmark.url} />
+                <cf-link-preview url={bookmark.url} />
                 <button
                   type="button"
                   onClick={() => removeBookmark.send({ index })}

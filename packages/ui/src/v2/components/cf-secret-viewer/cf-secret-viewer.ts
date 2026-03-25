@@ -1,30 +1,31 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
+import "../cf-button/cf-button.ts";
 import "../cf-copy-button/cf-copy-button.ts";
 
 const AUTO_HIDE_MS = 30_000;
 
 /**
- * CTSecretViewer - Trusted UI component for revealing secret strings
+ * CFSecretViewer - Trusted UI component for revealing secret strings
  *
  * Displays a greeked/masked value (e.g., `••••••••••hJ9k`) with click-to-reveal
  * and a copy button. Used by patterns to show webhook URLs, API keys, or other
  * confidential strings without the pattern code itself needing to read the value.
  *
- * @element ct-secret-viewer
+ * @element cf-secret-viewer
  *
  * @attr {string} value - The secret string (bound from a cell)
  * @attr {string} label - Optional label displayed above the value
  * @attr {number} trailing-chars - How many non-greeked chars to show at end (default: 4)
  *
  * @example
- * <ct-secret-viewer
+ * <cf-secret-viewer
  *   label="Webhook URL"
  *   value="https://api.example.com/webhooks/wh_abc123"
  *   trailing-chars="4"
- * ></ct-secret-viewer>
+ * ></cf-secret-viewer>
  */
-export class CTSecretViewer extends BaseElement {
+export class CFSecretViewer extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -165,4 +166,8 @@ export class CTSecretViewer extends BaseElement {
       </div>
     `;
   }
+}
+
+if (!globalThis.customElements.get("cf-secret-viewer")) {
+  globalThis.customElements.define("cf-secret-viewer", CFSecretViewer);
 }

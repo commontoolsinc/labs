@@ -1,15 +1,15 @@
 /**
- * Tests for CTFileDownload component
+ * Tests for CFFileDownload component
  */
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { CTFileDownload } from "./ct-file-download.ts";
+import { CFFileDownload } from "./cf-file-download.ts";
 
 /**
- * Interface for accessing private members of CTFileDownload in tests.
+ * Interface for accessing private members of CFFileDownload in tests.
  * We use this to cast elements for testing internal state.
  */
-interface CTFileDownloadPrivateAccess {
+interface CFFileDownloadPrivateAccess {
   _autosaveEnabled: boolean;
   _autosaveDirHandle: FileSystemDirectoryHandle | null;
   _autosaveTimer: ReturnType<typeof setTimeout> | null;
@@ -45,7 +45,7 @@ interface CTFileDownloadPrivateAccess {
 /**
  * Helper to clear all timers on an element to prevent test leaks
  */
-function clearElementTimers(privateAccess: CTFileDownloadPrivateAccess) {
+function clearElementTimers(privateAccess: CFFileDownloadPrivateAccess) {
   if (privateAccess._autosaveTimer) {
     clearTimeout(privateAccess._autosaveTimer);
     privateAccess._autosaveTimer = null;
@@ -59,8 +59,8 @@ function clearElementTimers(privateAccess: CTFileDownloadPrivateAccess) {
 /**
  * Cast element to access private members for testing
  */
-function asPrivate(element: CTFileDownload): CTFileDownloadPrivateAccess {
-  return element as unknown as CTFileDownloadPrivateAccess;
+function asPrivate(element: CFFileDownload): CFFileDownloadPrivateAccess {
+  return element as unknown as CFFileDownloadPrivateAccess;
 }
 
 /**
@@ -111,25 +111,25 @@ class MockFileSystemWritableFileStream {
   }
 }
 
-describe("CTFileDownload", () => {
+describe("CFFileDownload", () => {
   describe("component definition", () => {
     it("should be defined", () => {
-      expect(CTFileDownload).toBeDefined();
+      expect(CFFileDownload).toBeDefined();
     });
 
     it("should have customElement definition", () => {
-      expect(customElements.get("ct-file-download")).toBe(CTFileDownload);
+      expect(customElements.get("cf-file-download")).toBe(CFFileDownload);
     });
 
     it("should create element instance", () => {
-      const element = new CTFileDownload();
-      expect(element).toBeInstanceOf(CTFileDownload);
+      const element = new CFFileDownload();
+      expect(element).toBeInstanceOf(CFFileDownload);
     });
   });
 
   describe("default properties", () => {
     it("should have correct default values", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       expect(element.data).toBe("");
       expect(element.filename).toBe("");
       expect(element.mimeType).toBe("application/octet-stream");
@@ -145,7 +145,7 @@ describe("CTFileDownload", () => {
 
   describe("filename sanitization", () => {
     it("should remove path traversal attempts", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.filename = "../../../etc/passwd";
       // Access private method via type assertion for testing
       const sanitized = (element as unknown as {
@@ -156,7 +156,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should remove special characters", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       const sanitized = (element as unknown as {
         _sanitizeFilename: (f: string) => string;
       })._sanitizeFilename('file<>:"/\\|?*name.txt');
@@ -165,7 +165,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should truncate long filenames to 255 characters", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       const longName = "a".repeat(300);
       const sanitized = (element as unknown as {
         _sanitizeFilename: (f: string) => string;
@@ -174,7 +174,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should handle normal filenames unchanged", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       const sanitized = (element as unknown as {
         _sanitizeFilename: (f: string) => string;
       })._sanitizeFilename("my-file_2024.json");
@@ -184,7 +184,7 @@ describe("CTFileDownload", () => {
 
   describe("blob creation", () => {
     it("should create text blob for plain data", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.mimeType = "text/plain";
       const blob = (element as unknown as {
         _createBlob: (d: string) => Blob;
@@ -195,7 +195,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should decode base64 data when base64 flag is set", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.base64 = true;
       element.mimeType = "text/plain";
       // "Hello" in base64 is "SGVsbG8="
@@ -207,7 +207,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should trim whitespace from base64 data", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.base64 = true;
       element.mimeType = "text/plain";
       // Base64 with surrounding whitespace
@@ -219,7 +219,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should throw on invalid base64 data", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.base64 = true;
       expect(() => {
         (element as unknown as {
@@ -231,7 +231,7 @@ describe("CTFileDownload", () => {
 
   describe("auto-generated filename", () => {
     it("should generate filename with correct extension for JSON", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.mimeType = "application/json";
       const filename = (element as unknown as {
         _getFilename: () => string;
@@ -242,7 +242,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should generate filename with correct extension for CSV", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.mimeType = "text/csv";
       const filename = (element as unknown as {
         _getFilename: () => string;
@@ -251,7 +251,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should use bin extension for unknown MIME types", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.mimeType = "application/x-unknown";
       const filename = (element as unknown as {
         _getFilename: () => string;
@@ -263,7 +263,7 @@ describe("CTFileDownload", () => {
   describe("size limits", () => {
     it("should have MAX_FILE_SIZE of 100MB", () => {
       // Access static property
-      const maxSize = (CTFileDownload as unknown as {
+      const maxSize = (CFFileDownload as unknown as {
         MAX_FILE_SIZE: number;
       }).MAX_FILE_SIZE;
       expect(maxSize).toBe(100 * 1024 * 1024);
@@ -272,20 +272,20 @@ describe("CTFileDownload", () => {
 
   describe("autosave configuration", () => {
     it("should have AUTOSAVE_INTERVAL of 60 seconds", () => {
-      const interval = (CTFileDownload as unknown as {
+      const interval = (CFFileDownload as unknown as {
         AUTOSAVE_INTERVAL: number;
       }).AUTOSAVE_INTERVAL;
       expect(interval).toBe(60_000);
     });
 
     it("should set allowAutosave via property", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.allowAutosave = true;
       expect(element.allowAutosave).toBe(true);
     });
 
     it("should have autosave indicator methods", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       // Access private methods for testing
       const getIndicatorClass = (element as unknown as {
         _getAutosaveIndicatorClass: () => string;
@@ -299,7 +299,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should return empty indicator class when autosave disabled", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       const indicatorClass = (element as unknown as {
         _getAutosaveIndicatorClass: () => string;
       })._getAutosaveIndicatorClass();
@@ -307,7 +307,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should return empty tooltip when autosave disabled", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       const tooltip = (element as unknown as {
         _getAutosaveTooltip: () => string;
       })._getAutosaveTooltip();
@@ -317,7 +317,7 @@ describe("CTFileDownload", () => {
 
   describe("Option+click behavior", () => {
     it("should track not available state for feedback", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       const privateAccess = asPrivate(element);
 
       // Directly set the feedback state (as _showNotAvailableFeedback would do)
@@ -333,7 +333,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should not enable autosave when allowAutosave is false", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.allowAutosave = false;
       const privateAccess = asPrivate(element);
 
@@ -343,7 +343,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should attempt to enable autosave when Option+click with allowAutosave=true", async () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.allowAutosave = true;
       const privateAccess = asPrivate(element);
 
@@ -385,7 +385,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should not trigger autosave on regular click (no altKey) when autosave not enabled", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.allowAutosave = true;
       const privateAccess = asPrivate(element);
 
@@ -397,7 +397,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should disable autosave when _disableAutosave is called", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.allowAutosave = true;
       const privateAccess = asPrivate(element);
 
@@ -407,7 +407,7 @@ describe("CTFileDownload", () => {
         new MockFileSystemDirectoryHandle() as unknown as FileSystemDirectoryHandle;
 
       let disabledEventFired = false;
-      element.addEventListener("ct-autosave-disabled", () => {
+      element.addEventListener("cf-autosave-disabled", () => {
         disabledEventFired = true;
       });
 
@@ -418,7 +418,7 @@ describe("CTFileDownload", () => {
     });
 
     it("should toggle autosave off when Option+click while autosave is enabled", () => {
-      const element = new CTFileDownload();
+      const element = new CFFileDownload();
       element.allowAutosave = true;
       const privateAccess = asPrivate(element);
 
@@ -439,11 +439,11 @@ describe("CTFileDownload", () => {
   });
 
   describe("timer scheduling", () => {
-    let element: CTFileDownload;
-    let privateAccess: CTFileDownloadPrivateAccess;
+    let element: CFFileDownload;
+    let privateAccess: CFFileDownloadPrivateAccess;
 
     beforeEach(() => {
-      element = new CTFileDownload();
+      element = new CFFileDownload();
       element.data = "test data";
       privateAccess = asPrivate(element);
     });
@@ -502,11 +502,11 @@ describe("CTFileDownload", () => {
   });
 
   describe("state transition - indicator class", () => {
-    let element: CTFileDownload;
-    let privateAccess: CTFileDownloadPrivateAccess;
+    let element: CFFileDownload;
+    let privateAccess: CFFileDownloadPrivateAccess;
 
     beforeEach(() => {
-      element = new CTFileDownload();
+      element = new CFFileDownload();
       privateAccess = asPrivate(element);
     });
 
@@ -542,11 +542,11 @@ describe("CTFileDownload", () => {
   });
 
   describe("state transition - tooltip", () => {
-    let element: CTFileDownload;
-    let privateAccess: CTFileDownloadPrivateAccess;
+    let element: CFFileDownload;
+    let privateAccess: CFFileDownloadPrivateAccess;
 
     beforeEach(() => {
-      element = new CTFileDownload();
+      element = new CFFileDownload();
       privateAccess = asPrivate(element);
     });
 
@@ -593,12 +593,12 @@ describe("CTFileDownload", () => {
   });
 
   describe("File System Access API mock tests", () => {
-    let element: CTFileDownload;
-    let privateAccess: CTFileDownloadPrivateAccess;
+    let element: CFFileDownload;
+    let privateAccess: CFFileDownloadPrivateAccess;
     let originalShowDirectoryPicker: (() => Promise<unknown>) | undefined;
 
     beforeEach(() => {
-      element = new CTFileDownload();
+      element = new CFFileDownload();
       element.allowAutosave = true;
       element.data = "test data content";
       element.filename = "test-file.txt";
@@ -645,7 +645,7 @@ describe("CTFileDownload", () => {
       let enabledEventFired = false;
       let eventDetail: { directoryName?: string } = {};
       element.addEventListener(
-        "ct-autosave-enabled",
+        "cf-autosave-enabled",
         ((e: CustomEvent<{ directoryName: string }>) => {
           enabledEventFired = true;
           eventDetail = e.detail;
@@ -757,12 +757,12 @@ describe("CTFileDownload", () => {
   });
 
   describe("event emission", () => {
-    let element: CTFileDownload;
-    let privateAccess: CTFileDownloadPrivateAccess;
+    let element: CFFileDownload;
+    let privateAccess: CFFileDownloadPrivateAccess;
     let originalShowDirectoryPicker: (() => Promise<unknown>) | undefined;
 
     beforeEach(() => {
-      element = new CTFileDownload();
+      element = new CFFileDownload();
       element.allowAutosave = true;
       element.data = "test data for events";
       element.filename = "event-test.txt";
@@ -794,7 +794,7 @@ describe("CTFileDownload", () => {
       }
     });
 
-    it("should emit ct-autosave-enabled event with directory name", async () => {
+    it("should emit cf-autosave-enabled event with directory name", async () => {
       const mockDirHandle = new MockFileSystemDirectoryHandle();
       mockDirHandle.name = "my-backup-folder";
 
@@ -806,7 +806,7 @@ describe("CTFileDownload", () => {
 
       let eventDetail: { directoryName?: string } = {};
       element.addEventListener(
-        "ct-autosave-enabled",
+        "cf-autosave-enabled",
         ((e: CustomEvent<{ directoryName: string }>) => {
           eventDetail = e.detail;
         }) as EventListener,
@@ -817,13 +817,13 @@ describe("CTFileDownload", () => {
       expect(eventDetail.directoryName).toBe("my-backup-folder");
     });
 
-    it("should emit ct-autosave-disabled event", () => {
+    it("should emit cf-autosave-disabled event", () => {
       privateAccess._autosaveEnabled = true;
       privateAccess._autosaveDirHandle =
         new MockFileSystemDirectoryHandle() as unknown as FileSystemDirectoryHandle;
 
       let disabledFired = false;
-      element.addEventListener("ct-autosave-disabled", () => {
+      element.addEventListener("cf-autosave-disabled", () => {
         disabledFired = true;
       });
 
@@ -833,7 +833,7 @@ describe("CTFileDownload", () => {
       expect(privateAccess._autosaveEnabled).toBe(false);
     });
 
-    it("should emit ct-autosave-success event with filename and size on successful save", async () => {
+    it("should emit cf-autosave-success event with filename and size on successful save", async () => {
       const mockDirHandle = new MockFileSystemDirectoryHandle();
       privateAccess._autosaveEnabled = true;
       privateAccess._autosaveDirHandle =
@@ -846,7 +846,7 @@ describe("CTFileDownload", () => {
 
       let eventDetail: { filename?: string; size?: number } = {};
       element.addEventListener(
-        "ct-autosave-success",
+        "cf-autosave-success",
         ((e: CustomEvent<{ filename: string; size: number }>) => {
           eventDetail = e.detail;
         }) as EventListener,
@@ -859,7 +859,7 @@ describe("CTFileDownload", () => {
       expect(eventDetail.size).toBeGreaterThan(0);
     });
 
-    it("should emit ct-autosave-error event on failure", async () => {
+    it("should emit cf-autosave-error event on failure", async () => {
       // Create a mock that throws on write
       const mockDirHandle = {
         name: "test-folder",
@@ -884,7 +884,7 @@ describe("CTFileDownload", () => {
       let errorEventFired = false;
       let eventError: Error | undefined;
       element.addEventListener(
-        "ct-autosave-error",
+        "cf-autosave-error",
         ((e: CustomEvent<{ error: Error }>) => {
           errorEventFired = true;
           eventError = e.detail.error;
@@ -925,10 +925,10 @@ describe("CTFileDownload", () => {
       let disabledFired = false;
       let errorFired = false;
 
-      element.addEventListener("ct-autosave-disabled", () => {
+      element.addEventListener("cf-autosave-disabled", () => {
         disabledFired = true;
       });
-      element.addEventListener("ct-autosave-error", () => {
+      element.addEventListener("cf-autosave-error", () => {
         errorFired = true;
       });
 
@@ -946,11 +946,11 @@ describe("CTFileDownload", () => {
   });
 
   describe("autosave perform operation", () => {
-    let element: CTFileDownload;
-    let privateAccess: CTFileDownloadPrivateAccess;
+    let element: CFFileDownload;
+    let privateAccess: CFFileDownloadPrivateAccess;
 
     beforeEach(() => {
-      element = new CTFileDownload();
+      element = new CFFileDownload();
       element.data = "content to save";
       element.filename = "save-test.json";
       element.mimeType = "application/json";
@@ -969,7 +969,7 @@ describe("CTFileDownload", () => {
       privateAccess._isDirty = true;
 
       let successFired = false;
-      element.addEventListener("ct-autosave-success", () => {
+      element.addEventListener("cf-autosave-success", () => {
         successFired = true;
       });
 
@@ -986,7 +986,7 @@ describe("CTFileDownload", () => {
       privateAccess._isSavingAutosave = true;
 
       let successCount = 0;
-      element.addEventListener("ct-autosave-success", () => {
+      element.addEventListener("cf-autosave-success", () => {
         successCount++;
       });
 

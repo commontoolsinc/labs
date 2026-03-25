@@ -1,6 +1,8 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { CellHandle } from "@commonfabric/runtime-client";
+import "../cf-button/cf-button.ts";
+import "../cf-secret-viewer/cf-secret-viewer.ts";
 
 // Design spec: docs/specs/webhook-ingress/README.md
 
@@ -10,7 +12,7 @@ export interface WebhookConfig {
 }
 
 /**
- * CTWebhook - Webhook integration component
+ * CFWebhook - Webhook integration component
  *
  * Creates and manages a webhook endpoint. The component handles all API
  * interaction internally — patterns never call /api/webhooks directly.
@@ -20,20 +22,20 @@ export interface WebhookConfig {
  * The component creates the confidential config cell internally so the
  * pattern never needs to manage CFC labels for secrets.
  *
- * @element ct-webhook
+ * @element cf-webhook
  *
  * @attr {string} name - Human-readable label for the webhook
  * @attr {CellHandle<any>} inbox - Stream that receives webhook payloads (pass via $inbox)
  * @attr {CellHandle<WebhookConfig | null>} config - Cell for URL+secret storage (pass via $config)
  *
  * @example
- * <ct-webhook
+ * <cf-webhook
  *   name="GitHub Push Events"
  *   $inbox={webhookInbox}
  *   $config={webhookConfig}
  * />
  */
-export class CTWebhook extends BaseElement {
+export class CFWebhook extends BaseElement {
   static override properties = {
     name: { type: String },
     inbox: { type: Object, attribute: false },
@@ -223,16 +225,16 @@ export class CTWebhook extends BaseElement {
             ${this._isLoading ? "..." : "Delete"}
           </cf-button>
         </div>
-        <ct-secret-viewer
+        <cf-secret-viewer
           label="Webhook URL"
           .value="${configData.url}"
           trailing-chars="8"
-        ></ct-secret-viewer>
-        <ct-secret-viewer
+        ></cf-secret-viewer>
+        <cf-secret-viewer
           label="Bearer Token"
           .value="${configData.secret}"
           trailing-chars="4"
-        ></ct-secret-viewer>
+        ></cf-secret-viewer>
         ${this._error
           ? html`
             <div class="error" role="alert">${this._error}</div>
@@ -288,6 +290,6 @@ export class CTWebhook extends BaseElement {
   ];
 }
 
-if (!globalThis.customElements.get("ct-webhook")) {
-  globalThis.customElements.define("ct-webhook", CTWebhook);
+if (!globalThis.customElements.get("cf-webhook")) {
+  globalThis.customElements.define("cf-webhook", CFWebhook);
 }

@@ -17,7 +17,7 @@ Secrets (the webhook URL and bearer token) flow through the system without patte
 1. A pattern creates an inbox stream and a **confidential config cell** (CFC-labeled)
 2. The pattern calls `POST /api/webhooks` with both cell links
 3. Toolshed generates the ID and secret, stores the registration in its own service space, and writes `{ url, secret }` into the confidential config cell
-4. The pattern binds the confidential config cell to `<ct-secret-viewer>` components
+4. The pattern binds the confidential config cell to `<cf-secret-viewer>` components
 5. The user clicks "Reveal" in the trusted UI component to see and copy the values
 6. The pattern code never reads the URL or secret directly
 
@@ -45,10 +45,10 @@ Pattern                     Toolshed                    External Service
   │◄── { id, name } ─────────┤                              │
   │                           │                              │
   ├─ Bind config cell to      │                              │
-  │  <ct-secret-viewer>       │                              │
+  │  <cf-secret-viewer>       │                              │
   │                           │                              │
   │  User copies URL+token    │                              │
-  │  from ct-secret-viewer    │                              │
+  │  from cf-secret-viewer    │                              │
   │  and configures external  │         ┌─────────────────── │
   │  service                  │         │                    │
   │                           │         ▼                    │
@@ -79,7 +79,7 @@ Stored in **toolshed's service space** (`identity.did()`):
 Stored in **user's space** (pattern-created, CFC-labeled):
 - Written once by toolshed at creation time
 - Contains: `{ url, secret }`
-- Displayed to user via `<ct-secret-viewer>`
+- Displayed to user via `<cf-secret-viewer>`
 
 ### Inbox stream
 
@@ -196,7 +196,7 @@ All webhook routes have permissive CORS (`origin: *`) to support both browser-ba
 ### Scoped writes
 Each webhook writes to exactly one stream. A compromised bearer token can only affect that single stream.
 
-## `ct-secret-viewer` Component
+## `cf-secret-viewer` Component
 
 A trusted UI component for displaying confidential strings.
 
@@ -217,12 +217,12 @@ Shows greeked text: `••••••••••••hJ9k` (last 4 character
 
 ### Usage
 ```html
-<ct-secret-viewer
+<cf-secret-viewer
   label="Webhook URL"
   value={config.url}
   trailing-chars={4}
 />
-<ct-secret-viewer
+<cf-secret-viewer
   label="Bearer Token"
   value={config.secret}
   trailing-chars={4}

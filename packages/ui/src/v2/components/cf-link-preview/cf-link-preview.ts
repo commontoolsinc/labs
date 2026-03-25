@@ -3,18 +3,18 @@ import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTLinkPreview - Renders a rich link preview card for a given URL
+ * CFLinkPreview - Renders a rich link preview card for a given URL
  *
  * Fetches metadata and a screenshot via the /api/link-preview endpoint
  * (which proxies through Jina to avoid SSRF concerns).
  *
- * @element ct-link-preview
+ * @element cf-link-preview
  * @attr {string} url - The URL to generate a preview for
  *
  * @example
- * <ct-link-preview url="https://github.com"></ct-link-preview>
+ * <cf-link-preview url="https://github.com"></cf-link-preview>
  */
-export class CTLinkPreview extends BaseElement {
+export class CFLinkPreview extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -342,4 +342,4 @@ export class CTLinkPreview extends BaseElement {
       }
     }
 
-    globalThis.customElements.define("ct-link-preview", CTLinkPreview);
+    globalThis.customElements.define("cf-link-preview", CFLinkPreview);

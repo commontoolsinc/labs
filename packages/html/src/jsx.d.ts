@@ -2860,7 +2860,7 @@ interface CFCellLinkElement extends CTHTMLElement {}
 interface CFSpaceLinkElement extends CTHTMLElement {}
 interface CFLoaderElement extends CTHTMLElement {}
 interface CFInputElement extends CTHTMLElement {}
-interface CTLinkPreviewElement extends CTHTMLElement {}
+interface CFLinkPreviewElement extends CTHTMLElement {}
 interface CFTextAreaElement extends CTHTMLElement {}
 interface CTFileInputElement extends CTHTMLElement {}
 interface CTImageInputElement extends CTHTMLElement {}
@@ -2881,7 +2881,7 @@ interface CTAutostartElement extends CTHTMLElement {}
 interface CFAutoLayoutElement extends CTHTMLElement {}
 interface CFButtonElement extends CTHTMLElement {}
 interface CFCopyButtonElement extends CTHTMLElement {}
-interface CTFileDownloadElement extends CTHTMLElement {}
+interface CFFileDownloadElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CFHStackElement extends CTHTMLElement {}
 interface CTFabElement extends CTHTMLElement {}
@@ -2926,8 +2926,8 @@ interface CTIFrameElement extends CTHTMLElement {}
 interface CTVoiceInputElement extends CTHTMLElement {}
 interface CTAudioVisualizerElement extends CTHTMLElement {}
 interface CTLocationElement extends CTHTMLElement {}
-interface CTWebhookElement extends CTHTMLElement {}
-interface CTSecretViewerElement extends CTHTMLElement {}
+interface CFWebhookElement extends CTHTMLElement {}
+interface CFSecretViewerElement extends CTHTMLElement {}
 interface CTRouterElement extends CTHTMLElement {}
 interface CTRouteElement extends CTHTMLElement {}
 interface CTLinkElement extends CTHTMLElement {}
@@ -3016,13 +3016,14 @@ interface CTOAuthAttributes<T> extends CTHTMLAttributes<T> {
   "tokenField"?: string;
 }
 
-interface CTWebhookAttributes<T> extends CTHTMLAttributes<T> {
+interface CFWebhookAttributes<T> extends CTHTMLAttributes<T> {
   "name"?: string;
   "$inbox"?: CellLike<any>;
   "$config"?: CellLike<any>;
 }
 
-interface CTSecretViewerAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSecretViewerAttributes<T> extends CTHTMLAttributes<T> {
+  "label"?: string;
   "value"?: string;
   "trailing-chars"?: number;
 }
@@ -3406,7 +3407,7 @@ interface CFCopyButtonAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-copy-error"?: EventHandler<{ error: Error; text: string }>;
 }
 
-interface CTFileDownloadAttributes<T> extends CTHTMLAttributes<T> {
+interface CFFileDownloadAttributes<T> extends CTHTMLAttributes<T> {
   "$data"?: CellLike<string>;
   "data"?: string;
   "$filename"?: CellLike<string>;
@@ -3430,6 +3431,19 @@ interface CTFileDownloadAttributes<T> extends CTHTMLAttributes<T> {
   "iconOnly"?: boolean;
   "allow-autosave"?: boolean;
   "allowAutosave"?: boolean;
+  "oncf-download-success"?: EventHandler<{
+    filename: string;
+    size: number;
+    mimeType: string;
+  }>;
+  "oncf-download-error"?: EventHandler<{ error: Error; filename: string }>;
+  "oncf-autosave-enabled"?: EventHandler<{ directoryName: string }>;
+  "oncf-autosave-disabled"?: EventHandler<{}>;
+  "oncf-autosave-success"?: EventHandler<{
+    filename: string;
+    size: number;
+  }>;
+  "oncf-autosave-error"?: EventHandler<{ error: Error }>;
 }
 
 interface CTIframeAttributes<T> extends CTHTMLAttributes<T> {
@@ -3574,7 +3588,7 @@ interface CFInputAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-invalid"?: any;
 }
 
-interface CTLinkPreviewAttributes<T> extends CTHTMLAttributes<T> {
+interface CFLinkPreviewAttributes<T> extends CTHTMLAttributes<T> {
   "url"?: CellLike<string> | string;
 }
 
@@ -4646,9 +4660,9 @@ declare global {
         CFInputAttributes<CFInputElement>,
         CFInputElement
       >;
-      "ct-link-preview": CTDOM.DetailedHTMLProps<
-        CTLinkPreviewAttributes<CTLinkPreviewElement>,
-        CTLinkPreviewElement
+      "cf-link-preview": CTDOM.DetailedHTMLProps<
+        CFLinkPreviewAttributes<CFLinkPreviewElement>,
+        CFLinkPreviewElement
       >;
       "cf-textarea": CTDOM.DetailedHTMLProps<
         CFTextAreaAttributes<CFTextAreaElement>,
@@ -4734,9 +4748,9 @@ declare global {
         CFModalProviderAttributes<CFModalProviderElement>,
         CFModalProviderElement
       >;
-      "ct-file-download": CTDOM.DetailedHTMLProps<
-        CTFileDownloadAttributes<CTFileDownloadElement>,
-        CTFileDownloadElement
+      "cf-file-download": CTDOM.DetailedHTMLProps<
+        CFFileDownloadAttributes<CFFileDownloadElement>,
+        CFFileDownloadElement
       >;
       "cf-chevron-button": CTDOM.DetailedHTMLProps<
         CFChevronButtonAttributes<CFChevronButtonElement>,
@@ -4898,13 +4912,13 @@ declare global {
         CTPlaidLinkAttributes<CTPlaidLinkElement>,
         CTPlaidLinkElement
       >;
-      "ct-webhook": CTDOM.DetailedHTMLProps<
-        CTWebhookAttributes<CTWebhookElement>,
-        CTWebhookElement
+      "cf-webhook": CTDOM.DetailedHTMLProps<
+        CFWebhookAttributes<CFWebhookElement>,
+        CFWebhookElement
       >;
-      "ct-secret-viewer": CTDOM.DetailedHTMLProps<
-        CTSecretViewerAttributes<CTSecretViewerElement>,
-        CTSecretViewerElement
+      "cf-secret-viewer": CTDOM.DetailedHTMLProps<
+        CFSecretViewerAttributes<CFSecretViewerElement>,
+        CFSecretViewerElement
       >;
       "cf-hstack": CTDOM.DetailedHTMLProps<
         CFStackAttributes<CFHStackElement>,

@@ -1230,11 +1230,11 @@ type Input = {
 
 A pattern for collecting and browsing URLs/bookmarks. Users can add URLs to a
 collection, view them in a searchable grid with rich link previews (via
-ct-link-preview), and remove bookmarks. Designed to feed into the summary
+cf-link-preview), and remove bookmarks. Designed to feed into the summary
 system.
 
 **Keywords:** bookmarks, links, collection, urls, grid, preview, search,
-ct-link-preview, ct-grid
+cf-link-preview, ct-grid
 
 ### Input Schema
 
@@ -1262,10 +1262,10 @@ interface BookmarksOutput {
 ## `link-preview.tsx`
 
 A simple pattern that renders a rich link preview for a single URL. Uses
-cf-input for URL entry and ct-link-preview to display the preview card with
+cf-input for URL entry and cf-link-preview to display the preview card with
 metadata and screenshot.
 
-**Keywords:** link, preview, url, ct-link-preview, cf-input
+**Keywords:** link, preview, url, cf-link-preview, cf-input
 
 ### Input Schema
 

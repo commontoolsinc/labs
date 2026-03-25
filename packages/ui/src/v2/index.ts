@@ -43,7 +43,7 @@ export * from "./components/cf-copy-button/index.ts";
 export * from "./components/ct-draggable/index.ts";
 export * from "./components/ct-drop-zone/index.ts";
 export * from "./components/ct-fab/index.ts";
-export * from "./components/ct-file-download/index.ts";
+export * from "./components/cf-file-download/index.ts";
 export * from "./components/ct-file-input/index.ts";
 export * from "./components/form/index.ts";
 export * from "./components/cf-fragment/index.ts";
@@ -58,7 +58,7 @@ export * from "./components/ct-image-input/index.ts";
 export * from "./components/cf-input/index.ts";
 export * from "./components/ct-input-otp/index.ts";
 export * from "./components/cf-label/index.ts";
-export * from "./components/ct-link-preview/index.ts";
+export * from "./components/cf-link-preview/index.ts";
 export * from "./components/ct-plaid-link/index.ts";
 export * from "./components/cf-progress/index.ts";
 export * from "./components/cf-radio/index.ts";
@@ -117,8 +117,8 @@ export * from "./components/cf-space-link/index.ts";
 export * from "./components/ct-drag-source/index.ts";
 export * from "./components/ct-drop-zone/index.ts";
 export * from "./components/cf-picker/index.ts";
-export * from "./components/ct-secret-viewer/index.ts";
-export * from "./components/ct-webhook/index.ts";
+export * from "./components/cf-secret-viewer/index.ts";
+export * from "./components/cf-webhook/index.ts";
 export * from "./components/ct-router/index.ts";
 
 // Type exports

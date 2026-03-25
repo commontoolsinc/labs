@@ -75,7 +75,7 @@ const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
                   Click "Create Webhook" to register a new endpoint. The URL and
                   secret will be stored in the config cell below.
                 </div>
-                <ct-webhook
+                <cf-webhook
                   name="Test Webhook"
                   $inbox={webhookInbox}
                   $config={webhookConfig}
