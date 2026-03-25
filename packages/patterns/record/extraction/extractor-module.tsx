@@ -25,6 +25,7 @@ import {
   type ImageData,
   NAME,
   pattern,
+  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -941,7 +942,7 @@ const dismiss = handler<
   parentSubPieces.set(current.filter((e) => e?.type !== "extractor"));
   parentTrashedSubPieces.push({
     ...selfEntry,
-    trashedAt: new Date().toISOString(),
+    trashedAt: new Date(safeDateNow()).toISOString(),
   });
 });
 
@@ -1627,7 +1628,7 @@ const applySelected = handler<
         if (entry) {
           parentTrashedSubPiecesCell.push({
             ...entry,
-            trashedAt: new Date().toISOString(),
+            trashedAt: new Date(safeDateNow()).toISOString(),
           });
         }
       }

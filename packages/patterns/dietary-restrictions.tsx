@@ -1242,7 +1242,9 @@ function buildAutocompleteItems(): AutocompleteItem[] {
       group: info.category,
       // No searchAliases - typing "milk" finds "milk" item, "dairy" finds "dairy" group
     });
-    info.members.forEach((m) => allMembers.add(m));
+    for (const member of info.members) {
+      allMembers.add(member);
+    }
   }
 
   // Add individual members with parent groups as searchAliases
@@ -1259,27 +1261,20 @@ function buildAutocompleteItems(): AutocompleteItem[] {
   return items;
 }
 
-// Lazy-init singleton for autocomplete items (defers work until first use)
-let _cachedAutocompleteItems: AutocompleteItem[] | null = null;
-function getAutocompleteItems(): AutocompleteItem[] {
-  if (!_cachedAutocompleteItems) {
-    _cachedAutocompleteItems = buildAutocompleteItems();
-  }
-  return _cachedAutocompleteItems;
-}
-
 // ===== Computed UI helpers (stable identity, no inline callbacks) =====
 
 // Empty state for when no restrictions
-const emptyState = (
-  <cf-vstack style="padding: 24px; text-align: center; color: #9ca3af;">
-    <span style="font-size: 32px; margin-bottom: 8px;">🍽️</span>
-    <span>No dietary restrictions added</span>
-    <span style="font-size: 13px;">
-      Search for allergies, diets (vegetarian, keto), or intolerances
-    </span>
-  </cf-vstack>
-);
+function renderEmptyState() {
+  return (
+    <cf-vstack style="padding: 24px; text-align: center; color: #9ca3af;">
+      <span style="font-size: 32px; margin-bottom: 8px;">🍽️</span>
+      <span>No dietary restrictions added</span>
+      <span style="font-size: 13px;">
+        Search for allergies, diets (vegetarian, keto), or intolerances
+      </span>
+    </cf-vstack>
+  );
+}
 
 // ===== Handlers =====
 
@@ -1400,6 +1395,7 @@ export const DietaryRestrictionsModule = pattern<
   DietaryRestrictionsInput,
   DietaryRestrictionsInput
 >(({ restrictions }) => {
+  const autocompleteItems = buildAutocompleteItems();
   const selectedLevel = Writable.of<RestrictionLevel>("prefer");
 
   // Normalize raw restrictions to RestrictionEntry[] format
@@ -1488,7 +1484,7 @@ export const DietaryRestrictionsModule = pattern<
         {/* Input row */}
         <cf-hstack gap="2" align="center">
           <cf-autocomplete
-            items={getAutocompleteItems()}
+            items={autocompleteItems}
             placeholder="Search allergies, diets, intolerances..."
             allowCustom
             oncf-select={onSelectRestriction({ restrictions, selectedLevel })}
@@ -1573,7 +1569,7 @@ export const DietaryRestrictionsModule = pattern<
               )}
             </cf-hstack>
           </cf-vstack>,
-          emptyState,
+          renderEmptyState(),
         )}
 
         {/* Implied items section */}

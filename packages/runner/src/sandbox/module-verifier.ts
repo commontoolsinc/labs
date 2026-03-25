@@ -53,9 +53,13 @@ const SAFE_GLOBAL_IDENTIFIERS = new Set([
   "Set",
   "String",
   "Symbol",
+  "TextDecoder",
+  "TextEncoder",
   "Uint8Array",
   "URL",
   "URLSearchParams",
+  "atob",
+  "btoa",
   "console",
   "fetch",
   "globalThis",
@@ -83,7 +87,10 @@ const CT_DATA_PURE_METHOD_NAMES = new Set([
   "entries",
   "filter",
   "flatMap",
+  "forEach",
+  "get",
   "getFullYear",
+  "has",
   "includes",
   "indexOf",
   "join",
@@ -704,7 +711,11 @@ function verifyTrustedBuilderCall(
   env: Map<string, BindingInfo>,
   pendingCaptureChecks: PendingCaptureCheck[],
 ): void {
-  const callbackIndexes = callbackIndexesForBuilder(builderName, expression);
+  const callbackIndexes = callbackIndexesForBuilder(
+    builderName,
+    expression,
+    env,
+  );
   if (callbackIndexes.length === 0) {
     throw verificationError(
       sourceFile,
@@ -716,7 +727,8 @@ function verifyTrustedBuilderCall(
   for (let i = 0; i < expression.arguments.length; i++) {
     const argument = expression.arguments[i];
     if (callbackIndexes.includes(i)) {
-      if (!ts.isArrowFunction(argument) && !ts.isFunctionExpression(argument)) {
+      const callbackFn = resolveTrustedBuilderCallback(argument, env);
+      if (!callbackFn) {
         throw verificationError(
           sourceFile,
           argument,
@@ -724,7 +736,7 @@ function verifyTrustedBuilderCall(
         );
       }
       pendingCaptureChecks.push({
-        fn: argument,
+        fn: callbackFn,
         nodeForError: argument,
       });
       continue;
@@ -736,6 +748,7 @@ function verifyTrustedBuilderCall(
 function callbackIndexesForBuilder(
   builderName: string,
   expression: ts.CallExpression,
+  env: Map<string, BindingInfo>,
 ): number[] {
   switch (builderName) {
     case "pattern":
@@ -751,7 +764,7 @@ function callbackIndexesForBuilder(
     case "handler":
       if (
         expression.arguments.length >= 1 &&
-        isFunctionLikeExpression(expression.arguments[0])
+        isTrustedBuilderCallbackArgument(expression.arguments[0], env)
       ) {
         return [0];
       }
@@ -765,6 +778,37 @@ function callbackIndexesForBuilder(
     default:
       return [];
   }
+}
+
+function isTrustedBuilderCallbackArgument(
+  argument: ts.Expression,
+  env: Map<string, BindingInfo>,
+): boolean {
+  return !!resolveTrustedBuilderCallback(argument, env);
+}
+
+function resolveTrustedBuilderCallback(
+  argument: ts.Expression,
+  env: Map<string, BindingInfo>,
+): ts.FunctionLikeDeclaration | undefined {
+  const callback = unwrapExpression(argument);
+  if (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) {
+    return callback;
+  }
+
+  if (!ts.isIdentifier(callback)) {
+    return undefined;
+  }
+
+  const binding = env.get(callback.text);
+  if (
+    binding?.kind !== "function" || !binding.functionNode ||
+    binding.hardeningHelper
+  ) {
+    return undefined;
+  }
+
+  return binding.functionNode;
 }
 
 function verifyTrustedValueExpression(
@@ -1264,6 +1308,19 @@ function verifyCtDataExpression(
   }
 
   if (ts.isPropertyAccessExpression(expr)) {
+    const compiledExportsBinding = getCompiledExportsBindingName(expr, env);
+    if (compiledExportsBinding) {
+      if (isAllowedCtDataIdentifier(compiledExportsBinding, env, locals)) {
+        return;
+      }
+
+      throw verificationError(
+        sourceFile,
+        expr,
+        `__ct_data() cannot capture unsafe top-level identifier '${compiledExportsBinding}'`,
+      );
+    }
+
     verifyCtDataExpression(expr.expression, sourceFile, env, locals);
     return;
   }
@@ -1706,6 +1763,11 @@ function verifyCtDataStatement(
     return;
   }
 
+  if (ts.isForOfStatement(statement) || ts.isForInStatement(statement)) {
+    verifyCtDataForEachStatement(statement, sourceFile, env, locals, visiting);
+    return;
+  }
+
   if (ts.isBlock(statement)) {
     verifyCtDataNestedStatement(statement, sourceFile, env, locals, visiting);
     return;
@@ -1805,6 +1867,42 @@ function verifyCtDataForStatement(
     sourceFile,
     env,
     loopLocals,
+    visiting,
+  );
+}
+
+function verifyCtDataForEachStatement(
+  statement: ts.ForOfStatement | ts.ForInStatement,
+  sourceFile: ts.SourceFile,
+  env: Map<string, BindingInfo>,
+  outerLocals: Set<string>,
+  visiting: Set<string>,
+): void {
+  const locals = new Set(outerLocals);
+  if (ts.isVariableDeclarationList(statement.initializer)) {
+    for (const declaration of statement.initializer.declarations) {
+      if (declaration.initializer) {
+        verifyCtDataExpression(
+          declaration.initializer,
+          sourceFile,
+          env,
+          locals,
+        );
+      }
+      for (const name of bindingNames(declaration.name)) {
+        locals.add(name);
+      }
+    }
+  } else {
+    verifyCtDataExpression(statement.initializer, sourceFile, env, locals);
+  }
+
+  verifyCtDataExpression(statement.expression, sourceFile, env, locals);
+  verifyCtDataNestedStatement(
+    statement.statement,
+    sourceFile,
+    env,
+    locals,
     visiting,
   );
 }
@@ -2227,12 +2325,17 @@ function verifyCompiledExportAssignment(
     return;
   }
 
-  classifyTopLevelExpression(
+  const binding = classifyTopLevelExpression(
     expression.right,
     sourceFile,
     env,
     pendingCaptureChecks,
   );
+
+  const exportedName = getExportsPropertyName(expression.left);
+  if (exportedName) {
+    env.set(exportedName, cloneBindingInfo(binding));
+  }
 }
 
 function isCompiledEsModuleMarker(statement: ts.Statement): boolean {
@@ -2353,6 +2456,30 @@ function isExportsReference(
   );
 }
 
+function getExportsPropertyName(
+  expression: ts.Expression,
+): string | undefined {
+  if (
+    ts.isPropertyAccessExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === "exports"
+  ) {
+    return expression.name.text;
+  }
+
+  if (
+    ts.isElementAccessExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === "exports" &&
+    expression.argumentExpression &&
+    ts.isStringLiteralLike(expression.argumentExpression)
+  ) {
+    return expression.argumentExpression.text;
+  }
+
+  return undefined;
+}
+
 function isVoidZeroExpression(expression: ts.Expression): boolean {
   const target = ts.isVoidExpression(expression)
     ? unwrapExpression(expression.expression)
@@ -2453,6 +2580,25 @@ function isFunctionLikeExpression(
 ): expression is ts.ArrowFunction | ts.FunctionExpression {
   return !!expression &&
     (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression));
+}
+
+function getCompiledExportsBindingName(
+  expression: ts.PropertyAccessExpression,
+  env: Map<string, BindingInfo>,
+): string | undefined {
+  if (
+    !ts.isIdentifier(expression.expression) ||
+    expression.expression.text !== "exports"
+  ) {
+    return undefined;
+  }
+
+  const exportsBinding = env.get("exports");
+  if (exportsBinding?.kind !== "import" || !exportsBinding.namespaceImport) {
+    return undefined;
+  }
+
+  return expression.name.text;
 }
 
 function isFunctionHardeningHelperDeclaration(

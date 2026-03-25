@@ -142,7 +142,7 @@ export const TextImportModule = pattern<
   const contentSize = computed(() => {
     const c = content;
     if (!c) return "";
-    const bytes = new Blob([c]).size;
+    const bytes = new TextEncoder().encode(c).length;
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;

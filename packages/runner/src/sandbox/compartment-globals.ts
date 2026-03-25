@@ -13,8 +13,12 @@ function createCompatibilityGlobals(): Record<string, unknown> {
       "Headers",
       "Request",
       "Response",
+      "TextDecoder",
+      "TextEncoder",
       "URL",
       "URLSearchParams",
+      "atob",
+      "btoa",
     ] as const
   ) {
     const value = hostGlobals[name];

@@ -99,6 +99,26 @@ describe("verifyProgramModuleScope()", () => {
     expect(() => verifyProgramModuleScope(program)).not.toThrow();
   });
 
+  it("accepts verified top-level function references for trusted builders", () => {
+    const program: Program = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { lift } from "commontools";',
+            "function sanitize(value: string | undefined) {",
+            '  return value?.trim() ?? "";',
+            "}",
+            "export default lift(sanitize);",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).not.toThrow();
+  });
+
   it("accepts __ct_data() with intrinsic collection helpers and local helpers", () => {
     const program: Program = {
       main: "/main.ts",
@@ -123,6 +143,33 @@ describe("verifyProgramModuleScope()", () => {
             "  ),",
             ");",
             "export default { years, scopes };",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).not.toThrow();
+  });
+
+  it("accepts __ct_data() helpers that use for...of iteration", () => {
+    const program: Program = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { __ct_data } from "commontools";',
+            "function buildIndex() {",
+            "  const index = new Map<string, string[]>();",
+            '  for (const [group, members] of Object.entries({ dairy: ["milk"] })) {',
+            "    for (const member of members) {",
+            "      index.set(member, [group]);",
+            "    }",
+            "  }",
+            "  return index;",
+            "}",
+            "const parentIndex = __ct_data(buildIndex());",
+            "export default parentIndex;",
           ].join("\n"),
         },
       ],

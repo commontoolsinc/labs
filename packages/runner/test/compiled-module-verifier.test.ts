@@ -17,6 +17,23 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts verified top-level function references for compiled trusted builders", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    function sanitize(value) {
+      return (value == null ? "" : value).trim();
+    }
+    exports.default = (0, commontools_1.lift)(sanitize);
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("rejects mutable compiled module state", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
@@ -111,6 +128,44 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.default = (0, commontools_1.lift)(() => typeof fetch !== "undefined");
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts ambient base64 helpers in compiled callbacks", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = (0, commontools_1.lift)(() => atob("YQ=="));
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts compiled __ct_data() references rewritten through exports", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.MODULE_METADATA = exports.STANDARD_LABELS = void 0;
+    exports.STANDARD_LABELS = (0, commontools_1.__ct_data)(["Personal", "Work"]);
+    exports.MODULE_METADATA = (0, commontools_1.__ct_data)({
+      type: "email",
+      label: "Email",
+      schema: {
+        label: {
+          enum: exports.STANDARD_LABELS,
+        },
+      },
+    });
   });
 });
 `;
