@@ -2,6 +2,11 @@ import { canonicalHash } from "@commontools/memory/canonical-hash";
 import { storableFromNativeValue } from "@commontools/memory/storable-value";
 import type { JSONSchema, Module, Pattern } from "../builder/types.ts";
 import { toHex } from "./shared.ts";
+import {
+  type CfcAtom,
+  type CfcIntegrityLabel,
+  normalizeIntegrityLabel,
+} from "./label-algebra.ts";
 
 const cfcBuiltinModuleNameMarker = Symbol("cfcBuiltinModuleName");
 
@@ -52,6 +57,31 @@ export function encodeImplementationIdentity(
     return `Builtin(${identity.name})`;
   }
   return `CodeHash(${identity.hash})`;
+}
+
+export function implementationIdentityIntegrityAtom(
+  identity: CfcImplementationIdentity | undefined,
+): CfcAtom | undefined {
+  if (!identity || identity.kind === "unknown") {
+    return undefined;
+  }
+  if (identity.kind === "builtin") {
+    return {
+      type: "https://commonfabric.org/cfc/atom/Builtin",
+      name: identity.name,
+    };
+  }
+  return {
+    type: "https://commonfabric.org/cfc/atom/CodeHash",
+    hash: identity.hash,
+  };
+}
+
+export function implementationIdentityIntegrityLabel(
+  identity: CfcImplementationIdentity | undefined,
+): CfcIntegrityLabel | undefined {
+  const atom = implementationIdentityIntegrityAtom(identity);
+  return atom ? normalizeIntegrityLabel([atom]) : undefined;
 }
 
 export function getAnnotatedImplementationIdentity(

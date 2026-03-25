@@ -1,4 +1,4 @@
-import type { JSONSchema } from "../builder/types.ts";
+import { type JSONSchema, UI } from "../builder/types.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { ContextualFlowControl } from "../cfc.ts";
 import type {
@@ -46,7 +46,10 @@ import {
   resolveObservationLabel,
 } from "./shared.ts";
 import { AUTHORIZED_REQUEST_ATOM } from "./fetch-sink-labels.ts";
-import type { CfcImplementationIdentity } from "./implementation-identity.ts";
+import {
+  type CfcImplementationIdentity,
+  implementationIdentityIntegrityLabel,
+} from "./implementation-identity.ts";
 import { selectFlowPrecisionConsumedReads } from "./flow-precision.ts";
 import {
   type CfcTrustContext,
@@ -429,12 +432,52 @@ function isInternalStateSchema(schema: JSONSchema | undefined): boolean {
   );
 }
 
-function computePreparedLabels(schema: JSONSchema): PersistedPathLabels {
+function isUiSchemaRoot(schema: JSONSchema | undefined): boolean {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return false;
+  }
+  return schema.$id === "https://commonfabric.org/schemas/vdom.json" ||
+    schema.$id === "https://commonfabric.org/schemas/vnode.json";
+}
+
+function pathIsWithinUiSubtree(
+  path: string,
+  rootSchema: JSONSchema,
+): boolean {
+  if (path === "/") {
+    return isUiSchemaRoot(rootSchema);
+  }
+  return fromCanonicalPath(path).includes(UI);
+}
+
+function readAddIntegrityFromSchema(
+  schema: JSONSchema | undefined,
+): CfcIntegrityLabel | undefined {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return undefined;
+  }
+  const rawIfc = (schema as { ifc?: unknown }).ifc;
+  if (!rawIfc || typeof rawIfc !== "object" || Array.isArray(rawIfc)) {
+    return undefined;
+  }
+  return normalizeIntegrityLabel(
+    (rawIfc as { addIntegrity?: unknown })
+      .addIntegrity,
+  );
+}
+
+function computePreparedLabels(
+  schema: JSONSchema,
+  implementationIdentity?: CfcImplementationIdentity,
+): PersistedPathLabels {
   type LabelAccumulator = {
     classification?: CfcConfidentialityLabel;
     integrity?: CfcIntegrityLabel;
   };
   const byPath = new Map<string, LabelAccumulator>();
+  const implementationIntegrity = implementationIdentityIntegrityLabel(
+    implementationIdentity,
+  );
 
   const ensureAccumulator = (path: string): LabelAccumulator => {
     let accumulator = byPath.get(path);
@@ -510,9 +553,14 @@ function computePreparedLabels(schema: JSONSchema): PersistedPathLabels {
         !Array.isArray(ifc)
       ? normalizeIntegrityLabel((ifc as { integrity?: unknown }).integrity)
       : undefined;
+    const addIntegrity = readAddIntegrityFromSchema(node);
 
     const classification = localClassification ?? inheritedClassification;
-    const integrity = localIntegrity ?? inheritedIntegrity;
+    let integrity = localIntegrity ?? inheritedIntegrity;
+    integrity = joinIntegrityLabels(integrity, addIntegrity);
+    if (pathIsWithinUiSubtree(path, fullSchema)) {
+      integrity = joinIntegrityLabels(integrity, implementationIntegrity);
+    }
 
     pushLabelsForPath(path, classification, integrity);
 
@@ -888,7 +936,7 @@ async function resolvePreparedWriteSchemas(
 
     let labels = labelsCache.get(schema);
     if (!labels) {
-      labels = computePreparedLabels(schema);
+      labels = computePreparedLabels(schema, options.implementationIdentity);
       labelsCache.set(schema, labels);
     }
 
@@ -2834,7 +2882,10 @@ function verifyOutputTransitionsForAttempt(
     );
     let preparedLabels = preparedLabelsByEntity.get(cfcEntityKey(entity));
     if (!preparedLabels) {
-      preparedLabels = computePreparedLabels(rootSchema);
+      preparedLabels = computePreparedLabels(
+        rootSchema,
+        options.implementationIdentity,
+      );
       preparedLabelsByEntity.set(cfcEntityKey(entity), preparedLabels);
     }
     const actualLabelOp = writeObservation === "label" ? "shape" : "value";
