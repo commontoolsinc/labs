@@ -1,11 +1,11 @@
 import * as __cfHelpers from "commonfabric";
 import { derive, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
-const multiplier = Writable.of(2, {
+const multiplier = __cfHelpers.__ct_data(Writable.of(2, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
-const prefix = Writable.of("Result: ", {
+} as const satisfies __cfHelpers.JSONSchema));
+const prefix = __cfHelpers.__ct_data(Writable.of("Result: ", {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema));
 type Output = {
     tool: PatternToolResult<Record<string, never>>;
 };

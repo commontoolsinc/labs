@@ -1,8 +1,8 @@
 import * as __cfHelpers from "commonfabric";
 import { computed, generateText, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
-const content = Writable.of("Hello world", {
+const content = __cfHelpers.__ct_data(Writable.of("Hello world", {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema));
 type Output = {
     tool: PatternToolResult<{
         content: string;
