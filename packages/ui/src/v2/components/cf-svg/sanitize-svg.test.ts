@@ -5,7 +5,7 @@
  * in a browser environment. To run these tests:
  *
  * 1. Using deno-web-test:
- *    deno run -A packages/deno-web-test/cli.ts packages/ui/src/v2/components/ct-svg/sanitize-svg.test.ts
+ *    deno run -A packages/deno-web-test/cli.ts packages/ui/src/v2/components/cf-svg/sanitize-svg.test.ts
  *
  * 2. Or run them manually in a browser console
  *

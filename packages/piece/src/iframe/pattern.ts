@@ -39,7 +39,7 @@ export const buildFullPattern = (iframe: IFramePattern) => {
   pattern((data) => ({
     [NAME]: name,
     [UI]: (
-      <ct-iframe src={src} $context={data}></ct-iframe>
+      <cf-iframe src={src} $context={data}></cf-iframe>
     ),
 ${result}
   }), argumentSchema, resultSchema);

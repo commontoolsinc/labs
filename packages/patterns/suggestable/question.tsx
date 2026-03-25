@@ -92,14 +92,14 @@ const Question = pattern<QuestionInput, QuestionOutput>(
               <div style="color: var(--ct-color-text-secondary);">
                 <cf-loader show-elapsed /> Generating question...
               </div>,
-              <ct-question
+              <cf-question
                 question={computed(
                   () => response.result?.question || "",
                 )}
                 options={computed(
                   () => response.result?.options || [],
                 )}
-                onct-answer={onAnswer({ answer })}
+                oncf-answer={onAnswer({ answer })}
               />,
             )}
           </cf-vstack>

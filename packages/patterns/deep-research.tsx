@@ -108,7 +108,7 @@ When done, call presentResult with your structured findings.`,
     result,
     [UI]: (
       <div style="display:contents">
-        <ct-autostart
+        <cf-autostart
           onstart={triggerGeneration({
             addMessage,
             situation,

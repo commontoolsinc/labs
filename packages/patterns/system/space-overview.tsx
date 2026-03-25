@@ -134,7 +134,7 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
           <h2 style={{ margin: 0, fontSize: "18px" }}>Space Overview</h2>
         </cf-toolbar>
 
-        <ct-autostart onstart={triggerAnalysis({ addMessage })} />
+        <cf-autostart onstart={triggerAnalysis({ addMessage })} />
 
         <cf-vscroll flex showScrollbar fadeEdges>
           <cf-vstack gap="3" style="padding: 1rem;">

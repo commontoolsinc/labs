@@ -6,11 +6,11 @@ import {
 } from "@commonfabric/iframe-sandbox";
 
 /**
- * CTIframe - An iframe to execute arbitrary scripts
+ * CFIframe - An iframe to execute arbitrary scripts
  *
  * See `@commonfabric/iframe-sandbox` for security details.
  *
- * @element ct-iframe
+ * @element cf-iframe
  *
  * @attr {string} src - String representation of HTML content to load within an iframe
  * @attr {object} context - Cell context
@@ -19,9 +19,9 @@ import {
  * @event {CustomEvent} fix - Dispatched when user clicks "Fix" on an error modal
  *
  * @example
- * <ct-iframe src="<html>...</html>" .context=${cellContext}></ct-iframe>
+ * <cf-iframe src="<html>...</html>" .context=${cellContext}></cf-iframe>
  */
-export class CTIframe extends BaseElement {
+export class CFIframe extends BaseElement {
   static override properties = {
     src: { type: String },
     context: { type: Object },
@@ -209,4 +209,4 @@ export class CTIframe extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-iframe", CTIframe);
+globalThis.customElements.define("cf-iframe", CFIframe);

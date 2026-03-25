@@ -52,7 +52,7 @@ export default pattern<
             placeholder="Error"
             oncf-input={updateError({ error })}
           />
-          <ct-updater
+          <cf-updater
             id="registerBgCounter"
             $state={counter}
             integration="counter"

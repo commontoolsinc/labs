@@ -20,7 +20,7 @@
  * FULL BACKGROUND SERVICE SETUP (for live server-side testing):
  * 1. Registration API: POST /api/integrations/bg with {pieceId, space, integration}
  *    - CLI: curl -X POST localhost:8000/api/integrations/bg -d '{"pieceId":"...","space":"did:key:...","integration":"..."}'
- *    - UI: <ct-updater> component (has CORS issue locally)
+ *    - UI: <cf-updater> component (has CORS issue locally)
  * 2. Space DID derivation: Identity.fromPassphrase("common user").derive(spaceName).did()
  * 3. System space: did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88 (common user + toolshed-system)
  * 4. Service requires ACL authorization to access system space
@@ -223,7 +223,7 @@ export default pattern<Input>(({ runCount, logs }) => {
         </div>
 
         <div style={{ marginTop: "15px" }}>
-          <ct-updater $state={runCount} integration="folk-wisdom-test" />
+          <cf-updater $state={runCount} integration="folk-wisdom-test" />
         </div>
       </div>
     ),

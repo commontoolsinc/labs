@@ -3,30 +3,30 @@ import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTQuestion - Component for asking single questions and collecting answers
+ * CFQuestion - Component for asking single questions and collecting answers
  *
- * @element ct-question
+ * @element cf-question
  *
  * @attr {string} question - The question text to display
  * @attr {string[]} options - Optional multiple choice options (JSON array)
  * @attr {boolean} allow-custom - Allow custom text input alongside options (default: false)
  *
- * @fires ct-answer - Fired when user submits an answer, detail: { answer: string }
+ * @fires cf-answer - Fired when user submits an answer, detail: { answer: string }
  *
  * @example
- * <ct-question
+ * <cf-question
  *   question="What's your preferred cooking style?"
  *   options='["Quick & easy", "Elaborate meals", "Healthy focus"]'
- * ></ct-question>
+ * ></cf-question>
  *
  * @example
- * <ct-question
+ * <cf-question
  *   question="What's your preferred cooking style?"
  *   options='["Quick & easy", "Elaborate meals", "Healthy focus"]'
  *   allow-custom
- * ></ct-question>
+ * ></cf-question>
  */
-export class CTQuestion extends BaseElement {
+export class CFQuestion extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -176,7 +176,7 @@ export class CTQuestion extends BaseElement {
 
     this._answer = answer;
     this._isSubmitted = true;
-    this.emit("ct-answer", { answer });
+    this.emit("cf-answer", { answer });
   }
 
   private _handleKeyDown(e: KeyboardEvent): void {
@@ -252,4 +252,4 @@ export class CTQuestion extends BaseElement {
   }
 }
 
-customElements.define("ct-question", CTQuestion);
+customElements.define("cf-question", CFQuestion);

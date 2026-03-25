@@ -2877,12 +2877,12 @@ interface CTThemeElement extends CTHTMLElement {}
 interface CTCodeEditorElement extends CTHTMLElement {}
 interface CTCodeEditorLegacyElement extends CTHTMLElement {}
 interface CFScreenElement extends CTHTMLElement {}
-interface CTAutostartElement extends CTHTMLElement {}
+interface CFAutostartElement extends CTHTMLElement {}
 interface CFAutoLayoutElement extends CTHTMLElement {}
 interface CFButtonElement extends CTHTMLElement {}
 interface CFCopyButtonElement extends CTHTMLElement {}
 interface CFFileDownloadElement extends CTHTMLElement {}
-interface CTIFrameElement extends CTHTMLElement {}
+interface CFIFrameElement extends CTHTMLElement {}
 interface CFHStackElement extends CTHTMLElement {}
 interface CTFabElement extends CTHTMLElement {}
 interface CFModalElement extends CTHTMLElement {}
@@ -2890,7 +2890,7 @@ interface CFModalProviderElement extends CTHTMLElement {}
 interface CFChevronButtonElement extends CTHTMLElement {}
 interface CFCardElement extends CTHTMLElement {}
 interface CFCalendarElement extends CTHTMLElement {}
-interface CTQuestionElement extends CTHTMLElement {}
+interface CFQuestionElement extends CTHTMLElement {}
 interface CFAlertElement extends CTHTMLElement {}
 interface CFVStackElement extends CTHTMLElement {}
 interface CFMessageInputElement extends CTHTMLElement {}
@@ -2903,7 +2903,7 @@ interface CTDragSourceElement extends CTHTMLElement {}
 interface CTDropZoneElement extends CTHTMLElement {}
 interface CFChatMessageElement extends CTHTMLElement {}
 interface CFMarkdownElement extends CTHTMLElement {}
-interface CTSvgElement extends CTHTMLElement {}
+interface CFSvgElement extends CTHTMLElement {}
 interface CFVScrollElement extends CTHTMLElement {}
 interface CTSendMessageElement extends CTHTMLElement {}
 interface CTTextElement extends CTHTMLElement {}
@@ -2915,14 +2915,14 @@ interface CFMessageBeadsElement extends CTHTMLElement {}
 interface CFAttachmentsBarElement extends CTHTMLElement {}
 interface CTCTCollapsibleElement extends CTHTMLElement {}
 interface CFFragmentElement extends CTHTMLElement {}
-interface CTUpdaterElement extends CTHTMLElement {}
+interface CFUpdaterElement extends CTHTMLElement {}
 interface CFGoogleOAuthElement extends CTHTMLElement {}
 interface CFOAuthElement extends CTHTMLElement {}
 interface CTCanvasElement extends CTHTMLElement {}
 interface CTDraggableElement extends CTHTMLElement {}
 interface CFPlaidLinkElement extends CTHTMLElement {}
 interface CFPieceElement extends CTHTMLElement {}
-interface CTIFrameElement extends CTHTMLElement {}
+interface CFIFrameElement extends CTHTMLElement {}
 interface CFVoiceInputElement extends CTHTMLElement {}
 interface CFAudioVisualizerElement extends CTHTMLElement {}
 interface CFLocationElement extends CTHTMLElement {}
@@ -3029,7 +3029,7 @@ interface CFSecretViewerAttributes<T> extends CTHTMLAttributes<T> {
   "trailing-chars"?: number;
 }
 
-interface CTUpdaterAttributes<T> extends CTHTMLAttributes<T> {
+interface CFUpdaterAttributes<T> extends CTHTMLAttributes<T> {
   "integration"?: string;
   "$state"?: CellLike<any>;
 }
@@ -3330,7 +3330,7 @@ interface CFMarkdownAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-checkbox-change"?: EventHandler<{ index: number; checked: boolean }>;
 }
 
-interface CTSvgAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSvgAttributes<T> extends CTHTMLAttributes<T> {
   "content"?: string;
   "$content"?: CellLike<string>;
 }
@@ -3366,10 +3366,10 @@ interface CFCalendarAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-month-change"?: EventHandler<{ year: number; month: number }>;
 }
 
-interface CTQuestionAttributes<T> extends CTHTMLAttributes<T> {
+interface CFQuestionAttributes<T> extends CTHTMLAttributes<T> {
   "question"?: CellLike<string>;
   "options"?: CellLike<string[]>;
-  "onct-answer"?: EventHandler<{ answer: string }>;
+  "oncf-answer"?: EventHandler<{ answer: string }>;
 }
 
 interface CFButtonAttributes<T> extends CTHTMLAttributes<T> {
@@ -3445,7 +3445,7 @@ interface CFFileDownloadAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-autosave-error"?: EventHandler<{ error: Error }>;
 }
 
-interface CTIframeAttributes<T> extends CTHTMLAttributes<T> {
+interface CFIframeAttributes<T> extends CTHTMLAttributes<T> {
   "src": string;
   "$context": CellLike<any>;
 }
@@ -3854,7 +3854,7 @@ interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "onbacklink-create"?: any;
 }
 
-interface CTAutostartAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAutostartAttributes<T> extends CTHTMLAttributes<T> {
   "onstart"?: any;
 }
 
@@ -4721,9 +4721,9 @@ declare global {
         CTHTMLAttributes<CFScreenElement>,
         CFScreenElement
       >;
-      "ct-autostart": CTDOM.DetailedHTMLProps<
-        CTAutostartAttributes<CTAutostartElement>,
-        CTAutostartElement
+      "cf-autostart": CTDOM.DetailedHTMLProps<
+        CFAutostartAttributes<CFAutostartElement>,
+        CFAutostartElement
       >;
       "cf-autolayout": CTDOM.DetailedHTMLProps<
         CFAutoLayoutAttributes<CFAutoLayoutElement>,
@@ -4785,9 +4785,9 @@ declare global {
         CFCalendarAttributes<CFCalendarElement>,
         CFCalendarElement
       >;
-      "ct-question": CTDOM.DetailedHTMLProps<
-        CTQuestionAttributes<CTQuestionElement>,
-        CTQuestionElement
+      "cf-question": CTDOM.DetailedHTMLProps<
+        CFQuestionAttributes<CFQuestionElement>,
+        CFQuestionElement
       >;
       "cf-toolbar": CTDOM.DetailedHTMLProps<
         CFToolbarAttributes<CFToolbarElement>,
@@ -4893,13 +4893,13 @@ declare global {
         CTHTMLAttributes<CFFragmentElement>,
         CFFragmentElement
       >;
-      "ct-iframe": CTDOM.DetailedHTMLProps<
-        CTIframeAttributes<CTIFrameElement>,
-        CTIFrameElement
+      "cf-iframe": CTDOM.DetailedHTMLProps<
+        CFIframeAttributes<CFIFrameElement>,
+        CFIFrameElement
       >;
-      "ct-updater": CTDOM.DetailedHTMLProps<
-        CTUpdaterAttributes<CTUpdaterElement>,
-        CTUpdaterElement
+      "cf-updater": CTDOM.DetailedHTMLProps<
+        CFUpdaterAttributes<CFUpdaterElement>,
+        CFUpdaterElement
       >;
       "cf-google-oauth": CTDOM.DetailedHTMLProps<
         CFGoogleOAuthAttributes<CFGoogleOAuthElement>,
@@ -4971,9 +4971,9 @@ declare global {
         CFSwitchAttributes<CFSwitchElement>,
         CFSwitchElement
       >;
-      "ct-svg": CTDOM.DetailedHTMLProps<
-        CTSvgAttributes<CTSvgElement>,
-        CTSvgElement
+      "cf-svg": CTDOM.DetailedHTMLProps<
+        CFSvgAttributes<CFSvgElement>,
+        CFSvgElement
       >;
       "cf-toggle": CTDOM.DetailedHTMLProps<
         CFToggleAttributes<CFToggleElement>,

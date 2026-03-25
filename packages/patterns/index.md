@@ -1045,9 +1045,9 @@ type DiagramOutput = {
 ## `suggestable/svg-diagram.tsx`
 
 Generates an SVG diagram illustrating relationships, flows, or structures.
-Rendered via `<ct-svg>` web component for scalable vector output.
+Rendered via `<cf-svg>` web component for scalable vector output.
 
-**Keywords:** diagram, SVG, generateText, suggestion-fuel, ct-svg
+**Keywords:** diagram, SVG, generateText, suggestion-fuel, cf-svg
 
 ### Input Schema
 

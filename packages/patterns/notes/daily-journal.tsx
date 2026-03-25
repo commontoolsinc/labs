@@ -453,7 +453,7 @@ ${notesXml}
                         </cf-button>
                       </div>
 
-                      <ct-autostart
+                      <cf-autostart
                         onstart={triggerRollup({
                           addMessage: rollupAddMessage,
                         })}

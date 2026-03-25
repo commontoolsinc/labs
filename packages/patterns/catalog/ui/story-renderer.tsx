@@ -30,7 +30,7 @@ import BadgeStory from "../stories/cf-badge-story.tsx";
 import AlertStory from "../stories/cf-alert-story.tsx";
 import SeparatorStory from "../stories/cf-separator-story.tsx";
 import MarkdownStory from "../stories/cf-markdown-story.tsx";
-import SvgStory from "../stories/ct-svg-story.tsx";
+import SvgStory from "../stories/cf-svg-story.tsx";
 import LoaderStory from "../stories/cf-loader-story.tsx";
 import SkeletonStory from "../stories/cf-skeleton-story.tsx";
 import CollapsibleStory from "../stories/cf-collapsible-story.tsx";

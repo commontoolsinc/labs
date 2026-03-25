@@ -62,7 +62,7 @@ const SvgDiagram = pattern<SvgDiagramInput, SvgDiagramOutput>(
               <div style="color: var(--ct-color-text-secondary);">
                 <cf-loader show-elapsed /> Generating diagram...
               </div>,
-              <ct-svg content={response.result} />,
+              <cf-svg content={response.result} />,
             )}
           </cf-vstack>
         </cf-screen>

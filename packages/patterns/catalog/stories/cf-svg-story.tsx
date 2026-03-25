@@ -40,7 +40,7 @@ export default pattern<SvgStoryInput, SvgStoryOutput>(() => {
   };
 
   return {
-    [NAME]: "ct-svg Story",
+    [NAME]: "cf-svg Story",
     [UI]: (
       <div style={{ padding: "1rem" }}>
         <div
@@ -65,15 +65,15 @@ export default pattern<SvgStoryInput, SvgStoryOutput>(() => {
           }}
         >
           <div style={svgWrapperStyle}>
-            <ct-svg content={shapesSvg} />
+            <cf-svg content={shapesSvg} />
             <div style={labelStyle}>Simple shapes</div>
           </div>
           <div style={svgWrapperStyle}>
-            <ct-svg content={gradientSvg} />
+            <cf-svg content={gradientSvg} />
             <div style={labelStyle}>Gradient</div>
           </div>
           <div style={svgWrapperStyle}>
-            <ct-svg content={starSvg} />
+            <cf-svg content={starSvg} />
             <div style={labelStyle}>Path icon</div>
           </div>
         </div>
@@ -91,7 +91,7 @@ export default pattern<SvgStoryInput, SvgStoryOutput>(() => {
           Custom SVG
         </div>
         <div style={{ width: "120px" }}>
-          <ct-svg content={customSvg} />
+          <cf-svg content={customSvg} />
         </div>
       </div>
     ),

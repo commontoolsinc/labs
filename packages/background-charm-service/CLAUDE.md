@@ -54,7 +54,7 @@ curl -X POST http://localhost:8000/api/integrations/bg \
   }'
 ```
 
-Or add `<ct-updater $state={someCell} integration="name" />` to your charm's UI.
+Or add `<cf-updater $state={someCell} integration="name" />` to your charm's UI.
 
 **Getting space DID from space name:**
 

@@ -242,7 +242,7 @@ curl -X POST http://localhost:8000/api/integrations/bg \
   -d '{"pieceId":"baedrei...","space":"did:key:z6Mk...","integration":"my-integration"}'
 ```
 
-Or use the `<ct-updater>` component in your piece's UI.
+Or use the `<cf-updater>` component in your piece's UI.
 
 ### Key Details
 

@@ -4,17 +4,17 @@ import { CFPiece } from "../cf-piece/cf-piece.ts";
 import { CellHandle } from "@commonfabric/runtime-client";
 
 /**
- * CTUpdater - Button component for registering pieces for background updates
+ * CFUpdater - Button component for registering pieces for background updates
  *
- * @element ct-updater
+ * @element cf-updater
  *
  * @attr {Cell} state - Cell state object
  * @attr {string} integration - Integration name/identifier
  *
  * @example
- * <ct-updater .state=${cellState} integration="my-integration"></ct-updater>
+ * <cf-updater .state=${cellState} integration="my-integration"></cf-updater>
  */
-export class CTUpdater extends BaseElement {
+export class CFUpdater extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -161,4 +161,4 @@ export class CTUpdater extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-updater", CTUpdater);
+globalThis.customElements.define("cf-updater", CFUpdater);

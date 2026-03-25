@@ -222,7 +222,7 @@ Use the user context above to personalize your suggestions when relevant.`;
   // reconciler to re-mount the DOM, losing inner subscriptions).
   const freeformUI = (
     <div style="display:contents">
-      <ct-autostart
+      <cf-autostart
         onstart={triggerGeneration({
           addMessage,
           situation,
@@ -247,12 +247,12 @@ Use the user context above to personalize your suggestions when relevant.`;
         oncf-refine={showRefineInput({ showRefine })}
       />
 
-      <ct-question
+      <cf-question
         question={computed(() => pendingQuestion.get()?.question ?? "")}
         options={computed(() => pendingQuestion.get()?.options ?? [])}
         allow-custom
         style={computed(() => (hasPendingQuestion ? "" : "display:none"))}
-        onct-answer={onQuestionAnswer({ addMessage, pendingQuestion })}
+        oncf-answer={onQuestionAnswer({ addMessage, pendingQuestion })}
       />
       <cf-prompt-input
         placeholder="Refine suggestion..."

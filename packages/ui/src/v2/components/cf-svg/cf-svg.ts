@@ -9,27 +9,27 @@ import { sanitizeSvg } from "./sanitize-svg.ts";
 // matching the prior phase-1 token migration pattern.
 
 /**
- * CTSvg - Renders SVG content from a string
+ * CFSvg - Renders SVG content from a string
  *
- * @element ct-svg
+ * @element cf-svg
  *
  * @attr {string} content - The SVG markup to render (string or CellHandle<string>)
  *
  * @csspart content - The SVG content wrapper
  *
  * @example
- * <ct-svg content="<svg viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='blue'/></svg>"></ct-svg>
+ * <cf-svg content="<svg viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='blue'/></svg>"></cf-svg>
  *
  * @example
- * <ct-svg .content=${mySvgCell}></ct-svg>
+ * <cf-svg .content=${mySvgCell}></cf-svg>
  */
-export class CTSvg extends BaseElement {
+export class CFSvg extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
       :host {
-        --ct-svg-width: 100%;
-        --ct-svg-height: auto;
+        --cf-svg-width: 100%;
+        --cf-svg-height: auto;
 
         display: block;
         box-sizing: border-box;
@@ -42,13 +42,13 @@ export class CTSvg extends BaseElement {
       }
 
       .svg-content {
-        width: var(--ct-svg-width, 100%);
-        height: var(--ct-svg-height, auto);
+        width: var(--cf-svg-width, 100%);
+        height: var(--cf-svg-height, auto);
       }
 
       .svg-content svg {
-        width: var(--ct-svg-width, 100%);
-        height: var(--ct-svg-height, auto);
+        width: var(--cf-svg-width, 100%);
+        height: var(--cf-svg-height, auto);
         display: block;
       }
     `,
@@ -112,4 +112,4 @@ export class CTSvg extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-svg", CTSvg);
+globalThis.customElements.define("cf-svg", CFSvg);
