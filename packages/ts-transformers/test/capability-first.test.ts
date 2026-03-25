@@ -580,6 +580,40 @@ export default pattern<{ label?: string }>((state) => ({
 );
 
 Deno.test(
+  "Capability-first: logical-or fallback rewrites reactive prefix-unary roots",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+export default pattern<{ showCompleted: boolean; task: { done: boolean } }>((state) => ({
+  [UI]: <div>{state.showCompleted || !state.task.done ? "Visible" : ""}</div>,
+}));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, "__ctHelpers.ifElse(");
+    assertStringIncludes(
+      output,
+      "({ state }) => state.showCompleted || !state.task.done",
+    );
+    assert(
+      !output.includes('!state.key("task", "done")'),
+      "expected logical-or fallback root to rewrite as a reactive boolean expression rather than a raw negated key() access",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: top-level call-argument property access lowers outside JSX",
   async () => {
     const source = `/// <cts-enable />

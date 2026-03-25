@@ -206,7 +206,24 @@ export default pattern((state) => {
                                     type: "boolean"
                                 } as const satisfies __ctHelpers.JSONSchema, { task: {
                                         note: task.key("note")
-                                    } }, ({ task }) => task.note !== undefined), task.key("note") !== ""), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
+                                    } }, ({ task }) => task.note !== undefined), __ctHelpers.derive({
+                                    type: "object",
+                                    properties: {
+                                        task: {
+                                            type: "object",
+                                            properties: {
+                                                note: {
+                                                    type: "string"
+                                                }
+                                            }
+                                        }
+                                    },
+                                    required: ["task"]
+                                } as const satisfies __ctHelpers.JSONSchema, {
+                                    type: "boolean"
+                                } as const satisfies __ctHelpers.JSONSchema, { task: {
+                                        note: task.key("note")
+                                    } }, ({ task }) => task.note !== "")), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
                         </button>
                         {/* [TRANSFORM] .map() → mapWithPattern: task.tags is reactive pattern-owned data (nested inside sections map) */}
                         {/* [TRANSFORM] closure captures: taskIndex, section, state, task (all via params) */}
@@ -281,7 +298,25 @@ export default pattern((state) => {
                                             type: "boolean"
                                         } as const satisfies __ctHelpers.JSONSchema, {
                                             type: "boolean"
-                                        } as const satisfies __ctHelpers.JSONSchema, state.key("showCompleted"), !task.key("done")), tag, ""))}
+                                        } as const satisfies __ctHelpers.JSONSchema, state.key("showCompleted"), __ctHelpers.derive({
+                                            type: "object",
+                                            properties: {
+                                                task: {
+                                                    type: "object",
+                                                    properties: {
+                                                        done: {
+                                                            type: "boolean"
+                                                        }
+                                                    },
+                                                    required: ["done"]
+                                                }
+                                            },
+                                            required: ["task"]
+                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                            type: "boolean"
+                                        } as const satisfies __ctHelpers.JSONSchema, { task: {
+                                                done: task.key("done")
+                                            } }, ({ task }) => !task.done)), tag, ""))}
                           </span>);
                                 }, {
                                     type: "object",

@@ -44,6 +44,7 @@ export interface EmitterContext extends RewriteParams {
   readonly containerKind?: ExpressionContainerKind;
   readonly preferDeriveWrappers: boolean;
   rewriteChildren(node: ts.Expression): ts.Expression;
+  rewriteSubexpression(node: ts.Expression): ts.Expression;
 }
 
 export type Emitter = (params: EmitterContext) => ts.Expression | undefined;

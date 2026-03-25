@@ -133,6 +133,39 @@ export function rewriteExpression(
         preferDeriveWrappers,
       );
     },
+    rewriteSubexpression(node: ts.Expression): ts.Expression {
+      const analysis = params.analyze(node);
+      if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
+        return rewriteExpression({
+          expression: node,
+          analysis,
+          context: params.context,
+          analyze: params.analyze,
+          reactiveContextKind,
+          containerKind: params.containerKind,
+          inSafeContext,
+          preferDeriveWrappers,
+        }) ?? rewriteChildExpressions(
+          node,
+          params.context,
+          params.analyze,
+          reactiveContextKind,
+          params.containerKind,
+          inSafeContext,
+          preferDeriveWrappers,
+        );
+      }
+
+      return rewriteChildExpressions(
+        node,
+        params.context,
+        params.analyze,
+        reactiveContextKind,
+        params.containerKind,
+        inSafeContext,
+        preferDeriveWrappers,
+      );
+    },
     ...params,
     inSafeContext,
     preferDeriveWrappers,

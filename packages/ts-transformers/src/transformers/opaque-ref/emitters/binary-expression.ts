@@ -25,7 +25,7 @@ export const emitBinaryExpression: Emitter = ({
   analysis,
   context,
   analyze,
-  rewriteChildren,
+  rewriteSubexpression,
   inSafeContext,
   reactiveContextKind,
   containerKind,
@@ -85,7 +85,7 @@ export const emitBinaryExpression: Emitter = ({
         }
       }
 
-      const value = rewriteChildren(expression.right) || expression.right;
+      const value = rewriteSubexpression(expression.right);
 
       const whenCall = createWhenCall({
         condition,
@@ -135,7 +135,7 @@ export const emitBinaryExpression: Emitter = ({
         }
       }
 
-      const value = rewriteChildren(expression.right) || expression.right;
+      const value = rewriteSubexpression(expression.right);
 
       const unlessCall = createUnlessCall({
         condition,

@@ -47,7 +47,7 @@ export default pattern((_state) => {
             required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name.length > 0), `Hello, ${__ctHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name.length > 0), __ctHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -64,7 +64,7 @@ export default pattern((_state) => {
             required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name)}!`)}</p>
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => `Hello, ${user.get().name}!`))}</p>
 
         {/* Non-JSX right side: number expression */}
         <p>Age: {__ctHelpers.when({
@@ -96,30 +96,18 @@ export default pattern((_state) => {
                 user: {
                     type: "object",
                     properties: {
-                        name: {
-                            type: "string"
-                        },
                         age: {
                             type: "number"
                         }
                     },
-                    required: ["name", "age"],
+                    required: ["age"],
                     asCell: true
                 }
             },
             required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                age: {
-                    type: "number"
-                }
-            },
-            required: ["name", "age"]
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get()).age)}</p>
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().age))}</p>
       </div>),
     };
 }, false as const satisfies __ctHelpers.JSONSchema, {
