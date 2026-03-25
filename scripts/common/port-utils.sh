@@ -29,7 +29,7 @@ read_base_ports() {
         echo "Error: $ports_file not found" >&2
         exit 1
     fi
-    BASE_TOOLSHED_PORT=$(jq -r '.toolshed' "$ports_file")
-    BASE_SHELL_PORT=$(jq -r '.shell' "$ports_file")
-    BASE_INSPECTOR_PORT=$(jq -r '.inspector' "$ports_file")
+    BASE_TOOLSHED_PORT=$(jq -e '.toolshed' "$ports_file") || { echo "Error: ports.json missing .toolshed" >&2; exit 1; }
+    BASE_SHELL_PORT=$(jq -e '.shell' "$ports_file") || { echo "Error: ports.json missing .shell" >&2; exit 1; }
+    BASE_INSPECTOR_PORT=$(jq -e '.inspector' "$ports_file") || { echo "Error: ports.json missing .inspector" >&2; exit 1; }
 }
