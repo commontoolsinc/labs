@@ -1,6 +1,6 @@
 # @commonfabric/test-support
 
-Shared testing infrastructure for CommonTools packages. This package currently
+Shared testing infrastructure for Common Fabric packages. This package currently
 exports a configurable fixture runner that powers schema generator and
 transformer tests without duplicating boilerplate code.
 

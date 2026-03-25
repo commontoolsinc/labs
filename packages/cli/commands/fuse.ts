@@ -13,7 +13,7 @@ import {
   writeMountState,
 } from "../lib/fuse.ts";
 
-const fuseDescription = `Mount Common Tools spaces as a FUSE filesystem.
+const fuseDescription = `Mount Common Fabric spaces as a FUSE filesystem.
 
 Spaces appear as directories at the mount root. Any space name you \`cd\`
 into is connected on demand — no need to specify spaces up front.

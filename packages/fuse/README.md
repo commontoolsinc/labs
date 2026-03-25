@@ -1,6 +1,6 @@
 # @commonfabric/fuse
 
-Mount Common Tools spaces as a FUSE filesystem. Pieces appear as directories
+Mount Common Fabric spaces as a FUSE filesystem. Pieces appear as directories
 with their cell data exploded into files and subdirectories — browse with `ls`,
 read with `cat`, write with `echo`, execute mounted callables with `cf exec`,
 and link pieces together with `ln -s`.
@@ -22,21 +22,21 @@ sudo apt-get install -y fuse3 libfuse3-dev pkg-config gcc
 
 ```bash
 # Mount your home space
-cf fuse mount /tmp/ct
+cf fuse mount /tmp/cf
 
 # In another terminal, explore
-ls /tmp/ct/home/pieces/
-cat /tmp/ct/home/pieces/todo-app/result.json
-cat /tmp/ct/home/pieces/todo-app/result/items/0/text
+ls /tmp/cf/home/pieces/
+cat /tmp/cf/home/pieces/todo-app/result.json
+cat /tmp/cf/home/pieces/todo-app/result/items/0/text
 
 # Unmount
-cf fuse unmount /tmp/ct
+cf fuse unmount /tmp/cf
 ```
 
 ## Filesystem Layout
 
 ```
-/tmp/ct/                              # mount root
+/tmp/cf/                              # mount root
   home/                               # space (connected on demand)
     pieces/
       todo-app/                       # piece directory
@@ -208,7 +208,7 @@ ls "did:key:z6Mkk.../pieces/"
 
 ```bash
 # Mount (foreground — Ctrl+C to unmount)
-cf fuse mount /tmp/ct
+cf fuse mount /tmp/cf
 
 # Mount in background
 cf fuse mount /tmp/cf --background
@@ -217,13 +217,13 @@ cf fuse mount /tmp/cf --background
 cf fuse status
 
 # Unmount
-cf fuse unmount /tmp/ct
+cf fuse unmount /tmp/cf
 
 # With explicit connection settings
 cf fuse mount /tmp/cf --api-url http://localhost:8000 --identity ./my.key
 
 # Show callable help from the mounted schema
-cf exec /tmp/ct/home/pieces/todo-app/result/search.tool --help
+cf exec /tmp/cf/home/pieces/todo-app/result/search.tool --help
 ```
 
 Environment variables `CF_API_URL` and `CF_IDENTITY` are also supported.
@@ -267,13 +267,13 @@ allow the kernel extension. A reboot may be required.
 If a previous FUSE process crashed, the mount point may be stale:
 
 ```bash
-umount /tmp/ct          # macOS
+umount /tmp/cf          # macOS
 # or
-fusermount -u /tmp/ct   # Linux
+fusermount -u /tmp/cf   # Linux
 
 # If umount fails with "not currently mounted" but the dir looks broken:
-diskutil unmount force /tmp/ct   # macOS last resort
-rm -rf /tmp/ct && mkdir /tmp/ct
+diskutil unmount force /tmp/cf   # macOS last resort
+rm -rf /tmp/cf && mkdir /tmp/cf
 ```
 
 ### `ls` shows stale directory contents
@@ -284,10 +284,10 @@ data:
 
 ```bash
 # Force a fresh listing (bypass shell hash)
-command ls /tmp/ct/home/pieces/
+command ls /tmp/cf/home/pieces/
 
 # Or use a stat-based tool
-find /tmp/ct/home/pieces/ -maxdepth 1
+find /tmp/cf/home/pieces/ -maxdepth 1
 ```
 
 ### Permission denied / Operation not permitted
@@ -296,7 +296,7 @@ The Deno process needs FFI and file access:
 
 ```bash
 deno run --unstable-ffi --allow-ffi --allow-read --allow-write --allow-env --allow-net \
-  packages/fuse/mod.ts /tmp/ct ...
+  packages/fuse/mod.ts /tmp/cf ...
 ```
 
 If using `cf fuse mount`, these permissions are set automatically.

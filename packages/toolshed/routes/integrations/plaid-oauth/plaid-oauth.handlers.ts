@@ -53,14 +53,14 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
     const plaidClient = createPlaidClient();
 
     // Create a user ID for Plaid (can be any stable string)
-    const userId = "commontools-user";
+    const userId = "commonfabric-user";
 
     // Create link token request
     const linkTokenRequest: LinkTokenCreateRequest = {
       user: {
         client_user_id: userId,
       },
-      client_name: "Common Tools",
+      client_name: "Common Fabric",
       products: payload.products || ["transactions"],
       country_codes: (payload.countryCodes || ["US"]) as CountryCode[],
       language: "en",

@@ -299,8 +299,8 @@ export class XLoginView extends BaseView {
 
     try {
       const passkey = await PassKey.create(
-        "Common Tools User",
-        "commontoolsuser",
+        "Common Fabric User",
+        "commonfabricuser",
       );
       const identity = await passkey.createRootKey();
 

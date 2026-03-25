@@ -1346,7 +1346,7 @@ export type JSONSchemaObj = {
   readonly $schema?: string;
   readonly $comment?: string;
 
-  // Common Tools extensions
+  // Common Fabric extensions
   readonly [ID]?: unknown;
   readonly [ID_FIELD]?: unknown;
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.

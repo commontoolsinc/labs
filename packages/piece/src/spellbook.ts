@@ -102,7 +102,7 @@ export async function saveSpell(
   runtime: Runtime,
 ): Promise<boolean> {
   try {
-    // Get all the required data from commontools first
+    // Get all the required data from commonfabric first
     const patternMetaResult = runtime.patternManager.getPatternMeta(
       spell as any,
     );
