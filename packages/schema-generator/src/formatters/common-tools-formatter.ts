@@ -6,7 +6,10 @@ import {
   isCellBrand,
 } from "../typescript/cell-brand.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
-import type { JSONSchemaMutable } from "@commontools/api";
+import type {
+  JSONSchemaMutable,
+  JSONSchemaMutableOrBoolean,
+} from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
@@ -71,7 +74,10 @@ export class CommonToolsFormatter implements TypeFormatter {
     return wrapperInfo !== undefined;
   }
 
-  formatType(type: ts.Type, context: GenerationContext): JSONSchemaMutable {
+  formatType(
+    type: ts.Type,
+    context: GenerationContext,
+  ): JSONSchemaMutableOrBoolean {
     const n = context.typeNode;
 
     // Handle wrapper unions first (before Opaque<T> union check)
@@ -215,7 +221,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
     wrapperKind: WrapperKind,
-  ): JSONSchemaMutable {
+  ): JSONSchemaMutableOrBoolean {
     const innerTypeNode = typeRefNode.typeArguments?.[0];
     if (!innerTypeNode) {
       throw new Error(`${wrapperKind}<T> requires type argument`);
@@ -285,7 +291,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     typeRefNode: ts.TypeNode | undefined,
     context: GenerationContext,
     wrapperKind: WrapperKind,
-  ): JSONSchemaMutable {
+  ): JSONSchemaMutableOrBoolean {
     const innerTypeFromType = typeRef.typeArguments?.[0];
 
     // Only extract innerTypeNode if the typeRefNode has type arguments AND
@@ -611,7 +617,7 @@ export class CommonToolsFormatter implements TypeFormatter {
   private formatDefaultType(
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): JSONSchemaMutableOrBoolean {
     const typeArgs = typeRefNode.typeArguments;
     if (!typeArgs || typeArgs.length < 2) {
       throw new Error("Default<T,V> requires exactly 2 type arguments");
@@ -647,9 +653,9 @@ export class CommonToolsFormatter implements TypeFormatter {
         // Boolean schemas (true/false) cannot have properties directly
         // For true: { default: value } (any value is valid)
         // For false: { not: true, default: value } (no value is valid)
-        return valueSchema === false
-          ? { not: true, default: defaultValue } as JSONSchemaMutable
-          : { default: defaultValue } as JSONSchemaMutable;
+        return (valueSchema === false
+          ? { not: true, default: defaultValue }
+          : { default: defaultValue }) as JSONSchemaMutable;
       }
       (valueSchema as any).default = defaultValue;
     }
@@ -899,9 +905,9 @@ export class CommonToolsFormatter implements TypeFormatter {
    * Boolean schemas (true/false) can't have properties spread into them.
    */
   private applyWrapperSemantics(
-    schema: JSONSchemaMutable,
+    schema: JSONSchemaMutableOrBoolean,
     wrapperKind: WrapperKind,
-  ): JSONSchemaMutable {
+  ): JSONSchemaMutableOrBoolean {
     // OpaqueRef is just T — no wrapper semantics needed
     if (wrapperKind === "OpaqueRef") {
       return schema;
@@ -911,8 +917,8 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     if (typeof schema === "boolean") {
       return schema === false
-        ? { [propertyName]: true, not: true } as JSONSchemaMutable
-        : { [propertyName]: true } as JSONSchemaMutable;
+        ? { [propertyName]: true, not: true }
+        : { [propertyName]: true };
     }
 
     return { ...schema, [propertyName]: true };
@@ -923,15 +929,17 @@ export class CommonToolsFormatter implements TypeFormatter {
    * Handles empty array by returning true (any value is valid).
    * Deduplicates identical schemas before wrapping.
    */
-  private maybeWrapInAnyOf(schemas: JSONSchemaMutable[]): JSONSchemaMutable {
+  private maybeWrapInAnyOf(
+    schemas: JSONSchemaMutableOrBoolean[],
+  ): JSONSchemaMutableOrBoolean {
     if (schemas.length === 0) {
-      return true as JSONSchemaMutable;
+      return true;
     } else if (schemas.length === 1) {
       return schemas[0]!;
     } else {
       // Deduplicate identical schemas
       const seen = new Set<string>();
-      const unique: JSONSchemaMutable[] = [];
+      const unique: JSONSchemaMutableOrBoolean[] = [];
       for (const schema of schemas) {
         const key = JSON.stringify(schema);
         if (!seen.has(key)) {
@@ -955,9 +963,9 @@ export class CommonToolsFormatter implements TypeFormatter {
   private formatWrapperUnion(
     unionType: ts.UnionType,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): JSONSchemaMutableOrBoolean {
     const members = unionType.types;
-    const schemas: JSONSchemaMutable[] = [];
+    const schemas: JSONSchemaMutableOrBoolean[] = [];
 
     // Check if we have a UnionTypeNode with member nodes
     const hasUnionNode = context.typeNode &&

@@ -1,5 +1,8 @@
 import ts from "typescript";
-import type { JSONSchemaMutable } from "@commontools/api";
+import type {
+  JSONSchemaMutable,
+  JSONSchemaMutableOrBoolean,
+} from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import {
   cloneSchemaDefinition,
@@ -83,7 +86,10 @@ export class ObjectFormatter implements TypeFormatter {
     return context.typeChecker.typeToString(type) === "object";
   }
 
-  formatType(type: ts.Type, context: GenerationContext): JSONSchemaMutable {
+  formatType(
+    type: ts.Type,
+    context: GenerationContext,
+  ): JSONSchemaMutableOrBoolean {
     const checker = context.typeChecker;
 
     // If this is the TS `object` type (unknown object shape), emit a permissive
@@ -100,7 +106,7 @@ export class ObjectFormatter implements TypeFormatter {
     // Do not early-return for empty object types. Instead, try to enumerate
     // properties via the checker to allow type literals to surface members.
 
-    const properties: Record<string, JSONSchemaMutable> = {};
+    const properties: Record<string, JSONSchemaMutableOrBoolean> = {};
     const required: string[] = [];
 
     const props = checker.getPropertiesOfType(type);
@@ -163,11 +169,12 @@ export class ObjectFormatter implements TypeFormatter {
       }
 
       // Delegate to the main generator (specific formatters handle wrappers/defaults)
-      const generated: JSONSchemaMutable = this.schemaGenerator.formatChildType(
-        resolvedPropType,
-        context,
-        propTypeNode,
-      );
+      const generated: JSONSchemaMutableOrBoolean = this.schemaGenerator
+        .formatChildType(
+          resolvedPropType,
+          context,
+          propTypeNode,
+        );
       // Attach property description from JSDoc (if any)
       const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
       if (text && isRecord(generated)) {
@@ -245,7 +252,7 @@ export class ObjectFormatter implements TypeFormatter {
   private lookupBuiltInSchema(
     type: ts.Type,
     checker: ts.TypeChecker,
-  ): JSONSchemaMutable | boolean | undefined {
+  ): JSONSchemaMutableOrBoolean | undefined {
     const builtin = getNativeTypeSchema(type, checker);
     return builtin === undefined ? undefined : cloneSchemaDefinition(builtin);
   }

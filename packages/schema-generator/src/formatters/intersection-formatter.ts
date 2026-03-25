@@ -1,5 +1,8 @@
 import ts from "typescript";
-import type { JSONSchemaMutable } from "@commontools/api";
+import type {
+  JSONSchemaMutable,
+  JSONSchemaMutableOrBoolean,
+} from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { cloneSchemaDefinition, getNativeTypeSchema } from "../type-utils.ts";
@@ -23,7 +26,10 @@ export class IntersectionFormatter implements TypeFormatter {
     return (type.flags & ts.TypeFlags.Intersection) !== 0;
   }
 
-  formatType(type: ts.Type, context: GenerationContext): JSONSchemaMutable {
+  formatType(
+    type: ts.Type,
+    context: GenerationContext,
+  ): JSONSchemaMutableOrBoolean {
     const checker = context.typeChecker;
     const native = getNativeTypeSchema(type, checker);
     if (native !== undefined) {
@@ -226,7 +232,7 @@ export class IntersectionFormatter implements TypeFormatter {
   }
 
   private isObjectSchema(
-    schema: JSONSchemaMutable,
+    schema: JSONSchemaMutableOrBoolean,
   ): schema is JSONSchemaMutable & {
     properties?: Record<string, JSONSchemaMutable>;
     required?: string[];
@@ -239,7 +245,7 @@ export class IntersectionFormatter implements TypeFormatter {
   }
 
   private resolveObjectSchema(
-    schema: JSONSchemaMutable,
+    schema: JSONSchemaMutableOrBoolean,
     context: GenerationContext,
   ):
     | (JSONSchemaMutable & {

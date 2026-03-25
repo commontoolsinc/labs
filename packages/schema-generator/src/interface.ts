@@ -1,5 +1,5 @@
 import type ts from "typescript";
-import type { JSONSchemaMutable } from "@commontools/api";
+import type { JSONSchemaMutableOrBoolean } from "@commontools/api";
 
 /**
  * Unified context for schema generation - contains all state in one place
@@ -15,7 +15,7 @@ export interface GenerationContext {
 
   // Accumulating state (grows during generation)
   /** Named type definitions for $refs */
-  definitions: Record<string, JSONSchemaMutable>;
+  definitions: Record<string, JSONSchemaMutableOrBoolean>;
   /** Which $refs have been emitted */
   emittedRefs: Set<string>;
 
@@ -50,7 +50,10 @@ export interface TypeFormatter {
   /**
    * Convert the type to JSON Schema
    */
-  formatType(type: ts.Type, context: GenerationContext): JSONSchemaMutable;
+  formatType(
+    type: ts.Type,
+    context: GenerationContext,
+  ): JSONSchemaMutableOrBoolean;
 }
 
 /**
@@ -66,7 +69,7 @@ export interface SchemaGenerator {
     typeNode?: ts.TypeNode,
     options?: { widenLiterals?: boolean },
     schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
-  ): JSONSchemaMutable;
+  ): JSONSchemaMutableOrBoolean;
 
   /**
    * Generate schema from a synthetic TypeNode that doesn't resolve to a proper Type.
@@ -82,5 +85,5 @@ export interface SchemaGenerator {
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
     schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
-  ): JSONSchemaMutable;
+  ): JSONSchemaMutableOrBoolean;
 }

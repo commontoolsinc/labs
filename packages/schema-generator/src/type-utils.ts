@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { JSONSchemaMutable } from "@commontools/api";
+import type { JSONSchemaMutableOrBoolean } from "@commontools/api";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { getPropertyNameText } from "./typescript/property-name.ts";
 
@@ -286,7 +286,7 @@ export function getPrimarySymbol(type: ts.Type): ts.Symbol | undefined {
   return undefined;
 }
 
-export function cloneSchemaDefinition<T extends JSONSchemaMutable | boolean>(
+export function cloneSchemaDefinition<T extends JSONSchemaMutableOrBoolean>(
   schema: T,
 ): T {
   return (typeof schema === "boolean" ? schema : structuredClone(schema)) as T;
@@ -295,12 +295,12 @@ export function cloneSchemaDefinition<T extends JSONSchemaMutable | boolean>(
 export function getNativeTypeSchema(
   type: ts.Type,
   checker: ts.TypeChecker,
-): JSONSchemaMutable | boolean | undefined {
+): JSONSchemaMutableOrBoolean | undefined {
   const visited = new Set<ts.Type>();
 
   const resolve = (
     current: ts.Type,
-  ): JSONSchemaMutable | boolean | undefined => {
+  ): JSONSchemaMutableOrBoolean | undefined => {
     if (visited.has(current)) return undefined;
     visited.add(current);
 
