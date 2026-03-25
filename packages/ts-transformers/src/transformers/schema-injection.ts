@@ -884,11 +884,64 @@ function handlePatternSchemaInjection(
     ]);
   };
 
+  const schemaArgs = detectSchemaArguments(argsArray, builderFunction);
+
+  if (schemaArgs.length >= 2) {
+    const updated = buildCallExpression(schemaArgs[0]!, schemaArgs[1]!);
+    return ts.visitEachChild(updated, visit, transformation);
+  }
+
   // Determine input and result schema TypeNodes based on type arguments
   let inputTypeNode: ts.TypeNode;
   let inputType: ts.Type | undefined;
   let resultTypeNode: ts.TypeNode;
   let resultType: ts.Type | undefined;
+
+  if (schemaArgs.length === 1) {
+    const existingInputSchema = schemaArgs[0]!;
+
+    if (typeArgs && typeArgs.length >= 2) {
+      resultTypeNode = typeArgs[1]!;
+      if (typeRegistry) {
+        resultType = typeRegistry.get(resultTypeNode);
+      }
+      resultType ??= getTypeFromTypeNodeWithFallback(
+        resultTypeNode,
+        checker,
+        typeRegistry,
+      );
+    } else {
+      const inferred = collectFunctionSchemaTypeNodes(
+        builderFunction,
+        checker,
+        sourceFile,
+        factory,
+        undefined,
+        typeRegistry,
+        capabilityRegistry,
+        argumentCapabilityMode,
+        context,
+      );
+      if (!inferred.result) {
+        reportAnyResultSchema(context, node);
+      }
+      resultTypeNode = inferred.result ??
+        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+      resultType = getTypeFromRegistryOrFallback(
+        resultTypeNode,
+        inferred.resultType,
+        typeRegistry,
+      );
+    }
+
+    const toSchemaResult = createToSchemaCall(context, resultTypeNode);
+    if (resultType && typeRegistry) {
+      typeRegistry.set(toSchemaResult, resultType);
+    }
+
+    const updated = buildCallExpression(existingInputSchema, toSchemaResult);
+    return ts.visitEachChild(updated, visit, transformation);
+  }
 
   if (typeArgs && typeArgs.length >= 2) {
     // Case 1: Two or more type arguments → both schemas from type args
@@ -947,82 +1000,38 @@ function handlePatternSchemaInjection(
       typeRegistry,
     );
   } else {
-    // Case 3: No type arguments - check for schema arguments
-    const schemaArgs = detectSchemaArguments(argsArray, builderFunction);
+    // Case 3: No type arguments, no schema args → infer both from function
+    const inputParam = builderFunction.parameters[0];
+    const inferred = collectFunctionSchemaTypeNodes(
+      builderFunction,
+      checker,
+      sourceFile,
+      factory,
+      undefined,
+      typeRegistry,
+      capabilityRegistry,
+      argumentCapabilityMode,
+      context,
+    );
 
-    if (schemaArgs.length >= 2) {
-      // Already has two schemas (input + result) - skip transformation
-      return undefined;
-    } else if (schemaArgs.length === 1) {
-      // Case 3a: Has one schema argument but no type args
-      // Use existing schema as input, infer result from function
-      const existingInputSchema = schemaArgs[0]!;
+    inputTypeNode = inferred.argument ??
+      getParameterSchemaType(factory, inputParam);
+    inputType = getTypeFromRegistryOrFallback(
+      inputTypeNode,
+      inferred.argumentType,
+      typeRegistry,
+    );
 
-      // Infer result type from function
-      const inferred = collectFunctionSchemaTypeNodes(
-        builderFunction,
-        checker,
-        sourceFile,
-        factory,
-        undefined,
-        typeRegistry,
-        capabilityRegistry,
-        argumentCapabilityMode,
-        context,
-      );
-      if (!inferred.result) {
-        reportAnyResultSchema(context, node);
-      }
-      resultTypeNode = inferred.result ??
-        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-      resultType = getTypeFromRegistryOrFallback(
-        resultTypeNode,
-        inferred.resultType,
-        typeRegistry,
-      );
-
-      // Use existing schema directly as input, create result schema from type
-      const toSchemaResult = createToSchemaCall(context, resultTypeNode);
-      if (resultType && typeRegistry) {
-        typeRegistry.set(toSchemaResult, resultType);
-      }
-
-      const updated = buildCallExpression(existingInputSchema, toSchemaResult);
-      return ts.visitEachChild(updated, visit, transformation);
-    } else {
-      // Case 3b: No type arguments, no schema args → infer both from function
-      const inputParam = builderFunction.parameters[0];
-      const inferred = collectFunctionSchemaTypeNodes(
-        builderFunction,
-        checker,
-        sourceFile,
-        factory,
-        undefined,
-        typeRegistry,
-        capabilityRegistry,
-        argumentCapabilityMode,
-        context,
-      );
-
-      inputTypeNode = inferred.argument ??
-        getParameterSchemaType(factory, inputParam);
-      inputType = getTypeFromRegistryOrFallback(
-        inputTypeNode,
-        inferred.argumentType,
-        typeRegistry,
-      );
-
-      if (!inferred.result) {
-        reportAnyResultSchema(context, node);
-      }
-      resultTypeNode = inferred.result ??
-        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-      resultType = getTypeFromRegistryOrFallback(
-        resultTypeNode,
-        inferred.resultType,
-        typeRegistry,
-      );
+    if (!inferred.result) {
+      reportAnyResultSchema(context, node);
     }
+    resultTypeNode = inferred.result ??
+      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+    resultType = getTypeFromRegistryOrFallback(
+      resultTypeNode,
+      inferred.resultType,
+      typeRegistry,
+    );
   }
 
   const originalInputTypeNode = inputTypeNode;

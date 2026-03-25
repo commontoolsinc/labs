@@ -466,7 +466,7 @@ function readAddIntegrityFromSchema(
   );
 }
 
-function computePreparedLabels(
+export function computePreparedLabelsForSchema(
   schema: JSONSchema,
   implementationIdentity?: CfcImplementationIdentity,
 ): PersistedPathLabels {
@@ -936,7 +936,10 @@ async function resolvePreparedWriteSchemas(
 
     let labels = labelsCache.get(schema);
     if (!labels) {
-      labels = computePreparedLabels(schema, options.implementationIdentity);
+      labels = computePreparedLabelsForSchema(
+        schema,
+        options.implementationIdentity,
+      );
       labelsCache.set(schema, labels);
     }
 
@@ -2882,7 +2885,7 @@ function verifyOutputTransitionsForAttempt(
     );
     let preparedLabels = preparedLabelsByEntity.get(cfcEntityKey(entity));
     if (!preparedLabels) {
-      preparedLabels = computePreparedLabels(
+      preparedLabels = computePreparedLabelsForSchema(
         rootSchema,
         options.implementationIdentity,
       );

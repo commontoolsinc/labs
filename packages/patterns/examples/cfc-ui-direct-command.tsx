@@ -6,6 +6,7 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  Stream,
   UI,
   VNode,
   Writable,
@@ -35,6 +36,7 @@ export interface DirectCommandInput {
 export interface DirectCommandOutput {
   draft: string;
   submittedCount: number;
+  submit: Stream<void>;
   [UI]: VNode;
 }
 
@@ -164,6 +166,7 @@ export default pattern<DirectCommandInput, DirectCommandOutput>(
       ),
       draft,
       submittedCount,
+      submit,
     };
   },
   DIRECT_COMMAND_INPUT_SCHEMA,

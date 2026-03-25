@@ -6,6 +6,7 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  Stream,
   UI,
   VNode,
   Writable,
@@ -38,6 +39,7 @@ export interface MessageShareRowInput {
 
 export interface MessageShareRowOutput {
   shared: boolean;
+  toggleShared: Stream<void>;
   [UI]: VNode;
 }
 
@@ -123,6 +125,7 @@ export const MessageShareRow = pattern<
         </ct-card>
       ),
       shared,
+      toggleShared,
     };
   },
   MESSAGE_SHARE_ROW_INPUT_SCHEMA,

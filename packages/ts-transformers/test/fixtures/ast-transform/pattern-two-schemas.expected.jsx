@@ -32,20 +32,16 @@ export default pattern((__ct_pattern_input) => {
 }, {
     type: "object",
     properties: {
-        count: {
-            type: "number"
-        }
+        count: { type: "number" }
     },
     required: ["count"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies JSONSchema, {
     type: "object",
     properties: {
-        doubled: {
-            type: "number"
-        }
+        doubled: { type: "number" }
     },
     required: ["doubled"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

@@ -31,6 +31,7 @@ import type {
   Cell,
   ErrorWithContext,
   Pattern,
+  ReadObservationOp,
   SettleStats,
   Stream,
 } from "@commontools/runner";
@@ -46,6 +47,25 @@ import {
   resetAllCountBaselines,
   resetAllTimingBaselines,
 } from "@commontools/utils/logger";
+import {
+  cfcLabelsAddress,
+  normalizePersistedPathLabels,
+  resolveObservationLabel,
+} from "../../runner/src/cfc/shared.ts";
+import {
+  clauseMatchesAtomPatterns,
+  matchesCfcAtomPattern,
+} from "../../runner/src/cfc/atom-patterns.ts";
+import type {
+  CfcAtom,
+  CfcConfidentialityClause,
+} from "../../runner/src/cfc/label-algebra.ts";
+import {
+  joinIntegrityLabels,
+  normalizeConfidentialityLabel,
+  normalizeIntegrityLabel,
+} from "../../runner/src/cfc/label-algebra.ts";
+import { prepareCfcCommitIfNeeded } from "../../runner/src/cfc/prepare-shim.ts";
 
 /**
  * A test step is an object with either an 'assertion' or 'action' property.
@@ -54,7 +74,38 @@ import {
  */
 export type TestStep =
   | { assertion: OpaqueRef<boolean>; skip?: boolean }
-  | { action: Stream<void>; skip?: boolean };
+  | { action: Stream<void>; skip?: boolean }
+  | { labelAssertion: LabelAssertionSpec; skip?: boolean };
+
+export interface LabelAssertionSpec {
+  /**
+   * Top-level key on the test pattern output that resolves to the target cell.
+   * Omit to assert against the root test-pattern result.
+   */
+  target?: string;
+  /**
+   * Optional schema override to resolve labels from when runtime metadata does
+   * not retain the authored output schema.
+   */
+  schema?: unknown;
+  /**
+   * Relative path inside the target output. Defaults to "/".
+   */
+  path?: string;
+  /**
+   * Observation class to resolve. Defaults to "value".
+   */
+  op?: ReadObservationOp;
+  /**
+   * Integrity atom patterns that must all be matched by the resolved label.
+   */
+  integrityIncludes?: readonly CfcAtom[];
+  /**
+   * Confidentiality clause patterns. Each clause pattern must be matched by at
+   * least one resolved confidentiality clause.
+   */
+  confidentialityIncludes?: readonly CfcConfidentialityClause[];
+}
 
 export interface TestResult {
   name: string;
@@ -96,6 +147,209 @@ export interface TestRunnerOptions {
   root?: string;
   /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
   statsThreshold?: number;
+}
+
+function joinRelativePath(
+  basePath: readonly string[] | undefined,
+  relativePath: string | undefined,
+): string {
+  const relative = relativePath ?? "/";
+  const relativeSegments = relative === "/"
+    ? []
+    : relative.replace(/^\//, "").split("/").filter((segment) =>
+      segment.length > 0
+    );
+  const allSegments = [...(basePath ?? []), ...relativeSegments];
+  return allSegments.length === 0 ? "/" : `/${allSegments.join("/")}`;
+}
+
+function pathSegments(path: string): string[] {
+  if (path === "/") {
+    return [];
+  }
+  return path.replace(/^\//, "").split("/").filter((segment) =>
+    segment.length > 0
+  );
+}
+
+function resolveLocalSchemaLabel(
+  runtime: Runtime,
+  schema: unknown,
+  observationPath: string,
+): {
+  classification?: readonly CfcConfidentialityClause[];
+  integrity?: readonly CfcAtom[];
+} | undefined {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return undefined;
+  }
+  const schemaAtPath = runtime.cfc.getSchemaAtPath(
+    schema as never,
+    pathSegments(observationPath),
+  );
+  if (
+    !schemaAtPath || typeof schemaAtPath !== "object" ||
+    Array.isArray(schemaAtPath)
+  ) {
+    return undefined;
+  }
+  const rawIfc = (schemaAtPath as { ifc?: unknown }).ifc;
+  if (!rawIfc || typeof rawIfc !== "object" || Array.isArray(rawIfc)) {
+    return undefined;
+  }
+
+  const classification = normalizeConfidentialityLabel(
+    (rawIfc as { classification?: unknown }).classification,
+  );
+  const integrity = joinIntegrityLabels(
+    normalizeIntegrityLabel((rawIfc as { integrity?: unknown }).integrity),
+    normalizeIntegrityLabel(
+      (rawIfc as { addIntegrity?: unknown }).addIntegrity,
+    ),
+  );
+
+  if (!classification && !integrity) {
+    return undefined;
+  }
+  return {
+    ...(classification ? { classification } : {}),
+    ...(integrity ? { integrity } : {}),
+  };
+}
+
+async function runLabelAssertion(
+  runtime: Runtime,
+  patternResult: Cell<Record<string, unknown>>,
+  rootResultCell: Cell<Record<string, unknown>>,
+  spec: LabelAssertionSpec,
+  rootPatternSchema: unknown,
+): Promise<{ passed: boolean; error?: string }> {
+  try {
+    const targetRef = spec.target
+      ? patternResult.key(spec.target) as Cell<unknown>
+      : rootResultCell;
+    const targetCell = targetRef.resolveAsCell();
+    const targetLink = targetCell.getAsNormalizedFullLink();
+    let targetSchema = spec.schema ??
+      targetRef.schema ??
+      targetLink.schema ??
+      targetCell.schema;
+    if (!targetSchema) {
+      try {
+        targetSchema = targetRef.asSchemaFromLinks().schema ??
+          targetCell.asSchemaFromLinks().schema;
+      } catch {
+        // Fall through to the last-resort root schema lookup below.
+      }
+    }
+    if (
+      !targetSchema &&
+      !spec.target &&
+      rootPatternSchema &&
+      typeof rootPatternSchema === "object" &&
+      !Array.isArray(rootPatternSchema)
+    ) {
+      targetSchema = runtime.cfc.getSchemaAtPath(
+        rootPatternSchema as never,
+        [],
+      );
+    }
+    const observationPath = joinRelativePath(targetLink.path, spec.path);
+    const op = spec.op ?? "value";
+
+    const tx = runtime.edit();
+    let labelsValue: unknown;
+    try {
+      labelsValue = tx.readOrThrow(cfcLabelsAddress({
+        space: targetLink.space,
+        id: targetLink.id,
+        type: targetLink.type,
+      }));
+    } catch (error) {
+      return {
+        passed: false,
+        error: `Error loading CFC labels: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    }
+
+    const { error: commitError } = await tx.commit();
+    if (commitError) {
+      return {
+        passed: false,
+        error:
+          `Error committing label read transaction: ${commitError.message}`,
+      };
+    }
+
+    const labelsByPath = normalizePersistedPathLabels(labelsValue);
+    const resolved =
+      resolveObservationLabel(labelsByPath, observationPath, op) ??
+        resolveLocalSchemaLabel(runtime, targetSchema, observationPath);
+    if (!resolved) {
+      return {
+        passed: false,
+        error: `No CFC labels resolved at ${
+          spec.target ?? "$self"
+        }:${observationPath} (${op}); target=${targetLink.id}${
+          targetLink.path.length > 0
+            ? ` path=/${targetLink.path.join("/")}`
+            : ""
+        }; hasSchema=${targetSchema !== undefined}; labelKeys=${
+          JSON.stringify(Object.keys(labelsByPath))
+        }`,
+      };
+    }
+
+    const integrityIncludes = spec.integrityIncludes ?? [];
+    const confidentialityIncludes = spec.confidentialityIncludes ?? [];
+
+    if (integrityIncludes.length > 0) {
+      const actualIntegrity = resolved.integrity ?? [];
+      const missingPattern = integrityIncludes.find((pattern) =>
+        !actualIntegrity.some((atom) => matchesCfcAtomPattern(atom, pattern))
+      );
+      if (missingPattern) {
+        return {
+          passed: false,
+          error: `Missing integrity atom pattern ${
+            JSON.stringify(missingPattern)
+          } at ${spec.target ?? "$self"}:${observationPath} (${op}); actual=${
+            JSON.stringify(actualIntegrity)
+          }`,
+        };
+      }
+    }
+
+    if (confidentialityIncludes.length > 0) {
+      const actualClassification = resolved.classification ?? [];
+      const missingClause = confidentialityIncludes.find((patternClause) =>
+        !actualClassification.some((actualClause) =>
+          clauseMatchesAtomPatterns(actualClause, patternClause)
+        )
+      );
+      if (missingClause) {
+        return {
+          passed: false,
+          error: `Missing confidentiality clause pattern ${
+            JSON.stringify(missingClause)
+          } at ${spec.target ?? "$self"}:${observationPath} (${op}); actual=${
+            JSON.stringify(actualClassification)
+          }`,
+        };
+      }
+    }
+
+    return { passed: true };
+  } catch (error) {
+    return {
+      passed: false,
+      error: error instanceof Error
+        ? (error.stack ?? error.message)
+        : String(error),
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -583,6 +837,9 @@ export async function runTestPattern(
         mentionable: [],
       });
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+      await prepareCfcCommitIfNeeded(setupTx, {
+        enforceBoundary: runtime.experimental.cfcBoundaryEnforcement,
+      });
       await setupTx.commit();
       await runtime.idle();
     }
@@ -602,6 +859,9 @@ export async function runTestPattern(
     const patternResult = runtime.run(tx, testPatternFactory, {}, resultCell);
 
     // Commit the transaction
+    await prepareCfcCommitIfNeeded(tx, {
+      enforceBoundary: runtime.experimental.cfcBoundaryEnforcement,
+    });
     await tx.commit();
 
     // Wait for initial setup to complete
@@ -657,16 +917,18 @@ export async function runTestPattern(
       const stepValue = testsValue[i] as {
         action?: unknown;
         assertion?: unknown;
+        labelAssertion?: unknown;
         skip?: boolean;
       };
 
       // Check if this step has 'action' or 'assertion' key
       const isAction = "action" in stepValue;
       const isAssertion = "assertion" in stepValue;
+      const isLabelAssertion = "labelAssertion" in stepValue;
 
-      if (!isAction && !isAssertion) {
+      if (!isAction && !isAssertion && !isLabelAssertion) {
         throw new Error(
-          `Test step at index ${i} must have either 'action' or 'assertion' key. Got: ${
+          `Test step at index ${i} must have either 'action', 'assertion', or 'labelAssertion' key. Got: ${
             JSON.stringify(Object.keys(stepValue))
           }`,
         );
@@ -682,7 +944,9 @@ export async function runTestPattern(
           }
         } else {
           assertionCount++;
-          const assertionName = `assertion_${assertionCount}`;
+          const assertionName = isLabelAssertion
+            ? `label_assertion_${assertionCount}`
+            : `assertion_${assertionCount}`;
           const suffix = lastActionIndex !== null
             ? ` (after action_${actionCount})`
             : "";
@@ -905,7 +1169,7 @@ export async function runTestPattern(
             }
           }
         }
-      } else {
+      } else if (isAssertion) {
         // It's an assertion - check the boolean value
         assertionCount++;
         const assertionName = `assertion_${assertionCount}`;
@@ -945,6 +1209,39 @@ export async function runTestPattern(
             : "";
           console.log(`  ${status} ${assertionName}${suffix}`);
         }
+      } else {
+        assertionCount++;
+        const assertionName = `label_assertion_${assertionCount}`;
+
+        const labelSpec = stepValue.labelAssertion as LabelAssertionSpec;
+        const {
+          passed,
+          error,
+        } = await runLabelAssertion(
+          runtime,
+          patternResult,
+          resultCell,
+          labelSpec,
+          testPatternFactory.resultSchema,
+        );
+
+        results.push({
+          name: assertionName,
+          passed,
+          afterAction: lastActionIndex !== null
+            ? `action_${actionCount}`
+            : null,
+          error,
+          durationMs: performance.now() - itemStart,
+        });
+
+        if (options.verbose) {
+          const status = passed ? "✓" : "✗";
+          const suffix = lastActionIndex !== null
+            ? ` (after action_${actionCount})`
+            : "";
+          console.log(`  ${status} ${assertionName}${suffix}`);
+        }
       }
 
       // Print delta stats for slow steps
@@ -954,6 +1251,8 @@ export async function runTestPattern(
         if (stepDuration > statsThreshold || statsThreshold === 0) {
           const stepLabel = isAction
             ? `action_${actionCount}`
+            : isLabelAssertion
+            ? `label_assertion_${assertionCount}`
             : `assertion_${assertionCount}`;
           printLoggerStats(
             performance.now() - startTime,
