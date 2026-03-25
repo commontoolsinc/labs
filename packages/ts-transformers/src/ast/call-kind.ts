@@ -597,12 +597,89 @@ function getImplicitReactiveParameterCallKind(
     if (!candidate) continue;
 
     const callKind = detectCallKind(candidate as ts.CallExpression, checker);
-    if (callKind?.kind === "builder" || callKind?.kind === "array-method") {
+    if (callKind?.kind === "builder") {
+      return callKind.kind;
+    }
+
+    if (
+      callKind?.kind === "array-method" &&
+      isImplicitReactiveArrayMethodCallback(
+        candidate as ts.CallExpression,
+        checker,
+      )
+    ) {
       return callKind.kind;
     }
   }
 
   return undefined;
+}
+
+function isImplicitReactiveArrayMethodCallback(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  if (isLoweredReactiveArrayMethodCall(call, checker)) {
+    return true;
+  }
+
+  const target = stripWrappers(call.expression);
+  if (
+    !ts.isPropertyAccessExpression(target) &&
+    !ts.isElementAccessExpression(target)
+  ) {
+    return false;
+  }
+
+  return isReactiveArrayMethodReceiverExpression(target.expression, checker);
+}
+
+function isReactiveArrayMethodReceiverExpression(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  const target = stripWrappers(expression);
+
+  if (isReactiveValueExpression(target, checker)) {
+    return true;
+  }
+
+  if (
+    ts.isBinaryExpression(target) &&
+    (
+      target.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken ||
+      target.operatorToken.kind === ts.SyntaxKind.BarBarToken
+    )
+  ) {
+    return isReactiveArrayMethodReceiverExpression(target.left, checker) ||
+      isReactiveArrayMethodReceiverExpression(target.right, checker);
+  }
+
+  if (!ts.isCallExpression(target)) {
+    return false;
+  }
+
+  if (
+    isReactiveOriginCall(target, checker) ||
+    isLoweredReactiveArrayMethodCall(target, checker)
+  ) {
+    return true;
+  }
+
+  const callKind = detectCallKind(target, checker);
+  if (callKind?.kind !== "array-method") {
+    return false;
+  }
+
+  const callee = stripWrappers(target.expression);
+  if (
+    !ts.isPropertyAccessExpression(callee) &&
+    !ts.isElementAccessExpression(callee)
+  ) {
+    return false;
+  }
+
+  return isReactiveArrayMethodReceiverExpression(callee.expression, checker);
 }
 
 function isVariableFromReactiveCallSymbol(

@@ -17,7 +17,7 @@ import {
 
 export interface DataFlowScopeParameter {
   readonly name: string;
-  readonly symbol: ts.Symbol;
+  readonly symbol?: ts.Symbol;
   readonly declaration?: ts.ParameterDeclaration;
 }
 
@@ -125,27 +125,37 @@ export function createDataFlowAnalyzer(
 
   // Convert symbols to enriched parameters with name and declaration info
   const toScopeParameters = (
-    symbols: ts.Symbol[],
+    parameters: readonly ts.ParameterDeclaration[],
   ): DataFlowScopeParameter[] =>
-    symbols.map((symbol) => {
-      const declarations = symbol.getDeclarations();
-      const parameterDecl = declarations?.find((
-        decl,
-      ): decl is ts.ParameterDeclaration => ts.isParameter(decl));
-      return parameterDecl
-        ? { name: symbol.getName(), symbol, declaration: parameterDecl }
-        : { name: symbol.getName(), symbol };
+    parameters.flatMap((parameter) => {
+      const symbol = tryGetSymbol(parameter.name);
+      if (symbol) {
+        return [{
+          name: symbol.getName(),
+          symbol,
+          declaration: parameter,
+        }];
+      }
+
+      if (ts.isIdentifier(parameter.name)) {
+        return [{
+          name: parameter.name.text,
+          declaration: parameter,
+        }];
+      }
+
+      return [];
     });
 
   const createScope = (
     context: AnalyzerContext,
     parent: DataFlowScope | null,
-    parameterSymbols: ts.Symbol[],
+    parameters: readonly ts.ParameterDeclaration[],
   ): DataFlowScope => {
     const scope: DataFlowScope = {
       id: context.nextScopeId++,
       parentId: parent ? parent.id : null,
-      parameters: toScopeParameters(parameterSymbols),
+      parameters: toScopeParameters(parameters),
     };
     context.scopes.set(scope.id, scope);
     return scope;
@@ -160,7 +170,9 @@ export function createDataFlowAnalyzer(
     let current: DataFlowScope | undefined = scope;
     while (current) {
       for (const param of current.parameters) {
-        result.add(param.symbol);
+        if (param.symbol) {
+          result.add(param.symbol);
+        }
       }
       current = current.parentId !== null
         ? scopes.get(current.parentId)
@@ -331,6 +343,13 @@ export function createDataFlowAnalyzer(
       // Can't resolve symbol - if synthetic, treat as opaque parameter
       // This handles cases like `discount` where the whole identifier is synthetic
       if (!symbol && isSynthetic(expression)) {
+        const hasSyntheticLocalParameter = scope.parameters.some((parameter) =>
+          !parameter.symbol && parameter.name === expression.text
+        );
+        if (hasSyntheticLocalParameter) {
+          return emptyAnalysis();
+        }
+
         recordDataFlow(expression, scope, null, true); // Explicit: synthetic opaque parameter
         return {
           containsOpaqueRef: true,
@@ -621,14 +640,7 @@ export function createDataFlowAnalyzer(
       const analyses: InternalAnalysis[] = [callee];
       for (const arg of expression.arguments) {
         if (isFunctionLikeExpression(arg)) {
-          const parameterSymbols: ts.Symbol[] = [];
-          for (const parameter of arg.parameters) {
-            const symbol = tryGetSymbol(parameter.name);
-            if (symbol) {
-              parameterSymbols.push(symbol);
-            }
-          }
-          const childScope = createScope(context, scope, parameterSymbols);
+          const childScope = createScope(context, scope, arg.parameters);
           if (ts.isBlock(arg.body)) {
             const blockAnalyses: InternalAnalysis[] = [];
             for (const statement of arg.body.statements) {
@@ -669,12 +681,7 @@ export function createDataFlowAnalyzer(
     }
 
     if (isFunctionLikeExpression(expression)) {
-      const parameterSymbols: ts.Symbol[] = [];
-      for (const parameter of expression.parameters) {
-        const symbol = tryGetSymbol(parameter.name);
-        if (symbol) parameterSymbols.push(symbol);
-      }
-      const childScope = createScope(context, scope, parameterSymbols);
+      const childScope = createScope(context, scope, expression.parameters);
       if (ts.isBlock(expression.body)) {
         const analyses: InternalAnalysis[] = [];
         for (const statement of expression.body.statements) {

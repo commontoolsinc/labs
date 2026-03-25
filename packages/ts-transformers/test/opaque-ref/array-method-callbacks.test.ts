@@ -206,6 +206,89 @@ export default pattern<State>((state) => {
 });
 `;
 
+const PARKING_STYLE_JOIN_SOURCE = `/// <cts-enable />
+import { computed, pattern, UI } from "commontools";
+
+interface Spot {
+  active: boolean;
+  spotNumber: string;
+  label?: string;
+}
+
+interface Person {
+  name: string;
+  email: string;
+  commuteMode: string;
+  priorityRank: number;
+  defaultSpot?: string;
+  spotPreferences: string[];
+  isFirst: boolean;
+  isLast: boolean;
+}
+
+interface State {
+  people: Person[];
+  editingPersonName: string | null;
+  removePersonConfirmTarget: string | null;
+  spots: Spot[];
+}
+
+export default pattern<State>((state) => {
+  return {
+    [UI]: (
+      <div>
+        {state.people.map((person) => {
+          const {
+            name: personName,
+            email,
+            commuteMode,
+            priorityRank,
+            defaultSpot,
+            spotPreferences,
+            isFirst,
+            isLast,
+          } = person;
+          const isEditing = computed(() => state.editingPersonName === personName);
+          const isRemoveConfirm = computed(() =>
+            state.removePersonConfirmTarget === personName
+          );
+          const activeSpotOpts = computed(() =>
+            state.spots
+              .filter((s) => s.active)
+              .map((s) => ({
+                label: "#" + s.spotNumber + (s.label ? " — " + s.label : ""),
+                value: s.spotNumber,
+              }))
+          );
+
+          return (
+            <section>
+              <span>{personName}</span>
+              <span>{email}</span>
+              <span>{commuteMode}</span>
+              <span>{priorityRank}</span>
+              {defaultSpot ? <span>{defaultSpot}</span> : null}
+              {isFirst ? <span>first</span> : null}
+              {isLast ? <span>last</span> : null}
+              {isEditing ? <span>editing</span> : null}
+              {isRemoveConfirm ? <span>removing</span> : null}
+              {activeSpotOpts.length > 0 ? <span>spots</span> : null}
+              {spotPreferences.length > 0
+                ? (
+                  <span>
+                    Prefers: {spotPreferences.map((n) => "#" + n).join(", ")}
+                  </span>
+                )
+                : null}
+            </section>
+          );
+        })}
+      </div>
+    ),
+  };
+});
+`;
+
 describe("OpaqueRef map callbacks", () => {
   it("transforms wish<Default<Array<T>, []>>().result.map() to mapWithPattern", async () => {
     const output = await transformSource(WISH_DEFAULT_ARRAY_SOURCE, {
@@ -288,6 +371,25 @@ describe("OpaqueRef map callbacks", () => {
         '({ section, task, taskIndex, tag, tagIndex, state }) => section.key("tasks").mapWithPattern(',
       ),
       "direct reactive callback-root maps should stay structural mapWithPattern roots, not whole-root derive wrappers",
+    );
+  });
+
+  it("does not capture nested plain-array callback locals in parking-style join branches", async () => {
+    const output = await transformSource(
+      PARKING_STYLE_JOIN_SOURCE,
+      {
+        types: { "commontools.d.ts": commontools },
+      },
+    );
+    const normalized = output.replace(/\s+/g, " ");
+
+    assertStringIncludes(
+      normalized,
+      'spotPreferences.map((n) => "#" + n).join(", ")',
+    );
+    assert(
+      !normalized.includes("{ n: n }"),
+      "parking-style join branches should not capture nested plain-array callback locals",
     );
   });
 
