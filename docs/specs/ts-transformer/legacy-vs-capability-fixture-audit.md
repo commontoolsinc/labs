@@ -124,8 +124,6 @@ These changed output text but did not move map rewrite, logical lowering, or typ
 - packages/ts-transformers/test/fixtures/closures/map-import-reference.input.tsx (keyCalls +2)
 - packages/ts-transformers/test/fixtures/closures/map-index-param-used.input.tsx (keyCalls +6)
 - packages/ts-transformers/test/fixtures/closures/map-index-shorthand.input.tsx (keyCalls +6)
-- packages/ts-transformers/test/fixtures/closures/map-jsx-compute-wrapper-local-function.input.tsx (keyCalls +1)
-- packages/ts-transformers/test/fixtures/closures/map-jsx-compute-wrapper-no-rewrite.input.tsx (keyCalls +1)
 - packages/ts-transformers/test/fixtures/closures/map-multiple-captures.input.tsx (keyCalls +9)
 - packages/ts-transformers/test/fixtures/closures/map-multiple-similar-captures.input.tsx (keyCalls +7)
 - packages/ts-transformers/test/fixtures/closures/map-nested-callback.input.tsx (keyCalls +10)
@@ -177,4 +175,3 @@ These changed output text but did not move map rewrite, logical lowering, or typ
 ## Other Deltas
 These changed outputs but did not move the tracked counters above.
 - packages/ts-transformers/test/fixtures/closures/patternTool-no-captures.input.tsx
-
