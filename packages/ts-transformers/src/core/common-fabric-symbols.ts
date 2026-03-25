@@ -1,12 +1,12 @@
 import ts from "typescript";
 
-// Constant for identifying CommonTools declarations
-const COMMONTOOLS_DECLARATION = "commonfabric.d.ts";
+// Constant for identifying Common Fabric declarations
+const COMMONFABRIC_DECLARATION = "commonfabric.d.ts";
 
 /**
- * Checks if a declaration comes from the CommonTools library
+ * Checks if a declaration comes from the Common Fabric library
  */
-export function isCommonToolsSymbol(
+export function isCommonFabricSymbol(
   symbol: ts.Symbol,
 ): boolean {
   const declarations = symbol.getDeclarations();
@@ -15,15 +15,15 @@ export function isCommonToolsSymbol(
   ) {
     const source = declarations[0].getSourceFile();
     const fileName = source.fileName.replace(/\\/g, "/");
-    return fileName.endsWith(COMMONTOOLS_DECLARATION);
+    return fileName.endsWith(COMMONFABRIC_DECLARATION);
   }
   return false;
 }
 
 /**
- * Resolves a symbol to check if it represents a CommonTools export
+ * Resolves a symbol to check if it represents a Common Fabric export
  */
-export function resolvesToCommonToolsSymbol(
+export function resolvesToCommonFabricSymbol(
   symbol: ts.Symbol | undefined,
   checker: ts.TypeChecker,
   targetName: string,
@@ -33,7 +33,7 @@ export function resolvesToCommonToolsSymbol(
   seen.add(symbol);
 
   if (symbol.getName() === targetName) {
-    if (isCommonToolsSymbol(symbol)) {
+    if (isCommonFabricSymbol(symbol)) {
       return true;
     }
   }
@@ -42,7 +42,7 @@ export function resolvesToCommonToolsSymbol(
     const aliased = checker.getAliasedSymbol(symbol);
     if (
       aliased &&
-      resolvesToCommonToolsSymbol(aliased, checker, targetName, seen)
+      resolvesToCommonFabricSymbol(aliased, checker, targetName, seen)
     ) {
       return true;
     }
@@ -56,7 +56,7 @@ export function resolvesToCommonToolsSymbol(
         if (aliasType && ts.isTypeReferenceNode(aliasType)) {
           const referenced = checker.getSymbolAtLocation(aliasType.typeName);
           if (
-            resolvesToCommonToolsSymbol(
+            resolvesToCommonFabricSymbol(
               referenced,
               checker,
               targetName,
@@ -74,9 +74,9 @@ export function resolvesToCommonToolsSymbol(
 }
 
 /**
- * Checks if a type node represents a CommonTools Default type
+ * Checks if a type node represents a Common Fabric Default type
  */
-function isCommonToolsDefaultTypeNode(
+function isCommonFabricDefaultTypeNode(
   typeNode: ts.TypeNode | undefined,
   checker: ts.TypeChecker,
   visited: Set<ts.Symbol> = new Set(),
@@ -85,7 +85,7 @@ function isCommonToolsDefaultTypeNode(
   const symbol = checker.getSymbolAtLocation(typeNode.typeName);
   if (!symbol || visited.has(symbol)) return false;
   visited.add(symbol);
-  if (resolvesToCommonToolsSymbol(symbol, checker, "Default")) {
+  if (resolvesToCommonFabricSymbol(symbol, checker, "Default")) {
     return true;
   }
   const declarations = symbol.getDeclarations();
@@ -95,7 +95,7 @@ function isCommonToolsDefaultTypeNode(
       const aliased = declaration.type;
       if (
         aliased && ts.isTypeReferenceNode(aliased) &&
-        isCommonToolsDefaultTypeNode(aliased, checker, visited)
+        isCommonFabricDefaultTypeNode(aliased, checker, visited)
       ) {
         return true;
       }
@@ -105,9 +105,9 @@ function isCommonToolsDefaultTypeNode(
 }
 
 /**
- * Checks if a symbol declares a CommonTools Default type
+ * Checks if a symbol declares a Common Fabric Default type
  */
-export function symbolDeclaresCommonToolsDefault(
+export function symbolDeclaresCommonFabricDefault(
   symbol: ts.Symbol | undefined,
   checker: ts.TypeChecker,
 ): boolean {
@@ -118,15 +118,15 @@ export function symbolDeclaresCommonToolsDefault(
     const nodeWithType = declaration as { type?: ts.TypeNode };
     if (
       nodeWithType.type &&
-      isCommonToolsDefaultTypeNode(nodeWithType.type, checker)
+      isCommonFabricDefaultTypeNode(nodeWithType.type, checker)
     ) {
       return true;
     }
     if (ts.isPropertySignature(declaration) && declaration.type) {
-      return isCommonToolsDefaultTypeNode(declaration.type, checker);
+      return isCommonFabricDefaultTypeNode(declaration.type, checker);
     }
     if (ts.isTypeAliasDeclaration(declaration) && declaration.type) {
-      return isCommonToolsDefaultTypeNode(declaration.type, checker);
+      return isCommonFabricDefaultTypeNode(declaration.type, checker);
     }
     return false;
   });

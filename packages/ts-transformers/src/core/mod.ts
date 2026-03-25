@@ -1,8 +1,8 @@
 /**
  * Cross-transformer communication registries.
  *
- * The pipeline creates four shared registries in CommonToolsTransformerPipeline
- * (ct-pipeline.ts). Each is keyed by AST node identity, which is preserved when
+ * The pipeline creates four shared registries in CommonFabricTransformerPipeline
+ * (cf-pipeline.ts). Each is keyed by AST node identity, which is preserved when
  * transformers are applied in sequence via ts.transform().
  *
  * TypeRegistry (WeakMap<ts.Node, ts.Type>)
@@ -65,9 +65,9 @@ export {
   Pipeline,
   Transformer,
 } from "./transformers.ts";
-export * from "./common-tools-symbols.ts";
+export * from "./common-fabric-symbols.ts";
 export {
-  CT_HELPERS_IDENTIFIER,
-  CTHelpers,
-  transformCtDirective,
-} from "./ct-helpers.ts";
+  CF_HELPERS_IDENTIFIER,
+  CFHelpers,
+  transformCfDirective,
+} from "./cf-helpers.ts";

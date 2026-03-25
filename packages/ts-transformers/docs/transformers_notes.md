@@ -45,7 +45,7 @@ implementation, outstanding gaps, and the focused roadmap we intend to pursue.
   wrapped in additional `derive` calls.
 - **AMD module qualification** – Injected `derive` and `ifElse` calls now
   properly reuse existing import identifiers for correct AMD output.
-- **Import resolver** – New system to find and reuse existing CommonTools
+- **Import resolver** – New system to find and reuse existing Common Fabric
   imports rather than creating bare identifiers.
 - **Normalization refactor** – Implemented explicit dependency tracking with
   `isExplicit` flag, removing text-matching workarounds and fixing parent
@@ -128,7 +128,7 @@ implementation, outstanding gaps, and the focused roadmap we intend to pursue.
     (`import { derive as ctDerive } from
     "commonfabric"`) without breaking
     helper detection.
-  - Omit any CommonTools import in `cts`-enabled files, by inserting a safe
+  - Omit any Common Fabric import in `cts`-enabled files, by inserting a safe
     namespace import during a preprocessing pass if none is detected.
 
 ## Longer-Term Considerations

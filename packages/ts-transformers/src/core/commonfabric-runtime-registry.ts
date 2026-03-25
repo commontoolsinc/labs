@@ -1,4 +1,4 @@
-export type CommonToolsRuntimeExportSpec =
+export type CommonFabricRuntimeExportSpec =
   | {
     exportName: string;
     category: "builder";
@@ -27,7 +27,7 @@ export type CommonToolsRuntimeExportSpec =
     reactiveOrigin: boolean;
   };
 
-export const COMMONTOOLS_RUNTIME_EXPORT_REGISTRY = [
+export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
   {
     exportName: "pattern",
     category: "builder",
@@ -171,38 +171,40 @@ export const COMMONTOOLS_RUNTIME_EXPORT_REGISTRY = [
     callKind: "runtime-call",
     reactiveOrigin: true,
   },
-] as const satisfies readonly CommonToolsRuntimeExportSpec[];
+] as const satisfies readonly CommonFabricRuntimeExportSpec[];
 
-export const COMMONTOOLS_RUNTIME_EXPORTS_BY_NAME: ReadonlyMap<
+export const COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME: ReadonlyMap<
   string,
-  CommonToolsRuntimeExportSpec
+  CommonFabricRuntimeExportSpec
 > = new Map(
-  COMMONTOOLS_RUNTIME_EXPORT_REGISTRY.map((entry) => [entry.exportName, entry]),
+  COMMONFABRIC_RUNTIME_EXPORT_REGISTRY.map((
+    entry,
+  ) => [entry.exportName, entry]),
 );
 
-export const COMMONTOOLS_BUILDER_EXPORT_NAMES: ReadonlySet<string> = new Set(
-  COMMONTOOLS_RUNTIME_EXPORT_REGISTRY
+export const COMMONFABRIC_BUILDER_EXPORT_NAMES: ReadonlySet<string> = new Set(
+  COMMONFABRIC_RUNTIME_EXPORT_REGISTRY
     .filter((entry) => entry.category === "builder")
     .map((entry) => entry.exportName),
 );
 
-export const COMMONTOOLS_CALL_EXPORT_NAMES: ReadonlySet<string> = new Set(
-  COMMONTOOLS_RUNTIME_EXPORT_REGISTRY
+export const COMMONFABRIC_CALL_EXPORT_NAMES: ReadonlySet<string> = new Set(
+  COMMONFABRIC_RUNTIME_EXPORT_REGISTRY
     .filter((entry) => entry.category === "call")
     .map((entry) => entry.exportName),
 );
 
-export const COMMONTOOLS_REACTIVE_ORIGIN_BUILDER_NAMES: ReadonlySet<string> =
+export const COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES: ReadonlySet<string> =
   new Set(
-    COMMONTOOLS_RUNTIME_EXPORT_REGISTRY
+    COMMONFABRIC_RUNTIME_EXPORT_REGISTRY
       .filter((entry) => entry.category === "builder" && entry.reactiveOrigin)
       .map((entry) => entry.builderName),
   );
 
-export const COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES: ReadonlySet<
+export const COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES: ReadonlySet<
   string
 > = new Set(
-  COMMONTOOLS_RUNTIME_EXPORT_REGISTRY
+  COMMONFABRIC_RUNTIME_EXPORT_REGISTRY
     .filter((entry) => entry.category === "call" && entry.reactiveOrigin)
     .map((entry) => entry.exportName),
 );

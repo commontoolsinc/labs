@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commonfabric";
+import * as __cfHelpers from "commonfabric";
 import { computed, pattern } from "commonfabric";
 // FIXTURE: computed-no-captures
 // Verifies: computed(() => expr) with no external captures is transformed to derive() with empty captures
@@ -6,17 +6,17 @@ import { computed, pattern } from "commonfabric";
 // Context: The capture schema has no properties and the captures object is empty {}.
 //   The callback parameter list is also empty (no destructuring needed).
 export default pattern(() => {
-    const result = __ctHelpers.derive({
+    const result = __cfHelpers.derive({
         type: "object",
         properties: {}
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {}, () => 42);
+    } as const satisfies __cfHelpers.JSONSchema, {}, () => 42);
     return result;
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

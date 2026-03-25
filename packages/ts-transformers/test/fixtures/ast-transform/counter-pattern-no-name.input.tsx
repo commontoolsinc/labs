@@ -22,7 +22,7 @@ const decrement = handler((_, state: { value: Cell<number> }) => {
 //   handler<unknown, CounterState>(fn) → handler(true, stateSchema, fn)
 //   handler((_, state: {...}) => ...)  → handler(false, stateSchema, fn)
 //   pattern<PatternState>(fn)          → pattern(fn, inputSchema, outputSchema)
-//   state.value ? a : b (in JSX)      → __ctHelpers.ifElse(...schemas, state.key("value"), derive(...), "unknown")
+//   state.value ? a : b (in JSX)      → __cfHelpers.ifElse(...schemas, state.key("value"), derive(...), "unknown")
 // Context: Identical to counter-pattern; verifies no-name patterns still transform correctly
 export default pattern<PatternState>((state) => {
   return {

@@ -1,19 +1,19 @@
 import ts from "typescript";
 import { TransformationContext } from "./mod.ts";
 
-export const CT_HELPERS_IDENTIFIER = "__ctHelpers";
+export const CF_HELPERS_IDENTIFIER = "__cfHelpers";
 
-const CT_HELPERS_SPECIFIER = "commonfabric";
+const CF_HELPERS_SPECIFIER = "commonfabric";
 
 const HELPERS_STMT =
-  `import * as ${CT_HELPERS_IDENTIFIER} from "${CT_HELPERS_SPECIFIER}";`;
+  `import * as ${CF_HELPERS_IDENTIFIER} from "${CF_HELPERS_SPECIFIER}";`;
 
 const HELPERS_USED_STMT = `// @ts-ignore: Internals
-function h(...args: any[]) { return ${CT_HELPERS_IDENTIFIER}.h.apply(null, args); }
+function h(...args: any[]) { return ${CF_HELPERS_IDENTIFIER}.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = ${CT_HELPERS_IDENTIFIER}.h.fragment`;
+h.fragment = ${CF_HELPERS_IDENTIFIER}.h.fragment`;
 
-export class CTHelpers {
+export class CFHelpers {
   #sourceFile: ts.SourceFile;
   #factory: ts.NodeFactory;
   #helperIdent?: ts.Identifier;
@@ -23,7 +23,7 @@ export class CTHelpers {
     this.#factory = params.factory;
 
     for (const stmt of this.#sourceFile.statements) {
-      const symbol = getCTHelpersIdentifier(stmt);
+      const symbol = getCFHelpersIdentifier(stmt);
       if (symbol) {
         this.#helperIdent = symbol;
         break;
@@ -36,7 +36,7 @@ export class CTHelpers {
   }
 
   // Returns an PropertyAccessExpression of the requested
-  // helper name e.g. `(__ctHelpers.derive)`.
+  // helper name e.g. `(__cfHelpers.derive)`.
   preserveNodeSourceMap<T extends ts.Node>(
     node: T,
     originalNode: ts.Node,
@@ -48,7 +48,6 @@ export class CTHelpers {
       ? ts.setOriginalNode(preserved, identityNode) as T
       : preserved as T;
   }
-
   getHelperExpr(
     name: string,
     originalNode?: ts.Node,
@@ -99,7 +98,7 @@ export class CTHelpers {
   }
 
   // Returns an QualifiedName of the requested
-  // helper name e.g. `__ctHelpers.JSONSchema`.
+  // helper name e.g. `__cfHelpers.JSONSchema`.
   getHelperQualified(
     name: string,
   ): ts.QualifiedName {
@@ -130,10 +129,10 @@ export class CTHelpers {
 // Take care in maintaining source lines from its input.
 //
 // This injected statement enables subsequent transformations.
-export function transformCtDirective(
+export function transformCfDirective(
   source: string,
 ): string {
-  checkCTHelperVar(source);
+  checkCFHelperVar(source);
 
   const lines = source.split("\n");
   if (!lines[0] || !isCTSEnabled(lines[0])) {
@@ -150,18 +149,18 @@ function isCTSEnabled(line: string) {
   return /^\/\/\/\s*<cts-enable\s*\/>/m.test(line);
 }
 
-// Throws if `__ctHelpers` was found as an Identifier
+// Throws if `__cfHelpers` was found as an Identifier
 // in the source code.
-function checkCTHelperVar(source: string) {
+function checkCFHelperVar(source: string) {
   const sourceFile = ts.createSourceFile(
     "source.tsx",
     source,
     ts.ScriptTarget.ES2023,
   );
   const visitor = (node: ts.Node): ts.Node => {
-    if (ts.isIdentifier(node) && node.text === CT_HELPERS_IDENTIFIER) {
+    if (ts.isIdentifier(node) && node.text === CF_HELPERS_IDENTIFIER) {
       throw new Error(
-        `Source cannot contain reserved '${CT_HELPERS_IDENTIFIER}' symbol.`,
+        `Source cannot contain reserved '${CF_HELPERS_IDENTIFIER}' symbol.`,
       );
     }
     return ts.visitEachChild(node, visitor, undefined);
@@ -169,7 +168,7 @@ function checkCTHelperVar(source: string) {
   ts.visitNode(sourceFile, visitor);
 }
 
-function getCTHelpersIdentifier(
+function getCFHelpersIdentifier(
   statement: ts.Statement,
 ): ts.Identifier | undefined {
   if (!ts.isImportDeclaration(statement)) return;
@@ -177,12 +176,12 @@ function getCTHelpersIdentifier(
 
   // Check specifier is "commonfabric"
   if (!ts.isStringLiteral(moduleSpecifier)) return;
-  if (moduleSpecifier.text !== CT_HELPERS_SPECIFIER) return;
+  if (moduleSpecifier.text !== CF_HELPERS_SPECIFIER) return;
 
-  // Check it is a namespace import `* as __ctHelpers`
+  // Check it is a namespace import `* as __cfHelpers`
   if (!importClause || !ts.isImportClause(importClause)) return;
   const { namedBindings } = importClause;
   if (!namedBindings || !ts.isNamespaceImport(namedBindings)) return;
-  if (namedBindings.name.text !== CT_HELPERS_IDENTIFIER) return;
+  if (namedBindings.name.text !== CF_HELPERS_IDENTIFIER) return;
   return namedBindings.name;
 }

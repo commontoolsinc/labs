@@ -3,7 +3,7 @@
 // compiled through the full CTS transformer pipeline.
 //
 // These tests exercise the production compilation path:
-// source string → transformCtDirective → TypeScript + CTS transformers
+// source string → transformCfDirective → TypeScript + CTS transformers
 // → source maps → eval → error → parseStack → original line numbers.
 
 import { assertEquals, assertMatch } from "@std/assert";

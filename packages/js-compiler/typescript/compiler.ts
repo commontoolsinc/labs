@@ -358,7 +358,7 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     );
     checker.check(diagnostics);
 
-    // Check for transformer diagnostics (from CommonTools pipeline)
+    // Check for transformer diagnostics (from Common Fabric pipeline)
     if (getDiagnostics) {
       const transformerDiagnostics = getDiagnostics();
       const errors = transformerDiagnostics.filter((d) =>

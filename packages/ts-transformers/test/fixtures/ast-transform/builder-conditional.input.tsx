@@ -8,7 +8,7 @@ interface PatternState {
 
 // FIXTURE: builder-conditional
 // Verifies: ternary in JSX is transformed to ifElse() with derive() for the condition
-//   state.count > 0 ? <p>A</p> : <p>B</p> → __ctHelpers.ifElse(...schemas, derive(..., state.count > 0), <p>A</p>, <p>B</p>)
+//   state.count > 0 ? <p>A</p> : <p>B</p> → __cfHelpers.ifElse(...schemas, derive(..., state.count > 0), <p>A</p>, <p>B</p>)
 //   pattern<PatternState>                  → pattern(..., inputSchema, outputSchema)
 //   state.label                            → state.key("label")
 export default pattern<PatternState>((state) => {

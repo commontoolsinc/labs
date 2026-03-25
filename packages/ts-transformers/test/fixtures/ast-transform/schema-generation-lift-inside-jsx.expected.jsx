@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commonfabric";
+import * as __cfHelpers from "commonfabric";
 import { lift } from "commonfabric";
 interface Person {
     name: string;
@@ -25,7 +25,7 @@ export const result = (<div>
             }
         },
         required: ["name", "age"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             name: {
@@ -36,12 +36,12 @@ export const result = (<div>
             }
         },
         required: ["name", "birthYear"]
-    } as const satisfies __ctHelpers.JSONSchema, (person: Person): PersonWithYear => ({
+    } as const satisfies __cfHelpers.JSONSchema, (person: Person): PersonWithYear => ({
         name: person.name,
         birthYear: currentYear - person.age,
     }))}
   </div>);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

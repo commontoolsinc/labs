@@ -1,7 +1,7 @@
 import { assertEquals, assertGreater, assertStringIncludes } from "@std/assert";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
-import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
 function getErrors(diagnostics: readonly TransformationDiagnostic[]) {
   return diagnostics.filter((d) => d.severity === "error");
@@ -57,7 +57,7 @@ Deno.test("Cast Validation", async (t) => {
       const ref = data as unknown as OpaqueRef<Item>;
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
@@ -73,7 +73,7 @@ Deno.test("Cast Validation", async (t) => {
       const ref = data as OpaqueRef<Item>;
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
@@ -88,7 +88,7 @@ Deno.test("Cast Validation", async (t) => {
       const cell = data as Cell<number>;
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const warnings = getWarnings(diagnostics);
     assertGreater(warnings.length, 0, "Expected at least one warning");
@@ -103,7 +103,7 @@ Deno.test("Cast Validation", async (t) => {
       const cell = data as OpaqueCell<number>;
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const warnings = getWarnings(diagnostics);
     assertGreater(warnings.length, 0, "Expected at least one warning");
@@ -118,7 +118,7 @@ Deno.test("Cast Validation", async (t) => {
       const cell = data as Writable<number>;
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const warnings = getWarnings(diagnostics);
     assertGreater(warnings.length, 0, "Expected at least one warning");
@@ -132,7 +132,7 @@ Deno.test("Cast Validation", async (t) => {
       const item = data as Item;
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(errors.length, 0, "Should not produce any errors");
@@ -226,7 +226,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(errors.length, 0, "JSX property access should be allowed");
@@ -249,7 +249,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -273,7 +273,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -342,7 +342,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const spreadErrors = errors.filter((error) =>
@@ -370,7 +370,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(
@@ -1323,7 +1323,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(
@@ -1347,7 +1347,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(
@@ -1369,7 +1369,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(
@@ -1395,7 +1395,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -1420,7 +1420,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(
@@ -1450,7 +1450,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(
@@ -1486,7 +1486,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -1516,7 +1516,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(
@@ -1545,7 +1545,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(
@@ -1578,7 +1578,7 @@ Deno.test("Computed/derive local reactive alias validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -1602,7 +1602,7 @@ Deno.test("Computed/derive local reactive alias validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -1627,7 +1627,7 @@ Deno.test("Computed/derive local reactive alias validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(errors.length, 0);
@@ -1648,7 +1648,7 @@ Deno.test("Computed/derive local reactive alias validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(errors.length, 0);
@@ -1664,7 +1664,7 @@ Deno.test("Diagnostic output format", async (t) => {
       const data = {} as unknown as OpaqueRef<any>;
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0);
@@ -1694,7 +1694,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
@@ -1713,7 +1713,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
@@ -1732,7 +1732,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
@@ -1754,7 +1754,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(
@@ -1779,7 +1779,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(
@@ -1800,7 +1800,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(
@@ -1821,7 +1821,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(errors.length, 0, "Map callback inside JSX should be allowed");
@@ -1881,7 +1881,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(
@@ -1940,7 +1940,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const creationErrors = errors.filter((error) =>
@@ -1968,7 +1968,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
@@ -1989,7 +1989,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -2014,7 +2014,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
@@ -2035,7 +2035,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2062,7 +2062,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
@@ -2089,7 +2089,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(errors.length, 0, "lift() at module scope should be allowed");
@@ -2108,7 +2108,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(
@@ -2130,7 +2130,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(
@@ -2152,7 +2152,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(errors.length, 0, "action() inside pattern should be allowed");
@@ -2170,7 +2170,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(errors.length, 0, "derive() inside pattern should be allowed");
@@ -2191,7 +2191,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -2226,7 +2226,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -2246,7 +2246,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2288,7 +2288,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2378,7 +2378,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2402,7 +2402,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       export default readCount;
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2429,7 +2429,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       export default increment;
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2453,7 +2453,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       export default value;
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -2473,7 +2473,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       export default value;
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -2495,7 +2495,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       export default value;
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2527,7 +2527,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(errors.length, 0);
@@ -2605,7 +2605,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(errors.length, 0);
@@ -2631,7 +2631,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const fallbackErrors = getErrors(diagnostics).filter((error) =>
         error.type === "pattern-context:map-on-fallback"
@@ -2717,7 +2717,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2746,7 +2746,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2772,7 +2772,7 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -2793,7 +2793,7 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -2836,7 +2836,7 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2858,7 +2858,7 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2884,7 +2884,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       };
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -2910,7 +2910,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       };
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -2936,7 +2936,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       };
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -2967,7 +2967,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2990,7 +2990,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       tool;
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const optionalErrors = errors.filter((error) =>
@@ -3035,7 +3035,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       };
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -3055,7 +3055,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       };
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -3078,7 +3078,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -3108,7 +3108,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       };
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics).filter(
         (e) => e.type === "standalone-function:reactive-operation",

@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commonfabric";
+import * as __cfHelpers from "commonfabric";
 /**
  * FIXTURE: helper-owned-compute-branches
  * Verifies: helper-owned branches inside computed() can mix compute-owned array
@@ -30,9 +30,9 @@ export default pattern((state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     // [TRANSFORM] computed() → derive(): captures state.showArchived, state.projects
-    const visibleProjects = __ctHelpers.derive({
+    const visibleProjects = __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -93,7 +93,7 @@ export default pattern((state) => {
                 required: ["text", "active"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             $ref: "#/$defs/Project"
@@ -139,14 +139,14 @@ export default pattern((state) => {
                 required: ["text", "active"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             showArchived: state.key("showArchived"),
             projects: state.key("projects")
         } }, ({ state }) => state.showArchived
         ? state.projects
         : state.projects.filter((project) => !project.archived));
     // [TRANSFORM] computed() → derive(): captures visibleProjects (asOpaque), state.prefix, fallbackMembers (asCell — Writable)
-    const rows = __ctHelpers.derive({
+    const rows = __cfHelpers.derive({
         type: "object",
         properties: {
             visibleProjects: {
@@ -214,7 +214,7 @@ export default pattern((state) => {
                 required: ["text", "active"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             anyOf: [{
@@ -234,7 +234,7 @@ export default pattern((state) => {
                 required: ["$UI"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         visibleProjects: visibleProjects,
         state: {
             prefix: state.key("prefix")
@@ -248,17 +248,17 @@ export default pattern((state) => {
         // [TRANSFORM] ifElse: schema args injected on authored ifElse
         return ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, project.badges.length > 0, <div>
+        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, project.badges.length > 0, <div>
           <h3>{project.name}</h3>
           {/* [TRANSFORM] .map() stays plain: project.badges is compute-owned data inside derive */}
           {project.badges.map((badge, badgeIndex) => (<span>
@@ -269,7 +269,7 @@ export default pattern((state) => {
                         : ""}
             </span>))}
           {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside derive */}
-          {fallbackMembers.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+          {fallbackMembers.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const member = __ct_pattern_input.key("element");
                 const memberIndex = __ct_pattern_input.key("index");
                 const project = __ct_pattern_input.params.project;
@@ -344,7 +344,7 @@ export default pattern((state) => {
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -364,7 +364,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {
+            } as const satisfies __cfHelpers.JSONSchema), {
                 project: {
                     name: project.name
                 }
@@ -441,7 +441,7 @@ export default pattern((state) => {
             required: ["text", "active"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -470,8 +470,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

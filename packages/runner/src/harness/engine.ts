@@ -22,7 +22,7 @@ import {
   UnsafeEvalRuntime,
 } from "./eval-runtime.ts";
 import {
-  CommonToolsTransformerPipeline,
+  CommonFabricTransformerPipeline,
   OpaqueRefErrorTransformer,
 } from "@commonfabric/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
@@ -153,7 +153,7 @@ export class Engine extends EventTarget implements Harness {
       getTransformedProgram: options.getTransformedProgram,
       diagnosticMessageTransformer,
       beforeTransformers: (program) => {
-        const pipeline = new CommonToolsTransformerPipeline();
+        const pipeline = new CommonFabricTransformerPipeline();
         return {
           factories: pipeline.toFactories(program),
           getDiagnostics: () => pipeline.getDiagnostics(),

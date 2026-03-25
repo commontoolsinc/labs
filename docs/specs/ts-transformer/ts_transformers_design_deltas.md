@@ -21,7 +21,7 @@ behavior and open follow-up work.
   - single transform pipeline (legacy `useLegacyOpaqueRefSemantics`
     flag removed)
   - unified context classifier (`pattern` / `compute` / `neutral`)
-  - provenance-first CommonTools call detection with shadowed-helper rejection
+  - provenance-first Common Fabric call detection with shadowed-helper rejection
     and narrow synthetic/ambient fallback paths
   - deterministic JSX logical lowering policy (`&&` / `||`) by context
   - helper-owned ternary / conditional branches re-analyzed under synthetic

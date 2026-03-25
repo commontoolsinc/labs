@@ -2,7 +2,7 @@ import ts from "typescript";
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 
-import { COMMONTOOLS_RUNTIME_EXPORTS_BY_NAME } from "../../src/core/commontools-runtime-registry.ts";
+import { COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME } from "../../src/core/commonfabric-runtime-registry.ts";
 
 const FACTORY_URL = new URL(
   "../../../runner/src/builder/factory.ts",
@@ -90,21 +90,21 @@ function extractInjectedCallableExports(sourceText: string): string[] {
   return [...injectedExports].sort();
 }
 
-describe("COMMONTOOLS_RUNTIME_EXPORT_REGISTRY", () => {
+describe("COMMONFABRIC_RUNTIME_EXPORT_REGISTRY", () => {
   it("covers every imported callable injected by runner builder factory", async () => {
     const factorySource = await Deno.readTextFile(FACTORY_URL);
     const injectedExports = extractInjectedCallableExports(factorySource);
     const missing = injectedExports.filter((name) =>
-      !COMMONTOOLS_RUNTIME_EXPORTS_BY_NAME.has(name)
+      !COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME.has(name)
     );
 
     assertEquals(
       missing,
       [],
       [
-        "builder/factory.ts injects callable exports that are missing from COMMONTOOLS_RUNTIME_EXPORT_REGISTRY.",
+        "builder/factory.ts injects callable exports that are missing from COMMONFABRIC_RUNTIME_EXPORT_REGISTRY.",
         `Missing exports: ${missing.join(", ") || "(none)"}`,
-        "Add each export to src/core/commontools-runtime-registry.ts and explicitly decide whether reactiveOrigin should be true or false.",
+        "Add each export to src/core/commonfabric-runtime-registry.ts and explicitly decide whether reactiveOrigin should be true or false.",
         "If the export needs dedicated detection behavior, also update src/ast/call-kind.ts to map it to the right CallKind.",
       ].join("\n"),
     );

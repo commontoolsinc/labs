@@ -22,7 +22,7 @@ const decrement = handler((_, state: { value: Cell<number> }) => {
 //   handler<unknown, CounterState>(fn) → handler(true, stateSchema, fn)
 //   handler((_, state: {...}) => ...)  → handler(false, stateSchema, fn)
 //   pattern<PatternState>(fn)          → pattern(fn, inputSchema, outputSchema)
-//   state.value ? a : b (in JSX)      → __ctHelpers.ifElse(...schemas, state.key("value"), derive(...), "unknown")
+//   state.value ? a : b (in JSX)      → __cfHelpers.ifElse(...schemas, state.key("value"), derive(...), "unknown")
 //   state.value                        → state.key("value")
 // Context: Combines handler schema injection, pattern schema generation, ternary-to-ifElse, and str template transforms
 export default pattern<PatternState>((state) => {

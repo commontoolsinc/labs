@@ -1,7 +1,7 @@
 # @commonfabric/ts-transformers
 
 TypeScript AST transformers that bridge authored TypeScript patterns and the
-CommonTools runtime. Pattern authors write natural TypeScript; the transformer
+Common Fabric runtime. Pattern authors write natural TypeScript; the transformer
 pipeline rewrites supported reactive constructs into explicit schema-annotated
 form for reactivity and information-flow control.
 

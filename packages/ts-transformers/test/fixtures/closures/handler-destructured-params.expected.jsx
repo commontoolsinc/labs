@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commonfabric";
+import * as __cfHelpers from "commonfabric";
 import { Cell, pattern, UI } from "commonfabric";
 interface State {
     selectedValue: Cell<string>;
@@ -13,7 +13,7 @@ export default pattern((state) => {
         [UI]: (<cf-select $value={state.key("selectedValue")} items={[
                 { label: "Option A", value: "a" },
                 { label: "Option B", value: "b" },
-            ]} oncf-change={__ctHelpers.handler({
+            ]} oncf-change={__cfHelpers.handler({
             type: "object",
             properties: {
                 detail: {
@@ -38,7 +38,7 @@ export default pattern((state) => {
                 }
             },
             required: ["detail"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
             properties: {
                 state: {
@@ -57,7 +57,7 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, ({ detail: { value, items } }, { state }) => {
+        } as const satisfies __cfHelpers.JSONSchema, ({ detail: { value, items } }, { state }) => {
             state.selectedValue.set(value);
             state.lastItems.set(items.map(i => i.label).join(", "));
         })({
@@ -80,7 +80,7 @@ export default pattern((state) => {
         }
     },
     required: ["selectedValue", "lastItems"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -109,8 +109,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -1,5 +1,5 @@
 /**
- * Verify null elimination using actual commontools types
+ * Verify null elimination using actual commonfabric types
  * Run: deno run -A test/fixtures/bug-repro/verify-actual.ts
  */
 

@@ -19,16 +19,16 @@ import {
 type WrapperKind = CellWrapperKind;
 
 /**
- * Formatter for Common Tools specific types (Cell<T>, Stream<T>, OpaqueRef<T>, Default<T,V>)
+ * Formatter for Common Fabric-specific types (Cell<T>, Stream<T>, OpaqueRef<T>, Default<T,V>)
  *
  * TypeScript handles alias resolution automatically and we don't need to
  * manually traverse alias chains.
  */
-export class CommonToolsFormatter implements TypeFormatter {
+export class CommonFabricFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {
     if (!schemaGenerator) {
       throw new Error(
-        "CommonToolsFormatter requires a SchemaGenerator instance",
+        "CommonFabricFormatter requires a SchemaGenerator instance",
       );
     }
   }
@@ -168,7 +168,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       );
     }
 
-    // Synthetic wrapper nodes (for example __ctHelpers.ReadonlyCell<...>) may
+    // Synthetic wrapper nodes (for example __cfHelpers.ReadonlyCell<...>) may
     // resolve to `any` in checker contexts created before helper injection.
     // In that case, fall back to node-driven wrapper formatting.
     if (
@@ -210,7 +210,7 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     const nodeName = this.getTypeRefIdentifierName(n);
     throw new Error(
-      `Unexpected CommonTools type: ${nodeName}`,
+      `Unexpected Common Fabric type: ${nodeName}`,
     );
   }
 

@@ -5,7 +5,7 @@ import { unwrapExpression } from "../utils/expression.ts";
 import {
   cloneKeyExpression,
   getKnownComputedKeyExpression,
-  isCommonToolsKeyExpression,
+  isCommonFabricKeyExpression,
 } from "../utils/reactive-keys.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
@@ -259,8 +259,8 @@ export function collectDestructureBindings(
         key = staticKey;
       } else {
         const computedKey = element.propertyName.expression;
-        if (isCommonToolsKeyExpression(computedKey, context, "SELF")) {
-          directKeyExpression = context.ctHelpers.getHelperExpr("SELF");
+        if (isCommonFabricKeyExpression(computedKey, context, "SELF")) {
+          directKeyExpression = context.cfHelpers.getHelperExpr("SELF");
         } else {
           key = getKnownComputedKeyExpression(computedKey, context) ??
             computedKey;

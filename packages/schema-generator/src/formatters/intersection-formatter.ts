@@ -16,7 +16,7 @@ export class IntersectionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    // Don't handle cell types - they are intersection types but should be handled by CommonToolsFormatter
+    // Don't handle cell types - they are intersection types but should be handled by CommonFabricFormatter
     if (isCellType(type, context.typeChecker)) {
       return false;
     }

@@ -50,7 +50,7 @@ each pattern:
                ~5% of total time
 
 2. Compile     TypeScriptCompiler.compile()
-               Type-checking, CommonToolsTransformerPipeline, TS emit, AMD bundling
+               Type-checking, CommonFabricTransformerPipeline, TS emit, AMD bundling
                ~90% of total time → produces JsScript { js, sourceMap, filename }
 
 3. Evaluate    isolate.execute(jsScript).invoke(runtimeExports)

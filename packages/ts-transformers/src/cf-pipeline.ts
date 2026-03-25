@@ -19,7 +19,7 @@ import {
   Transformer,
 } from "./core/mod.ts";
 
-export class CommonToolsTransformerPipeline extends Pipeline {
+export class CommonFabricTransformerPipeline extends Pipeline {
   private readonly diagnosticsCollector: TransformationDiagnostic[] = [];
 
   constructor(options: TransformationOptions = {}) {

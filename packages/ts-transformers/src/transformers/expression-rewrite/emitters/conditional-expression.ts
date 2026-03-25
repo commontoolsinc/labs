@@ -143,7 +143,7 @@ export const emitConditionalExpression: Emitter = ({
   const ifElseCall = createIfElseCall({
     expression,
     factory: context.factory,
-    ctHelpers: context.ctHelpers,
+    cfHelpers: context.cfHelpers,
     sourceFile: context.sourceFile,
     overrides: {
       predicate,

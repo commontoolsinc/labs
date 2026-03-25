@@ -1,5 +1,5 @@
 
-## CTS (CommonTools TypeScript)
+## CTS (Common Fabric TypeScript)
 
 TypeScript types are automatically processed at runtime. Enable with:
 

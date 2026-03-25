@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commonfabric";
+import * as __cfHelpers from "commonfabric";
 import { handler, pattern, UI } from "commonfabric";
 declare global {
     namespace JSX {
@@ -10,7 +10,7 @@ declare global {
 interface State {
     count: number;
 }
-const existing = handler(false as const satisfies __ctHelpers.JSONSchema, {
+const existing = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         state: {
@@ -29,7 +29,7 @@ const existing = handler(false as const satisfies __ctHelpers.JSONSchema, {
             required: ["count"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (_event, { state }: {
+} as const satisfies __cfHelpers.JSONSchema, (_event, { state }: {
     state: State;
 }) => {
     console.log(state.count);
@@ -53,7 +53,7 @@ export default pattern((state) => {
         }
     },
     required: ["count"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -82,8 +82,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

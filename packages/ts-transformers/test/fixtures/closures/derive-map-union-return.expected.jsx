@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commonfabric";
+import * as __cfHelpers from "commonfabric";
 import { derive, pattern, UI } from "commonfabric";
 interface ContentPart {
     type: "text" | "image";
@@ -63,13 +63,13 @@ export default pattern((state) => {
                 required: ["type"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
                 type: "string"
             }, {
                 type: "null"
             }]
-    } as const satisfies __ctHelpers.JSONSchema, state.key("messages"), (messages) => {
+    } as const satisfies __cfHelpers.JSONSchema, state.key("messages"), (messages) => {
         if (!messages || messages.length === 0)
             return null;
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -140,7 +140,7 @@ export default pattern((state) => {
             required: ["type"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -169,8 +169,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

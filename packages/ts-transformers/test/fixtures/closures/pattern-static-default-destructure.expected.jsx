@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commonfabric";
+import * as __cfHelpers from "commonfabric";
 import { pattern, UI } from "commonfabric";
 interface State {
     title: string;
@@ -29,7 +29,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["title", "count"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -58,8 +58,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

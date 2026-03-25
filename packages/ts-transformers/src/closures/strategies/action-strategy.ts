@@ -56,7 +56,7 @@ export class ActionStrategy implements ClosureTransformationStrategy {
 }
 
 /**
- * Check if a call expression is an action() call from commontools
+ * Check if a call expression is an action() call from commonfabric
  */
 function isActionCall(
   node: ts.CallExpression,

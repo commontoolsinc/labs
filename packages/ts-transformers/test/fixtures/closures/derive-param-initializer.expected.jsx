@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commonfabric";
+import * as __cfHelpers from "commonfabric";
 import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-param-initializer
 // Verifies: a callback parameter with a default value is preserved after capture extraction
@@ -8,9 +8,9 @@ export default pattern(() => {
     const value = 5;
     const multiplier = Writable.of(2, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     // Test parameter with default value
-    const result = __ctHelpers.derive({
+    const result = __cfHelpers.derive({
         type: "object",
         properties: {
             value: {
@@ -22,17 +22,17 @@ export default pattern(() => {
             }
         },
         required: ["value", "multiplier"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         value,
         multiplier: multiplier
     }, ({ value: v = 10, multiplier }) => v * multiplier.get());
     return result;
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

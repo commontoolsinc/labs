@@ -100,7 +100,7 @@ const configs: FixtureConfig[] = [
 ];
 
 const staticCache = new StaticCacheFS();
-const commontools = await staticCache.getText("types/commonfabric.d.ts");
+const commonfabric = await staticCache.getText("types/commonfabric.d.ts");
 const commontoolsSchema = await staticCache.getText(
   "types/commonfabric-schema.d.ts",
 );
@@ -157,7 +157,7 @@ async function loadAllFixturesInDirectory(
 // To skip input validation temporarily, run with SKIP_INPUT_CHECK=1.
 //
 // NOTE: Expected (.expected.tsx) files are NOT type-checked because the transformer
-// output intentionally strips type arguments and uses __ctHelpers patterns that
+// output intentionally strips type arguments and uses __cfHelpers patterns that
 // don't carry full type information. This is by design — the transformer converts
 // TypeScript type information into runtime schema objects.
 const batchedDiagnosticsByConfig = new Map<
@@ -202,7 +202,7 @@ if (!Deno.env.get("SKIP_INPUT_CHECK")) {
 
     const result = await batchTypeCheckFixtures(allFixtures, {
       types: {
-        "commonfabric.d.ts": commontools,
+        "commonfabric.d.ts": commonfabric,
         "commonfabric-schema.d.ts": commontoolsSchema,
       },
     });
@@ -231,7 +231,7 @@ for (const config of configs) {
       { stem, extension }: { stem: string; extension: string },
     ) => {
       // Expected files use JS extensions since they are post-transform output
-      // (type arguments stripped, __ctHelpers patterns) — not valid TypeScript.
+      // (type arguments stripped, __cfHelpers patterns) — not valid TypeScript.
       const jsExtension = extension === ".tsx" ? ".jsx" : ".js";
       return `${stem}.expected${jsExtension}`;
     },
@@ -261,7 +261,7 @@ for (const config of configs) {
         `${config.directory}/${fixture.relativeInputPath}`,
         {
           types: {
-            "commonfabric.d.ts": commontools,
+            "commonfabric.d.ts": commonfabric,
             "commonfabric-schema.d.ts": commontoolsSchema,
           },
           typeCheck: !Deno.env.get("SKIP_INPUT_CHECK"),

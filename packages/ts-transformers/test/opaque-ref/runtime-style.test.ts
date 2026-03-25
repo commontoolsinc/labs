@@ -5,10 +5,10 @@ import { StaticCacheFS } from "@commonfabric/static";
 import { transformSource, validateSource } from "../utils.ts";
 
 const staticCache = new StaticCacheFS();
-const commontools = await staticCache.getText("types/commonfabric.d.ts");
+const commonfabric = await staticCache.getText("types/commonfabric.d.ts");
 
 describe("OpaqueRef transformer (runtime-style API)", () => {
-  const types = { "commonfabric.d.ts": commontools };
+  const types = { "commonfabric.d.ts": commonfabric };
 
   describe("error mode", () => {
     it("reports errors instead of transforming", async () => {

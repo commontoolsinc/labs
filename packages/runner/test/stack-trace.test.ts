@@ -9,7 +9,7 @@ import {
 } from "@commonfabric/js-compiler";
 import { UnsafeEvalRuntime } from "../src/harness/eval-runtime.ts";
 import { StaticCacheFS } from "@commonfabric/static";
-import { CommonToolsTransformerPipeline } from "@commonfabric/ts-transformers";
+import { CommonFabricTransformerPipeline } from "@commonfabric/ts-transformers";
 
 const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
 
@@ -45,7 +45,7 @@ function compileWithCTS(
 ) {
   return compile(files, filename, {
     beforeTransformers: (program) => {
-      const pipeline = new CommonToolsTransformerPipeline();
+      const pipeline = new CommonFabricTransformerPipeline();
       return {
         factories: pipeline.toFactories(program),
         getDiagnostics: () => pipeline.getDiagnostics(),

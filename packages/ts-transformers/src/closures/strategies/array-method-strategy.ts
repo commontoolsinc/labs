@@ -35,7 +35,7 @@ import { unwrapExpression } from "../../utils/expression.ts";
 import {
   cloneKeyExpression,
   getKnownComputedKeyExpression,
-  isCommonToolsKeyIdentifier,
+  isCommonFabricKeyIdentifier,
 } from "../../utils/reactive-keys.ts";
 import { rewriteArrayMethodCallbackExpressionSites } from "../../transformers/expression-site-lowering.ts";
 
@@ -237,10 +237,10 @@ function isKnownComputedKey(
   expression: ts.Expression,
   context: TransformationContext,
 ): expression is ts.Identifier {
-  return isCommonToolsKeyIdentifier(expression, context, "NAME") ||
-    isCommonToolsKeyIdentifier(expression, context, "UI") ||
-    isCommonToolsKeyIdentifier(expression, context, "SELF") ||
-    isCommonToolsKeyIdentifier(expression, context, "FS");
+  return isCommonFabricKeyIdentifier(expression, context, "NAME") ||
+    isCommonFabricKeyIdentifier(expression, context, "UI") ||
+    isCommonFabricKeyIdentifier(expression, context, "SELF") ||
+    isCommonFabricKeyIdentifier(expression, context, "FS");
 }
 
 function lowerMapReceiverMemberAccess(
@@ -451,7 +451,7 @@ function createPatternCallWithParams(
     typeArgs.push(resultTypeNode);
   }
 
-  const patternCall = context.ctHelpers.createHelperCall(
+  const patternCall = context.cfHelpers.createHelperCall(
     "pattern",
     methodCall,
     typeArgs,

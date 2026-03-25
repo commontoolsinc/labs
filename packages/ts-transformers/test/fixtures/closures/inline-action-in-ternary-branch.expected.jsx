@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commonfabric";
+import * as __cfHelpers from "commonfabric";
 /**
  * Regression test: inline arrow function inside explicit computed() in JSX
  *
@@ -23,29 +23,29 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<cf-card>
-        {__ctHelpers.ifElse({
+        {__cfHelpers.ifElse({
             type: "boolean",
             asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("isEditing"), <div>Editing</div>, <div>
+        } as const satisfies __cfHelpers.JSONSchema, state.key("isEditing"), <div>Editing</div>, <div>
             <span>{state.key("card", "title")}</span>
             {/* Explicit computed() wrapping a button with inline handler */}
             {/* The Cell ref in the handler must be captured in the derive */}
-            {__ctHelpers.derive({
+            {__cfHelpers.derive({
                 type: "object",
                 properties: {
                     state: {
@@ -60,7 +60,7 @@ export default pattern((state) => {
                     }
                 },
                 required: ["state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -80,9 +80,9 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } as const satisfies __cfHelpers.JSONSchema, { state: {
                     isEditing: state.key("isEditing")
-                } }, ({ state }) => (<cf-button onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+                } }, ({ state }) => (<cf-button onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
                 type: "object",
                 properties: {
                     state: {
@@ -97,7 +97,7 @@ export default pattern((state) => {
                     }
                 },
                 required: ["state"]
-            } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => state.isEditing.set(true))({
+            } as const satisfies __cfHelpers.JSONSchema, (__ct_handler_event, { state }) => state.isEditing.set(true))({
                 state: {
                     isEditing: state.isEditing
                 }
@@ -132,7 +132,7 @@ export default pattern((state) => {
             required: ["title", "description"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -176,8 +176,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

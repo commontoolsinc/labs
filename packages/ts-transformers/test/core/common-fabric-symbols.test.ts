@@ -1,15 +1,15 @@
 /**
- * Unit tests for symbolDeclaresCommonToolsDefault.
+ * Unit tests for symbolDeclaresCommonFabricDefault.
  *
  * The function is meant to return true ONLY for properties whose declared type
- * is the CommonTools Default<T,V> from `@commonfabric/api` (identified by the
+ * is the Common Fabric Default<T,V> from `@commonfabric/api` (identified by the
  * source file being named "commonfabric.d.ts").  A user who happens to name
  * their own generic type "Default" must NOT trigger the same special handling.
  */
 import ts from "typescript";
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertFalse } from "@std/assert";
-import { symbolDeclaresCommonToolsDefault } from "../../src/core/common-tools-symbols.ts";
+import { symbolDeclaresCommonFabricDefault } from "../../src/core/common-fabric-symbols.ts";
 
 // ---------------------------------------------------------------------------
 // Test infrastructure
@@ -82,7 +82,7 @@ function getPropertySymbol(
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("symbolDeclaresCommonToolsDefault", () => {
+describe("symbolDeclaresCommonFabricDefault", () => {
   describe("user-defined Default type (should return false)", () => {
     it("returns false when the property type references a user-defined Default alias in the same file", () => {
       // Default is declared in /test.ts — NOT in commonfabric.d.ts.
@@ -100,12 +100,12 @@ describe("symbolDeclaresCommonToolsDefault", () => {
       const titleSymbol = getPropertySymbol(checker, sf, "MyArgs", "title");
 
       assertFalse(
-        symbolDeclaresCommonToolsDefault(titleSymbol, checker),
-        "User-defined Default (same file) must NOT be treated as CommonTools Default",
+        symbolDeclaresCommonFabricDefault(titleSymbol, checker),
+        "User-defined Default (same file) must NOT be treated as Common Fabric Default",
       );
     });
 
-    it("returns false when Default is imported from a non-commontools file", () => {
+    it("returns false when Default is imported from a non-commonfabric file", () => {
       // Even if the alias chain eventually looks like Default, the source file
       // check should disqualify it when it doesn't come from commonfabric.d.ts.
       const { program, checker } = createProgram({
@@ -125,8 +125,8 @@ describe("symbolDeclaresCommonToolsDefault", () => {
       const countSymbol = getPropertySymbol(checker, sf, "MyArgs", "count");
 
       assertFalse(
-        symbolDeclaresCommonToolsDefault(countSymbol, checker),
-        "Default from a non-commontools file must NOT be treated as CommonTools Default",
+        symbolDeclaresCommonFabricDefault(countSymbol, checker),
+        "Default from a non-commonfabric file must NOT be treated as Common Fabric Default",
       );
     });
 
@@ -145,17 +145,17 @@ describe("symbolDeclaresCommonToolsDefault", () => {
       const themeSymbol = getPropertySymbol(checker, sf, "Config", "theme");
 
       assertFalse(
-        symbolDeclaresCommonToolsDefault(themeSymbol, checker),
-        "Optional property with user-defined Default must NOT be treated as CommonTools Default",
+        symbolDeclaresCommonFabricDefault(themeSymbol, checker),
+        "Optional property with user-defined Default must NOT be treated as Common Fabric Default",
       );
     });
   });
 
-  describe("CommonTools Default from commonfabric.d.ts (should return true)", () => {
+  describe("Common Fabric Default from commonfabric.d.ts (should return true)", () => {
     it("returns true when the property type references Default declared in commonfabric.d.ts", () => {
-      // isCommonToolsSymbol checks fileName.endsWith("commonfabric.d.ts").
+      // isCommonFabricSymbol checks fileName.endsWith("commonfabric.d.ts").
       // Declaring Default globally in commonfabric.d.ts and including it as a
-      // root file makes it the canonical CommonTools Default.
+      // root file makes it the canonical Common Fabric Default.
       const { program, checker } = createProgram({
         "commonfabric.d.ts": `
           declare const DEFAULT_MARKER: unique symbol;
@@ -172,12 +172,12 @@ describe("symbolDeclaresCommonToolsDefault", () => {
       const titleSymbol = getPropertySymbol(checker, sf, "MyArgs", "title");
 
       assert(
-        symbolDeclaresCommonToolsDefault(titleSymbol, checker),
-        "Property typed with CommonTools Default (from commonfabric.d.ts) must return true",
+        symbolDeclaresCommonFabricDefault(titleSymbol, checker),
+        "Property typed with Common Fabric Default (from commonfabric.d.ts) must return true",
       );
     });
 
-    it("returns true for an optional property typed with CommonTools Default", () => {
+    it("returns true for an optional property typed with Common Fabric Default", () => {
       const { program, checker } = createProgram({
         "commonfabric.d.ts": `
           declare const DEFAULT_MARKER: unique symbol;
@@ -194,8 +194,8 @@ describe("symbolDeclaresCommonToolsDefault", () => {
       const themeSymbol = getPropertySymbol(checker, sf, "Config", "theme");
 
       assert(
-        symbolDeclaresCommonToolsDefault(themeSymbol, checker),
-        "Optional property typed with CommonTools Default must return true",
+        symbolDeclaresCommonFabricDefault(themeSymbol, checker),
+        "Optional property typed with Common Fabric Default must return true",
       );
     });
   });

@@ -969,7 +969,7 @@ export function wrapTypeNodeWithCapability(
 
   return factory.createTypeReferenceNode(
     factory.createQualifiedName(
-      factory.createIdentifier("__ctHelpers"),
+      factory.createIdentifier("__cfHelpers"),
       factory.createIdentifier(wrapperName),
     ),
     [node],
@@ -983,7 +983,7 @@ function wrapTypeNodeWithDefault(
 ): ts.TypeNode {
   return factory.createTypeReferenceNode(
     factory.createQualifiedName(
-      factory.createIdentifier("__ctHelpers"),
+      factory.createIdentifier("__cfHelpers"),
       factory.createIdentifier("Default"),
     ),
     [node, defaultType],

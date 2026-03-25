@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commonfabric";
+import * as __cfHelpers from "commonfabric";
 import { Cell, Default, handler, NAME, pattern, toSchema, UI, } from "commonfabric";
 import "commonfabric/schema";
 interface Item {
@@ -45,7 +45,7 @@ const inputSchema = {
             required: ["text"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema;
+} as const satisfies __cfHelpers.JSONSchema;
 const outputSchema = {
     type: "object",
     properties: {
@@ -77,7 +77,7 @@ const outputSchema = {
             required: ["text"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema;
+} as const satisfies __cfHelpers.JSONSchema;
 // Handler that logs the message event
 const addItem = handler // <
 ({
@@ -94,7 +94,7 @@ const addItem = handler // <
         }
     },
     required: ["detail"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         items: {
@@ -118,7 +118,7 @@ const addItem = handler // <
             required: ["text"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (event: InputEventType, { items }: {
+} as const satisfies __cfHelpers.JSONSchema, (event: InputEventType, { items }: {
     items: Cell<Item[]>;
 }) => {
     items.push({ text: event.detail.message });
@@ -141,7 +141,7 @@ export default pattern((__ct_pattern_input) => {
         <p>Basic pattern</p>
         <p>Items count: {items_count}</p>
         <ul>
-          {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+          {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const index = __ct_pattern_input.key("index");
                 return (<li key={index}>{item.key("text")}</li>);
@@ -168,7 +168,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["text"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -188,7 +188,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            } as const satisfies __cfHelpers.JSONSchema), {})}
         </ul>
         <cf-message-input name="Send" placeholder="Type a message..." appearance="rounded" oncf-send={addItem({ items })}/>
       </div>),
@@ -224,7 +224,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["text"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         items_count: {
@@ -255,8 +255,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["text"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

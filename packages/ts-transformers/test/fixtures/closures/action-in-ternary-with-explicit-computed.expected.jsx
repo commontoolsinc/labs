@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commonfabric";
+import * as __cfHelpers from "commonfabric";
 /**
  * Regression test: action() referenced inside explicit computed() in JSX
  *
@@ -23,8 +23,8 @@ export default pattern((__ct_pattern_input) => {
     const card = __ct_pattern_input.key("card");
     const isEditing = Cell.of(false, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const startEditing = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema);
+    const startEditing = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             isEditing: {
@@ -33,36 +33,36 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["isEditing"]
-    } as const satisfies __ctHelpers.JSONSchema, (_, { isEditing }) => {
+    } as const satisfies __cfHelpers.JSONSchema, (_, { isEditing }) => {
         isEditing.set(true);
     })({
         isEditing: isEditing
     });
     return {
         [UI]: (<cf-card>
-        {__ctHelpers.ifElse({
+        {__cfHelpers.ifElse({
             type: "boolean",
             asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, isEditing, <div>Editing</div>, <div>
+        } as const satisfies __cfHelpers.JSONSchema, isEditing, <div>Editing</div>, <div>
             <span>{card.key("title")}</span>
             {/* Explicit computed() wrapping JSX that references the action */}
             {/* The action must be captured in the derive created for this computed */}
-            {__ctHelpers.derive({
+            {__cfHelpers.derive({
                 type: "object",
                 properties: {
                     card: {
@@ -79,7 +79,7 @@ export default pattern((__ct_pattern_input) => {
                     }
                 },
                 required: ["card", "startEditing"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -99,7 +99,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 card: {
                     description: card.key("description")
                 },
@@ -134,7 +134,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["title", "description"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -178,8 +178,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;
