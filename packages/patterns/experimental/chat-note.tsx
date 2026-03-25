@@ -630,7 +630,7 @@ const ChatNote = pattern<Input, Output>(
           />
 
           {/* Editor */}
-          <ct-code-editor
+          <cf-code-editor
             $value={content}
             $mentionable={mentionable}
             $mentioned={mentioned}

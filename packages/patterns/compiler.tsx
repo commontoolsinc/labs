@@ -57,10 +57,10 @@ export default pattern<Input>(({ code }) => {
     [UI]: (
       <div>
         <cf-cell-context $cell={code} label="Source Code">
-          <ct-code-editor
+          <cf-code-editor
             value={code}
             language="text/x.typescript"
-            onChange={updateCode({ code })}
+            oncf-change={updateCode({ code })}
             //errors={errors}
           />
         </cf-cell-context>

@@ -139,7 +139,7 @@ export class CFButton extends BaseElement {
       return;
     }
     // Emit custom event
-    this.emit("ct-click", {/* detail */});
+    this.emit("cf-click", {/* detail */});
   }
 }
 ```
@@ -148,7 +148,7 @@ export class CFButton extends BaseElement {
 
 Components that deeply integrate with the runtime and Cell abstractions.
 
-**Examples:** `ct-render`, `ct-code-editor`, `ct-outliner`
+**Examples:** `ct-render`, `cf-code-editor`, `ct-outliner`
 
 **Characteristics:**
 
@@ -165,8 +165,8 @@ Components that deeply integrate with the runtime and Cell abstractions.
 Each component should follow this structure:
 
 ```
-ct-component-name/
-├── ct-component-name.ts    # Component implementation
+cf-component-name/
+├── cf-component-name.ts    # Component implementation
 ├── index.ts                # Export and registration
 └── styles.ts               # Optional: extracted styles (for complex components)
 ```
@@ -345,15 +345,15 @@ Events are automatically `bubbles: true` and `composed: true`.
 
 ```typescript
 private handleChange(newValue: string) {
-  this.emit("ct-change", { value: newValue });
+  this.emit("cf-change", { value: newValue });
 }
 ```
 
 ### Event Naming
 
-- Prefix custom events with `ct-`
-- Use present tense: `ct-change`, not `ct-changed`
-- Be specific: `ct-add-item`, `ct-remove-item`
+- Prefix custom events with `cf-`
+- Use present tense: `cf-change`, not `cf-changed`
+- Be specific: `cf-add-item`, `cf-remove-item`
 
 ### Event Documentation
 
@@ -361,7 +361,7 @@ Document events in JSDoc:
 
 ```typescript
 /**
- * @fires ct-change - Fired when value changes with detail: { value }
+ * @fires cf-change - Fired when value changes with detail: { value }
  * @fires cf-submit - Fired when form is submitted with detail: { formData }
  */
 ```
@@ -449,7 +449,7 @@ Provide comprehensive JSDoc:
  *
  * @slot - Default slot for button content
  *
- * @fires ct-click - Fired when button is clicked
+ * @fires cf-click - Fired when button is clicked
  *
  * @example
  * <cf-button variant="primary" size="lg">Click Me</cf-button>
@@ -461,9 +461,9 @@ Provide comprehensive JSDoc:
 Tests should be colocated with components:
 
 ```
-ct-component/
-├── ct-component.ts
-├── ct-component.test.ts
+cf-component/
+├── cf-component.ts
+├── cf-component.test.ts
 └── index.ts
 ```
 

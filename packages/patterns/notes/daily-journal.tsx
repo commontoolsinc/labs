@@ -654,7 +654,7 @@ ${notesXml}
                 Available variables: {"{{date}}"}, {"{{dayOfWeek}}"},
                 {"{{month}}"}, {"{{year}}"}
               </p>
-              <ct-code-editor
+              <cf-code-editor
                 $value={template}
                 language="text/markdown"
                 wordWrap

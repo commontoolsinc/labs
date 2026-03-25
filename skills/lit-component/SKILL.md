@@ -269,7 +269,7 @@ export class CFInput extends BaseElement {
     const value = (event.target as HTMLInputElement).value;
 
     this.inputTiming.schedule(() => {
-      this.emit("ct-change", { value });
+      this.emit("cf-change", { value });
     });
   }
 }
@@ -283,7 +283,7 @@ Use the `emit()` helper from `BaseElement`:
 
 ```typescript
 private handleChange(newValue: string) {
-  this.emit("ct-change", { value: newValue });
+  this.emit("cf-change", { value: newValue });
 }
 ```
 
@@ -418,7 +418,7 @@ Study these components to understand architectural patterns:
   `display: contents`, reactive Cell subscriptions
 - **Runtime rendering:** `ct-render` - Pattern loading, UI extraction, lifecycle
   management
-- **Third-party integration:** `ct-code-editor` - CodeMirror lifecycle,
+- **Third-party integration:** `cf-code-editor` - CodeMirror lifecycle,
   Compartments, bidirectional sync, CellController
 - **Tree operations:** `ct-outliner` - Path-based operations, diff-based
   rendering, keyboard commands, MentionController

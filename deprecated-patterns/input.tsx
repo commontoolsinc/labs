@@ -134,7 +134,7 @@ export default pattern(
             placeholder="Enter something..."
           />
           <hr />
-          <ct-code-editor
+          <cf-code-editor
             $value={content}
             language="text/markdown"
             placeholder="Enter something..."

@@ -2874,8 +2874,8 @@ interface CFToolsChipElement extends CTHTMLElement {}
 interface CFHeadingElement extends CTHTMLElement {}
 interface CFCollapsibleElement extends CTHTMLElement {}
 interface CFThemeElement extends CTHTMLElement {}
-interface CTCodeEditorElement extends CTHTMLElement {}
-interface CTCodeEditorLegacyElement extends CTHTMLElement {}
+interface CFCodeEditorElement extends CTHTMLElement {}
+interface CFCodeEditorLegacyElement extends CTHTMLElement {}
 interface CFScreenElement extends CTHTMLElement {}
 interface CFAutostartElement extends CTHTMLElement {}
 interface CFAutoLayoutElement extends CTHTMLElement {}
@@ -3822,7 +3822,7 @@ interface CFCollapsibleAttributes<T> extends CTHTMLAttributes<T> {
 interface CFThemeAttributes<T> extends CTHTMLAttributes<T> {
   theme?: CFThemeInput;
 }
-interface CTCodeEditorLegacyAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCodeEditorLegacyAttributes<T> extends CTHTMLAttributes<T> {
   "source"?: string;
   "language"?:
     | "text/css"
@@ -3836,7 +3836,7 @@ interface CTCodeEditorLegacyAttributes<T> extends CTHTMLAttributes<T> {
   "errors"?: any[];
 }
 
-interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "$value"?: CellLike<string>;
   "value"?: string;
   "language"?:
@@ -3863,9 +3863,9 @@ interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "tabIndent"?: boolean;
   "theme"?: "light" | "dark";
   "mode"?: "code" | "prose";
-  "onct-change"?: any;
-  "onct-focus"?: any;
-  "onct-blur"?: any;
+  "oncf-change"?: any;
+  "oncf-focus"?: any;
+  "oncf-blur"?: any;
   "onbacklink-click"?: any;
   "onbacklink-create"?: any;
 }
@@ -4729,9 +4729,9 @@ declare global {
         CFThemeAttributes<CFThemeElement>,
         CFThemeElement
       >;
-      "ct-code-editor": CTDOM.DetailedHTMLProps<
-        CTCodeEditorAttributes<CTCodeEditorElement>,
-        CTCodeEditorElement
+      "cf-code-editor": CTDOM.DetailedHTMLProps<
+        CFCodeEditorAttributes<CFCodeEditorElement>,
+        CFCodeEditorElement
       >;
       "cf-screen": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CFScreenElement>,

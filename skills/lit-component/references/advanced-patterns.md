@@ -1,7 +1,7 @@
 # Advanced Component Patterns
 
 This document explores advanced patterns revealed by complex components like
-`cf-theme`, `ct-code-editor`, and `ct-outliner`.
+`cf-theme`, `cf-code-editor`, and `ct-outliner`.
 
 ## Architectural Principles
 
@@ -71,7 +71,7 @@ locale, services) to a subtree.
 
 ---
 
-### 2. Third-Party Integration Pattern (`ct-code-editor`)
+### 2. Third-Party Integration Pattern (`cf-code-editor`)
 
 **Philosophy:** Complex third-party libraries (CodeMirror, Monaco, etc.) require
 careful lifecycle management and bidirectional synchronization with Lit
@@ -85,7 +85,7 @@ properties.
 - Clean up library instances in `disconnectedCallback()`
 
 ```typescript
-export class CTCodeEditor extends BaseElement {
+export class CFCodeEditor extends BaseElement {
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
   private _readonly = new Compartment();
@@ -95,7 +95,7 @@ export class CTCodeEditor extends BaseElement {
   private _cellController = createStringCellController(this, {
     timing: { strategy: "debounce", delay: 500 },
     onChange: (newValue, oldValue) => {
-      this.emit("ct-change", { value: newValue, oldValue });
+      this.emit("cf-change", { value: newValue, oldValue });
     },
   });
 
@@ -224,7 +224,7 @@ private inputTiming = new InputTimingController(this, {
 private handleInput(event: Event) {
   const value = (event.target as HTMLInputElement).value;
   this.inputTiming.schedule(() => {
-    this.emit("ct-change", { value });
+    this.emit("cf-change", { value });
   });
 }
 ```
@@ -237,7 +237,7 @@ Manages Cell<T> ↔ value synchronization with timing:
 private _cellController = createStringCellController(this, {
   timing: { strategy: "debounce", delay: 500 },
   onChange: (newValue, oldValue) => {
-    this.emit("ct-change", { value: newValue, oldValue });
+    this.emit("cf-change", { value: newValue, oldValue });
   },
 });
 

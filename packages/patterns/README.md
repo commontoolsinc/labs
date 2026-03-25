@@ -20,7 +20,7 @@ keywords/features.
   update operations
   - **Data types**: array of objects (text strings)
   - **Keywords**: handler, map, array operations, cf-input, cf-button,
-    onct-change
+    oncf-change
 
 - aside.tsx: Full-screen layout demonstration with header, footer, and sidebars
   - **Data types**: none (layout only)
@@ -137,7 +137,7 @@ keywords/features.
 - notes/note.tsx: Note-taking app with backlinks and mentions
   - **Data types**: string (title/content), array of pieces
     (mentioned/backlinks)
-  - **Keywords**: wish, handler, navigateTo, ct-code-editor, $mentionable,
+  - **Keywords**: wish, handler, navigateTo, cf-code-editor, $mentionable,
     $mentioned, backlinks, cell
 
 - output_schema.tsx: Demonstrates explicit output schema typing

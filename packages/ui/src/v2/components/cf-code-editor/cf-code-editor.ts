@@ -120,9 +120,9 @@ const getLangExtFromMimeType = (mime: MimeType) => {
 };
 
 /**
- * CTCodeEditor - Code editor component with syntax highlighting and debounced changes
+ * CFCodeEditor - Code editor component with syntax highlighting and debounced changes
  *
- * @element ct-code-editor
+ * @element cf-code-editor
  *
  * @attr {string|CellHandle<string>} value - Editor content (supports both plain string and CellHandle<string>)
  * @attr {string} language - MIME type for syntax highlighting
@@ -144,18 +144,18 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {"code"|"prose"} mode - Editor mode; "prose" enables markdown prose editing.
  * @attr {CellHandle<string>} pattern - Optional pattern piece used for backlink context.
  *
- * @fires ct-change - Fired when content changes with detail: { value, oldValue, language }
- * @fires ct-focus - Fired on focus
- * @fires ct-blur - Fired on blur
+ * @fires cf-change - Fired when content changes with detail: { value, oldValue, language }
+ * @fires cf-focus - Fired on focus
+ * @fires cf-blur - Fired on blur
  * @fires backlink-click - Fired when a backlink is clicked with Cmd/Ctrl+Enter with detail: { text, piece }
  * @fires backlink-create - Fired when a novel backlink is activated (Cmd/Ctrl+Click)
  *   or confirmed with Enter during autocomplete with no matches. Detail:
  *   { text: string, pieceId: any, piece: Cell<MentionablePiece>, navigate: boolean }
  *
  * @example
- * <ct-code-editor language="text/javascript" placeholder="Enter code..."></ct-code-editor>
+ * <cf-code-editor language="text/javascript" placeholder="Enter code..."></cf-code-editor>
  */
-export class CTCodeEditor extends BaseElement {
+export class CFCodeEditor extends BaseElement {
   static override styles = [BaseElement.baseStyles, styles];
 
   static override properties = {
@@ -248,7 +248,7 @@ export class CTCodeEditor extends BaseElement {
       delay: 500,
     },
     onChange: (newValue: string, oldValue: string) => {
-      this.emit("ct-change", {
+      this.emit("cf-change", {
         value: newValue,
         oldValue,
         language: this.language,
@@ -796,7 +796,7 @@ export class CTCodeEditor extends BaseElement {
         insert: newValue,
       },
       selection: { anchor: anchorPos, head: headPos },
-      annotations: CTCodeEditor._cellSyncAnnotation.of(true),
+      annotations: CFCodeEditor._cellSyncAnnotation.of(true),
     });
 
     // Ensure mentioned pieces reflect external value changes
@@ -1139,7 +1139,7 @@ export class CTCodeEditor extends BaseElement {
       EditorView.theme({
         ".cm-content": {
           fontFamily:
-            "var(--ct-code-editor-font-family-prose, var(--cf-theme-font-family, var(--ct-font-family-sans)))",
+            "var(--cf-code-editor-font-family-prose, var(--cf-theme-font-family, var(--ct-font-family-sans)))",
           lineHeight: "1.6",
           padding: "8px 0",
           ...(!hasCustomWidth && { maxWidth: "700px" }),
@@ -1209,7 +1209,7 @@ export class CTCodeEditor extends BaseElement {
         // Check if any transaction has the Cell sync annotation - if so, skip.
         // This prevents the feedback loop: Cell → Editor → setValue → Cell...
         const isCellSync = update.transactions.some(
-          (tr) => tr.annotation(CTCodeEditor._cellSyncAnnotation),
+          (tr) => tr.annotation(CFCodeEditor._cellSyncAnnotation),
         );
         if (update.docChanged && !this.readonly && !isCellSync) {
           const value = update.state.doc.toString();
@@ -1226,12 +1226,12 @@ export class CTCodeEditor extends BaseElement {
       EditorView.domEventHandlers({
         focus: () => {
           this._cellController.onFocus();
-          this.emit("ct-focus");
+          this.emit("cf-focus");
           return false;
         },
         blur: () => {
           this._cellController.onBlur();
-          this.emit("ct-blur");
+          this.emit("cf-blur");
           return false;
         },
       }),
@@ -1520,7 +1520,7 @@ export class CTCodeEditor extends BaseElement {
     // Update document with annotation to prevent updateListener from calling setValue
     this._editorView.dispatch({
       changes: { from: bl.nameFrom, to: bl.nameTo, insert: currentName },
-      annotations: CTCodeEditor._cellSyncAnnotation.of(true),
+      annotations: CFCodeEditor._cellSyncAnnotation.of(true),
     });
 
     // Update Cell value IMMEDIATELY (bypass debounce) so Cell sync doesn't revert
@@ -1610,7 +1610,7 @@ export class CTCodeEditor extends BaseElement {
     const pieceCell = this.findPieceById(pieceId);
     if (!pieceCell) {
       console.warn(
-        `[ct-code-editor] Cannot update name: piece ${pieceId} not found`,
+        `[cf-code-editor] Cannot update name: piece ${pieceId} not found`,
       );
       return;
     }
@@ -1632,4 +1632,4 @@ export class CTCodeEditor extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-code-editor", CTCodeEditor);
+globalThis.customElements.define("cf-code-editor", CFCodeEditor);

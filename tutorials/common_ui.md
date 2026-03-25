@@ -342,7 +342,7 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 - interactive: `cf-collapsible`, `cf-tab-list`, `cf-canvas`
 
-- complex/integrated (cell interop): `ct-code-editor`, `ct-outliner`
+- complex/integrated (cell interop): `cf-code-editor`, `ct-outliner`
 	- gap: editable table rows
 
 ## Chat Components

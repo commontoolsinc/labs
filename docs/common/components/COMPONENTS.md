@@ -267,12 +267,12 @@ The component compresses images to fit within `maxSizeBytes`.
 
 ---
 
-## ct-code-editor
+## cf-code-editor
 
 Rich text editor with wiki-link mentions. **Uses `[[` for completions, not `@`.**
 
 ```tsx
-<ct-code-editor
+<cf-code-editor
   $value={inputText}
   $mentionable={mentionable}
   $mentioned={mentioned}

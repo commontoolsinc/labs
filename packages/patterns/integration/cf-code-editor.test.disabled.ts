@@ -1,5 +1,5 @@
 /**
- * Integration tests for ct-code-editor cursor stability.
+ * Integration tests for cf-code-editor cursor stability.
  *
  * Tests that the cursor doesn't jump when:
  * 1. Typing normally (Cell echoes back after debounce)
@@ -21,11 +21,11 @@ import { ANYONE_USER } from "@commonfabric/memory/acl";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
-// Debounce delay configured in ct-code-editor (default timingDelay)
+// Debounce delay configured in cf-code-editor (default timingDelay)
 const DEBOUNCE_DELAY = 500;
 const DEBOUNCE_BUFFER = 100; // Extra time for processing
 
-describe("ct-code-editor cursor stability", () => {
+describe("cf-code-editor cursor stability", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
@@ -42,7 +42,7 @@ describe("ct-code-editor cursor stability", () => {
     });
     piece = await cc.create(
       await Deno.readTextFile(
-        join(import.meta.dirname!, "..", "examples", "ct-code-editor-cell.tsx"),
+        join(import.meta.dirname!, "..", "examples", "cf-code-editor-cell.tsx"),
       ),
       { start: true },
     );
@@ -55,7 +55,7 @@ describe("ct-code-editor cursor stability", () => {
     if (cc) await cc.dispose();
   });
 
-  it("should load the ct-code-editor piece", async () => {
+  it("should load the cf-code-editor piece", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -65,7 +65,7 @@ describe("ct-code-editor cursor stability", () => {
       },
       identity,
     });
-    await page.waitForSelector("ct-code-editor", { strategy: "pierce" });
+    await page.waitForSelector("cf-code-editor", { strategy: "pierce" });
     await new Promise((r) => setTimeout(r, 1000));
   });
 
@@ -625,23 +625,23 @@ describe("ct-code-editor cursor stability", () => {
     // Select "World" (positions 6-11)
     await page.evaluate(`
       (() => {
-        function findCtCodeEditor(root) {
+        function findCfCodeEditor(root) {
           if (!root) return null;
-          const editor = root.querySelector?.('ct-code-editor');
+          const editor = root.querySelector?.('cf-code-editor');
           if (editor) return editor;
           const allElements = root.querySelectorAll?.('*') || [];
           for (const el of allElements) {
             if (el.shadowRoot) {
-              const found = findCtCodeEditor(el.shadowRoot);
+              const found = findCfCodeEditor(el.shadowRoot);
               if (found) return found;
             }
           }
           return null;
         }
 
-        const ctEditor = findCtCodeEditor(document);
-        if (ctEditor && ctEditor._editorView) {
-          ctEditor._editorView.dispatch({
+        const cfEditor = findCfCodeEditor(document);
+        if (cfEditor && cfEditor._editorView) {
+          cfEditor._editorView.dispatch({
             selection: { anchor: 6, head: 11 }
           });
         }
@@ -651,23 +651,23 @@ describe("ct-code-editor cursor stability", () => {
     // Verify selection
     const selection = (await page.evaluate(`
       (() => {
-        function findCtCodeEditor(root) {
+        function findCfCodeEditor(root) {
           if (!root) return null;
-          const editor = root.querySelector?.('ct-code-editor');
+          const editor = root.querySelector?.('cf-code-editor');
           if (editor) return editor;
           const allElements = root.querySelectorAll?.('*') || [];
           for (const el of allElements) {
             if (el.shadowRoot) {
-              const found = findCtCodeEditor(el.shadowRoot);
+              const found = findCfCodeEditor(el.shadowRoot);
               if (found) return found;
             }
           }
           return null;
         }
 
-        const ctEditor = findCtCodeEditor(document);
-        if (!ctEditor || !ctEditor._editorView) return null;
-        const sel = ctEditor._editorView.state.selection.main;
+        const cfEditor = findCfCodeEditor(document);
+        if (!cfEditor || !cfEditor._editorView) return null;
+        const sel = cfEditor._editorView.state.selection.main;
         return { anchor: sel.anchor, head: sel.head };
       })()
     `)) as { anchor: number; head: number };
@@ -683,23 +683,23 @@ describe("ct-code-editor cursor stability", () => {
     // Selection should be clamped to new content length
     const clampedSelection = (await page.evaluate(`
       (() => {
-        function findCtCodeEditor(root) {
+        function findCfCodeEditor(root) {
           if (!root) return null;
-          const editor = root.querySelector?.('ct-code-editor');
+          const editor = root.querySelector?.('cf-code-editor');
           if (editor) return editor;
           const allElements = root.querySelectorAll?.('*') || [];
           for (const el of allElements) {
             if (el.shadowRoot) {
-              const found = findCtCodeEditor(el.shadowRoot);
+              const found = findCfCodeEditor(el.shadowRoot);
               if (found) return found;
             }
           }
           return null;
         }
 
-        const ctEditor = findCtCodeEditor(document);
-        if (!ctEditor || !ctEditor._editorView) return null;
-        const sel = ctEditor._editorView.state.selection.main;
+        const cfEditor = findCfCodeEditor(document);
+        if (!cfEditor || !cfEditor._editorView) return null;
+        const sel = cfEditor._editorView.state.selection.main;
         return { anchor: sel.anchor, head: sel.head };
       })()
     `)) as { anchor: number; head: number };
@@ -1201,23 +1201,23 @@ describe("ct-code-editor cursor stability", () => {
     // Blur by explicitly calling blur() on the CodeMirror contentDOM
     await page.evaluate(`
       (() => {
-        function findCtCodeEditor(root) {
+        function findCfCodeEditor(root) {
           if (!root) return null;
-          const editor = root.querySelector?.('ct-code-editor');
+          const editor = root.querySelector?.('cf-code-editor');
           if (editor) return editor;
           const allElements = root.querySelectorAll?.('*') || [];
           for (const el of allElements) {
             if (el.shadowRoot) {
-              const found = findCtCodeEditor(el.shadowRoot);
+              const found = findCfCodeEditor(el.shadowRoot);
               if (found) return found;
             }
           }
           return null;
         }
 
-        const ctEditor = findCtCodeEditor(document);
-        if (ctEditor && ctEditor._editorView) {
-          ctEditor._editorView.contentDOM.blur();
+        const cfEditor = findCfCodeEditor(document);
+        if (cfEditor && cfEditor._editorView) {
+          cfEditor._editorView.contentDOM.blur();
         }
       })()
     `);
@@ -1259,23 +1259,23 @@ describe("ct-code-editor cursor stability", () => {
     // We'll simulate by canceling pending debounced writes
     await page.evaluate(`
       (() => {
-        function findCtCodeEditor(root) {
+        function findCfCodeEditor(root) {
           if (!root) return null;
-          const editor = root.querySelector?.('ct-code-editor');
+          const editor = root.querySelector?.('cf-code-editor');
           if (editor) return editor;
           const allElements = root.querySelectorAll?.('*') || [];
           for (const el of allElements) {
             if (el.shadowRoot) {
-              const found = findCtCodeEditor(el.shadowRoot);
+              const found = findCfCodeEditor(el.shadowRoot);
               if (found) return found;
             }
           }
           return null;
         }
 
-        const ctEditor = findCtCodeEditor(document);
-        if (ctEditor) {
-          ctEditor._cellController.cancel();
+        const cfEditor = findCfCodeEditor(document);
+        if (cfEditor) {
+          cfEditor._cellController.cancel();
         }
       })()
     `);
@@ -1313,24 +1313,24 @@ describe("ct-code-editor cursor stability", () => {
     // Simulate value property change by calling the path that updated() takes
     await page.evaluate(`
       (() => {
-        function findCtCodeEditor(root) {
+        function findCfCodeEditor(root) {
           if (!root) return null;
-          const editor = root.querySelector?.('ct-code-editor');
+          const editor = root.querySelector?.('cf-code-editor');
           if (editor) return editor;
           const allElements = root.querySelectorAll?.('*') || [];
           for (const el of allElements) {
             if (el.shadowRoot) {
-              const found = findCtCodeEditor(el.shadowRoot);
+              const found = findCfCodeEditor(el.shadowRoot);
               if (found) return found;
             }
           }
           return null;
         }
 
-        const ctEditor = findCtCodeEditor(document);
-        if (ctEditor) {
+        const cfEditor = findCfCodeEditor(document);
+        if (cfEditor) {
           // Simulate the reset that happens on value property change
-          ctEditor._cellController.cancel();
+          cfEditor._cellController.cancel();
         }
       })()
     `);
@@ -1382,58 +1382,58 @@ async function resetEditorState(
 }
 
 /**
- * Get current cursor position in the ct-code-editor
+ * Get current cursor position in the cf-code-editor
  */
 async function getCursorPosition(page: Page): Promise<number> {
   const result = await page.evaluate(`
     (() => {
-      function findCtCodeEditor(root) {
+      function findCfCodeEditor(root) {
         if (!root) return null;
-        const editor = root.querySelector?.('ct-code-editor');
+        const editor = root.querySelector?.('cf-code-editor');
         if (editor) return editor;
         const allElements = root.querySelectorAll?.('*') || [];
         for (const el of allElements) {
           if (el.shadowRoot) {
-            const found = findCtCodeEditor(el.shadowRoot);
+            const found = findCfCodeEditor(el.shadowRoot);
             if (found) return found;
           }
         }
         return null;
       }
 
-      const ctEditor = findCtCodeEditor(document);
-      if (!ctEditor || !ctEditor._editorView) return -1;
+      const cfEditor = findCfCodeEditor(document);
+      if (!cfEditor || !cfEditor._editorView) return -1;
 
-      return ctEditor._editorView.state.selection.main.head;
+      return cfEditor._editorView.state.selection.main.head;
     })()
   `);
   return result as number;
 }
 
 /**
- * Get current content from the ct-code-editor
+ * Get current content from the cf-code-editor
  */
 async function getEditorContent(page: Page): Promise<string> {
   const result = await page.evaluate(`
     (() => {
-      function findCtCodeEditor(root) {
+      function findCfCodeEditor(root) {
         if (!root) return null;
-        const editor = root.querySelector?.('ct-code-editor');
+        const editor = root.querySelector?.('cf-code-editor');
         if (editor) return editor;
         const allElements = root.querySelectorAll?.('*') || [];
         for (const el of allElements) {
           if (el.shadowRoot) {
-            const found = findCtCodeEditor(el.shadowRoot);
+            const found = findCfCodeEditor(el.shadowRoot);
             if (found) return found;
           }
         }
         return null;
       }
 
-      const ctEditor = findCtCodeEditor(document);
-      if (!ctEditor || !ctEditor._editorView) return "";
+      const cfEditor = findCfCodeEditor(document);
+      if (!cfEditor || !cfEditor._editorView) return "";
 
-      return ctEditor._editorView.state.doc.toString();
+      return cfEditor._editorView.state.doc.toString();
     })()
   `);
   return result as string;
@@ -1445,23 +1445,23 @@ async function getEditorContent(page: Page): Promise<string> {
 async function focusEditor(page: Page): Promise<void> {
   await page.evaluate(`
     (() => {
-      function findCtCodeEditor(root) {
+      function findCfCodeEditor(root) {
         if (!root) return null;
-        const editor = root.querySelector?.('ct-code-editor');
+        const editor = root.querySelector?.('cf-code-editor');
         if (editor) return editor;
         const allElements = root.querySelectorAll?.('*') || [];
         for (const el of allElements) {
           if (el.shadowRoot) {
-            const found = findCtCodeEditor(el.shadowRoot);
+            const found = findCfCodeEditor(el.shadowRoot);
             if (found) return found;
           }
         }
         return null;
       }
 
-      const ctEditor = findCtCodeEditor(document);
-      if (ctEditor && ctEditor._editorView) {
-        ctEditor._editorView.focus();
+      const cfEditor = findCfCodeEditor(document);
+      if (cfEditor && cfEditor._editorView) {
+        cfEditor._editorView.focus();
       }
     })()
   `);
@@ -1482,23 +1482,23 @@ async function typeInEditor(page: Page, text: string): Promise<void> {
 async function setCursorPosition(page: Page, position: number): Promise<void> {
   await page.evaluate(`
     ((pos) => {
-      function findCtCodeEditor(root) {
+      function findCfCodeEditor(root) {
         if (!root) return null;
-        const editor = root.querySelector?.('ct-code-editor');
+        const editor = root.querySelector?.('cf-code-editor');
         if (editor) return editor;
         const allElements = root.querySelectorAll?.('*') || [];
         for (const el of allElements) {
           if (el.shadowRoot) {
-            const found = findCtCodeEditor(el.shadowRoot);
+            const found = findCfCodeEditor(el.shadowRoot);
             if (found) return found;
           }
         }
         return null;
       }
 
-      const ctEditor = findCtCodeEditor(document);
-      if (ctEditor && ctEditor._editorView) {
-        ctEditor._editorView.dispatch({
+      const cfEditor = findCfCodeEditor(document);
+      if (cfEditor && cfEditor._editorView) {
+        cfEditor._editorView.dispatch({
           selection: { anchor: pos, head: pos }
         });
       }
@@ -1513,26 +1513,26 @@ async function setCursorPosition(page: Page, position: number): Promise<void> {
 async function clearEditor(page: Page): Promise<void> {
   await page.evaluate(`
     (() => {
-      function findCtCodeEditor(root) {
+      function findCfCodeEditor(root) {
         if (!root) return null;
-        const editor = root.querySelector?.('ct-code-editor');
+        const editor = root.querySelector?.('cf-code-editor');
         if (editor) return editor;
         const allElements = root.querySelectorAll?.('*') || [];
         for (const el of allElements) {
           if (el.shadowRoot) {
-            const found = findCtCodeEditor(el.shadowRoot);
+            const found = findCfCodeEditor(el.shadowRoot);
             if (found) return found;
           }
         }
         return null;
       }
 
-      const ctEditor = findCtCodeEditor(document);
-      if (ctEditor && ctEditor._editorView) {
-        const view = ctEditor._editorView;
+      const cfEditor = findCfCodeEditor(document);
+      if (cfEditor && cfEditor._editorView) {
+        const view = cfEditor._editorView;
         // Clear editor content using the Cell sync annotation to prevent
         // updateListener from scheduling Cell writes.
-        const annotation = ctEditor.constructor._cellSyncAnnotation;
+        const annotation = cfEditor.constructor._cellSyncAnnotation;
         view.dispatch({
           changes: { from: 0, to: view.state.doc.length, insert: "" },
           selection: { anchor: 0, head: 0 },

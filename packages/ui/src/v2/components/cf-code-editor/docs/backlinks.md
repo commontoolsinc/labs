@@ -1,4 +1,4 @@
-# Backlink implementation in ct-code-editor
+# Backlink implementation in cf-code-editor
 
 Backlinks are inline references stored directly in the document text as
 `[[Note Name (some-id)]]`. The ID is the stable reference to the linked piece;

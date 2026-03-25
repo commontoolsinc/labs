@@ -1,15 +1,15 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CTCodeEditor, MimeType } from "./ct-code-editor.ts";
+import { CFCodeEditor, MimeType } from "./cf-code-editor.ts";
 
-describe("CTCodeEditor", () => {
+describe("CFCodeEditor", () => {
   it("should create element instance", () => {
-    const element = new CTCodeEditor();
-    expect(element).toBeInstanceOf(CTCodeEditor);
+    const element = new CFCodeEditor();
+    expect(element).toBeInstanceOf(CFCodeEditor);
   });
 
   it("should have default properties", () => {
-    const element = new CTCodeEditor();
+    const element = new CFCodeEditor();
     expect(element.value).toBe("");
     expect(element.language).toBe(MimeType.markdown);
     expect(element.disabled).toBe(false);
@@ -30,7 +30,7 @@ describe("CTCodeEditor", () => {
   });
 
   it("should allow setting properties", () => {
-    const element = new CTCodeEditor();
+    const element = new CFCodeEditor();
     element.value = "const x = 42;";
     element.language = MimeType.javascript;
     element.readonly = true;

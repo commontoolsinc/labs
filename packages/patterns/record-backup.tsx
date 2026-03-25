@@ -675,7 +675,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                 >
                   Download Backup
                 </cf-file-download>
-                <ct-code-editor
+                <cf-code-editor
                   $value={exportedJson}
                   language="application/json"
                   theme="light"
@@ -704,7 +704,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                   showPreview={false}
                   oncf-change={handleFileUpload({ importJson })}
                 />
-                <ct-code-editor
+                <cf-code-editor
                   $value={importJson}
                   language="application/json"
                   theme="light"

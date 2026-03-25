@@ -33,7 +33,7 @@ export default pattern(
             />
           </div>
           <div style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
-            <ct-code-editor
+            <cf-code-editor
               $value={content}
               language="text/markdown"
               style="min-height: 400px;"

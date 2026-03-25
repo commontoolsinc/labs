@@ -1,6 +1,6 @@
 /// <cts-enable />
 /**
- * Integration test example for ct-code-editor with Cell binding.
+ * Integration test example for cf-code-editor with Cell binding.
  * Used to test cursor stability when typing with Cell sync.
  */
 import { Default, NAME, pattern, UI } from "commonfabric";
@@ -31,7 +31,7 @@ export default pattern<Input>(({ content }) => {
             minHeight: "200px",
           }}
         >
-          <ct-code-editor $value={content} language="text/markdown" />
+          <cf-code-editor $value={content} language="text/markdown" />
         </div>
         <div
           id="content-display"

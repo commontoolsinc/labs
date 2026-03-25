@@ -53,7 +53,7 @@ export default pattern<CodeEditorStoryInput, CodeEditorStoryOutput>(() => {
   const mentioned = Writable.of<typeof mentionedData | undefined>(undefined);
 
   return {
-    [NAME]: "ct-code-editor Story",
+    [NAME]: "cf-code-editor Story",
     [UI]: (
       <div style={{ padding: "1rem" }}>
         <div
@@ -75,7 +75,7 @@ export default pattern<CodeEditorStoryInput, CodeEditorStoryOutput>(() => {
           set <code>language</code> to <code>text/markdown</code>.
         </div>
         <div style={{ height: "320px", border: "1px solid #e2e8f0" }}>
-          <ct-code-editor
+          <cf-code-editor
             $value={value}
             language={language}
             disabled={disabled}

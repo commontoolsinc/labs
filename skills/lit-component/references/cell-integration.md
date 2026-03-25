@@ -293,5 +293,5 @@ See these components for complete examples demonstrating Cell integration
 patterns:
 
 - `ct-outliner` - Path-based operations, diff-based rendering with Cells
-- `ct-code-editor` - Bidirectional sync between Cell values and CodeMirror state
+- `cf-code-editor` - Bidirectional sync between Cell values and CodeMirror state
 - `ct-render` - Pattern loading and UI extraction with Cell subscriptions

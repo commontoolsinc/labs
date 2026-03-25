@@ -1,4 +1,4 @@
-# Prose markdown decorations in ct-code-editor
+# Prose markdown decorations in cf-code-editor
 
 Prose mode gives the editor a WYSIWYG-like feel for markdown. Syntax markers
 (`#`, `**`, `` ` ``, `---`, etc.) are hidden when the cursor is elsewhere and
@@ -77,7 +77,7 @@ mark/replace decorations:
 Singletons (`bulletWidget`, `hrWidget`) are used where possible since their
 `eq()` methods always return `true`.
 
-## Integration with ct-code-editor
+## Integration with cf-code-editor
 
 The Lit component activates prose mode through a `Compartment` in
 `_getModeExtension()`. When `mode === "prose"`, the compartment provides:

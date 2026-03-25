@@ -74,7 +74,7 @@ describe("Chat Note pattern test", () => {
       assert(titleElement, "Should find title element");
 
       // Check for the code editor
-      const editor = await page.waitForSelector("ct-code-editor", {
+      const editor = await page.waitForSelector("cf-code-editor", {
         strategy: "pierce",
       });
       assert(editor, "Should find code editor element");

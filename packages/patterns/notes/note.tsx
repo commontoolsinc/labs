@@ -65,7 +65,7 @@ interface NoteOutput extends NotePiece {
 
 // ===== Module-scope handlers (reused with different bindings) =====
 
-// Used in ct-code-editor - binds mentionable and allPieces
+// Used in cf-code-editor - binds mentionable and allPieces
 const handleNewBacklink = handler<
   {
     detail: {
@@ -344,7 +344,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     // ===== UI =====
 
     const editorUI = (
-      <ct-code-editor
+      <cf-code-editor
         $value={content}
         $mentionable={mentionable!}
         $mentioned={mentioned}

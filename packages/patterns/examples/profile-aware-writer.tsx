@@ -54,7 +54,7 @@ Write content personalized to the user when appropriate.`;
 
         <cf-card>
           <h4 style="margin-top: 0;">Profile Context:</h4>
-          <ct-code-editor
+          <cf-code-editor
             $value={profile.result}
             style={{ maxHeight: "256px" }}
           />

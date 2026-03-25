@@ -189,7 +189,7 @@ export default pattern<Input, Output>(({ prompt }) => {
           <cf-cell-context $cell={generated} label="Generated Code">
             <div>
               <h3>Generated Code</h3>
-              <ct-code-editor
+              <cf-code-editor
                 value={generated.result}
                 language="text/x.typescript"
                 readonly
