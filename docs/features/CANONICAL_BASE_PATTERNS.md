@@ -730,13 +730,13 @@ export default pattern<{ member: Writable<Default<FamilyMember, { name: "", rela
       <cf-screen>
         <cf-vstack gap="md">
           <cf-input $value={member.key("name")} placeholder="Name" />
-          <ct-picker
+          <cf-picker
             $value={member.key("relationship")}
             options={["spouse", "child", "parent", "sibling", "grandparent"]}
           />
           <cf-input $value={member.key("birthday")} type="date" placeholder="Birthday" />
-          <ct-tags tags={member.key("dietaryRestrictions")} placeholder="Dietary restrictions" />
-          <ct-tags tags={member.key("giftPreferences")} placeholder="Gift ideas" />
+          <cf-tags tags={member.key("dietaryRestrictions")} placeholder="Dietary restrictions" />
+          <cf-tags tags={member.key("giftPreferences")} placeholder="Gift ideas" />
         </cf-vstack>
       </cf-screen>
     ),

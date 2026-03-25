@@ -60,7 +60,7 @@ registerAllComponents();
 ### Core UI Components (23)
 
 - **Forms**: `cf-button`, `cf-input`, `cf-textarea`, `cf-checkbox`, `cf-radio`,
-  `cf-switch`, `cf-toggle`, `ct-slider`
+  `cf-switch`, `cf-toggle`, `cf-slider`
 - **Layout**: `cf-card`, `ct-separator`, `ct-accordion`, `cf-collapsible`,
   `ct-tabs`, `ct-scroll-area`
 - **Feedback**: `ct-alert`, `ct-badge`, `ct-progress`, `ct-skeleton`, `ct-label`

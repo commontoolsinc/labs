@@ -21,7 +21,7 @@ export default pattern<SliderStoryInput, SliderStoryOutput>(() => {
   const disabled = Writable.of(false);
 
   return {
-    [NAME]: "ct-slider Story",
+    [NAME]: "cf-slider Story",
     [UI]: (
       <div style={{ padding: "1rem", maxWidth: "560px" }}>
         <div
@@ -29,7 +29,7 @@ export default pattern<SliderStoryInput, SliderStoryOutput>(() => {
         >
           Value: {value}
         </div>
-        <ct-slider
+        <cf-slider
           $value={value}
           min={0}
           max={100}

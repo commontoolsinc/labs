@@ -312,7 +312,7 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Input Components
 
-- input: `cf-button`, `cf-select`, `cf-input`, `cf-textarea`, `cf-checkbox`, `ct-tags`
+- input: `cf-button`, `cf-select`, `cf-input`, `cf-textarea`, `cf-checkbox`, `cf-tags`
 	- gap: `ct-search` which has an autocomplete menu
 	- gap: `ct-file-picker`
 	- redundant: common-send-message, cf-message-input (?)
@@ -351,5 +351,5 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Unused/Unproven Components
 
-- stale: `ct-aspect-ratio`, `ct-draggable`, `cf-form`, `ct-grid`, `cf-hgroup`, `ct-input-otp`, `cf-message-input`, `ct-progress`, `cf-radio`, `cf-radio-group`, `ct-slider`, `cf-switch`, `ct-tile`, `cf-toggle`, `cf-toggle-group`, `cf-vgroup`
+- stale: `ct-aspect-ratio`, `ct-draggable`, `cf-form`, `ct-grid`, `cf-hgroup`, `ct-input-otp`, `cf-message-input`, `ct-progress`, `cf-radio`, `cf-radio-group`, `cf-slider`, `cf-switch`, `ct-tile`, `cf-toggle`, `cf-toggle-group`, `cf-vgroup`
 - superfluous: `ct-resizeable-handle`, `ct-resizable-panel`, `ct-resizeable-panel-group`, `ct-scroll-area`, `ct-tabs`/`ct-tab-list`/`ct-tab-panel`

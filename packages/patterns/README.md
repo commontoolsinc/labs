@@ -88,9 +88,9 @@ keywords/features.
   - **Keywords**: cf-select, $value (bidirectional binding), items (label/value
     objects)
 
-- examples/ct-tags.tsx: Tags input component
+- examples/cf-tags.tsx: Tags input component
   - **Data types**: array of strings
-  - **Keywords**: ct-tags, handler, onct-change, array of strings
+  - **Keywords**: cf-tags, handler, oncf-change, array of strings
 
 - system/default-app.tsx: Default application with piece management and
   navigation

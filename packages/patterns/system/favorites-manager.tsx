@@ -61,9 +61,9 @@ export default pattern<Record<string, never>>((_) => {
                   Remove
                 </cf-button>
               </cf-hstack>
-              <ct-tags
+              <cf-tags
                 tags={item.userTags}
-                onct-change={onUpdateUserTags({ userTags: item.userTags })}
+                oncf-change={onUpdateUserTags({ userTags: item.userTags })}
               />
             </cf-vstack>
           </cf-cell-context>

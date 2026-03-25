@@ -139,9 +139,9 @@ shadcn/ui design system. All components:
 <cf-switch name="notifications" checked>Enable notifications</cf-switch>
 ```
 
-### 8. ct-slider
+### 8. cf-slider
 
-**Purpose**: Range input slider **Tag**: `<ct-slider>` **Attributes**:
+**Purpose**: Range input slider **Tag**: `<cf-slider>` **Attributes**:
 
 - `value` - number
 - `min` - number (default: 0)
@@ -149,10 +149,10 @@ shadcn/ui design system. All components:
 - `step` - number (default: 1)
 - `disabled` - boolean
 - `name` - string **Events**:
-- `ct-change` - Fired on value change with detail: `{ value }` **Example**:
+- `cf-change` - Fired on value change with detail: `{ value }` **Example**:
 
 ```html
-<ct-slider min="0" max="100" value="50" step="5"></ct-slider>
+<cf-slider min="0" max="100" value="50" step="5"></cf-slider>
 ```
 
 ### 9. cf-toggle

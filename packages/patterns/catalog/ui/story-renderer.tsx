@@ -5,9 +5,9 @@ import ButtonStory from "../stories/cf-button-story.tsx";
 import CheckboxStory from "../stories/cf-checkbox-story.tsx";
 import CodeEditorStory from "../stories/ct-code-editor-story.tsx";
 import InputStory from "../stories/cf-input-story.tsx";
-import PickerStory from "../stories/ct-picker-story.tsx";
+import PickerStory from "../stories/cf-picker-story.tsx";
 import SelectStory from "../stories/cf-select-story.tsx";
-import SliderStory from "../stories/ct-slider-story.tsx";
+import SliderStory from "../stories/cf-slider-story.tsx";
 import SwitchStory from "../stories/cf-switch-story.tsx";
 import ToggleStory from "../stories/cf-toggle-story.tsx";
 import ToggleGroupStory from "../stories/cf-toggle-group-story.tsx";
@@ -46,7 +46,7 @@ import AutocompleteStory from "../stories/cf-autocomplete-story.tsx";
 import TableStory from "../stories/ct-table-story.tsx";
 import KbdStory from "../stories/ct-kbd-story.tsx";
 import CopyButtonStory from "../stories/ct-copy-button-story.tsx";
-import TagsStory from "../stories/ct-tags-story.tsx";
+import TagsStory from "../stories/cf-tags-story.tsx";
 import GridStory from "../stories/ct-grid-story.tsx";
 
 interface StoryRendererInput {

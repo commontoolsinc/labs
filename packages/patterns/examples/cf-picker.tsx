@@ -26,10 +26,10 @@ export default pattern<Input, Result>(
     const selection = computed(() => items[selectedIndex.get()]);
 
     return {
-      [NAME]: "ct-picker demo",
+      [NAME]: "cf-picker demo",
       [UI]: (
         <cf-vstack gap="3" style={{ padding: "1rem" }}>
-          <h3>ct-picker Component Demo</h3>
+          <h3>cf-picker Component Demo</h3>
 
           <cf-card>
             <cf-button
@@ -55,7 +55,7 @@ export default pattern<Input, Result>(
 
           <cf-card>
             {/* The cast is because OpaqueCell does not satisfy CellLike, but... it is */}
-            <ct-picker $items={items as any} $selectedIndex={selectedIndex} />
+            <cf-picker $items={items as any} $selectedIndex={selectedIndex} />
           </cf-card>
         </cf-vstack>
       ),

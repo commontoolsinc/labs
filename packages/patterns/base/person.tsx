@@ -385,9 +385,9 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
           {/* Tags */}
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Tags</label>
-            <ct-tags
+            <cf-tags
               tags={person.key("tags")}
-              onct-change={updateTags({ person })}
+              oncf-change={updateTags({ person })}
             />
           </cf-vstack>
 

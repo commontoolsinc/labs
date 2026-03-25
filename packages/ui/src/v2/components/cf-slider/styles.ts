@@ -1,5 +1,5 @@
 /**
- * Styles for ct-slider component
+ * Styles for cf-slider component
  */
 
 export const sliderStyles = `

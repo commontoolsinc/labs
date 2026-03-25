@@ -266,7 +266,7 @@ Use the user context above to personalize your suggestions when relevant.`;
   const pickerUI = (
     <cf-card>
       <h2>Choose Result ({initialResults.length})</h2>
-      <ct-picker $items={initialResults} $selectedIndex={selectedIndex} />
+      <cf-picker $items={initialResults} $selectedIndex={selectedIndex} />
       <cf-button
         variant="primary"
         onClick={() => userConfirmedIndex.set(selectedIndex.get())}

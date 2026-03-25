@@ -26,10 +26,10 @@ const updateTags = handler<
 export default pattern<Input, Result>(
   ({ tags }) => {
     return {
-      [NAME]: "ct-tags demo",
+      [NAME]: "cf-tags demo",
       [UI]: (
         <cf-vstack gap="3" style={{ padding: "1rem" }}>
-          <ct-tags tags={tags} onct-change={updateTags({ tags })} />
+          <cf-tags tags={tags} oncf-change={updateTags({ tags })} />
         </cf-vstack>
       ),
       tags,

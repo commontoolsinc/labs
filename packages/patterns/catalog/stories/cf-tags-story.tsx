@@ -11,7 +11,7 @@ interface TagsStoryOutput {
 
 export default pattern<TagsStoryInput, TagsStoryOutput>(() => {
   return {
-    [NAME]: "ct-tags Story",
+    [NAME]: "cf-tags Story",
     [UI]: (
       <div style={{ padding: "1rem", maxWidth: "400px" }}>
         <div
@@ -24,7 +24,7 @@ export default pattern<TagsStoryInput, TagsStoryOutput>(() => {
         >
           Tags
         </div>
-        <ct-tags tags={["TypeScript", "React", "Node.js", "Deno"]} />
+        <cf-tags tags={["TypeScript", "React", "Node.js", "Deno"]} />
       </div>
     ),
     controls: (

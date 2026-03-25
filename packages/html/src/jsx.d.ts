@@ -2869,7 +2869,7 @@ interface CFCheckboxElement extends CTHTMLElement {}
 interface CFAutocompleteElement extends CTHTMLElement {}
 interface CFSelectElement extends CTHTMLElement {}
 interface CFRadioGroupElement extends CTHTMLElement {}
-interface CTPickerElement extends CTHTMLElement {}
+interface CFPickerElement extends CTHTMLElement {}
 interface CTToolsChipElement extends CTHTMLElement {}
 interface CFHeadingElement extends CTHTMLElement {}
 interface CFCollapsibleElement extends CTHTMLElement {}
@@ -2908,7 +2908,7 @@ interface CFVScrollElement extends CTHTMLElement {}
 interface CTSendMessageElement extends CTHTMLElement {}
 interface CTTextElement extends CTHTMLElement {}
 interface CTTableElement extends CTHTMLElement {}
-interface CTTagsElement extends CTHTMLElement {}
+interface CFTagsElement extends CTHTMLElement {}
 interface CTPromptInputElement extends CTHTMLElement {}
 interface CTChatElement extends CTHTMLElement {}
 interface CTMessageBeadsElement extends CTHTMLElement {}
@@ -2951,7 +2951,7 @@ interface CTAccordionItemElement extends CTHTMLElement {}
 
 // Form components
 interface CFFormElement extends CTHTMLElement {}
-interface CTSliderElement extends CTHTMLElement {}
+interface CFSliderElement extends CTHTMLElement {}
 interface CFSwitchElement extends CTHTMLElement {}
 interface CFToggleElement extends CTHTMLElement {}
 interface CFToggleGroupElement extends CTHTMLElement {}
@@ -3189,10 +3189,10 @@ interface CTAttachmentsBarAttributes<T> extends CTHTMLAttributes<T> {
   "pinnedCells"?: any;
 }
 
-interface CTTagsAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTagsAttributes<T> extends CTHTMLAttributes<T> {
   "tags"?: string[];
   "readonly"?: boolean;
-  "onct-change"?: EventHandler<any>;
+  "oncf-change"?: EventHandler<{ tags: string[] }>;
 }
 
 interface CTToolbarAttributes<T> extends CTHTMLAttributes<T> {
@@ -3726,16 +3726,17 @@ interface CFRadioGroupAttributes<T> extends CTHTMLAttributes<T> {
   >;
 }
 
-interface CTPickerAttributes<T> extends CTHTMLAttributes<T> {
+interface CFPickerAttributes<T> extends CTHTMLAttributes<T> {
   "$selectedIndex"?: CellLike<number>;
   "$items": CellLike<any[]>;
   "disabled"?: boolean;
   "min-height"?: string;
-  "onct-change"?: EventHandler<
-    { value: any; oldValue: any; items: any[] }
+  "oncf-change"?: EventHandler<
+    { index: number; value: any; items: any[] }
   >;
-  "onct-focus"?: EventHandler<any>;
-  "onct-blur"?: EventHandler<any>;
+  "oncf-confirm"?: EventHandler<{ index: number; value: any }>;
+  "oncf-focus"?: EventHandler<any>;
+  "oncf-blur"?: EventHandler<any>;
 }
 
 interface CTToolsChipAttributes<T> extends CTHTMLAttributes<T> {
@@ -3883,7 +3884,7 @@ interface CFFormAttributes<T> extends CTHTMLAttributes<T> {
   }>;
 }
 
-interface CTSliderAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSliderAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: number | CellLike<number>;
   "$value"?: CellLike<number>;
   "min"?: number | CellLike<number>;
@@ -3894,7 +3895,8 @@ interface CTSliderAttributes<T> extends CTHTMLAttributes<T> {
     | "horizontal"
     | "vertical"
     | CellLike<"horizontal" | "vertical">;
-  "onct-change"?: EventHandler<{ value: number }>;
+  "oncf-input"?: EventHandler<{ value: number; oldValue: number }>;
+  "oncf-change"?: EventHandler<{ value: number; oldValue: number }>;
 }
 
 interface CFSwitchAttributes<T> extends CTHTMLAttributes<T> {
@@ -4653,9 +4655,9 @@ declare global {
         CFRadioGroupAttributes<CFRadioGroupElement>,
         CFRadioGroupElement
       >;
-      "ct-picker": CTDOM.DetailedHTMLProps<
-        CTPickerAttributes<CTPickerElement>,
-        CTPickerElement
+      "cf-picker": CTDOM.DetailedHTMLProps<
+        CFPickerAttributes<CFPickerElement>,
+        CFPickerElement
       >;
       "ct-tools-chip": CTDOM.DetailedHTMLProps<
         CTToolsChipAttributes<CTToolsChipElement>,
@@ -4793,9 +4795,9 @@ declare global {
         CTTableAttributes<CTTableElement>,
         CTTableElement
       >;
-      "ct-tags": CTDOM.DetailedHTMLProps<
-        CTTagsAttributes<CTTagsElement>,
-        CTTagsElement
+      "cf-tags": CTDOM.DetailedHTMLProps<
+        CFTagsAttributes<CFTagsElement>,
+        CFTagsElement
       >;
       "ct-prompt-input": CTDOM.DetailedHTMLProps<
         CTPromptInputAttributes<CTPromptInputElement>,
@@ -4923,9 +4925,9 @@ declare global {
         CFFormAttributes<CFFormElement>,
         CFFormElement
       >;
-      "ct-slider": CTDOM.DetailedHTMLProps<
-        CTSliderAttributes<CTSliderElement>,
-        CTSliderElement
+      "cf-slider": CTDOM.DetailedHTMLProps<
+        CFSliderAttributes<CFSliderElement>,
+        CFSliderElement
       >;
       "cf-switch": CTDOM.DetailedHTMLProps<
         CFSwitchAttributes<CFSwitchElement>,

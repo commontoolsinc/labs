@@ -85,7 +85,7 @@ interface Output {
 // Handlers
 // ============================================================================
 
-// Handler for ct-tags change event
+// Handler for cf-tags change event
 const updateDietaryRestrictions = handler<
   { detail: { tags: string[] } },
   { member: Writable<FamilyMember> }
@@ -315,9 +315,9 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
           {/* Tags */}
           <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Tags</label>
-            <ct-tags
+            <cf-tags
               tags={member.key("tags")}
-              onct-change={updateTags({ member })}
+              oncf-change={updateTags({ member })}
             />
           </cf-vstack>
 
@@ -365,18 +365,18 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Dietary Restrictions
                     </label>
-                    <ct-tags
+                    <cf-tags
                       tags={member.key("dietaryRestrictions")}
-                      onct-change={updateDietaryRestrictions({ member })}
+                      oncf-change={updateDietaryRestrictions({ member })}
                     />
                   </cf-vstack>
                   <cf-vstack style={{ gap: "4px" }}>
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Allergies
                     </label>
-                    <ct-tags
+                    <cf-tags
                       tags={member.key("allergies")}
-                      onct-change={updateAllergies({ member })}
+                      oncf-change={updateAllergies({ member })}
                     />
                   </cf-vstack>
                 </cf-vstack>
@@ -391,9 +391,9 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
               if (!showGifts.get()) return null;
               return (
                 <cf-vstack style={{ gap: "4px" }}>
-                  <ct-tags
+                  <cf-tags
                     tags={member.key("giftIdeas")}
-                    onct-change={updateGiftIdeas({ member })}
+                    oncf-change={updateGiftIdeas({ member })}
                   />
                 </cf-vstack>
               );

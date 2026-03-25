@@ -4,9 +4,9 @@ import { BaseElement } from "../../core/base-element.ts";
 export type SliderOrientation = "horizontal" | "vertical";
 
 /**
- * CTSlider - Range input slider for value selection
+ * CFSlider - Range input slider for value selection
  *
- * @element ct-slider
+ * @element cf-slider
  *
  * @attr {number} value - Current slider value
  * @attr {number} min - Minimum allowed value (default: 0)
@@ -15,16 +15,15 @@ export type SliderOrientation = "horizontal" | "vertical";
  * @attr {boolean} disabled - Whether the slider is disabled
  * @attr {SliderOrientation} orientation - Slider orientation ("horizontal" | "vertical")
  *
- * @fires ct-change - Fired when value changes with detail: { value, oldValue }
+ * @fires cf-change - Fired when value changes with detail: { value, oldValue }
  * @fires cf-input - Fired during dragging with detail: { value, oldValue }
  *
  * @example
- * <ct-slider min="0" max="100" value="50"></ct-slider>
- * <ct-slider min="0" max="100" value="25" step="5"></ct-slider>
- * <ct-slider orientation="vertical" style="height: 200px"></ct-slider>
+ * <cf-slider min="0" max="100" value="50"></cf-slider>
+ * <cf-slider min="0" max="100" value="25" step="5"></cf-slider>
+ * <cf-slider orientation="vertical" style="height: 200px"></cf-slider>
  */
-
-export class CTSlider extends BaseElement {
+export class CFSlider extends BaseElement {
   static override properties = {
     value: { type: Number },
     min: { type: Number },
@@ -36,26 +35,26 @@ export class CTSlider extends BaseElement {
   static override styles = css`
     :host {
       /* Default color values if not provided */
-      --ct-slider-color-background: var(--ct-theme-color-background, #ffffff);
-      --ct-slider-color-foreground: var(--ct-theme-color-text, #0f172a);
-      --ct-slider-color-border: var(--ct-theme-color-border, #e2e8f0);
-      --ct-slider-color-ring: var(--ct-theme-color-primary, #94a3b8);
-      --ct-slider-color-primary: var(--ct-theme-color-primary, #3b82f6);
-      --ct-slider-color-primary-foreground: var(
+      --cf-slider-color-background: var(--ct-theme-color-background, #ffffff);
+      --cf-slider-color-foreground: var(--ct-theme-color-text, #0f172a);
+      --cf-slider-color-border: var(--ct-theme-color-border, #e2e8f0);
+      --cf-slider-color-ring: var(--ct-theme-color-primary, #94a3b8);
+      --cf-slider-color-primary: var(--ct-theme-color-primary, #3b82f6);
+      --cf-slider-color-primary-foreground: var(
         --ct-theme-color-primary-foreground,
         #ffffff
       );
-      --ct-slider-color-muted: var(--ct-theme-color-surface, #f8fafc);
-      --ct-slider-color-muted-foreground: var(
+      --cf-slider-color-muted: var(--ct-theme-color-surface, #f8fafc);
+      --cf-slider-color-muted-foreground: var(
         --ct-theme-color-text-muted,
         #64748b
       );
 
       /* Slider dimensions */
-      --ct-slider-height: 1.25rem;
-      --ct-slider-track-height: 0.5rem;
-      --ct-slider-thumb-size: 1.25rem;
-      --ct-slider-border-radius: 9999px;
+      --cf-slider-height: 1.25rem;
+      --cf-slider-track-height: 0.5rem;
+      --cf-slider-thumb-size: 1.25rem;
+      --cf-slider-border-radius: 9999px;
 
       display: inline-block;
       width: 100%;
@@ -63,9 +62,9 @@ export class CTSlider extends BaseElement {
     }
 
     :host([orientation="vertical"]) {
-      width: var(--ct-slider-height);
+      width: var(--cf-slider-height);
       height: 200px;
-      min-width: var(--ct-slider-height);
+      min-width: var(--cf-slider-height);
       min-height: 200px;
     }
 
@@ -76,7 +75,7 @@ export class CTSlider extends BaseElement {
     .slider {
       position: relative;
       width: 100%;
-      height: var(--ct-slider-height);
+      height: var(--cf-slider-height);
       display: flex;
       align-items: center;
       touch-action: none;
@@ -84,7 +83,7 @@ export class CTSlider extends BaseElement {
     }
 
     .slider.vertical {
-      width: var(--ct-slider-height);
+      width: var(--cf-slider-height);
       height: 100%;
       align-items: center;
       justify-content: center;
@@ -99,15 +98,15 @@ export class CTSlider extends BaseElement {
     .track {
       position: relative;
       width: 100%;
-      height: var(--ct-slider-track-height);
-      background-color: var(--ct-slider-color-border);
-      border-radius: var(--ct-slider-border-radius);
+      height: var(--cf-slider-track-height);
+      background-color: var(--cf-slider-color-border);
+      border-radius: var(--cf-slider-border-radius);
       overflow: hidden;
       cursor: pointer;
     }
 
     .slider.vertical .track {
-      width: var(--ct-slider-track-height);
+      width: var(--cf-slider-track-height);
       height: 100%;
     }
 
@@ -119,8 +118,8 @@ export class CTSlider extends BaseElement {
     .range {
       position: absolute;
       height: 100%;
-      background-color: var(--ct-slider-color-primary);
-      border-radius: var(--ct-slider-border-radius);
+      background-color: var(--cf-slider-color-primary);
+      border-radius: var(--cf-slider-border-radius);
       pointer-events: none;
     }
 
@@ -138,11 +137,11 @@ export class CTSlider extends BaseElement {
     /* Thumb */
     .thumb {
       position: absolute;
-      width: var(--ct-slider-thumb-size);
-      height: var(--ct-slider-thumb-size);
-      background-color: var(--ct-slider-color-background);
-      border: 2px solid var(--ct-slider-color-primary);
-      border-radius: var(--ct-slider-border-radius);
+      width: var(--cf-slider-thumb-size);
+      height: var(--cf-slider-thumb-size);
+      background-color: var(--cf-slider-color-background);
+      border: 2px solid var(--cf-slider-color-primary);
+      border-radius: var(--cf-slider-border-radius);
       cursor: grab;
       transform: translate(-50%, -50%);
       transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -162,12 +161,12 @@ export class CTSlider extends BaseElement {
 
       .slider.disabled .thumb {
         cursor: not-allowed;
-        border-color: var(--ct-slider-color-border);
+        border-color: var(--cf-slider-color-border);
       }
 
       /* Hover state */
       :host(:not([disabled]):hover) .thumb {
-        border-color: var(--ct-slider-color-primary);
+        border-color: var(--cf-slider-color-primary);
         box-shadow:
           0 4px 6px -1px rgba(0, 0, 0, 0.1),
           0 2px 4px -2px rgba(0, 0, 0, 0.1);
@@ -182,8 +181,8 @@ export class CTSlider extends BaseElement {
           outline: 2px solid transparent;
           outline-offset: 2px;
           box-shadow:
-            0 0 0 2px var(--ct-slider-color-background),
-            0 0 0 4px var(--ct-slider-color-ring);
+            0 0 0 2px var(--cf-slider-color-background),
+            0 0 0 4px var(--cf-slider-color-ring);
           }
 
           /* Active/dragging state */
@@ -530,7 +529,7 @@ export class CTSlider extends BaseElement {
             const oldValue = this.value;
             this.value = snappedValue;
             this.emit("cf-input", { value: snappedValue, oldValue });
-            this.emit("ct-change", { value: snappedValue, oldValue });
+            this.emit("cf-change", { value: snappedValue, oldValue });
           }
         }
 
@@ -575,7 +574,7 @@ export class CTSlider extends BaseElement {
           if (clampedValue !== this.value) {
             const oldValue = this.value;
             this.value = clampedValue;
-            this.emit("ct-change", { value: clampedValue, oldValue });
+            this.emit("cf-change", { value: clampedValue, oldValue });
           }
         };
 
@@ -608,4 +607,4 @@ export class CTSlider extends BaseElement {
         }
       }
 
-      globalThis.customElements.define("ct-slider", CTSlider);
+      globalThis.customElements.define("cf-slider", CFSlider);

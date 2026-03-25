@@ -15,7 +15,7 @@ const DEBUG_LOGGING = false;
  * Each variant maps to a property name that patterns can export.
  *
  * - `default`: The main [UI] export. Full standalone rendering.
- * - `preview`: Compact preview for pickers/lists (e.g., ct-picker). Maps to `previewUI`.
+ * - `preview`: Compact preview for pickers/lists (e.g., cf-picker). Maps to `previewUI`.
  * - `thumbnail`: Icon/thumbnail view for grid displays. Maps to `thumbnailUI`.
  * - `sidebar`: Optimized layout for sidebar/navigation contexts. Maps to `sidebarUI`.
  * - `fab`: Floating action button UI. Maps to `fabUI`.

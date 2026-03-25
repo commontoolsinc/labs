@@ -9,13 +9,13 @@ import { numberSchema } from "@commonfabric/runner/schemas";
 import "../cf-render/cf-render.ts";
 
 /**
- * CTPicker - Simple carousel selection component for cells with UI
+ * CFPicker - Simple carousel selection component for cells with UI
  *
  * Displays one renderable cell at a time, allowing users to cycle through
  * items using arrow indicators (hover), swipe gestures (touch), or keyboard.
  * Uses index-based selection for simplicity.
  *
- * @element ct-picker
+ * @element cf-picker
  *
  * @attr {boolean} disabled - Whether the picker is disabled
  * @attr {string} min-height - Optional minimum height for the picker area
@@ -23,27 +23,27 @@ import "../cf-render/cf-render.ts";
  * @prop {CellHandle<any[]> | any[]} items - Array of Cells with [UI] to render (CellHandle or plain array)
  * @prop {CellHandle<number>} selectedIndex - Two-way bound cell for current selection index
  *
- * @fires ct-change - Fired when selection changes: { index, value, items }
- * @fires ct-confirm - Fired when Enter/Space pressed to confirm selection: { index, value }
- * @fires ct-focus - Fired when picker gains focus
- * @fires ct-blur - Fired when picker loses focus
+ * @fires cf-change - Fired when selection changes: { index, value, items }
+ * @fires cf-confirm - Fired when Enter/Space pressed to confirm selection: { index, value }
+ * @fires cf-focus - Fired when picker gains focus
+ * @fires cf-blur - Fired when picker loses focus
  *
  * @example
  * const selectedIndex = Cell.of(0);
- * <ct-picker .items=${cellsWithUI} $selectedIndex=${selectedIndex}></ct-picker>
+ * <cf-picker .items=${cellsWithUI} $selectedIndex=${selectedIndex}></cf-picker>
  */
-export class CTPicker extends BaseElement {
+export class CFPicker extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
       :host {
-        --ct-picker-border-radius: var(--ct-theme-border-radius, 0.5rem);
-        --ct-picker-color-surface: var(--ct-theme-color-surface, #ffffff);
-        --ct-picker-color-text: var(--ct-theme-color-text, #111827);
-        --ct-picker-color-background: var(--ct-theme-color-background, #ffffff);
-        --ct-picker-color-primary: var(--ct-theme-color-primary, #3b82f6);
-        --ct-picker-color-border: var(--ct-theme-color-border, #e5e7eb);
-        --ct-picker-color-text-secondary: var(
+        --cf-picker-border-radius: var(--ct-theme-border-radius, 0.5rem);
+        --cf-picker-color-surface: var(--ct-theme-color-surface, #ffffff);
+        --cf-picker-color-text: var(--ct-theme-color-text, #111827);
+        --cf-picker-color-background: var(--ct-theme-color-background, #ffffff);
+        --cf-picker-color-primary: var(--ct-theme-color-primary, #3b82f6);
+        --cf-picker-color-border: var(--ct-theme-color-border, #e5e7eb);
+        --cf-picker-color-text-secondary: var(
           --ct-theme-color-text-secondary,
           #6b7280
         );
@@ -71,11 +71,11 @@ export class CTPicker extends BaseElement {
         display: flex;
         align-items: stretch;
         justify-content: center;
-        border-radius: var(--ct-picker-border-radius, 0.5rem);
-        background: var(--ct-picker-color-surface, #ffffff);
+        border-radius: var(--cf-picker-border-radius, 0.5rem);
+        background: var(--cf-picker-color-surface, #ffffff);
         overflow: hidden;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        min-height: var(--ct-picker-min-height, auto);
+        min-height: var(--cf-picker-min-height, auto);
       }
 
       .card-wrapper cf-render {
@@ -95,8 +95,8 @@ export class CTPicker extends BaseElement {
         height: 2.5rem;
         border: none;
         border-radius: 50%;
-        background: var(--ct-picker-color-surface, rgba(255, 255, 255, 0.95));
-        color: var(--ct-picker-color-text, #111827);
+        background: var(--cf-picker-color-surface, rgba(255, 255, 255, 0.95));
+        color: var(--cf-picker-color-text, #111827);
         cursor: pointer;
         opacity: 0;
         transition:
@@ -107,7 +107,7 @@ export class CTPicker extends BaseElement {
       }
 
       .nav-arrow:hover {
-        background: var(--ct-picker-color-background, #ffffff);
+        background: var(--cf-picker-color-background, #ffffff);
         transform: translateY(-50%) scale(1.05);
       }
 
@@ -116,7 +116,7 @@ export class CTPicker extends BaseElement {
       }
 
       .nav-arrow:focus {
-        outline: 2px solid var(--ct-picker-color-primary, #3b82f6);
+        outline: 2px solid var(--cf-picker-color-primary, #3b82f6);
         outline-offset: 2px;
       }
 
@@ -156,7 +156,7 @@ export class CTPicker extends BaseElement {
       }
 
       .empty-state {
-        color: var(--ct-picker-color-text-secondary, #6b7280);
+        color: var(--cf-picker-color-text-secondary, #6b7280);
         font-size: 0.875rem;
       }
 
@@ -171,11 +171,11 @@ export class CTPicker extends BaseElement {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: var(--ct-picker-color-border, #e5e7eb);
+        background: var(--cf-picker-color-border, #e5e7eb);
       }
 
       .dot.active {
-        background: var(--ct-picker-color-primary, #3b82f6);
+        background: var(--cf-picker-color-primary, #3b82f6);
       }
     `,
   ];
@@ -220,7 +220,7 @@ export class CTPicker extends BaseElement {
   private _indexCellController = createCellController<number>(this, {
     timing: { strategy: "immediate" },
     onChange: (newIndex) => {
-      this.emit("ct-change", {
+      this.emit("cf-change", {
         index: newIndex,
         value: this._getItemAt(newIndex ?? 0),
         items: this.items,
@@ -433,7 +433,7 @@ export class CTPicker extends BaseElement {
       case "Enter":
       case " ":
         event.preventDefault();
-        this.emit("ct-confirm", {
+        this.emit("cf-confirm", {
           index: this._currentIndex,
           value: this._getItemAt(this._currentIndex),
         });
@@ -465,11 +465,11 @@ export class CTPicker extends BaseElement {
   // --- Focus handling ---
 
   private _handleFocus = (): void => {
-    this.emit("ct-focus");
+    this.emit("cf-focus");
   };
 
   private _handleBlur = (): void => {
-    this.emit("ct-blur");
+    this.emit("cf-blur");
   };
 
   // --- ARIA ---
@@ -485,7 +485,7 @@ export class CTPicker extends BaseElement {
   // --- Styling helpers ---
 
   private _updateMinHeight(): void {
-    this.style.setProperty("--ct-picker-min-height", this.minHeight);
+    this.style.setProperty("--cf-picker-min-height", this.minHeight);
   }
 
   // --- Public API ---
@@ -506,10 +506,10 @@ export class CTPicker extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-picker", CTPicker);
+globalThis.customElements.define("cf-picker", CFPicker);
 
 declare global {
   interface HTMLElementTagNameMap {
-    "ct-picker": CTPicker;
+    "cf-picker": CFPicker;
   }
 }

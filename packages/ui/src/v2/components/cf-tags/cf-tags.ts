@@ -6,20 +6,19 @@ import { BaseElement } from "../../core/base-element.ts";
 // matching the prior phase-1 token migration pattern.
 
 /**
- * CTTags - A tags component that renders tags as pills with add/remove functionality
+ * CFTags - A tags component that renders tags as pills with add/remove functionality
  *
- * @element ct-tags
+ * @element cf-tags
  *
  * @attr {Array<string>} tags - Array of tag strings
  * @attr {boolean} readonly - Whether the tags are read-only
  *
- * @fires ct-change - Fired when tags change with detail: { tags }
+ * @fires cf-change - Fired when tags change with detail: { tags }
  *
  * @example
- * <ct-tags .tags="${['tag1', 'tag2']}" @ct-change="${handleTagsChange}"></ct-tags>
+ * <cf-tags .tags="${['tag1', 'tag2']}" @cf-change="${handleTagsChange}"></cf-tags>
  */
-
-export class CTTags extends BaseElement {
+export class CFTags extends BaseElement {
   static override properties = {
     tags: { type: Array },
     readonly: { type: Boolean },
@@ -218,7 +217,7 @@ export class CTTags extends BaseElement {
     const newTags = [...this.tags];
     newTags.splice(index, 1);
     this.tags = newTags;
-    this.emit("ct-change", { tags: this.tags });
+    this.emit("cf-change", { tags: this.tags });
   }
 
   private handleTagInput(index: number, event: Event) {
@@ -265,7 +264,7 @@ export class CTTags extends BaseElement {
       const newTags = [...this.tags];
       newTags[index] = tag;
       this.tags = newTags;
-      this.emit("ct-change", { tags: this.tags });
+      this.emit("cf-change", { tags: this.tags });
     }
 
     this.editingIndex = null;
@@ -315,7 +314,7 @@ export class CTTags extends BaseElement {
     const tag = this.newTagValue.trim();
     if (tag && !this.tags.includes(tag)) {
       this.tags = [...this.tags, tag];
-      this.emit("ct-change", { tags: this.tags });
+      this.emit("cf-change", { tags: this.tags });
     }
     this.cancelNewTag();
   }
@@ -407,4 +406,4 @@ export class CTTags extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-tags", CTTags);
+globalThis.customElements.define("cf-tags", CFTags);

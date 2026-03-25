@@ -1,5 +1,12 @@
 /// <cts-enable />
-import { computed, NAME, pattern, UI, type VNode, Writable } from "commonfabric";
+import {
+  computed,
+  NAME,
+  pattern,
+  UI,
+  type VNode,
+  Writable,
+} from "commonfabric";
 
 import { Controls, SwitchControl } from "../ui/controls/index.ts";
 
@@ -84,10 +91,10 @@ export default pattern<PickerStoryInput, PickerStoryOutput>(() => {
   });
 
   return {
-    [NAME]: "ct-picker Story",
+    [NAME]: "cf-picker Story",
     [UI]: (
       <div style={{ padding: "1rem", maxWidth: "560px" }}>
-        <ct-picker
+        <cf-picker
           $items={items}
           $selectedIndex={selectedIndex}
           disabled={disabled}
