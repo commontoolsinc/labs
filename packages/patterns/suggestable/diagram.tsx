@@ -59,7 +59,7 @@ const Diagram = pattern<DiagramInput, DiagramOutput>(({ topic, context }) => {
           {ifElse(
             response.pending,
             <div style="color: var(--ct-color-text-secondary);">
-              <ct-loader show-elapsed /> Generating diagram...
+              <cf-loader show-elapsed /> Generating diagram...
             </div>,
             <pre style="font-family: monospace; font-size: 0.85rem; line-height: 1.4; overflow-x: auto; white-space: pre; background: var(--ct-color-surface-secondary, #f5f5f5); padding: 1rem; border-radius: 0.5rem;">
               {response.result}

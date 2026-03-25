@@ -498,7 +498,7 @@ export const SmartTextInput = pattern<
             gap: "8px",
           }}
         >
-          <ct-loader size="sm" />
+          <cf-loader size="sm" />
           <span style={{ color: "#6b7280", fontSize: "13px" }}>
             Extracting text from image...
           </span>

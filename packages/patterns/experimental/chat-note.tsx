@@ -584,7 +584,7 @@ const ChatNote = pattern<Input, Output>(
                   flexShrink: 0,
                 }}
               >
-                <ct-loader show-elapsed style={{ flexShrink: 0 }} />
+                <cf-loader show-elapsed style={{ flexShrink: 0 }} />
                 <cf-button
                   variant="secondary"
                   size="sm"

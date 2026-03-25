@@ -1,7 +1,7 @@
 /**
  * @fileoverview UI Skeleton Component - Loading placeholder with animations
  *
- * @module ct-skeleton
+ * @module cf-skeleton
  * @description
  * A loading placeholder component that displays an animated skeleton screen
  * while content is being loaded. Helps improve perceived performance by
@@ -11,16 +11,16 @@
  * @example
  * ```html
  * <!-- Basic skeleton -->
- * <ct-skeleton style="width: 200px; height: 20px"></ct-skeleton>
+ * <cf-skeleton style="width: 200px; height: 20px"></cf-skeleton>
  *
  * <!-- Text skeleton -->
- * <ct-skeleton variant="text" width="100%" height="1em"></ct-skeleton>
+ * <cf-skeleton variant="text" width="100%" height="1em"></cf-skeleton>
  *
  * <!-- Circular skeleton (avatar placeholder) -->
- * <ct-skeleton variant="circular" width="40px" height="40px"></ct-skeleton>
+ * <cf-skeleton variant="circular" width="40px" height="40px"></cf-skeleton>
  *
  * <!-- Static skeleton (no animation) -->
- * <ct-skeleton animated="false"></ct-skeleton>
+ * <cf-skeleton animated="false"></cf-skeleton>
  * ```
  */
 
@@ -31,9 +31,9 @@ import { BaseElement } from "../../core/base-element.ts";
 export type SkeletonVariant = "default" | "text" | "circular";
 
 /**
- * CTSkeleton displays an animated loading placeholder.
+ * CFSkeleton displays an animated loading placeholder.
  *
- * @tag ct-skeleton
+ * @tag cf-skeleton
  * @extends BaseElement
  *
  * @property {SkeletonVariant} variant - Visual style variant ("default" | "text" | "circular")
@@ -51,7 +51,7 @@ export type SkeletonVariant = "default" | "text" | "circular";
  * @note Style with CSS width/height or use width/height attributes
  * @note Has role="status" and aria-label="Loading" for accessibility
  */
-export class CTSkeleton extends BaseElement {
+export class CFSkeleton extends BaseElement {
   static override styles = css`
     :host {
       display: inline-block;
@@ -164,4 +164,4 @@ export class CTSkeleton extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-skeleton", CTSkeleton);
+globalThis.customElements.define("cf-skeleton", CFSkeleton);

@@ -90,7 +90,7 @@ const Question = pattern<QuestionInput, QuestionOutput>(
             {ifElse(
               response.pending,
               <div style="color: var(--ct-color-text-secondary);">
-                <ct-loader show-elapsed /> Generating question...
+                <cf-loader show-elapsed /> Generating question...
               </div>,
               <ct-question
                 question={computed(

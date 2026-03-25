@@ -61,9 +61,9 @@ registerAllComponents();
 
 - **Forms**: `cf-button`, `cf-input`, `cf-textarea`, `cf-checkbox`, `cf-radio`,
   `cf-switch`, `cf-toggle`, `cf-slider`
-- **Layout**: `cf-card`, `ct-separator`, `ct-accordion`, `cf-collapsible`,
+- **Layout**: `cf-card`, `cf-separator`, `ct-accordion`, `cf-collapsible`,
   `ct-tabs`, `ct-scroll-area`
-- **Feedback**: `ct-alert`, `ct-badge`, `ct-progress`, `ct-skeleton`, `ct-label`
+- **Feedback**: `ct-alert`, `ct-badge`, `ct-progress`, `cf-skeleton`, `cf-label`
 - **Data**: `ct-table`, `cf-form`, `ct-input-otp`
 - **Display**: `ct-aspect-ratio`, `ct-resizable-panel-group`
 
@@ -149,12 +149,12 @@ packages/ui/
 <cf-form>
   <cf-vstack gap="4">
     <cf-vgroup gap="1">
-      <ct-label for="email" required>Email</ct-label>
+      <cf-label for="email" required>Email</cf-label>
       <cf-input id="email" type="email" name="email" required></cf-input>
     </cf-vgroup>
 
     <cf-vgroup gap="1">
-      <ct-label for="message">Message</ct-label>
+      <cf-label for="message">Message</cf-label>
       <cf-textarea id="message" name="message" rows="4"></cf-textarea>
     </cf-vgroup>
 

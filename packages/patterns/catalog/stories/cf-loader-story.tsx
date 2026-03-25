@@ -14,7 +14,7 @@ export default pattern<LoaderStoryInput, LoaderStoryOutput>(() => {
   const showElapsed = Writable.of(false);
 
   return {
-    [NAME]: "ct-loader Story",
+    [NAME]: "cf-loader Story",
     [UI]: (
       <div
         style={{
@@ -37,19 +37,19 @@ export default pattern<LoaderStoryInput, LoaderStoryOutput>(() => {
           </div>
           <div style={{ display: "flex", gap: "24px", alignItems: "center" }}>
             <cf-vstack gap="1" align="center">
-              <ct-loader size="sm" show-elapsed={showElapsed} />
+              <cf-loader size="sm" show-elapsed={showElapsed} />
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                 sm
               </span>
             </cf-vstack>
             <cf-vstack gap="1" align="center">
-              <ct-loader size="md" show-elapsed={showElapsed} />
+              <cf-loader size="md" show-elapsed={showElapsed} />
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                 md
               </span>
             </cf-vstack>
             <cf-vstack gap="1" align="center">
-              <ct-loader size="lg" show-elapsed={showElapsed} />
+              <cf-loader size="lg" show-elapsed={showElapsed} />
               <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                 lg
               </span>

@@ -811,7 +811,7 @@ export default pattern<Input, Output>(
                       {ifElse(
                         computed(() => isFetchingCell.get() === true),
                         <cf-hstack align="center" gap={1}>
-                          <ct-loader />
+                          <cf-loader />
                           <span>Fetching...</span>
                         </cf-hstack>,
                         "Fetch Comments",

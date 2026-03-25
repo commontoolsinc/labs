@@ -11,7 +11,7 @@ interface KbdStoryOutput {
 
 export default pattern<KbdStoryInput, KbdStoryOutput>(() => {
   return {
-    [NAME]: "ct-kbd Story",
+    [NAME]: "cf-kbd Story",
     [UI]: (
       <div
         style={{
@@ -22,33 +22,33 @@ export default pattern<KbdStoryInput, KbdStoryOutput>(() => {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <ct-kbd>⌘</ct-kbd>
-          <ct-kbd>C</ct-kbd>
+          <cf-kbd>⌘</cf-kbd>
+          <cf-kbd>C</cf-kbd>
           <span style={{ fontSize: "13px", color: "#6b7280" }}>Copy</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <ct-kbd>⌘</ct-kbd>
-          <ct-kbd>V</ct-kbd>
+          <cf-kbd>⌘</cf-kbd>
+          <cf-kbd>V</cf-kbd>
           <span style={{ fontSize: "13px", color: "#6b7280" }}>Paste</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <ct-kbd>⌘</ct-kbd>
-          <ct-kbd>Shift</ct-kbd>
-          <ct-kbd>P</ct-kbd>
+          <cf-kbd>⌘</cf-kbd>
+          <cf-kbd>Shift</cf-kbd>
+          <cf-kbd>P</cf-kbd>
           <span style={{ fontSize: "13px", color: "#6b7280" }}>
             Command Palette
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <ct-kbd>Ctrl</ct-kbd>
-          <ct-kbd>Alt</ct-kbd>
-          <ct-kbd>Del</ct-kbd>
+          <cf-kbd>Ctrl</cf-kbd>
+          <cf-kbd>Alt</cf-kbd>
+          <cf-kbd>Del</cf-kbd>
           <span style={{ fontSize: "13px", color: "#6b7280" }}>
             Task Manager
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <ct-kbd>Esc</ct-kbd>
+          <cf-kbd>Esc</cf-kbd>
           <span style={{ fontSize: "13px", color: "#6b7280" }}>Close</span>
         </div>
       </div>

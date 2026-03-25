@@ -5,7 +5,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commonfabric/html/client";
 import type { CellHandle } from "@commonfabric/runtime-client";
 import { type VNode } from "@commonfabric/runtime-client";
-import "../ct-loader/ct-loader.ts";
+import "../cf-loader/cf-loader.ts";
 
 // Set to true to enable debug logging
 const DEBUG_LOGGING = false;
@@ -144,7 +144,7 @@ export class CFRender extends BaseElement {
       ${!this._hasRendered
         ? html`
           <div class="loading-spinner">
-            <ct-loader size="lg"></ct-loader>
+            <cf-loader size="lg"></cf-loader>
           </div>
         `
         : null}

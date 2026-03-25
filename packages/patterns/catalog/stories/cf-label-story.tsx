@@ -11,7 +11,7 @@ interface LabelStoryOutput {
 
 export default pattern<LabelStoryInput, LabelStoryOutput>(() => {
   return {
-    [NAME]: "ct-label Story",
+    [NAME]: "cf-label Story",
     [UI]: (
       <div
         style={{
@@ -22,9 +22,9 @@ export default pattern<LabelStoryInput, LabelStoryOutput>(() => {
           maxWidth: "320px",
         }}
       >
-        <ct-label>Default label</ct-label>
-        <ct-label required>Required label</ct-label>
-        <ct-label disabled>Disabled label</ct-label>
+        <cf-label>Default label</cf-label>
+        <cf-label required>Required label</cf-label>
+        <cf-label disabled>Disabled label</cf-label>
       </div>
     ),
     controls: (

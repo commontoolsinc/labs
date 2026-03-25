@@ -1819,7 +1819,7 @@ When you're done searching, STOP calling tools and produce your final structured
                         color: "#475569",
                       }}
                     >
-                      <ct-loader show-elapsed></ct-loader>
+                      <cf-loader show-elapsed></cf-loader>
                       Scanning emails...
                     </div>
 
@@ -1874,7 +1874,7 @@ When you're done searching, STOP calling tools and produce your final structured
                                 gap: "8px",
                               }}
                             >
-                              <ct-loader size="sm"></ct-loader>
+                              <cf-loader size="sm"></cf-loader>
                               Analyzing emails...
                             </div>
                           </div>

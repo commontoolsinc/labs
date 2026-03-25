@@ -75,7 +75,7 @@ export default pattern<LLMTestInput>(({ title }) => {
               pending
                 ? (
                   <div>
-                    <ct-loader show-elapsed /> Thinking...
+                    <cf-loader show-elapsed /> Thinking...
                   </div>
                 )
                 : r

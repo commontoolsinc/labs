@@ -1,5 +1,5 @@
 /**
- * Styles for ct-label component
+ * Styles for cf-label component
  */
 
 export const labelStyles = `

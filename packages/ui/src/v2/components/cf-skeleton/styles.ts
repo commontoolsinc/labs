@@ -1,5 +1,5 @@
 /**
- * Styles for ct-skeleton component
+ * Styles for cf-skeleton component
  */
 
 export const skeletonStyles = `

@@ -100,7 +100,7 @@ export default pattern<{
               pending
                 ? (
                   <div style="margin-bottom: 16px;">
-                    <ct-loader show-elapsed /> Generating summary...
+                    <cf-loader show-elapsed /> Generating summary...
                   </div>
                 )
                 : result

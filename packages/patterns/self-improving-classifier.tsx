@@ -2305,7 +2305,7 @@ Each suggestion should have:
                       </cf-vstack>,
                       // Still loading
                       <cf-hstack gap="2" align="center">
-                        <ct-loader size="sm" />
+                        <cf-loader size="sm" />
                         <span style="font-weight: 500;">Classifying...</span>
                       </cf-hstack>,
                     )}

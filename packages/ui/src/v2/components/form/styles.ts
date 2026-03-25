@@ -33,7 +33,7 @@ export const formStyles = `
   }
 
   /* Common form field patterns */
-  ::slotted(ct-label) {
+  ::slotted(cf-label) {
     margin-bottom: var(--form-field-gap);
   }
 

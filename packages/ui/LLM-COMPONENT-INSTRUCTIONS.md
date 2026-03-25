@@ -182,19 +182,19 @@ shadcn/ui design system. All components:
 - `cf-change` - Fired on selection change with detail: `{ value }` **Slots**:
   Default slot for cf-toggle elements
 
-### 11. ct-label
+### 11. cf-label
 
-**Purpose**: Form field label **Tag**: `<ct-label>` **Attributes**:
+**Purpose**: Form field label **Tag**: `<cf-label>` **Attributes**:
 
 - `for` - string (ID of associated input)
 - `required` - boolean (shows asterisk)
 - `disabled` - boolean **Events**:
-- `ct-label-click` - Fired on click with detail: `{ targetId, targetElement }`
+- `cf-label-click` - Fired on click with detail: `{ targetId, targetElement }`
 
 **Slots**: Default slot for label text **Example**:
 
 ```html
-<ct-label for="email" required>Email Address</ct-label>
+<cf-label for="email" required>Email Address</cf-label>
 <cf-input id="email" type="email"></cf-input>
 ```
 
@@ -248,15 +248,15 @@ shadcn/ui design system. All components:
 </ct-alert>
 ```
 
-### 15. ct-separator
+### 15. cf-separator
 
-**Purpose**: Visual divider **Tag**: `<ct-separator>` **Attributes**:
+**Purpose**: Visual divider **Tag**: `<cf-separator>` **Attributes**:
 
 - `orientation` - "horizontal" | "vertical"
 - `decorative` - boolean **Example**:
 
 ```html
-<ct-separator orientation="vertical"></ct-separator>
+<cf-separator orientation="vertical"></cf-separator>
 ```
 
 ### 16. ct-progress
@@ -271,13 +271,13 @@ shadcn/ui design system. All components:
 <ct-progress value="60"></ct-progress>
 ```
 
-### 17. ct-skeleton
+### 17. cf-skeleton
 
-**Purpose**: Loading placeholder **Tag**: `<ct-skeleton>` **Attributes**: None
+**Purpose**: Loading placeholder **Tag**: `<cf-skeleton>` **Attributes**: None
 (style with CSS width/height) **Example**:
 
 ```html
-<ct-skeleton style="width: 200px; height: 20px"></ct-skeleton>
+<cf-skeleton style="width: 200px; height: 20px"></cf-skeleton>
 ```
 
 ### 18. ct-accordion
@@ -576,17 +576,17 @@ Same as cf-hstack **Example**:
 <cf-form>
   <cf-vstack gap="4">
     <cf-vgroup gap="1">
-      <ct-label for="name" required>Full Name</ct-label>
+      <cf-label for="name" required>Full Name</cf-label>
       <cf-input id="name" name="name" required></cf-input>
     </cf-vgroup>
 
     <cf-vgroup gap="1">
-      <ct-label for="email" required>Email</ct-label>
+      <cf-label for="email" required>Email</cf-label>
       <cf-input id="email" name="email" type="email" required></cf-input>
     </cf-vgroup>
 
     <cf-vgroup gap="1">
-      <ct-label for="message">Message</ct-label>
+      <cf-label for="message">Message</cf-label>
       <cf-textarea id="message" name="message" rows="4"></cf-textarea>
     </cf-vgroup>
 

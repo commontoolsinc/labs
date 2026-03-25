@@ -238,7 +238,7 @@ const summaries = articles.map((article) => ({
                   if (pending) {
                     return (
                       <div style={{ color: "#1976d2" }}>
-                        <ct-loader show-elapsed /> Generating summary...
+                        <cf-loader show-elapsed /> Generating summary...
                       </div>
                     );
                   }

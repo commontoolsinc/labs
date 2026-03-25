@@ -1,7 +1,7 @@
 /**
  * @fileoverview UI Loader Component - Spinning loading indicator
  *
- * @module ct-loader
+ * @module cf-loader
  * @description
  * A simple inline spinner for visualizing pending async operations.
  * Optionally displays elapsed time and a stop/cancel button.
@@ -9,16 +9,16 @@
  * @example
  * ```html
  * <!-- Basic spinner -->
- * <ct-loader></ct-loader>
+ * <cf-loader></cf-loader>
  *
  * <!-- With elapsed time -->
- * <ct-loader showElapsed></ct-loader>
+ * <cf-loader showElapsed></cf-loader>
  *
  * <!-- With stop button -->
- * <ct-loader showElapsed showStop @ct-stop=${handleCancel}></ct-loader>
+ * <cf-loader showElapsed showStop @cf-stop=${handleCancel}></cf-loader>
  *
  * <!-- Small inline spinner -->
- * <span>Loading <ct-loader size="sm"></ct-loader></span>
+ * <span>Loading <cf-loader size="sm"></cf-loader></span>
  * ```
  */
 
@@ -28,41 +28,41 @@ import { BaseElement } from "../../core/base-element.ts";
 export type LoaderSize = "sm" | "md" | "lg";
 
 /**
- * CTLoader displays a spinning loading indicator.
+ * CFLoader displays a spinning loading indicator.
  *
- * @tag ct-loader
+ * @tag cf-loader
  * @extends BaseElement
  *
  * @property {LoaderSize} size - Size variant: "sm" (12px), "md" (24px), "lg" (48px)
  * @property {boolean} showElapsed - Whether to display elapsed time
  * @property {boolean} showStop - Whether to display stop button
  *
- * @fires ct-stop - Fired when stop button is clicked
+ * @fires cf-stop - Fired when stop button is clicked
  *
  * @csspart spinner - The spinning circle SVG
  * @csspart elapsed - The elapsed time text
  * @csspart stop - The stop button
  */
-export class CTLoader extends BaseElement {
+export class CFLoader extends BaseElement {
   static override styles = css`
     :host {
-      --ct-loader-color-track: var(
+      --cf-loader-color-track: var(
         --ct-theme-color-border,
         var(--ct-colors-gray-300, #e0e0e0)
       );
-      --ct-loader-color-arc: var(
+      --cf-loader-color-arc: var(
         --ct-theme-color-primary,
         var(--ct-colors-primary-500, #000)
       );
-      --ct-loader-color-text: var(
+      --cf-loader-color-text: var(
         --ct-theme-color-text-muted,
         var(--ct-colors-gray-600, #666)
       );
-      --ct-loader-color-surface: var(
+      --cf-loader-color-surface: var(
         --ct-theme-color-surface,
         var(--ct-colors-gray-100, #f0f0f0)
       );
-      --ct-loader-color-error: var(
+      --cf-loader-color-error: var(
         --ct-theme-color-error,
         var(--ct-colors-error, #dc2626)
       );
@@ -101,11 +101,11 @@ export class CTLoader extends BaseElement {
     }
 
     .track {
-      stroke: var(--ct-loader-color-track, #e0e0e0);
+      stroke: var(--cf-loader-color-track, #e0e0e0);
     }
 
     .arc {
-      stroke: var(--ct-loader-color-arc, #000);
+      stroke: var(--cf-loader-color-arc, #000);
       stroke-linecap: round;
     }
 
@@ -117,7 +117,7 @@ export class CTLoader extends BaseElement {
 
     .elapsed {
       font-size: 0.75rem;
-      color: var(--ct-loader-color-text, #666);
+      color: var(--cf-loader-color-text, #666);
       font-variant-numeric: tabular-nums;
     }
 
@@ -131,13 +131,13 @@ export class CTLoader extends BaseElement {
       border: none;
       border-radius: 2px;
       background: transparent;
-      color: var(--ct-loader-color-text, #666);
+      color: var(--cf-loader-color-text, #666);
       cursor: pointer;
     }
 
     .stop-button:hover {
-      background: var(--ct-loader-color-surface, #f0f0f0);
-      color: var(--ct-loader-color-error, #dc2626);
+      background: var(--cf-loader-color-surface, #f0f0f0);
+      color: var(--cf-loader-color-error, #dc2626);
     }
 
     .stop-button svg {
@@ -240,7 +240,7 @@ export class CTLoader extends BaseElement {
   private _handleStop(event: Event): void {
     event.preventDefault();
     event.stopPropagation();
-    this.emit("ct-stop", {});
+    this.emit("cf-stop", {});
   }
 
   override render() {
@@ -305,4 +305,4 @@ export class CTLoader extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-loader", CTLoader);
+globalThis.customElements.define("cf-loader", CFLoader);

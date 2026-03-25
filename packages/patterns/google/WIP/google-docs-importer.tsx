@@ -312,7 +312,7 @@ export default pattern<Input, Output>(
                       {ifElse(
                         isFetchingCell,
                         <cf-hstack align="center" gap={1}>
-                          <ct-loader />
+                          <cf-loader />
                           <span>Importing...</span>
                         </cf-hstack>,
                         "Import",

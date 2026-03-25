@@ -5,13 +5,13 @@ import { BaseElement } from "../../core/base-element.ts";
 // matching the prior phase-1 token migration pattern.
 
 /**
- * CTKbd - Inline keyboard hint element
+ * CFKbd - Inline keyboard hint element
  *
- * @element ct-kbd
+ * @element cf-kbd
  *
  * @slot - Shortcut text (e.g. ⌘N)
  */
-export class CTKbd extends BaseElement {
+export class CFKbd extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -50,4 +50,4 @@ export class CTKbd extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-kbd", CTKbd);
+globalThis.customElements.define("cf-kbd", CFKbd);

@@ -51,7 +51,7 @@ export default pattern(
 
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
               <div>
-                <ct-label for="text-input">Text Input</ct-label>
+                <cf-label for="text-input">Text Input</cf-label>
                 <cf-input
                   id="text-input"
                   type="text"
@@ -61,7 +61,7 @@ export default pattern(
               </div>
 
               <div>
-                <ct-label for="email-input" required>Email Input</ct-label>
+                <cf-label for="email-input" required>Email Input</cf-label>
                 <cf-input
                   id="email-input"
                   type="email"
@@ -71,7 +71,7 @@ export default pattern(
               </div>
 
               <div>
-                <ct-label for="password-input">Password Input</ct-label>
+                <cf-label for="password-input">Password Input</cf-label>
                 <cf-input
                   id="password-input"
                   type="password"
@@ -81,7 +81,7 @@ export default pattern(
               </div>
 
               <div>
-                <ct-label for="number-input">Number Input</ct-label>
+                <cf-label for="number-input">Number Input</cf-label>
                 <cf-input
                   id="number-input"
                   type="number"
@@ -103,22 +103,22 @@ export default pattern(
 
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">
               <div>
-                <ct-label for="basic-textarea">Basic Textarea</ct-label>
+                <cf-label for="basic-textarea">Basic Textarea</cf-label>
                 <cf-textarea
                   id="basic-textarea"
                   placeholder="Enter your message..."
-                  rows="4"
+                  rows={4}
                 >
                 </cf-textarea>
               </div>
 
               <div>
-                <ct-label for="auto-textarea">Auto-resize Textarea</ct-label>
+                <cf-label for="auto-textarea">Auto-resize Textarea</cf-label>
                 <cf-textarea
                   id="auto-textarea"
                   placeholder="This grows as you type..."
                   auto-resize
-                  rows="2"
+                  rows={2}
                 >
                 </cf-textarea>
               </div>
@@ -198,17 +198,17 @@ export default pattern(
 
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
               <cf-checkbox id="checkbox1"></cf-checkbox>
-              <ct-label for="checkbox1">Unchecked by default</ct-label>
+              <cf-label for="checkbox1">Unchecked by default</cf-label>
             </div>
 
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
               <cf-checkbox id="checkbox2" checked></cf-checkbox>
-              <ct-label for="checkbox2">Checked by default</ct-label>
+              <cf-label for="checkbox2">Checked by default</cf-label>
             </div>
 
             <div style="display: flex; align-items: center; gap: 0.5rem;">
               <cf-checkbox id="checkbox3" disabled></cf-checkbox>
-              <ct-label for="checkbox3" disabled>Disabled checkbox</ct-label>
+              <cf-label for="checkbox3" disabled>Disabled checkbox</cf-label>
             </div>
           </section>
 
@@ -219,17 +219,17 @@ export default pattern(
 
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
               <cf-switch id="switch1"></cf-switch>
-              <ct-label for="switch1">Enable notifications</ct-label>
+              <cf-label for="switch1">Enable notifications</cf-label>
             </div>
 
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
               <cf-switch id="switch2" checked></cf-switch>
-              <ct-label for="switch2">Dark mode (on by default)</ct-label>
+              <cf-label for="switch2">Dark mode (on by default)</cf-label>
             </div>
 
             <div style="display: flex; align-items: center; gap: 0.5rem;">
               <cf-switch id="switch3" disabled></cf-switch>
-              <ct-label for="switch3" disabled>Disabled switch</ct-label>
+              <cf-label for="switch3" disabled>Disabled switch</cf-label>
             </div>
           </section>
 
@@ -239,26 +239,26 @@ export default pattern(
             <p style="color: #64748b; margin-bottom: 1rem;">Range sliders</p>
 
             <div style="margin-bottom: 1rem;">
-              <ct-label for="slider1">Volume</ct-label>
-              <ct-slider
+              <cf-label for="slider1">Volume</cf-label>
+              <cf-slider
                 id="slider1"
-                min="0"
-                max="100"
-                value="50"
+                min={0}
+                max={100}
+                value={50}
               >
-              </ct-slider>
+              </cf-slider>
             </div>
 
             <div style="margin-bottom: 1rem;">
-              <ct-label for="slider2">Temperature</ct-label>
-              <ct-slider
+              <cf-label for="slider2">Temperature</cf-label>
+              <cf-slider
                 id="slider2"
-                min="0"
-                max="30"
-                value="22"
-                step="0.5"
+                min={0}
+                max={30}
+                value={22}
+                step={0.5}
               >
-              </ct-slider>
+              </cf-slider>
             </div>
           </section>
 
@@ -270,10 +270,10 @@ export default pattern(
             </p>
 
             <div style="display: flex; flex-direction: column; gap: 1rem;">
-              <ct-progress value="0"></ct-progress>
-              <ct-progress value="33"></ct-progress>
-              <ct-progress value="66"></ct-progress>
-              <ct-progress value="100"></ct-progress>
+              <ct-progress value={0}></ct-progress>
+              <ct-progress value={33}></ct-progress>
+              <ct-progress value={66}></ct-progress>
+              <ct-progress value={100}></ct-progress>
             </div>
           </section>
 
@@ -348,12 +348,12 @@ export default pattern(
             </p>
 
             <div>Content above separator</div>
-            <ct-separator></ct-separator>
+            <cf-separator></cf-separator>
             <div>Content below separator</div>
 
             <div style="display: flex; height: 100px; align-items: stretch; margin-top: 1rem;">
               <div>Left content</div>
-              <ct-separator orientation="vertical"></ct-separator>
+              <cf-separator orientation="vertical"></cf-separator>
               <div>Right content</div>
             </div>
           </section>
@@ -372,9 +372,9 @@ export default pattern(
             </div>
 
             <cf-toggle-group type="single">
-              <cf-toggle value="left">Left</cf-toggle>
-              <cf-toggle value="center">Center</cf-toggle>
-              <cf-toggle value="right">Right</cf-toggle>
+              <cf-toggle>Left</cf-toggle>
+              <cf-toggle>Center</cf-toggle>
+              <cf-toggle>Right</cf-toggle>
             </cf-toggle-group>
           </section>
 
@@ -388,15 +388,15 @@ export default pattern(
             <cf-radio-group name="options" value="option1">
               <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
                 <cf-radio id="radio1" value="option1"></cf-radio>
-                <ct-label for="radio1">Option 1</ct-label>
+                <cf-label for="radio1">Option 1</cf-label>
               </div>
               <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
                 <cf-radio id="radio2" value="option2"></cf-radio>
-                <ct-label for="radio2">Option 2</ct-label>
+                <cf-label for="radio2">Option 2</cf-label>
               </div>
               <div style="display: flex; align-items: center; gap: 0.5rem;">
                 <cf-radio id="radio3" value="option3"></cf-radio>
-                <ct-label for="radio3">Option 3</ct-label>
+                <cf-label for="radio3">Option 3</cf-label>
               </div>
             </cf-radio-group>
           </section>
@@ -427,17 +427,17 @@ export default pattern(
             </p>
 
             <div style="display: flex; flex-direction: column; gap: 1rem;">
-              <ct-skeleton style="width: 200px; height: 20px;"></ct-skeleton>
-              <ct-skeleton style="width: 100px; height: 100px; border-radius: 50%;">
-              </ct-skeleton>
+              <cf-skeleton style="width: 200px; height: 20px;"></cf-skeleton>
+              <cf-skeleton style="width: 100px; height: 100px; border-radius: 50%;">
+              </cf-skeleton>
 
               <cf-card>
                 <div slot="content">
-                  <ct-skeleton style="width: 100%; height: 20px; margin-bottom: 8px;">
-                  </ct-skeleton>
-                  <ct-skeleton style="width: 80%; height: 20px; margin-bottom: 8px;">
-                  </ct-skeleton>
-                  <ct-skeleton style="width: 60%; height: 20px;"></ct-skeleton>
+                  <cf-skeleton style="width: 100%; height: 20px; margin-bottom: 8px;">
+                  </cf-skeleton>
+                  <cf-skeleton style="width: 80%; height: 20px; margin-bottom: 8px;">
+                  </cf-skeleton>
+                  <cf-skeleton style="width: 60%; height: 20px;"></cf-skeleton>
                 </div>
               </cf-card>
             </div>
@@ -453,7 +453,7 @@ export default pattern(
             <cf-form>
               <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
                 <div>
-                  <ct-label for="form-name" required>Name</ct-label>
+                  <cf-label for="form-name" required>Name</cf-label>
                   <cf-input
                     id="form-name"
                     name="name"
@@ -465,7 +465,7 @@ export default pattern(
                 </div>
 
                 <div>
-                  <ct-label for="form-email" required>Email</ct-label>
+                  <cf-label for="form-email" required>Email</cf-label>
                   <cf-input
                     id="form-email"
                     name="email"
@@ -478,12 +478,12 @@ export default pattern(
               </div>
 
               <div style="margin-bottom: 1rem;">
-                <ct-label for="form-message">Message</ct-label>
+                <cf-label for="form-message">Message</cf-label>
                 <cf-textarea
                   id="form-message"
                   name="message"
                   placeholder="Your message..."
-                  rows="4"
+                  rows={4}
                 >
                 </cf-textarea>
               </div>
@@ -500,8 +500,8 @@ export default pattern(
             </p>
 
             <div>
-              <ct-label for="otp-input">Enter verification code</ct-label>
-              <ct-input-otp id="otp-input" length="6"></ct-input-otp>
+              <cf-label for="otp-input">Enter verification code</cf-label>
+              <ct-input-otp id="otp-input" length={6}></ct-input-otp>
             </div>
           </section>
 

@@ -597,7 +597,7 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
               color: "#2563eb",
             }}
           >
-            <ct-loader size="sm" />
+            <cf-loader size="sm" />
             <span>{pendingCount} analyzing...</span>
           </div>
           <span style={{ color: "#059669" }}>

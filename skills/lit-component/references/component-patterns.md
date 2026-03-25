@@ -56,7 +56,7 @@ export class CFVStack extends BaseElement {
 
 Components that display content with styling.
 
-**Examples:** `ct-label`, `ct-separator`, `ct-skeleton`
+**Examples:** `cf-label`, `cf-separator`, `cf-skeleton`
 
 **Characteristics:**
 
@@ -67,7 +67,7 @@ Components that display content with styling.
 **Pattern:**
 
 ```typescript
-export class CTSeparator extends BaseElement {
+export class CFSeparator extends BaseElement {
   static override properties = {
     orientation: { type: String },
     decorative: { type: Boolean },

@@ -1,5 +1,5 @@
 /**
- * Styles for ct-separator component
+ * Styles for cf-separator component
  */
 
 export const separatorStyles = `

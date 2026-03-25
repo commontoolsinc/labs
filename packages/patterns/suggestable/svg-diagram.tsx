@@ -60,7 +60,7 @@ const SvgDiagram = pattern<SvgDiagramInput, SvgDiagramOutput>(
             {ifElse(
               response.pending,
               <div style="color: var(--ct-color-text-secondary);">
-                <ct-loader show-elapsed /> Generating diagram...
+                <cf-loader show-elapsed /> Generating diagram...
               </div>,
               <ct-svg content={response.result} />,
             )}

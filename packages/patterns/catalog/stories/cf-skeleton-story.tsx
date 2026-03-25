@@ -11,7 +11,7 @@ interface SkeletonStoryOutput {
 
 export default pattern<SkeletonStoryInput, SkeletonStoryOutput>(() => {
   return {
-    [NAME]: "ct-skeleton Story",
+    [NAME]: "cf-skeleton Story",
     [UI]: (
       <div
         style={{
@@ -34,9 +34,9 @@ export default pattern<SkeletonStoryInput, SkeletonStoryOutput>(() => {
             Text Variants
           </div>
           <cf-vstack gap="3">
-            <ct-skeleton width="100%" height="20px" />
-            <ct-skeleton variant="text" width="80%" />
-            <ct-skeleton variant="text" width="60%" />
+            <cf-skeleton width="100%" height="20px" />
+            <cf-skeleton variant="text" width="80%" />
+            <cf-skeleton variant="text" width="60%" />
           </cf-vstack>
         </div>
 
@@ -52,10 +52,10 @@ export default pattern<SkeletonStoryInput, SkeletonStoryOutput>(() => {
             Card Skeleton
           </div>
           <cf-hstack gap="3" align="center">
-            <ct-skeleton variant="circular" width="40px" height="40px" />
+            <cf-skeleton variant="circular" width="40px" height="40px" />
             <cf-vstack gap="2" style="flex: 1;">
-              <ct-skeleton variant="text" width="70%" />
-              <ct-skeleton variant="text" width="40%" />
+              <cf-skeleton variant="text" width="70%" />
+              <cf-skeleton variant="text" width="40%" />
             </cf-vstack>
           </cf-hstack>
         </div>

@@ -32,10 +32,10 @@ import {
  * @example
  * ```html
  * <cf-form method="POST" action="/api/submit">
- *   <ct-label for="name">Name</ct-label>
+ *   <cf-label for="name">Name</cf-label>
  *   <cf-input id="name" name="name" required></cf-input>
  *
- *   <ct-label for="email">Email</ct-label>
+ *   <cf-label for="email">Email</cf-label>
  *   <cf-input id="email" name="email" type="email" required></cf-input>
  *
  *   <div class="form-actions">
@@ -78,7 +78,7 @@ export class CFForm extends BaseElement {
     }
 
     /* Common form field patterns */
-    ::slotted(ct-label) {
+    ::slotted(cf-label) {
       margin-bottom: var(--form-field-gap);
     }
 

@@ -2858,7 +2858,7 @@ type OutlinerNode = {
 interface CTOutlinerElement extends CTHTMLElement {}
 interface CTCellLinkElement extends CTHTMLElement {}
 interface CTSpaceLinkElement extends CTHTMLElement {}
-interface CTLoaderElement extends CTHTMLElement {}
+interface CFLoaderElement extends CTHTMLElement {}
 interface CFInputElement extends CTHTMLElement {}
 interface CTLinkPreviewElement extends CTHTMLElement {}
 interface CFTextAreaElement extends CTHTMLElement {}
@@ -2895,7 +2895,7 @@ interface CTAlertElement extends CTHTMLElement {}
 interface CFVStackElement extends CTHTMLElement {}
 interface CFMessageInputElement extends CTHTMLElement {}
 interface CTToolbarElement extends CTHTMLElement {}
-interface CTKbdElement extends CTHTMLElement {}
+interface CFKbdElement extends CTHTMLElement {}
 interface CTKeybindElement extends CTHTMLElement {}
 interface CFRenderElement extends CTHTMLElement {}
 interface CFCellContextElement extends CTHTMLElement {}
@@ -2957,14 +2957,14 @@ interface CFToggleElement extends CTHTMLElement {}
 interface CFToggleGroupElement extends CTHTMLElement {}
 interface CFRadioElement extends CTHTMLElement {}
 interface CTInputOtpElement extends CTHTMLElement {}
-interface CTLabelElement extends CTHTMLElement {}
+interface CFLabelElement extends CTHTMLElement {}
 
 // Display components
 interface CTBadgeElement extends CTHTMLElement {}
 interface CTChipElement extends CTHTMLElement {}
 interface CTProgressElement extends CTHTMLElement {}
-interface CTSkeletonElement extends CTHTMLElement {}
-interface CTSeparatorElement extends CTHTMLElement {}
+interface CFSkeletonElement extends CTHTMLElement {}
+interface CFSeparatorElement extends CTHTMLElement {}
 interface CTTileElement extends CTHTMLElement {}
 
 // Layout components
@@ -3474,12 +3474,12 @@ interface CTDropZoneAttributes<T> extends CTHTMLAttributes<T> {
   >;
 }
 
-interface CTLoaderAttributes<T> extends CTHTMLAttributes<T> {
+interface CFLoaderAttributes<T> extends CTHTMLAttributes<T> {
   "size"?: "sm" | "md" | "lg";
   "show-elapsed"?: boolean;
   "show-stop"?: boolean;
   /** Fired when stop button is clicked */
-  "onct-stop"?: EventHandler<{}>;
+  "oncf-stop"?: EventHandler<{}>;
 }
 
 interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
@@ -3963,10 +3963,14 @@ interface CTInputOtpAttributes<T> extends CTHTMLAttributes<T> {
   "onct-complete"?: EventHandler<{ value: string }>;
 }
 
-interface CTLabelAttributes<T> extends CTHTMLAttributes<T> {
+interface CFLabelAttributes<T> extends CTHTMLAttributes<T> {
   "for"?: string | CellLike<string>;
   "required"?: boolean | CellLike<boolean>;
   "disabled"?: boolean | CellLike<boolean>;
+  "oncf-label-click"?: EventHandler<{
+    targetId: string;
+    targetElement: HTMLElement;
+  }>;
 }
 
 // Display component attributes
@@ -4000,7 +4004,7 @@ interface CTProgressAttributes<T> extends CTHTMLAttributes<T> {
   "indeterminate"?: boolean | CellLike<boolean>;
 }
 
-interface CTSkeletonAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSkeletonAttributes<T> extends CTHTMLAttributes<T> {
   "variant"?:
     | "default"
     | "text"
@@ -4011,7 +4015,7 @@ interface CTSkeletonAttributes<T> extends CTHTMLAttributes<T> {
   "height"?: string | CellLike<string>;
 }
 
-interface CTSeparatorAttributes<T> extends CTHTMLAttributes<T> {
+interface CFSeparatorAttributes<T> extends CTHTMLAttributes<T> {
   "orientation"?:
     | "horizontal"
     | "vertical"
@@ -4632,9 +4636,9 @@ declare global {
         CTOutlinerAttributes<CTOutlinerElement>,
         CTOutlinerElement
       >;
-      "ct-loader": CTDOM.DetailedHTMLProps<
-        CTLoaderAttributes<CTLoaderElement>,
-        CTLoaderElement
+      "cf-loader": CTDOM.DetailedHTMLProps<
+        CFLoaderAttributes<CFLoaderElement>,
+        CFLoaderElement
       >;
       "cf-input": CTDOM.DetailedHTMLProps<
         CFInputAttributes<CFInputElement>,
@@ -4772,9 +4776,9 @@ declare global {
         CTToolbarAttributes<CTToolbarElement>,
         CTToolbarElement
       >;
-      "ct-kbd": CTDOM.DetailedHTMLProps<
-        CTHTMLAttributes<CTKbdElement>,
-        CTKbdElement
+      "cf-kbd": CTDOM.DetailedHTMLProps<
+        CTHTMLAttributes<CFKbdElement>,
+        CFKbdElement
       >;
       "ct-keybind": CTDOM.DetailedHTMLProps<
         CTKeybindAttributes<CTKeybindElement>,
@@ -4970,9 +4974,9 @@ declare global {
         CTInputOtpAttributes<CTInputOtpElement>,
         CTInputOtpElement
       >;
-      "ct-label": CTDOM.DetailedHTMLProps<
-        CTLabelAttributes<CTLabelElement>,
-        CTLabelElement
+      "cf-label": CTDOM.DetailedHTMLProps<
+        CFLabelAttributes<CFLabelElement>,
+        CFLabelElement
       >;
 
       // Display components
@@ -4988,13 +4992,13 @@ declare global {
         CTProgressAttributes<CTProgressElement>,
         CTProgressElement
       >;
-      "ct-skeleton": CTDOM.DetailedHTMLProps<
-        CTSkeletonAttributes<CTSkeletonElement>,
-        CTSkeletonElement
+      "cf-skeleton": CTDOM.DetailedHTMLProps<
+        CFSkeletonAttributes<CFSkeletonElement>,
+        CFSkeletonElement
       >;
-      "ct-separator": CTDOM.DetailedHTMLProps<
-        CTSeparatorAttributes<CTSeparatorElement>,
-        CTSeparatorElement
+      "cf-separator": CTDOM.DetailedHTMLProps<
+        CFSeparatorAttributes<CFSeparatorElement>,
+        CFSeparatorElement
       >;
       "ct-tile": CTDOM.DetailedHTMLProps<
         CTTileAttributes<CTTileElement>,

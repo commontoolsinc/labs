@@ -300,14 +300,14 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Visual Components
 
-- typesetting: `ct-label`, `cf-heading`
+- typesetting: `cf-label`, `cf-heading`
 	- gap: `ct-text` for themed paragraph usecase (`p` works)
 	- <p>, <Text>
 
-- gap: `ct-icon` (and `ct-label` has an optional in-built icon)
+- gap: `ct-icon` (and `cf-label` has an optional in-built icon)
     - gap: icon set?
 
-- visual: `ct-kdb`, `ct-separator`, `ct-table`, `cf-tool-call`
+- visual: `cf-kbd`, `cf-separator`, `ct-table`, `cf-tool-call`
 	- gap: `ct-img` or `ct-media`
 
 # Input Components

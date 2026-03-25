@@ -1,7 +1,7 @@
 /**
  * @fileoverview UI Separator Component - Visual divider for content sections
  *
- * @module ct-separator
+ * @module cf-separator
  * @description
  * A visual separator component used to divide content sections with a line.
  * Can be oriented horizontally or vertically and supports decorative mode
@@ -10,14 +10,14 @@
  * @example
  * ```html
  * <div>Section 1</div>
- * <ct-separator></ct-separator>
+ * <cf-separator></cf-separator>
  * <div>Section 2</div>
  *
  * <!-- Vertical separator -->
- * <ct-separator orientation="vertical"></ct-separator>
+ * <cf-separator orientation="vertical"></cf-separator>
  *
  * <!-- Decorative separator (no semantic meaning) -->
- * <ct-separator decorative></ct-separator>
+ * <cf-separator decorative></cf-separator>
  * ```
  */
 
@@ -27,9 +27,9 @@ import { BaseElement } from "../../core/base-element.ts";
 export type SeparatorOrientation = "horizontal" | "vertical";
 
 /**
- * CTSeparator provides a visual divider between content sections.
+ * CFSeparator provides a visual divider between content sections.
  *
- * @tag ct-separator
+ * @tag cf-separator
  * @extends BaseElement
  *
  * @property {SeparatorOrientation} orientation - Direction of the separator ("horizontal" | "vertical")
@@ -42,10 +42,10 @@ export type SeparatorOrientation = "horizontal" | "vertical";
  *
  * @note When decorative is false, the component has role="separator" for accessibility
  */
-export class CTSeparator extends BaseElement {
+export class CFSeparator extends BaseElement {
   static override styles = css`
     :host {
-      --ct-separator-color-border: var(--ct-theme-color-border, hsl(0, 0%, 89%));
+      --cf-separator-color-border: var(--ct-theme-color-border, hsl(0, 0%, 89%));
 
       display: block;
       box-sizing: border-box;
@@ -58,7 +58,7 @@ export class CTSeparator extends BaseElement {
     }
 
     .separator {
-      background-color: var(--ct-separator-color-border, hsl(0, 0%, 89%));
+      background-color: var(--cf-separator-color-border, hsl(0, 0%, 89%));
       flex-shrink: 0;
     }
 
@@ -108,4 +108,4 @@ export class CTSeparator extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-separator", CTSeparator);
+globalThis.customElements.define("cf-separator", CFSeparator);

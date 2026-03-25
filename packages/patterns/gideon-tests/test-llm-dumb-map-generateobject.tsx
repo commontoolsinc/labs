@@ -173,7 +173,7 @@ export default pattern<Input>(({ items }) => {
                           borderRadius: "4px",
                         }}
                       >
-                        <ct-loader
+                        <cf-loader
                           show-elapsed
                           style={{
                             display: "inline-block",

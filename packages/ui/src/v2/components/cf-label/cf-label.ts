@@ -2,9 +2,9 @@ import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTLabel - Form field label with accessibility features
+ * CFLabel - Form field label with accessibility features
  *
- * @element ct-label
+ * @element cf-label
  *
  * @attr {string} for - ID of associated input element
  * @attr {boolean} required - Shows asterisk for required fields
@@ -12,18 +12,18 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @slot - Default slot for label text
  *
- * @fires ct-label-click - Fired on click with detail: { targetId, targetElement }
+ * @fires cf-label-click - Fired on click with detail: { targetId, targetElement }
  *
  * @example
- * <ct-label for="email" required>Email Address</ct-label>
+ * <cf-label for="email" required>Email Address</cf-label>
  * <cf-input id="email" type="email"></cf-input>
  */
 
-export class CTLabel extends BaseElement {
+export class CFLabel extends BaseElement {
   static override styles = css`
     :host {
-      --ct-label-color-text: var(--ct-theme-color-text, hsl(0, 0%, 9%));
-      --ct-label-color-required: var(--ct-theme-color-error, hsl(0, 100%, 50%));
+      --cf-label-color-text: var(--ct-theme-color-text, hsl(0, 0%, 9%));
+      --cf-label-color-required: var(--ct-theme-color-error, hsl(0, 100%, 50%));
 
       display: inline-block;
       box-sizing: border-box;
@@ -42,7 +42,7 @@ export class CTLabel extends BaseElement {
       font-size: 0.875rem;
       font-weight: 500;
       line-height: 1.25rem;
-      color: var(--ct-label-color-text, hsl(0, 0%, 9%));
+      color: var(--cf-label-color-text, hsl(0, 0%, 9%));
       cursor: pointer;
       user-select: none;
     }
@@ -53,7 +53,7 @@ export class CTLabel extends BaseElement {
     }
 
     .required-indicator {
-      color: var(--ct-label-color-required, hsl(0, 100%, 50%));
+      color: var(--cf-label-color-required, hsl(0, 100%, 50%));
       font-weight: 600;
       line-height: 1;
       margin-left: 0.125rem;
@@ -133,7 +133,7 @@ export class CTLabel extends BaseElement {
         }
 
         // Emit custom event
-        this.emit("ct-label-click", {
+        this.emit("cf-label-click", {
           targetId: this.for,
           targetElement: targetElement,
         });
@@ -162,4 +162,4 @@ export class CTLabel extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-label", CTLabel);
+globalThis.customElements.define("cf-label", CFLabel);

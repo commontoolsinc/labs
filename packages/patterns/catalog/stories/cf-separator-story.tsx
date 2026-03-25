@@ -11,7 +11,7 @@ interface SeparatorStoryOutput {
 
 export default pattern<SeparatorStoryInput, SeparatorStoryOutput>(() => {
   return {
-    [NAME]: "ct-separator Story",
+    [NAME]: "cf-separator Story",
     [UI]: (
       <div
         style={{
@@ -22,7 +22,7 @@ export default pattern<SeparatorStoryInput, SeparatorStoryOutput>(() => {
         <div style={{ fontSize: "13px", marginBottom: "8px" }}>
           Content above
         </div>
-        <ct-separator />
+        <cf-separator />
         <div style={{ fontSize: "13px", marginTop: "8px" }}>Content below</div>
       </div>
     ),

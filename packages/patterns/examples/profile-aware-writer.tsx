@@ -90,7 +90,7 @@ Write content personalized to the user when appropriate.`;
               pending
                 ? (
                   <div style="margin-top: 16px;">
-                    <ct-loader show-elapsed />{" "}
+                    <cf-loader show-elapsed />{" "}
                     Generating personalized content...
                   </div>
                 )
