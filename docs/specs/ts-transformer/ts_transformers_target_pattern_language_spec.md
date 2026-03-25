@@ -80,6 +80,129 @@ Each construct family is classified as one of:
 | `.get()` on ordinary opaque/reactive values | Unsupported | Pattern inputs, `computed` results, `derive` results, and other ordinary reactive values should be read directly rather than through `.get()` |
 | Statement-boundary imperative constructs in top-level pattern-owned code (`let`, loops, function creation, early return) | Unsupported | Top-level pattern context is intentionally declarative; imperative statement structure belongs in explicit callback bodies such as `computed`, `action`, `lift`, or `handler` |
 
+## 4.1 Authoring Context Guide
+
+The matrix above is the policy summary. This section states the same boundary
+in author-facing terms: **what kinds of expressions belong in each authored
+context.**
+
+### Top-Level Pattern Body
+
+The top-level pattern body should stay declarative.
+
+**Good here**
+
+```ts
+pattern(({ items, show }) => ({
+  visibleCount: ifElse(show, items.length, 0),
+  [UI]: <div>{items.map((item) => item.name)}</div>,
+}));
+```
+
+**Move elsewhere**
+
+```ts
+pattern(({ user, count }) => ({
+  upper: user.name.toUpperCase(),
+  value: count.get(),
+}));
+```
+
+Why:
+
+- top-level helper control flow is part of the language
+- top-level receiver-method calls and eager `.get()` reads are not
+- move those into JSX, authored helper control flow, or an explicit
+  computation callback
+
+### JSX Expressions
+
+JSX is the main local reactive expression context.
+
+**Good here**
+
+```tsx
+<div>
+  {user.name.toUpperCase()}
+  {selectedScopes[key]}
+  {ifElse(show, count.get(), 0)}
+  {items.filter((item) => item.visible).join(", ")}
+</div>
+```
+
+**Unsupported here**
+
+```tsx
+<div>{[0, 1].forEach(() => list.map((item) => item))}</div>
+```
+
+Why:
+
+- JSX supports local reactive reads, control flow, receiver methods, supported
+  collection callbacks, and true-cell eager reads
+- JSX does not bless foreign imperative callback containers as language forms
+
+### Explicit Computation Callbacks
+
+`computed`, `derive`, `action`, `lift`, and `handler` callbacks are explicit
+imperative/value-computation boundaries.
+
+**Good here**
+
+```ts
+computed(() => input[key])
+computed(() => count.get())
+action(() => state.name.trim())
+```
+
+**Still unsupported here**
+
+```ts
+computed(() => derivedValue.get())
+```
+
+Why:
+
+- dynamic access, receiver methods, and true-cell eager reads are valid here
+- `.get()` on ordinary opaque/reactive values is still not part of the
+  language, even inside a computation callback
+
+### Event Handler JSX Attributes
+
+Event handlers are an explicit callback boundary for imperative UI logic.
+
+**Good here**
+
+```tsx
+<button onClick={() => count.set(count.get() + 1)} />
+```
+
+Why:
+
+- imperative statements and eager reads belong naturally inside the event
+  handler callback boundary
+- event handlers are part of the language, but they are not ordinary
+  expression-site lowering roots
+
+### Supported Collection Callbacks
+
+Callbacks for supported reactive collection operators are their own authored
+expression context.
+
+**Good here**
+
+```ts
+items.map((item) => item.name.toUpperCase())
+items.map((item) => labels[item.id])
+items.map((item) => item.tags.map((tag) => tag.trim()).join(", "))
+```
+
+Why:
+
+- the outer callback belongs to the supported reactive collection operator
+- inner plain arrays stay plain JS and are not implicitly promoted into
+  pattern-owned collection operators
+
 ## 5. Construct Notes
 
 ## 5.1 JSX Is A Routing Boundary, Not A Separate Semantic World
