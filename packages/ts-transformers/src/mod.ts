@@ -10,7 +10,7 @@ export { Pipeline, transformCtDirective, Transformer } from "./core/mod.ts";
 export {
   CapabilityLoweringTransformer,
   CastValidationTransformer,
-  OpaqueRefJSXTransformer,
+  JsxExpressionSiteRouterTransformer,
   PatternContextValidationTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,

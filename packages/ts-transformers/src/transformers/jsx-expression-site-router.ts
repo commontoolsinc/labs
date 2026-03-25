@@ -8,7 +8,7 @@ import {
   rewriteOpaquePathTerminalJsxExpressionSite,
 } from "./expression-site-lowering.ts";
 
-export class OpaqueRefJSXTransformer extends Transformer {
+export class JsxExpressionSiteRouterTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
     return context.ctHelpers.sourceHasHelpers();
   }

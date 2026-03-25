@@ -873,7 +873,7 @@ const REACTIVE_ARRAY_METHODS = new Set(["map", "filter", "flatMap"]);
  *
  * Used by both:
  * - ClosureTransformer to decide whether to transform to *WithPattern
- * - OpaqueRefJSXTransformer to decide whether to skip derive wrapping
+ * - JsxExpressionSiteRouterTransformer to decide whether to skip derive wrapping
  */
 export function isReactiveArrayMethodCall(
   node: ts.CallExpression,

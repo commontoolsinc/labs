@@ -3,8 +3,8 @@ import {
   CastValidationTransformer,
   EmptyArrayOfValidationTransformer,
   HelperOwnedExpressionSiteLoweringTransformer,
+  JsxExpressionSiteRouterTransformer,
   OpaqueGetValidationTransformer,
-  OpaqueRefJSXTransformer,
   PatternContextValidationTransformer,
   PatternOwnedExpressionSiteLoweringTransformer,
   SchemaGeneratorTransformer,
@@ -51,7 +51,7 @@ export class CommonToolsTransformerPipeline extends Pipeline {
 
     transformers.push(
       // Then the regular transformation pipeline
-      new OpaqueRefJSXTransformer(sharedOps),
+      new JsxExpressionSiteRouterTransformer(sharedOps),
       new ComputedTransformer(sharedOps),
       new ClosureTransformer(sharedOps),
       new PatternOwnedExpressionSiteLoweringTransformer(sharedOps),
