@@ -38,7 +38,6 @@ describe("shell piece tests", () => {
       );
     const piece = await cc.create(
       program,
-      { start: false },
     );
     pieceId = piece.id;
   });
