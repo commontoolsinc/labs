@@ -38,6 +38,7 @@ import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { hashSchema } from "@commontools/data-model/schema-hash";
+import { schemaWithProperties } from "@commontools/data-model/schema-utils";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import {
@@ -536,7 +537,9 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         }
         // Include $defs and compare again
         if (schema.$defs !== undefined) {
-          item = { ...item, $defs: schema.$defs };
+          item = schemaWithProperties(item, {
+            $defs: schema.$defs,
+          });
           item = SelectorTracker.getStandardSchema(item);
           if (JSON.stringify(item) === schemaString) {
             return true;

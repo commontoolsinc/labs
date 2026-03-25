@@ -1,5 +1,8 @@
 import { isObject, isRecord, Mutable } from "@commontools/utils/types";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import {
+  cloneSchemaMutable,
+  toDeepFrozenSchema,
+} from "@commontools/data-model/schema-utils";
 import {
   type Cell,
   createJsonSchema,
@@ -334,9 +337,7 @@ async function singlePhaseCodeGeneration(
   // NOTE(ja): we put the result schema in the argument schema
   // as a hack to work around iframes not supporting results schemas
   const schema: JSONSchemaObjMutable = {
-    ...(isObject(existingSchema)
-      ? (structuredClone(existingSchema) as JSONSchemaObjMutable)
-      : {}),
+    ...cloneSchemaMutable(existingSchema),
     title: title || "missing",
     description,
   };
@@ -432,9 +433,7 @@ async function twoPhaseCodeGeneration(
   // NOTE(ja): we put the result schema in the argument schema
   // as a hack to work around iframes not supporting results schemas
   const schema: JSONSchemaObjMutable = {
-    ...(isObject(existingSchema)
-      ? (structuredClone(existingSchema) as JSONSchemaObjMutable)
-      : {}),
+    ...cloneSchemaMutable(existingSchema),
     title: title || "missing",
     description,
   };
