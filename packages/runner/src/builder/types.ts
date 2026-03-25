@@ -28,7 +28,6 @@ import type {
   ID_FIELD as IDFieldSymbol,
   IfElseFunction,
   JSONSchema,
-  JSONSchemaObj,
   JSONValue,
   LiftFunction,
   LLMDialogFunction,
