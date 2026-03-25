@@ -1,5 +1,5 @@
 /**
- * Styles for ct-alert component
+ * Styles for cf-alert component
  */
 
 export const alertStyles = `

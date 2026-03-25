@@ -3,21 +3,21 @@ import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTTile - A tile component for rendering page/item previews with click handling
+ * CFTile - A tile component for rendering page/item previews with click handling
  *
- * @element ct-tile
+ * @element cf-tile
  *
  * @attr {Object} item - Item object with title and metadata
  * @attr {string} summary - Summary text to display
  * @attr {boolean} clickable - Whether the tile is clickable
  *
- * @fires ct-click - Fired when tile is clicked with detail: { item }
+ * @fires cf-click - Fired when tile is clicked with detail: { item }
  *
  * @example
- * <ct-tile .item="${page}" summary="Pages: 2, Lists: 1" @ct-click="${handleClick}"></ct-tile>
+ * <cf-tile .item="${page}" summary="Pages: 2, Lists: 1" @cf-click="${handleClick}"></cf-tile>
  */
 
-export class CTTile extends BaseElement {
+export class CFTile extends BaseElement {
   @property()
   item: { title: string; [key: string]: any } = { title: "" };
 
@@ -131,7 +131,7 @@ export class CTTile extends BaseElement {
 
     private handleClick() {
       if (this.clickable) {
-        this.emit("ct-click", { item: this.item });
+        this.emit("cf-click", { item: this.item });
       }
     }
 
@@ -163,4 +163,4 @@ export class CTTile extends BaseElement {
     }
   }
 
-  globalThis.customElements.define("ct-tile", CTTile);
+  globalThis.customElements.define("cf-tile", CFTile);

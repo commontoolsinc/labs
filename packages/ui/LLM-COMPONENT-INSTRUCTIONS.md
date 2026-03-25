@@ -215,37 +215,37 @@ shadcn/ui design system. All components:
 </cf-card>
 ```
 
-### 13. ct-badge
+### 13. cf-badge
 
-**Purpose**: Status indicator or label **Tag**: `<ct-badge>` **Attributes**:
+**Purpose**: Status indicator or label **Tag**: `<cf-badge>` **Attributes**:
 
 - `variant` - "default" | "secondary" | "destructive" | "outline"
 - `removable` - boolean (shows X button) **Events**:
-- `ct-remove` - Fired when X clicked (if removable) **Slots**: Default slot for
+- `cf-remove` - Fired when X clicked (if removable) **Slots**: Default slot for
   badge text **Example**:
 
 ```html
-<ct-badge variant="secondary" removable>Status</ct-badge>
+<cf-badge variant="secondary" removable>Status</cf-badge>
 ```
 
-### 14. ct-alert
+### 14. cf-alert
 
-**Purpose**: Alert message display **Tag**: `<ct-alert>` **Attributes**:
+**Purpose**: Alert message display **Tag**: `<cf-alert>` **Attributes**:
 
 - `variant` - "default" | "destructive"
 - `dismissible` - boolean **Events**:
-- `ct-dismiss` - Fired when dismissed **Slots**:
+- `cf-dismiss` - Fired when dismissed **Slots**:
 - `icon` - Alert icon
 - `title` - Alert title
 - `description` - Alert description
 - Default slot - Alert content **Example**:
 
 ```html
-<ct-alert variant="destructive" dismissible>
+<cf-alert variant="destructive" dismissible>
   <span slot="icon">⚠️</span>
   <h4 slot="title">Error</h4>
   <p slot="description">Something went wrong</p>
-</ct-alert>
+</cf-alert>
 ```
 
 ### 15. cf-separator
@@ -259,16 +259,16 @@ shadcn/ui design system. All components:
 <cf-separator orientation="vertical"></cf-separator>
 ```
 
-### 16. ct-progress
+### 16. cf-progress
 
-**Purpose**: Progress indicator **Tag**: `<ct-progress>` **Attributes**:
+**Purpose**: Progress indicator **Tag**: `<cf-progress>` **Attributes**:
 
 - `value` - number (0-100)
 - `max` - number (default: 100)
 - `indeterminate` - boolean **Example**:
 
 ```html
-<ct-progress value="60"></ct-progress>
+<cf-progress value="60"></cf-progress>
 ```
 
 ### 17. cf-skeleton
@@ -607,7 +607,7 @@ Same as cf-hstack **Example**:
     <ct-grid slot="content" columns="3" gap="4">
       <cf-card>
         <cf-vstack slot="content" gap="2">
-          <ct-badge variant="secondary">Active</ct-badge>
+          <cf-badge variant="secondary">Active</cf-badge>
           <h3>Total Users</h3>
           <p style="font-size: 2rem">1,234</p>
         </cf-vstack>

@@ -15,7 +15,7 @@ export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
   const indeterminate = Writable.of(false);
 
   return {
-    [NAME]: "ct-progress Story",
+    [NAME]: "cf-progress Story",
     [UI]: (
       <div
         style={{
@@ -27,7 +27,7 @@ export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
       >
         <cf-vstack gap="1">
           <span style="font-weight: 600;">Interactive</span>
-          <ct-progress value={65} max={100} indeterminate={indeterminate} />
+          <cf-progress value={65} max={100} indeterminate={indeterminate} />
         </cf-vstack>
 
         <cf-vstack gap="1">
@@ -37,7 +37,7 @@ export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
               0%
             </span>
             <div style={{ flex: "1" }}>
-              <ct-progress value={0} max={100} />
+              <cf-progress value={0} max={100} />
             </div>
           </cf-hstack>
           <cf-hstack gap="2" align="center">
@@ -45,7 +45,7 @@ export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
               25%
             </span>
             <div style={{ flex: "1" }}>
-              <ct-progress value={25} max={100} />
+              <cf-progress value={25} max={100} />
             </div>
           </cf-hstack>
           <cf-hstack gap="2" align="center">
@@ -53,7 +53,7 @@ export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
               50%
             </span>
             <div style={{ flex: "1" }}>
-              <ct-progress value={50} max={100} />
+              <cf-progress value={50} max={100} />
             </div>
           </cf-hstack>
           <cf-hstack gap="2" align="center">
@@ -61,7 +61,7 @@ export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
               75%
             </span>
             <div style={{ flex: "1" }}>
-              <ct-progress value={75} max={100} />
+              <cf-progress value={75} max={100} />
             </div>
           </cf-hstack>
           <cf-hstack gap="2" align="center">
@@ -69,14 +69,14 @@ export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
               100%
             </span>
             <div style={{ flex: "1" }}>
-              <ct-progress value={100} max={100} />
+              <cf-progress value={100} max={100} />
             </div>
           </cf-hstack>
         </cf-vstack>
 
         <cf-vstack gap="1">
           <span style="font-weight: 600;">Indeterminate</span>
-          <ct-progress indeterminate />
+          <cf-progress indeterminate />
         </cf-vstack>
       </div>
     ),

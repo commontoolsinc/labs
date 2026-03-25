@@ -1,21 +1,21 @@
 /**
- * Styles for ct-progress component
+ * Styles for cf-progress component
  */
 
 export const progressStyles = `
   :host {
     /* Default color values if not provided */
-    --ct-progress-color-background: var(--ct-theme-color-background, #ffffff);
-    --ct-progress-color-foreground: var(--ct-theme-color-text, #0f172a);
-    --ct-progress-color-track: var(--ct-theme-color-border, #e2e8f0);
-    --ct-progress-color-ring: var(--ct-theme-color-primary, #94a3b8);
-    --ct-progress-color-indicator: var(--ct-theme-color-primary, #3b82f6);
-    --ct-progress-color-indicator-foreground: var(
+    --cf-progress-color-background: var(--ct-theme-color-background, #ffffff);
+    --cf-progress-color-foreground: var(--ct-theme-color-text, #0f172a);
+    --cf-progress-color-track: var(--ct-theme-color-border, #e2e8f0);
+    --cf-progress-color-ring: var(--ct-theme-color-primary, #94a3b8);
+    --cf-progress-color-indicator: var(--ct-theme-color-primary, #3b82f6);
+    --cf-progress-color-indicator-foreground: var(
       --ct-theme-color-primary-foreground,
       #ffffff
     );
-    --ct-progress-color-muted: var(--ct-theme-color-surface, #f8fafc);
-    --ct-progress-color-muted-foreground: var(
+    --cf-progress-color-muted: var(--ct-theme-color-surface, #f8fafc);
+    --cf-progress-color-muted-foreground: var(
       --ct-theme-color-text-muted,
       #64748b
     );
@@ -36,7 +36,7 @@ export const progressStyles = `
     position: relative;
     width: 100%;
     height: var(--progress-height);
-    background-color: var(--ct-progress-color-track);
+    background-color: var(--cf-progress-color-track);
     border-radius: var(--progress-border-radius);
     overflow: hidden;
   }
@@ -44,7 +44,7 @@ export const progressStyles = `
   /* Indicator (filled portion) */
   .indicator {
     height: 100%;
-    background-color: var(--ct-progress-color-indicator);
+    background-color: var(--cf-progress-color-indicator);
     border-radius: var(--progress-border-radius);
     transition: width 300ms cubic-bezier(0.4, 0, 0.2, 1);
     will-change: width;
@@ -117,19 +117,19 @@ export const progressStyles = `
 
   /* Custom styling support */
   :host([variant="success"]) {
-    --ct-progress-color-indicator: var(--ct-theme-color-success, #22c55e);
+    --cf-progress-color-indicator: var(--ct-theme-color-success, #22c55e);
   }
 
   :host([variant="warning"]) {
-    --ct-progress-color-indicator: var(--ct-theme-color-warning, #f59e0b);
+    --cf-progress-color-indicator: var(--ct-theme-color-warning, #f59e0b);
   }
 
   :host([variant="error"]) {
-    --ct-progress-color-indicator: var(--ct-theme-color-error, #ef4444);
+    --cf-progress-color-indicator: var(--ct-theme-color-error, #ef4444);
   }
 
   :host([variant="info"]) {
-    --ct-progress-color-indicator: #3b82f6;
+    --cf-progress-color-indicator: #3b82f6;
   }
 
   /* Striped variant */

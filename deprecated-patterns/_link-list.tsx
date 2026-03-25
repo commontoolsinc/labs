@@ -174,7 +174,7 @@ export default pattern(
                   <blockquote>
                     {title}
                   </blockquote>
-                  <ct-alert>{question}</ct-alert>
+                  <cf-alert>{question}</cf-alert>
                   <cf-button
                     outline
                     variant="danger"

@@ -3,9 +3,9 @@ import { classMap } from "lit/directives/class-map.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTAlert - Alert message display component with variants and dismissible option
+ * CFAlert - Alert message display component with variants and dismissible option
  *
- * @element ct-alert
+ * @element cf-alert
  *
  * @attr {string} variant - Visual style variant: "default" | "destructive" | "warning" | "success" | "info"
  * @attr {boolean} dismissible - Whether the alert can be dismissed with an X button
@@ -15,14 +15,14 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot description - Alert description
  * @slot - Default slot for alert content
  *
- * @fires ct-dismiss - Fired when alert is dismissed
+ * @fires cf-dismiss - Fired when alert is dismissed
  *
  * @example
- * <ct-alert variant="destructive" dismissible>
+ * <cf-alert variant="destructive" dismissible>
  *   <span slot="icon">⚠️</span>
  *   <h4 slot="title">Error</h4>
  *   <p slot="description">Something went wrong</p>
- * </ct-alert>
+ * </cf-alert>
  */
 
 export type AlertVariant =
@@ -32,45 +32,45 @@ export type AlertVariant =
   | "success"
   | "info";
 
-export class CTAlert extends BaseElement {
+export class CFAlert extends BaseElement {
   static override styles = css`
     :host {
       /* Default color values if not provided */
-      --ct-alert-color-background: var(--ct-theme-color-background, #ffffff);
-      --ct-alert-color-foreground: var(--ct-theme-color-text, #0f172a);
-      --ct-alert-color-muted: var(--ct-theme-color-surface, #f8fafc);
-      --ct-alert-color-muted-foreground: var(
+      --cf-alert-color-background: var(--ct-theme-color-background, #ffffff);
+      --cf-alert-color-foreground: var(--ct-theme-color-text, #0f172a);
+      --cf-alert-color-muted: var(--ct-theme-color-surface, #f8fafc);
+      --cf-alert-color-muted-foreground: var(
         --ct-theme-color-text-muted,
         #64748b
       );
-      --ct-alert-color-primary: var(--ct-theme-color-primary, #0f172a);
-      --ct-alert-color-primary-foreground: var(
+      --cf-alert-color-primary: var(--ct-theme-color-primary, #0f172a);
+      --cf-alert-color-primary-foreground: var(
         --ct-theme-color-primary-foreground,
         #f8fafc
       );
-      --ct-alert-color-destructive: var(--ct-theme-color-error, #dc2626);
-      --ct-alert-color-destructive-foreground: var(
+      --cf-alert-color-destructive: var(--ct-theme-color-error, #dc2626);
+      --cf-alert-color-destructive-foreground: var(
         --ct-theme-color-error-foreground,
         #fef2f2
       );
-      --ct-alert-color-warning: var(--ct-theme-color-warning, #f59e0b);
-      --ct-alert-color-warning-foreground: var(
+      --cf-alert-color-warning: var(--ct-theme-color-warning, #f59e0b);
+      --cf-alert-color-warning-foreground: var(
         --ct-theme-color-warning-foreground,
         #fffbeb
       );
-      --ct-alert-color-warning-text: var(--ct-theme-color-text, #92400e);
-      --ct-alert-color-success: var(--ct-theme-color-success, #10b981);
-      --ct-alert-color-success-foreground: var(
+      --cf-alert-color-warning-text: var(--ct-theme-color-text, #92400e);
+      --cf-alert-color-success: var(--ct-theme-color-success, #10b981);
+      --cf-alert-color-success-foreground: var(
         --ct-theme-color-success-foreground,
         #f0fdf4
       );
-      --ct-alert-color-info: var(--ct-theme-color-primary, #3b82f6);
-      --ct-alert-color-info-foreground: var(
+      --cf-alert-color-info: var(--ct-theme-color-primary, #3b82f6);
+      --cf-alert-color-info-foreground: var(
         --ct-theme-color-primary-foreground,
         #eff6ff
       );
-      --ct-alert-color-border: var(--ct-theme-color-border, #e2e8f0);
-      --ct-alert-color-ring: var(--ct-theme-color-primary, #94a3b8);
+      --cf-alert-color-border: var(--ct-theme-color-border, #e2e8f0);
+      --cf-alert-color-ring: var(--ct-theme-color-primary, #94a3b8);
 
       display: block;
     }
@@ -154,7 +154,7 @@ export class CTAlert extends BaseElement {
     .dismiss-button:focus-visible {
       outline: 2px solid transparent;
       outline-offset: 2px;
-      box-shadow: 0 0 0 2px var(--ct-alert-color-ring, #94a3b8);
+      box-shadow: 0 0 0 2px var(--cf-alert-color-ring, #94a3b8);
     }
 
     .dismiss-button svg {
@@ -164,92 +164,92 @@ export class CTAlert extends BaseElement {
 
     /* Default variant */
     .alert.variant-default {
-      background-color: var(--ct-alert-color-background, #ffffff);
-      color: var(--ct-alert-color-foreground, #0f172a);
-      border-color: var(--ct-alert-color-border, #e2e8f0);
+      background-color: var(--cf-alert-color-background, #ffffff);
+      color: var(--cf-alert-color-foreground, #0f172a);
+      border-color: var(--cf-alert-color-border, #e2e8f0);
     }
 
     .alert.variant-default .alert-icon {
-      color: var(--ct-alert-color-foreground, #0f172a);
+      color: var(--cf-alert-color-foreground, #0f172a);
     }
 
     /* Destructive variant */
     .alert.variant-destructive {
-      background-color: var(--ct-alert-color-destructive-foreground, #fef2f2);
-      color: var(--ct-alert-color-destructive, #dc2626);
-      border-color: var(--ct-alert-color-destructive, #dc2626);
+      background-color: var(--cf-alert-color-destructive-foreground, #fef2f2);
+      color: var(--cf-alert-color-destructive, #dc2626);
+      border-color: var(--cf-alert-color-destructive, #dc2626);
     }
 
     .alert.variant-destructive .alert-icon {
-      color: var(--ct-alert-color-destructive, #dc2626);
+      color: var(--cf-alert-color-destructive, #dc2626);
     }
 
     .alert.variant-destructive .alert-title {
-      color: var(--ct-alert-color-destructive, #dc2626);
+      color: var(--cf-alert-color-destructive, #dc2626);
     }
 
     .alert.variant-destructive .alert-description {
-      color: var(--ct-alert-color-destructive, #dc2626);
+      color: var(--cf-alert-color-destructive, #dc2626);
       opacity: 0.8;
     }
 
     /* Warning variant */
     .alert.variant-warning {
-      background-color: var(--ct-alert-color-warning-foreground, #fffbeb);
-      color: var(--ct-alert-color-warning-text, #92400e);
-      border-color: var(--ct-alert-color-warning, #f59e0b);
+      background-color: var(--cf-alert-color-warning-foreground, #fffbeb);
+      color: var(--cf-alert-color-warning-text, #92400e);
+      border-color: var(--cf-alert-color-warning, #f59e0b);
     }
 
     .alert.variant-warning .alert-icon {
-      color: var(--ct-alert-color-warning, #f59e0b);
+      color: var(--cf-alert-color-warning, #f59e0b);
     }
 
     .alert.variant-warning .alert-title {
-      color: var(--ct-alert-color-warning-text, #92400e);
+      color: var(--cf-alert-color-warning-text, #92400e);
     }
 
     .alert.variant-warning .alert-description {
-      color: var(--ct-alert-color-warning-text, #92400e);
+      color: var(--cf-alert-color-warning-text, #92400e);
       opacity: 0.8;
     }
 
     /* Success variant */
     .alert.variant-success {
-      background-color: var(--ct-alert-color-success-foreground, #f0fdf4);
-      color: var(--ct-alert-color-success, #10b981);
-      border-color: var(--ct-alert-color-success, #10b981);
+      background-color: var(--cf-alert-color-success-foreground, #f0fdf4);
+      color: var(--cf-alert-color-success, #10b981);
+      border-color: var(--cf-alert-color-success, #10b981);
     }
 
     .alert.variant-success .alert-icon {
-      color: var(--ct-alert-color-success, #10b981);
+      color: var(--cf-alert-color-success, #10b981);
     }
 
     .alert.variant-success .alert-title {
-      color: var(--ct-alert-color-success, #10b981);
+      color: var(--cf-alert-color-success, #10b981);
     }
 
     .alert.variant-success .alert-description {
-      color: var(--ct-alert-color-success, #10b981);
+      color: var(--cf-alert-color-success, #10b981);
       opacity: 0.8;
     }
 
     /* Info variant */
     .alert.variant-info {
-      background-color: var(--ct-alert-color-info-foreground, #eff6ff);
-      color: var(--ct-alert-color-info, #3b82f6);
-      border-color: var(--ct-alert-color-info, #3b82f6);
+      background-color: var(--cf-alert-color-info-foreground, #eff6ff);
+      color: var(--cf-alert-color-info, #3b82f6);
+      border-color: var(--cf-alert-color-info, #3b82f6);
     }
 
     .alert.variant-info .alert-icon {
-      color: var(--ct-alert-color-info, #3b82f6);
+      color: var(--cf-alert-color-info, #3b82f6);
     }
 
     .alert.variant-info .alert-title {
-      color: var(--ct-alert-color-info, #3b82f6);
+      color: var(--cf-alert-color-info, #3b82f6);
     }
 
     .alert.variant-info .alert-description {
-      color: var(--ct-alert-color-info, #3b82f6);
+      color: var(--cf-alert-color-info, #3b82f6);
       opacity: 0.8;
     }
 
@@ -341,11 +341,11 @@ export class CTAlert extends BaseElement {
     event.preventDefault();
     event.stopPropagation();
 
-    // Emit ct-dismiss event
-    this.emit("ct-dismiss", {
+    // Emit cf-dismiss event
+    this.emit("cf-dismiss", {
       variant: this.variant,
     });
   };
 }
 
-globalThis.customElements.define("ct-alert", CTAlert);
+globalThis.customElements.define("cf-alert", CFAlert);

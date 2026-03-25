@@ -2891,7 +2891,7 @@ interface CFChevronButtonElement extends CTHTMLElement {}
 interface CFCardElement extends CTHTMLElement {}
 interface CTCalendarElement extends CTHTMLElement {}
 interface CTQuestionElement extends CTHTMLElement {}
-interface CTAlertElement extends CTHTMLElement {}
+interface CFAlertElement extends CTHTMLElement {}
 interface CFVStackElement extends CTHTMLElement {}
 interface CFMessageInputElement extends CTHTMLElement {}
 interface CTToolbarElement extends CTHTMLElement {}
@@ -2960,12 +2960,12 @@ interface CTInputOtpElement extends CTHTMLElement {}
 interface CFLabelElement extends CTHTMLElement {}
 
 // Display components
-interface CTBadgeElement extends CTHTMLElement {}
+interface CFBadgeElement extends CTHTMLElement {}
 interface CTChipElement extends CTHTMLElement {}
-interface CTProgressElement extends CTHTMLElement {}
+interface CFProgressElement extends CTHTMLElement {}
 interface CFSkeletonElement extends CTHTMLElement {}
 interface CFSeparatorElement extends CTHTMLElement {}
-interface CTTileElement extends CTHTMLElement {}
+interface CFTileElement extends CTHTMLElement {}
 
 // Layout components
 interface CTGridElement extends CTHTMLElement {}
@@ -3335,10 +3335,10 @@ interface CTSvgAttributes<T> extends CTHTMLAttributes<T> {
   "$content"?: CellLike<string>;
 }
 
-interface CTAlertAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAlertAttributes<T> extends CTHTMLAttributes<T> {
   "variant"?: "default" | "destructive" | "warning" | "success" | "info";
   "dismissible"?: boolean;
-  "onct-dismiss"?: EventHandler<{}>;
+  "oncf-dismiss"?: EventHandler<{}>;
 }
 
 interface CFCardAttributes<T> extends CTHTMLAttributes<T> {
@@ -3974,7 +3974,7 @@ interface CFLabelAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 // Display component attributes
-interface CTBadgeAttributes<T> extends CTHTMLAttributes<T> {
+interface CFBadgeAttributes<T> extends CTHTMLAttributes<T> {
   "variant"?:
     | "default"
     | "secondary"
@@ -3982,7 +3982,7 @@ interface CTBadgeAttributes<T> extends CTHTMLAttributes<T> {
     | "outline"
     | CellLike<"default" | "secondary" | "destructive" | "outline">;
   "removable"?: boolean | CellLike<boolean>;
-  "onct-remove"?: EventHandler<{}>;
+  "oncf-remove"?: EventHandler<{}>;
 }
 
 interface CTChipAttributes<T> extends CTHTMLAttributes<T> {
@@ -3998,7 +3998,7 @@ interface CTChipAttributes<T> extends CTHTMLAttributes<T> {
   "onct-click"?: EventHandler<{}>;
 }
 
-interface CTProgressAttributes<T> extends CTHTMLAttributes<T> {
+interface CFProgressAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: number | CellLike<number>;
   "max"?: number | CellLike<number>;
   "indeterminate"?: boolean | CellLike<boolean>;
@@ -4023,11 +4023,11 @@ interface CFSeparatorAttributes<T> extends CTHTMLAttributes<T> {
   "decorative"?: boolean | CellLike<boolean>;
 }
 
-interface CTTileAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTileAttributes<T> extends CTHTMLAttributes<T> {
   "item"?: any | CellLike<any>;
   "summary"?: string | CellLike<string>;
   "clickable"?: boolean | CellLike<boolean>;
-  "onct-click"?: EventHandler<{}>;
+  "oncf-click"?: EventHandler<{}>;
 }
 
 // Layout component attributes
@@ -4848,9 +4848,9 @@ declare global {
         CTDraggableAttributes<CTDraggableElement>,
         CTDraggableElement
       >;
-      "ct-alert": CTDOM.DetailedHTMLProps<
-        CTAlertAttributes<CTAlertElement>,
-        CTAlertElement
+      "cf-alert": CTDOM.DetailedHTMLProps<
+        CFAlertAttributes<CFAlertElement>,
+        CFAlertElement
       >;
       "os-container": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CTHTMLElement>,
@@ -4980,17 +4980,17 @@ declare global {
       >;
 
       // Display components
-      "ct-badge": CTDOM.DetailedHTMLProps<
-        CTBadgeAttributes<CTBadgeElement>,
-        CTBadgeElement
+      "cf-badge": CTDOM.DetailedHTMLProps<
+        CFBadgeAttributes<CFBadgeElement>,
+        CFBadgeElement
       >;
       "ct-chip": CTDOM.DetailedHTMLProps<
         CTChipAttributes<CTChipElement>,
         CTChipElement
       >;
-      "ct-progress": CTDOM.DetailedHTMLProps<
-        CTProgressAttributes<CTProgressElement>,
-        CTProgressElement
+      "cf-progress": CTDOM.DetailedHTMLProps<
+        CFProgressAttributes<CFProgressElement>,
+        CFProgressElement
       >;
       "cf-skeleton": CTDOM.DetailedHTMLProps<
         CFSkeletonAttributes<CFSkeletonElement>,
@@ -5000,9 +5000,9 @@ declare global {
         CFSeparatorAttributes<CFSeparatorElement>,
         CFSeparatorElement
       >;
-      "ct-tile": CTDOM.DetailedHTMLProps<
-        CTTileAttributes<CTTileElement>,
-        CTTileElement
+      "cf-tile": CTDOM.DetailedHTMLProps<
+        CFTileAttributes<CFTileElement>,
+        CFTileElement
       >;
 
       // Layout components

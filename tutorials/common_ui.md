@@ -351,5 +351,5 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Unused/Unproven Components
 
-- stale: `ct-aspect-ratio`, `ct-draggable`, `cf-form`, `ct-grid`, `cf-hgroup`, `ct-input-otp`, `cf-message-input`, `ct-progress`, `cf-radio`, `cf-radio-group`, `cf-slider`, `cf-switch`, `ct-tile`, `cf-toggle`, `cf-toggle-group`, `cf-vgroup`
+- stale: `ct-aspect-ratio`, `ct-draggable`, `cf-form`, `ct-grid`, `cf-hgroup`, `ct-input-otp`, `cf-message-input`, `cf-progress`, `cf-radio`, `cf-radio-group`, `cf-slider`, `cf-switch`, `cf-tile`, `cf-toggle`, `cf-toggle-group`, `cf-vgroup`
 - superfluous: `ct-resizeable-handle`, `ct-resizable-panel`, `ct-resizeable-panel-group`, `ct-scroll-area`, `ct-tabs`/`ct-tab-list`/`ct-tab-panel`

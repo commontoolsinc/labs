@@ -2,53 +2,53 @@ import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTBadge - Status indicator or label with multiple visual variants
+ * CFBadge - Status indicator or label with multiple visual variants
  *
- * @element ct-badge
+ * @element cf-badge
  *
  * @attr {string} variant - Visual style variant: "default" | "secondary" | "destructive" | "outline"
  * @attr {boolean} removable - Shows an X button to remove the badge
  *
  * @slot - Default slot for badge text
  *
- * @fires ct-remove - Fired when X button is clicked (if removable)
+ * @fires cf-remove - Fired when X button is clicked (if removable)
  *
  * @example
- * <ct-badge variant="secondary" removable>Status</ct-badge>
+ * <cf-badge variant="secondary" removable>Status</cf-badge>
  */
 
 export type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
 
-export class CTBadge extends BaseElement {
+export class CFBadge extends BaseElement {
   static override styles = css`
     :host {
-      --ct-badge-color-primary: var(
+      --cf-badge-color-primary: var(
         --ct-theme-color-primary,
         hsl(212, 100%, 47%)
       );
-      --ct-badge-color-primary-foreground: var(
+      --cf-badge-color-primary-foreground: var(
         --ct-theme-color-primary-foreground,
         hsl(0, 0%, 100%)
       );
-      --ct-badge-color-secondary: var(
+      --cf-badge-color-secondary: var(
         --ct-theme-color-secondary,
         hsl(0, 0%, 96%)
       );
-      --ct-badge-color-secondary-foreground: var(
+      --cf-badge-color-secondary-foreground: var(
         --ct-theme-color-secondary-foreground,
         hsl(0, 0%, 9%)
       );
-      --ct-badge-color-destructive: var(
+      --cf-badge-color-destructive: var(
         --ct-theme-color-error,
         hsl(0, 100%, 50%)
       );
-      --ct-badge-color-destructive-foreground: var(
+      --cf-badge-color-destructive-foreground: var(
         --ct-theme-color-error-foreground,
         hsl(0, 0%, 100%)
       );
-      --ct-badge-color-border: var(--ct-theme-color-border, hsl(0, 0%, 89%));
-      --ct-badge-color-text: var(--ct-theme-color-text, hsl(0, 0%, 9%));
-      --ct-badge-color-ring: var(--ct-theme-color-primary, hsl(212, 100%, 47%));
+      --cf-badge-color-border: var(--ct-theme-color-border, hsl(0, 0%, 89%));
+      --cf-badge-color-text: var(--ct-theme-color-text, hsl(0, 0%, 9%));
+      --cf-badge-color-ring: var(--ct-theme-color-primary, hsl(212, 100%, 47%));
 
       display: inline-block;
       box-sizing: border-box;
@@ -75,24 +75,24 @@ export class CTBadge extends BaseElement {
 
     /* Variant styles */
     .badge.default {
-      background-color: var(--ct-badge-color-primary, hsl(212, 100%, 47%));
-      color: var(--ct-badge-color-primary-foreground, hsl(0, 0%, 100%));
+      background-color: var(--cf-badge-color-primary, hsl(212, 100%, 47%));
+      color: var(--cf-badge-color-primary-foreground, hsl(0, 0%, 100%));
     }
 
     .badge.secondary {
-      background-color: var(--ct-badge-color-secondary, hsl(0, 0%, 96%));
-      color: var(--ct-badge-color-secondary-foreground, hsl(0, 0%, 9%));
+      background-color: var(--cf-badge-color-secondary, hsl(0, 0%, 96%));
+      color: var(--cf-badge-color-secondary-foreground, hsl(0, 0%, 9%));
     }
 
     .badge.destructive {
-      background-color: var(--ct-badge-color-destructive, hsl(0, 100%, 50%));
-      color: var(--ct-badge-color-destructive-foreground, hsl(0, 0%, 100%));
+      background-color: var(--cf-badge-color-destructive, hsl(0, 100%, 50%));
+      color: var(--cf-badge-color-destructive-foreground, hsl(0, 0%, 100%));
     }
 
     .badge.outline {
       background-color: transparent;
-      border-color: var(--ct-badge-color-border, hsl(0, 0%, 89%));
-      color: var(--ct-badge-color-text, hsl(0, 0%, 9%));
+      border-color: var(--cf-badge-color-border, hsl(0, 0%, 89%));
+      color: var(--cf-badge-color-text, hsl(0, 0%, 9%));
     }
 
     /* Close button */
@@ -119,7 +119,7 @@ export class CTBadge extends BaseElement {
     }
 
     .close-button:focus-visible {
-      outline: 2px solid var(--ct-badge-color-ring, hsl(212, 100%, 47%));
+      outline: 2px solid var(--cf-badge-color-ring, hsl(212, 100%, 47%));
       outline-offset: 2px;
       border-radius: 2px;
     }
@@ -185,11 +185,11 @@ export class CTBadge extends BaseElement {
     event.preventDefault();
     event.stopPropagation();
 
-    // Emit ct-remove event
-    this.emit("ct-remove", {
+    // Emit cf-remove event
+    this.emit("cf-remove", {
       variant: this.variant,
     });
   }
 }
 
-globalThis.customElements.define("ct-badge", CTBadge);
+globalThis.customElements.define("cf-badge", CFBadge);

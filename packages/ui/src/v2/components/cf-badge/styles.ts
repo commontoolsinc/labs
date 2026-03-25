@@ -1,5 +1,5 @@
 /**
- * Styles for ct-badge component
+ * Styles for cf-badge component
  */
 
 export const badgeStyles = `

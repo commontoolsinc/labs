@@ -164,10 +164,10 @@ export default pattern(
             <p style="color: #64748b; margin-bottom: 1rem;">Badge variations</p>
 
             <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-              <ct-badge>Default</ct-badge>
-              <ct-badge variant="secondary">Secondary</ct-badge>
-              <ct-badge variant="destructive">Destructive</ct-badge>
-              <ct-badge variant="outline">Outline</ct-badge>
+              <cf-badge>Default</cf-badge>
+              <cf-badge variant="secondary">Secondary</cf-badge>
+              <cf-badge variant="destructive">Destructive</cf-badge>
+              <cf-badge variant="outline">Outline</cf-badge>
             </div>
           </section>
 
@@ -177,17 +177,17 @@ export default pattern(
             <p style="color: #64748b; margin-bottom: 1rem;">Alert messages</p>
 
             <div style="margin-bottom: 1rem;">
-              <ct-alert>
+              <cf-alert>
                 <strong>Default Alert</strong>{" "}
                 - This is a default alert message.
-              </ct-alert>
+              </cf-alert>
             </div>
 
             <div>
-              <ct-alert variant="destructive">
+              <cf-alert variant="destructive">
                 <strong>Destructive Alert</strong>{" "}
                 - This action cannot be undone.
-              </ct-alert>
+              </cf-alert>
             </div>
           </section>
 
@@ -270,10 +270,10 @@ export default pattern(
             </p>
 
             <div style="display: flex; flex-direction: column; gap: 1rem;">
-              <ct-progress value={0}></ct-progress>
-              <ct-progress value={33}></ct-progress>
-              <ct-progress value={66}></ct-progress>
-              <ct-progress value={100}></ct-progress>
+              <cf-progress value={0}></cf-progress>
+              <cf-progress value={33}></cf-progress>
+              <cf-progress value={66}></cf-progress>
+              <cf-progress value={100}></cf-progress>
             </div>
           </section>
 

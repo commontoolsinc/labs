@@ -26,7 +26,7 @@ export default pattern<BadgeStoryInput, BadgeStoryOutput>(() => {
   const label = Writable.of("Badge");
 
   return {
-    [NAME]: "ct-badge Story",
+    [NAME]: "cf-badge Story",
     [UI]: (
       <div style={{ padding: "1rem" }}>
         <div
@@ -38,12 +38,12 @@ export default pattern<BadgeStoryInput, BadgeStoryOutput>(() => {
             padding: "2rem 0",
           }}
         >
-          <ct-badge
+          <cf-badge
             variant={variant}
             removable={removable}
           >
             {label}
-          </ct-badge>
+          </cf-badge>
           <span style={{ fontSize: "0.875rem", color: "#6b7280" }}>
             Click the close button when removable is enabled.
           </span>
@@ -67,7 +67,7 @@ export default pattern<BadgeStoryInput, BadgeStoryOutput>(() => {
           />
           <SwitchControl
             label="removable"
-            description="Shows close button and emits ct-remove"
+            description="Shows close button and emits cf-remove"
             defaultValue="false"
             checked={removable}
           />

@@ -28,11 +28,11 @@ export default pattern<AlertStoryInput, AlertStoryOutput>(() => {
   const body = Writable.of("");
 
   return {
-    [NAME]: "ct-alert Story",
+    [NAME]: "cf-alert Story",
     [UI]: (
       <div style={{ padding: "1rem" }}>
         <div style={{ padding: "2rem 0" }}>
-          <ct-alert
+          <cf-alert
             variant={variant}
             dismissible={dismissible}
           >
@@ -40,11 +40,11 @@ export default pattern<AlertStoryInput, AlertStoryOutput>(() => {
             <span slot="title">{title}</span>
             <span slot="description">{description}</span>
             {body}
-          </ct-alert>
+          </cf-alert>
           <div
             style={{ fontSize: "0.875rem", color: "#6b7280", marginTop: "8px" }}
           >
-            Dismissible alerts emit ct-dismiss when the close button is clicked.
+            Dismissible alerts emit cf-dismiss when the close button is clicked.
           </div>
         </div>
       </div>
@@ -67,7 +67,7 @@ export default pattern<AlertStoryInput, AlertStoryOutput>(() => {
           />
           <SwitchControl
             label="dismissible"
-            description="Shows dismiss button and emits ct-dismiss"
+            description="Shows dismiss button and emits cf-dismiss"
             defaultValue="false"
             checked={dismissible}
           />

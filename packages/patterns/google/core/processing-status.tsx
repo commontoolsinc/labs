@@ -71,7 +71,7 @@ export default pattern<ProcessingStatusProps>(
               flex: 1,
             }}
           >
-            <ct-progress
+            <cf-progress
               value={completedCount}
               max={totalCount}
               style="width: 60px; height: 6px;"

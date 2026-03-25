@@ -1,8 +1,8 @@
 /**
- * @component ct-progress
+ * @component cf-progress
  * @description Progress indicator component that displays completion percentage or indeterminate loading state
  *
- * @tag ct-progress
+ * @tag cf-progress
  *
  * @attribute {number} value - Current progress value (0-100). Defaults to 0.
  * @attribute {number} max - Maximum value for the progress bar. Defaults to 100.
@@ -14,13 +14,13 @@
  * @example
  * ```html
  * <!-- Determinate progress -->
- * <ct-progress value="60"></ct-progress>
+ * <cf-progress value="60"></cf-progress>
  *
  * <!-- Indeterminate progress -->
- * <ct-progress indeterminate></ct-progress>
+ * <cf-progress indeterminate></cf-progress>
  *
  * <!-- Custom max value -->
- * <ct-progress value="50" max="200"></ct-progress>
+ * <cf-progress value="50" max="200"></cf-progress>
  * ```
  *
  * @accessibility
@@ -35,7 +35,7 @@ import { styleMap } from "lit/directives/style-map.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { progressStyles } from "./styles.ts";
 
-export class CTProgress extends BaseElement {
+export class CFProgress extends BaseElement {
   static override properties = {
     value: { type: Number },
     max: { type: Number },
@@ -186,4 +186,4 @@ export class CTProgress extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-progress", CTProgress);
+globalThis.customElements.define("cf-progress", CFProgress);

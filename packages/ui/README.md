@@ -63,7 +63,7 @@ registerAllComponents();
   `cf-switch`, `cf-toggle`, `cf-slider`
 - **Layout**: `cf-card`, `cf-separator`, `ct-accordion`, `cf-collapsible`,
   `ct-tabs`, `ct-scroll-area`
-- **Feedback**: `ct-alert`, `ct-badge`, `ct-progress`, `cf-skeleton`, `cf-label`
+- **Feedback**: `cf-alert`, `cf-badge`, `cf-progress`, `cf-skeleton`, `cf-label`
 - **Data**: `ct-table`, `cf-form`, `ct-input-otp`
 - **Display**: `ct-aspect-ratio`, `ct-resizable-panel-group`
 
@@ -175,7 +175,7 @@ packages/ui/
     <ct-grid slot="content" columns="3" gap="4">
       <cf-card>
         <cf-vstack slot="content" gap="2">
-          <ct-badge variant="secondary">Active</ct-badge>
+          <cf-badge variant="secondary">Active</cf-badge>
           <h3>Total Users</h3>
           <p style="font-size: 2rem">1,234</p>
         </cf-vstack>
