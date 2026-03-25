@@ -7,6 +7,20 @@ hash/fact/subscription prototype.
 If this file conflicts with sections 01-06, update the file. Do not preserve
 older guidance by layering compatibility code around it.
 
+## Status Note
+
+This guidance tracks the current implementation, not the full future protocol
+target. In particular:
+
+- the current wire protocol uses plain JSON messages, not UCAN-framed transport
+- write-class commands may persist `invocation` / `authorization` payloads, but
+  transport-level UCAN verification remains deferred
+- session resume still uses caller-provided `sessionId` values; principal
+  binding and server-issued session ids remain deferred
+- one-shot `graph.query` now honors `branch`, `since`, and `atSeq`
+- watch installation remains current-state only in this pass; do not treat
+  watch specs as historical subscriptions keyed by `atSeq`
+
 ## 1. Source Of Truth
 
 Implementation authority is:
@@ -45,7 +59,8 @@ codebase. The target wire messages are:
 - `session/effect`
 
 Do not switch this pass to full UCAN message framing. Persist invocation/auth
-data for write-class commands only.
+data for write-class commands only. None of the current wire messages are
+transport-level signed UCAN invocations.
 
 ## 4. Session Model
 
@@ -67,11 +82,21 @@ Reconnect behavior:
 The client should treat `seenSeq` as “highest canonical seq fully integrated
 into confirmed state,” not merely “latest seq observed on the wire.”
 
+Current deferred constraint:
+
+- `sessionId` hardening is out of scope for this pass. Resume remains keyed by
+  the supplied `(space, sessionId)` pair rather than a server-issued,
+  principal-bound identifier.
+
 The normal growth path for live interests should use `session.watch.add`,
 including the first watch install on a fresh session. Use `session.watch.set`
 only when replacing the full interest set. Watch mutations must be serialized
 per session so overlapping add/set requests cannot race to construct competing
 local watch views.
+
+When `session.watch.add` receives a watch id that already exists, treat it as a
+replacement of that watch definition rather than a no-op. Reused ids should
+recompute the full watch union and may legitimately emit `removes`.
 
 ## 5. Transaction Contract
 
@@ -165,6 +190,10 @@ Practical guidance:
 - watch overlap should dedupe at the session cache layer
 - `removes` mean “no longer relevant to this watch union,” not tombstone
 - keep one-shot `graph.query` for non-live reads and shared traversal logic
+- compare sync cache entries by revision identity (`branch`, `id`, `seq`,
+  `deleted`), not by serializing document payloads on hot paths
+- keep the client watch view incrementally ordered instead of rebuilding and
+  sorting the full entity set on every emit
 
 Before returning a `ConflictError`, flush any already-committed relevant sync so
 the client can retry on fresh watched state.
@@ -186,18 +215,31 @@ For schema-aware live watches, keep the cache lifetimes split:
 - use a fresh traversal memo for write-triggered refreshes so retargets and
   other topology changes cannot be incorrectly pruned by stale memo entries
 
+For one-shot reads, `graph.query` must honor:
+
+- `branch` for branch-scoped traversal
+- `atSeq` for point-in-time reconstruction on that branch
+- `since` as a post-traversal filter on entity head seq
+
+Do not silently drop `since` / `atSeq` from one-shot query semantics.
+
+Keep shared JSON-pointer and path-overlap helpers in one module under
+`packages/memory/v2` so patch application, conflict detection, and runner-side
+read invalidation do not drift.
+
 ## 12. Branch Scope
 
-This pass includes basic branches only:
+This pass includes only the branch-aware read/write/query behavior already wired
+through the core storage path:
 
-- branch create/delete/list
 - branch-aware writes
 - branch-aware current reads
 - branch-aware point-in-time reads
 - branch-aware watch scopes
 
-Defer merge proposal generation and advanced branch live-sync behavior. Do not
-block the seq/revision rewrite on merge ergonomics.
+Public branch lifecycle commands, merge proposal generation, and advanced branch
+live-sync behavior remain deferred. Do not block the seq/revision rewrite on
+merge ergonomics.
 
 ## 13. Testing Strategy
 
@@ -216,9 +258,12 @@ changing the implementation.
 Required test areas:
 
 - new engine-root path resolution
+- rejection of unsafe store subjects before path construction
 - revision replay and snapshots
 - idempotent `(sessionId, localSeq)` replay
 - session watch installation and catch-up sync
+- `session.watch.add` replacement behavior for reused watch ids
+- one-shot `graph.query` coverage for `branch`, `since`, and `atSeq`
 - reconnect with outstanding commits
 - runner notification ordering
 - toolshed end-to-end sync on the new protocol

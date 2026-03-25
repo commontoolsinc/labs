@@ -111,8 +111,13 @@ session-scoped catch-up sync.
 
 ## Implementation Materials
 
+For the current shipped implementation status and explicitly deferred items, use
+the implementation plan and guidance below rather than inferring status from the
+broader target sections.
+
 | File                                                             | Content                                                            |
 | ---------------------------------------------------------------- | ------------------------------------------------------------------ |
+| [implementation-plan.md](./implementation-plan.md)               | Current implementation status, shipped scope, deferred items, and focused test coverage |
 | [10-implementation-guidance.md](./10-implementation-guidance.md) | Architectural guidance, known pitfalls, phasing, and anti-patterns |
 
 ## Key Type Summary

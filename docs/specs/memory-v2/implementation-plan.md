@@ -11,6 +11,43 @@ hash-addressed JSON facts plus subscription-id live updates to:
 - session-scoped watch sets
 - session-scoped catch-up sync frames
 
+## Current Status
+
+This file and
+[10-implementation-guidance.md](/Users/berni/src/labs.exp-memory-impl-4/docs/specs/memory-v2/10-implementation-guidance.md)
+are the authoritative implementation notes for the current code. They describe
+what is shipped now and what remains explicitly deferred, even where sections
+04-06 still describe the broader target design.
+
+Implemented on the current branch:
+
+- `engine-v3` / `.engine-v3` storage roots for the rewritten v2 engine
+- seq/revision-based JSON storage with point-in-time reads
+- lightweight WebSocket framing with `hello`, `session.open`, `transact`,
+  `graph.query`, `session.watch.set`, `session.watch.add`, `session.ack`,
+  `response`, and `session/effect`
+- session-scoped watch-union sync with catch-up frames, `removes`, and
+  conflict-time sync flushing
+- one-shot `graph.query` support for `branch`, `since`, and `atSeq`
+- `session.watch.add` replacement-by-id semantics when an incoming watch id
+  already exists
+- unsafe store-subject rejection before engine-root path construction
+- shared JSON-pointer/path-overlap helpers reused across memory and runner
+- watch-layer hot-path cleanup:
+  - session cache diffing by revision identity instead of serialized payload
+    comparison
+  - incremental ordered client watch views instead of full resort on every emit
+
+Explicitly deferred:
+
+- full UCAN transport framing for all wire messages
+- server-issued or principal-bound session ids; resume remains keyed by the
+  caller-provided `sessionId`
+- public branch lifecycle commands on the v2 wire protocol
+- merge proposal generation, merge conflict workflows, and advanced branch
+  live-sync optimizations
+- broad protocol-spec reconciliation outside these implementation notes
+
 This is a clean break:
 
 - no in-place migration from the current v2 engine store
@@ -33,10 +70,13 @@ memory route.
   `session.ack`, `response`, and `session/effect`.
 - Do not switch this pass to full UCAN transport framing.
 - Keep invocation/auth persistence for write-class commands only.
+- Session resume may keep using caller-provided `sessionId` values for now.
+  Session-id hardening is deferred.
 - Keep blob payload storage content-addressed. The seq rewrite applies to JSON
   entity storage, not blob data.
-- Include basic branches now: create/delete/list, branch-aware reads/writes, and
-  branch-aware watch scopes. Defer merge proposals and advanced branch sync.
+- Keep branch-aware reads, writes, and watch scopes where already supported.
+  Defer public branch lifecycle commands, merge proposals, and advanced branch
+  sync.
 
 ## Phase 0: Spec Maintenance
 
@@ -124,17 +164,20 @@ memory route.
 
 ## Phase 5: Basic Branches
 
-- Include:
-  - branch create/delete/list
-  - branch-aware writes
-  - branch-aware current reads
-  - branch-aware point-in-time reads
-  - branch-aware watch scopes
-- Defer:
-  - merge proposal generation
-  - merge conflict workflow
-  - advanced branch-specific live sync optimizations
-  - deleted-branch refinements beyond historical reads
+Implemented in this pass:
+
+- branch-aware writes
+- branch-aware current reads
+- branch-aware point-in-time reads
+- branch-aware watch scopes
+
+Deferred:
+
+- public branch create/delete/list commands on the v2 wire protocol
+- merge proposal generation
+- merge conflict workflow
+- advanced branch-specific live sync optimizations
+- deleted-branch refinements beyond historical reads
 
 ## Phase 6: Remove Old Assumptions
 
@@ -162,10 +205,13 @@ memory route.
 
 - `hello` then `session.open` ordering
 - `session.watch.set` installs or replaces the current watch set
+- `session.watch.add` incrementally extends the current watch set for new ids
+  and replaces existing watch definitions when ids are reused
 - `session/effect` emits correct `upserts` and `removes`
 - `session.ack` advances server-side `seenSeq`
 - reconnect restores watch set and replays outstanding commits
 - old live `graph.query subscribe` is rejected
+- one-shot `graph.query` honors `branch`, `since`, and `atSeq`
 
 ### Runner / Provider
 
@@ -183,4 +229,5 @@ memory route.
 - end-to-end runtime sync across fresh runtimes using watch sync
 - root retarget and deep-link propagation through session sync
 - server restart + resume with watch restoration
-- basic branch reads/writes against the real toolshed route
+- safe store-subject rejection on toolshed-backed v2 session open
+- basic branch-aware reads/writes against the real toolshed route
