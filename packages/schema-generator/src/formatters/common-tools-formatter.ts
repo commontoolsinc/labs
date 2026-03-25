@@ -264,6 +264,9 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     if (wrapperKind === "Stream") {
+      if (typeof innerSchema === "boolean") {
+        return this.applyWrapperSemantics(innerSchema, "Stream");
+      }
       const { asCell: _drop, ...rest } = innerSchema as Record<string, unknown>;
       return this.applyWrapperSemantics(rest as JSONSchemaMutable, "Stream");
     }
@@ -391,6 +394,9 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     // Stream<T>: do not reflect inner Cell-ness; only mark asStream
     if (wrapperKind === "Stream") {
+      if (typeof innerSchema === "boolean") {
+        return this.applyWrapperSemantics(innerSchema, "Stream");
+      }
       const { asCell: _drop, ...rest } = innerSchema as Record<string, unknown>;
       return this.applyWrapperSemantics(rest as JSONSchemaMutable, "Stream");
     }
