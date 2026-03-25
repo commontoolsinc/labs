@@ -1,5 +1,6 @@
 import { Command } from "@cliffy/command";
 import { resolve } from "@std/path";
+import ports from "@commontools/ports" with { type: "json" };
 import {
   buildDenoArgs,
   defaultStateDir,
@@ -118,7 +119,7 @@ export const fuse = new Command()
     "Mount with settings from CT_API_URL / CT_IDENTITY env vars.",
   )
   .example(
-    "ct fuse mount /tmp/ct-fuse --api-url http://localhost:8000",
+    `ct fuse mount /tmp/ct-fuse --api-url http://localhost:${ports.toolshed}`,
     "Mount with explicit API URL.",
   )
   .example(

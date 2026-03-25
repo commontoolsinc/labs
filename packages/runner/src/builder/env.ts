@@ -1,4 +1,5 @@
 import { isDeno } from "@commontools/utils/env";
+import ports from "@commontools/ports" with { type: "json" };
 
 // Environment configuration provided to patterns. Could
 // eventually be e.g. `import.meta` exposed to patterns.
@@ -13,7 +14,7 @@ export interface PatternEnvironment {
 
 let globalEnv = {
   apiUrl: isDeno()
-    ? new URL("http://localhost:8000")
+    ? new URL(`http://localhost:${ports.toolshed}`)
     : new URL(new URL(globalThis.location.href).origin),
 };
 

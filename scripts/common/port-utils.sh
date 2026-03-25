@@ -16,3 +16,16 @@ get_pids_on_port() {
         fuser "$port/tcp" 2>&1 | awk '{for(i=2;i<=NF;i++) print $i}'
     fi
 }
+
+# Read base ports from ports.json at repo root
+read_base_ports() {
+    local ports_file
+    ports_file="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/ports.json"
+    if [[ ! -f "$ports_file" ]]; then
+        echo "Error: $ports_file not found" >&2
+        exit 1
+    fi
+    BASE_TOOLSHED_PORT=$(jq -r '.toolshed' "$ports_file")
+    BASE_SHELL_PORT=$(jq -r '.shell' "$ports_file")
+    BASE_INSPECTOR_PORT=$(jq -r '.inspector' "$ports_file")
+}

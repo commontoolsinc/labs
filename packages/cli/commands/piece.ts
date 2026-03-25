@@ -30,6 +30,7 @@ import { decode } from "@commontools/utils/encoding";
 import { absPath } from "../lib/utils.ts";
 import { parsePath } from "@commontools/piece/ops";
 import { UI } from "@commontools/runner";
+import ports from "@commontools/ports" with { type: "json" };
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -138,10 +139,10 @@ function pieceEnvStatus(): string {
 const pieceDescription = `Interact with pieces running on a server.
 
 COMMON WORKFLOWS:
-  Deploy:    ct piece new ./pattern.tsx -i ./claude.key -a http://localhost:8000 -s my-space
-  Update:    ct piece setsrc --piece <ID> ./pattern.tsx -i ./claude.key -a http://localhost:8000 -s my-space
-  Test:      ct piece call --piece <ID> callableName -i ./claude.key -a http://localhost:8000 -s my-space
-  Inspect:   ct piece inspect --piece <ID> -i ./claude.key -a http://localhost:8000 -s my-space
+  Deploy:    ct piece new ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
+  Update:    ct piece setsrc --piece <ID> ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
+  Test:      ct piece call --piece <ID> callableName -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
+  Inspect:   ct piece inspect --piece <ID> -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
 ${pieceEnvStatus()}
 TIPS:
   • Use 'setsrc' for iteration, not repeated 'new' (avoids clutter)
@@ -745,11 +746,11 @@ JSON VALUES: Strings need quotes: echo '"hello"' | ct piece set ...`,
     "Deploy a custom home pattern or reset to system default.",
   )
   .example(
-    `ct piece set-home ${EX_ID} -a http://localhost:8000 ./my-home.tsx`,
+    `ct piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} ./my-home.tsx`,
     `Deploy a custom home pattern.`,
   )
   .example(
-    `ct piece set-home ${EX_ID} -a http://localhost:8000 --reset`,
+    `ct piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} --reset`,
     `Reset to the system default home pattern.`,
   )
   .option("--reset", "Reset to the system default home pattern")

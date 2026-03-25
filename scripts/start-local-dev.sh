@@ -5,6 +5,7 @@ cd "$SCRIPT_DIR/.."
 
 # Source shared utilities
 source "$SCRIPT_DIR/common/port-utils.sh"
+read_base_ports
 
 # Default ports and offset
 PORT_OFFSET=${PORT_OFFSET:-0}
@@ -82,9 +83,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Apply offset to default ports if not explicitly set
-SHELL_PORT=${SHELL_PORT:-$((5173 + PORT_OFFSET))}
-TOOLSHED_PORT=${TOOLSHED_PORT:-$((8000 + PORT_OFFSET))}
-INSPECT_PORT=${INSPECT_PORT:-$((9229 + PORT_OFFSET))}
+SHELL_PORT=${SHELL_PORT:-$((BASE_SHELL_PORT + PORT_OFFSET))}
+TOOLSHED_PORT=${TOOLSHED_PORT:-$((BASE_TOOLSHED_PORT + PORT_OFFSET))}
+INSPECT_PORT=${INSPECT_PORT:-$((BASE_INSPECTOR_PORT + PORT_OFFSET))}
 
 # Export for child processes
 export SHELL_PORT

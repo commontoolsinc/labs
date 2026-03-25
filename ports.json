@@ -1,0 +1,6 @@
+{
+  "_description": "Base ports for labs servers. Consumed by external projects (e.g. loom) to compute port offsets. Changing a value here changes it for all consumers.",
+  "toolshed": 8000,
+  "shell": 5173,
+  "inspector": 9229
+}

@@ -8,6 +8,7 @@ import { init } from "./init.ts";
 import { piece } from "./piece.ts";
 import { identity } from "./identity.ts";
 import { test } from "./test.ts";
+import ports from "@commontools/ports" with { type: "json" };
 
 function envStatus(): string {
   const identity = Deno.env.get("CT_IDENTITY");
@@ -33,7 +34,7 @@ QUICK START:
 FIRST TIME SETUP:
   ct id new > claude.key            # Create identity key
   export CT_IDENTITY=./claude.key   # Set default identity
-  export CT_API_URL=http://localhost:8000  # Set default API URL
+  export CT_API_URL=http://localhost:${ports.toolshed}  # Set default API URL
 
 LOCAL DEVELOPMENT:
   ./scripts/start-local-dev.sh      # Start local servers

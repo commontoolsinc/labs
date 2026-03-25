@@ -17,6 +17,7 @@
  */
 
 import * as path from "@std/path";
+import ports from "@commontools/ports" with { type: "json" };
 
 // Packages with integration tests that need a running server
 const PACKAGES_WITH_SERVER = [
@@ -469,8 +470,8 @@ Environment:
                    Falls back to running packages/cli/mod.ts via deno.
 
 Server ports (with offset):
-  Toolshed:  8000 + offset
-  Shell:     5173 + offset
+  Toolshed:  ${ports.toolshed} + offset
+  Shell:     ${ports.shell} + offset
 
 Log files (after servers start):
   packages/shell/local-dev-shell.log
@@ -531,7 +532,7 @@ async function main(): Promise<void> {
     (envPortOffset ? parseInt(envPortOffset, 10) : undefined) ??
     Math.floor(Math.random() * 901) + 100; // 100-1000
 
-  const apiUrl = `http://localhost:${8000 + portOffset}`;
+  const apiUrl = `http://localhost:${ports.toolshed + portOffset}`;
 
   console.log("Integration Test Runner");
   console.log("=======================");

@@ -1,9 +1,13 @@
 import { type Config } from "@commontools/felt";
+import ports from "@commontools/ports" with { type: "json" };
 
 const PRODUCTION = !!Deno.env.get("PRODUCTION");
 const ENVIRONMENT = PRODUCTION ? "production" : "development";
 
-const SHELL_PORT = parseInt(Deno.env.get("SHELL_PORT") || "5173", 10);
+const SHELL_PORT = parseInt(
+  Deno.env.get("SHELL_PORT") || String(ports.shell),
+  10,
+);
 
 const config: Config = {
   entries: [
