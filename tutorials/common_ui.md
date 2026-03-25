@@ -105,20 +105,20 @@ When to use: your `<main>` or `<div>` is not growing to full the available space
 
 Inspired by this [Swift UI convention](https://scottsmithdev.com/screen-vs-view-in-swiftui). A `Screen` is just a `View` but it represents the kind of view that MIGHT fill a screen on some device.
 
-## ct-toolbar
+## cf-toolbar
 
 Stack several actions into a horizontal bar, typically at the top of `<cf-screen>`.
 
-```{figure} ./images/diagrams/ct-toolbar.svg
+```{figure} ./images/diagrams/cf-toolbar.svg
 :name: layout-example
 ```
 
 ```{code-block} html
 <cf-screen>
-  <ct-toolbar slot="header">
+  <cf-toolbar slot="header">
       <cf-button>A</cf-button>
       <cf-button>B</cf-button>
-  </ct-toolbar>
+  </cf-toolbar>
 </cf-screen>
 ```
 
@@ -263,9 +263,9 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 ```{code-block} html
 <cf-screen>
-    <ct-toolbar slot="top">
+    <cf-toolbar slot="top">
         <cf-button>hello</cf-button>
-    </ct-toolbar>
+    </cf-toolbar>
     <cf-autolayout>
         <cf-vstack slot="left">
             <cf-hstack gap="1">

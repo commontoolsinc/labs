@@ -24,14 +24,14 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
   const closeModal = action(() => open.set(false));
 
   return {
-    [NAME]: "ct-modal Story",
+    [NAME]: "cf-modal Story",
     [UI]: (
       <div style={{ padding: "1rem" }}>
         <cf-button variant="primary" onClick={showModal}>
           Open Modal
         </cf-button>
 
-        <ct-modal $open={open} size={size} dismissable={dismissable}>
+        <cf-modal $open={open} size={size} dismissable={dismissable}>
           <div slot="header">
             <cf-heading level={4}>Modal Title</cf-heading>
           </div>
@@ -51,7 +51,7 @@ export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
               </cf-button>
             </cf-hstack>
           </div>
-        </ct-modal>
+        </cf-modal>
       </div>
     ),
     controls: (

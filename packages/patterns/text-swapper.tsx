@@ -163,7 +163,7 @@ export default pattern<Input, Output>(({ leftText, rightText }) => {
         </div>
 
         {/* Edit Modal */}
-        <ct-modal $open={showModal} dismissable size="sm" label="Edit Text">
+        <cf-modal $open={showModal} dismissable size="sm" label="Edit Text">
           <span slot="header">
             Edit {editingSide.get() === "left" ? "Left" : "Right"} Text
           </span>
@@ -231,7 +231,7 @@ export default pattern<Input, Output>(({ leftText, rightText }) => {
               Save
             </button>
           </div>
-        </ct-modal>
+        </cf-modal>
       </div>
     ),
   };

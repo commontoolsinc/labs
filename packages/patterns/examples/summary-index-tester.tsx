@@ -31,9 +31,9 @@ export default pattern<Record<string, never>>((_) => {
     [NAME]: "Summary Index Tester",
     [UI]: (
       <cf-screen>
-        <ct-toolbar slot="header" sticky>
+        <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Summary Index Tester</h2>
-        </ct-toolbar>
+        </cf-toolbar>
 
         <cf-vstack gap="6" padding="6">
           <cf-vstack gap="2">

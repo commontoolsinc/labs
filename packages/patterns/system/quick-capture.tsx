@@ -215,9 +215,9 @@ ${profileSection}`;
       [NAME]: "Quick Capture",
       [UI]: (
         <cf-screen>
-          <ct-toolbar slot="header" sticky>
+          <cf-toolbar slot="header" sticky>
             <h2 style={{ margin: 0, fontSize: "18px" }}>Quick Capture</h2>
-          </ct-toolbar>
+          </cf-toolbar>
 
           <cf-vscroll flex showScrollbar fadeEdges snapToBottom>
             <cf-vstack gap="3" style="padding: 1rem;">

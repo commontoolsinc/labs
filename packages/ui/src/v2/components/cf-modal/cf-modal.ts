@@ -1,11 +1,11 @@
 /**
- * ct-modal - Accessible modal dialog with mobile sheet transformation
+ * cf-modal - Accessible modal dialog with mobile sheet transformation
  *
  * Supports both Cell and plain boolean for the $open property:
  * - Cell binding: Modal writes `false` on dismiss (reactive pattern)
- * - Plain boolean: Parent controls via `onct-modal-close` event (controlled pattern)
+ * - Plain boolean: Parent controls via `oncf-modal-close` event (controlled pattern)
  *
- * @element ct-modal
+ * @element cf-modal
  *
  * @attr {boolean} open - Whether the modal is visible (reflected)
  * @attr {boolean} dismissable - Allow dismiss via backdrop/Escape/X button
@@ -15,10 +15,10 @@
  *
  * @prop {CellHandle<boolean>|boolean} open - Visibility state (supports both Cell and plain value)
  *
- * @fires ct-modal-open - Modal is opening
- * @fires ct-modal-close - Modal requests close (detail: { reason })
- * @fires ct-modal-opened - Open animation completed
- * @fires ct-modal-closed - Close animation completed
+ * @fires cf-modal-open - Modal is opening
+ * @fires cf-modal-close - Modal requests close (detail: { reason })
+ * @fires cf-modal-opened - Open animation completed
+ * @fires cf-modal-closed - Close animation completed
  *
  * @slot - Main content
  * @slot header - Header content
@@ -36,17 +36,17 @@
  * @example
  * ```html
  * <!-- Cell binding (reactive) -->
- * <ct-modal $open={isModalOpen} dismissable>
+ * <cf-modal $open={isModalOpen} dismissable>
  *   <span slot="header">Edit Item</span>
  *   <p>Modal content here</p>
  *   <cf-button slot="footer" onClick={save}>Save</cf-button>
- * </ct-modal>
+ * </cf-modal>
  *
  * <!-- Plain boolean (controlled) -->
- * <ct-modal $open={true} onct-modal-close={handleClose}>
+ * <cf-modal $open={true} oncf-modal-close={handleClose}>
  *   <span slot="header">Confirm</span>
  *   <p>Are you sure?</p>
- * </ct-modal>
+ * </cf-modal>
  * ```
  */
 import { html, nothing, type PropertyValues } from "lit";
@@ -63,7 +63,7 @@ import {
 import { modalStyles } from "./styles.ts";
 import { CellHandle } from "@commonfabric/runtime-client";
 
-export class CTModal extends BaseElement {
+export class CFModal extends BaseElement {
   static override styles = [BaseElement.baseStyles, modalStyles];
 
   /** Visibility state - supports both Cell<boolean> and plain boolean */
@@ -202,7 +202,7 @@ export class CTModal extends BaseElement {
       document.body.style.overflow = "hidden";
     }
 
-    this.emit("ct-modal-open");
+    this.emit("cf-modal-open");
 
     // Focus first focusable element after animation
     requestAnimationFrame(() => {
@@ -215,7 +215,7 @@ export class CTModal extends BaseElement {
       const dialog = this.shadowRoot?.querySelector(".dialog") as HTMLElement;
       if (dialog) {
         const handler = () => {
-          this.emit("ct-modal-opened");
+          this.emit("cf-modal-opened");
           dialog.removeEventListener("transitionend", handler);
         };
         dialog.addEventListener("transitionend", handler);
@@ -245,7 +245,7 @@ export class CTModal extends BaseElement {
     const dialog = this.shadowRoot?.querySelector(".dialog") as HTMLElement;
     if (dialog) {
       const handler = () => {
-        this.emit("ct-modal-closed");
+        this.emit("cf-modal-closed");
         dialog.removeEventListener("transitionend", handler);
       };
       dialog.addEventListener("transitionend", handler);
@@ -302,7 +302,7 @@ export class CTModal extends BaseElement {
     this._setOpenValue(false);
 
     // Always emit event so parent can run cleanup logic
-    this.emit("ct-modal-close", { reason });
+    this.emit("cf-modal-close", { reason });
   }
 
   /**
@@ -317,7 +317,7 @@ export class CTModal extends BaseElement {
     }
 
     // Handle Escape (only if we're the top modal or no manager)
-    // Note: When using ct-modal-provider, Escape is handled globally there
+    // Note: When using cf-modal-provider, Escape is handled globally there
     // This is fallback for standalone usage
     if (e.key === "Escape" && this.dismissable && !this._manager) {
       e.preventDefault();
@@ -471,4 +471,4 @@ export class CTModal extends BaseElement {
   }
 }
 
-customElements.define("ct-modal", CTModal);
+customElements.define("cf-modal", CFModal);

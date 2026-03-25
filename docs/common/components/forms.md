@@ -194,7 +194,7 @@ the same object reference would cause all items to share the same data.
 - Prefer identity-based updates for lists: use `equals()` to find and update/remove
   items rather than relying on indices, which can drift when lists change.
 - Use a staging cell for create/edit flows and copy on submit to avoid shared references.
-- When using `ct-modal`, bind `$open` to a `Writable<boolean>` (not a `computed`)
+- When using `cf-modal`, bind `$open` to a `Writable<boolean>` (not a `computed`)
   so the modal can update state correctly.
 - Use `cf-button type="reset"` (or call `form.reset()`) to discard buffered changes.
 

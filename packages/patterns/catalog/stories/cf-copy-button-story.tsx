@@ -19,7 +19,7 @@ export default pattern<CopyButtonStoryInput, CopyButtonStoryOutput>(() => {
   const iconOnly = Writable.of(false);
 
   return {
-    [NAME]: "ct-copy-button Story",
+    [NAME]: "cf-copy-button Story",
     [UI]: (
       <div
         style={{
@@ -40,13 +40,13 @@ export default pattern<CopyButtonStoryInput, CopyButtonStoryOutput>(() => {
           >
             Copy Button
           </div>
-          <ct-copy-button
+          <cf-copy-button
             text="Hello, world!"
             variant={variant}
             icon-only={iconOnly}
           >
             Copy text
-          </ct-copy-button>
+          </cf-copy-button>
         </div>
         <div>
           <div
@@ -59,7 +59,7 @@ export default pattern<CopyButtonStoryInput, CopyButtonStoryOutput>(() => {
           >
             Icon Only
           </div>
-          <ct-copy-button
+          <cf-copy-button
             text="Copied from icon button"
             variant="ghost"
             icon-only
@@ -91,7 +91,7 @@ export default pattern<CopyButtonStoryInput, CopyButtonStoryOutput>(() => {
             >
               npm install @commonfabric/ui
             </code>
-            <ct-copy-button
+            <cf-copy-button
               text="npm install @commonfabric/ui"
               variant="ghost"
               icon-only

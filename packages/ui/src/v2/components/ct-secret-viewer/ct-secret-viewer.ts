@@ -1,5 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
+import "../cf-copy-button/cf-copy-button.ts";
 
 const AUTO_HIDE_MS = 30_000;
 
@@ -153,12 +154,12 @@ export class CTSecretViewer extends BaseElement {
             >
               ${this._revealed ? "Hide" : "Reveal"}
             </cf-button>
-            <ct-copy-button
+            <cf-copy-button
               .text="${this.value}"
               variant="ghost"
               size="sm"
               icon-only
-            ></ct-copy-button>
+            ></cf-copy-button>
           </div>
         </div>
       </div>

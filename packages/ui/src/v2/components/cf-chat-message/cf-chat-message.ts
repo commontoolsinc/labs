@@ -4,7 +4,7 @@ import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import "../cf-tool-call/cf-tool-call.ts";
 import "../cf-button/cf-button.ts";
-import "../ct-copy-button/ct-copy-button.ts";
+import "../cf-copy-button/cf-copy-button.ts";
 import "../cf-markdown/cf-markdown.ts";
 import type {
   BuiltInLLMContent,
@@ -340,12 +340,12 @@ export class CFChatMessage extends BaseElement {
       <div class="message-actions">
         ${this.role === "assistant"
           ? html`
-            <ct-copy-button
+            <cf-copy-button
               text="${textContent}"
               variant="ghost"
               size="sm"
               icon-only
-            ></ct-copy-button>
+            ></cf-copy-button>
           `
           : null}
       </div>

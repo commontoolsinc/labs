@@ -323,7 +323,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
     }),
     [UI]: (
       <cf-screen>
-        <ct-toolbar slot="header" sticky>
+        <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Knowledge Graph</h2>
           <div slot="end">
             {ifElse(
@@ -342,7 +342,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
               </cf-button>,
             )}
           </div>
-        </ct-toolbar>
+        </cf-toolbar>
         <cf-vstack gap="4" padding="6">
           <span
             style={{

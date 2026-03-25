@@ -2880,13 +2880,13 @@ interface CFScreenElement extends CTHTMLElement {}
 interface CTAutostartElement extends CTHTMLElement {}
 interface CFAutoLayoutElement extends CTHTMLElement {}
 interface CFButtonElement extends CTHTMLElement {}
-interface CTCopyButtonElement extends CTHTMLElement {}
+interface CFCopyButtonElement extends CTHTMLElement {}
 interface CTFileDownloadElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CFHStackElement extends CTHTMLElement {}
 interface CTFabElement extends CTHTMLElement {}
-interface CTModalElement extends CTHTMLElement {}
-interface CTModalProviderElement extends CTHTMLElement {}
+interface CFModalElement extends CTHTMLElement {}
+interface CFModalProviderElement extends CTHTMLElement {}
 interface CFChevronButtonElement extends CTHTMLElement {}
 interface CFCardElement extends CTHTMLElement {}
 interface CTCalendarElement extends CTHTMLElement {}
@@ -2894,7 +2894,7 @@ interface CTQuestionElement extends CTHTMLElement {}
 interface CFAlertElement extends CTHTMLElement {}
 interface CFVStackElement extends CTHTMLElement {}
 interface CFMessageInputElement extends CTHTMLElement {}
-interface CTToolbarElement extends CTHTMLElement {}
+interface CFToolbarElement extends CTHTMLElement {}
 interface CFKbdElement extends CTHTMLElement {}
 interface CTKeybindElement extends CTHTMLElement {}
 interface CFRenderElement extends CTHTMLElement {}
@@ -3212,7 +3212,7 @@ interface CFTagsAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-change"?: EventHandler<{ tags: string[] }>;
 }
 
-interface CTToolbarAttributes<T> extends CTHTMLAttributes<T> {
+interface CFToolbarAttributes<T> extends CTHTMLAttributes<T> {
   "dense"?: boolean;
   "sticky"?: boolean;
 }
@@ -3388,7 +3388,7 @@ interface CFButtonAttributes<T> extends CTHTMLAttributes<T> {
   "type"?: "button" | "submit" | "reset";
 }
 
-interface CTCopyButtonAttributes<T> extends CTHTMLAttributes<T> {
+interface CFCopyButtonAttributes<T> extends CTHTMLAttributes<T> {
   "text": string | Record<string, string>;
   "variant"?:
     | "primary"
@@ -3402,6 +3402,8 @@ interface CTCopyButtonAttributes<T> extends CTHTMLAttributes<T> {
   "disabled"?: boolean;
   "feedback-duration"?: number;
   "icon-only"?: boolean;
+  "oncf-copy-success"?: EventHandler<{ text: string; length: number }>;
+  "oncf-copy-error"?: EventHandler<{ error: Error; text: string }>;
 }
 
 interface CTFileDownloadAttributes<T> extends CTHTMLAttributes<T> {
@@ -3498,19 +3500,19 @@ interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
   "placeholder"?: string;
 }
 
-interface CTModalAttributes<T> extends CTHTMLAttributes<T> {
+interface CFModalAttributes<T> extends CTHTMLAttributes<T> {
   "$open"?: CellLike<boolean> | boolean;
   "dismissable"?: boolean;
   "size"?: "sm" | "md" | "lg" | "full";
   "prevent-scroll"?: boolean;
   "label"?: string;
-  "onct-modal-open"?: EventHandler<void>;
-  "onct-modal-close"?: EventHandler<{ reason: string }>;
-  "onct-modal-opened"?: EventHandler<void>;
-  "onct-modal-closed"?: EventHandler<void>;
+  "oncf-modal-open"?: EventHandler<void>;
+  "oncf-modal-close"?: EventHandler<{ reason: string }>;
+  "oncf-modal-opened"?: EventHandler<void>;
+  "oncf-modal-closed"?: EventHandler<void>;
 }
 
-interface CTModalProviderAttributes<T> extends CTHTMLAttributes<T> {}
+interface CFModalProviderAttributes<T> extends CTHTMLAttributes<T> {}
 
 interface CFChevronButtonAttributes<T> extends CTHTMLAttributes<T> {
   "expanded"?: boolean;
@@ -4716,21 +4718,21 @@ declare global {
         CFButtonAttributes<CFButtonElement>,
         CFButtonElement
       >;
-      "ct-copy-button": CTDOM.DetailedHTMLProps<
-        CTCopyButtonAttributes<CTCopyButtonElement>,
-        CTCopyButtonElement
+      "cf-copy-button": CTDOM.DetailedHTMLProps<
+        CFCopyButtonAttributes<CFCopyButtonElement>,
+        CFCopyButtonElement
       >;
       "ct-fab": CTDOM.DetailedHTMLProps<
         CTFabAttributes<CTFabElement>,
         CTFabElement
       >;
-      "ct-modal": CTDOM.DetailedHTMLProps<
-        CTModalAttributes<CTModalElement>,
-        CTModalElement
+      "cf-modal": CTDOM.DetailedHTMLProps<
+        CFModalAttributes<CFModalElement>,
+        CFModalElement
       >;
-      "ct-modal-provider": CTDOM.DetailedHTMLProps<
-        CTModalProviderAttributes<CTModalProviderElement>,
-        CTModalProviderElement
+      "cf-modal-provider": CTDOM.DetailedHTMLProps<
+        CFModalProviderAttributes<CFModalProviderElement>,
+        CFModalProviderElement
       >;
       "ct-file-download": CTDOM.DetailedHTMLProps<
         CTFileDownloadAttributes<CTFileDownloadElement>,
@@ -4772,9 +4774,9 @@ declare global {
         CTQuestionAttributes<CTQuestionElement>,
         CTQuestionElement
       >;
-      "ct-toolbar": CTDOM.DetailedHTMLProps<
-        CTToolbarAttributes<CTToolbarElement>,
-        CTToolbarElement
+      "cf-toolbar": CTDOM.DetailedHTMLProps<
+        CFToolbarAttributes<CFToolbarElement>,
+        CFToolbarElement
       >;
       "cf-kbd": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CFKbdElement>,

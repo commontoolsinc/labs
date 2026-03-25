@@ -11,7 +11,7 @@ interface ToolbarStoryOutput {
 
 export default pattern<ToolbarStoryInput, ToolbarStoryOutput>(() => {
   return {
-    [NAME]: "ct-toolbar Story",
+    [NAME]: "cf-toolbar Story",
     [UI]: (
       <div
         style={{
@@ -33,7 +33,7 @@ export default pattern<ToolbarStoryInput, ToolbarStoryOutput>(() => {
             Standard Toolbar
           </div>
           <div style="border: 1px solid #e2e8f0; border-radius: 4px; overflow: hidden;">
-            <ct-toolbar>
+            <cf-toolbar>
               <cf-button slot="start" variant="ghost" size="sm">Menu</cf-button>
               <span slot="center" style="font-size: 13px; font-weight: 600;">
                 Page Title
@@ -42,7 +42,7 @@ export default pattern<ToolbarStoryInput, ToolbarStoryOutput>(() => {
                 <cf-button variant="ghost" size="sm">Help</cf-button>
                 <cf-button variant="primary" size="sm">Save</cf-button>
               </cf-hstack>
-            </ct-toolbar>
+            </cf-toolbar>
           </div>
         </div>
 
@@ -58,13 +58,13 @@ export default pattern<ToolbarStoryInput, ToolbarStoryOutput>(() => {
             Dense Toolbar
           </div>
           <div style="border: 1px solid #e2e8f0; border-radius: 4px; overflow: hidden;">
-            <ct-toolbar dense>
+            <cf-toolbar dense>
               <cf-button slot="start" variant="ghost" size="sm">Back</cf-button>
               <span slot="center" style="font-size: 13px; font-weight: 600;">
                 Compact
               </span>
               <cf-button slot="end" variant="ghost" size="sm">Done</cf-button>
-            </ct-toolbar>
+            </cf-toolbar>
           </div>
         </div>
       </div>

@@ -648,11 +648,11 @@ export default pattern<Input, Output>(({ importJson }) => {
     [NAME]: computed(() => `Record Backup (${recordCount} records)`),
     [UI]: (
       <cf-screen>
-        <ct-toolbar slot="header" sticky>
+        <cf-toolbar slot="header" sticky>
           <div slot="start">
             <span style={{ fontWeight: "bold" }}>Record Backup</span>
           </div>
-        </ct-toolbar>
+        </cf-toolbar>
 
         <cf-vscroll flex showScrollbar>
           <cf-vstack gap="6" padding="6">

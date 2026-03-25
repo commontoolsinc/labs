@@ -186,9 +186,9 @@ const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
     [NAME]: "BacklinksIndex",
     [UI]: (
       <cf-screen>
-        <ct-toolbar slot="header" sticky>
+        <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Mentions</h2>
-        </ct-toolbar>
+        </cf-toolbar>
 
         <cf-vstack gap="4" padding="6">
           <cf-input $value={query} placeholder="Filter by name..." />

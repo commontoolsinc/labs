@@ -1,5 +1,5 @@
 /**
- * Styles for ct-modal component
+ * Styles for cf-modal component
  *
  * Desktop: Centered modal with fade + scale animation
  * Mobile (<480px): Bottom sheet with slide-up animation
@@ -8,28 +8,28 @@ import { css } from "lit";
 
 export const modalStyles = css`
   :host {
-    --ct-modal-color-background: var(--ct-theme-color-background, white);
-    --ct-modal-color-border: var(--ct-theme-color-border, #e5e7eb);
-    --ct-modal-color-surface: var(--ct-theme-color-surface, #fafafa);
-    --ct-modal-color-surface-hover: var(
+    --cf-modal-color-background: var(--ct-theme-color-background, white);
+    --cf-modal-color-border: var(--ct-theme-color-border, #e5e7eb);
+    --cf-modal-color-surface: var(--ct-theme-color-surface, #fafafa);
+    --cf-modal-color-surface-hover: var(
       --ct-theme-color-surface-hover,
       rgba(0, 0, 0, 0.05)
     );
-    --ct-modal-color-text: var(--ct-theme-color-text, #111827);
-    --ct-modal-color-text-muted: var(--ct-theme-color-text-muted, #6b7280);
-    --ct-modal-color-primary: var(--ct-theme-color-primary, #3b82f6);
-    --ct-modal-animation-duration: var(--ct-theme-animation-duration, 200ms);
-    --ct-modal-border-radius: var(--ct-theme-border-radius, 12px);
+    --cf-modal-color-text: var(--ct-theme-color-text, #111827);
+    --cf-modal-color-text-muted: var(--ct-theme-color-text-muted, #6b7280);
+    --cf-modal-color-primary: var(--ct-theme-color-primary, #3b82f6);
+    --cf-modal-animation-duration: var(--ct-theme-animation-duration, 200ms);
+    --cf-modal-border-radius: var(--ct-theme-border-radius, 12px);
 
     /* CSS custom properties for customization */
-    --_backdrop-color: var(--ct-modal-backdrop-color, rgba(0, 0, 0, 0.5));
-    --_backdrop-blur: var(--ct-modal-backdrop-blur, 8px);
-    --_border-radius: var(--ct-modal-border-radius, 12px);
-    --_width-sm: var(--ct-modal-width-sm, 320px);
-    --_width-md: var(--ct-modal-width-md, 500px);
-    --_width-lg: var(--ct-modal-width-lg, 700px);
-    --_max-height: var(--ct-modal-max-height, 90vh);
-    --_animation-duration: var(--ct-modal-animation-duration, 200ms);
+    --_backdrop-color: var(--cf-modal-backdrop-color, rgba(0, 0, 0, 0.5));
+    --_backdrop-blur: var(--cf-modal-backdrop-blur, 8px);
+    --_border-radius: var(--cf-modal-border-radius, 12px);
+    --_width-sm: var(--cf-modal-width-sm, 320px);
+    --_width-md: var(--cf-modal-width-md, 500px);
+    --_width-lg: var(--cf-modal-width-lg, 700px);
+    --_max-height: var(--cf-modal-max-height, 90vh);
+    --_animation-duration: var(--cf-modal-animation-duration, 200ms);
 
     display: contents;
   }
@@ -69,7 +69,7 @@ export const modalStyles = css`
   /* ===== Dialog ===== */
   .dialog {
     position: relative;
-    background: var(--ct-modal-color-background, white);
+    background: var(--cf-modal-color-background, white);
     border-radius: var(--_border-radius);
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
     max-height: var(--_max-height);
@@ -113,8 +113,8 @@ export const modalStyles = css`
       justify-content: space-between;
       align-items: center;
       padding: 16px 20px;
-      border-bottom: 1px solid var(--ct-modal-color-border, #e5e7eb);
-      background: var(--ct-modal-color-surface, #fafafa);
+      border-bottom: 1px solid var(--cf-modal-color-border, #e5e7eb);
+      background: var(--cf-modal-color-surface, #fafafa);
       flex-shrink: 0;
     }
 
@@ -125,7 +125,7 @@ export const modalStyles = css`
     .header-content {
       font-weight: 600;
       font-size: 16px;
-      color: var(--ct-modal-color-text, #111827);
+      color: var(--cf-modal-color-text, #111827);
       flex: 1;
       min-width: 0;
     }
@@ -137,7 +137,7 @@ export const modalStyles = css`
       cursor: pointer;
       padding: 4px 8px;
       font-size: 18px;
-      color: var(--ct-modal-color-text-muted, #6b7280);
+      color: var(--cf-modal-color-text-muted, #6b7280);
       line-height: 1;
       border-radius: 4px;
       transition: background var(--_animation-duration) ease;
@@ -146,11 +146,11 @@ export const modalStyles = css`
     }
 
     .close-button:hover {
-      background: var(--ct-modal-color-surface-hover, rgba(0, 0, 0, 0.05));
+      background: var(--cf-modal-color-surface-hover, rgba(0, 0, 0, 0.05));
     }
 
     .close-button:focus-visible {
-      outline: 2px solid var(--ct-modal-color-primary, #3b82f6);
+      outline: 2px solid var(--cf-modal-color-primary, #3b82f6);
       outline-offset: 2px;
     }
 
@@ -172,8 +172,8 @@ export const modalStyles = css`
       justify-content: flex-end;
       gap: 12px;
       padding: 16px 20px;
-      border-top: 1px solid var(--ct-modal-color-border, #e5e7eb);
-      background: var(--ct-modal-color-surface, #fafafa);
+      border-top: 1px solid var(--cf-modal-color-border, #e5e7eb);
+      background: var(--cf-modal-color-surface, #fafafa);
       flex-shrink: 0;
     }
 
@@ -213,7 +213,7 @@ export const modalStyles = css`
         display: block;
         width: 36px;
         height: 4px;
-        background: var(--ct-modal-color-border, #e5e7eb);
+        background: var(--cf-modal-color-border, #e5e7eb);
         border-radius: 2px;
         margin: 8px auto 0;
       }

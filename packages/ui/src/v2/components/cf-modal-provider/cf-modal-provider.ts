@@ -1,19 +1,19 @@
 /**
- * ct-modal-provider - Modal stack manager
+ * cf-modal-provider - Modal stack manager
  *
- * Provides ModalManager context to descendant ct-modal components.
+ * Provides ModalManager context to descendant cf-modal components.
  * Manages modal stacking, z-index allocation, and global Escape key handling.
  *
- * @element ct-modal-provider
+ * @element cf-modal-provider
  *
  * @example
  * ```html
- * <ct-modal-provider>
+ * <cf-modal-provider>
  *   <my-app>
  *     <!-- Modals anywhere in the tree will coordinate through the provider -->
- *     <ct-modal $open={showModal}>...</ct-modal>
+ *     <cf-modal $open={showModal}>...</cf-modal>
  *   </my-app>
- * </ct-modal-provider>
+ * </cf-modal-provider>
  * ```
  */
 import { css, html, LitElement } from "lit";
@@ -26,7 +26,7 @@ import {
   type ModalRegistration,
 } from "../modal-context.ts";
 
-export class CTModalProvider extends LitElement {
+export class CFModalProvider extends LitElement {
   static override styles = css`
     :host {
       display: contents;
@@ -136,7 +136,7 @@ export class CTModalProvider extends LitElement {
       if (this._stack[i].dismissable) {
         // Dispatch close event on the modal element
         this._stack[i].element.dispatchEvent(
-          new CustomEvent("ct-modal-close", {
+          new CustomEvent("cf-modal-close", {
             detail: { reason: "escape" },
             bubbles: true,
             composed: true,
@@ -155,4 +155,4 @@ export class CTModalProvider extends LitElement {
   }
 }
 
-customElements.define("ct-modal-provider", CTModalProvider);
+customElements.define("cf-modal-provider", CFModalProvider);

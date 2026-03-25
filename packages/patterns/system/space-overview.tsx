@@ -130,9 +130,9 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
     [NAME]: "Space Overview",
     [UI]: (
       <cf-screen>
-        <ct-toolbar slot="header" sticky>
+        <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Space Overview</h2>
-        </ct-toolbar>
+        </cf-toolbar>
 
         <ct-autostart onstart={triggerAnalysis({ addMessage })} />
 

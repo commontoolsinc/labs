@@ -399,9 +399,9 @@ export default pattern<Input, Output>(
                     Preview: {docTitleCell}
                   </span>
                   <cf-hstack gap={1}>
-                    <ct-copy-button text={markdownCell} variant="secondary">
+                    <cf-copy-button text={markdownCell} variant="secondary">
                       Copy to Clipboard
-                    </ct-copy-button>
+                    </cf-copy-button>
                     <cf-button
                       variant="primary"
                       type="button"

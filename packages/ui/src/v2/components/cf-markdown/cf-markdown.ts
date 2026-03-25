@@ -5,7 +5,7 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { classMap } from "lit/directives/class-map.js";
 import { marked } from "marked";
 import { BaseElement } from "../../core/base-element.ts";
-import "../ct-copy-button/ct-copy-button.ts";
+import "../cf-copy-button/cf-copy-button.ts";
 import "../ct-cell-link/ct-cell-link.ts";
 import {
   applyThemeToElement,
@@ -427,7 +427,7 @@ export class CFMarkdown extends BaseElement {
     //
     // Options to fix this:
     // 1. Add DOMPurify back with proper lockfile management
-    // 2. Implement our own sanitizer that allows our custom elements (ct-cell-link, ct-copy-button)
+    // 2. Implement our own sanitizer that allows our custom elements (ct-cell-link, cf-copy-button)
     // 3. Find an alternative sanitization library
     //
     // For now, only use this component with trusted markdown content!
@@ -459,13 +459,13 @@ export class CFMarkdown extends BaseElement {
 
         return `<div class="code-block-container">
           <pre><code${codeAttrs}>${codeContent}</code></pre>
-          <ct-copy-button
+          <cf-copy-button
             class="code-copy-button"
             text="${this._escapeForAttribute(decodedContent)}"
             variant="ghost"
             size="sm"
             icon-only
-          ></ct-copy-button>
+          ></cf-copy-button>
         </div>`;
       },
     );

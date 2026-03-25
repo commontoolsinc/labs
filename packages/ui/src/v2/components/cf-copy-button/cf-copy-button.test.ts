@@ -1,26 +1,26 @@
 /**
- * Tests for CTCopyButton component
+ * Tests for CFCopyButton component
  */
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { CTCopyButton } from "./ct-copy-button.ts";
+import { CFCopyButton } from "./cf-copy-button.ts";
 
-describe("CTCopyButton", () => {
+describe("CFCopyButton", () => {
   it("should be defined", () => {
-    expect(CTCopyButton).toBeDefined();
+    expect(CFCopyButton).toBeDefined();
   });
 
   it("should have customElement definition", () => {
-    expect(customElements.get("ct-copy-button")).toBe(CTCopyButton);
+    expect(customElements.get("cf-copy-button")).toBe(CFCopyButton);
   });
 
   it("should create element instance", () => {
-    const element = new CTCopyButton();
-    expect(element).toBeInstanceOf(CTCopyButton);
+    const element = new CFCopyButton();
+    expect(element).toBeInstanceOf(CFCopyButton);
   });
 
   it("should have default properties", () => {
-    const element = new CTCopyButton();
+    const element = new CFCopyButton();
     expect(element.text).toBe("");
     expect(element.variant).toBe("secondary");
     expect(element.size).toBe("default");
@@ -30,13 +30,13 @@ describe("CTCopyButton", () => {
   });
 
   it("should accept string text property", () => {
-    const element = new CTCopyButton();
+    const element = new CFCopyButton();
     element.text = "Hello World";
     expect(element.text).toBe("Hello World");
   });
 
   it("should accept object text property for multi-MIME support", () => {
-    const element = new CTCopyButton();
+    const element = new CFCopyButton();
     element.text = {
       "text/plain": "Hello World",
       "text/html": "<b>Hello World</b>",
@@ -48,7 +48,7 @@ describe("CTCopyButton", () => {
   });
 
   it("should accept object with multiple MIME types", () => {
-    const element = new CTCopyButton();
+    const element = new CFCopyButton();
     element.text = {
       "text/plain": "Plain text",
       "text/html": "<p>HTML text</p>",

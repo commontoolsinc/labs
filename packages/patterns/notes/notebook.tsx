@@ -1326,7 +1326,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
           </div>
 
           {/* New Notebook Prompt Modal */}
-          <ct-modal
+          <cf-modal
             $open={showNewNotebookPrompt}
             dismissable
             size="sm"
@@ -1363,10 +1363,10 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                 Create
               </cf-button>
             </cf-hstack>
-          </ct-modal>
+          </cf-modal>
 
           {/* New Note Prompt Modal */}
-          <ct-modal
+          <cf-modal
             $open={showNewNotePrompt}
             dismissable
             size="sm"
@@ -1401,10 +1401,10 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                 Create
               </cf-button>
             </cf-hstack>
-          </ct-modal>
+          </cf-modal>
 
           {/* New Nested Notebook Prompt Modal */}
-          <ct-modal
+          <cf-modal
             $open={showNewNestedNotebookPrompt}
             dismissable
             size="sm"
@@ -1439,7 +1439,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                 Create
               </cf-button>
             </cf-hstack>
-          </ct-modal>
+          </cf-modal>
 
           {/* Backlinks footer - show pieces that link to this notebook */}
           <cf-hstack

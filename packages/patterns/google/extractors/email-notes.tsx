@@ -505,7 +505,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                         </span>
                         <div style={{ display: "flex", gap: "8px" }}>
                           {/* Copy button - copies both plain text and HTML for rich pasting */}
-                          <ct-copy-button
+                          <cf-copy-button
                             text={derive(note, (n) => ({
                               "text/plain": n.content,
                               "text/html": n.htmlContent,

@@ -5,9 +5,9 @@ import { BaseElement } from "../../core/base-element.ts";
 // matching the prior phase-1 token migration pattern.
 
 /**
- * CTCopyButton - Copy to clipboard button with automatic visual feedback
+ * CFCopyButton - Copy to clipboard button with automatic visual feedback
  *
- * @element ct-copy-button
+ * @element cf-copy-button
  *
  * @attr {string | Record<string, string>} text - Content to copy to clipboard (required)
  *   - String: Copied as text/plain (backwards compatible)
@@ -21,42 +21,42 @@ import { BaseElement } from "../../core/base-element.ts";
  * @attr {number} feedback-duration - Success feedback duration in ms (default: 2000)
  * @attr {boolean} icon-only - Only show icon, no text (default: false)
  *
- * @fires ct-copy-success - Fired when copy succeeds
+ * @fires cf-copy-success - Fired when copy succeeds
  *   Detail: { text: string, length: number }
- * @fires ct-copy-error - Fired when copy fails
+ * @fires cf-copy-error - Fired when copy fails
  *   Detail: { error: Error, text: string }
  *
  * @slot - Button label text (optional, defaults based on state)
  *
  * @example
  * // Basic usage
- * <ct-copy-button text="Hello World">Copy</ct-copy-button>
+ * <cf-copy-button text="Hello World">Copy</cf-copy-button>
  *
  * // Icon only
- * <ct-copy-button text="Hello" icon-only></ct-copy-button>
+ * <cf-copy-button text="Hello" icon-only></cf-copy-button>
  *
  * // Custom styling
- * <ct-copy-button
+ * <cf-copy-button
  *   text="data"
  *   variant="ghost"
  *   size="sm"
- * >📋 Copy List</ct-copy-button>
+ * >📋 Copy List</cf-copy-button>
  *
  * // Rich text with HTML (pastes as formatted text in rich editors)
- * <ct-copy-button
+ * <cf-copy-button
  *   text={{
  *     "text/plain": "Hello World",
  *     "text/html": "<b>Hello World</b>"
  *   }}
- * >Copy</ct-copy-button>
+ * >Copy</cf-copy-button>
  *
  * // With event handler (in pattern)
- * <ct-copy-button
+ * <cf-copy-button
  *   text={ingredientListText}
- *   onct-copy-success={handleCopySuccess({})}
- * >Copy</ct-copy-button>
+ *   oncf-copy-success={handleCopySuccess({})}
+ * >Copy</cf-copy-button>
  */
-export class CTCopyButton extends BaseElement {
+export class CFCopyButton extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -137,7 +137,7 @@ export class CTCopyButton extends BaseElement {
       this._copied = true;
       this.requestUpdate();
 
-      this.emit("ct-copy-success", {
+      this.emit("cf-copy-success", {
         text: plainText,
         length: plainText.length,
       });
@@ -154,7 +154,7 @@ export class CTCopyButton extends BaseElement {
       const plainText = typeof this.text === "string"
         ? this.text
         : this.text["text/plain"] || Object.values(this.text)[0] || "";
-      this.emit("ct-copy-error", {
+      this.emit("cf-copy-error", {
         error: error as Error,
         text: plainText,
       });
@@ -197,4 +197,4 @@ export class CTCopyButton extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-copy-button", CTCopyButton);
+globalThis.customElements.define("cf-copy-button", CFCopyButton);

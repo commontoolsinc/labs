@@ -838,11 +838,11 @@ const Record = pattern<RecordInput, RecordOutput>(
     const trashExpanded = Writable.of(false);
 
     // Note editor modal state
-    // NOTE: In the future, this should use a <ct-modal> component instead of inline implementation.
-    // A ct-modal component would follow the ct-fab pattern:
-    //   <ct-modal $open={isOpen} onct-modal-close={handleClose}>
+    // NOTE: In the future, this should use a <cf-modal> component instead of inline implementation.
+    // A cf-modal component would follow the ct-fab pattern:
+    //   <cf-modal $open={isOpen} oncf-modal-close={handleClose}>
     //     <content />
-    //   </ct-modal>
+    //   </cf-modal>
     // With features: backdrop blur, escape key, focus trap, centered positioning, animations
     // IMPORTANT: Don't use Writable.of(null) - it creates a cell pointing to null, not primitive null.
     // Use Writable.of() without argument so .get() returns undefined (falsy) initially.
@@ -2135,11 +2135,11 @@ const Record = pattern<RecordInput, RecordOutput>(
           </div>
 
           {/* Note Editor Modal */}
-          <ct-modal
+          <cf-modal
             $open={computed(() => editingNoteIndex.get() !== undefined)}
             dismissable
             size="md"
-            onct-modal-close={closeNoteEditor({
+            oncf-modal-close={closeNoteEditor({
               editingNoteIndex,
               editingNoteText,
             })}
@@ -2197,14 +2197,14 @@ const Record = pattern<RecordInput, RecordOutput>(
                 Save Note
               </cf-button>
             </cf-hstack>
-          </ct-modal>
+          </cf-modal>
 
           {/* Settings Modal */}
-          <ct-modal
+          <cf-modal
             $open={computed(() => settingsModuleIndex.get() !== undefined)}
             dismissable
             size="md"
-            onct-modal-close={closeSettings({ settingsModuleIndex })}
+            oncf-modal-close={closeSettings({ settingsModuleIndex })}
           >
             <span slot="header">
               {settingsModuleDisplay.icon} {settingsModuleDisplay.label}{" "}
@@ -2223,7 +2223,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 Done
               </cf-button>
             </cf-hstack>
-          </ct-modal>
+          </cf-modal>
 
           {/* Expanded (Maximize) Module Overlay - backdrop + escape handler */}
           {ifElse(

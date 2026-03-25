@@ -320,11 +320,11 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
         </cf-hstack>
 
         {/* Modal form */}
-        <ct-modal
+        <cf-modal
           $open={modalOpen}
           dismissable
           size="md"
-          onct-modal-close={action(() => {
+          oncf-modal-close={action(() => {
             modalOpen.set(false);
             editing.set({ editing: null });
           })}
@@ -340,7 +340,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
             />,
             null,
           )}
-        </ct-modal>
+        </cf-modal>
       </cf-screen>
     ),
     people,

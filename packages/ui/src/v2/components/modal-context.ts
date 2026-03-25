@@ -1,5 +1,5 @@
 /**
- * Modal manager context and types for ct-modal system
+ * Modal manager context and types for cf-modal system
  *
  * Follows the KeyboardRouter pattern for cross-cutting UI coordination.
  * The ModalManager tracks open modals in a stack, allocates z-indices,

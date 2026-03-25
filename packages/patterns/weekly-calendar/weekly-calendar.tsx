@@ -588,7 +588,7 @@ const WeeklyCalendar = pattern<Input, Output>(
             }}
           >
             {/* New Event Modal */}
-            <ct-modal
+            <cf-modal
               $open={showNewEventPrompt}
               dismissable
               size="sm"
@@ -720,10 +720,10 @@ const WeeklyCalendar = pattern<Input, Output>(
                   Create
                 </button>
               </div>
-            </ct-modal>
+            </cf-modal>
 
             {/* Edit Event Modal */}
-            <ct-modal
+            <cf-modal
               $open={showEditModal}
               dismissable
               size="sm"
@@ -834,7 +834,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                   Save
                 </button>
               </div>
-            </ct-modal>
+            </cf-modal>
 
             {/* Calendar Grid */}
             <div

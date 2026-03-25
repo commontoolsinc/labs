@@ -176,7 +176,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     [NAME]: computed(() => `Space Home (${visiblePieces.length})`),
     [UI]: (
       <cf-screen>
-        <ct-toolbar slot="header" sticky>
+        <cf-toolbar slot="header" sticky>
           <div slot="start">
             <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>
           </div>
@@ -268,7 +268,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
               />
             </cf-vstack>
           </div>
-        </ct-toolbar>
+        </cf-toolbar>
 
         <cf-vscroll flex showScrollbar>
           <cf-vstack gap="6" padding="6">

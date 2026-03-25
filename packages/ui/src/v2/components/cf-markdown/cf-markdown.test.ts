@@ -55,7 +55,7 @@ describe("cf-markdown", () => {
     const rendered = (el as any)._renderMarkdown(markdown);
 
     expect(rendered).toContain("code-block-container");
-    expect(rendered).toContain("ct-copy-button");
+    expect(rendered).toContain("cf-copy-button");
   });
 
   it("should get content value from string", () => {
