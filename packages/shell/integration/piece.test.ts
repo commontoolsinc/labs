@@ -79,7 +79,10 @@ describe("shell piece tests", () => {
             strategy: "pierce",
             timeout: 500,
           });
-          return (await handle.innerText())?.trim() === expected;
+          const text = await handle.evaluate((el: HTMLElement) =>
+            el.textContent?.trim()
+          );
+          return text === expected;
         } catch (_) {
           return false;
         }
