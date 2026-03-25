@@ -53,8 +53,11 @@ export function resolveCellPath<T>(
   }
 
   const resolvedValue = currentCell.get();
-  if (path.length > 0 && resolvedValue === undefined) {
-    const segment = path[path.length - 1];
+  const segment = path[path.length - 1];
+  const keyMissing = parentValue != null && typeof parentValue === "object"
+    ? !(segment in (parentValue as object))
+    : resolvedValue === undefined;
+  if (path.length > 0 && keyMissing) {
     const availableKeys = parentValue != null && typeof parentValue === "object"
       ? Object.keys(parentValue as Record<string, unknown>)
         .filter((k) => !k.startsWith("$"))
@@ -64,9 +67,9 @@ export function resolveCellPath<T>(
       ? `. Available keys: ${availableKeys.join(", ")}`
       : "";
     throw new Error(
-      `Cannot access path "${
-        path.join("/")
-      }" - property "${segment}" not found${keysHint}`,
+      `Cannot access path "${path.join("/")}" - property "${
+        String(segment)
+      }" not found${keysHint}`,
     );
   }
 

@@ -618,10 +618,19 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   .action(async (options, pathString) => {
     const pieceConfig = parsePieceOptions(options);
     const pathSegments = pathString ? parsePath(pathString) : [];
-    const value = await getCellValue(pieceConfig, pathSegments, {
-      input: options.input,
-    });
-    render(value, { json: true });
+    try {
+      const value = await getCellValue(pieceConfig, pathSegments, {
+        input: options.input,
+      });
+      render(value, { json: true });
+    } catch (error) {
+      if (
+        error instanceof Error && error.message.startsWith("Cannot access path")
+      ) {
+        throw new ValidationError(error.message, { exitCode: 1 });
+      }
+      throw error;
+    }
   })
   /* piece set */
   .command(
