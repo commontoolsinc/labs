@@ -88,9 +88,9 @@ export const Router = pattern<RouterInput, RouterOutput>(
     });
 
     const Pattern = (
-      <ct-router $path={path}>
+      <cf-router $path={path}>
         {Route}
-      </ct-router>
+      </cf-router>
     );
 
     return {

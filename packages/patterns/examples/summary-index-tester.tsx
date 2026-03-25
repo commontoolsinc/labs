@@ -54,7 +54,7 @@ export default pattern<Record<string, never>>((_) => {
             </span>
           </cf-vstack>
 
-          <ct-table full-width>
+          <cf-table full-width>
             <thead>
               <tr>
                 <th>Name</th>
@@ -78,7 +78,7 @@ export default pattern<Record<string, never>>((_) => {
                 </tr>
               ))}
             </tbody>
-          </ct-table>
+          </cf-table>
         </cf-vstack>
       </cf-screen>
     ),

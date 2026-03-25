@@ -3,13 +3,13 @@ import { BaseElement } from "../../core/base-element.ts";
 import { property } from "lit/decorators.js";
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 
-export class CTRouter extends BaseElement {
+export class CFRouter extends BaseElement {
   @property({ attribute: false })
   path: CellHandle<string> | string = "/";
 
   override connectedCallback(): void {
     super.connectedCallback();
-    this.addEventListener("ct-route-change", this.onRouteChange);
+    this.addEventListener("cf-route-change", this.onRouteChange);
   }
 
   onRouteChange = (e: Event) => {
@@ -24,7 +24,7 @@ export class CTRouter extends BaseElement {
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
-    this.removeEventListener("ct-route-change", this.onRouteChange);
+    this.removeEventListener("cf-route-change", this.onRouteChange);
   }
 
   override render() {
@@ -34,4 +34,4 @@ export class CTRouter extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-router", CTRouter);
+globalThis.customElements.define("cf-router", CFRouter);

@@ -1135,8 +1135,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                       display: notesListDisplay,
                     }}
                   >
-                    {/* Notes List - using ct-table like default-app for consistent spacing */}
-                    <ct-table full-width hover>
+                    {/* Notes List - using cf-table like default-app for consistent spacing */}
+                    <cf-table full-width hover>
                       <tbody>
                         {notes.map((note, index) => (
                           <tr
@@ -1221,7 +1221,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                           </tr>
                         ))}
                       </tbody>
-                    </ct-table>
+                    </cf-table>
 
                     {/* Select All footer - only show when more than 1 item */}
                     <div

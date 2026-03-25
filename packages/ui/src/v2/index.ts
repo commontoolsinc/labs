@@ -56,7 +56,7 @@ export * from "./components/cf-hstack/index.ts";
 export * from "./components/cf-iframe/index.ts";
 export * from "./components/cf-image-input/index.ts";
 export * from "./components/cf-input/index.ts";
-export * from "./components/ct-input-otp/index.ts";
+export * from "./components/cf-input-otp/index.ts";
 export * from "./components/cf-label/index.ts";
 export * from "./components/cf-link-preview/index.ts";
 export * from "./components/cf-plaid-link/index.ts";
@@ -87,7 +87,7 @@ export * from "./components/ct-map/index.ts";
 export * from "./components/cf-markdown/index.ts";
 export * from "./components/cf-message-beads/index.ts";
 export * from "./components/cf-tags/index.ts";
-export * from "./components/ct-table/index.ts";
+export * from "./components/cf-table/index.ts";
 export * from "./components/cf-tile/index.ts";
 export * from "./components/cf-textarea/index.ts";
 export * from "./components/cf-toggle/index.ts";
@@ -119,7 +119,7 @@ export * from "./components/ct-drop-zone/index.ts";
 export * from "./components/cf-picker/index.ts";
 export * from "./components/cf-secret-viewer/index.ts";
 export * from "./components/cf-webhook/index.ts";
-export * from "./components/ct-router/index.ts";
+export * from "./components/cf-router/index.ts";
 
 // Type exports
 export type * from "./utils/types.ts";

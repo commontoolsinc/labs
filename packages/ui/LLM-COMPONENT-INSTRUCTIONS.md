@@ -404,16 +404,16 @@ Default slot for cf-tab elements
 - `reset()` - Reset form
 - `validate()` - Validate and return boolean
 
-### 28. ct-input-otp
+### 28. cf-input-otp
 
-**Purpose**: One-time password input **Tag**: `<ct-input-otp>` **Attributes**:
+**Purpose**: One-time password input **Tag**: `<cf-input-otp>` **Attributes**:
 
 - `length` - number (default: 6)
 - `value` - string
 - `disabled` - boolean
 - `name` - string **Events**:
-- `ct-change` - Fired on value change with detail: `{ value, complete }`
-- `ct-complete` - Fired when all digits entered with detail: `{ value }`
+- `cf-change` - Fired on value change with detail: `{ value, complete }`
+- `cf-complete` - Fired when all digits entered with detail: `{ value }`
 
 **Methods**:
 
@@ -421,7 +421,7 @@ Default slot for cf-tab elements
 - `clear()` - Clear all inputs **Example**:
 
 ```html
-<ct-input-otp length="6" name="otp"></ct-input-otp>
+<cf-input-otp length="6" name="otp"></cf-input-otp>
 ```
 
 ### 29. ct-resizable-panel-group
@@ -540,9 +540,9 @@ Same as cf-hstack **Example**:
 </cf-grid>
 ```
 
-### 39. ct-table
+### 39. cf-table
 
-**Purpose**: Semantic HTML table **Tag**: `<ct-table>` **Attributes**:
+**Purpose**: Semantic HTML table **Tag**: `<cf-table>` **Attributes**:
 
 - `striped` - boolean (zebra stripes)
 - `bordered` - boolean
@@ -552,7 +552,7 @@ Same as cf-hstack **Example**:
   tfoot **Example**:
 
 ```html
-<ct-table striped hover>
+<cf-table striped hover>
   <thead>
     <tr>
       <th>Name</th>
@@ -565,7 +565,7 @@ Same as cf-hstack **Example**:
       <td>100</td>
     </tr>
   </tbody>
-</ct-table>
+</cf-table>
 ```
 
 ## Component Composition Guidelines

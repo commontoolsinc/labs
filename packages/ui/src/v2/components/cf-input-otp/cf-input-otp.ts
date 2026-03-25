@@ -5,25 +5,25 @@ import { BaseElement } from "../../core/base-element.ts";
 import { inputOTPStyles } from "./styles.ts";
 
 /**
- * CTInputOTP - One-time password input with individual digit fields
+ * CFInputOTP - One-time password input with individual digit fields
  *
- * @element ct-input-otp
+ * @element cf-input-otp
  *
  * @attr {number} length - Number of digits (default: 6)
  * @attr {string} value - Current OTP value
  * @attr {boolean} disabled - Whether the input is disabled
  * @attr {string} name - Name attribute for form submission
  *
- * @fires ct-change - Fired on value change with detail: { value, complete }
- * @fires ct-complete - Fired when all digits entered with detail: { value }
+ * @fires cf-change - Fired on value change with detail: { value, complete }
+ * @fires cf-complete - Fired when all digits entered with detail: { value }
  *
  * @method focus() - Focus first input
  * @method clear() - Clear all inputs
  *
  * @example
- * <ct-input-otp length="6" name="otp"></ct-input-otp>
+ * <cf-input-otp length="6" name="otp"></cf-input-otp>
  */
-export class CTInputOTP extends BaseElement {
+export class CFInputOTP extends BaseElement {
   static override properties = {
     length: { type: Number },
     value: { type: String },
@@ -162,10 +162,10 @@ export class CTInputOTP extends BaseElement {
 
     // Emit events
     const complete = this.value.length === this.length;
-    this.emit("ct-change", { value: this.value, complete });
+    this.emit("cf-change", { value: this.value, complete });
 
     if (complete) {
-      this.emit("ct-complete", { value: this.value });
+      this.emit("cf-complete", { value: this.value });
     }
   }
 
@@ -235,10 +235,10 @@ export class CTInputOTP extends BaseElement {
 
       // Emit events
       const complete = this.value.length === this.length;
-      this.emit("ct-change", { value: this.value, complete });
+      this.emit("cf-change", { value: this.value, complete });
 
       if (complete) {
-        this.emit("ct-complete", { value: this.value });
+        this.emit("cf-complete", { value: this.value });
       }
     }
   }
@@ -273,4 +273,4 @@ export class CTInputOTP extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-input-otp", CTInputOTP);
+globalThis.customElements.define("cf-input-otp", CFInputOTP);

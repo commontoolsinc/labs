@@ -5,9 +5,9 @@ import { BaseElement } from "../../core/base-element.ts";
 // matching the prior phase-1 token migration pattern.
 
 /**
- * CTTable - Semantic table component with styling
+ * CFTable - Semantic table component with styling
  *
- * @element ct-table
+ * @element cf-table
  *
  * @attr {boolean} striped - Alternate row coloring
  * @attr {boolean} hover - Hover effect on rows
@@ -18,10 +18,10 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @slot - Table content (thead, tbody, tfoot)
  *
- * @fires ct-table-sort - Fired when table is sorted with detail: { columnIndex, ascending }
+ * @fires cf-table-sort - Fired when table is sorted with detail: { columnIndex, ascending }
  *
  * @example
- * <ct-table striped hover>
+ * <cf-table striped hover>
  *   <thead>
  *     <tr>
  *       <th>Name</th>
@@ -34,9 +34,9 @@ import { BaseElement } from "../../core/base-element.ts";
  *       <td>john@example.com</td>
  *     </tr>
  *   </tbody>
- * </ct-table>
+ * </cf-table>
  */
-export class CTTable extends BaseElement {
+export class CFTable extends BaseElement {
   static override styles = css`
     :host {
       display: block;
@@ -252,11 +252,11 @@ export class CTTable extends BaseElement {
     sortedRows.forEach((row) => tbody.appendChild(row));
 
     // Emit sort event
-    this.emit("ct-table-sort", {
+    this.emit("cf-table-sort", {
       columnIndex,
       ascending,
     });
   }
 }
 
-globalThis.customElements.define("ct-table", CTTable);
+globalThis.customElements.define("cf-table", CFTable);

@@ -64,14 +64,14 @@ registerAllComponents();
 - **Layout**: `cf-card`, `cf-separator`, `cf-accordion`, `cf-collapsible`,
   `cf-tabs`, `cf-scroll-area`
 - **Feedback**: `cf-alert`, `cf-badge`, `cf-progress`, `cf-skeleton`, `cf-label`
-- **Data**: `ct-table`, `cf-form`, `ct-input-otp`
+- **Data**: `cf-table`, `cf-form`, `cf-input-otp`
 - **Display**: `cf-aspect-ratio`, `ct-resizable-panel-group`
 
 ### Layout Components (8)
 
 - **Flexbox**: `cf-hstack`, `cf-vstack`, `cf-hgroup`, `cf-vgroup`
 - **Scrolling**: `cf-hscroll`, `cf-vscroll`
-- **Grid**: `cf-grid`, `ct-table`
+- **Grid**: `cf-grid`, `cf-table`
 
 ## 🔒 Security Constraints
 

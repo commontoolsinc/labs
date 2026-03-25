@@ -14,7 +14,7 @@
 1. **cf-aspect-ratio** - Maintains aspect ratio for content
 2. **cf-collapsible** - Expandable/collapsible content section
 3. **cf-progress** - Progress bar with determinate/indeterminate states
-4. **ct-input-otp** - One-time password input with individual digits
+4. **cf-input-otp** - One-time password input with individual digits
 5. **cf-radio-group** - Radio button group container
 
 ### Interactive Components (3)

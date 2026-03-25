@@ -43,7 +43,7 @@ import ChatStory from "../stories/cf-chat-story.tsx";
 import CalendarStory from "../stories/cf-calendar-story.tsx";
 import RadioStory from "../stories/cf-radio-story.tsx";
 import AutocompleteStory from "../stories/cf-autocomplete-story.tsx";
-import TableStory from "../stories/ct-table-story.tsx";
+import TableStory from "../stories/cf-table-story.tsx";
 import KbdStory from "../stories/cf-kbd-story.tsx";
 import CopyButtonStory from "../stories/cf-copy-button-story.tsx";
 import TagsStory from "../stories/cf-tags-story.tsx";

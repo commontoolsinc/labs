@@ -1,5 +1,5 @@
 /**
- * Styles for ct-input-otp component
+ * Styles for cf-input-otp component
  */
 
 export const inputOTPStyles = `

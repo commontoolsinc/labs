@@ -95,7 +95,7 @@ keywords/features.
 - system/default-app.tsx: Default application with piece management and
   navigation
   - **Data types**: array of pieces (MentionableCharm objects)
-  - **Keywords**: wish, derive, navigateTo, handler, ct-table, cf-button,
+  - **Keywords**: wish, derive, navigateTo, handler, cf-table, cf-button,
     multiple pattern instantiation
 
 - dice.tsx: Dice roller with random number generation

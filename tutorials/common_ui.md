@@ -307,7 +307,7 @@ You can mix-and-match the above components to achieve practically any (standard)
 - gap: `ct-icon` (and `cf-label` has an optional in-built icon)
     - gap: icon set?
 
-- visual: `cf-kbd`, `cf-separator`, `ct-table`, `cf-tool-call`
+- visual: `cf-kbd`, `cf-separator`, `cf-table`, `cf-tool-call`
 	- gap: `ct-img` or `ct-media`
 
 # Input Components
@@ -351,5 +351,5 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Unused/Unproven Components
 
-- stale: `cf-aspect-ratio`, `ct-draggable`, `cf-form`, `cf-grid`, `cf-hgroup`, `ct-input-otp`, `cf-message-input`, `cf-progress`, `cf-radio`, `cf-radio-group`, `cf-slider`, `cf-switch`, `cf-tile`, `cf-toggle`, `cf-toggle-group`, `cf-vgroup`
+- stale: `cf-aspect-ratio`, `ct-draggable`, `cf-form`, `cf-grid`, `cf-hgroup`, `cf-input-otp`, `cf-message-input`, `cf-progress`, `cf-radio`, `cf-radio-group`, `cf-slider`, `cf-switch`, `cf-tile`, `cf-toggle`, `cf-toggle-group`, `cf-vgroup`
 - superfluous: `ct-resizeable-handle`, `ct-resizable-panel`, `ct-resizeable-panel-group`, `cf-scroll-area`, `cf-tabs`/`cf-tab-list`/`cf-tab-panel`

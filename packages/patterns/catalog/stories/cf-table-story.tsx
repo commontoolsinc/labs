@@ -11,10 +11,10 @@ interface TableStoryOutput {
 
 export default pattern<TableStoryInput, TableStoryOutput>(() => {
   return {
-    [NAME]: "ct-table Story",
+    [NAME]: "cf-table Story",
     [UI]: (
       <div style={{ padding: "1rem" }}>
-        <ct-table>
+        <cf-table>
           <thead>
             <tr>
               <th>Name</th>
@@ -44,7 +44,7 @@ export default pattern<TableStoryInput, TableStoryOutput>(() => {
               <td>Offline</td>
             </tr>
           </tbody>
-        </ct-table>
+        </cf-table>
       </div>
     ),
     controls: (

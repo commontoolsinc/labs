@@ -279,7 +279,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                   <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
                   <cf-cell-link $cell={recentGridView} />
                 </cf-hstack>
-                <ct-table full-width hover>
+                <cf-table full-width hover>
                   <tbody>
                     {recentPieces.map((piece: any) => (
                       <tr>
@@ -291,7 +291,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                       </tr>
                     ))}
                   </tbody>
-                </ct-table>
+                </cf-table>
               </cf-vstack>,
               undefined,
             )}
@@ -302,7 +302,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                 <cf-cell-link $cell={gridView} />
               </cf-hstack>
 
-              <ct-table full-width hover>
+              <cf-table full-width hover>
                 <tbody>
                   {visiblePieces.map((piece) => {
                     const isNotebook = computed(() => {
@@ -349,7 +349,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                     );
                   })}
                 </tbody>
-              </ct-table>
+              </cf-table>
             </cf-vstack>
           </cf-vstack>
         </cf-vscroll>

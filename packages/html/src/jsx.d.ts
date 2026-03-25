@@ -2907,7 +2907,7 @@ interface CFSvgElement extends CTHTMLElement {}
 interface CFVScrollElement extends CTHTMLElement {}
 interface CTSendMessageElement extends CTHTMLElement {}
 interface CTTextElement extends CTHTMLElement {}
-interface CTTableElement extends CTHTMLElement {}
+interface CFTableElement extends CTHTMLElement {}
 interface CFTagsElement extends CTHTMLElement {}
 interface CFPromptInputElement extends CTHTMLElement {}
 interface CFChatElement extends CTHTMLElement {}
@@ -2928,9 +2928,9 @@ interface CFAudioVisualizerElement extends CTHTMLElement {}
 interface CFLocationElement extends CTHTMLElement {}
 interface CFWebhookElement extends CTHTMLElement {}
 interface CFSecretViewerElement extends CTHTMLElement {}
-interface CTRouterElement extends CTHTMLElement {}
+interface CFRouterElement extends CTHTMLElement {}
 interface CTRouteElement extends CTHTMLElement {}
-interface CTLinkElement extends CTHTMLElement {}
+interface CFLinkElement extends CTHTMLElement {}
 
 // Chart components
 interface CTChartElement extends CTHTMLElement {}
@@ -2956,7 +2956,7 @@ interface CFSwitchElement extends CTHTMLElement {}
 interface CFToggleElement extends CTHTMLElement {}
 interface CFToggleGroupElement extends CTHTMLElement {}
 interface CFRadioElement extends CTHTMLElement {}
-interface CTInputOtpElement extends CTHTMLElement {}
+interface CFInputOTPElement extends CTHTMLElement {}
 interface CFLabelElement extends CTHTMLElement {}
 
 // Display components
@@ -3209,9 +3209,17 @@ interface CFToolbarAttributes<T> extends CTHTMLAttributes<T> {
   "sticky"?: boolean;
 }
 
-interface CTTableAttributes<T> extends CTHTMLAttributes<T> {
+interface CFTableAttributes<T> extends CTHTMLAttributes<T> {
+  "striped"?: boolean;
+  "bordered"?: boolean;
+  "size"?: "sm" | "md" | "lg";
+  "sticky-header"?: boolean;
   "full-width"?: boolean;
   "hover"?: boolean;
+  "oncf-table-sort"?: EventHandler<{
+    columnIndex: number;
+    ascending: boolean;
+  }>;
 }
 
 type CFKeybindAttributes<T> = Omit<CTHTMLAttributes<T>, "key"> & {
@@ -3351,12 +3359,12 @@ interface CFCardAttributes<T> extends CTHTMLAttributes<T> {
   "clickable"?: boolean;
 }
 
-interface CTRouterAttributes<T> extends CTHTMLAttributes<T> {
+interface CFRouterAttributes<T> extends CTHTMLAttributes<T> {
   "path"?: CellLike<string> | string;
   "$path"?: CellLike<string>;
 }
 
-interface CTLinkAttributes<T> extends CTHTMLAttributes<T> {
+interface CFLinkAttributes<T> extends CTHTMLAttributes<T> {
   "to": string;
 }
 
@@ -3975,7 +3983,7 @@ interface CFRadioAttributes<T> extends CTHTMLAttributes<T> {
   "oncf-change"?: EventHandler<{ checked: boolean; value: string }>;
 }
 
-interface CTInputOtpAttributes<T> extends CTHTMLAttributes<T> {
+interface CFInputOTPAttributes<T> extends CTHTMLAttributes<T> {
   "length"?: number | CellLike<number>;
   "value"?: string | CellLike<string>;
   "$value"?: CellLike<string>;
@@ -3984,8 +3992,8 @@ interface CTInputOtpAttributes<T> extends CTHTMLAttributes<T> {
   "placeholder"?: string | CellLike<string>;
   "autoComplete"?: boolean | CellLike<boolean>;
   "autofocus"?: boolean | CellLike<boolean>;
-  "onct-change"?: EventHandler<{ value: string }>;
-  "onct-complete"?: EventHandler<{ value: string }>;
+  "oncf-change"?: EventHandler<{ value: string; complete: boolean }>;
+  "oncf-complete"?: EventHandler<{ value: string }>;
 }
 
 interface CFLabelAttributes<T> extends CTHTMLAttributes<T> {
@@ -4781,13 +4789,13 @@ declare global {
         CFCardAttributes<CFCardElement>,
         CFCardElement
       >;
-      "ct-router": CTDOM.DetailedHTMLProps<
-        CTRouterAttributes<CTRouterElement>,
-        CTRouterElement
+      "cf-router": CTDOM.DetailedHTMLProps<
+        CFRouterAttributes<CFRouterElement>,
+        CFRouterElement
       >;
-      "ct-link": CTDOM.DetailedHTMLProps<
-        CTLinkAttributes<CTLinkElement>,
-        CTLinkElement
+      "cf-link": CTDOM.DetailedHTMLProps<
+        CFLinkAttributes<CFLinkElement>,
+        CFLinkElement
       >;
       "cf-calendar": CTDOM.DetailedHTMLProps<
         CFCalendarAttributes<CFCalendarElement>,
@@ -4837,9 +4845,9 @@ declare global {
         CTHTMLAttributes<CTTextElement>,
         CTTextElement
       >;
-      "ct-table": CTDOM.DetailedHTMLProps<
-        CTTableAttributes<CTTableElement>,
-        CTTableElement
+      "cf-table": CTDOM.DetailedHTMLProps<
+        CFTableAttributes<CFTableElement>,
+        CFTableElement
       >;
       "cf-tags": CTDOM.DetailedHTMLProps<
         CFTagsAttributes<CFTagsElement>,
@@ -4995,9 +5003,9 @@ declare global {
         CFRadioAttributes<CFRadioElement>,
         CFRadioElement
       >;
-      "ct-input-otp": CTDOM.DetailedHTMLProps<
-        CTInputOtpAttributes<CTInputOtpElement>,
-        CTInputOtpElement
+      "cf-input-otp": CTDOM.DetailedHTMLProps<
+        CFInputOTPAttributes<CFInputOTPElement>,
+        CFInputOTPElement
       >;
       "cf-label": CTDOM.DetailedHTMLProps<
         CFLabelAttributes<CFLabelElement>,

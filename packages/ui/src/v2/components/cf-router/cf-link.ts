@@ -2,13 +2,13 @@ import { html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 
-export class CTLink extends BaseElement {
+export class CFLink extends BaseElement {
   @property({ type: String })
   declare to: string;
 
   private onClick = (e: Event) => {
     e.preventDefault();
-    this.emit("ct-route-change", { to: this.to });
+    this.emit("cf-route-change", { to: this.to });
   };
 
   override connectedCallback() {
@@ -28,4 +28,4 @@ export class CTLink extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-link", CTLink);
+globalThis.customElements.define("cf-link", CFLink);
