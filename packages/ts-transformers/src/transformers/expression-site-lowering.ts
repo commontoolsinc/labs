@@ -675,6 +675,21 @@ function isSupportedHelperOwnedExplicitReadRoot(
   }
 }
 
+function isSupportedHelperOwnedReceiverMethodRoot(
+  expression: ts.Expression,
+  siteInfo: ExpressionSitePolicyInfo,
+): expression is ts.CallExpression {
+  if (
+    !ts.isCallExpression(expression) ||
+    siteInfo.callRootKind !== "receiver-method"
+  ) {
+    return false;
+  }
+
+  return siteInfo.reactiveContext.owner === "pattern" ||
+    siteInfo.reactiveContext.owner === "render";
+}
+
 function isDeferredJsxArrayMethodExpression(
   expression: ts.Expression,
   context: TransformationContext,
@@ -1115,7 +1130,8 @@ function canRewriteHelperOwnedExpressionSite(
     !ts.isPrefixUnaryExpression(expression) &&
     !ts.isPostfixUnaryExpression(expression) &&
     !ts.isConditionalExpression(expression) &&
-    !isSupportedHelperOwnedExplicitReadRoot(expression, context)
+    !isSupportedHelperOwnedExplicitReadRoot(expression, context) &&
+    !isSupportedHelperOwnedReceiverMethodRoot(expression, siteInfo)
   ) {
     return false;
   }

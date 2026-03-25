@@ -735,6 +735,24 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   });
 
   await t.step(
+    "allows receiver method call inside authored ifElse branch",
+    async () => {
+      const source = `/// <cts-enable />
+      import { ifElse, pattern } from "commontools";
+
+      export default pattern<{ name: string; show: boolean }>((state) => ({
+        value: ifElse(state.show, state.name.trim(), "fallback"),
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
     "does not add the direct-pattern receiver-method diagnostic inside pattern-owned array-method callbacks",
     async () => {
       const source = `/// <cts-enable />

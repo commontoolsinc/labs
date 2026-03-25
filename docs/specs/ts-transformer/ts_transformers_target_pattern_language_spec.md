@@ -66,7 +66,7 @@ Each construct family is classified as one of:
 | `map` / `filter` / `flatMap` on reactive receivers in pattern-facing contexts | Supported | These operators are core language forms and may be structurally rewritten to explicit reactive collection operators |
 | Callback-local plain JS arrays in rewritten callbacks | Supported | Plain JS arrays inside callbacks stay plain; they are not implicitly promoted into pattern-owned array operators |
 | Direct JSX sink chains over structural array results | Supported | Terminal sink chains like `.filter(...).join(", ")` and ordinary receiver-method chains above that sink are valid JSX expression forms |
-| Receiver-method calls inside JSX expressions, explicit computation callbacks, or supported collection callbacks | Supported | Receiver methods are valid in local authored expression contexts such as JSX interpolation, `computed` / `derive` / `action` / `lift` / `handler` callbacks, and supported collection callbacks |
+| Receiver-method calls inside JSX expressions, explicit computation callbacks, or authored helper control flow | Supported | Receiver methods are valid in local authored expression contexts such as JSX interpolation, `computed` / `derive` / `action` / `lift` / `handler` callbacks, and helper control flow branches like `ifElse(show, name.trim(), "fallback")` |
 | Event-handler JSX attributes | Supported | Event handlers form an explicit callback boundary; they are part of the language but not part of ordinary expression-site lowering |
 | Dynamic key access inside JSX expressions, explicit computation callbacks, supported collection callbacks, or structural binding forms | Supported | Dynamic access like `selectedScopes[key]` is valid in local authored expression contexts or in binding forms that preserve the dynamic key directly |
 | Bare dynamic key access in top-level pattern-facing code | Unsupported | Forms like `input[key]` as a direct top-level pattern-body traversal are outside the intended declarative language and should move into JSX, an explicit computation callback, a supported collection callback, or a structural binding form |
@@ -192,16 +192,21 @@ expression context.
 **Good here**
 
 ```ts
-items.map((item) => item.name.toUpperCase())
-items.map((item) => labels[item.id])
-items.map((item) => item.tags.map((tag) => tag.trim()).join(", "))
+items.map((item) => item.name)
+items.map((item) => ifElse(item.active, item.name, "hidden"))
+items.map((item) => <span>{item.name.toUpperCase()}</span>)
 ```
 
 Why:
 
 - the outer callback belongs to the supported reactive collection operator
+- structural access, helper control flow, and nested JSX-local expressions are
+  valid here
 - inner plain arrays stay plain JS and are not implicitly promoted into
   pattern-owned collection operators
+- bare callback-local receiver-method roots like `items.map((item) =>
+  item.toUpperCase())` are still a separate boundary, not a generally
+  supported collection-callback form
 
 ## 4.2 Common Relocation Patterns
 
@@ -411,17 +416,23 @@ The intended split is:
    - examples:
      - `{ upper: state.name.toUpperCase() }`
      - `const upper = identity(state.name.trim())` in top-level pattern code
-2. **receiver-method calls inside local expression contexts**
+2. **receiver-method calls inside explicit local expression contexts**
    - valid as part of those local expression contexts
    - examples:
      - JSX expression sites like `{state.name.toUpperCase()}`
      - `computed(() => state.name.toUpperCase())`
-     - `action(() => state.name.trim())`
-     - callback-local calls inside supported collection operators
+      - `action(() => state.name.trim())`
+     - `ifElse(show, state.name.trim(), "fallback")`
+3. **bare callback-local receiver-method roots in supported collection callbacks**
+   - still outside the v1 target language for now
+   - examples:
+     - `items.map((item) => item.toUpperCase())`
+     - `items.map((item) => item.name.trim())` as a direct non-JSX callback root
 
 So the language should not be read as “receiver methods are unsupported.” The
-real rule is that **bare top-level pattern-body receiver calls are unsupported
-as a standalone pattern construct**.
+real rule is that **receiver methods are supported in explicit local expression
+contexts, but not yet as bare top-level pattern-body syntax or as bare
+non-JSX collection-callback roots**.
 
 ## 5.7 `.key(...)` And `.get()` Are Cell-Semantics-Split
 
@@ -468,9 +479,10 @@ The real rule is:
 These are the main semantic questions still worth revisiting after the current
 v1 draft:
 
-1. whether any narrow direct non-JSX receiver-method forms deserve promotion,
-   or whether the current “move them into JSX or an explicit callback”
-   boundary should stay strict
+1. whether bare callback-local receiver-method roots inside supported
+   collection callbacks deserve promotion, or whether the current “use nested
+   JSX, helper control flow, or an explicit computation callback” boundary
+   should stay strict
 2. whether the remaining invalid-program callback-container pass-through should
    be removed entirely from implementation now that diagnostics exist
 3. whether the explicit-cell `.key(...)` / `.get()` boundary is the right

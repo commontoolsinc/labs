@@ -3149,6 +3149,33 @@ export default pattern<{ count: Writable<number>; show: boolean }>(({ count, sho
 );
 
 Deno.test(
+  "Capability-first: authored ifElse receiver-method branch lowers reactively",
+  async () => {
+    const source = `/// <cts-enable />
+import { ifElse, pattern } from "commontools";
+
+export default pattern<{ name: string; show: boolean }>(({ name, show }) => ({
+  value: ifElse(show, name.trim(), "fallback"),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "ifElse(");
+    assertStringIncludes(
+      output,
+      "__ctHelpers.computed((): string => name.trim())",
+    );
+    assert(
+      !output.includes('ifElse(show, name.trim(), "fallback")'),
+      "expected authored ifElse receiver-method branch to be reactively wrapped",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: JSX authored ifElse Writable.get() branch lowers reactively",
   async () => {
     const source = `/// <cts-enable />
