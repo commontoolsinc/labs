@@ -70,9 +70,9 @@ describe("shell piece tests", () => {
       identity,
     });
 
-    const waitForPieceValue = async (expected: number) => {
+    const waitForActivePattern = async () => {
       await waitFor(async () => {
-        return await page.evaluate(async (expected, expectedPieceId) => {
+        return await page.evaluate((expectedPieceId) => {
           const rootView = document.querySelector("x-root-view");
           const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
             | {
@@ -92,14 +92,8 @@ describe("shell piece tests", () => {
             }
             | null;
           const activePattern = appView?._patterns?.value?.activePattern;
-          if (!activePattern || activePattern.id() !== expectedPieceId) {
-            return false;
-          }
-
-          const valueCell = activePattern.cell().key("value");
-          await valueCell.sync();
-          return valueCell.get() === expected;
-        }, { args: [expected, pieceId] });
+          return !!activePattern && activePattern.id() === expectedPieceId;
+        }, { args: [pieceId] });
       });
     };
 
@@ -133,12 +127,13 @@ describe("shell piece tests", () => {
       });
     };
 
-    await waitForPieceValue(0);
+    await waitForActivePattern();
+    await waitFor(async () => (await piece.result.get(["value"])) === 0);
 
     await clickDecrement();
-    await waitForPieceValue(-1);
+    await waitFor(async () => (await piece.result.get(["value"])) === -1);
 
     await clickDecrement();
-    await waitForPieceValue(-2);
+    await waitFor(async () => (await piece.result.get(["value"])) === -2);
   });
 });
