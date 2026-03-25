@@ -42,4 +42,5 @@ jobs:
         with:
           name: macos-cli
           path: |
+            ./dist/cf
             ./dist/ct

@@ -11,7 +11,7 @@ on:
 # Define the list of binaries we're building
 # This makes it easy to add more binaries in the future
 env:
-  BINARIES: "toolshed bg-charm-service ct"
+  BINARIES: "toolshed bg-charm-service cf ct"
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -96,6 +96,7 @@ jobs:
           path: |
             ./dist/toolshed
             ./dist/bg-charm-service
+            ./dist/cf
             ./dist/ct
 
   generated-patterns-integration-test:
@@ -239,10 +240,10 @@ jobs:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
           TOOLSHED_URL: http://localhost:${{ matrix.toolshed_port }}
         run: |
-          chmod +x ./common-binaries/ct
+          chmod +x ./common-binaries/cf
           chmod +x ./common-binaries/toolshed
           # Set tools to path
-          # Integration script needs `ct`
+          # Integration script needs `cf`
           echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
           MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
 
@@ -355,9 +356,9 @@ jobs:
 
       - name: 🧪 Run pattern unit tests
         run: |
-          chmod +x ./common-binaries/ct
+          chmod +x ./common-binaries/cf
           mkdir -p test-results
-          CT_BINARY=./common-binaries/ct deno task integration --junit-dir=test-results pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
+          CF_BINARY=./common-binaries/cf deno task integration --junit-dir=test-results pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
 
       - name: 📤 Upload test timing data
         if: always()
