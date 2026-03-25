@@ -17,6 +17,21 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts compiled dependencies from the shared runtime-module policy", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools/schema", "turndown"], function (require, exports, _schema, turndown_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    turndown_1 = __importDefault(turndown_1);
+    exports.default = turndown_1.default;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("accepts verified top-level function references for compiled trusted builders", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
@@ -62,6 +77,22 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
       "Dynamic import() is not allowed in SES mode",
+    );
+  });
+
+  it("rejects compiled dependencies outside the shared import policy", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "evil"], function (require, exports, evil) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = evil;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Compiled AMD dependency 'evil' is not allowed in SES mode",
     );
   });
 

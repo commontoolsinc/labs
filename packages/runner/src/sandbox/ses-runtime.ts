@@ -260,12 +260,16 @@ function createCompartment(globals: Record<string, unknown>) {
   const CompartmentCtor = (globalThis as {
     Compartment?: new (
       globals?: Record<string, unknown>,
-    ) => { evaluate(source: string): unknown };
+    ) => { evaluate(source: string): unknown; globalThis: object };
   }).Compartment;
   if (!CompartmentCtor) {
     throw new Error("SES Compartment is unavailable");
   }
-  return new CompartmentCtor(globals);
+  const compartment = new CompartmentCtor(globals);
+  // SES freezes intrinsics, but compartment global bindings remain writable
+  // unless we explicitly lock them down.
+  Object.freeze(compartment.globalThis);
+  return compartment;
 }
 
 function materializeHostVisibleStack(error: Error): void {

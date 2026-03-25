@@ -1,34 +1,12 @@
 import { createBuilder } from "../builder/factory.ts";
 import { StaticCache } from "@commontools/static";
 import turndown from "turndown";
-
-export type RuntimeModuleIdentifier =
-  | "commontools"
-  | "commontools/schema"
-  | "turndown"
-  | "@commontools/html"
-  | "@commontools/builder"
-  | "@commontools/runner";
-
-export const RuntimeModuleIdentifiers: RuntimeModuleIdentifier[] = [
-  "commontools",
-  "commontools/schema",
-  "turndown",
-  // backwards compat
-  "@commontools/html",
-  // backwards compat
-  "@commontools/builder",
-  // backwards compat, for supporting { type Cell } from "@commontools/runner"
-  // from older patterns
-  "@commontools/runner",
-];
-
-export function isRuntimeModuleIdentifier(
-  value: unknown,
-): value is RuntimeModuleIdentifier {
-  return typeof value === "string" &&
-    RuntimeModuleIdentifiers.includes(value as RuntimeModuleIdentifier);
-}
+import type { RuntimeModuleIdentifier } from "./runtime-module-policy.ts";
+export type { RuntimeModuleIdentifier } from "./runtime-module-policy.ts";
+export {
+  isRuntimeModuleIdentifier,
+  RuntimeModuleIdentifiers,
+} from "./runtime-module-policy.ts";
 
 export const getRuntimeModuleTypes = (() => {
   let depTypes:

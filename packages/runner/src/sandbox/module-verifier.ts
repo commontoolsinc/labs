@@ -1,5 +1,10 @@
 import type { Program } from "@commontools/js-compiler";
 import ts from "typescript";
+import {
+  isAllowedAuthoredImportSpecifier,
+  isAllowedCompiledDependencySpecifier,
+  isRuntimeModuleIdentifier,
+} from "./runtime-module-policy.ts";
 
 type BindingKind = "builder" | "data" | "function" | "import" | "unknown";
 
@@ -26,12 +31,6 @@ const TRUSTED_DATA_HELPERS = new Set([
   "__ct_data",
   "nonPrivateRandom",
   "safeDateNow",
-]);
-const TRUSTED_RUNTIME_MODULES = new Set([
-  "commontools",
-  "@commontools/builder",
-  "@commontools/html",
-  "@commontools/runner",
 ]);
 const SAFE_GLOBAL_IDENTIFIERS = new Set([
   "Array",
@@ -212,12 +211,27 @@ export function verifyCompiledBundleModuleFactories(
 
   const wrapper = unwrapBundleExpressionStatement(sourceFile.statements[0]);
   const body = getBundleWrapperBody(wrapper, filename);
+  const compiledModuleIds = new Set<string>();
 
   for (const statement of body.statements) {
     if (!isDefineCallStatement(statement)) {
       continue;
     }
-    verifyCompiledDefineCall(statement.expression, sourceFile);
+    const moduleId = getCompiledDefineModuleId(statement.expression);
+    if (moduleId) {
+      compiledModuleIds.add(moduleId);
+    }
+  }
+
+  for (const statement of body.statements) {
+    if (!isDefineCallStatement(statement)) {
+      continue;
+    }
+    verifyCompiledDefineCall(
+      statement.expression,
+      sourceFile,
+      compiledModuleIds,
+    );
   }
 }
 
@@ -233,7 +247,7 @@ function verifyStaticImportPolicy(sourceFile: ts.SourceFile): void {
 
     if (ts.isImportDeclaration(statement)) {
       const specifier = getImportSpecifier(statement);
-      if (!isAllowedStaticImportSpecifier(specifier)) {
+      if (!isAllowedAuthoredImportSpecifier(specifier)) {
         throw verificationError(
           sourceFile,
           statement.moduleSpecifier,
@@ -249,7 +263,7 @@ function verifyStaticImportPolicy(sourceFile: ts.SourceFile): void {
       ts.isStringLiteral(statement.moduleSpecifier)
     ) {
       const specifier = statement.moduleSpecifier.text;
-      if (!isAllowedStaticImportSpecifier(specifier)) {
+      if (!isAllowedAuthoredImportSpecifier(specifier)) {
         throw verificationError(
           sourceFile,
           statement.moduleSpecifier,
@@ -306,7 +320,7 @@ function predeclareImports(
       env.set(named.name.text, {
         kind: "import",
         namespaceImport: true,
-        trustedRuntimeName: TRUSTED_RUNTIME_MODULES.has(specifier)
+        trustedRuntimeName: isRuntimeModuleIdentifier(specifier)
           ? specifier
           : undefined,
         captureSafe: true,
@@ -317,7 +331,7 @@ function predeclareImports(
     for (const element of named.elements) {
       env.set(element.name.text, {
         kind: "import",
-        trustedRuntimeName: TRUSTED_RUNTIME_MODULES.has(specifier)
+        trustedRuntimeName: isRuntimeModuleIdentifier(specifier)
           ? element.propertyName?.text ?? element.name.text
           : undefined,
         captureSafe: true,
@@ -2123,6 +2137,7 @@ function verifyCtDataPropertyName(
 function verifyCompiledDefineCall(
   expression: ts.CallExpression,
   sourceFile: ts.SourceFile,
+  compiledModuleIds: ReadonlySet<string>,
 ): void {
   if (expression.arguments.length !== 3) {
     throw verificationError(
@@ -2156,6 +2171,16 @@ function verifyCompiledDefineCall(
         "AMD define() dependencies must be string literals",
       );
     }
+    if (
+      !isAllowedCompiledDependencySpecifier(element.text) &&
+      !compiledModuleIds.has(element.text)
+    ) {
+      throw verificationError(
+        sourceFile,
+        element,
+        `Compiled AMD dependency '${element.text}' is not allowed in SES mode`,
+      );
+    }
     return element.text;
   });
 
@@ -2185,6 +2210,18 @@ function verifyCompiledDefineCall(
     dependencySpecifiers,
     sourceFile,
   );
+}
+
+function getCompiledDefineModuleId(
+  expression: ts.CallExpression,
+): string | undefined {
+  if (
+    expression.arguments.length < 1 ||
+    !ts.isStringLiteral(expression.arguments[0])
+  ) {
+    return undefined;
+  }
+  return expression.arguments[0].text;
 }
 
 function verifyCompiledAuthoredFactory(
@@ -2354,7 +2391,7 @@ function predeclareCompiledFactoryDependencies(
     env.set(parameter.name.text, {
       kind: "import",
       namespaceImport: true,
-      trustedRuntimeName: TRUSTED_RUNTIME_MODULES.has(specifier)
+      trustedRuntimeName: isRuntimeModuleIdentifier(specifier)
         ? specifier
         : undefined,
       captureSafe: true,
@@ -3107,13 +3144,6 @@ function verifyTrustedSnapshotHelperCall(
       "Trusted snapshot helpers must not receive arguments in SES mode",
     );
   }
-}
-
-function isAllowedStaticImportSpecifier(specifier: string): boolean {
-  return TRUSTED_RUNTIME_MODULES.has(specifier) ||
-    specifier.startsWith("./") ||
-    specifier.startsWith("../") ||
-    specifier.startsWith("/");
 }
 
 function isDirectIifeCall(expression: ts.CallExpression): boolean {

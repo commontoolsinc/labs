@@ -26,6 +26,25 @@ describe("verifyProgramModuleScope()", () => {
     expect(() => verifyProgramModuleScope(program)).not.toThrow();
   });
 
+  it("allows trusted runtime imports from the shared module policy", () => {
+    const program: Program = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import "commontools/schema";',
+            'import TurndownService from "turndown";',
+            'import { lift } from "commontools";',
+            "export default lift(() => typeof TurndownService);",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).not.toThrow();
+  });
+
   it("rejects non-local external static imports", () => {
     const program: Program = {
       main: "/main.ts",

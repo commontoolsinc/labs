@@ -124,6 +124,125 @@ describe("SES security regressions", () => {
     });
   });
 
+  it("freezes callback compartment globalThis bindings", () => {
+    const probe = engine.getInvocation(`
+      function probe() {
+        "use strict";
+        const result = {};
+
+        try {
+          globalThis.fetch = undefined;
+          result.fetchWrite = "allowed";
+        } catch (error) {
+          result.fetchWrite = error.name;
+        }
+
+        try {
+          globalThis.Array = 123;
+          result.arrayWrite = "allowed";
+        } catch (error) {
+          result.arrayWrite = error.name;
+        }
+
+        try {
+          globalThis.globalThis = 123;
+          result.selfWrite = "allowed";
+        } catch (error) {
+          result.selfWrite = error.name;
+        }
+
+        try {
+          globalThis.injected = true;
+          result.addWrite = "allowed";
+        } catch (error) {
+          result.addWrite = error.name;
+        }
+
+        result.fetchType = typeof fetch;
+        result.arrayName = Array.name;
+        result.hasInjected = "injected" in globalThis;
+        return result;
+      }
+    `) as () => {
+      fetchWrite: string;
+      arrayWrite: string;
+      selfWrite: string;
+      addWrite: string;
+      fetchType: string;
+      arrayName: string;
+      hasInjected: boolean;
+    };
+
+    expect(probe()).toEqual({
+      fetchWrite: "TypeError",
+      arrayWrite: "TypeError",
+      selfWrite: "TypeError",
+      addWrite: "TypeError",
+      fetchType: "function",
+      arrayName: "Array",
+      hasInjected: false,
+    });
+  });
+
+  it("freezes module compartment globalThis bindings", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "export default function probe() {",
+            '  "use strict";',
+            "  const host = globalThis as Record<string, unknown>;",
+            "  const result: Record<string, unknown> = {};",
+            "  try {",
+            "    host.fetch = undefined;",
+            '    result.fetchWrite = "allowed";',
+            "  } catch (error) {",
+            "    result.fetchWrite = (error as Error).name;",
+            "  }",
+            "  try {",
+            "    host.Array = 123;",
+            '    result.arrayWrite = "allowed";',
+            "  } catch (error) {",
+            "    result.arrayWrite = (error as Error).name;",
+            "  }",
+            "  try {",
+            "    host.globalThis = 123;",
+            '    result.selfWrite = "allowed";',
+            "  } catch (error) {",
+            "    result.selfWrite = (error as Error).name;",
+            "  }",
+            "  try {",
+            "    host.injected = true;",
+            '    result.addWrite = "allowed";',
+            "  } catch (error) {",
+            "    result.addWrite = (error as Error).name;",
+            "  }",
+            "  result.fetchType = typeof fetch;",
+            "  result.arrayName = Array.name;",
+            '  result.hasInjected = "injected" in host;',
+            "  return result;",
+            "}",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main?.default()).toEqual({
+      fetchWrite: "TypeError",
+      arrayWrite: "TypeError",
+      selfWrite: "TypeError",
+      addWrite: "TypeError",
+      fetchType: "function",
+      arrayName: "Array",
+      hasInjected: false,
+    });
+  });
+
   it("preserves non-Error throws during SES source evaluation", () => {
     let thrown: unknown;
     try {
