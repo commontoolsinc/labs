@@ -1355,16 +1355,21 @@ export type JSONSchemaObj = {
   };
 };
 
-/** Recursively removes `readonly` from all properties of `T`. */
-type DeepMutable<T> = T extends ReadonlyArray<infer U> ? DeepMutable<U>[]
-  : T extends object ? ({ -readonly [P in keyof T]: DeepMutable<T[P]> })
+/**
+ * Recursively removes `readonly` from all properties of `T`.
+ *
+ * Copy of `Mutable` from `@commontools/utils/types`. These two definitions
+ * should be unified; see that module for the canonical version.
+ */
+type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
+  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
   : T;
 
 /**
  * A deep-mutable variant of `JSONSchemaObj`. Recursively strips `readonly`
  * from all properties, making the schema safe to build up incrementally.
  */
-export type JSONSchemaMutable = DeepMutable<JSONSchemaObj>;
+export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
 
 /**
  * Selects a sub-path within a document, optionally paired with a schema
