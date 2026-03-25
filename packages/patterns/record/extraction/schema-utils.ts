@@ -13,7 +13,7 @@ import type { SubPieceEntry } from "../types.ts";
 import type { JSONSchema } from "./schema-utils-pure.ts";
 
 // Registry import for fallback - only used for legacy entries without stored schema.
-// This import pulls in all module patterns which require commontools runtime.
+// This import pulls in all module patterns which require the Common Fabric runtime.
 // Tests that only use stored schema won't trigger the fallback path.
 import { getDefinition } from "../registry.ts";
 
