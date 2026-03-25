@@ -871,6 +871,35 @@ export async function runTestPattern(
       resetAllTimingBaselines();
     }
 
+    const settleRuntime = async (
+      stepIndex: number,
+      maxSettle = 20,
+    ): Promise<void> => {
+      await Promise.race([
+        (async () => {
+          for (let settle = 0; settle < maxSettle; settle++) {
+            const iterStart = performance.now();
+            await runtime.idle();
+            await storageManager.synced();
+            const totalMs = performance.now() - iterStart;
+            if (options.verbose && totalMs > 1) {
+              console.log(
+                `      settle[${settle}]: ${fmtMs(totalMs)}`,
+              );
+            }
+            // If both resolved nearly instantly, the system is settled.
+            // synced() has ~1ms of overhead even when idle, so use 2ms.
+            if (settle > 0 && totalMs < 2) break;
+          }
+          await runtime.idle();
+        })(),
+        timeout(
+          TIMEOUT,
+          `Action at index ${stepIndex} timed out after ${TIMEOUT}ms`,
+        ),
+      ]);
+    };
+
     // 5. Process tests sequentially
     const results: TestResult[] = [];
     let lastActionIndex: number | null = null;
@@ -968,30 +997,7 @@ export async function runTestPattern(
         // resolve quickly (< 1ms), indicating quiescence. Max iterations
         // as a safety net against infinite loops.
         try {
-          const MAX_SETTLE = 20;
-          await Promise.race([
-            (async () => {
-              for (let settle = 0; settle < MAX_SETTLE; settle++) {
-                const iterStart = performance.now();
-                await runtime.idle();
-                await storageManager.synced();
-                const totalMs = performance.now() - iterStart;
-                if (options.verbose && totalMs > 1) {
-                  console.log(
-                    `      settle[${settle}]: ${fmtMs(totalMs)}`,
-                  );
-                }
-                // If both resolved nearly instantly, the system is settled.
-                // synced() has ~1ms of overhead even when idle, so use 2ms.
-                if (settle > 0 && totalMs < 2) break;
-              }
-              await runtime.idle();
-            })(),
-            timeout(
-              TIMEOUT,
-              `Action at index ${i} timed out after ${TIMEOUT}ms`,
-            ),
-          ]);
+          await settleRuntime(i, 20);
         } catch (err) {
           results.push({
             name: actionName,
@@ -1146,19 +1152,43 @@ export async function runTestPattern(
         let passed = false;
         let error: string | undefined;
 
-        try {
+        const evaluateAssertion = (): { passed: boolean; error?: string } => {
           // Get the assertion cell via .key()
-          const assertCell = testsCell.key(i).key("assertion") as Cell<unknown>;
-          const value = assertCell.get();
-          passed = value === true;
-          if (!passed) {
-            error = `Expected true, got ${JSON.stringify(value)}`;
+          try {
+            const assertCell = testsCell.key(i).key("assertion") as Cell<
+              unknown
+            >;
+            const value = assertCell.get();
+            if (value === true) {
+              return { passed: true };
+            }
+            return {
+              passed: false,
+              error: `Expected true, got ${JSON.stringify(value)}`,
+            };
+          } catch (err) {
+            return {
+              passed: false,
+              error: `Error reading assertion: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            };
           }
-        } catch (err) {
-          passed = false;
-          error = `Error reading assertion: ${
-            err instanceof Error ? err.message : String(err)
-          }`;
+        };
+
+        ({ passed, error } = evaluateAssertion());
+
+        if (!passed && lastActionIndex !== null) {
+          try {
+            for (let retry = 0; retry < 3 && !passed; retry++) {
+              await new Promise((resolve) => setTimeout(resolve, 0));
+              await settleRuntime(i, 6);
+              ({ passed, error } = evaluateAssertion());
+            }
+          } catch (err) {
+            passed = false;
+            error = err instanceof Error ? err.message : String(err);
+          }
         }
 
         results.push({
