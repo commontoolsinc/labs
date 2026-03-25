@@ -467,7 +467,13 @@ export class StorageManager implements IStorageManager {
   private resolveCrossSpace(resolve: () => void): Promise<void> {
     const promises = [...this.#crossSpacePromises.values()];
     if (promises.length === 0) {
-      queueMicrotask(resolve);
+      queueMicrotask(() => {
+        if (this.#crossSpacePromises.size === 0) {
+          resolve();
+          return;
+        }
+        void this.resolveCrossSpace(resolve);
+      });
       return Promise.resolve();
     }
     return Promise.all(promises)

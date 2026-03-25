@@ -394,6 +394,48 @@ Deno.test("memory v2 runner resolves synced on a microtask when idle", async () 
   }
 });
 
+Deno.test(
+  "memory v2 runner waits for cross-space syncs registered later in the same turn",
+  async () => {
+    const transport = new CountingWatchSetTransport();
+    const sessionFactory = new SingleSessionFactory(transport);
+    const storageManager = TestStorageManager.create({
+      as: signer,
+      address: new URL("memory://runner-v2-synced-cross-space"),
+      memoryVersion: "v2",
+    }, sessionFactory);
+    using time = new FakeTime();
+
+    try {
+      let settled = false;
+      const crossSpace = Promise.withResolvers<void>();
+      let trackedPromise: Promise<void> | undefined;
+      const synced = storageManager.synced().then(() => {
+        settled = true;
+      });
+
+      queueMicrotask(() => {
+        trackedPromise = crossSpace.promise.finally(() => {
+          if (trackedPromise) {
+            storageManager.removeCrossSpacePromise(trackedPromise);
+          }
+        });
+        storageManager.addCrossSpacePromise(trackedPromise);
+      });
+
+      await time.runMicrotasks();
+      assertEquals(settled, false);
+
+      crossSpace.resolve();
+      await time.runMicrotasks();
+      assertEquals(settled, true);
+      await synced;
+    } finally {
+      await storageManager.close();
+    }
+  },
+);
+
 Deno.test("memory v2 runner integrates watch deltas without re-diffing cold watched docs", async () => {
   const docA = `of:watch-delta-a-${crypto.randomUUID()}` as URI;
   const docB = `of:watch-delta-b-${crypto.randomUUID()}` as URI;
