@@ -216,6 +216,8 @@ describe("default-app flow test", () => {
         return await page.evaluate(() => {
           const state = globalThis.app?.serialize?.();
           return !!state &&
+            !!state.view &&
+            typeof state.view === "object" &&
             "pieceId" in state.view &&
             typeof state.view.pieceId === "string" &&
             state.view.pieceId.length > 0;

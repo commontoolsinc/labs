@@ -81,9 +81,17 @@ export class WebWorkerRuntimeTransport
   private _handleError = (event: ErrorEvent): void => {
     event.preventDefault();
 
-    const error = event.error instanceof Error
-      ? event.error
-      : new Error(event.message || "Web worker failed before initialization");
+    const error = new Error(
+      typeof event.error?.message === "string"
+        ? event.error.message
+        : event.message || "Web worker failed before initialization",
+    );
+    if (typeof event.error?.name === "string") {
+      error.name = event.error.name;
+    }
+    if (typeof event.error?.stack === "string") {
+      error.stack = event.error.stack;
+    }
 
     if (!this._ready) {
       this._readyPromise.reject(error);
