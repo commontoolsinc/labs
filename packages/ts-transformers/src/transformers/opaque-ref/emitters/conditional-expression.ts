@@ -31,11 +31,21 @@ function isControlFlowBranchExpression(expr: ts.Expression): boolean {
     );
 }
 
+function isLogicalControlFlowExpression(expr: ts.Expression): boolean {
+  const current = unwrapExpression(expr);
+  return ts.isBinaryExpression(current) &&
+    (
+      current.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+      current.operatorToken.kind === ts.SyntaxKind.BarBarToken
+    );
+}
+
 function processBranch(
   expr: ts.Expression,
   context: Parameters<Emitter>[0]["context"],
   analyze: Parameters<Emitter>[0]["analyze"],
   rewriteChildren: Parameters<Emitter>[0]["rewriteChildren"],
+  rewriteSubexpression: Parameters<Emitter>[0]["rewriteSubexpression"],
   preferDeriveWrappers: boolean,
 ): ts.Expression {
   if (isJsxLocalRewriteContainer(expr)) {
@@ -43,7 +53,7 @@ function processBranch(
   }
 
   if (isControlFlowBranchExpression(expr)) {
-    return rewriteChildren(expr) || expr;
+    return rewriteSubexpression(expr) || expr;
   }
 
   const branchAnalysis = analyze(expr);
@@ -90,6 +100,7 @@ export const emitConditionalExpression: Emitter = ({
   context,
   analyze,
   rewriteChildren,
+  rewriteSubexpression,
   inSafeContext,
   preferDeriveWrappers,
 }) => {
@@ -106,7 +117,9 @@ export const emitConditionalExpression: Emitter = ({
     !isSimpleReactiveAccessExpression(expression.condition, context.checker);
 
   let predicate: ts.Expression = expression.condition;
-  if (shouldDerivePredicate) {
+  if (isLogicalControlFlowExpression(expression.condition)) {
+    predicate = rewriteSubexpression(expression.condition);
+  } else if (shouldDerivePredicate) {
     const derivedPredicate = createReactiveWrapperForExpression(
       expression.condition,
       predicateDataFlows,
@@ -123,6 +136,7 @@ export const emitConditionalExpression: Emitter = ({
     context,
     analyze,
     rewriteChildren,
+    rewriteSubexpression,
     preferDeriveWrappers,
   );
 
@@ -131,6 +145,7 @@ export const emitConditionalExpression: Emitter = ({
     context,
     analyze,
     rewriteChildren,
+    rewriteSubexpression,
     preferDeriveWrappers,
   );
 

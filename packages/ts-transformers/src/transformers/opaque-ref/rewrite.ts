@@ -2,6 +2,7 @@ import ts from "typescript";
 
 import {
   classifyArrayMethodCall,
+  classifyReactiveContext,
   isInsideSafeCallbackWrapper,
   normalizeDataFlows,
   visitEachChildWithJsx,
@@ -34,6 +35,17 @@ const EMITTERS: readonly Emitter[] = [
   emitPrefixUnaryExpression,
   emitContainerExpression,
 ];
+
+function isSameReactiveContextBoundary(
+  source: ts.Expression,
+  target: ts.Expression,
+  context: RewriteParams["context"],
+): boolean {
+  const sourceInfo = classifyReactiveContext(source, context.checker, context);
+  const targetInfo = classifyReactiveContext(target, context.checker, context);
+  return sourceInfo.kind === targetInfo.kind &&
+    sourceInfo.owner === targetInfo.owner;
+}
 
 function rewriteChildExpressions(
   node: ts.Expression,
@@ -134,6 +146,24 @@ export function rewriteExpression(
       );
     },
     rewriteSubexpression(node: ts.Expression): ts.Expression {
+      if (
+        !isSameReactiveContextBoundary(
+          params.expression,
+          node,
+          params.context,
+        )
+      ) {
+        return rewriteChildExpressions(
+          node,
+          params.context,
+          params.analyze,
+          reactiveContextKind,
+          params.containerKind,
+          inSafeContext,
+          preferDeriveWrappers,
+        );
+      }
+
       const analysis = params.analyze(node);
       if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
         return rewriteExpression({

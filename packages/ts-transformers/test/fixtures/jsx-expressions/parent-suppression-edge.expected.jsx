@@ -411,45 +411,13 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Full features", "Limited features"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        config: {
-                            type: "object",
-                            properties: {
-                                features: {
-                                    type: "object",
-                                    properties: {
-                                        darkMode: {
-                                            type: "boolean"
-                                        },
-                                        animations: {
-                                            type: "boolean"
-                                        }
-                                    },
-                                    required: ["darkMode", "animations"]
-                                }
-                            },
-                            required: ["features"]
-                        }
-                    },
-                    required: ["config"]
-                }
-            },
-            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.when({
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                config: {
-                    features: {
-                        darkMode: state.key("config").features.darkMode,
-                        animations: state.key("config").features.animations
-                    }
-                }
-            } }, ({ state }) => state.config.features.darkMode && state.config.features.animations), "Full features", "Limited features")}
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "darkMode"), state.key("config", "features", "animations")), "Full features", "Limited features")}
         </p>
 
         <h3>Method Calls on Shared Bases</h3>

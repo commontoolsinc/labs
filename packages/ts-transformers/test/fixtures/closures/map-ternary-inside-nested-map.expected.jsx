@@ -151,7 +151,15 @@ export default pattern((__ct_pattern_input) => {
                         type: "string"
                     } as const satisfies __ctHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, tag.key("active"), tag.key("name"), showInactive ? __ctHelpers.derive({
+                    } as const satisfies __ctHelpers.JSONSchema, tag.key("active"), tag.key("name"), __ctHelpers.ifElse({
+                        type: "boolean"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, showInactive, __ctHelpers.derive({
                         type: "object",
                         properties: {
                             tag: {
@@ -169,7 +177,7 @@ export default pattern((__ct_pattern_input) => {
                         type: "string"
                     } as const satisfies __ctHelpers.JSONSchema, { tag: {
                             name: tag.key("name")
-                        } }, ({ tag }) => `(${tag.name})`) : "")}
+                        } }, ({ tag }) => `(${tag.name})`), ""))}
                   </li>);
                 }, {
                     type: "object",

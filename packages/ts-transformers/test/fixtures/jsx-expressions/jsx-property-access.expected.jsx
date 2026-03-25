@@ -391,45 +391,13 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        config: {
-                            type: "object",
-                            properties: {
-                                features: {
-                                    type: "object",
-                                    properties: {
-                                        beta: {
-                                            type: "boolean"
-                                        },
-                                        darkMode: {
-                                            type: "boolean"
-                                        }
-                                    },
-                                    required: ["beta", "darkMode"]
-                                }
-                            },
-                            required: ["features"]
-                        }
-                    },
-                    required: ["config"]
-                }
-            },
-            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.when({
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                config: {
-                    features: {
-                        beta: state.key("config").features.beta,
-                        darkMode: state.key("config").features.darkMode
-                    }
-                }
-            } }, ({ state }) => state.config.features.beta && state.config.features.darkMode), "Yes", "No")}
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "beta"), state.key("config", "features", "darkMode")), "Yes", "No")}
         </p>
       </div>),
     };

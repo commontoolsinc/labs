@@ -38,6 +38,44 @@ const p = pattern(({ foo, bar }) => <div>{computed(() => foo && bar)}</div>);
 });
 
 Deno.test(
+  "Capability-first: outer ternary does not lower nested ternary inside computed callback",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern } from "commontools";
+const p = pattern(({ show, bar }) => <div>{show ? computed(() => bar ? "B" : "C") : "D"}</div>);
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(output, "__ctHelpers.ifElse(");
+    assertStringIncludes(output, '=> bar ? "B" : "C"');
+    assert(
+      !output.includes('bar, "B", "C"'),
+      "expected nested ternary inside computed callback to stay authored instead of lowering structurally through the outer branch path",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: authored ifElse does not lower nested ternary inside computed callback branch",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, ifElse, pattern } from "commontools";
+const p = pattern(({ show, foo, bar }) => ifElse(show, computed(() => foo ? "A" : bar ? "B" : "C"), "D"));
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(output, "return ifElse(");
+    assertStringIncludes(output, '=> foo ? "A" : bar ? "B" : "C"');
+    assert(
+      !output.includes('bar, "B", "C"'),
+      "expected nested ternary inside computed callback to stay authored even when reached through helper-owned branch rewriting",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: map in compute context from JSX wrapper does not rewrite",
   async () => {
     const source = `/// <cts-enable />
@@ -604,11 +642,76 @@ export default pattern<{ showCompleted: boolean; task: { done: boolean } }>((sta
     assertStringIncludes(output, "__ctHelpers.ifElse(");
     assertStringIncludes(
       output,
-      "({ state }) => state.showCompleted || !state.task.done",
+      "__ctHelpers.unless(",
+    );
+    assertStringIncludes(
+      output,
+      "!state.task.done",
     );
     assert(
       !output.includes('!state.key("task", "done")'),
       "expected logical-or fallback root to rewrite as a reactive boolean expression rather than a raw negated key() access",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: direct nested ternary branches rewrite without parentheses",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+export default pattern<{ a: boolean; b: boolean }>((state) => ({
+  [UI]: <div>{state.a ? "A" : state.b ? "B" : "C"}</div>,
+}));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, "__ctHelpers.ifElse(");
+    assert(
+      !output.includes('state.key("b") ? "B" : "C"'),
+      "expected direct nested ternary branch to lower structurally instead of staying as a raw child ternary",
+    );
+    assertStringIncludes(output, 'state.key("b"), "B", "C"');
+  },
+);
+
+Deno.test(
+  "Capability-first: direct nested logical branches rewrite without parentheses",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+export default pattern<{ a: boolean; b?: string }>((state) => ({
+  [UI]: <div>{state.a ? "A" : state.b || "C"}</div>,
+}));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, "__ctHelpers.unless(");
+    assert(
+      !output.includes('state.key("b") || "C"'),
+      "expected direct nested logical branch to lower structurally instead of staying as a raw child logical expression",
     );
   },
 );
