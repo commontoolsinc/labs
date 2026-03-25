@@ -5,6 +5,11 @@
 **Effective date:** March 17, 2026\
 **Scope:** Compile-time behavior implemented in `packages/ts-transformers/src`
 and exercised by current tests/fixtures.
+**Related:**
+
+- `docs/specs/ts-transformer/ts_transformers_target_pattern_language_spec.md`
+- `docs/specs/ts-transformer/ts_transformers_lowering_contract.md`
+- `docs/specs/ts-transformer/ts_transformers_goals.md`
 
 ## 1. Scope And Source Of Truth
 
@@ -53,12 +58,14 @@ Transformers always run in this order:
 2. `EmptyArrayOfValidationTransformer`
 3. `OpaqueGetValidationTransformer`
 4. `PatternContextValidationTransformer`
-5. `OpaqueRefJSXTransformer`
+5. `JsxExpressionSiteRouterTransformer`
 6. `ComputedTransformer`
 7. `ClosureTransformer`
-8. `CapabilityLoweringTransformer`
-9. `SchemaInjectionTransformer`
-10. `SchemaGeneratorTransformer`
+8. `PatternOwnedExpressionSiteLoweringTransformer`
+9. `HelperOwnedExpressionSiteLoweringTransformer`
+10. `CapabilityLoweringTransformer`
+11. `SchemaInjectionTransformer`
+12. `SchemaGeneratorTransformer`
 
 The order is behaviorally significant.
 
@@ -71,7 +78,7 @@ The order is behaviorally significant.
 
 Current mode-sensitive behavior:
 
-- `OpaqueRefJSXTransformer` in `error` mode reports diagnostics instead of
+- `JsxExpressionSiteRouterTransformer` in `error` mode reports diagnostics instead of
   rewriting JSX expressions that would require opaque-ref rewrites in
   non-compute contexts.
 - Other transformers currently do not branch on mode.
@@ -322,9 +329,9 @@ Diagnostics:
   - message instructs adding an explicit Output type parameter:
     `pattern<Input, Output>(...)`
 
-## 7. OpaqueRef JSX Rewriting
+## 7. JSX Expression Site Routing And Early Rewriting
 
-`OpaqueRefJSXTransformer` runs only when helper import is present.
+`JsxExpressionSiteRouterTransformer` runs only when helper import is present.
 
 ### 7.1 Top-level behavior
 
