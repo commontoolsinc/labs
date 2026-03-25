@@ -289,6 +289,40 @@ export default pattern<State>((state) => {
 });
 `;
 
+const GOOGLE_SCOPE_CHECKBOX_SOURCE = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+type SelectedScopes = {
+  gmail: boolean;
+  calendar: boolean;
+};
+
+const SCOPE_DESCRIPTIONS = {
+  gmail: "Gmail",
+  calendar: "Calendar",
+} as const;
+
+interface Input {
+  selectedScopes: SelectedScopes;
+}
+
+export default pattern<Input>(({ selectedScopes }) => {
+  return {
+    [UI]: (
+      <div>
+        {Object.entries(SCOPE_DESCRIPTIONS).map(([key, description]) => (
+          <label>
+            <ct-checkbox $checked={selectedScopes[key as keyof SelectedScopes]}>
+              {description}
+            </ct-checkbox>
+          </label>
+        ))}
+      </div>
+    ),
+  };
+});
+`;
+
 describe("OpaqueRef map callbacks", () => {
   it("transforms wish<Default<Array<T>, []>>().result.map() to mapWithPattern", async () => {
     const output = await transformSource(WISH_DEFAULT_ARRAY_SOURCE, {
@@ -390,6 +424,35 @@ describe("OpaqueRef map callbacks", () => {
     assert(
       !normalized.includes("{ n: n }"),
       "parking-style join branches should not capture nested plain-array callback locals",
+    );
+  });
+
+  it("rewrites dynamic checkbox bindings inside plain array callbacks without claiming the callback root", async () => {
+    const output = await transformSource(
+      GOOGLE_SCOPE_CHECKBOX_SOURCE,
+      {
+        types: { "commontools.d.ts": commontools },
+      },
+    );
+    const normalized = output.replace(/\s+/g, " ");
+
+    assertStringIncludes(
+      normalized,
+      "Object.entries(SCOPE_DESCRIPTIONS).map(([key, description]) => (",
+    );
+    assertStringIncludes(
+      normalized,
+      "selectedScopes: selectedScopes, key: key",
+    );
+    assertStringIncludes(
+      normalized,
+      "({ selectedScopes, key }) => selectedScopes[key as keyof SelectedScopes]",
+    );
+    assert(
+      !normalized.includes(
+        "({ selectedScopes, key, description }) => Object.entries(SCOPE_DESCRIPTIONS).map(",
+      ),
+      "plain array callback roots should stay plain .map() calls while the dynamic checkbox binding is derived",
     );
   });
 

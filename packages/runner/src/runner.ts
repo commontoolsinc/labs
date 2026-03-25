@@ -151,7 +151,19 @@ export class Runner {
       // have happened if the write succeeded and was immediately overwritten.
       return this.runtime.editWithRetry((tx) => {
         this.setupInternal(tx, patternOrModule, argument, resultCell);
-      }).then(() => resultCell);
+      }).then(({ error }) => {
+        if (error) {
+          if (error.name === "StorageTransactionAborted") {
+            throw error.reason instanceof Error
+              ? error.reason
+              : new Error(error.message);
+          }
+
+          throw new Error(error.message);
+        }
+
+        return resultCell;
+      });
     }
   }
 

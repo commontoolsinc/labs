@@ -899,7 +899,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: local helper calls stay out of the shared free-function slice",
+  "Expression site policy: local helper calls stay out of the shared non-JSX free-function slice",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare function pattern<T>(fn: (state: any) => T): T;
@@ -926,6 +926,47 @@ Deno.test(
     );
 
     assertEquals(siteInfo.callRootKind, "other");
+  },
+);
+
+Deno.test(
+  "Expression site policy: JSX local helper call roots with reactive args defer to the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      function previous(value: number) {
+        return value - 1;
+      }
+
+      const view = pattern((state: any) => <div>{previous(state.value)}</div>);
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "previous",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    const siteInfo = getExpressionSitePolicyInfo(
+      call,
+      "jsx-expression",
+      context,
+      analyze,
+    );
+
+    assertEquals(siteInfo.callRootKind, "other");
+    assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
+      route: "shared-post-closure",
+    });
   },
 );
 

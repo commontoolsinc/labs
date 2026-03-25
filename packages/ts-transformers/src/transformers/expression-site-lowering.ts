@@ -263,6 +263,25 @@ function isSharedPostClosureCallRoot(
       "free-function";
 }
 
+function isSharedJsxLocalHelperCallRoot(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  if (!ts.isCallExpression(expression)) {
+    return false;
+  }
+
+  const callee = expression.expression;
+  if (
+    !ts.isIdentifier(callee) || !isLocalValueReference(callee, context.checker)
+  ) {
+    return false;
+  }
+
+  return analyze(expression).containsOpaqueRef;
+}
+
 function isSharedJsxArrayMethodResultSinkCallRoot(
   expression: ts.Expression,
   context: TransformationContext,
@@ -548,6 +567,43 @@ function isArrayMethodOwnedExpressionSite(
   return callKind?.kind === "array-method";
 }
 
+function isPlainArrayCallbackExpressionSite(
+  expression: ts.Expression,
+  analyze: AnalyzeFn,
+  context: TransformationContext,
+): boolean {
+  const callbackContext = findEnclosingCallbackContext(expression);
+  if (!callbackContext) {
+    return false;
+  }
+
+  if (context.isArrayMethodCallback(callbackContext.callback)) {
+    return false;
+  }
+
+  const callKind = detectCallKind(callbackContext.call, context.checker);
+  if (callKind?.kind !== "array-method") {
+    return false;
+  }
+
+  const callExpression = callbackContext.call.expression;
+  if (!ts.isPropertyAccessExpression(callExpression)) {
+    return false;
+  }
+
+  const receiverAnalysis = analyze(callExpression.expression);
+  return !receiverAnalysis.containsOpaqueRef;
+}
+
+function isOwnedDynamicElementAccessInPlainArrayCallbackRoot(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  return isOwnedDynamicElementAccessRoot(expression, context, analyze) &&
+    isPlainArrayCallbackExpressionSite(expression, analyze, context);
+}
+
 const HELPER_BOUNDARY_KINDS = new Set<ExpressionSiteHelperBoundaryKind>([
   "ifElse",
   "when",
@@ -749,6 +805,19 @@ export function classifyJsxExpressionSiteRoute(
   }
 
   if (siteInfo.arrayMethodOwned) {
+    if (
+      isOwnedDynamicElementAccessInPlainArrayCallbackRoot(
+        expression,
+        context,
+        analyze,
+      )
+    ) {
+      return {
+        route: "owned-pre-closure",
+        owner: "dynamic-element-access-root",
+      };
+    }
+
     return {
       route: "skip",
       reason: "array-method-owned",
@@ -809,6 +878,10 @@ export function classifyJsxExpressionSiteRoute(
   }
 
   if (siteInfo.callRootKind === "free-function") {
+    return { route: "shared-post-closure" };
+  }
+
+  if (isSharedJsxLocalHelperCallRoot(expression, context, analyze)) {
     return { route: "shared-post-closure" };
   }
 
@@ -888,7 +961,15 @@ function canRewriteExpressionSite(
   }
 
   if (containerKind === "jsx-expression" && siteInfo.arrayMethodOwned) {
-    return false;
+    if (
+      !isOwnedDynamicElementAccessInPlainArrayCallbackRoot(
+        expression,
+        context,
+        analyze,
+      )
+    ) {
+      return false;
+    }
   }
 
   if (
