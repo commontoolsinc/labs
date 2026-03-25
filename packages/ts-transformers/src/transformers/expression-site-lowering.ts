@@ -447,6 +447,24 @@ function isSharedPreClosureAtomicControlFlowExpression(
   return false;
 }
 
+function isSharedPreClosureDeferredArrayMethodControlFlowExpression(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  const current = getControlFlowRewriteExpression(expression);
+  if (!current || !ts.isConditionalExpression(current)) {
+    return false;
+  }
+
+  return isOwnedDeferredJsxArrayMethodRoot(
+    current.whenTrue,
+    context,
+    analyze,
+  ) ||
+    isOwnedDeferredJsxArrayMethodRoot(current.whenFalse, context, analyze);
+}
+
 function requiresLegacyJsxControlFlowHandling(
   expression: ts.Expression,
   context: TransformationContext,
@@ -853,7 +871,14 @@ export function classifyJsxExpressionSiteRoute(
   }
 
   if (siteInfo.controlFlowRewriteRoot) {
-    if (isSharedPreClosureAtomicControlFlowExpression(expression)) {
+    if (
+      isSharedPreClosureAtomicControlFlowExpression(expression) ||
+      isSharedPreClosureDeferredArrayMethodControlFlowExpression(
+        expression,
+        context,
+        analyze,
+      )
+    ) {
       return { route: "shared-pre-closure" };
     }
 

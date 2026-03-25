@@ -1547,6 +1547,47 @@ Deno.test(
 );
 
 Deno.test(
+  "Expression site policy: ternary branches with direct deferred JSX array-method roots use the shared pre-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+          p: any;
+        }
+      }
+
+      type Cell<T> = T & { get(): T };
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+      declare function computed<T>(fn: () => T): T;
+
+      interface Item {
+        name: string;
+      }
+
+      const view = pattern(({ items }: { items: Cell<Item[]> }) => {
+        const hasItems = computed(() => items.get().length > 0);
+        return <div>{
+          hasItems
+            ? items.map((item) => <span>{item.name}</span>)
+            : <p>No items</p>
+        }</div>;
+      });
+    `);
+
+    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyJsxExpressionSiteRoute(conditional, context, analyze),
+      { route: "shared-pre-closure" },
+    );
+  },
+);
+
+Deno.test(
   "Expression site policy: array-method-owned JSX wrapper roots with reactive array-method subexpressions stay out of the shared JSX routes",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
