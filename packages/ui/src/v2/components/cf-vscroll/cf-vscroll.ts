@@ -253,7 +253,7 @@ export class CFVScroll extends BaseElement {
 
   private handleScroll = () => {
     this.updateScrollState();
-    this.emit("ct-scroll", {
+    this.emit("cf-scroll", {
       scrollTop: (this.scrollContainer as HTMLElement)?.scrollTop || 0,
       scrollHeight: (this.scrollContainer as HTMLElement)?.scrollHeight || 0,
       clientHeight: (this.scrollContainer as HTMLElement)?.clientHeight || 0,

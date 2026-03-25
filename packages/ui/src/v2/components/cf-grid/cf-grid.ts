@@ -6,9 +6,9 @@ import { BaseElement } from "../../core/base-element.ts";
 // matching the prior phase-1 token migration pattern.
 
 /**
- * CTGrid - CSS Grid layout component
+ * CFGrid - CSS Grid layout component
  *
- * @element ct-grid
+ * @element cf-grid
  *
  * @attr {string} columns - Number of columns (1-12) or custom template
  * @attr {string} rows - Number of rows or custom template
@@ -24,13 +24,13 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot - Content to be laid out in a grid
  *
  * @example
- * <ct-grid columns="3" gap="4">
+ * <cf-grid columns="3" gap="4">
  *   <div>Item 1</div>
  *   <div>Item 2</div>
  *   <div>Item 3</div>
- * </ct-grid>
+ * </cf-grid>
  */
-export class CTGrid extends BaseElement {
+export class CFGrid extends BaseElement {
   static override styles = css`
     :host {
       display: block;
@@ -411,4 +411,4 @@ export class CTGrid extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-grid", CTGrid);
+globalThis.customElements.define("cf-grid", CFGrid);

@@ -25,10 +25,10 @@ export default pattern<GridStoryInput, GridStoryOutput>(() => {
   };
 
   return {
-    [NAME]: "ct-grid Story",
+    [NAME]: "cf-grid Story",
     [UI]: (
       <div style={{ padding: "1rem" }}>
-        <ct-grid columns={columns} gap={gap}>
+        <cf-grid columns={columns} gap={gap}>
           <div style={cellStyle}>1</div>
           <div style={cellStyle}>2</div>
           <div style={cellStyle}>3</div>
@@ -38,7 +38,7 @@ export default pattern<GridStoryInput, GridStoryOutput>(() => {
           <div style={cellStyle}>7</div>
           <div style={cellStyle}>8</div>
           <div style={cellStyle}>9</div>
-        </ct-grid>
+        </cf-grid>
       </div>
     ),
     controls: (

@@ -1,5 +1,5 @@
 /**
- * Styles for ct-aspect-ratio component
+ * Styles for cf-aspect-ratio component
  */
 
 export const aspectRatioStyles = `

@@ -68,7 +68,7 @@ const SuggestionHistory = pattern<Input, Output>(() => {
     [NAME]: "Suggestion History",
     [UI]: (
       <cf-screen>
-        <ct-grid columns="3" gap="4" padding="4">
+        <cf-grid columns="3" gap="4" padding="4">
           {allEntries.map((entry: SuggestionHistoryEntry) => (
             <div
               style={{
@@ -110,7 +110,7 @@ const SuggestionHistory = pattern<Input, Output>(() => {
               </div>
             </div>
           ))}
-        </ct-grid>
+        </cf-grid>
       </cf-screen>
     ),
     entries: allEntries,

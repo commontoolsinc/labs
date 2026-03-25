@@ -1,5 +1,5 @@
 /**
- * Styles for ct-scroll-area component
+ * Styles for cf-scroll-area component
  */
 
 export const scrollAreaStyles = `

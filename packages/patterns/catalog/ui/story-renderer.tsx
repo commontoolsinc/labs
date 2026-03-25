@@ -19,7 +19,7 @@ import HStackStory from "../stories/cf-hstack-story.tsx";
 import VGroupStory from "../stories/cf-vgroup-story.tsx";
 import HGroupStory from "../stories/cf-hgroup-story.tsx";
 import VScrollStory from "../stories/cf-vscroll-story.tsx";
-import HScrollStory from "../stories/ct-hscroll-story.tsx";
+import HScrollStory from "../stories/cf-hscroll-story.tsx";
 import TextareaStory from "../stories/cf-textarea-story.tsx";
 import MessageInputStory from "../stories/cf-message-input-story.tsx";
 import ToolbarStory from "../stories/cf-toolbar-story.tsx";
@@ -47,7 +47,7 @@ import TableStory from "../stories/ct-table-story.tsx";
 import KbdStory from "../stories/cf-kbd-story.tsx";
 import CopyButtonStory from "../stories/cf-copy-button-story.tsx";
 import TagsStory from "../stories/cf-tags-story.tsx";
-import GridStory from "../stories/ct-grid-story.tsx";
+import GridStory from "../stories/cf-grid-story.tsx";
 
 interface StoryRendererInput {
   selected: string;

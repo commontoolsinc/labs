@@ -25,7 +25,7 @@ export default pattern<Input>(({ pieces, [SELF]: self }) => {
   return {
     [NAME]: "Grid View",
     [UI]: (
-      <ct-grid columns="3" gap="4" padding="4">
+      <cf-grid columns="3" gap="4" padding="4">
         {filtered.map((piece: Piece) => (
           <div
             style={{
@@ -59,7 +59,7 @@ export default pattern<Input>(({ pieces, [SELF]: self }) => {
             </div>
           </div>
         ))}
-      </ct-grid>
+      </cf-grid>
     ),
   };
 });

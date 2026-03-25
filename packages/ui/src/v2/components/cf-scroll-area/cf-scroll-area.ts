@@ -1,7 +1,7 @@
 /**
  * @fileoverview UI Scroll Area Component - Custom scrollable area with styled scrollbars
  *
- * @module ct-scroll-area
+ * @module cf-scroll-area
  * @description
  * A scrollable container component that provides custom-styled scrollbars for better
  * visual consistency across browsers and platforms. Supports vertical, horizontal,
@@ -9,9 +9,9 @@
  *
  * @example
  * ```html
- * <ct-scroll-area style="height: 200px" orientation="vertical">
+ * <cf-scroll-area style="height: 200px" orientation="vertical">
  *   <div>Long content that needs scrolling...</div>
- * </ct-scroll-area>
+ * </cf-scroll-area>
  * ```
  */
 
@@ -22,9 +22,9 @@ import { scrollAreaStyles } from "./styles.ts";
 export type ScrollOrientation = "vertical" | "horizontal" | "both";
 
 /**
- * CTScrollArea provides a customizable scrollable container with styled scrollbars.
+ * CFScrollArea provides a customizable scrollable container with styled scrollbars.
  *
- * @tag ct-scroll-area
+ * @tag cf-scroll-area
  * @extends BaseElement
  *
  * @property {ScrollOrientation} orientation - Scroll direction ("vertical" | "horizontal" | "both")
@@ -43,7 +43,7 @@ export type ScrollOrientation = "vertical" | "horizontal" | "both";
  *
  * @note Scrollbars appear on hover and during scrolling with smooth fade animations
  */
-export class CTScrollArea extends BaseElement {
+export class CFScrollArea extends BaseElement {
   static override styles = unsafeCSS(scrollAreaStyles);
 
   static override properties = {
@@ -497,4 +497,4 @@ export class CTScrollArea extends BaseElement {
   };
 }
 
-globalThis.customElements.define("ct-scroll-area", CTScrollArea);
+globalThis.customElements.define("cf-scroll-area", CFScrollArea);

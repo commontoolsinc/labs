@@ -15,7 +15,7 @@ import HStackStory from "./cf-hstack-story.tsx";
 import VGroupStory from "./cf-vgroup-story.tsx";
 import HGroupStory from "./cf-hgroup-story.tsx";
 import VScrollStory from "./cf-vscroll-story.tsx";
-import HScrollStory from "./ct-hscroll-story.tsx";
+import HScrollStory from "./cf-hscroll-story.tsx";
 import TextareaStory from "./cf-textarea-story.tsx";
 import MessageInputStory from "./cf-message-input-story.tsx";
 import ToolbarStory from "./cf-toolbar-story.tsx";

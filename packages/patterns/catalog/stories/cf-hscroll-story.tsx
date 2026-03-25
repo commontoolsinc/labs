@@ -16,7 +16,7 @@ export default pattern<HScrollStoryInput, HScrollStoryOutput>(() => {
   const fadeEdges = Writable.of(false);
 
   return {
-    [NAME]: "ct-hscroll Story",
+    [NAME]: "cf-hscroll Story",
     [UI]: (
       <div
         style={{
@@ -37,7 +37,7 @@ export default pattern<HScrollStoryInput, HScrollStoryOutput>(() => {
           >
             Horizontal Scrollable Area
           </div>
-          <ct-hscroll
+          <cf-hscroll
             show-scrollbar={showScrollbar}
             fade-edges={fadeEdges}
             style="border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px;"
@@ -68,7 +68,7 @@ export default pattern<HScrollStoryInput, HScrollStoryOutput>(() => {
                 <span>Card 8</span>
               </cf-card>
             </cf-hstack>
-          </ct-hscroll>
+          </cf-hscroll>
         </div>
 
         <div>
@@ -82,7 +82,7 @@ export default pattern<HScrollStoryInput, HScrollStoryOutput>(() => {
           >
             Image Gallery Style
           </div>
-          <ct-hscroll
+          <cf-hscroll
             fade-edges
             style="border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px;"
           >
@@ -106,7 +106,7 @@ export default pattern<HScrollStoryInput, HScrollStoryOutput>(() => {
                 🍂
               </div>
             </cf-hstack>
-          </ct-hscroll>
+          </cf-hscroll>
         </div>
       </div>
     ),

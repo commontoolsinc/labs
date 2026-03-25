@@ -4,20 +4,20 @@ import { BaseElement } from "../../core/base-element.ts";
 import { aspectRatioStyles } from "./styles.ts";
 
 /**
- * CTAspectRatio - Maintains a specific aspect ratio for its content
+ * CFAspectRatio - Maintains a specific aspect ratio for its content
  *
- * @element ct-aspect-ratio
+ * @element cf-aspect-ratio
  *
  * @attr {string} ratio - Aspect ratio as a fraction (e.g., "16/9", "1/1", "4/3"). Default: "16/9"
  *
  * @slot - Default slot for content that will maintain the aspect ratio
  *
  * @example
- * <ct-aspect-ratio ratio="16/9">
+ * <cf-aspect-ratio ratio="16/9">
  *   <div style="background: gray">Video placeholder</div>
- * </ct-aspect-ratio>
+ * </cf-aspect-ratio>
  */
-export class CTAspectRatio extends BaseElement {
+export class CFAspectRatio extends BaseElement {
   static override styles = unsafeCSS(aspectRatioStyles);
 
   static override properties = {
@@ -73,4 +73,4 @@ export class CTAspectRatio extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-aspect-ratio", CTAspectRatio);
+globalThis.customElements.define("cf-aspect-ratio", CFAspectRatio);

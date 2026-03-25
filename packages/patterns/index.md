@@ -1234,7 +1234,7 @@ cf-link-preview), and remove bookmarks. Designed to feed into the summary
 system.
 
 **Keywords:** bookmarks, links, collection, urls, grid, preview, search,
-cf-link-preview, ct-grid
+cf-link-preview, cf-grid
 
 ### Input Schema
 

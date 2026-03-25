@@ -2968,10 +2968,10 @@ interface CFSeparatorElement extends CTHTMLElement {}
 interface CFTileElement extends CTHTMLElement {}
 
 // Layout components
-interface CTGridElement extends CTHTMLElement {}
+interface CFGridElement extends CTHTMLElement {}
 interface CFHGroupElement extends CTHTMLElement {}
 interface CFVGroupElement extends CTHTMLElement {}
-interface CTAspectRatioElement extends CTHTMLElement {}
+interface CFAspectRatioElement extends CTHTMLElement {}
 
 // Resizable components
 interface CTResizablePanelElement extends CTHTMLElement {}
@@ -2979,7 +2979,8 @@ interface CTResizablePanelGroupElement extends CTHTMLElement {}
 interface CTResizableHandleElement extends CTHTMLElement {}
 
 // Other components
-interface CTScrollAreaElement extends CTHTMLElement {}
+interface CFHScrollElement extends CTHTMLElement {}
+interface CFScrollAreaElement extends CTHTMLElement {}
 interface CFToolCallElement extends CTHTMLElement {}
 
 interface CTDraggableAttributes<T> extends CTHTMLAttributes<T> {
@@ -3283,6 +3284,14 @@ interface CFScrollAttributes<T> extends CTHTMLAttributes<T> {
   "showScrollbar"?: boolean;
   "fadeEdges"?: boolean;
   "snapToBottom"?: boolean;
+  "oncf-scroll"?: EventHandler<{
+    scrollTop?: number;
+    scrollHeight?: number;
+    clientHeight?: number;
+    scrollLeft?: number;
+    scrollWidth?: number;
+    clientWidth?: number;
+  }>;
 }
 
 interface CTOutlinerAttributes<T> extends CTHTMLAttributes<T> {
@@ -4039,7 +4048,7 @@ interface CFTileAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 // Layout component attributes
-interface CTGridAttributes<T> extends CTHTMLAttributes<T> {
+interface CFGridAttributes<T> extends CTHTMLAttributes<T> {
   "columns"?: string | CellLike<string>;
   "rows"?: string | CellLike<string>;
   "gap"?: string | CellLike<string>;
@@ -4090,7 +4099,7 @@ interface CFVGroupAttributes<T> extends CTHTMLAttributes<T> {
     | CellLike<"start" | "center" | "end" | "between" | "around" | "evenly">;
 }
 
-interface CTAspectRatioAttributes<T> extends CTHTMLAttributes<T> {
+interface CFAspectRatioAttributes<T> extends CTHTMLAttributes<T> {
   "ratio"?: string | CellLike<string>;
 }
 
@@ -4111,7 +4120,7 @@ interface CTResizableHandleAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 // Other component attributes
-interface CTScrollAreaAttributes<T> extends CTHTMLAttributes<T> {
+interface CFScrollAreaAttributes<T> extends CTHTMLAttributes<T> {
   "orientation"?:
     | "vertical"
     | "horizontal"
@@ -4812,9 +4821,9 @@ declare global {
         CFScrollAttributes<CFVScrollElement>,
         CFVScrollElement
       >;
-      "ct-hscroll": CTDOM.DetailedHTMLProps<
-        CFScrollAttributes<CFVScrollElement>,
-        CFVScrollElement
+      "cf-hscroll": CTDOM.DetailedHTMLProps<
+        CFScrollAttributes<CFHScrollElement>,
+        CFHScrollElement
       >;
       "ct-text": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CTTextElement>,
@@ -5014,9 +5023,9 @@ declare global {
       >;
 
       // Layout components
-      "ct-grid": CTDOM.DetailedHTMLProps<
-        CTGridAttributes<CTGridElement>,
-        CTGridElement
+      "cf-grid": CTDOM.DetailedHTMLProps<
+        CFGridAttributes<CFGridElement>,
+        CFGridElement
       >;
       "cf-hgroup": CTDOM.DetailedHTMLProps<
         CFHGroupAttributes<CFHGroupElement>,
@@ -5026,9 +5035,9 @@ declare global {
         CFVGroupAttributes<CFVGroupElement>,
         CFVGroupElement
       >;
-      "ct-aspect-ratio": CTDOM.DetailedHTMLProps<
-        CTAspectRatioAttributes<CTAspectRatioElement>,
-        CTAspectRatioElement
+      "cf-aspect-ratio": CTDOM.DetailedHTMLProps<
+        CFAspectRatioAttributes<CFAspectRatioElement>,
+        CFAspectRatioElement
       >;
 
       // Resizable components
@@ -5046,9 +5055,9 @@ declare global {
       >;
 
       // Other components
-      "ct-scroll-area": CTDOM.DetailedHTMLProps<
-        CTScrollAreaAttributes<CTScrollAreaElement>,
-        CTScrollAreaElement
+      "cf-scroll-area": CTDOM.DetailedHTMLProps<
+        CFScrollAreaAttributes<CFScrollAreaElement>,
+        CFScrollAreaElement
       >;
       "cf-tool-call": CTDOM.DetailedHTMLProps<
         CFToolCallAttributes<CFToolCallElement>,

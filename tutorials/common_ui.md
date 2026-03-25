@@ -249,9 +249,9 @@ Will attempt to lay out the children provided as best it can. Provides two slots
 </cf-screen>
 ```
 
-## ct-grid (stale)
+## cf-grid (stale)
 
-`ct-grid` has not been used in production and likely doesn't work, but the intention is to wrap the [CSS Grid API](https://grid.malven.co/) and blend in ideas from [Swift UI Grid](https://developer.apple.com/documentation/swiftui/grid).
+`cf-grid` has not been used in production and likely doesn't work, but the intention is to wrap the [CSS Grid API](https://grid.malven.co/) and blend in ideas from [Swift UI Grid](https://developer.apple.com/documentation/swiftui/grid).
 
 ## ct-spacer (missing)
 
@@ -283,9 +283,9 @@ You can mix-and-match the above components to achieve practically any (standard)
 
         <cf-screen>
             <cf-vstack>
-                <ct-grid rows="3" cols="4" gap="2">
+                <cf-grid rows="3" cols="4" gap="2">
                     ...
-                </ct-grid>
+                </cf-grid>
             </cf-vstack>
         </cf-screen>
 
@@ -351,5 +351,5 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Unused/Unproven Components
 
-- stale: `ct-aspect-ratio`, `ct-draggable`, `cf-form`, `ct-grid`, `cf-hgroup`, `ct-input-otp`, `cf-message-input`, `cf-progress`, `cf-radio`, `cf-radio-group`, `cf-slider`, `cf-switch`, `cf-tile`, `cf-toggle`, `cf-toggle-group`, `cf-vgroup`
-- superfluous: `ct-resizeable-handle`, `ct-resizable-panel`, `ct-resizeable-panel-group`, `ct-scroll-area`, `cf-tabs`/`cf-tab-list`/`cf-tab-panel`
+- stale: `cf-aspect-ratio`, `ct-draggable`, `cf-form`, `cf-grid`, `cf-hgroup`, `ct-input-otp`, `cf-message-input`, `cf-progress`, `cf-radio`, `cf-radio-group`, `cf-slider`, `cf-switch`, `cf-tile`, `cf-toggle`, `cf-toggle-group`, `cf-vgroup`
+- superfluous: `ct-resizeable-handle`, `ct-resizable-panel`, `ct-resizeable-panel-group`, `cf-scroll-area`, `cf-tabs`/`cf-tab-list`/`cf-tab-panel`

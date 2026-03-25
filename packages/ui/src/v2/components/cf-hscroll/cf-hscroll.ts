@@ -3,9 +3,9 @@ import { classMap } from "lit/directives/class-map.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * CTHScroll - Horizontal scroll container
+ * CFHScroll - Horizontal scroll container
  *
- * @element ct-hscroll
+ * @element cf-hscroll
  *
  * @attr {boolean} show-scrollbar - Always show scrollbar
  * @attr {boolean} fade-edges - Show fade effect at edges
@@ -14,15 +14,15 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot - Content to be scrolled horizontally
  *
  * @example
- * <ct-hscroll>
+ * <cf-hscroll>
  *   <cf-hstack gap="4">
  *     <cf-card>Card 1</cf-card>
  *     <cf-card>Card 2</cf-card>
  *     <cf-card>Card 3</cf-card>
  *   </cf-hstack>
- * </ct-hscroll>
+ * </cf-hscroll>
  */
-export class CTHScroll extends BaseElement {
+export class CFHScroll extends BaseElement {
   static override properties = {
     showScrollbar: {
       type: Boolean,
@@ -42,10 +42,10 @@ export class CTHScroll extends BaseElement {
 
   static override styles = css`
     :host {
-      --ct-hscroll-color-surface: var(--ct-theme-color-surface, #f1f5f9);
-      --ct-hscroll-color-thumb: var(--ct-theme-color-text-muted, #64748b);
-      --ct-hscroll-color-thumb-hover: var(--ct-theme-color-text, #475569);
-      --ct-hscroll-color-background: var(--ct-theme-color-background, #ffffff);
+      --cf-hscroll-color-surface: var(--ct-theme-color-surface, #f1f5f9);
+      --cf-hscroll-color-thumb: var(--ct-theme-color-text-muted, #64748b);
+      --cf-hscroll-color-thumb-hover: var(--ct-theme-color-text, #475569);
+      --cf-hscroll-color-background: var(--ct-theme-color-background, #ffffff);
 
       display: block;
       position: relative;
@@ -83,17 +83,17 @@ export class CTHScroll extends BaseElement {
     }
 
     .scroll-container::-webkit-scrollbar-track {
-      background: var(--ct-hscroll-color-surface, #f1f5f9);
+      background: var(--cf-hscroll-color-surface, #f1f5f9);
       border-radius: 4px;
     }
 
     .scroll-container::-webkit-scrollbar-thumb {
-      background: var(--ct-hscroll-color-thumb, #64748b);
+      background: var(--cf-hscroll-color-thumb, #64748b);
       border-radius: 4px;
     }
 
     .scroll-container::-webkit-scrollbar-thumb:hover {
-      background: var(--ct-hscroll-color-thumb-hover, #475569);
+      background: var(--cf-hscroll-color-thumb-hover, #475569);
     }
 
     /* Padding utilities */
@@ -139,7 +139,7 @@ export class CTHScroll extends BaseElement {
       left: 0;
       background: linear-gradient(
         to right,
-        var(--ct-hscroll-color-background, white),
+        var(--cf-hscroll-color-background, white),
         transparent
       );
       opacity: 0;
@@ -149,7 +149,7 @@ export class CTHScroll extends BaseElement {
       right: 0;
       background: linear-gradient(
         to left,
-        var(--ct-hscroll-color-background, white),
+        var(--cf-hscroll-color-background, white),
         transparent
       );
       opacity: 0;
@@ -222,7 +222,7 @@ export class CTHScroll extends BaseElement {
 
   private handleScroll = () => {
     this.updateScrollState();
-    this.emit("ct-scroll", {
+    this.emit("cf-scroll", {
       scrollLeft: (this.scrollContainer as HTMLElement)?.scrollLeft || 0,
       scrollWidth: (this.scrollContainer as HTMLElement)?.scrollWidth || 0,
       clientWidth: (this.scrollContainer as HTMLElement)?.clientWidth || 0,
@@ -284,4 +284,4 @@ export class CTHScroll extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-hscroll", CTHScroll);
+globalThis.customElements.define("cf-hscroll", CFHScroll);

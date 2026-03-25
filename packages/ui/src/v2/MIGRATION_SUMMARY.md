@@ -6,12 +6,12 @@
 
 1. **cf-vgroup** - Vertical group with gap management
 2. **cf-hgroup** - Horizontal group with gap management
-3. **ct-hscroll** - Horizontal scroll container with fade edges
+3. **cf-hscroll** - Horizontal scroll container with fade edges
 4. **cf-vscroll** - Vertical scroll container with fade edges
 
 ### Form/Input Components (5)
 
-1. **ct-aspect-ratio** - Maintains aspect ratio for content
+1. **cf-aspect-ratio** - Maintains aspect ratio for content
 2. **cf-collapsible** - Expandable/collapsible content section
 3. **cf-progress** - Progress bar with determinate/indeterminate states
 4. **ct-input-otp** - One-time password input with individual digits
@@ -21,7 +21,7 @@
 
 1. **cf-toggle** - Toggle button with pressed state
 2. **cf-toggle-group** - Toggle group for single/multiple selection
-3. **ct-scroll-area** - Custom scrollable area with styled scrollbars
+3. **cf-scroll-area** - Custom scrollable area with styled scrollbars
 
 ## Migration Pattern Applied
 

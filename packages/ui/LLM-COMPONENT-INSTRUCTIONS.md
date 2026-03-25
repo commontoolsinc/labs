@@ -361,31 +361,31 @@ Default slot for cf-tab elements
 - `value` - string (required, matches tab value) **Slots**: Default slot for
   content
 
-### 25. ct-scroll-area
+### 25. cf-scroll-area
 
-**Purpose**: Custom scrollable area **Tag**: `<ct-scroll-area>` **Attributes**:
+**Purpose**: Custom scrollable area **Tag**: `<cf-scroll-area>` **Attributes**:
 
 - `orientation` - "vertical" | "horizontal" | "both" **Slots**: Default slot for
   scrollable content **Example**:
 
 ```html
-<ct-scroll-area style="height: 200px">
+<cf-scroll-area style="height: 200px">
   <div>Long content...</div>
-</ct-scroll-area>
+</cf-scroll-area>
 ```
 
-### 26. ct-aspect-ratio
+### 26. cf-aspect-ratio
 
-**Purpose**: Maintains aspect ratio of content **Tag**: `<ct-aspect-ratio>`
+**Purpose**: Maintains aspect ratio of content **Tag**: `<cf-aspect-ratio>`
 **Attributes**:
 
 - `ratio` - string (e.g., "16/9", "1/1", "4/3") **Slots**: Default slot for
   content **Example**:
 
 ```html
-<ct-aspect-ratio ratio="16/9">
+<cf-aspect-ratio ratio="16/9">
   <div style="background: gray">Video placeholder</div>
-</ct-aspect-ratio>
+</cf-aspect-ratio>
 ```
 
 ### 27. cf-form
@@ -492,14 +492,14 @@ Same as cf-hstack **Example**:
 **Purpose**: Vertical group with semantic spacing **Tag**: `<cf-vgroup>`
 **Attributes**: Same as cf-hgroup
 
-### 36. ct-hscroll
+### 36. cf-hscroll
 
-**Purpose**: Horizontal scroll container **Tag**: `<ct-hscroll>` **Attributes**:
+**Purpose**: Horizontal scroll container **Tag**: `<cf-hscroll>` **Attributes**:
 
 - `fade-edges` - boolean (gradient fade on edges)
 - `show-scrollbar` - boolean
 - `snap` - boolean (scroll snapping) **Events**:
-- `ct-scroll` - Fired on scroll with detail:
+- `cf-scroll` - Fired on scroll with detail:
   `{ scrollLeft, scrollWidth, clientWidth }` **Methods**:
 - `scrollToX(x, smooth)` - Scroll to position
 - `scrollByX(x, smooth)` - Scroll by amount
@@ -512,14 +512,14 @@ Same as cf-hstack **Example**:
 - `fade-edges` - boolean
 - `show-scrollbar` - boolean
 - `snap` - boolean **Events**:
-- `ct-scroll` - Fired on scroll with detail:
+- `cf-scroll` - Fired on scroll with detail:
   `{ scrollTop, scrollHeight, clientHeight }` **Methods**:
 - `scrollToY(y, smooth)` - Scroll to position
 - `scrollByY(y, smooth)` - Scroll by amount
 
-### 38. ct-grid
+### 38. cf-grid
 
-**Purpose**: CSS Grid container **Tag**: `<ct-grid>` **Attributes**:
+**Purpose**: CSS Grid container **Tag**: `<cf-grid>` **Attributes**:
 
 - `columns` - number | string (e.g., "3" or "repeat(auto-fit, minmax(200px,
   1fr))")
@@ -533,11 +533,11 @@ Same as cf-hstack **Example**:
 **Example**:
 
 ```html
-<ct-grid columns="3" gap="4">
+<cf-grid columns="3" gap="4">
   <div>Item 1</div>
   <div>Item 2</div>
   <div>Item 3</div>
-</ct-grid>
+</cf-grid>
 ```
 
 ### 39. ct-table
@@ -604,7 +604,7 @@ Same as cf-hstack **Example**:
 <cf-vstack gap="4" style="padding: 2rem">
   <cf-card>
     <h2 slot="header">Dashboard</h2>
-    <ct-grid slot="content" columns="3" gap="4">
+    <cf-grid slot="content" columns="3" gap="4">
       <cf-card>
         <cf-vstack slot="content" gap="2">
           <cf-badge variant="secondary">Active</cf-badge>
@@ -613,7 +613,7 @@ Same as cf-hstack **Example**:
         </cf-vstack>
       </cf-card>
       <!-- More stat cards... -->
-    </ct-grid>
+    </cf-grid>
   </cf-card>
 
   <cf-tabs default-value="overview">

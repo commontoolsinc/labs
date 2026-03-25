@@ -90,7 +90,7 @@ export const Bookmarks = pattern<BookmarksInput, BookmarksOutput>(
           />
 
           {/* Grid of link previews */}
-          <ct-grid columns="3" gap="4">
+          <cf-grid columns="3" gap="4">
             {filteredBookmarks.map((bookmark: Bookmark, index: number) => (
               <cf-vstack
                 gap="1"
@@ -126,7 +126,7 @@ export const Bookmarks = pattern<BookmarksInput, BookmarksOutput>(
                 </button>
               </cf-vstack>
             ))}
-          </ct-grid>
+          </cf-grid>
         </cf-vstack>
       ),
       bookmarks,

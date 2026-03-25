@@ -62,16 +62,16 @@ registerAllComponents();
 - **Forms**: `cf-button`, `cf-input`, `cf-textarea`, `cf-checkbox`, `cf-radio`,
   `cf-switch`, `cf-toggle`, `cf-slider`
 - **Layout**: `cf-card`, `cf-separator`, `cf-accordion`, `cf-collapsible`,
-  `cf-tabs`, `ct-scroll-area`
+  `cf-tabs`, `cf-scroll-area`
 - **Feedback**: `cf-alert`, `cf-badge`, `cf-progress`, `cf-skeleton`, `cf-label`
 - **Data**: `ct-table`, `cf-form`, `ct-input-otp`
-- **Display**: `ct-aspect-ratio`, `ct-resizable-panel-group`
+- **Display**: `cf-aspect-ratio`, `ct-resizable-panel-group`
 
 ### Layout Components (8)
 
 - **Flexbox**: `cf-hstack`, `cf-vstack`, `cf-hgroup`, `cf-vgroup`
-- **Scrolling**: `ct-hscroll`, `cf-vscroll`
-- **Grid**: `ct-grid`, `ct-table`
+- **Scrolling**: `cf-hscroll`, `cf-vscroll`
+- **Grid**: `cf-grid`, `ct-table`
 
 ## 🔒 Security Constraints
 
@@ -132,7 +132,7 @@ packages/ui/
 │   │   ├── components/      # common-* components
 │   │   └── index.ts
 │   └── v2/                  # Modern components
-│       ├── components/      # ct-* components
+│       ├── components/      # cf-* and remaining ct-* components
 │       ├── core/            # BaseElement class
 │       ├── styles/          # Shared styles
 │       ├── utils/           # Utilities
@@ -172,7 +172,7 @@ packages/ui/
 <cf-vstack gap="4">
   <cf-card>
     <h2 slot="header">Dashboard</h2>
-    <ct-grid slot="content" columns="3" gap="4">
+    <cf-grid slot="content" columns="3" gap="4">
       <cf-card>
         <cf-vstack slot="content" gap="2">
           <cf-badge variant="secondary">Active</cf-badge>
@@ -181,7 +181,7 @@ packages/ui/
         </cf-vstack>
       </cf-card>
       <!-- More cards... -->
-    </ct-grid>
+    </cf-grid>
   </cf-card>
 </cf-vstack>
 ```
