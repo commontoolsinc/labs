@@ -1,12 +1,12 @@
 import { isObject, isRecord, Mutable } from "@commontools/utils/types";
 import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import type { JSONSchemaMutable } from "@commontools/api";
 import {
   type Cell,
   createJsonSchema,
   isCell,
   isStream,
   type JSONSchema,
-  type JSONSchemaMutable,
   type MemorySpace,
   type PatternMeta,
   type Runtime,

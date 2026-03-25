@@ -1,9 +1,9 @@
 import { isRecord } from "@commontools/utils/types";
 import { type LegacyAlias } from "../sigil-types.ts";
+import type { JSONSchemaMutable } from "@commontools/api";
 import {
   isPattern,
   type JSONSchema,
-  type JSONSchemaMutable,
   type JSONSchemaTypes,
   type JSONValue,
   type Module,

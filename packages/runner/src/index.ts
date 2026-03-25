@@ -96,7 +96,6 @@ export {
   isStreamValue,
   type JSONObject,
   type JSONSchema,
-  type JSONSchemaMutable,
   type JSONValue,
   type Module,
   type ModuleFactory,
