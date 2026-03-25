@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import "../src/globals.ts";
 import { Identity } from "@commontools/identity";
-import { PiecesController } from "@commontools/piece/ops";
+import { PieceController, PiecesController } from "@commontools/piece/ops";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
@@ -14,8 +14,10 @@ describe("shell piece tests", () => {
   shell.bindLifecycle();
 
   let pieceId: string;
+  let piece: PieceController;
   let identity: Identity;
   let cc: PiecesController;
+  let pieceSinkCancel: (() => void) | undefined;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -36,13 +38,17 @@ describe("shell piece tests", () => {
       .resolve(
         new FileSystemProgramResolver(sourcePath),
       );
-    const piece = await cc.create(
+    piece = await cc.create(
       program,
     );
     pieceId = piece.id;
+
+    const resultCell = cc.manager().getResult(piece.getCell());
+    pieceSinkCancel = resultCell.sink(() => {});
   });
 
   afterAll(async () => {
+    pieceSinkCancel?.();
     if (cc) await cc.dispose();
   });
 
