@@ -57,7 +57,7 @@ export function endDrag(): void {
   const finalState = currentDrag;
 
   // Notify listeners that drag is ending (with isEnding flag)
-  // Drop zones use this to emit ct-drop if pointer is over them
+  // Drop zones use this to emit cf-drop if pointer is over them
   notifyListenersOfEnd(finalState);
 
   // Call cleanup function if provided

@@ -5,28 +5,28 @@ import { subscribeToDrag, subscribeToEndDrag } from "../../core/drag-state.ts";
 import type { DragState } from "../../core/drag-state.ts";
 
 /**
- * CTDropZone - Marks a region as droppable and emits events when valid drops occur
+ * CFDropZone - Marks a region as droppable and emits events when valid drops occur
  *
  * Purely behavioral component with no visual representation except CSS feedback
  * during drag-over. Subscribes to drag state and checks if pointer intersects
  * this element's bounding box.
  *
- * @element ct-drop-zone
+ * @element cf-drop-zone
  *
  * @property {string} accept - Optional filter by drag source type (comma-separated)
  *
- * @fires ct-drag-enter - When a valid drag enters the zone
- * @fires ct-drag-leave - When a drag leaves the zone
- * @fires ct-drop - When a valid drop occurs (drag ends while over this zone)
+ * @fires cf-drag-enter - When a valid drag enters the zone
+ * @fires cf-drag-leave - When a drag leaves the zone
+ * @fires cf-drop - When a valid drop occurs (drag ends while over this zone)
  *
  * @slot - Default slot for wrapped content
  *
  * @example
- * <ct-drop-zone accept="item" onct-drop=${handleDrop}>
+ * <cf-drop-zone accept="item" oncf-drop=${handleDrop}>
  *   <div>Drop items here</div>
- * </ct-drop-zone>
+ * </cf-drop-zone>
  */
-export class CTDropZone extends BaseElement {
+export class CFDropZone extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -149,12 +149,12 @@ export class CTDropZone extends BaseElement {
     this.toggleAttribute("drag-over", isOver);
 
     if (isOver && dragState) {
-      this.emit("ct-drag-enter", {
+      this.emit("cf-drag-enter", {
         sourceCell: dragState.cell,
         type: dragState.type,
       });
     } else {
-      this.emit("ct-drag-leave", {});
+      this.emit("cf-drag-leave", {});
     }
   }
 
@@ -168,13 +168,13 @@ export class CTDropZone extends BaseElement {
       this.toggleAttribute("drag-over", false);
 
       // Emit leave event before drop (dropping is a form of leaving)
-      this.emit("ct-drag-leave", {});
+      this.emit("cf-drag-leave", {});
 
       // Get drop zone bounding rect for position calculation in handler
       const dropZoneRect = this.getBoundingClientRect();
 
       // Emit drop event with pointer coordinates and drop zone rect
-      this.emit("ct-drop", {
+      this.emit("cf-drop", {
         sourceCell: dragState.cell,
         sourceCellRef: dragState.cell.ref(),
         type: dragState.type,
@@ -197,10 +197,10 @@ export class CTDropZone extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-drop-zone", CTDropZone);
+globalThis.customElements.define("cf-drop-zone", CFDropZone);
 
 declare global {
   interface HTMLElementTagNameMap {
-    "ct-drop-zone": CTDropZone;
+    "cf-drop-zone": CFDropZone;
   }
 }

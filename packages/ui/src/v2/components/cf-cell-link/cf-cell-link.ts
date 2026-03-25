@@ -233,7 +233,7 @@ export class CFCellLink extends BaseElement {
   private _onPointerDown(e: PointerEvent) {
     if (this.isStatic || !this._resolvedCell) return;
 
-    // Prevent parent ct-drag-source elements from also starting a drag
+    // Prevent parent cf-drag-source elements from also starting a drag
     e.stopPropagation();
 
     this._dragStartX = e.clientX;

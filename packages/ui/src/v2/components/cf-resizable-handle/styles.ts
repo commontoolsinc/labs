@@ -72,11 +72,11 @@ export const resizableHandleStyles = `
   }
 
   /* Adjust cursor based on parent panel group direction */
-  :host-context(ct-resizable-panel-group[direction="horizontal"]) {
+  :host-context(cf-resizable-panel-group[direction="horizontal"]) {
     cursor: col-resize;
   }
 
-  :host-context(ct-resizable-panel-group[direction="vertical"]) {
+  :host-context(cf-resizable-panel-group[direction="vertical"]) {
     cursor: row-resize;
   }
 

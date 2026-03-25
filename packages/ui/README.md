@@ -65,7 +65,7 @@ registerAllComponents();
   `cf-tabs`, `cf-scroll-area`
 - **Feedback**: `cf-alert`, `cf-badge`, `cf-progress`, `cf-skeleton`, `cf-label`
 - **Data**: `cf-table`, `cf-form`, `cf-input-otp`
-- **Display**: `cf-aspect-ratio`, `ct-resizable-panel-group`
+- **Display**: `cf-aspect-ratio`, `cf-resizable-panel-group`
 
 ### Layout Components (8)
 

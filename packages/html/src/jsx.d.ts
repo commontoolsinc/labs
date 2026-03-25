@@ -2899,8 +2899,8 @@ interface CFKbdElement extends CTHTMLElement {}
 interface CFKeybindElement extends CTHTMLElement {}
 interface CFRenderElement extends CTHTMLElement {}
 interface CFCellContextElement extends CTHTMLElement {}
-interface CTDragSourceElement extends CTHTMLElement {}
-interface CTDropZoneElement extends CTHTMLElement {}
+interface CFDragSourceElement extends CTHTMLElement {}
+interface CFDropZoneElement extends CTHTMLElement {}
 interface CFChatMessageElement extends CTHTMLElement {}
 interface CFMarkdownElement extends CTHTMLElement {}
 interface CFSvgElement extends CTHTMLElement {}
@@ -2919,7 +2919,7 @@ interface CFUpdaterElement extends CTHTMLElement {}
 interface CFGoogleOAuthElement extends CTHTMLElement {}
 interface CFOAuthElement extends CTHTMLElement {}
 interface CTCanvasElement extends CTHTMLElement {}
-interface CTDraggableElement extends CTHTMLElement {}
+interface CFDraggableElement extends CTHTMLElement {}
 interface CFPlaidLinkElement extends CTHTMLElement {}
 interface CFPieceElement extends CTHTMLElement {}
 interface CFIFrameElement extends CTHTMLElement {}
@@ -2974,16 +2974,16 @@ interface CFVGroupElement extends CTHTMLElement {}
 interface CFAspectRatioElement extends CTHTMLElement {}
 
 // Resizable components
-interface CTResizablePanelElement extends CTHTMLElement {}
-interface CTResizablePanelGroupElement extends CTHTMLElement {}
-interface CTResizableHandleElement extends CTHTMLElement {}
+interface CFResizablePanelElement extends CTHTMLElement {}
+interface CFResizablePanelGroupElement extends CTHTMLElement {}
+interface CFResizableHandleElement extends CTHTMLElement {}
 
 // Other components
 interface CFHScrollElement extends CTHTMLElement {}
 interface CFScrollAreaElement extends CTHTMLElement {}
 interface CFToolCallElement extends CTHTMLElement {}
 
-interface CTDraggableAttributes<T> extends CTHTMLAttributes<T> {
+interface CFDraggableAttributes<T> extends CTHTMLAttributes<T> {
   "key"?: number;
   "x"?: EventHandler<any>;
   "y"?: EventHandler<any>;
@@ -3482,19 +3482,19 @@ interface CFCellContextAttributes<T> extends CTHTMLAttributes<T> {
   "inline"?: boolean;
 }
 
-interface CTDragSourceAttributes<T> extends CTHTMLAttributes<T> {
+interface CFDragSourceAttributes<T> extends CTHTMLAttributes<T> {
   "$cell": CellLike<any>;
   "type"?: string;
   "disabled"?: boolean;
-  "onct-drag-start"?: EventHandler<{ cell: any }>;
-  "onct-drag-end"?: EventHandler<{ cell: any }>;
+  "oncf-drag-start"?: EventHandler<{ cell: any }>;
+  "oncf-drag-end"?: EventHandler<{ cell: any }>;
 }
 
-interface CTDropZoneAttributes<T> extends CTHTMLAttributes<T> {
+interface CFDropZoneAttributes<T> extends CTHTMLAttributes<T> {
   "accept"?: string;
-  "onct-drag-enter"?: EventHandler<{ sourceCell: any; type?: string }>;
-  "onct-drag-leave"?: EventHandler<{}>;
-  "onct-drop"?: EventHandler<
+  "oncf-drag-enter"?: EventHandler<{ sourceCell: any; type?: string }>;
+  "oncf-drag-leave"?: EventHandler<{}>;
+  "oncf-drop"?: EventHandler<
     {
       sourceCell: any;
       sourceCellRef?: { id: string; space: string; path: string[] };
@@ -4120,18 +4120,18 @@ interface CFAspectRatioAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 // Resizable component attributes
-interface CTResizablePanelAttributes<T> extends CTHTMLAttributes<T> {
+interface CFResizablePanelAttributes<T> extends CTHTMLAttributes<T> {
   "minSize"?: number | CellLike<number>;
   "defaultSize"?: number | CellLike<number>;
   "maxSize"?: number | CellLike<number>;
   "collapsible"?: boolean | CellLike<boolean>;
 }
 
-interface CTResizablePanelGroupAttributes<T> extends CTHTMLAttributes<T> {
+interface CFResizablePanelGroupAttributes<T> extends CTHTMLAttributes<T> {
   "direction"?: "horizontal" | "vertical" | CellLike<"horizontal" | "vertical">;
 }
 
-interface CTResizableHandleAttributes<T> extends CTHTMLAttributes<T> {
+interface CFResizableHandleAttributes<T> extends CTHTMLAttributes<T> {
   "withHandle"?: boolean | CellLike<boolean>;
 }
 
@@ -4825,13 +4825,13 @@ declare global {
         CFCellContextAttributes<CFCellContextElement>,
         CFCellContextElement
       >;
-      "ct-drag-source": CTDOM.DetailedHTMLProps<
-        CTDragSourceAttributes<CTDragSourceElement>,
-        CTDragSourceElement
+      "cf-drag-source": CTDOM.DetailedHTMLProps<
+        CFDragSourceAttributes<CFDragSourceElement>,
+        CFDragSourceElement
       >;
-      "ct-drop-zone": CTDOM.DetailedHTMLProps<
-        CTDropZoneAttributes<CTDropZoneElement>,
-        CTDropZoneElement
+      "cf-drop-zone": CTDOM.DetailedHTMLProps<
+        CFDropZoneAttributes<CFDropZoneElement>,
+        CFDropZoneElement
       >;
       "cf-vscroll": CTDOM.DetailedHTMLProps<
         CFScrollAttributes<CFVScrollElement>,
@@ -4877,9 +4877,9 @@ declare global {
         CTCanvasAttributes<CTCanvasElement>,
         CTCanvasElement
       >;
-      "ct-draggable": CTDOM.DetailedHTMLProps<
-        CTDraggableAttributes<CTDraggableElement>,
-        CTDraggableElement
+      "cf-draggable": CTDOM.DetailedHTMLProps<
+        CFDraggableAttributes<CFDraggableElement>,
+        CFDraggableElement
       >;
       "cf-alert": CTDOM.DetailedHTMLProps<
         CFAlertAttributes<CFAlertElement>,
@@ -5057,17 +5057,17 @@ declare global {
       >;
 
       // Resizable components
-      "ct-resizable-panel": CTDOM.DetailedHTMLProps<
-        CTResizablePanelAttributes<CTResizablePanelElement>,
-        CTResizablePanelElement
+      "cf-resizable-panel": CTDOM.DetailedHTMLProps<
+        CFResizablePanelAttributes<CFResizablePanelElement>,
+        CFResizablePanelElement
       >;
-      "ct-resizable-panel-group": CTDOM.DetailedHTMLProps<
-        CTResizablePanelGroupAttributes<CTResizablePanelGroupElement>,
-        CTResizablePanelGroupElement
+      "cf-resizable-panel-group": CTDOM.DetailedHTMLProps<
+        CFResizablePanelGroupAttributes<CFResizablePanelGroupElement>,
+        CFResizablePanelGroupElement
       >;
-      "ct-resizable-handle": CTDOM.DetailedHTMLProps<
-        CTResizableHandleAttributes<CTResizableHandleElement>,
-        CTResizableHandleElement
+      "cf-resizable-handle": CTDOM.DetailedHTMLProps<
+        CFResizableHandleAttributes<CFResizableHandleElement>,
+        CFResizableHandleElement
       >;
 
       // Other components

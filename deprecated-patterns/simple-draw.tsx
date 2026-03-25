@@ -159,7 +159,7 @@ export const UserSession = pattern<
             >
               {messages.map((m, index) => {
                 return (
-                  <ct-draggable
+                  <cf-draggable
                     key={index}
                     x={derive(m, (msg) => msg.x)}
                     y={derive(m, (msg) => msg.y)}
@@ -193,7 +193,7 @@ export const UserSession = pattern<
                         style="margin-top: 5px;"
                       />
                     </div>
-                  </ct-draggable>
+                  </cf-draggable>
                 );
               })}
             </ct-canvas>

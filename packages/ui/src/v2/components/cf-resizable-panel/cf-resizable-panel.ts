@@ -2,10 +2,10 @@ import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * @component ct-resizable-panel
+ * @component cf-resizable-panel
  * @description Individual resizable panel component that works within a resizable panel group
  *
- * @tag ct-resizable-panel
+ * @tag cf-resizable-panel
  *
  * @attribute {number} default-size - Default size of the panel as a percentage (0-100). Defaults to 50.
  * @attribute {number} min-size - Minimum size of the panel as a percentage (0-100). Defaults to 0.
@@ -19,44 +19,44 @@ import { BaseElement } from "../../core/base-element.ts";
  * @example
  * ```html
  * <!-- Basic resizable panels -->
- * <ct-resizable-panel-group direction="horizontal">
- *   <ct-resizable-panel default-size="30" min-size="20">
+ * <cf-resizable-panel-group direction="horizontal">
+ *   <cf-resizable-panel default-size="30" min-size="20">
  *     <div>Sidebar content</div>
- *   </ct-resizable-panel>
- *   <ct-resizable-handle></ct-resizable-handle>
- *   <ct-resizable-panel default-size="70">
+ *   </cf-resizable-panel>
+ *   <cf-resizable-handle></cf-resizable-handle>
+ *   <cf-resizable-panel default-size="70">
  *     <div>Main content</div>
- *   </ct-resizable-panel>
- * </ct-resizable-panel-group>
+ *   </cf-resizable-panel>
+ * </cf-resizable-panel-group>
  *
  * <!-- Collapsible panel -->
- * <ct-resizable-panel-group direction="vertical">
- *   <ct-resizable-panel default-size="50">
+ * <cf-resizable-panel-group direction="vertical">
+ *   <cf-resizable-panel default-size="50">
  *     <div>Top panel</div>
- *   </ct-resizable-panel>
- *   <ct-resizable-handle></ct-resizable-handle>
- *   <ct-resizable-panel default-size="50" collapsible>
+ *   </cf-resizable-panel>
+ *   <cf-resizable-handle></cf-resizable-handle>
+ *   <cf-resizable-panel default-size="50" collapsible>
  *     <div>Bottom panel (collapsible)</div>
- *   </ct-resizable-panel>
- * </ct-resizable-panel-group>
+ *   </cf-resizable-panel>
+ * </cf-resizable-panel-group>
  *
  * <!-- With size constraints -->
- * <ct-resizable-panel
+ * <cf-resizable-panel
  *   default-size="40"
  *   min-size="25"
  *   max-size="60"
  * >
  *   <div>Constrained panel</div>
- * </ct-resizable-panel>
+ * </cf-resizable-panel>
  * ```
  *
  * @note
- * - Must be used within a ct-resizable-panel-group
- * - Panels are separated by ct-resizable-handle components
+ * - Must be used within a cf-resizable-panel-group
+ * - Panels are separated by cf-resizable-handle components
  * - Size values are percentages of the total available space
  * - The component automatically validates that min <= default <= max
  */
-export class CTResizablePanel extends BaseElement {
+export class CFResizablePanel extends BaseElement {
   static override properties = {
     minSize: { type: Number, attribute: "min-size" },
     defaultSize: { type: Number, attribute: "default-size" },
@@ -147,4 +147,4 @@ export class CTResizablePanel extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-resizable-panel", CTResizablePanel);
+globalThis.customElements.define("cf-resizable-panel", CFResizablePanel);

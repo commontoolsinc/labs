@@ -11,28 +11,28 @@ import type { CellHandle } from "@commonfabric/runtime-client";
 import "../cf-cell-context/cf-cell-context.ts";
 
 /**
- * CTDragSource - Wraps draggable content and initiates drag operations
+ * CFDragSource - Wraps draggable content and initiates drag operations
  *
  * This component makes any content draggable and manages the drag lifecycle.
  * It automatically wraps content with cf-cell-context for debugging support.
  *
- * @element ct-drag-source
+ * @element cf-drag-source
  *
  * @property {CellHandle} cell - Required: the cell being dragged
  * @property {string} type - Optional: type identifier for filtering drop zones
  * @property {boolean} disabled - Disable dragging
  *
- * @fires ct-drag-start - Fired when drag starts with { cell: CellHandle }
- * @fires ct-drag-end - Fired when drag ends with { cell: CellHandle, dropped: boolean }
+ * @fires cf-drag-start - Fired when drag starts with { cell: CellHandle }
+ * @fires cf-drag-end - Fired when drag ends with { cell: CellHandle, dropped: boolean }
  *
  * @slot - Default slot for draggable content
  *
  * @example
- * <ct-drag-source .cell=${myCellHandle} type="item">
+ * <cf-drag-source .cell=${myCellHandle} type="item">
  *   <div>Drag me!</div>
- * </ct-drag-source>
+ * </cf-drag-source>
  */
-export class CTDragSource extends BaseElement {
+export class CFDragSource extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -215,7 +215,7 @@ export class CTDragSource extends BaseElement {
     });
 
     // Emit drag start event
-    this.emit("ct-drag-start", { cell });
+    this.emit("cf-drag-start", { cell });
   }
 
   private _endDrag() {
@@ -231,11 +231,11 @@ export class CTDragSource extends BaseElement {
     }
 
     // End drag in drag state (this will clean up preview)
-    // Drop zones handle their own detection and emit ct-drop events
+    // Drop zones handle their own detection and emit cf-drop events
     endDrag();
 
     // Emit drag end event
-    this.emit("ct-drag-end", { cell });
+    this.emit("cf-drag-end", { cell });
 
     this._preview = undefined;
   }
@@ -252,10 +252,10 @@ export class CTDragSource extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-drag-source", CTDragSource);
+globalThis.customElements.define("cf-drag-source", CFDragSource);
 
 declare global {
   interface HTMLElementTagNameMap {
-    "ct-drag-source": CTDragSource;
+    "cf-drag-source": CFDragSource;
   }
 }

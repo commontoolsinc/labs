@@ -29,37 +29,37 @@ export const resizablePanelGroupStyles = `
     pointer-events: none;
   }
 
-  :host(.resizing) ::slotted(ct-resizable-handle) {
+  :host(.resizing) ::slotted(cf-resizable-handle) {
     pointer-events: auto;
   }
 
-  ::slotted(ct-resizable-panel) {
+  ::slotted(cf-resizable-panel) {
     overflow: hidden;
     position: relative;
   }
 
-  ::slotted(ct-resizable-handle) {
+  ::slotted(cf-resizable-handle) {
     flex-shrink: 0;
     z-index: 10;
   }
 
   /* Horizontal layout */
-  .panel-group.direction-horizontal ::slotted(ct-resizable-panel) {
+  .panel-group.direction-horizontal ::slotted(cf-resizable-panel) {
     height: 100%;
   }
 
-  .panel-group.direction-horizontal ::slotted(ct-resizable-handle) {
+  .panel-group.direction-horizontal ::slotted(cf-resizable-handle) {
     width: 6px;
     height: 100%;
     cursor: col-resize;
   }
 
   /* Vertical layout */
-  .panel-group.direction-vertical ::slotted(ct-resizable-panel) {
+  .panel-group.direction-vertical ::slotted(cf-resizable-panel) {
     width: 100%;
   }
 
-  .panel-group.direction-vertical ::slotted(ct-resizable-handle) {
+  .panel-group.direction-vertical ::slotted(cf-resizable-handle) {
     width: 100%;
     height: 6px;
     cursor: row-resize;

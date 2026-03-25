@@ -86,7 +86,7 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
               }}
             >
               {items.map((item) => (
-                <ct-drag-source $cell={item} type="item">
+                <cf-drag-source $cell={item} type="item">
                   <div
                     style={{
                       padding: "0.75rem",
@@ -98,15 +98,15 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
                   >
                     {item.title}
                   </div>
-                </ct-drag-source>
+                </cf-drag-source>
               ))}
               <cf-cell-link $cell={counter} />
             </div>
           </div>
 
-          <ct-drop-zone
+          <cf-drop-zone
             accept="item,cell-link"
-            onct-drop={dropItem({ droppedItems })}
+            oncf-drop={dropItem({ droppedItems })}
           >
             <div
               style={{
@@ -153,7 +153,7 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
                 </div>,
               )}
             </div>
-          </ct-drop-zone>
+          </cf-drop-zone>
         </div>
       ),
       availableItems,

@@ -2,14 +2,14 @@ import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
- * @component ct-resizable-handle
+ * @component cf-resizable-handle
  * @description Drag handle component for resizing panels within a resizable panel group
  *
- * @tag ct-resizable-handle
+ * @tag cf-resizable-handle
  *
  * @attribute {boolean} with-handle - Whether to show the visual grip indicator. Defaults to true.
  *
- * @event {CustomEvent} ct-handle-adjust - Fired when handle is adjusted via keyboard
+ * @event {CustomEvent} cf-handle-adjust - Fired when handle is adjusted via keyboard
  * @event-detail {Object} detail - Event detail object
  * @event-detail {number} detail.delta - The adjustment amount (-100 to 100)
  *
@@ -19,18 +19,18 @@ import { BaseElement } from "../../core/base-element.ts";
  * @example
  * ```html
  * <!-- Basic resizable panels with handles -->
- * <ct-resizable-panel-group direction="horizontal">
- *   <ct-resizable-panel default-size="50">
+ * <cf-resizable-panel-group direction="horizontal">
+ *   <cf-resizable-panel default-size="50">
  *     <div>Panel 1</div>
- *   </ct-resizable-panel>
- *   <ct-resizable-handle></ct-resizable-handle>
- *   <ct-resizable-panel default-size="50">
+ *   </cf-resizable-panel>
+ *   <cf-resizable-handle></cf-resizable-handle>
+ *   <cf-resizable-panel default-size="50">
  *     <div>Panel 2</div>
- *   </ct-resizable-panel>
- * </ct-resizable-panel-group>
+ *   </cf-resizable-panel>
+ * </cf-resizable-panel-group>
  *
  * <!-- Handle without visual indicator -->
- * <ct-resizable-handle with-handle="false"></ct-resizable-handle>
+ * <cf-resizable-handle with-handle="false"></cf-resizable-handle>
  * ```
  *
  * @accessibility
@@ -46,9 +46,9 @@ import { BaseElement } from "../../core/base-element.ts";
  * - Home - Set to minimum size
  * - End - Set to maximum size
  *
- * @note Must be used between ct-resizable-panel elements within a ct-resizable-panel-group
+ * @note Must be used between cf-resizable-panel elements within a cf-resizable-panel-group
  */
-export class CTResizableHandle extends BaseElement {
+export class CFResizableHandle extends BaseElement {
   static override properties = {
     withHandle: { type: Boolean, attribute: "with-handle" },
   };
@@ -194,7 +194,7 @@ export class CTResizableHandle extends BaseElement {
   }
 
   private handleKeyDown = (e: KeyboardEvent): void => {
-    const panelGroup = this.closest("ct-resizable-panel-group");
+    const panelGroup = this.closest("cf-resizable-panel-group");
     if (!panelGroup) return;
 
     const direction = panelGroup.getAttribute("direction") || "horizontal";
@@ -245,8 +245,8 @@ export class CTResizableHandle extends BaseElement {
 
   private adjustSize(delta: number): void {
     // Emit a custom event that the panel group can listen to
-    this.emit("ct-handle-adjust", { delta });
+    this.emit("cf-handle-adjust", { delta });
   }
 }
 
-globalThis.customElements.define("ct-resizable-handle", CTResizableHandle);
+globalThis.customElements.define("cf-resizable-handle", CFResizableHandle);

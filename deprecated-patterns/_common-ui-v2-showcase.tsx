@@ -501,7 +501,7 @@ export default pattern(
 
             <div>
               <cf-label for="otp-input">Enter verification code</cf-label>
-              <ct-input-otp id="otp-input" length={6}></ct-input-otp>
+              <cf-input-otp id="otp-input" length={6}></cf-input-otp>
             </div>
           </section>
 
@@ -513,19 +513,19 @@ export default pattern(
             </p>
 
             <div style="max-width: 400px; margin-bottom: 1rem;">
-              <ct-aspect-ratio ratio="16/9">
+              <cf-aspect-ratio ratio="16/9">
                 <div style="width: 100%; height: 100%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; border-radius: 4px;">
                   16:9 Aspect Ratio
                 </div>
-              </ct-aspect-ratio>
+              </cf-aspect-ratio>
             </div>
 
             <div style="max-width: 400px;">
-              <ct-aspect-ratio ratio="1/1">
+              <cf-aspect-ratio ratio="1/1">
                 <div style="width: 100%; height: 100%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; border-radius: 4px;">
                   1:1 Square
                 </div>
-              </ct-aspect-ratio>
+              </cf-aspect-ratio>
             </div>
           </section>
 
@@ -536,7 +536,7 @@ export default pattern(
               Custom scrollable area
             </p>
 
-            <ct-scroll-area style="height: 200px; border: 1px solid #e2e8f0; border-radius: 4px;">
+            <cf-scroll-area style="height: 200px; border: 1px solid #e2e8f0; border-radius: 4px;">
               <div style="padding: 1rem;">
                 <h3>Scrollable Content</h3>
                 <p>This is a custom scroll area component.</p>
@@ -555,7 +555,7 @@ export default pattern(
                 </p>
                 <p>Esse cillum dolore eu fugiat nulla pariatur.</p>
               </div>
-            </ct-scroll-area>
+            </cf-scroll-area>
           </section>
 
           {/* Resizable Panels Component */}
@@ -566,21 +566,21 @@ export default pattern(
             </p>
 
             <div style="height: 400px; border: 1px solid #e2e8f0; border-radius: 4px; overflow: hidden;">
-              <ct-resizable-panel-group direction="horizontal">
-                <ct-resizable-panel default-size="30" min-size="20">
+              <cf-resizable-panel-group direction="horizontal">
+                <cf-resizable-panel default-size="30" min-size="20">
                   <div style="padding: 1rem; height: 100%; display: flex; align-items: center; justify-content: center; background: #f1f5f9;">
                     Left Panel (30%)
                   </div>
-                </ct-resizable-panel>
+                </cf-resizable-panel>
 
-                <ct-resizable-handle></ct-resizable-handle>
+                <cf-resizable-handle></cf-resizable-handle>
 
-                <ct-resizable-panel default-size="70" min-size="20">
+                <cf-resizable-panel default-size="70" min-size="20">
                   <div style="padding: 1rem; height: 100%; display: flex; align-items: center; justify-content: center; background: #f1f5f9;">
                     Right Panel (70%)
                   </div>
-                </ct-resizable-panel>
-              </ct-resizable-panel-group>
+                </cf-resizable-panel>
+              </cf-resizable-panel-group>
             </div>
           </section>
         </div>

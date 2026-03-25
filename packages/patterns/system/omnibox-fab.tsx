@@ -245,10 +245,10 @@ Be matter-of-fact. Prefer action to explanation.`;
       [NAME]: "OmniboxFAB",
       messages: omnibot.messages,
       [UI]: (
-        <ct-drop-zone
+        <cf-drop-zone
           accept="cell-link"
           style="position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); z-index: 997;"
-          onct-drop={handleDropToPin({
+          oncf-drop={handleDropToPin({
             pinToChat: omnibot.pinToChat,
             fabExpanded,
           })}
@@ -350,7 +350,7 @@ Be matter-of-fact. Prefer action to explanation.`;
               null,
             )}
           </cf-fab>
-        </ct-drop-zone>
+        </cf-drop-zone>
       ),
       fabExpanded,
       pinToChat: handleExternalPin({

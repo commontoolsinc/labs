@@ -1027,9 +1027,9 @@ const WeeklyCalendar = pattern<Input, Output>(
                         </div>
 
                         {/* Time Grid with Drop Zone */}
-                        <ct-drop-zone
+                        <cf-drop-zone
                           accept="event,event-resize"
-                          onct-drop={handleDayDrop}
+                          oncf-drop={handleDayDrop}
                           style={{ position: "relative", flex: "1" }}
                         >
                           {HOURS.map((hour, hourIdx) => (
@@ -1046,7 +1046,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                               onClick={hourClickActions[hourIdx]}
                             />
                           ))}
-                        </ct-drop-zone>
+                        </cf-drop-zone>
                       </div>
                     );
                   })}
@@ -1174,7 +1174,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                         </div>
 
                         {/* Drag Source for Moving */}
-                        <ct-drag-source
+                        <cf-drag-source
                           $cell={evt}
                           type="event"
                           onClick={openEvent}
@@ -1189,10 +1189,10 @@ const WeeklyCalendar = pattern<Input, Output>(
                           }}
                         >
                           {dragAreaContent}
-                        </ct-drag-source>
+                        </cf-drag-source>
 
                         {/* Resize Drag Source */}
-                        <ct-drag-source
+                        <cf-drag-source
                           $cell={evt}
                           type="event-resize"
                           style={{
@@ -1209,7 +1209,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                           }}
                         >
                           {resizeHandleLines}
-                        </ct-drag-source>
+                        </cf-drag-source>
                       </div>
                     );
                   })}

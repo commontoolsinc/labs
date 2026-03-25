@@ -1010,9 +1010,9 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               <cf-card>
                 <cf-vstack gap="4">
                   {/* Header - also a drop zone for receiving items from "Other notebooks" */}
-                  <ct-drop-zone
+                  <cf-drop-zone
                     accept="sibling"
-                    onct-drop={handleDropOntoCurrentNotebook({
+                    oncf-drop={handleDropOntoCurrentNotebook({
                       notes,
                       notebooks,
                       selectedNoteIndices,
@@ -1098,7 +1098,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                         </cf-button>
                       </div>
                     </div>
-                  </ct-drop-zone>
+                  </cf-drop-zone>
 
                   {/* Empty state - shown when notebook has no notes, opens new note modal */}
                   <div
@@ -1175,16 +1175,16 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                             </td>
                             <td style={{ verticalAlign: "middle" }}>
                               {/* Drop zone + drag source on the item itself */}
-                              <ct-drop-zone
+                              <cf-drop-zone
                                 accept="note,notebook"
-                                onct-drop={handleDropOntoNotebook({
+                                oncf-drop={handleDropOntoNotebook({
                                   targetNotebook: self,
                                   currentNotes: notes,
                                   selectedNoteIndices,
                                   notebooks,
                                 })}
                               >
-                                <ct-drag-source $cell={note} type="note">
+                                <cf-drag-source $cell={note} type="note">
                                   <div
                                     style={{ cursor: "pointer" }}
                                     onClick={navigateToChild({
@@ -1201,8 +1201,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                                       />
                                     </cf-cell-context>
                                   </div>
-                                </ct-drag-source>
-                              </ct-drop-zone>
+                                </cf-drag-source>
+                              </cf-drop-zone>
                             </td>
                             <td
                               style={{

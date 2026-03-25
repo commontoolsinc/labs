@@ -4,23 +4,23 @@ import { BaseElement } from "../../core/base-element.ts";
 /**
  * @fileoverview UI Resizable Panel Group Component - Container for resizable panels
  *
- * @module ct-resizable-panel-group
+ * @module cf-resizable-panel-group
  * @description
  * A container component that manages multiple resizable panels with draggable handles between them.
- * Works in conjunction with ct-resizable-panel and ct-resizable-handle components to create
+ * Works in conjunction with cf-resizable-panel and cf-resizable-handle components to create
  * flexible layouts where users can adjust panel sizes by dragging dividers.
  *
  * @example
  * ```html
- * <ct-resizable-panel-group direction="horizontal">
- *   <ct-resizable-panel default-size="30" min-size="20">
+ * <cf-resizable-panel-group direction="horizontal">
+ *   <cf-resizable-panel default-size="30" min-size="20">
  *     Left panel content
- *   </ct-resizable-panel>
- *   <ct-resizable-handle></ct-resizable-handle>
- *   <ct-resizable-panel default-size="70">
+ *   </cf-resizable-panel>
+ *   <cf-resizable-handle></cf-resizable-handle>
+ *   <cf-resizable-panel default-size="70">
  *     Right panel content
- *   </ct-resizable-panel>
- * </ct-resizable-panel-group>
+ *   </cf-resizable-panel>
+ * </cf-resizable-panel-group>
  * ```
  */
 
@@ -35,24 +35,24 @@ interface PanelInfo {
 }
 
 /**
- * CTResizablePanelGroup manages a collection of resizable panels separated by draggable handles.
+ * CFResizablePanelGroup manages a collection of resizable panels separated by draggable handles.
  *
- * @tag ct-resizable-panel-group
+ * @tag cf-resizable-panel-group
  * @extends BaseElement
  *
  * @property {PanelGroupDirection} direction - Layout direction ("horizontal" | "vertical")
  *
  * @attribute {string} direction - Sets the layout direction for panels
  *
- * @event {CustomEvent} ct-resize - Fired when panels are resized
+ * @event {CustomEvent} cf-resize - Fired when panels are resized
  *   @detail {Object} detail - Event detail object
  *   @detail {Array<{element: HTMLElement, size: number}>} detail.panels - Array of panel elements with their current sizes
  *
- * @slot default - Container for ct-resizable-panel and ct-resizable-handle elements
+ * @slot default - Container for cf-resizable-panel and cf-resizable-handle elements
  *
  * @csspart panel-group - The main container element
  */
-export class CTResizablePanelGroup extends BaseElement {
+export class CFResizablePanelGroup extends BaseElement {
   static override properties = {
     direction: { type: String },
   };
@@ -89,37 +89,37 @@ export class CTResizablePanelGroup extends BaseElement {
       pointer-events: none;
     }
 
-    :host(.resizing) ::slotted(ct-resizable-handle) {
+    :host(.resizing) ::slotted(cf-resizable-handle) {
       pointer-events: auto;
     }
 
-    ::slotted(ct-resizable-panel) {
+    ::slotted(cf-resizable-panel) {
       overflow: hidden;
       position: relative;
     }
 
-    ::slotted(ct-resizable-handle) {
+    ::slotted(cf-resizable-handle) {
       flex-shrink: 0;
       z-index: 10;
     }
 
     /* Horizontal layout */
-    .panel-group.direction-horizontal ::slotted(ct-resizable-panel) {
+    .panel-group.direction-horizontal ::slotted(cf-resizable-panel) {
       height: 100%;
     }
 
-    .panel-group.direction-horizontal ::slotted(ct-resizable-handle) {
+    .panel-group.direction-horizontal ::slotted(cf-resizable-handle) {
       width: 6px;
       height: 100%;
       cursor: col-resize;
     }
 
     /* Vertical layout */
-    .panel-group.direction-vertical ::slotted(ct-resizable-panel) {
+    .panel-group.direction-vertical ::slotted(cf-resizable-panel) {
       width: 100%;
     }
 
-    .panel-group.direction-vertical ::slotted(ct-resizable-handle) {
+    .panel-group.direction-vertical ::slotted(cf-resizable-handle) {
       width: 100%;
       height: 6px;
       cursor: row-resize;
@@ -160,7 +160,7 @@ export class CTResizablePanelGroup extends BaseElement {
       handle.removeEventListener("mousedown", this.handleMouseDown);
       handle.removeEventListener("touchstart", this.handleTouchStart);
       handle.removeEventListener(
-        "ct-handle-adjust",
+        "cf-handle-adjust",
         this.handleAdjust as EventListener,
       );
     });
@@ -181,8 +181,8 @@ export class CTResizablePanelGroup extends BaseElement {
     this._panels.clear();
     this._handles = [];
 
-    const panels = Array.from(this.querySelectorAll("ct-resizable-panel"));
-    const handles = Array.from(this.querySelectorAll("ct-resizable-handle"));
+    const panels = Array.from(this.querySelectorAll("cf-resizable-panel"));
+    const handles = Array.from(this.querySelectorAll("cf-resizable-handle"));
 
     // Store panel information
     panels.forEach((panel) => {
@@ -217,7 +217,7 @@ export class CTResizablePanelGroup extends BaseElement {
         this.handleTouchStart,
       );
       handle.addEventListener(
-        "ct-handle-adjust",
+        "cf-handle-adjust",
         this.handleAdjust as EventListener,
       );
       // Set orientation on handle
@@ -324,7 +324,7 @@ export class CTResizablePanelGroup extends BaseElement {
         this.applyPanelSizes();
 
         // Emit resize event
-        this.emit("ct-resize", {
+        this.emit("cf-resize", {
           panels: panels.map((p) => ({
             element: p.element,
             size: p.currentSize,
@@ -378,7 +378,7 @@ export class CTResizablePanelGroup extends BaseElement {
         handle.setAttribute("aria-valuenow", percentage.toString());
 
         // Emit resize event
-        this.emit("ct-resize", {
+        this.emit("cf-resize", {
           panels: panels.map((p) => ({
             element: p.element,
             size: p.currentSize,
@@ -399,6 +399,6 @@ export class CTResizablePanelGroup extends BaseElement {
 }
 
 globalThis.customElements.define(
-  "ct-resizable-panel-group",
-  CTResizablePanelGroup,
+  "cf-resizable-panel-group",
+  CFResizablePanelGroup,
 );

@@ -180,15 +180,15 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
             minHeight: "200px",
           }}
         >
-          <ct-drop-zone
+          <cf-drop-zone
             accept="card,cell-link"
-            onct-drop={moveToPile1}
+            oncf-drop={moveToPile1}
           >
             <div style={pileStyle}>
               <div style={pileLabelStyle}>{pile1Label}</div>
               <div style={cardListStyle}>
                 {pile1.map((card) => (
-                  <ct-drag-source $cell={card} type="card">
+                  <cf-drag-source $cell={card} type="card">
                     <div style={cardStyle}>
                       <div
                         style={{
@@ -227,7 +227,7 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
                         </span>
                       </div>
                     </div>
-                  </ct-drag-source>
+                  </cf-drag-source>
                 ))}
                 {computed(() =>
                   pile1.get().length === 0
@@ -236,17 +236,17 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
                 )}
               </div>
             </div>
-          </ct-drop-zone>
+          </cf-drop-zone>
 
-          <ct-drop-zone
+          <cf-drop-zone
             accept="card,cell-link"
-            onct-drop={moveToPile2}
+            oncf-drop={moveToPile2}
           >
             <div style={pileStyle}>
               <div style={pileLabelStyle}>{pile2Label}</div>
               <div style={cardListStyle}>
                 {pile2.map((card) => (
-                  <ct-drag-source $cell={card} type="card">
+                  <cf-drag-source $cell={card} type="card">
                     <div style={cardStyle}>
                       <div
                         style={{
@@ -285,7 +285,7 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
                         </span>
                       </div>
                     </div>
-                  </ct-drag-source>
+                  </cf-drag-source>
                 ))}
                 {computed(() =>
                   pile2.get().length === 0
@@ -294,7 +294,7 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
                 )}
               </div>
             </div>
-          </ct-drop-zone>
+          </cf-drop-zone>
         </div>
       </cf-screen>
     ),

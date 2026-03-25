@@ -274,9 +274,9 @@ const DoItemCard = pattern<
     [NAME]: computed(() => item.title),
     summary: computed(() => item.title),
     [UI]: (
-      <ct-drop-zone
+      <cf-drop-zone
         accept="cell-link"
-        onct-drop={addAttachment({ item, items })}
+        oncf-drop={addAttachment({ item, items })}
       >
         <cf-card style={`margin-left: ${(item.indent ?? 0) * 24}px;`}>
           <cf-hstack gap="2" align="center">
@@ -330,7 +330,7 @@ const DoItemCard = pattern<
             />
           </details>
         </cf-card>
-      </ct-drop-zone>
+      </cf-drop-zone>
     ),
   };
 });

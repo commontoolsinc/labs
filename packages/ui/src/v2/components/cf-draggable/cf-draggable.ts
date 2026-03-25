@@ -2,8 +2,8 @@ import { css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 
-@customElement("ct-draggable")
-export class CtDraggable extends BaseElement {
+@customElement("cf-draggable")
+export class CFDraggable extends BaseElement {
   @property({ type: Number })
   x = 0;
 
@@ -62,8 +62,8 @@ export class CtDraggable extends BaseElement {
     const target = event.target as HTMLElement;
     if (
       target.tagName === "INPUT" || target.tagName === "BUTTON" ||
-      target.tagName === "CT-INPUT" || target.tagName === "CT-TEXTAREA" ||
-      target.tagName === "CT-SELECT" || target.tagName === "CT-BUTTON" ||
+      target.tagName === "CF-INPUT" || target.tagName === "CF-TEXTAREA" ||
+      target.tagName === "CF-SELECT" || target.tagName === "CF-BUTTON" ||
       target.closest("common-send-message")
     ) {
       return;
@@ -131,6 +131,6 @@ export class CtDraggable extends BaseElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "ct-draggable": CtDraggable;
+    "cf-draggable": CFDraggable;
   }
 }

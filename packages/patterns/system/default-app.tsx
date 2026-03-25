@@ -313,11 +313,11 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                     });
 
                     const link = (
-                      <ct-drag-source $cell={piece} type="note">
+                      <cf-drag-source $cell={piece} type="note">
                         <cf-cell-context $cell={piece}>
                           <cf-cell-link $cell={piece} />
                         </cf-cell-context>
-                      </ct-drag-source>
+                      </cf-drag-source>
                     );
 
                     return (
@@ -325,14 +325,14 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                         <td>
                           {ifElse(
                             isNotebook,
-                            <ct-drop-zone
+                            <cf-drop-zone
                               accept="note"
-                              onct-drop={dropOntoNotebook({
+                              oncf-drop={dropOntoNotebook({
                                 notebook: piece as any,
                               })}
                             >
                               {link}
-                            </ct-drop-zone>,
+                            </cf-drop-zone>,
                             link,
                           )}
                         </td>

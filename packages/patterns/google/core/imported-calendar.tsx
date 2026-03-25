@@ -1000,9 +1000,9 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       </div>
 
                       {/* Time Grid with Drop Zone */}
-                      <ct-drop-zone
+                      <cf-drop-zone
                         accept="local-event,local-event-resize"
-                        onct-drop={handleDayDrop}
+                        oncf-drop={handleDayDrop}
                         style={{ position: "relative", flex: "1" }}
                       >
                         {HOURS.map((hour, hourIdx) => (
@@ -1019,7 +1019,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                             onClick={hourClickActions[hourIdx]}
                           />
                         ))}
-                      </ct-drop-zone>
+                      </cf-drop-zone>
                     </div>
                   );
                 })}
@@ -1329,7 +1329,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       </div>
 
                       {/* Drag Source for Moving */}
-                      <ct-drag-source
+                      <cf-drag-source
                         $cell={evt}
                         type="local-event"
                         onClick={openEvent}
@@ -1344,10 +1344,10 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                         }}
                       >
                         {dragAreaContent}
-                      </ct-drag-source>
+                      </cf-drag-source>
 
                       {/* Resize Drag Source */}
-                      <ct-drag-source
+                      <cf-drag-source
                         $cell={evt}
                         type="local-event-resize"
                         style={{
@@ -1364,7 +1364,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                         }}
                       >
                         {resizeHandleLines}
-                      </ct-drag-source>
+                      </cf-drag-source>
                     </div>
                   );
                 })}

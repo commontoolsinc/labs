@@ -424,18 +424,18 @@ Default slot for cf-tab elements
 <cf-input-otp length="6" name="otp"></cf-input-otp>
 ```
 
-### 29. ct-resizable-panel-group
+### 29. cf-resizable-panel-group
 
 **Purpose**: Container for resizable panels **Tag**:
-`<ct-resizable-panel-group>` **Attributes**:
+`<cf-resizable-panel-group>` **Attributes**:
 
 - `direction` - "horizontal" | "vertical" **Events**:
 - `ct-layout` - Fired on resize with detail: `{ sizes }` **Slots**: Default slot
   for panels and handles
 
-### 30. ct-resizable-panel
+### 30. cf-resizable-panel
 
-**Purpose**: Individual resizable panel **Tag**: `<ct-resizable-panel>`
+**Purpose**: Individual resizable panel **Tag**: `<cf-resizable-panel>`
 **Attributes**:
 
 - `default-size` - number (percentage)
@@ -443,9 +443,9 @@ Default slot for cf-tab elements
 - `max-size` - number (percentage)
 - `collapsible` - boolean **Slots**: Default slot for content
 
-### 31. ct-resizable-handle
+### 31. cf-resizable-handle
 
-**Purpose**: Drag handle between panels **Tag**: `<ct-resizable-handle>`
+**Purpose**: Drag handle between panels **Tag**: `<cf-resizable-handle>`
 **Attributes**: None
 
 ## Layout Components
