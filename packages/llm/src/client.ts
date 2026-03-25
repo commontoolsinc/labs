@@ -545,7 +545,7 @@ export class LLMClient {
       throw new Error("No response body");
     }
 
-    const id = response.headers.get("x-ct-llm-trace-id") as string;
+    const id = response.headers.get("x-cf-llm-trace-id") as string;
 
     // the server might return cached data instead of a stream
     if (response.headers.get("content-type") === "application/json") {

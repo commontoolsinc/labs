@@ -211,7 +211,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
       await persistCache(result.messages);
       const response = c.json(result.message);
       if (result.spanId) {
-        response.headers.set("x-ct-llm-trace-id", result.spanId);
+        response.headers.set("x-cf-llm-trace-id", result.spanId);
       }
       return response;
     }
@@ -222,7 +222,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
         "Transfer-Encoding": "chunked",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
-        ...(result.spanId ? { "x-ct-llm-trace-id": result.spanId } : {}),
+        ...(result.spanId ? { "x-cf-llm-trace-id": result.spanId } : {}),
       },
     });
   } catch (error) {

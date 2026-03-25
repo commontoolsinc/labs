@@ -11,7 +11,7 @@ router.use(
     origin: "*",
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"],
-    exposeHeaders: ["Content-Length", "X-Disk-Cache", "x-ct-llm-trace-id"],
+    exposeHeaders: ["Content-Length", "X-Disk-Cache", "x-cf-llm-trace-id"],
     maxAge: 3600,
     credentials: true,
   }),

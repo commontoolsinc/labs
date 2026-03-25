@@ -106,9 +106,9 @@ describe("Stack trace source mapping", () => {
       "Error: compile-time boom",
       "    at fail (helper.ts:2:8)",
       "    at Object.eval (main.tsx:2:19)",
-      "    at <CT_INTERNAL>",
-      "    at <CT_INTERNAL>",
-      "    at <CT_INTERNAL>",
+      "    at <CF_INTERNAL>",
+      "    at <CF_INTERNAL>",
+      "    at <CF_INTERNAL>",
     ]);
   });
 

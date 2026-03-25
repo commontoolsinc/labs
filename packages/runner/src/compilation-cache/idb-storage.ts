@@ -3,7 +3,7 @@ import type {
   CompilationCacheStorage,
 } from "./storage.ts";
 
-const DB_NAME = "ct-compilation-cache";
+const DB_NAME = "cf-compilation-cache";
 const DB_VERSION = 1;
 const STORE_NAME = "compiled";
 
