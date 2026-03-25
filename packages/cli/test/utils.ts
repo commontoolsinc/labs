@@ -9,13 +9,17 @@ export function bytesToLines(stream: Uint8Array): string[] {
 
 export function checkStderr(stderr: string[]) {
   try {
-    expect(stderr.length).toBe(2);
+    expect([2, 4]).toContain(stderr.length);
   } catch (e) {
     console.error(stderr);
     throw e;
   }
   expect(stderr[0]).toMatch(/deno run /);
   expect(stderr[1]).toMatch(/experimentalDecorators compiler option/);
+  if (stderr.length === 4) {
+    expect(stderr[2]).toBe("SES Removing unpermitted intrinsics");
+    expect(stderr[3]).toBe("  Removing intrinsics.%SharedSymbol%.metadata");
+  }
 }
 
 async function runCliTask(
