@@ -549,6 +549,21 @@ export class CellBridge {
     const subs = await this.subscribePiece(piece, pieceIno, name, spaceName);
     state.pieceSubs.set(name, subs);
 
+    // Eagerly populate entities/<id>/ for stable ID-based access (CT-1391)
+    const entityIno = await this.loadPieceTree(
+      piece,
+      state.entitiesIno,
+      piece.id,
+      spaceName,
+    );
+    const entitySubs = await this.subscribePiece(
+      piece,
+      entityIno,
+      `entity:${piece.id}`,
+      spaceName,
+    );
+    state.pieceSubs.set(`entity:${piece.id}`, entitySubs);
+
     return name;
   }
 
@@ -565,6 +580,18 @@ export class CellBridge {
 
     // Remove tree nodes
     this.tree.removeChild(state.piecesIno, name);
+
+    // Clean up entity tree
+    const pieceId = state.pieceMap.get(name);
+    if (pieceId) {
+      this.tree.removeChild(state.entitiesIno, pieceId);
+      const entitySubsKey = `entity:${pieceId}`;
+      const entitySubs = state.pieceSubs.get(entitySubsKey);
+      if (entitySubs) {
+        for (const cancel of entitySubs) cancel();
+        state.pieceSubs.delete(entitySubsKey);
+      }
+    }
 
     state.pieceMap.delete(name);
     state.pieceControllers.delete(name);
@@ -654,6 +681,10 @@ export class CellBridge {
       // Also invalidate "pieces" entry on the space dir so readdir refreshes
       this.onInvalidate(state.spaceIno, ["pieces"]);
     }
+    // Invalidate newly added entity dirs
+    if (this.onInvalidate && toAdd.length > 0) {
+      this.onInvalidate(state.entitiesIno, toAdd.map((p) => p.id));
+    }
     // Invalidate cached inode data for pieces dir (forces readdir refresh)
     if (this.onInvalidateInode) {
       this.onInvalidateInode(state.piecesIno);
@@ -668,6 +699,7 @@ export class CellBridge {
       name: string;
       pattern: string;
       summary: string;
+      entityPath: string;
     }> = [];
 
     for (const [name, id] of state.pieceMap) {
@@ -693,7 +725,13 @@ export class CellBridge {
         // Summary not always available
       }
 
-      entries.push({ id, name, pattern, summary });
+      entries.push({
+        id,
+        name,
+        pattern,
+        summary,
+        entityPath: `entities/${id}`,
+      });
     }
 
     const existingIno = this.tree.lookup(state.piecesIno, "pieces.json");
@@ -829,9 +867,11 @@ export class CellBridge {
       const childCell = rootCell.key(key).asSchemaFromLinks();
       let childValue: unknown;
       try {
-        childValue = childCell.getRaw?.();
-        if (childValue === undefined) {
-          childValue = childCell.get?.();
+        childValue = childCell.get?.();
+        // Override with raw link reference only for sigil links (enables FUSE symlinks)
+        const rawValue = childCell.getRaw?.();
+        if (isSigilLink(rawValue)) {
+          childValue = rawValue;
         }
       } catch {
         childValue = undefined;

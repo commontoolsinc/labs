@@ -178,8 +178,20 @@ export const piece = new Command()
     `ct piece ls ${EX_ID} ${EX_URL}`,
     `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
   )
+  .option("--json", "Output machine-readable JSON.")
   .action(async (options) => {
     const pieces = await listPieces(parseSpaceOptions(options));
+    if (options.json) {
+      render(
+        pieces.map((p) => ({
+          id: p.id,
+          name: p.name ?? null,
+          patternName: p.patternName ?? null,
+        })),
+        { json: true },
+      );
+      return;
+    }
     const piecesData = [
       ["ID", "NAME", "PATTERN"],
       ...(pieces.map(
