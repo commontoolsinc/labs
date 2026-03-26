@@ -42,9 +42,6 @@ describe("CFC UI direct-command integration", () => {
 
     const resultCell = cc.manager().getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink(() => {});
-
-    await piece.input.set(INITIAL_DRAFT, ["draft"]);
-    await piece.input.set(0, ["submittedCount"]);
   });
 
   afterAll(async () => {

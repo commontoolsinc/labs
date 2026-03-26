@@ -201,8 +201,11 @@ export interface DirectCommandOutput {
 export const DIRECT_COMMAND_INPUT_SCHEMA = {
   type: "object",
   properties: {
-    draft: { type: "string" },
-    submittedCount: { type: "number" },
+    draft: {
+      type: "string",
+      default: "Summarize the latest inbox triage notes.",
+    },
+    submittedCount: { type: "number", default: 0 },
   },
   required: ["draft", "submittedCount"],
 } as const satisfies JSONSchema;
