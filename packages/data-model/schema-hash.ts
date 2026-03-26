@@ -187,17 +187,18 @@ function resetInternCache(): void {
 seedBooleanInterns();
 
 /**
- * Intern a schema: freeze it, compute its hash, and cache the
- * bidirectional mapping. Returns the existing schema (or optionally full
- * `SchemaAndHash`) if the schema (or a structurally-identical one with the same
- * hash) has already been interned.
+ * Intern a schema: Freeze it, compute its hash, and cache the bidirectional
+ * mapping. Returns the actual interned schema object or, optionally, the full
+ * `SchemaAndHash`. The returned schema object is the same as (`===` to) the
+ * given `schema` only if an identical schema was not already interned.
  *
- * **Caching behaviour:** only deep-frozen schema objects are used as
- * cache keys — mutable inputs are never cached by identity.
- * `toDeepFrozenSchema()` returns the same reference if the input is
- * already deep-frozen, so such schemas hit the WeakMap on repeated
- * calls. For mutable inputs, a new frozen copy is created each time
- * and the hash-keyed reverse map finds a structural match.
+ * If given a non-deep-frozen `schema`, this function will _always_ make it
+ * deep-frozen as a side effect. Callers must be okay with this! This design is
+ * motivated by the desire to minimize unnecessary cloning of objects, colored
+ * by the observation that most mutable schemas are built by starting with an
+ * effectively -- if not actually -- deep-immutable schema and selectively
+ * shallow-cloned as mutable, for the express purpose of tactical modification
+ * and then immediately treated once again as deep-immutable.
  */
 export function internSchema(
   schema: JSONSchema,
@@ -222,9 +223,7 @@ export function internSchema(
 /**
  * Helper for `internSchema()` which always returns a `SchemaAndHash`.
  */
-function internSchemaReturningSchemaAndHash(
-  schema: JSONSchema,
-): SchemaAndHash {
+function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
   // Boolean schemas are primitives — return prefab instances.
   if (typeof schema === "boolean") {
     return schema ? booleanInterns.true : booleanInterns.false;
@@ -234,8 +233,8 @@ function internSchemaReturningSchemaAndHash(
   const cached = schemaToSah.get(schema);
   if (cached) return cached;
 
-  // toDeepFrozenSchema returns the same reference if already deep-frozen.
-  const frozen = toDeepFrozenSchema(schema) as JSONSchemaObj;
+  // `toDeepFrozenSchema()` returns the same reference if already deep-frozen.
+  const frozen = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
 
   // Check the hash-keyed reverse map (structurally-equal but different object).
   const hash = _hashSchemaItemAsFabricHash(frozen);
