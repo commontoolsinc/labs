@@ -1,5 +1,6 @@
 import ts from "typescript";
-import { classifyArrayMethodCall, detectCallKind } from "./call-kind.ts";
+import { detectCallKind } from "./call-kind.ts";
+import { classifyCallbackBoundary } from "../policy/callback-boundary.ts";
 
 export type ReactiveContextKind = "pattern" | "compute" | "neutral";
 
@@ -135,31 +136,6 @@ function isInlineJsxEventHandler(
   return jsxExprParent.name.getText().startsWith("on");
 }
 
-function isWithinJsxExpression(node: ts.Node): boolean {
-  let current: ts.Node | undefined = node.parent;
-  while (current) {
-    if (ts.isJsxExpression(current)) {
-      return true;
-    }
-    current = current.parent;
-  }
-  return false;
-}
-
-function isNamedCallbackCall(
-  call: ts.CallExpression,
-  name: string,
-): boolean {
-  const expression = call.expression;
-  if (ts.isIdentifier(expression)) {
-    return expression.text === name;
-  }
-  if (ts.isPropertyAccessExpression(expression)) {
-    return expression.name.text === name;
-  }
-  return false;
-}
-
 export function isStandaloneFunctionDefinition(
   func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
 ): boolean {
@@ -251,55 +227,34 @@ export function classifyReactiveContext(
           return { kind: "compute", owner: "standalone", inJsxExpression };
         }
 
-        const callParent: ts.Node | undefined = current.parent;
-        if (
-          callParent &&
-          ts.isCallExpression(callParent) &&
-          callParent.arguments.includes(current)
-        ) {
-          const callKind = detectCallKind(callParent, checker);
-          if (callKind?.kind === "derive") {
-            return { kind: "compute", owner: "derive", inJsxExpression };
-          }
-
-          if (callKind?.kind === "builder") {
-            const builderContext = getBuilderContext(callKind.builderName);
-            if (builderContext) {
-              return { ...builderContext, inJsxExpression };
-            }
-            // Unknown builder callback: inherit parent context.
-          }
-
-          if (callKind?.kind === "pattern-tool") {
-            return { kind: "compute", owner: "unknown", inJsxExpression };
-          }
-
-          if (classifyArrayMethodCall(callParent)) {
-            // Non-transformed map callbacks inherit the parent context.
+        const callbackBoundary = classifyCallbackBoundary(current, checker, {
+          isArrayMethodCallback: (node) =>
+            lookup?.isArrayMethodCallback(node) ?? false,
+        });
+        if (callbackBoundary.kind === "supported") {
+          if (callbackBoundary.bodyContext.strategy === "inherit-parent") {
             current = current.parent;
             continue;
           }
 
-          // Fallback for synthetic helper calls where symbol-based call-kind
-          // classification can fail transiently during transformation.
-          if (
-            isNamedCallbackCall(callParent, "pattern") ||
-            isNamedCallbackCall(callParent, "patternTool")
-          ) {
-            return { kind: "pattern", owner: "pattern", inJsxExpression };
+          return {
+            kind: callbackBoundary.bodyContext.kind,
+            owner: callbackBoundary.bodyContext.owner,
+            inJsxExpression,
+          };
+        }
+
+        if (callbackBoundary.kind === "unsupported") {
+          if (callbackBoundary.bodyContext.strategy === "inherit-parent") {
+            current = current.parent;
+            continue;
           }
 
-          // Unsupported callback containers inside JSX are treated as
-          // compute-like only so nested expressions do not emit misleading
-          // pattern-context diagnostics before validation reports the
-          // callback-container error at the boundary.
-          if (inJsxExpression || isWithinJsxExpression(current)) {
-            return {
-              kind: "compute",
-              owner: "unsupported-jsx-callback",
-              inJsxExpression,
-            };
-          }
+          return {
+            kind: callbackBoundary.bodyContext.kind,
+            owner: callbackBoundary.bodyContext.owner,
+            inJsxExpression,
+          };
         }
       }
 

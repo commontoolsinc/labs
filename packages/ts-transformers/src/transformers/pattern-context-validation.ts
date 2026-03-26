@@ -46,10 +46,9 @@ import {
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
 import {
-  allowsRestrictedContextFunctionCallback,
   classifyCallbackSupport,
-  supportsPatternOwnedWrapperCallbackSite,
 } from "./callback-support.ts";
+import { classifyCallbackBoundary } from "../policy/callback-boundary.ts";
 import {
   collectLocalOpaqueRootSymbols,
   isOpaqueSourceExpression,
@@ -427,12 +426,16 @@ export class PatternContextValidationTransformer extends Transformer {
   ): void {
     if (!ts.isBlock(func.body)) return;
 
+    const callbackBoundary = classifyCallbackBoundary(func, checker, context);
     const bodyContext = classifyReactiveContext(func.body, checker, context);
     if (
-      bodyContext.kind !== "pattern" ||
-      !supportsPatternOwnedWrapperCallbackSite(
-        classifyCallbackSupport(func, checker, context),
-      )
+      callbackBoundary.kind !== "supported" ||
+      (
+        callbackBoundary.boundaryKind !== "reactive-array-method" &&
+        callbackBoundary.boundaryKind !== "pattern-builder" &&
+        callbackBoundary.boundaryKind !== "render-builder"
+      ) ||
+      bodyContext.kind !== "pattern"
     ) {
       return;
     }
@@ -546,23 +549,31 @@ export class PatternContextValidationTransformer extends Transformer {
     // Skip if inside safe wrapper callback (computed, action, derive, lift, handler)
     if (isInsideSafeCallbackWrapper(node, checker, context)) return;
 
-    const callbackSupport = ts.isFunctionDeclaration(node)
+    const callbackBoundary = ts.isFunctionDeclaration(node)
       ? { kind: "none" as const }
-      : classifyCallbackSupport(node, checker, context);
+      : classifyCallbackBoundary(node, checker, context);
 
-    // Skip if this function IS a callback to a safe wrapper
-    // e.g., computed(() => ...), action(() => ...), derive(() => ...)
-    if (allowsRestrictedContextFunctionCallback(callbackSupport)) return;
+    if (
+      callbackBoundary.kind === "supported" &&
+      callbackBoundary.boundaryKind !== "event-handler" &&
+      callbackBoundary.boundaryKind !== "pattern-builder" &&
+      callbackBoundary.boundaryKind !== "render-builder"
+    ) {
+      return;
+    }
 
     // Only error if inside restricted context (pattern/render)
     if (!isInsideRestrictedContext(node, checker, context)) return;
 
     if (this.isInsideJsx(node)) {
-      if (callbackSupport.kind === "supported") {
+      if (callbackBoundary.kind === "supported") {
         return;
       }
 
-      if (callbackSupport.kind === "unsupported") {
+      if (
+        callbackBoundary.kind === "unsupported" &&
+        callbackBoundary.boundaryDiagnostic === "callback-container"
+      ) {
         context.reportDiagnostic({
           severity: "error",
           type: "pattern-context:callback-container",
@@ -667,10 +678,10 @@ export class PatternContextValidationTransformer extends Transformer {
   ): void {
     // Skip if this function is passed to patternTool()
     if (!ts.isFunctionDeclaration(func)) {
-      const callbackSupport = classifyCallbackSupport(func, checker, context);
+      const callbackBoundary = classifyCallbackBoundary(func, checker, context);
       if (
-        callbackSupport.kind === "supported" &&
-        callbackSupport.supportedKind === "pattern-tool"
+        callbackBoundary.kind === "supported" &&
+        callbackBoundary.boundaryKind === "pattern-tool"
       ) {
         return;
       }

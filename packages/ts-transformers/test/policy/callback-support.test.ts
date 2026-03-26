@@ -8,6 +8,7 @@ import {
   isReactiveArrayMethodCallbackSupport,
   supportsPatternOwnedWrapperCallbackSite,
 } from "../../src/transformers/callback-support.ts";
+import { classifyCallbackBoundary } from "../../src/policy/callback-boundary.ts";
 
 function createProgramAndContext(source: string): {
   sourceFile: ts.SourceFile;
@@ -154,6 +155,52 @@ Deno.test(
 );
 
 Deno.test(
+  "Callback boundary policy: non-transformed reactive array callbacks inherit parent body context",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare function derive<T>(value: T): T;
+
+      const result = derive([1, 2, 3]).map((item) => item + 1);
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const decision = classifyCallbackBoundary(callback, checker, context);
+
+    assertEquals(decision, {
+      kind: "supported",
+      boundaryKind: "reactive-array-method",
+      bodyContext: {
+        strategy: "inherit-parent",
+      },
+    });
+  },
+);
+
+Deno.test(
+  "Callback boundary policy: transformed array callbacks stay explicit pattern boundaries",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      const items = [1, 2, 3];
+      const result = items.map((item) => item + 1);
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    context.markAsArrayMethodCallback(callback);
+    const decision = classifyCallbackBoundary(callback, checker, context);
+
+    assertEquals(decision, {
+      kind: "supported",
+      boundaryKind: "reactive-array-method",
+      bodyContext: {
+        strategy: "explicit",
+        kind: "pattern",
+        owner: "array-method",
+      },
+    });
+  },
+);
+
+Deno.test(
   "Callback support policy: event handlers stay outside the generic safe-wrapper callback bucket",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
@@ -175,6 +222,57 @@ Deno.test(
     });
     assertEquals(allowsRestrictedContextFunctionCallback(decision), false);
     assertEquals(supportsPatternOwnedWrapperCallbackSite(decision), false);
+  },
+);
+
+Deno.test(
+  "Callback boundary policy: unsupported callbacks inside JSX become boundary-owned callback-container errors",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      const view = <div>{[1, 2, 3].forEach((item) => item + 1)}</div>;
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const decision = classifyCallbackBoundary(callback, checker, context);
+
+    assertEquals(decision, {
+      kind: "unsupported",
+      boundaryKind: "unsupported-container",
+      boundaryDiagnostic: "callback-container",
+      bodyContext: {
+        strategy: "explicit",
+        kind: "compute",
+        owner: "unsupported-jsx-callback",
+      },
+    });
+  },
+);
+
+Deno.test(
+  "Callback boundary policy: unsupported callbacks outside JSX inherit parent context",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      const items = [1, 2, 3];
+      items.forEach((item) => item + 1);
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const decision = classifyCallbackBoundary(callback, checker, context);
+
+    assertEquals(decision, {
+      kind: "unsupported",
+      boundaryKind: "unsupported-container",
+      boundaryDiagnostic: "function-creation",
+      bodyContext: {
+        strategy: "inherit-parent",
+      },
+    });
   },
 );
 
