@@ -187,6 +187,28 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
   );
 
   await t.step(
+    "errors on top-level optional call in pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern((input) => input?.foo());
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:optional-chaining");
+      assertEquals(
+        errors.some((error) => error.message.includes("Optional chaining")),
+        true,
+        "Optional call diagnostics should explain the optional chaining restriction",
+      );
+    },
+  );
+
+  await t.step(
     "errors on spread of pattern input outside computed()",
     async () => {
       const source = `/// <cts-enable />

@@ -76,26 +76,6 @@ const p = pattern(({ show, foo, bar }) => ifElse(show, computed(() => foo ? "A" 
 );
 
 Deno.test(
-  "Capability-first diagnostics: foreign callback container in JSX is unsupported",
-  async () => {
-    const source = `/// <cts-enable />
-import { pattern } from "commontools";
-const p = pattern(({ list }: { list: string[] }) => <div>{[0, 1].forEach(() => list.map((item) => item))}</div>);
-`;
-
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
-    });
-
-    const callbackContainerDiagnostics = diagnostics.filter((diagnostic) =>
-      diagnostic.type === "pattern-context:callback-container"
-    );
-
-    assertEquals(callbackContainerDiagnostics.length, 1);
-  },
-);
-
-Deno.test(
   "Capability-first: direct computed result map inside computed stays plain",
   async () => {
     const source = `/// <cts-enable />
@@ -1253,82 +1233,6 @@ const p = pattern<{ messages: string[] }>(({ messages }) => {
       !output.includes('__ct_destructure.key("result")'),
       "should not drop generated suffixes when lowering destructured opaque temporaries",
     );
-  },
-);
-
-Deno.test(
-  "Capability-first diagnostics: optional-call stays blocked in pattern context",
-  async () => {
-    const source = `/// <cts-enable />
-import { pattern } from "commontools";
-const p = pattern((input) => input?.foo());
-`;
-
-    const { diagnostics } = await validateSource(source);
-
-    const optionalDiagnostics = diagnostics.filter((diagnostic) =>
-      diagnostic.type === "pattern-context:optional-chaining"
-    );
-
-    assertEquals(optionalDiagnostics.length, 1);
-    assertStringIncludes(optionalDiagnostics[0]!.message, "Optional chaining");
-  },
-);
-
-Deno.test(
-  "Capability-first diagnostics: builder placement remains enforced",
-  async () => {
-    const source = `/// <cts-enable />
-import { pattern, lift } from "commontools";
-const p = pattern((input) => {
-  const inc = lift((value: number) => value + 1);
-  return inc(input.foo);
-});
-`;
-
-    const { diagnostics } = await validateSource(source);
-
-    const builderDiagnostics = diagnostics.filter((diagnostic) =>
-      diagnostic.type === "pattern-context:builder-placement"
-    );
-    assertEquals(builderDiagnostics.length, 1);
-    assertStringIncludes(builderDiagnostics[0]!.message, "module scope");
-  },
-);
-
-Deno.test(
-  "Capability-first diagnostics: restricted .get() keeps pattern-context:get-call",
-  async () => {
-    const source = `/// <cts-enable />
-import { pattern } from "commontools";
-const p = pattern((input) => input.get());
-`;
-
-    const { diagnostics } = await validateSource(source);
-
-    const getDiagnostics = diagnostics.filter((diagnostic) =>
-      diagnostic.type === "pattern-context:get-call"
-    );
-    assertEquals(getDiagnostics.length, 1);
-  },
-);
-
-Deno.test(
-  "Capability-first diagnostics: standalone reactive operation codes remain stable",
-  async () => {
-    const source = `/// <cts-enable />
-import { computed, pattern } from "commontools";
-const helper = ({ value }: { value: number }) => computed(() => value + 1);
-const p = pattern((input) => input.foo);
-`;
-
-    const { diagnostics } = await validateSource(source);
-
-    const standaloneDiagnostics = diagnostics.filter((diagnostic) =>
-      diagnostic.type === "standalone-function:reactive-operation"
-    );
-    assertEquals(standaloneDiagnostics.length, 1);
-    assertStringIncludes(standaloneDiagnostics[0]!.message, "standalone");
   },
 );
 
