@@ -17,7 +17,6 @@ export {
   getCapabilitySummaryCallbackArgument,
   getPatternBuilderCallbackArgument,
   isPatternBuilderCall,
-  isReactiveArrayMethodCallSite,
   isReactiveOriginCall,
   isReactiveValueExpression,
   isReactiveValueSymbol,

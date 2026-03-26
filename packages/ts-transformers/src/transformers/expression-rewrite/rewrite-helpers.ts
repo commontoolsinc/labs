@@ -1,10 +1,10 @@
 import ts from "typescript";
 
 import {
+  classifyArrayMethodCallSite,
   classifyReactiveContext,
   type DataFlowAnalysis,
   detectCallKind,
-  isReactiveArrayMethodCallSite,
   type NormalizedDataFlow,
   setParentPointers,
 } from "../../ast/mod.ts";
@@ -100,7 +100,8 @@ function getOpaqueCallKindForParameter(
   if (callKind?.kind === "builder") {
     return "builder";
   }
-  if (isReactiveArrayMethodCallSite(candidate, checker)) {
+  const arrayMethodCallSite = classifyArrayMethodCallSite(candidate, checker);
+  if (arrayMethodCallSite?.ownership === "reactive") {
     if (context) {
       const reactiveContext = classifyReactiveContext(
         candidate,

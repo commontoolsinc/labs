@@ -353,13 +353,6 @@ export function classifyArrayMethodCallSite(
   };
 }
 
-export function isReactiveArrayMethodCallSite(
-  call: ts.CallExpression,
-  checker: ts.TypeChecker,
-): boolean {
-  return classifyArrayMethodCallSite(call, checker)?.ownership === "reactive";
-}
-
 export function classifyArrayMethodResultSinkCall(
   call: ts.CallExpression,
   checker?: ts.TypeChecker,
@@ -492,7 +485,7 @@ export function isReactiveValueSymbol(
   symbol: ts.Symbol | undefined,
   checker: ts.TypeChecker,
 ): boolean {
-  return !!getImplicitReactiveParameterCallKind(symbol, checker) ||
+  return hasImplicitReactiveParameterContext(symbol, checker) ||
     isVariableFromReactiveCallSymbol(symbol, checker);
 }
 
@@ -667,8 +660,10 @@ function isReactiveArrayMethodChain(
   checker: ts.TypeChecker,
 ): boolean {
   const target = stripWrappers(expression);
-  return ts.isCallExpression(target) &&
-    isReactiveArrayMethodCallSite(target, checker);
+  const callSite = ts.isCallExpression(target)
+    ? classifyArrayMethodCallSite(target, checker)
+    : undefined;
+  return !!callSite && callSite.ownership === "reactive";
 }
 
 function isLoweredReactiveArrayMethodCall(
@@ -681,13 +676,13 @@ function isLoweredReactiveArrayMethodCall(
     callSite.ownership === "reactive";
 }
 
-function getImplicitReactiveParameterCallKind(
+function hasImplicitReactiveParameterContext(
   symbol: ts.Symbol | undefined,
   checker: ts.TypeChecker,
-): "builder" | "array-method" | undefined {
-  if (!symbol) return undefined;
+): boolean {
+  if (!symbol) return false;
   const declarations = symbol.getDeclarations();
-  if (!declarations) return undefined;
+  if (!declarations) return false;
 
   for (const declaration of declarations) {
     let paramNode: ts.Node = declaration;
@@ -714,7 +709,7 @@ function getImplicitReactiveParameterCallKind(
 
     const callKind = detectCallKind(candidate as ts.CallExpression, checker);
     if (callKind?.kind === "builder") {
-      return callKind.kind;
+      return true;
     }
 
     if (
@@ -724,11 +719,11 @@ function getImplicitReactiveParameterCallKind(
         checker,
       )
     ) {
-      return callKind.kind;
+      return true;
     }
   }
 
-  return undefined;
+  return false;
 }
 
 function isImplicitReactiveArrayMethodCallback(
@@ -782,10 +777,8 @@ function isReactiveArrayMethodReceiverExpression(
     return true;
   }
 
-  if (!isReactiveArrayMethodCallSite(target, checker)) {
-    return false;
-  }
-  return true;
+  const callSite = classifyArrayMethodCallSite(target, checker);
+  return !!callSite && callSite.ownership === "reactive";
 }
 
 function isVariableFromReactiveCallSymbol(
