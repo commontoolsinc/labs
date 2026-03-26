@@ -2,8 +2,6 @@ import ts from "typescript";
 import {
   classifyArrayMethodCall,
   classifyArrayMethodCallSite,
-  classifyArrayMethodResultSinkCall,
-  classifyArrayMethodResultSinkReceiverChainCall,
   classifyReactiveContext,
   detectCallKind,
   findEnclosingCallbackContext,
@@ -271,57 +269,6 @@ function isSharedJsxLocalHelperCallRoot(
   return analyze(expression).containsOpaqueRef;
 }
 
-function isSharedJsxArrayMethodResultSinkCallRoot(
-  expression: ts.Expression,
-  context: TransformationContext,
-  analyze: AnalyzeFn,
-  owner: ExpressionSitePolicyInfo["reactiveContext"]["owner"],
-): boolean {
-  if (!ts.isCallExpression(expression)) {
-    return false;
-  }
-
-  if (owner !== "pattern" && owner !== "render") {
-    return false;
-  }
-
-  const sinkCall = classifyArrayMethodResultSinkCall(
-    expression,
-    context.checker,
-  );
-  if (!sinkCall) {
-    return false;
-  }
-  return sinkCall.sink === "join" &&
-    containsReactiveArrayMethodSubexpression(expression, context, analyze);
-}
-
-function isSharedJsxArrayMethodResultSinkReceiverChainRoot(
-  expression: ts.Expression,
-  context: TransformationContext,
-  analyze: AnalyzeFn,
-  owner: ExpressionSitePolicyInfo["reactiveContext"]["owner"],
-): boolean {
-  if (!ts.isCallExpression(expression)) {
-    return false;
-  }
-
-  if (owner !== "pattern" && owner !== "render") {
-    return false;
-  }
-
-  const sinkReceiverChain = classifyArrayMethodResultSinkReceiverChainCall(
-    expression,
-    context.checker,
-  );
-  if (!sinkReceiverChain) {
-    return false;
-  }
-
-  return sinkReceiverChain.sinkCall.sink === "join" &&
-    containsReactiveArrayMethodSubexpression(expression, context, analyze);
-}
-
 function isEligiblePatternOwnedWrapperCallbackSite(
   expression: ts.Expression,
   context: TransformationContext,
@@ -337,33 +284,6 @@ function isEligiblePatternOwnedWrapperCallbackSite(
     context,
   );
   return supportsPatternOwnedWrapperCallbackSite(callbackSupport);
-}
-
-function containsReactiveArrayMethodSubexpression(
-  root: ts.Expression,
-  context: TransformationContext,
-  analyze: AnalyzeFn,
-): boolean {
-  let found = false;
-
-  const visit = (node: ts.Node): void => {
-    if (found) return;
-    if (node !== root && ts.isFunctionLike(node)) return;
-
-    if (
-      node !== root &&
-      ts.isExpression(node) &&
-      isDeferredJsxArrayMethodExpression(node, context, analyze)
-    ) {
-      found = true;
-      return;
-    }
-
-    ts.forEachChild(node, visit);
-  };
-
-  visit(root);
-  return found;
 }
 
 function isAtomicWholeBranchIife(
@@ -845,37 +765,11 @@ export function classifyJsxExpressionSiteRoute(
       };
     }
 
-    if (
-      isSharedJsxArrayMethodResultSinkCallRoot(
-        expression,
-        context,
-        analyze,
-        siteInfo.reactiveContext.owner,
-      )
-    ) {
-      return { route: "shared-post-closure" };
-    }
-
-    if (
-      isSharedJsxArrayMethodResultSinkReceiverChainRoot(
-        expression,
-        context,
-        analyze,
-        siteInfo.reactiveContext.owner,
-      )
-    ) {
-      return { route: "shared-post-closure" };
-    }
-
     return { route: "shared-post-closure" };
   }
 
   if (!isPostClosureWrapperRewriteExpression(expression, context)) {
     return { route: "skip", reason: "not-shared-jsx-root-kind" };
-  }
-
-  if (containsReactiveArrayMethodSubexpression(expression, context, analyze)) {
-    return { route: "shared-post-closure" };
   }
 
   return { route: "shared-post-closure" };

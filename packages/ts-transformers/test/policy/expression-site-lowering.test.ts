@@ -692,46 +692,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: direct JSX join sinks over reactive array-method receivers defer to the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
-      declare namespace JSX {
-        interface IntrinsicElements {
-          div: any;
-        }
-      }
-
-      declare function pattern<T>(fn: (state: any) => T): T;
-
-      const view = pattern((state: any) => (
-        <div>{state.items.filter((item: number) => item > state.threshold).join(", ")}</div>
-      ));
-    `);
-
-    const call = findFirstNode(
-      sourceFile,
-      (node): node is ts.CallExpression =>
-        ts.isCallExpression(node) &&
-        ts.isPropertyAccessExpression(node.expression) &&
-        node.expression.name.text === "join",
-    );
-    const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      call,
-      "jsx-expression",
-      context,
-      analyze,
-    );
-
-    assertEquals(siteInfo.callRootKind, "receiver-method");
-    assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
-      route: "shared-post-closure",
-    });
-  },
-);
-
-Deno.test(
-  "Expression site policy: one-layer chained JSX receiver-method sinks over reactive array-method receivers defer to the shared post-closure path",
+  "Expression site policy: receiver-method chains over reactive array-method sinks defer to the shared post-closure path",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -753,45 +714,6 @@ Deno.test(
         ts.isCallExpression(node) &&
         ts.isPropertyAccessExpression(node.expression) &&
         node.expression.name.text === "toUpperCase",
-    );
-    const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      call,
-      "jsx-expression",
-      context,
-      analyze,
-    );
-
-    assertEquals(siteInfo.callRootKind, "receiver-method");
-    assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
-      route: "shared-post-closure",
-    });
-  },
-);
-
-Deno.test(
-  "Expression site policy: multi-layer chained JSX receiver-method sinks over reactive array-method receivers defer to the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
-      declare namespace JSX {
-        interface IntrinsicElements {
-          div: any;
-        }
-      }
-
-      declare function pattern<T>(fn: (state: any) => T): T;
-
-      const view = pattern((state: any) => (
-        <div>{state.items.filter((item: number) => item > state.threshold).join(", ").toUpperCase().trim()}</div>
-      ));
-    `);
-
-    const call = findFirstNode(
-      sourceFile,
-      (node): node is ts.CallExpression =>
-        ts.isCallExpression(node) &&
-        ts.isPropertyAccessExpression(node.expression) &&
-        node.expression.name.text === "trim",
     );
     const analyze = createDataFlowAnalyzer(checker);
     const siteInfo = getExpressionSitePolicyInfo(
