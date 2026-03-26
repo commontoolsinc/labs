@@ -9,18 +9,14 @@
 
 import { parseArgs } from "@std/cli/parse-args";
 import { CellBridge } from "./cell-bridge.ts";
-import { openFuse } from "./ffi.ts";
 import {
-  createFuseArgs,
   DIR_MODE,
   EACCES,
   EINVAL,
   EIO,
   EISDIR,
-  ENODATA,
   ENOENT,
   ENOTDIR,
-  ENTRY_PARAM_SIZE,
   ERANGE,
   EXDEV,
   FILE_MODE,
@@ -28,19 +24,12 @@ import {
   FILE_MODE_RWX,
   FILE_MODE_RX,
   FUSE_SET_ATTR_SIZE,
+  getPlatform,
   O_RDWR,
-  O_TRUNC,
   O_WRONLY,
-  OPS_OFFSETS,
-  OPS_SIZE,
   readCString,
-  readFileInfo,
-  STAT_SIZE,
   SYMLINK_MODE,
-  writeEntryParam,
-  writeFileInfo,
-  writeStat,
-} from "./ffi-types.ts";
+} from "./platform.ts";
 import { FsTree } from "./tree.ts";
 import { HandleMap } from "./handles.ts";
 
@@ -91,8 +80,22 @@ async function main() {
     Deno.mkdirSync(mountpoint, { recursive: true });
   }
 
-  // Open libfuse
-  const fuse = openFuse();
+  // Open libfuse via platform abstraction
+  const platform = await getPlatform();
+  const fuse = platform.openFuse();
+  const {
+    STAT_SIZE,
+    ENTRY_PARAM_SIZE,
+    OPS_SIZE,
+    OPS_OFFSETS,
+    STAT_ST_SIZE_OFFSET,
+    writeStat,
+    writeEntryParam,
+    readFileInfo,
+    writeFileInfo,
+    O_TRUNC,
+    ENODATA,
+  } = platform;
 
   // Create filesystem tree
   const tree = new FsTree();
@@ -735,9 +738,9 @@ async function main() {
 
       // Handle truncate / size change
       if (toSet & FUSE_SET_ATTR_SIZE) {
-        // Read new size from attr struct (st_size @ offset 96)
+        // Read new size from attr struct
         const attrView = new Deno.UnsafePointerView(_attrPtr!);
-        const newSize = Number(attrView.getBigInt64(96));
+        const newSize = Number(attrView.getBigInt64(STAT_ST_SIZE_OFFSET));
         const { fh } = readFileInfo(fi);
         const handle = handles.get(fh);
         if (handle) {
@@ -801,22 +804,16 @@ async function main() {
   );
   callbacks.push(releasedirCb);
 
-  // getxattr(req, ino, name_ptr, size, position)
-  // macOS FUSE has an extra `position` parameter (uint32_t) — always ignored for user attrs
-  const getxattrCb = new Deno.UnsafeCallback(
-    {
-      parameters: ["pointer", "u64", "pointer", "usize", "u32"],
-      result: "void",
-    } as const,
+  // getxattr — platform factory handles macOS extra `position` param vs Linux 4-param signature
+  const getxattrCb = platform.createGetxattrCallback(
     (
       req: Deno.PointerValue,
-      ino: number | bigint,
+      ino: bigint,
       namePtr: Deno.PointerValue,
-      size: number | bigint,
-      _position: number,
+      size: bigint,
     ) => {
       const attrName = readCString(namePtr);
-      const node = tree.getNode(BigInt(ino));
+      const node = tree.getNode(ino);
 
       // Determine the xattr value (if any)
       let attrValue: Uint8Array | null = null;
@@ -1180,17 +1177,13 @@ async function main() {
   );
   callbacks.push(rmdirCb);
 
-  // rename(req, parent_ino, name_ptr, newparent_ino, newname_ptr)
-  const renameCb = new Deno.UnsafeCallback(
-    {
-      parameters: ["pointer", "u64", "pointer", "u64", "pointer"],
-      result: "void",
-    } as const,
+  // rename — platform factory handles Linux v3 extra `flags` param
+  const renameCb = platform.createRenameCallback(
     (
       req: Deno.PointerValue,
-      parentIno: number | bigint,
+      parentIno: bigint,
       namePtr: Deno.PointerValue,
-      newParentIno: number | bigint,
+      newParentIno: bigint,
       newNamePtr: Deno.PointerValue,
     ) => {
       if (!bridge) {
@@ -1198,9 +1191,9 @@ async function main() {
         return;
       }
 
-      const oldParent = BigInt(parentIno);
+      const oldParent = parentIno;
       const oldName = readCString(namePtr);
-      const newParent = BigInt(newParentIno);
+      const newParent = newParentIno;
       const newName = readCString(newNamePtr);
 
       const childIno = tree.lookup(oldParent, oldName);
@@ -1372,38 +1365,26 @@ async function main() {
   setOp(OPS_OFFSETS.create, createCb);
 
   // --- Mount ---
-  const { argsBuf, argv: _argv, encodedArgs: _ea } = createFuseArgs([
+  const { argsBuf, argv: _argv, encodedArgs: _ea } = platform.createFuseArgs([
     "fuse_ct",
   ]);
 
   const mountpointBuf = encoder.encode(mountpoint + "\0");
 
-  const chan = fuse.symbols.fuse_mount(
-    mountpointBuf,
-    Deno.UnsafePointer.of(new Uint8Array(argsBuf)),
-  );
-
-  if (!chan) {
-    console.error(
-      "fuse_mount failed. Is the mountpoint valid? Is macFUSE installed?",
+  let handle: ReturnType<typeof platform.mount>;
+  try {
+    handle = platform.mount(
+      fuse,
+      mountpointBuf,
+      argsBuf,
+      opsBuf,
+      BigInt(OPS_SIZE),
     );
+  } catch (e) {
+    console.error(String(e));
     Deno.exit(1);
   }
-
-  const session = fuse.symbols.fuse_lowlevel_new(
-    Deno.UnsafePointer.of(new Uint8Array(argsBuf)),
-    Deno.UnsafePointer.of(new Uint8Array(opsBuf)),
-    BigInt(OPS_SIZE),
-    null,
-  );
-
-  if (!session) {
-    console.error("fuse_lowlevel_new failed");
-    fuse.symbols.fuse_unmount(mountpointBuf, chan);
-    Deno.exit(1);
-  }
-
-  fuse.symbols.fuse_session_add_chan(session, chan);
+  // handle is guaranteed assigned — Deno.exit(1) never returns
 
   let unmounting = false;
 
@@ -1415,7 +1396,7 @@ async function main() {
       for (const name of names) {
         const nameBuf = encoder.encode(name + "\0");
         const rc = fuse.symbols.fuse_lowlevel_notify_inval_entry(
-          chan,
+          handle.notifyTarget,
           parentIno,
           nameBuf,
           BigInt(name.length),
@@ -1434,7 +1415,7 @@ async function main() {
       if (unmounting) return;
       // Invalidate all cached data for this inode (off=0, len=-1 means all)
       const ret = fuse.symbols.fuse_lowlevel_notify_inval_inode(
-        chan,
+        handle.notifyTarget,
         ino,
         0n,
         -1n,
@@ -1453,7 +1434,7 @@ async function main() {
     if (unmounting) return;
     unmounting = true;
     console.log("\nUnmounting...");
-    fuse.symbols.fuse_unmount(mountpointBuf, chan);
+    platform.unmount(fuse, handle, mountpointBuf);
   }
 
   Deno.addSignalListener("SIGINT", () => {
@@ -1464,15 +1445,11 @@ async function main() {
   });
 
   // Run FUSE event loop (nonblocking: true → returns Promise)
-  const result = await fuse.symbols.fuse_session_loop(session);
+  const result = await fuse.symbols.fuse_session_loop(handle.session);
   console.log(`FUSE loop exited (code ${result})`);
 
   // Final cleanup
-  fuse.symbols.fuse_session_remove_chan(chan);
-  fuse.symbols.fuse_session_destroy(session);
-  if (!unmounting) {
-    fuse.symbols.fuse_unmount(mountpointBuf, chan);
-  }
+  platform.cleanup(fuse, handle, mountpointBuf, unmounting);
   for (const cb of callbacks) cb.close();
   console.log("Cleaned up.");
 }

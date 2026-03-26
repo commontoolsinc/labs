@@ -1,6 +1,6 @@
 // handles.ts — File handle tracking for write support
 
-import { O_RDWR, O_WRONLY } from "./ffi-types.ts";
+import { O_RDWR, O_WRONLY } from "./platform.ts";
 
 export interface HandleState {
   ino: bigint;
