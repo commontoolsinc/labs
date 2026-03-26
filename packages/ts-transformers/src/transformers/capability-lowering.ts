@@ -1,70 +1,23 @@
 import ts from "typescript";
 import {
-  detectCallKind,
-  isFunctionLikeExpression,
+  getCapabilitySummaryCallbackArgument,
+  getPatternBuilderCallbackArgument,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { TransformationContext, Transformer } from "../core/mod.ts";
-import { unwrapExpression } from "../utils/expression.ts";
 import { collectPatternCallbackPreScan } from "./pattern-callback-prescan.ts";
 import {
   registerCapabilitySummary,
   transformPatternCallback,
 } from "./pattern-callback-transform.ts";
 
-function isPatternBuilderCall(
-  call: ts.CallExpression,
-  checker: ts.TypeChecker,
-): boolean {
-  const kind = detectCallKind(call, checker);
-  if (kind?.kind === "builder" && kind.builderName === "pattern") {
-    return true;
-  }
-
-  const expression = unwrapExpression(call.expression);
-  if (ts.isIdentifier(expression)) {
-    return expression.text === "pattern";
-  }
-  if (ts.isPropertyAccessExpression(expression)) {
-    return expression.name.text === "pattern";
-  }
-  return false;
-}
-
 function maybeRegisterBuilderCapabilitySummary(
   node: ts.CallExpression,
   context: TransformationContext,
 ): void {
-  const callKind = detectCallKind(node, context.checker);
-  if (!callKind) return;
-
-  const registerFrom = (arg: ts.Expression | undefined): void => {
-    if (!arg || !isFunctionLikeExpression(arg)) return;
-    registerCapabilitySummary(arg, context, true);
-  };
-
-  if (callKind.kind === "derive") {
-    registerFrom(node.arguments[1]);
-    return;
-  }
-
-  if (callKind.kind === "builder") {
-    if (callKind.builderName === "lift") {
-      registerFrom(node.arguments[0]);
-      return;
-    }
-    if (callKind.builderName === "handler") {
-      registerFrom(node.arguments[0]);
-      return;
-    }
-    if (callKind.builderName === "computed") {
-      registerFrom(node.arguments[0]);
-      return;
-    }
-    if (callKind.builderName === "action") {
-      registerFrom(node.arguments[0]);
-      return;
-    }
+  const callback = getCapabilitySummaryCallbackArgument(node, context.checker);
+  if (callback) {
+    registerCapabilitySummary(callback, context, true);
   }
 }
 
@@ -93,7 +46,6 @@ export class CapabilityLoweringTransformer extends Transformer {
     } = collectPatternCallbackPreScan(
       context.sourceFile,
       context,
-      isPatternBuilderCall,
     );
 
     // ── Main transform pass ────────────────────────────────────────────
@@ -104,32 +56,33 @@ export class CapabilityLoweringTransformer extends Transformer {
         return visitedNode;
       }
 
-      if (isPatternBuilderCall(visitedNode, context.checker)) {
-        const callbackArg = visitedNode.arguments[0];
-        if (callbackArg && isFunctionLikeExpression(callbackArg)) {
-          const isArrayMethodCallback = arrayMethodPatternCallNodes.has(node);
-          const nonReactiveCaptures = isArrayMethodCallback
-            ? nonReactiveCapturesByMapPattern.get(node)
-            : undefined;
-          const transformedCallback = transformPatternCallback(
-            callbackArg,
-            context,
-            isArrayMethodCallback,
-            nonReactiveCaptures,
-          );
-          const rewritten = context.factory.updateCallExpression(
-            visitedNode,
-            visitedNode.expression,
-            visitedNode.typeArguments,
-            [
-              transformedCallback,
-              ...visitedNode.arguments.slice(1),
-            ],
-          );
-          registerBuilderSummariesInSubtree(transformedCallback.body, context);
-          maybeRegisterBuilderCapabilitySummary(rewritten, context);
-          return rewritten;
-        }
+      const callbackArg = getPatternBuilderCallbackArgument(
+        visitedNode,
+        context.checker,
+      );
+      if (callbackArg) {
+        const isArrayMethodCallback = arrayMethodPatternCallNodes.has(node);
+        const nonReactiveCaptures = isArrayMethodCallback
+          ? nonReactiveCapturesByMapPattern.get(node)
+          : undefined;
+        const transformedCallback = transformPatternCallback(
+          callbackArg,
+          context,
+          isArrayMethodCallback,
+          nonReactiveCaptures,
+        );
+        const rewritten = context.factory.updateCallExpression(
+          visitedNode,
+          visitedNode.expression,
+          visitedNode.typeArguments,
+          [
+            transformedCallback,
+            ...visitedNode.arguments.slice(1),
+          ],
+        );
+        registerBuilderSummariesInSubtree(transformedCallback.body, context);
+        maybeRegisterBuilderCapabilitySummary(rewritten, context);
+        return rewritten;
       }
 
       maybeRegisterBuilderCapabilitySummary(visitedNode, context);

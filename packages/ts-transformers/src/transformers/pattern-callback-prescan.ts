@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { isFunctionLikeExpression } from "../ast/mod.ts";
+import { getPatternBuilderCallbackArgument } from "../ast/mod.ts";
 import { TransformationContext } from "../core/mod.ts";
 import {
   addBindingTargetSymbols,
@@ -14,10 +14,6 @@ export interface PatternCallbackPreScanResult {
 export function collectPatternCallbackPreScan(
   sourceFile: ts.SourceFile,
   context: TransformationContext,
-  isPatternBuilderCall: (
-    call: ts.CallExpression,
-    checker: ts.TypeChecker,
-  ) => boolean,
 ): PatternCallbackPreScanResult {
   const arrayMethodPatternCallNodes = new Set<ts.Node>();
   const nonReactiveCapturesByMapPattern = new Map<ts.Node, Set<string>>();
@@ -76,12 +72,9 @@ export function collectPatternCallbackPreScan(
 
   const preScan = (node: ts.Node): void => {
     let pushed = false;
-    if (
-      ts.isCallExpression(node) &&
-      isPatternBuilderCall(node, context.checker)
-    ) {
-      const cb = node.arguments[0];
-      if (cb && isFunctionLikeExpression(cb)) {
+    if (ts.isCallExpression(node)) {
+      const cb = getPatternBuilderCallbackArgument(node, context.checker);
+      if (cb) {
         const opaqueNames = new Set<string>();
         const opaqueSymbols = new Set<ts.Symbol>();
         const firstParam = cb.parameters[0];

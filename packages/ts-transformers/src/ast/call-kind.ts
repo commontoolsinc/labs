@@ -146,6 +146,63 @@ export function detectDirectBuilderCall(
   return builderKind?.kind === "builder" ? builderKind : undefined;
 }
 
+export function isPatternBuilderCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const builderKind = detectDirectBuilderCall(call, checker);
+  if (builderKind?.builderName === "pattern") {
+    return true;
+  }
+
+  const target = stripWrappers(call.expression);
+  return ts.isPropertyAccessExpression(target) &&
+    target.name.text === "pattern";
+}
+
+export function getPatternBuilderCallbackArgument(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  if (!isPatternBuilderCall(call, checker)) {
+    return undefined;
+  }
+
+  const callbackArg = call.arguments[0];
+  if (callbackArg && isCallbackFunctionExpression(callbackArg)) {
+    return callbackArg;
+  }
+  return undefined;
+}
+
+export function getCapabilitySummaryCallbackArgument(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  const callKind = detectCallKind(call, checker);
+  if (!callKind) return undefined;
+
+  let callbackArg: ts.Expression | undefined;
+  if (callKind.kind === "derive") {
+    callbackArg = call.arguments[1];
+  } else if (
+    callKind.kind === "builder" &&
+    (
+      callKind.builderName === "lift" ||
+      callKind.builderName === "handler" ||
+      callKind.builderName === "computed" ||
+      callKind.builderName === "action"
+    )
+  ) {
+    callbackArg = call.arguments[0];
+  }
+
+  if (callbackArg && isCallbackFunctionExpression(callbackArg)) {
+    return callbackArg;
+  }
+  return undefined;
+}
+
 export function isReactiveOriginCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -206,6 +263,12 @@ export function classifyWildcardTraversalCall(
   }
 
   return undefined;
+}
+
+function isCallbackFunctionExpression(
+  expression: ts.Expression,
+): expression is ts.ArrowFunction | ts.FunctionExpression {
+  return ts.isArrowFunction(expression) || ts.isFunctionExpression(expression);
 }
 
 export function isWildcardTraversalCall(

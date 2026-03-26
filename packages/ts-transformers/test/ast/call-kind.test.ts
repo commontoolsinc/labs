@@ -4,6 +4,8 @@ import ts from "typescript";
 import {
   classifyArrayMethodCallSite,
   detectCallKind,
+  getCapabilitySummaryCallbackArgument,
+  getPatternBuilderCallbackArgument,
 } from "../../src/ast/mod.ts";
 
 function createProgram(source: string): {
@@ -133,4 +135,50 @@ Deno.test("classifyArrayMethodCallSite treats lowered *WithPattern methods as re
     lowered: true,
     ownership: "reactive",
   });
+});
+
+Deno.test("getPatternBuilderCallbackArgument preserves unresolved property-access pattern fallback", () => {
+  const { sourceFile, checker } = createProgram(`
+    const builders = {} as any;
+    const value = builders.pattern((input: unknown) => input);
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isCallExpression(expression)) {
+    throw new Error("Expected call expression initializer");
+  }
+
+  const callback = getPatternBuilderCallbackArgument(expression, checker);
+  if (!callback) {
+    throw new Error("Expected pattern callback argument");
+  }
+
+  assertEquals(ts.isArrowFunction(callback), true);
+});
+
+Deno.test("getCapabilitySummaryCallbackArgument recognizes derive and builder callback families", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare function derive<T, U>(input: T, callback: (value: T) => U): U;
+    declare function computed<T>(callback: () => T): T;
+    declare function action<T>(callback: () => T): T;
+
+    const first = derive(1, (value: number) => value + 1);
+    const second = computed(() => 1);
+    const third = action(() => 2);
+  `);
+
+  const first = findInitializer(sourceFile, "first");
+  const second = findInitializer(sourceFile, "second");
+  const third = findInitializer(sourceFile, "third");
+
+  if (
+    !ts.isCallExpression(first) || !ts.isCallExpression(second) ||
+    !ts.isCallExpression(third)
+  ) {
+    throw new Error("Expected call expression initializers");
+  }
+
+  assertEquals(!!getCapabilitySummaryCallbackArgument(first, checker), true);
+  assertEquals(!!getCapabilitySummaryCallbackArgument(second, checker), true);
+  assertEquals(!!getCapabilitySummaryCallbackArgument(third, checker), true);
 });

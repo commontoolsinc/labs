@@ -3,7 +3,7 @@ import { type TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   classifyReactiveContext,
-  detectCallKind,
+  getPatternBuilderCallbackArgument,
   getTypeAtLocationWithFallback,
   isDeriveCall,
   isFunctionLikeExpression,
@@ -484,20 +484,7 @@ function isPatternBuilderCallback(
   if (!parent.arguments.includes(node)) {
     return false;
   }
-
-  const kind = detectCallKind(parent, context.checker);
-  if (kind?.kind === "builder" && kind.builderName === "pattern") {
-    return true;
-  }
-
-  const expression = unwrapExpression(parent.expression);
-  if (ts.isIdentifier(expression)) {
-    return expression.text === "pattern";
-  }
-  if (ts.isPropertyAccessExpression(expression)) {
-    return expression.name.text === "pattern";
-  }
-  return false;
+  return getPatternBuilderCallbackArgument(parent, context.checker) === node;
 }
 
 function isIdentifierBoundInPatternCallback(
