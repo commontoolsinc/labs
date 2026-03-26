@@ -4,14 +4,12 @@ import {
   type MountedCallablePath,
   parseMountedCallablePath,
 } from "../../fuse/callable-path.ts";
-import { callableCommandSpec, executeResolvedCallable } from "./callable.ts";
+import { callableCommandSpec } from "./callable.ts";
+import { executeCallableCommand } from "./callable-command.ts";
 import {
   type ExecCommandSpec,
-  normalizeCallableInputForExecution,
-  type ParsedExecArgs,
   renderExecHelp,
   renderExecHelpJson,
-  resolveExecInvocation,
 } from "./exec-schema.ts";
 import {
   canonicalizeMountLookupPath,
@@ -164,30 +162,11 @@ export async function executeMountedCallableFile(
   deps: ExecDependencies = {},
 ): Promise<ExecutedMountedCallableFile> {
   const resolved = await resolveMountedCallableFile(filePath, deps);
-  const invocation = await resolveExecInvocation(
-    resolved.commandSpec,
-    rawArgs,
-    deps,
-  );
-  const parsed = invocation.parsed;
   const invocationStyle = deps.invocationStyle ??
     (Deno.env.get("CF_EXEC_SHEBANG") === "1" ? "direct" : "cf");
-
-  if (parsed.showHelp) {
-    return {
-      helpText: parsed.showHelpJson
-        ? renderExecHelpJson(resolved.commandSpec)
-        : renderExecHelp(filePath, resolved.commandSpec, {
-          invocationStyle,
-        }),
-      parsed,
-      resolved,
-    };
-  }
-
-  const input = invocation.input;
-  const executed = await executeResolvedCallable(
-    {
+  return await executeCallableCommand({
+    resolved,
+    execution: {
       callableCell: resolved.callableCell,
       callableKind: resolved.callablePath.callableKind,
       cellKey: resolved.callablePath.cellKey,
@@ -196,15 +175,14 @@ export async function executeMountedCallableFile(
       piece: resolved.piece,
       space: resolved.manager.getSpace?.() ?? resolved.callablePath.spaceName,
     },
-    parsed.usedJsonInput
-      ? input
-      : normalizeCallableInputForExecution(resolved.commandSpec, input),
+    commandSpec: resolved.commandSpec,
+    rawArgs,
     deps,
-  );
-
-  return {
-    outputText: executed.outputText,
-    parsed,
-    resolved,
-  };
+    renderHelp: (commandSpec, parsed) =>
+      parsed.showHelpJson
+        ? renderExecHelpJson(commandSpec)
+        : renderExecHelp(filePath, commandSpec, {
+          invocationStyle,
+        }),
+  });
 }

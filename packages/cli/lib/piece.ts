@@ -20,13 +20,12 @@ import {
   detectCallableKind,
   executeResolvedCallable,
 } from "./callable.ts";
+import { executeCallableCommand } from "./callable-command.ts";
 import {
   type ExecCommandSpec,
-  normalizeCallableInputForExecution,
   type ParsedExecArgs,
   renderExecHelpJson,
   renderPieceCallHelp,
-  resolveExecInvocation,
 } from "./exec-schema.ts";
 import { cliCommand } from "./cli-name.ts";
 
@@ -515,41 +514,21 @@ export async function executePieceCallable(
   deps: PieceCallableDependencies = {},
 ): Promise<ExecutedPieceCallable> {
   const resolved = await resolvePieceCallable(config, callableName, deps);
-  const invocation = await resolveExecInvocation(
-    resolved.commandSpec,
+  return await executeCallableCommand({
+    resolved,
+    execution: resolved,
+    commandSpec: resolved.commandSpec,
     rawArgs,
     deps,
-  );
-  const parsed = invocation.parsed;
-
-  if (parsed.showHelp) {
-    return {
-      helpText: parsed.showHelpJson
-        ? renderExecHelpJson(resolved.commandSpec)
+    renderHelp: (commandSpec, parsed) =>
+      parsed.showHelpJson
+        ? renderExecHelpJson(commandSpec)
         : renderPieceCallHelp(
           deps.helpCommandPrefix ??
             cliCommand(["piece", "call", "...", callableName]),
-          resolved.commandSpec,
+          commandSpec,
         ),
-      parsed,
-      resolved,
-    };
-  }
-
-  const input = invocation.input;
-  const executed = await executeResolvedCallable(
-    resolved,
-    parsed.usedJsonInput
-      ? input
-      : normalizeCallableInputForExecution(resolved.commandSpec, input),
-    deps,
-  );
-
-  return {
-    outputText: executed.outputText,
-    parsed,
-    resolved,
-  };
+  });
 }
 
 export async function linkPieces(
