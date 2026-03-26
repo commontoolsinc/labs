@@ -7,14 +7,13 @@ import {
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
-import { classifySupportedCallRoot } from "./call-root-support.ts";
 import {
   canRewriteExpressionSite,
   canRewriteHelperOwnedExpressionSite,
+  classifyExpressionSiteCallRootPolicy,
   classifyJsxExpressionSiteRoute,
   containsLogicalBinaryOperator,
   getExpressionContainerKind,
-  getExpressionSitePolicyInfo,
   isControlFlowRewriteExpression,
   isDirectArrayMethodRootExpression,
 } from "./expression-site-policy.ts";
@@ -319,15 +318,14 @@ export function rewriteArrayMethodCallbackExpressionSites(
       return undefined;
     }
 
-    const siteInfo = getExpressionSitePolicyInfo(
+    const callRootPolicy = classifyExpressionSiteCallRootPolicy(
       expression,
-      containerKind,
       context,
       analyze,
     );
     if (
-      classifySupportedCallRoot(expression, siteInfo, context) !==
-        "array-method-owned-receiver-method"
+      callRootPolicy.kind !== "supported" ||
+      callRootPolicy.supportedKind !== "array-method-owned-receiver-method"
     ) {
       return undefined;
     }

@@ -134,7 +134,7 @@ export default pattern((__ct_pattern_input) => {
                 type: "boolean"
             } as const satisfies __ctHelpers.JSONSchema, { item: {
                     tags: {
-                        length: item.key("tags").length
+                        length: item.key("tags", "length")
                     }
                 } }, ({ item }) => item.tags.length > 0), item.key("label"), "No tags")}</strong>
               <ul>

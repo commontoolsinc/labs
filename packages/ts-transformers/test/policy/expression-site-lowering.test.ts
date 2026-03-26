@@ -1,11 +1,12 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import ts from "typescript";
 
 import { createDataFlowAnalyzer } from "../../src/ast/mod.ts";
 import { TransformationContext } from "../../src/core/mod.ts";
 import {
+  canRewriteExpressionSite,
+  canRewriteHelperOwnedExpressionSite,
   classifyJsxExpressionSiteRoute,
-  getExpressionSitePolicyInfo,
 } from "../../src/transformers/expression-site-policy.ts";
 
 function createProgramAndContext(source: string): {
@@ -154,50 +155,24 @@ Deno.test(
 
     const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      conditional,
-      "call-argument",
-      context,
-      analyze,
+    assertEquals(
+      canRewriteExpressionSite(
+        conditional,
+        "call-argument",
+        context,
+        analyze,
+      ),
+      true,
     );
-
-    assertEquals(siteInfo.arrayMethodOwned, true);
-    assertEquals(siteInfo.helperBoundaryKind, undefined);
-    assertEquals(siteInfo.controlFlowRewriteRoot, true);
-    assertEquals(siteInfo.reactiveContext.owner, "array-method");
-  },
-);
-
-Deno.test(
-  "Expression site policy: authored ifElse branches are marked as helper-owned",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
-      declare function ifElse<A, B, C>(cond: A, ifTrue: B, ifFalse: C): B | C;
-
-      const callback = (__ct_pattern_input: any) => {
-        const row = __ct_pattern_input.key("element");
-        const branch = ifElse(row.done, row.label ? "Done" : "Pending", "Fallback");
-        return branch;
-      };
-    `);
-
-    const callback = findVariableInitializer(sourceFile, "callback");
-    if (!ts.isArrowFunction(callback)) {
-      throw new Error("Expected callback arrow function");
-    }
-    context.markAsArrayMethodCallback(callback);
-
-    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
-    const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      conditional,
-      "call-argument",
-      context,
-      analyze,
+    assertEquals(
+      canRewriteHelperOwnedExpressionSite(
+        conditional,
+        "call-argument",
+        context,
+        analyze,
+      ),
+      false,
     );
-
-    assertEquals(siteInfo.arrayMethodOwned, true);
-    assertEquals(siteInfo.helperBoundaryKind, "ifElse");
   },
 );
 
@@ -227,14 +202,6 @@ Deno.test(
         node.expression.name.text === "map",
     );
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      mapCall,
-      "jsx-expression",
-      context,
-      analyze,
-    );
-
-    assertEquals(siteInfo.deferredJsxArrayMethod, true);
     assertEquals(classifyJsxExpressionSiteRoute(mapCall, context, analyze), {
       route: "skip",
       reason: "deferred-jsx-array-method-root",
@@ -286,14 +253,6 @@ Deno.test(
     );
 
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      nestedMapCall,
-      "jsx-expression",
-      context,
-      analyze,
-    );
-
-    assertEquals(siteInfo.arrayMethodOwned, true);
     assertEquals(
       classifyJsxExpressionSiteRoute(nestedMapCall, context, analyze),
       {
@@ -331,14 +290,6 @@ Deno.test(
         node.expression.name.text === "map",
     );
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      mapCall,
-      "jsx-expression",
-      context,
-      analyze,
-    );
-
-    assertEquals(siteInfo.deferredJsxArrayMethod, true);
     assertEquals(classifyJsxExpressionSiteRoute(mapCall, context, analyze), {
       route: "skip",
       reason: "deferred-jsx-array-method-root",
@@ -506,14 +457,6 @@ Deno.test(
     );
 
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      helperCall,
-      "jsx-expression",
-      context,
-      analyze,
-    );
-
-    assertEquals(siteInfo.callRootKind, "conditional-helper");
     assertEquals(
       classifyJsxExpressionSiteRoute(helperCall, context, analyze),
       {
@@ -525,7 +468,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: synthetic compute-owned authored subtrees are visible in site metadata",
+  "Expression site policy: synthetic compute-owned authored subtrees stay out of rewrite eligibility",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare function pattern<T>(fn: (state: any) => T): T;
@@ -540,16 +483,24 @@ Deno.test(
     context.markSyntheticComputeOwnedSubtree(conditional);
 
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      conditional,
-      "variable-initializer",
-      context,
-      analyze,
+    assertEquals(
+      canRewriteExpressionSite(
+        conditional,
+        "variable-initializer",
+        context,
+        analyze,
+      ),
+      false,
     );
-
-    assertExists(siteInfo.syntheticComputeOwned);
-    assertEquals(siteInfo.syntheticComputeOwned, true);
-    assertEquals(siteInfo.reactiveContext.kind, "compute");
+    assertEquals(
+      canRewriteHelperOwnedExpressionSite(
+        conditional,
+        "variable-initializer",
+        context,
+        analyze,
+      ),
+      false,
+    );
   },
 );
 
@@ -606,14 +557,6 @@ Deno.test(
         node.expression.name.text === "max",
     );
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      call,
-      "jsx-expression",
-      context,
-      analyze,
-    );
-
-    assertEquals(siteInfo.callRootKind, "free-function");
     assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
       route: "shared-post-closure",
     });
@@ -643,14 +586,6 @@ Deno.test(
         node.expression.name.text === "toUpperCase",
     );
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      call,
-      "jsx-expression",
-      context,
-      analyze,
-    );
-
-    assertEquals(siteInfo.callRootKind, "receiver-method");
     assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
       route: "shared-post-closure",
     });
@@ -682,14 +617,6 @@ Deno.test(
         node.expression.name.text === "toUpperCase",
     );
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      call,
-      "jsx-expression",
-      context,
-      analyze,
-    );
-
-    assertEquals(siteInfo.callRootKind, "receiver-method");
     assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
       route: "shared-post-closure",
     });
@@ -726,14 +653,6 @@ Deno.test(
         node.expression.name.text === "toUpperCase",
     );
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      call,
-      "jsx-expression",
-      context,
-      analyze,
-    );
-
-    assertEquals(siteInfo.arrayMethodOwned, true);
     assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
       route: "skip",
       reason: "array-method-owned",
@@ -771,14 +690,6 @@ Deno.test(
         node.expression.name.text === "get",
     );
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      call,
-      "jsx-expression",
-      context,
-      analyze,
-    );
-
-    assertEquals(siteInfo.callRootKind, "receiver-method");
     assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
       route: "owned-pre-closure",
       owner: "opaque-path-terminal-root",
@@ -806,14 +717,10 @@ Deno.test(
         node.expression.text === "identity",
     );
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      call,
-      "object-property",
-      context,
-      analyze,
+    assertEquals(
+      canRewriteExpressionSite(call, "object-property", context, analyze),
+      false,
     );
-
-    assertEquals(siteInfo.callRootKind, "other");
   },
 );
 
@@ -844,14 +751,6 @@ Deno.test(
         node.expression.text === "previous",
     );
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      call,
-      "jsx-expression",
-      context,
-      analyze,
-    );
-
-    assertEquals(siteInfo.callRootKind, "other");
     assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
       route: "shared-post-closure",
     });
@@ -879,14 +778,10 @@ Deno.test(
         node.expression.name.text === "stringify",
     );
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      call,
-      "object-property",
-      context,
-      analyze,
+    assertEquals(
+      canRewriteExpressionSite(call, "object-property", context, analyze),
+      false,
     );
-
-    assertEquals(siteInfo.callRootKind, "other");
   },
 );
 

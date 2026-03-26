@@ -2,7 +2,7 @@ import ts from "typescript";
 import { getCellKind } from "@commontools/schema-generator/cell-brand";
 import type { TransformationContext } from "../core/mod.ts";
 import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
-import type { ExpressionSitePolicyInfo } from "./expression-site-types.ts";
+import type { ExpressionSiteCallRootPolicyInfo } from "./expression-site-types.ts";
 
 export type SupportedCallRootKind =
   | "helper-owned-explicit-read"
@@ -42,7 +42,7 @@ function hasOpaquePathTerminalReceiverChain(
 
 export function classifySupportedCallRoot(
   expression: ts.Expression,
-  siteInfo: ExpressionSitePolicyInfo,
+  siteInfo: ExpressionSiteCallRootPolicyInfo,
   context: TransformationContext,
 ): SupportedCallRootKind | undefined {
   const decision = classifyCallRootPolicy(expression, siteInfo, context);
@@ -51,7 +51,7 @@ export function classifySupportedCallRoot(
 
 export function classifyUnsupportedCallRoot(
   expression: ts.Expression,
-  siteInfo: ExpressionSitePolicyInfo,
+  siteInfo: ExpressionSiteCallRootPolicyInfo,
   context: TransformationContext,
 ): UnsupportedCallRootKind | undefined {
   const decision = classifyCallRootPolicy(expression, siteInfo, context);
@@ -60,7 +60,7 @@ export function classifyUnsupportedCallRoot(
 
 export function classifyCallRootPolicy(
   expression: ts.Expression,
-  siteInfo: ExpressionSitePolicyInfo,
+  siteInfo: ExpressionSiteCallRootPolicyInfo,
   context: TransformationContext,
 ): CallRootPolicyDecision {
   if (!ts.isCallExpression(expression)) {

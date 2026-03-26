@@ -34,3 +34,10 @@ export interface ExpressionSitePolicyInfo {
   readonly deferredJsxArrayMethod: boolean;
   readonly controlFlowRewriteRoot: boolean;
 }
+
+export interface ExpressionSiteCallRootPolicyInfo {
+  readonly reactiveContext: ReactiveContextInfo;
+  readonly arrayMethodOwned: boolean;
+  readonly helperBoundaryKind?: ExpressionSiteHelperBoundaryKind;
+  readonly callRootKind?: ExpressionSiteCallRootKind;
+}

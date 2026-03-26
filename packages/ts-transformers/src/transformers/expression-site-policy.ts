@@ -19,8 +19,9 @@ import {
   supportsPatternOwnedWrapperCallbackSite,
 } from "./callback-support.ts";
 import {
+  classifyCallRootPolicy,
   classifySupportedCallRoot,
-  classifyUnsupportedCallRoot,
+  type CallRootPolicyDecision,
   type UnsupportedCallRootKind,
 } from "./call-root-support.ts";
 import { shouldDeferFallbackMapReceiverRewrite } from "./expression-rewrite/fallback-array-method-rewrite.ts";
@@ -32,6 +33,7 @@ import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
 import type {
   ExpressionContainerKind,
   ExpressionSiteCallRootKind,
+  ExpressionSiteCallRootPolicyInfo,
   ExpressionSiteHelperBoundaryKind,
   ExpressionSitePolicyInfo,
 } from "./expression-site-types.ts";
@@ -176,7 +178,7 @@ function getLeftmostMemberBase(expression: ts.Expression): ts.Expression {
   return current;
 }
 
-export function classifyCallExpressionRoot(
+function classifyCallExpressionRoot(
   expression: ts.CallExpression,
   context: TransformationContext,
   analyze: AnalyzeFn,
@@ -581,34 +583,60 @@ function isOwnedObjectLiteralRoot(
     analyze(current).containsOpaqueRef;
 }
 
-export function getExpressionSitePolicyInfo(
+function getExpressionSitePolicyInfo(
   expression: ts.Expression,
   containerKind: ExpressionContainerKind,
   context: TransformationContext,
   analyze: AnalyzeFn,
 ): ExpressionSitePolicyInfo {
-  const reactiveContext = classifyReactiveContext(
+  const callRootPolicyInfo = getExpressionSiteCallRootPolicyInfo(
     expression,
-    context.checker,
     context,
+    analyze,
   );
   return {
-    reactiveContext,
+    ...callRootPolicyInfo,
     hasAuthoredSourceSite: hasAuthoredSourceSite(expression),
     withinEventHandlerJsxAttribute: isWithinEventHandlerJsxAttribute(
       expression,
       context.checker,
+    ),
+    syntheticComputeOwned: context.isSyntheticComputeOwnedNode(expression),
+    deferredJsxArrayMethod: containerKind === "jsx-expression" &&
+      isDeferredJsxArrayMethodExpression(expression, context, analyze),
+    controlFlowRewriteRoot: isControlFlowRewriteExpression(expression),
+  };
+}
+
+function getExpressionSiteCallRootPolicyInfo(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): ExpressionSiteCallRootPolicyInfo {
+  return {
+    reactiveContext: classifyReactiveContext(
+      expression,
+      context.checker,
+      context,
     ),
     arrayMethodOwned: isArrayMethodOwnedExpressionSite(expression, context),
     helperBoundaryKind: getHelperBoundaryKind(expression, context),
     callRootKind: ts.isCallExpression(expression)
       ? classifyCallExpressionRoot(expression, context, analyze)
       : undefined,
-    syntheticComputeOwned: context.isSyntheticComputeOwnedNode(expression),
-    deferredJsxArrayMethod: containerKind === "jsx-expression" &&
-      isDeferredJsxArrayMethodExpression(expression, context, analyze),
-    controlFlowRewriteRoot: isControlFlowRewriteExpression(expression),
   };
+}
+
+export function classifyExpressionSiteCallRootPolicy(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): CallRootPolicyDecision {
+  return classifyCallRootPolicy(
+    expression,
+    getExpressionSiteCallRootPolicyInfo(expression, context, analyze),
+    context,
+  );
 }
 
 export function classifyJsxExpressionSiteRoute(
@@ -619,13 +647,13 @@ export function classifyJsxExpressionSiteRoute(
     allowDeferredRootOwner?: boolean;
   },
 ): JsxExpressionSiteRoute {
-  const allowDeferredRootOwner = options?.allowDeferredRootOwner ?? false;
   const siteInfo = getExpressionSitePolicyInfo(
     expression,
     "jsx-expression",
     context,
     analyze,
   );
+  const allowDeferredRootOwner = options?.allowDeferredRootOwner ?? false;
 
   if (!siteInfo.hasAuthoredSourceSite) {
     return { route: "skip", reason: "no-authored-source-site" };
@@ -742,14 +770,12 @@ export function classifyUnsupportedExpressionSiteCallRoot(
     return undefined;
   }
 
-  const siteInfo = getExpressionSitePolicyInfo(
+  const decision = classifyExpressionSiteCallRootPolicy(
     expression,
-    containerKind,
     context,
     analyze,
   );
-
-  return classifyUnsupportedCallRoot(expression, siteInfo, context);
+  return decision.kind === "unsupported" ? decision.unsupportedKind : undefined;
 }
 
 function hasPatternExpressionSitePreconditions(
@@ -761,18 +787,14 @@ function hasPatternExpressionSitePreconditions(
     !siteInfo.deferredJsxArrayMethod;
 }
 
-export function canRewriteExpressionSite(
+function canRewriteExpressionSiteWithPolicyInfo(
   expression: ts.Expression,
   containerKind: ExpressionContainerKind,
+  siteInfo: ExpressionSitePolicyInfo,
+  analysis: ReturnType<AnalyzeFn>,
   context: TransformationContext,
   analyze: AnalyzeFn,
 ): boolean {
-  const siteInfo = getExpressionSitePolicyInfo(
-    expression,
-    containerKind,
-    context,
-    analyze,
-  );
   if (!hasPatternExpressionSitePreconditions(siteInfo)) {
     return false;
   }
@@ -827,7 +849,6 @@ export function canRewriteExpressionSite(
     return false;
   }
 
-  const analysis = analyze(expression);
   return analysis.requiresRewrite ||
     isOptionalAccessExpression(expression) ||
     isLogicalBinaryExpression(expression) ||
@@ -836,6 +857,28 @@ export function canRewriteExpressionSite(
       siteInfo.controlFlowRewriteRoot &&
       analysis.containsOpaqueRef
     );
+}
+
+export function canRewriteExpressionSite(
+  expression: ts.Expression,
+  containerKind: ExpressionContainerKind,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  const siteInfo = getExpressionSitePolicyInfo(
+    expression,
+    containerKind,
+    context,
+    analyze,
+  );
+  return canRewriteExpressionSiteWithPolicyInfo(
+    expression,
+    containerKind,
+    siteInfo,
+    analyze(expression),
+    context,
+    analyze,
+  );
 }
 
 function canDeferExpressionSiteToHelperBoundary(
@@ -932,7 +975,14 @@ export function findLowerableExpressionSite(
         );
         const analysis = analyze(current);
         if (
-          canRewriteExpressionSite(current, containerKind, context, analyze) ||
+          canRewriteExpressionSiteWithPolicyInfo(
+            current,
+            containerKind,
+            siteInfo,
+            analysis,
+            context,
+            analyze,
+          ) ||
           canDeferExpressionSiteToHelperBoundary(siteInfo, analysis)
         ) {
           return {
