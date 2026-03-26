@@ -6,6 +6,13 @@ import {
 } from "./runtime-module-policy.ts";
 import { verifyCompiledBundleModuleFactoriesWithParser } from "./compiled-bundle-verifier.ts";
 import { ModuleVerificationError } from "./module-verification-error.ts";
+import {
+  isTrustedSnapshotHelperName,
+  SAFE_GLOBAL_IDENTIFIERS,
+  TOP_LEVEL_CALL_RESULT_ERROR,
+  TRUSTED_BUILDERS,
+  TRUSTED_DATA_HELPERS,
+} from "./policy.ts";
 
 export { ModuleVerificationError } from "./module-verification-error.ts";
 
@@ -21,61 +28,6 @@ interface BindingInfo {
   hardeningHelper?: boolean;
 }
 
-const TRUSTED_BUILDERS = new Set([
-  "action",
-  "computed",
-  "derive",
-  "handler",
-  "lift",
-  "pattern",
-]);
-const TRUSTED_DATA_HELPERS = new Set([
-  "schema",
-  "__ct_data",
-  "nonPrivateRandom",
-  "safeDateNow",
-]);
-const SAFE_GLOBAL_IDENTIFIERS = new Set([
-  "Array",
-  "BigInt",
-  "Boolean",
-  "Date",
-  "Error",
-  "Headers",
-  "Infinity",
-  "JSON",
-  "Map",
-  "Math",
-  "NaN",
-  "Number",
-  "Object",
-  "Promise",
-  "Request",
-  "RegExp",
-  "Response",
-  "Set",
-  "String",
-  "Symbol",
-  "TextDecoder",
-  "TextEncoder",
-  "Uint8Array",
-  "URL",
-  "URLSearchParams",
-  "atob",
-  "btoa",
-  "console",
-  "decodeURIComponent",
-  "encodeURIComponent",
-  "fetch",
-  "globalThis",
-  "isFinite",
-  "isNaN",
-  "parseFloat",
-  "parseInt",
-  "Promise",
-  "structuredClone",
-  "undefined",
-]);
 const CT_DATA_GLOBAL_CALLS = new Set([
   "BigInt",
   "Boolean",
@@ -592,11 +544,11 @@ function classifyCallExpression(
   }
 
   if (isLocalCallableExpression(expression.expression, env)) {
-    verifyLocalTopLevelCall(expression, sourceFile, env);
-    return {
-      kind: "data",
-      captureSafe: false,
-    };
+    throw verificationError(
+      sourceFile,
+      expression,
+      TOP_LEVEL_CALL_RESULT_ERROR,
+    );
   }
 
   throw verificationError(
@@ -680,16 +632,6 @@ function verifyCtDataCall(
     );
   }
   verifyCtDataExpression(expression.arguments[0], sourceFile, env, new Set());
-}
-
-function verifyLocalTopLevelCall(
-  expression: ts.CallExpression,
-  sourceFile: ts.SourceFile,
-  env: Map<string, BindingInfo>,
-): void {
-  for (const argument of expression.arguments) {
-    verifyTrustedValueExpression(argument, sourceFile, env);
-  }
 }
 
 function verifyTrustedBuilderCall(
@@ -2385,12 +2327,6 @@ function isAllowedCtDataProxy(expression: ts.NewExpression): boolean {
 function isAllowedCtDataEphemeralCall(expression: ts.CallExpression): boolean {
   return ts.isIdentifier(expression.expression) &&
     expression.expression.text === "Symbol";
-}
-
-function isTrustedSnapshotHelperName(
-  name: string | undefined,
-): name is "nonPrivateRandom" | "safeDateNow" {
-  return name === "nonPrivateRandom" || name === "safeDateNow";
 }
 
 function verifyTrustedSnapshotHelperCall(

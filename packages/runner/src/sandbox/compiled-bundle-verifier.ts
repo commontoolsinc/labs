@@ -19,6 +19,12 @@ import {
   isAllowedCompiledDependencySpecifier,
   isRuntimeModuleIdentifier,
 } from "./runtime-module-policy.ts";
+import {
+  SAFE_GLOBAL_IDENTIFIERS,
+  TOP_LEVEL_CALL_RESULT_ERROR,
+  TRUSTED_BUILDERS,
+  TRUSTED_DATA_HELPERS,
+} from "./policy.ts";
 
 type BindingKind = "builder" | "data" | "function" | "import" | "unknown";
 
@@ -30,22 +36,6 @@ interface BindingInfo {
   captureSafe?: boolean;
   functionRange?: { start: number; end: number };
 }
-
-const TRUSTED_BUILDERS = new Set([
-  "action",
-  "computed",
-  "derive",
-  "handler",
-  "lift",
-  "pattern",
-]);
-
-const TRUSTED_DATA_HELPERS = new Set([
-  "__ct_data",
-  "nonPrivateRandom",
-  "safeDateNow",
-  "schema",
-]);
 
 const CANONICAL_HARDENING_HELPER = stripJsTrivia(
   `function __ctHardenFn(fn) {
@@ -59,46 +49,6 @@ const CANONICAL_HARDENING_HELPER = stripJsTrivia(
 );
 
 const SIMPLE_IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
-const SAFE_GLOBAL_IDENTIFIERS = new Set([
-  "Array",
-  "BigInt",
-  "Boolean",
-  "Date",
-  "Error",
-  "Headers",
-  "Infinity",
-  "JSON",
-  "Map",
-  "Math",
-  "NaN",
-  "Number",
-  "Object",
-  "Promise",
-  "Request",
-  "RegExp",
-  "Response",
-  "Set",
-  "String",
-  "Symbol",
-  "TextDecoder",
-  "TextEncoder",
-  "Uint8Array",
-  "URL",
-  "URLSearchParams",
-  "atob",
-  "btoa",
-  "console",
-  "decodeURIComponent",
-  "encodeURIComponent",
-  "fetch",
-  "globalThis",
-  "isFinite",
-  "isNaN",
-  "parseFloat",
-  "parseInt",
-  "structuredClone",
-  "undefined",
-]);
 const RESERVED_IDENTIFIERS = new Set([
   "async",
   "await",
@@ -543,11 +493,12 @@ function classifyExpressionText(
     }
 
     if (isLocalCallableExpression(normalizedCallee, env)) {
-      verifyLocalTopLevelCall(source, filename, call.args, env);
-      return {
-        kind: "data",
-        captureSafe: false,
-      };
+      throw verificationErrorAt(
+        source,
+        filename,
+        call.start,
+        TOP_LEVEL_CALL_RESULT_ERROR,
+      );
     }
 
     throw verificationErrorAt(
@@ -728,23 +679,6 @@ function callbackIndexesForBuilder(
       return args.length >= 4 ? [3] : args.length >= 2 ? [1] : [];
     default:
       return [];
-  }
-}
-
-function verifyLocalTopLevelCall(
-  source: string,
-  filename: string,
-  args: Array<{ start: number; end: number }>,
-  env: Map<string, BindingInfo>,
-): void {
-  for (const argument of args) {
-    verifyTrustedValueExpression(
-      source,
-      filename,
-      argument.start,
-      argument.end,
-      env,
-    );
   }
 }
 

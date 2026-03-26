@@ -280,6 +280,25 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("rejects raw top-level helper calls without __ct_data()", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    function build() {
+      return { count: 1 };
+    }
+    exports.default = build();
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Top-level call results must be wrapped in __ct_data() in SES mode",
+    );
+  });
+
   it("rejects direct authored require() calls in compiled factories", () => {
     const bundle = `
 ((runtimeDeps = {}) => {

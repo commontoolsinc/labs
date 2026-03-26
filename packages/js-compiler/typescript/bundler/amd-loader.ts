@@ -73,6 +73,16 @@ export function getAMDLoader() {
       throw new Error("Authored AMD require() is unavailable in SES mode");
     }
 
+    private freezeResolvedExports<T>(value: T): T {
+      if (
+        value !== null &&
+        (typeof value === "object" || typeof value === "function")
+      ) {
+        Object.freeze(value);
+      }
+      return value;
+    }
+
     private resolveModule(id: string): any {
       const module = this.modules.get(id);
       if (!module) {
@@ -107,6 +117,7 @@ export function getAMDLoader() {
           module.exports = resolvedDeps[1];
         }
 
+        module.exports = this.freezeResolvedExports(module.exports);
         module.resolved = true;
         return module.exports;
       } finally {

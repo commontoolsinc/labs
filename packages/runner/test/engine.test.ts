@@ -58,8 +58,12 @@ describe("Engine.compile()", () => {
         },
         {
           name: "/main.tsx",
-          contents:
-            "import { double } from './utils.ts'; export default double(21);",
+          contents: [
+            "import { double } from './utils.ts';",
+            "export default function run() {",
+            "  return double(21);",
+            "}",
+          ].join("\n"),
         },
       ],
     };
@@ -301,8 +305,12 @@ describe("Engine.evaluate()", () => {
         },
         {
           name: "/main.tsx",
-          contents:
-            "import { double } from './utils.ts'; export default double(21);",
+          contents: [
+            "import { double } from './utils.ts';",
+            "export default function run() {",
+            "  return double(21);",
+            "}",
+          ].join("\n"),
         },
       ],
     };
@@ -311,7 +319,7 @@ describe("Engine.evaluate()", () => {
     const result = await engine.evaluate(id, jsScript, program.files);
 
     expect(result.main).toBeDefined();
-    expect(result.main!["default"]).toBe(42);
+    expect(result.main!["default"]()).toBe(42);
     expect(result.exportMap).toBeDefined();
 
     // exportMap should include exports from source files
@@ -325,6 +333,37 @@ describe("Engine.evaluate()", () => {
     const utilExports = result.exportMap![utilsKey!];
     expect(typeof utilExports["double"]).toBe("function");
     expect(typeof utilExports["triple"]).toBe("function");
+  });
+
+  it("freezes authored local-module namespace exports", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/helper.ts",
+          contents: "export const value = 1;",
+        },
+        {
+          name: "/main.ts",
+          contents: [
+            "import * as helper from './helper.ts';",
+            "export default function probe() {",
+            "  try {",
+            "    (helper as typeof helper & { state?: number }).state = 1;",
+            '    return "allowed";',
+            "  } catch (error) {",
+            "    return (error as Error).name;",
+            "  }",
+            "}",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main?.default()).toBe("TypeError");
   });
 
   it("allows top-level schema() without CTS because it is a runtime helper", async () => {
@@ -399,6 +438,27 @@ describe("Engine.evaluate()", () => {
     };
 
     await expect(engine.compile(program)).rejects.toThrow();
+  });
+
+  it("rejects raw top-level helper calls without __ct_data()", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "function build() {",
+            "  return { count: 1 };",
+            "}",
+            "export default build();",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    await expect(engine.compile(program)).rejects.toThrow(
+      "Top-level call results must be wrapped in __ct_data() in SES mode",
+    );
   });
 
   it("throws when handler() relies on CTS inference without CTS", async () => {

@@ -233,6 +233,27 @@ describe("verifyProgramModuleScope()", () => {
     expect(() => verifyProgramModuleScope(program)).toThrow();
   });
 
+  it("rejects raw top-level helper calls without __ct_data()", () => {
+    const program: Program = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "function build() {",
+            "  return { count: 1 };",
+            "}",
+            "export default build();",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).toThrow(
+      "Top-level call results must be wrapped in __ct_data() in SES mode",
+    );
+  });
+
   it("rejects fragment mutation escape hatches at module scope", () => {
     const program: Program = {
       main: "/main.tsx",
