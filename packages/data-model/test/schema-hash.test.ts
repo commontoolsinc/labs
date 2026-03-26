@@ -303,34 +303,70 @@ describe("schema-hash dispatch", () => {
   });
 
   describe("findInternedSchema()", () => {
-    it("finds a previously interned schema by FabricHash", () => {
-      const sah = internSchema({ type: "array", items: { type: "string" } }, true);
-      const found = findInternedSchema(sah.hash);
-      assertStrictEquals(found, sah);
+    it("defaults to `wantSchemaAndHash = false`", () => {
+      const hash = internSchema({}, true).hash;
+      const result = findInternedSchema(hash);
+      assert(result !== undefined);
+      assert(!(result instanceof SchemaAndHash));
     });
 
-    it("finds a previously interned schema by hash string", () => {
-      const sah = internSchema(
-        {
-          type: "object",
-          properties: { z: { type: "boolean" } },
-        },
-        true,
-      );
-      const found = findInternedSchema(sah.hashString);
-      assertStrictEquals(found, sah);
-    });
+    for (const wantSah of [false, true]) {
+      const callFind = (hash: FabricHash | string) => {
+        const result = findInternedSchema(hash, wantSah);
 
-    it("returns undefined for unknown hash", () => {
-      const unknown = new FabricHash(new Uint8Array(32), "fid1");
-      assertStrictEquals(findInternedSchema(unknown), undefined);
-    });
+        if (wantSah && (result !== undefined)) {
+          assert(result instanceof SchemaAndHash);
+          assert(result.hash instanceof FabricHash);
+        }
 
-    it("finds interned boolean schemas", () => {
-      const sahTrue = internSchema(true, true);
-      const sahFalse = internSchema(false, true);
-      assertStrictEquals(findInternedSchema(sahTrue.hash), sahTrue);
-      assertStrictEquals(findInternedSchema(sahFalse.hash), sahFalse);
-    });
+        return result;
+      }
+
+      const expectSame = (
+        got: JSONSchema | SchemaAndHash | undefined,
+        expectedSah: SchemaAndHash,
+      ) => {
+        if (wantSah) {
+          assertStrictEquals(got, expectedSah);
+        } else {
+          assertStrictEquals(got, expectedSah.schema);
+        }
+      };
+
+      describe(`with \`wantSchemaAndHash = ${wantSah}\``, () => {
+        it("finds a previously interned schema by FabricHash", () => {
+          const sah = internSchema({ type: "array", items: { type: "string" } }, true);
+          const found = callFind(sah.hash);
+          expectSame(found, sah);
+        });
+
+        it("finds a previously interned schema by hash string", () => {
+          const sah = internSchema(
+            {
+              type: "object",
+              properties: { z: { type: "boolean" } },
+            },
+            true,
+          );
+          const found = callFind(sah.hashString);
+          expectSame(found, sah);
+        });
+
+        it("returns undefined for unknown hash", () => {
+          const unknown = new FabricHash(new Uint8Array(32), "fid1");
+          const found = callFind(unknown);
+          assertStrictEquals(found, undefined);
+        });
+
+        it("finds interned boolean schemas", () => {
+          const sahTrue = internSchema(true, true);
+          const sahFalse = internSchema(false, true);
+          const foundTrue = callFind(sahTrue.hash);
+          const foundFalse = callFind(sahFalse.hash);
+          expectSame(foundTrue, sahTrue);
+          expectSame(foundFalse, sahFalse);
+        });
+      });
+    }
   });
 });
