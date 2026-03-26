@@ -1,7 +1,7 @@
 import ts from "typescript";
 import type {
-  JSONSchemaMutable,
   JSONSchemaMutableOrBoolean,
+  JSONSchemaObjMutable,
 } from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
@@ -14,7 +14,7 @@ export class ArrayFormatter implements TypeFormatter {
     return !!getArrayElementInfo(type, context.typeChecker, context.typeNode);
   }
 
-  formatType(type: ts.Type, context: GenerationContext): JSONSchemaMutable {
+  formatType(type: ts.Type, context: GenerationContext): JSONSchemaObjMutable {
     // Check for array items override (propagated from wrapper types for array-property-only access)
     // This allows patterns like `allPieces.length` to generate `items: { not: true, asCell/asOpaque: true }`
     if (context.arrayItemsOverride !== undefined) {

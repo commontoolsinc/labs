@@ -7,8 +7,8 @@ import {
 } from "../typescript/cell-brand.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import type {
-  JSONSchemaMutable,
   JSONSchemaMutableOrBoolean,
+  JSONSchemaObjMutable,
 } from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
@@ -147,7 +147,7 @@ export class CommonToolsFormatter implements TypeFormatter {
           if (typeof valueSchema === "boolean") {
             return (valueSchema === false
               ? { not: true, default: defaultValue }
-              : { default: defaultValue }) as JSONSchemaMutable;
+              : { default: defaultValue }) as JSONSchemaObjMutable;
           }
           (valueSchema as Record<string, unknown>).default = defaultValue;
         }
@@ -268,7 +268,7 @@ export class CommonToolsFormatter implements TypeFormatter {
         return this.applyWrapperSemantics(innerSchema, "Stream");
       }
       const { asCell: _drop, ...rest } = innerSchema as Record<string, unknown>;
-      return this.applyWrapperSemantics(rest as JSONSchemaMutable, "Stream");
+      return this.applyWrapperSemantics(rest as JSONSchemaObjMutable, "Stream");
     }
 
     if (wrapperKind === "Cell") {
@@ -371,7 +371,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       if (hint?.items === false) {
         isArrayPropertyOnlyAccess = true;
         // Build items override with object stub and the appropriate wrapper semantic
-        const itemsOverride: JSONSchemaMutable = { type: "unknown" };
+        const itemsOverride: JSONSchemaObjMutable = { type: "unknown" };
         if (wrapperKind === "Cell") {
           itemsOverride.asCell = true;
         }
@@ -398,7 +398,7 @@ export class CommonToolsFormatter implements TypeFormatter {
         return this.applyWrapperSemantics(innerSchema, "Stream");
       }
       const { asCell: _drop, ...rest } = innerSchema as Record<string, unknown>;
-      return this.applyWrapperSemantics(rest as JSONSchemaMutable, "Stream");
+      return this.applyWrapperSemantics(rest as JSONSchemaObjMutable, "Stream");
     }
 
     // Cell<T>: disallow Cell<Stream<T>> to avoid ambiguous semantics
@@ -661,7 +661,7 @@ export class CommonToolsFormatter implements TypeFormatter {
         // For false: { not: true, default: value } (no value is valid)
         return (valueSchema === false
           ? { not: true, default: defaultValue }
-          : { default: defaultValue }) as JSONSchemaMutable;
+          : { default: defaultValue }) as JSONSchemaObjMutable;
       }
       (valueSchema as any).default = defaultValue;
     }

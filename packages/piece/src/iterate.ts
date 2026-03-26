@@ -6,7 +6,7 @@ import {
   isCell,
   isStream,
   type JSONSchema,
-  type JSONSchemaMutable,
+  type JSONSchemaObjMutable,
   type MemorySpace,
   type PatternMeta,
   type Runtime,
@@ -333,9 +333,9 @@ async function singlePhaseCodeGeneration(
 
   // NOTE(ja): we put the result schema in the argument schema
   // as a hack to work around iframes not supporting results schemas
-  const schema: JSONSchemaMutable = {
+  const schema: JSONSchemaObjMutable = {
     ...(isObject(existingSchema)
-      ? (structuredClone(existingSchema) as JSONSchemaMutable)
+      ? (structuredClone(existingSchema) as JSONSchemaObjMutable)
       : {}),
     title: title || "missing",
     description,
@@ -361,7 +361,7 @@ async function singlePhaseCodeGeneration(
       } else {
         schema.properties![key] = structuredClone(
           props[key],
-        ) as JSONSchemaMutable;
+        ) as JSONSchemaObjMutable;
       }
     });
   }
@@ -431,9 +431,9 @@ async function twoPhaseCodeGeneration(
 
   // NOTE(ja): we put the result schema in the argument schema
   // as a hack to work around iframes not supporting results schemas
-  const schema: JSONSchemaMutable = {
+  const schema: JSONSchemaObjMutable = {
     ...(isObject(existingSchema)
-      ? (structuredClone(existingSchema) as JSONSchemaMutable)
+      ? (structuredClone(existingSchema) as JSONSchemaObjMutable)
       : {}),
     title: title || "missing",
     description,
@@ -459,7 +459,7 @@ async function twoPhaseCodeGeneration(
       } else {
         schema.properties![key] = structuredClone(
           props[key],
-        ) as JSONSchemaMutable;
+        ) as JSONSchemaObjMutable;
       }
     });
   }

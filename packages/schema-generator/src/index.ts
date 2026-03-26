@@ -4,4 +4,4 @@ export { createSchemaTransformerV2 } from "./plugin.ts";
 
 // Public types for API consumers
 export type { SchemaGenerator as ISchemaGenerator } from "./interface.ts";
-export type { JSONSchemaMutable } from "@commontools/api";
+export type { JSONSchemaObjMutable } from "@commontools/api";

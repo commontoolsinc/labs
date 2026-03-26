@@ -1,7 +1,7 @@
 import ts from "typescript";
 import type {
-  JSONSchemaMutable,
   JSONSchemaMutableOrBoolean,
+  JSONSchemaObjMutable,
 } from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
@@ -113,7 +113,7 @@ export class UnionFormatter implements TypeFormatter {
     if (context.widenLiterals && unionOptions.length > 1) {
       unionOptions = this.mergeIdenticalSchemas(unionOptions);
     }
-    const anyOf: JSONSchemaMutable[] = [];
+    const anyOf: JSONSchemaObjMutable[] = [];
     for (const option of unionOptions) {
       // mergePrimitiveSchemaIntoAnyOf mutates anyOf in place; returns true to short-circuit
       if (this.mergePrimitiveSchemaIntoAnyOf(anyOf, option)) {
@@ -169,7 +169,7 @@ export class UnionFormatter implements TypeFormatter {
    * Returns true if the result is the permissive schema (short-circuit the caller).
    */
   private mergePrimitiveSchemaIntoAnyOf(
-    anyOf: JSONSchemaMutable[],
+    anyOf: JSONSchemaObjMutable[],
     cur: JSONSchemaMutableOrBoolean,
   ): boolean {
     if (cur === true) {
@@ -322,7 +322,7 @@ export class UnionFormatter implements TypeFormatter {
     const first = schemas[0]!;
     if (typeof first === "boolean") return first;
 
-    const result: JSONSchemaMutable = {};
+    const result: JSONSchemaObjMutable = {};
 
     // Handle enum -> base type conversion
     if ("enum" in first && first.enum) {

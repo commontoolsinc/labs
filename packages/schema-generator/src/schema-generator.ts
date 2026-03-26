@@ -2,8 +2,8 @@ import ts from "typescript";
 import { isRecord } from "@commontools/utils/types";
 
 import type {
-  JSONSchemaMutable,
   JSONSchemaMutableOrBoolean,
+  JSONSchemaObjMutable,
 } from "@commontools/api";
 import type {
   GenerationContext,
@@ -682,7 +682,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         }
       }
 
-      const schema: JSONSchemaMutable = {
+      const schema: JSONSchemaObjMutable = {
         type: "object",
         properties,
       };
@@ -724,7 +724,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       const filtered = memberSchemas.filter((s) => s !== false);
       if (filtered.length === 0) return false;
       if (filtered.length === 1) return filtered[0]!;
-      return { anyOf: filtered as JSONSchemaMutable[] };
+      return { anyOf: filtered as JSONSchemaObjMutable[] };
     }
 
     // Synthetic TypeReferenceNodes may fail to bind in checker APIs directly.

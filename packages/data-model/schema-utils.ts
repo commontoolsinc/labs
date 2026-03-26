@@ -4,8 +4,8 @@
 
 import type {
   JSONSchema,
-  JSONSchemaMutable,
   JSONSchemaObj,
+  JSONSchemaObjMutable,
 } from "@commontools/api";
 import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { cloneIfNecessary } from "./fabric-value.ts";
@@ -102,21 +102,21 @@ export function toDeepFrozenSchema<T extends JSONSchema>(
 export function cloneSchemaMutable(
   schema: JSONSchema | undefined,
   forceObject: true,
-): JSONSchemaMutable;
+): JSONSchemaObjMutable;
 export function cloneSchemaMutable(
   schema: JSONSchema | undefined,
   forceObject?: false,
-): JSONSchemaMutable | boolean;
+): JSONSchemaObjMutable | boolean;
 export function cloneSchemaMutable(
   schema: JSONSchema | undefined,
   forceObject: boolean = false,
-): JSONSchemaMutable | boolean {
+): JSONSchemaObjMutable | boolean {
   if (schema === undefined) return {};
   if (typeof schema === "boolean") return forceObject ? {} : schema;
   return cloneIfNecessary(schema, {
     frozen: false,
     deep: true,
-  }) as JSONSchemaMutable;
+  }) as JSONSchemaObjMutable;
 }
 
 /**

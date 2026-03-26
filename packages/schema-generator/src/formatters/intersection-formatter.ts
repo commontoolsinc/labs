@@ -1,7 +1,7 @@
 import ts from "typescript";
 import type {
-  JSONSchemaMutable,
   JSONSchemaMutableOrBoolean,
+  JSONSchemaObjMutable,
 } from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
@@ -154,7 +154,7 @@ export class IntersectionFormatter implements TypeFormatter {
     parts: readonly ts.Type[],
     context: GenerationContext,
   ): {
-    schema: JSONSchemaMutable;
+    schema: JSONSchemaObjMutable;
     docTexts: string[];
     documentedSources: string[];
     missingSources: string[];
@@ -219,7 +219,7 @@ export class IntersectionFormatter implements TypeFormatter {
       }
     }
 
-    const result: JSONSchemaMutable = {
+    const result: JSONSchemaObjMutable = {
       type: "object",
       properties: mergedProps,
     };
@@ -233,7 +233,7 @@ export class IntersectionFormatter implements TypeFormatter {
 
   private isObjectSchema(
     schema: JSONSchemaMutableOrBoolean,
-  ): schema is JSONSchemaMutable & { type: "object" } {
+  ): schema is JSONSchemaObjMutable & { type: "object" } {
     return (
       typeof schema === "object" &&
       schema !== null &&
@@ -244,7 +244,7 @@ export class IntersectionFormatter implements TypeFormatter {
   private resolveObjectSchema(
     schema: JSONSchemaMutableOrBoolean,
     context: GenerationContext,
-  ): (JSONSchemaMutable & { type: "object" }) | undefined {
+  ): (JSONSchemaObjMutable & { type: "object" }) | undefined {
     if (this.isObjectSchema(schema)) return schema;
     if (
       typeof schema === "object" &&
@@ -264,12 +264,12 @@ export class IntersectionFormatter implements TypeFormatter {
 
   private applyIntersectionDocs(
     data: {
-      schema: JSONSchemaMutable;
+      schema: JSONSchemaObjMutable;
       docTexts: string[];
       documentedSources: string[];
       missingSources: string[];
     },
-  ): JSONSchemaMutable {
+  ): JSONSchemaObjMutable {
     const { schema, docTexts, documentedSources, missingSources } = data;
     if (!isRecord(schema)) return schema;
 

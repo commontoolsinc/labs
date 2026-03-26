@@ -3,7 +3,7 @@ import { type LegacyAlias } from "../sigil-types.ts";
 import {
   isPattern,
   type JSONSchema,
-  type JSONSchemaMutable,
+  type JSONSchemaObjMutable,
   type JSONSchemaTypes,
   type JSONValue,
   type Module,
@@ -142,8 +142,8 @@ export function createJsonSchema(
   example: any,
   addDefaults = false,
   runtime?: Runtime,
-): JSONSchemaMutable {
-  const seen = new Map<string, JSONSchemaMutable>();
+): JSONSchemaObjMutable {
+  const seen = new Map<string, JSONSchemaObjMutable>();
 
   function analyzeType(value: any): JSONSchema {
     if (isCellLink(value)) {
@@ -161,15 +161,15 @@ export function createJsonSchema(
       if (schema === undefined) {
         // If we find pointing back here, assume an empty schema. This is
         // overwritten below. (TODO(seefeld): This should create `$ref: "#/.."`)
-        seen.set(linkAsStr, {} as JSONSchemaMutable);
+        seen.set(linkAsStr, {} as JSONSchemaObjMutable);
         schema = analyzeType(cell.getRaw());
       }
-      seen.set(linkAsStr, schema as JSONSchemaMutable);
+      seen.set(linkAsStr, schema as JSONSchemaObjMutable);
       return schema;
     }
 
     const type = typeof value;
-    const schema: JSONSchemaMutable = {};
+    const schema: JSONSchemaObjMutable = {};
 
     switch (type) {
       case "object":
@@ -220,7 +220,7 @@ export function createJsonSchema(
     return schema;
   }
 
-  return analyzeType(example) as JSONSchemaMutable;
+  return analyzeType(example) as JSONSchemaObjMutable;
 }
 
 export function moduleToJSON(module: Module) {

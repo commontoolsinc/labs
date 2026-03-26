@@ -1,7 +1,7 @@
 import ts from "typescript";
 import type {
-  JSONSchemaMutable,
   JSONSchemaMutableOrBoolean,
+  JSONSchemaObjMutable,
 } from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import {
@@ -36,7 +36,7 @@ const logger = getLogger("schema-generator.object", {
 function getWrapperSchemaFromCallable(
   type: ts.Type,
   checker: ts.TypeChecker,
-): JSONSchemaMutable | undefined {
+): JSONSchemaObjMutable | undefined {
   const callSignatures = type.getCallSignatures();
   if (callSignatures.length === 0) return undefined;
 
@@ -196,7 +196,7 @@ export class ObjectFormatter implements TypeFormatter {
       properties[propName] = generated;
     }
 
-    const schema: JSONSchemaMutable = { type: "object", properties };
+    const schema: JSONSchemaObjMutable = { type: "object", properties };
 
     // Handle string/number index signatures → additionalProperties with description
     const stringIndex = checker.getIndexTypeOfType(type, ts.IndexKind.String);
@@ -241,7 +241,7 @@ export class ObjectFormatter implements TypeFormatter {
         }
       }
       (schema as Record<string, unknown>).additionalProperties =
-        apSchema as JSONSchemaMutable;
+        apSchema as JSONSchemaObjMutable;
     }
     if (required.length > 0) schema.required = required;
 

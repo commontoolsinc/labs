@@ -1,7 +1,7 @@
 import { hydratePrompt, llmPrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
-import type { JSONSchema, JSONSchemaMutable } from "@commontools/runner";
+import type { JSONSchema, JSONSchemaObjMutable } from "@commontools/runner";
 import { WorkflowForm } from "@commontools/piece";
 import { JSONSchemaObj } from "@commontools/api";
 import { isRecord } from "@commontools/utils/types";
@@ -334,8 +334,8 @@ Based on this goal and the existing schema, please provide a title, description,
   );
 
   // If we have an existing schema, use it; otherwise parse the generated schema
-  let resultSchema: JSONSchemaMutable;
-  let argumentSchema: JSONSchemaMutable;
+  let resultSchema: JSONSchemaObjMutable;
+  let argumentSchema: JSONSchemaObjMutable;
 
   try {
     const resultSchemaJson = parseTagFromResponse(
@@ -475,8 +475,8 @@ Based on this goal and the existing schema, please provide a title, description,
   );
 
   // If we have an existing schema, use it; otherwise parse the generated schema
-  let resultSchema: JSONSchemaMutable;
-  let argumentSchema: JSONSchemaMutable;
+  let resultSchema: JSONSchemaObjMutable;
+  let argumentSchema: JSONSchemaObjMutable;
 
   try {
     const resultSchemaJson = parseTagFromResponse(
