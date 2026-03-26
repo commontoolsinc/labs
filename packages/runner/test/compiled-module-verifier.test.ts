@@ -49,6 +49,28 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts destructured compiled builder callbacks with injected schema args", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const count = (0, commontools_1.schema)({ type: "number" });
+    exports.default = (0, commontools_1.pattern)(({ count: value }) => ({
+      data: { value },
+    }), false, {
+      type: "object",
+      properties: {
+        data: { type: "object" },
+      },
+    });
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("rejects mutable compiled module state", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
@@ -258,28 +280,36 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
-  it("rejects nested closure captures of unsafe top-level state in compiled callbacks", () => {
+  it("rejects direct authored require() calls in compiled factories", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
   define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    const state = (0, commontools_1.schema)({
-      type: "object",
-      properties: {
-        count: { type: "number" }
-      }
-    });
-    exports.default = (0, commontools_1.lift)(() => {
-      const local = 1;
-      return () => state.type + local;
-    });
+    exports.default = require("./dep");
   });
 });
 `;
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Callback captures top-level data binding 'state'",
+      "Authored AMD require() is not allowed in SES mode",
+    );
+  });
+
+  it("rejects top-level IIFEs that try to hide mutable state in compiled factories", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const state = (() => ({ count: 0 }))();
+    exports.default = 42;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Only trusted builder calls, schema(), and canonical function hardening are allowed at module scope in SES mode",
     );
   });
 });
