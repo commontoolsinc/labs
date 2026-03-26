@@ -355,10 +355,11 @@ Deno.test(
   },
 );
 
-Deno.test(
-  "Expression site policy: reactive dynamic JSX element-access roots use the generic owned pre-closure route",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+const ownedOrSkippedJsxRouteCases: JsxRouteCase[] = [
+  {
+    name:
+      "reactive dynamic JSX element-access roots use the generic owned pre-closure route",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -371,31 +372,23 @@ Deno.test(
       const view = pattern((state: any) => (
         <div>{state.items[state.index]}</div>
       ));
-    `);
-
-    const elementAccess = findFirstNode(
-      sourceFile,
-      (node): node is ts.ElementAccessExpression =>
-        ts.isElementAccessExpression(node) &&
-        node.getText(sourceFile) === "state.items[state.index]",
-    );
-
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(
-      classifyJsxExpressionSiteRoute(elementAccess, context, analyze),
-      {
-        route: "owned-pre-closure",
-        owner: "generic-owned-root",
-      },
-    );
+    `,
+    find: (sourceFile) =>
+      findFirstNode(
+        sourceFile,
+        (node): node is ts.ElementAccessExpression =>
+          ts.isElementAccessExpression(node) &&
+          node.getText(sourceFile) === "state.items[state.index]",
+      ),
+    expected: {
+      route: "owned-pre-closure",
+      owner: "generic-owned-root",
+    },
   },
-);
-
-Deno.test(
-  "Expression site policy: non-reactive dynamic JSX element-access roots stay in the residual skip bucket",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "non-reactive dynamic JSX element-access roots stay in the residual skip bucket",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -410,26 +403,80 @@ Deno.test(
         const index = 1;
         return <div>{rows[index]}</div>;
       });
-    `);
-
-    const elementAccess = findFirstNode(
-      sourceFile,
-      (node): node is ts.ElementAccessExpression =>
-        ts.isElementAccessExpression(node) &&
-        node.getText(sourceFile) === "rows[index]",
-    );
-
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(
-      classifyJsxExpressionSiteRoute(elementAccess, context, analyze),
-      {
-        route: "skip",
-        reason: "not-shared-jsx-root-kind",
-      },
-    );
+    `,
+    find: (sourceFile) =>
+      findFirstNode(
+        sourceFile,
+        (node): node is ts.ElementAccessExpression =>
+          ts.isElementAccessExpression(node) &&
+          node.getText(sourceFile) === "rows[index]",
+      ),
+    expected: {
+      route: "skip",
+      reason: "not-shared-jsx-root-kind",
+    },
   },
-);
+  {
+    name:
+      "reactive direct JSX object-literal roots use the generic owned pre-closure route",
+    source: `
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>{{
+          color: state.theme.primary,
+          fontSize: state.theme.size + "px",
+        }}</div>
+      ));
+    `,
+    find: (sourceFile) =>
+      findFirstNode(
+        sourceFile,
+        (node): node is ts.ObjectLiteralExpression =>
+          ts.isObjectLiteralExpression(node) &&
+          node.getText(sourceFile).includes("color: state.theme.primary"),
+      ),
+    expected: {
+      route: "owned-pre-closure",
+      owner: "generic-owned-root",
+    },
+  },
+  {
+    name:
+      "non-reactive direct JSX object-literal roots stay in the residual skip bucket",
+    source: `
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((_state: any) => (
+        <div>{{ color: "red", fontSize: "12px" }}</div>
+      ));
+    `,
+    find: (sourceFile) =>
+      findFirstNode(sourceFile, ts.isObjectLiteralExpression),
+    expected: {
+      route: "skip",
+      reason: "not-shared-jsx-root-kind",
+    },
+  },
+];
+
+for (const testCase of ownedOrSkippedJsxRouteCases) {
+  Deno.test(`Expression site policy: ${testCase.name}`, () => {
+    assertJsxRouteCase(testCase);
+  });
+}
 
 Deno.test(
   "Expression site policy: direct JSX helper-call roots use the generic owned pre-closure route",
@@ -472,79 +519,6 @@ Deno.test(
       {
         route: "owned-pre-closure",
         owner: "generic-owned-root",
-      },
-    );
-  },
-);
-
-Deno.test(
-  "Expression site policy: reactive direct JSX object-literal roots use the generic owned pre-closure route",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
-      declare namespace JSX {
-        interface IntrinsicElements {
-          div: any;
-        }
-      }
-
-      declare function pattern<T>(fn: (state: any) => T): T;
-
-      const view = pattern((state: any) => (
-        <div>{{
-          color: state.theme.primary,
-          fontSize: state.theme.size + "px",
-        }}</div>
-      ));
-    `);
-
-    const objectLiteral = findFirstNode(
-      sourceFile,
-      (node): node is ts.ObjectLiteralExpression =>
-        ts.isObjectLiteralExpression(node) &&
-        node.getText(sourceFile).includes("color: state.theme.primary"),
-    );
-
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(
-      classifyJsxExpressionSiteRoute(objectLiteral, context, analyze),
-      {
-        route: "owned-pre-closure",
-        owner: "generic-owned-root",
-      },
-    );
-  },
-);
-
-Deno.test(
-  "Expression site policy: non-reactive direct JSX object-literal roots stay in the residual skip bucket",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
-      declare namespace JSX {
-        interface IntrinsicElements {
-          div: any;
-        }
-      }
-
-      declare function pattern<T>(fn: (state: any) => T): T;
-
-      const view = pattern((_state: any) => (
-        <div>{{ color: "red", fontSize: "12px" }}</div>
-      ));
-    `);
-
-    const objectLiteral = findFirstNode(
-      sourceFile,
-      ts.isObjectLiteralExpression,
-    );
-
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(
-      classifyJsxExpressionSiteRoute(objectLiteral, context, analyze),
-      {
-        route: "skip",
-        reason: "not-shared-jsx-root-kind",
       },
     );
   },

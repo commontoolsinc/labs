@@ -99,10 +99,6 @@ function transform(context: TransformationContext): ts.SourceFile {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      if (route.route === "skip" && route.reason === "array-method-owned") {
-        return visitEachChildWithJsx(node, visit, context.tsContext);
-      }
-
       return visitEachChildWithJsx(node, visit, context.tsContext);
     }
 
