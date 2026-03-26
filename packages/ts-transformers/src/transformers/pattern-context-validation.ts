@@ -88,7 +88,7 @@ export class PatternContextValidationTransformer extends Transformer {
 
         if (
           (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
-          this.isComputedLikeCallback(node, checker)
+          this.isComputedLikeCallback(node, context, checker)
         ) {
           this.validateLocalReactiveAliasUsage(node, context);
         }
@@ -606,17 +606,15 @@ export class PatternContextValidationTransformer extends Transformer {
 
   private isComputedLikeCallback(
     node: ts.ArrowFunction | ts.FunctionExpression,
+    context: TransformationContext,
     checker: ts.TypeChecker,
   ): boolean {
-    const parent = node.parent;
-    if (!parent || !ts.isCallExpression(parent)) return false;
-    if (!parent.arguments.includes(node)) return false;
-
-    const callKind = detectCallKind(parent, checker);
-    if (!callKind) return false;
-
-    return callKind.kind === "derive" ||
-      (callKind.kind === "builder" && callKind.builderName === "computed");
+    const callbackSupport = classifyCallbackSupport(node, checker, context);
+    return callbackSupport.kind === "supported" &&
+      (
+        callbackSupport.supportedKind === "derive" ||
+        callbackSupport.supportedKind === "computed-builder"
+      );
   }
 
   /**
@@ -700,8 +698,14 @@ export class PatternContextValidationTransformer extends Transformer {
     checker: ts.TypeChecker,
   ): void {
     // Skip if this function is passed to patternTool()
-    if (this.isPatternToolArgument(func, checker)) {
-      return;
+    if (!ts.isFunctionDeclaration(func)) {
+      const callbackSupport = classifyCallbackSupport(func, checker, context);
+      if (
+        callbackSupport.kind === "supported" &&
+        callbackSupport.supportedKind === "pattern-tool"
+      ) {
+        return;
+      }
     }
 
     // Walk the function body looking for reactive operations
@@ -781,28 +785,6 @@ export class PatternContextValidationTransformer extends Transformer {
     if (func.body) {
       visitBody(func.body);
     }
-  }
-
-  /**
-   * Checks if a function is passed directly as an argument to patternTool().
-   * If so, the patternTool transformer will handle closure capture.
-   */
-  private isPatternToolArgument(
-    func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
-    checker: ts.TypeChecker,
-  ): boolean {
-    // Function declarations can't be passed as arguments
-    if (ts.isFunctionDeclaration(func)) return false;
-
-    const parent = func.parent;
-    if (!parent || !ts.isCallExpression(parent)) return false;
-
-    // Check if this function is the first argument
-    if (parent.arguments[0] !== func) return false;
-
-    // Use detectCallKind for consistent call detection
-    const callKind = detectCallKind(parent, checker);
-    return callKind?.kind === "pattern-tool";
   }
 
   /**
