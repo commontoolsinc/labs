@@ -49,8 +49,8 @@ globalThis.addEventListener("error", (e) => {
   e.preventDefault();
 });
 
-async function main() {
-  const args = parseArgs(Deno.args, {
+export async function main(argv: string[] = Deno.args) {
+  const args = parseArgs(argv, {
     string: ["api-url", "space", "identity", "exec-cli"],
     boolean: ["debug"],
     collect: ["space"],
@@ -1454,4 +1454,6 @@ async function main() {
   console.log("Cleaned up.");
 }
 
-main();
+if (import.meta.main) {
+  main();
+}

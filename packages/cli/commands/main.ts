@@ -82,9 +82,8 @@ export const main = new Command()
       .useRawArgs()
       // deno-lint-ignore no-explicit-any
       .action(async (...rawArgs: any[]) => {
-        // Override Deno.args so the fuse module sees the raw args (mountpoint, flags, etc.)
-        Object.defineProperty(Deno, "args", { value: rawArgs });
-        await import("@commontools/fuse");
+        const { main } = await import("@commontools/fuse");
+        await main(rawArgs as string[]);
       }),
   )
   .command("id", identity)
