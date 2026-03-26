@@ -382,6 +382,11 @@ export class Runner {
     this.discoverAndCacheFunctions(pattern, new Set());
 
     this.locallyPreparedResults.add(key);
+    tx.addCommitCallback((_tx, result) => {
+      if (result.error) {
+        this.locallyPreparedResults.delete(key);
+      }
+    });
     return { resultCell, pattern, processCell, needsStart: true };
   }
 

@@ -42,7 +42,9 @@ describe("Pattern Runner - Regressions", () => {
   });
 
   afterEach(async () => {
-    await tx.commit();
+    if (tx?.status().status === "ready") {
+      await tx.commit();
+    }
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -121,6 +123,8 @@ describe("Pattern Runner - Regressions", () => {
 
   it("keeps Notebook NAME current after createNote without an extra timer turn in v2", async () => {
     await tx.commit();
+    await runtime.dispose();
+    await storageManager.close();
     storageManager = StorageManager.emulate({
       as: signer,
       memoryVersion: "v2",
@@ -197,5 +201,51 @@ describe("Pattern Runner - Regressions", () => {
 
     expect(result.key("noteCount").get()).toBe(1);
     expect(result.key(NAME).get()).toBe("📓 Test Notebook (1)");
+  });
+
+  it("clears locally prepared results when a run transaction fails to commit in v2", async () => {
+    await tx.commit();
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+    });
+    tx = runtime.edit();
+
+    const echoPattern = pattern<{ title: string }>(({ title }) => ({ title }));
+    const resultCell = runtime.getCell<{ title: string }>(
+      space,
+      "ct-locally-prepared-results-rollback",
+      undefined,
+      tx,
+    );
+
+    const runner = runtime.runner as any;
+    runner.setupInternal(tx, echoPattern, { title: "draft" }, resultCell);
+    const key = runner.getDocKey(resultCell);
+    expect(runner.locallyPreparedResults.has(key)).toBe(true);
+
+    const originalCommit = tx.tx.commit.bind(tx.tx);
+    (tx.tx as any).commit = () =>
+      Promise.resolve({
+        error: {
+          name: "ConflictError",
+          message: "synthetic conflict",
+        },
+      });
+
+    const result = await tx.commit();
+    expect(result.error?.name).toBe("ConflictError");
+    expect(runner.locallyPreparedResults.has(key)).toBe(false);
+
+    (tx.tx as any).commit = originalCommit;
+    tx = runtime.edit();
   });
 });

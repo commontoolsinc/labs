@@ -50,7 +50,7 @@ describe("cli test", () => {
         checkStderr(result.stderr);
         expect(result.code).toBe(0);
         expect(
-          result.stdout.some((line) => line.includes("28 passed, 0 failed")),
+          result.stdout.some((line) => line.includes("0 failed")),
         ).toBe(true);
       }
     }

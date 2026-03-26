@@ -387,12 +387,22 @@ class Connection {
     space: string,
     dirtyIds?: ReadonlySet<string>,
   ): Promise<void> {
+    if (this.#closed) {
+      return;
+    }
+
     for (const sessionId of this.#sessionIds) {
+      if (this.#closed) {
+        return;
+      }
       const effect = await this.server.syncSessionForConnection(
         space,
         sessionId,
         dirtyIds,
       );
+      if (this.#closed) {
+        return;
+      }
       if (effect !== null) {
         this.send(effect);
       }

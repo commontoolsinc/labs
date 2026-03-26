@@ -514,6 +514,63 @@ Deno.test("memory v2 server does not emit delayed exact-reconcile removes after 
   }
 });
 
+Deno.test("memory v2 server does not send watch effects after a connection closes mid-refresh", async () => {
+  const server = createServer("memory://memory-v2-server-close-during-refresh");
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-server-close-during-refresh";
+  let releaseRefresh!: () => void;
+  const waitForRefresh = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  let sessionId = "";
+
+  try {
+    await connection.receive(JSON.stringify({
+      type: "hello",
+      protocol: MEMORY_V2_PROTOCOL,
+    }));
+    shiftMessage(messages);
+
+    await connection.receive(JSON.stringify({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+    }));
+    sessionId = assertResponse<{ sessionId: string }>(
+      shiftMessage(messages),
+    ).ok!.sessionId;
+
+    server.syncSessionForConnection = async (...args) => {
+      await waitForRefresh;
+      return {
+        type: "session/effect",
+        space: args[0],
+        sessionId,
+        effect: {
+          type: "sync",
+          serverSeq: 0,
+          fromSeq: 0,
+          toSeq: 0,
+          upserts: [],
+          removes: [],
+        },
+      };
+    };
+
+    const refreshPromise = connection.refreshDirty(space);
+    await tick();
+    connection.close();
+    releaseRefresh();
+    await refreshPromise;
+
+    assertEquals(messages, []);
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 server refreshes watched docs without rerunning full graph queries", async () => {
   const server = createServer("memory://memory-v2-server-incremental-watch");
   const messages: ServerMessage[] = [];

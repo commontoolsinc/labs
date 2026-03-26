@@ -1,4 +1,9 @@
-import { assert, assertEquals, assertExists } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertExists,
+  assertStrictEquals,
+} from "@std/assert";
 import { toFileUrl } from "@std/path";
 import {
   applyCommit,
@@ -82,7 +87,7 @@ Deno.test("memory v2 query retains a persistent memo for incremental watch growt
       }],
     });
 
-    assertEquals(tracked.state.memo, memo);
+    assertStrictEquals(tracked.state.memo, memo);
     assert(tracked.state.memo.size >= initialMemoSize);
     assert(
       [...extended.updates.values()].some((entity) =>
@@ -222,7 +227,7 @@ Deno.test("memory v2 query uses a fresh memo for write-triggered refreshes", asy
       new Set([fixture.rootId]),
     );
     assertExists(refreshed);
-    assertEquals(tracked.state.memo, growthMemo);
+    assertStrictEquals(tracked.state.memo, growthMemo);
     assertEquals(tracked.state.memo.size, growthMemoSize);
 
     assertEquals(
