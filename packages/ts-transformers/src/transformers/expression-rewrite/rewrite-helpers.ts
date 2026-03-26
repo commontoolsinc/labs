@@ -30,7 +30,7 @@ function originatesFromIgnoredParameter(
       if (parameter.symbol === symbol || parameter.name === symbolName) {
         if (
           parameter.declaration &&
-          getOpaqueCallKindForParameter(parameter.declaration, checker, context)
+          isOpaqueCallParameter(parameter.declaration, checker, context)
         ) {
           return false;
         }
@@ -51,7 +51,7 @@ function originatesFromIgnoredParameter(
           }
           if (
             parameter.declaration &&
-            getOpaqueCallKindForParameter(
+            isOpaqueCallParameter(
               parameter.declaration,
               checker,
               context,
@@ -79,26 +79,26 @@ function originatesFromIgnoredParameter(
   return inner(expression);
 }
 
-function getOpaqueCallKindForParameter(
+function isOpaqueCallParameter(
   declaration: ts.ParameterDeclaration,
   checker: ts.TypeChecker,
   context?: TransformationContext,
-): "builder" | "array-method" | undefined {
+): boolean {
   let functionNode: ts.Node | undefined = declaration.parent;
   while (functionNode && !ts.isFunctionLike(functionNode)) {
     functionNode = functionNode.parent;
   }
-  if (!functionNode) return undefined;
+  if (!functionNode) return false;
 
   let candidate: ts.Node | undefined = functionNode.parent;
   while (candidate && !ts.isCallExpression(candidate)) {
     candidate = candidate.parent;
   }
-  if (!candidate) return undefined;
+  if (!candidate) return false;
 
   const callKind = detectCallKind(candidate, checker);
   if (callKind?.kind === "builder") {
-    return "builder";
+    return true;
   }
   const arrayMethodCallSite = classifyArrayMethodCallSite(candidate, checker);
   if (arrayMethodCallSite?.ownership === "reactive") {
@@ -109,12 +109,12 @@ function getOpaqueCallKindForParameter(
         context,
       );
       if (reactiveContext.kind !== "pattern") {
-        return undefined;
+        return false;
       }
     }
-    return "array-method";
+    return true;
   }
-  return undefined;
+  return false;
 }
 
 export function filterRelevantDataFlows(
