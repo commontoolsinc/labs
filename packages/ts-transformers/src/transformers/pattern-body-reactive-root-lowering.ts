@@ -2,7 +2,6 @@ import ts from "typescript";
 import {
   classifyReactiveContext,
   createDataFlowAnalyzer,
-  detectCallKind,
   getCapabilitySummaryCallbackArgument,
   getTypeAtLocationWithFallback,
   isWildcardTraversalCall,
@@ -189,7 +188,7 @@ export function rewritePatternBody(
     }
   };
 
-  const callTargets = new WeakSet<ts.Node>();
+  const callTargetParents = new WeakMap<ts.Node, ts.CallExpression>();
 
   const getTrackedOpaqueAccessInfo = (
     expression: ts.Expression,
@@ -205,13 +204,13 @@ export function rewritePatternBody(
       : undefined;
   };
 
-  const findDynamicOpaqueAccess = (
+  const hasDynamicOpaqueAccess = (
     expression: ts.Expression,
-  ): ts.Expression | undefined => {
-    let culprit: ts.Expression | undefined;
+  ): boolean => {
+    let found = false;
 
     const visit = (node: ts.Node): void => {
-      if (culprit) return;
+      if (found) return;
       if (
         (ts.isPropertyAccessExpression(node) ||
           ts.isElementAccessExpression(node)) &&
@@ -219,7 +218,7 @@ export function rewritePatternBody(
       ) {
         const info = getTrackedOpaqueAccessInfo(node);
         if (info?.dynamic) {
-          culprit = node;
+          found = true;
           return;
         }
       }
@@ -227,7 +226,48 @@ export function rewritePatternBody(
     };
 
     visit(expression);
-    return culprit;
+    return found;
+  };
+
+  const getRelevantDataFlowsForExpression = (
+    expression: ts.Expression,
+  ): ReturnType<typeof normalizeDataFlows>["all"] | undefined => {
+    const analysis = analyze(expression);
+    const relevantDataFlows = filterRelevantDataFlows(
+      normalizeDataFlows(analysis.graph, analysis.dataFlows).all,
+      analysis,
+      context,
+    );
+    return relevantDataFlows.length > 0 ? relevantDataFlows : undefined;
+  };
+
+  const reportTrackedOpaqueComputation = (
+    expression: ts.Expression | undefined,
+    diagnosticNode: ts.Node,
+    message: string,
+  ): void => {
+    if (!expression || !getTrackedOpaqueAccessInfo(expression)) {
+      return;
+    }
+
+    reportOnce(diagnosticNode, "computation", message);
+  };
+
+  const registerOpaqueBindingState = (
+    name: ts.BindingName,
+    initializer: ts.Expression | undefined,
+  ): void => {
+    const initializerIsOpaque = !!initializer &&
+      isOpaqueSourceExpression(
+        initializer,
+        activeOpaqueRoots,
+        opaqueRootSymbols,
+        context,
+      );
+    setBindingOpaqueState(name, initializerIsOpaque);
+    if (initializerIsOpaque) {
+      addBindingTargetSymbols(name, opaqueRootSymbols, context.checker);
+    }
   };
 
   const maybeWrapDynamicInitializer = (
@@ -237,17 +277,12 @@ export function rewritePatternBody(
       return undefined;
     }
 
-    if (!findDynamicOpaqueAccess(initializer)) {
+    if (!hasDynamicOpaqueAccess(initializer)) {
       return undefined;
     }
 
-    const analysis = analyze(initializer);
-    const relevantDataFlows = filterRelevantDataFlows(
-      normalizeDataFlows(analysis.graph, analysis.dataFlows).all,
-      analysis,
-      context,
-    );
-    if (relevantDataFlows.length === 0) {
+    const relevantDataFlows = getRelevantDataFlowsForExpression(initializer);
+    if (!relevantDataFlows) {
       return undefined;
     }
 
@@ -288,13 +323,8 @@ export function rewritePatternBody(
       return undefined;
     }
 
-    const analysis = analyze(expression);
-    const relevantDataFlows = filterRelevantDataFlows(
-      normalizeDataFlows(analysis.graph, analysis.dataFlows).all,
-      analysis,
-      context,
-    );
-    if (relevantDataFlows.length === 0) {
+    const relevantDataFlows = getRelevantDataFlowsForExpression(expression);
+    if (!relevantDataFlows) {
       return undefined;
     }
 
@@ -443,7 +473,7 @@ export function rewritePatternBody(
     }
 
     if (ts.isCallExpression(node)) {
-      callTargets.add(node.expression);
+      callTargetParents.set(node.expression, node);
     }
 
     if (
@@ -462,20 +492,10 @@ export function rewritePatternBody(
           node.type,
           rewrittenInitializer,
         );
-        const initializerIsOpaque = isOpaqueSourceExpression(
+        registerOpaqueBindingState(
+          rewrittenDeclaration.name,
           rewrittenInitializer,
-          activeOpaqueRoots,
-          opaqueRootSymbols,
-          context,
         );
-        setBindingOpaqueState(rewrittenDeclaration.name, initializerIsOpaque);
-        if (initializerIsOpaque) {
-          addBindingTargetSymbols(
-            rewrittenDeclaration.name,
-            opaqueRootSymbols,
-            context.checker,
-          );
-        }
         return rewrittenDeclaration;
       }
     }
@@ -483,21 +503,7 @@ export function rewritePatternBody(
     const visited = visitEachChildWithJsx(node, visit, context.tsContext);
 
     if (ts.isVariableDeclaration(visited)) {
-      const initializerIsOpaque = !!visited.initializer &&
-        isOpaqueSourceExpression(
-          visited.initializer,
-          activeOpaqueRoots,
-          opaqueRootSymbols,
-          context,
-        );
-      setBindingOpaqueState(visited.name, initializerIsOpaque);
-      if (initializerIsOpaque) {
-        addBindingTargetSymbols(
-          visited.name,
-          opaqueRootSymbols,
-          context.checker,
-        );
-      }
+      registerOpaqueBindingState(visited.name, visited.initializer);
     }
 
     if (
@@ -526,10 +532,8 @@ export function rewritePatternBody(
       }
 
       if (ts.isPropertyAccessExpression(visited)) {
-        const isCallTarget = callTargets.has(node);
-        const parentCall = visited.parent;
-        const unsupportedCallRoot = parentCall &&
-            ts.isCallExpression(parentCall)
+        const parentCall = callTargetParents.get(node);
+        const unsupportedCallRoot = parentCall
           ? classifyUnsupportedExpressionSiteCallRoot(
             parentCall,
             context,
@@ -538,7 +542,7 @@ export function rewritePatternBody(
           : undefined;
 
         if (
-          KNOWN_PATH_TERMINAL_METHODS.has(visited.name.text) && isCallTarget
+          KNOWN_PATH_TERMINAL_METHODS.has(visited.name.text) && parentCall
         ) {
           if (unsupportedCallRoot === "optional-call") {
             return visited;
@@ -563,7 +567,7 @@ export function rewritePatternBody(
           return rewrittenMethod;
         }
 
-        if (isCallTarget) {
+        if (parentCall) {
           if (
             unsupportedCallRoot === "optional-call" ||
             unsupportedCallRoot === "unsupported-receiver-method"
@@ -633,35 +637,28 @@ export function rewritePatternBody(
       }
 
       if (isWildcardTraversalCall(visited, context.checker)) {
-        const firstArg = visited.arguments[0];
-        if (firstArg && getTrackedOpaqueAccessInfo(firstArg)) {
-          reportOnce(
-            firstArg,
-            "computation",
-            "Wildcard object traversal is not lowerable in pattern context. Move this expression into computed().",
-          );
-        }
+        reportTrackedOpaqueComputation(
+          visited.arguments[0],
+          visited.arguments[0] ?? visited,
+          "Wildcard object traversal is not lowerable in pattern context. Move this expression into computed().",
+        );
       }
     }
 
     if (ts.isSpreadElement(visited) || ts.isSpreadAssignment(visited)) {
-      if (getTrackedOpaqueAccessInfo(visited.expression)) {
-        reportOnce(
-          visited,
-          "computation",
-          "Spread traversal of opaque pattern values is not lowerable. Move this expression into computed().",
-        );
-      }
+      reportTrackedOpaqueComputation(
+        visited.expression,
+        visited,
+        "Spread traversal of opaque pattern values is not lowerable. Move this expression into computed().",
+      );
     }
 
     if (ts.isForInStatement(visited)) {
-      if (getTrackedOpaqueAccessInfo(visited.expression)) {
-        reportOnce(
-          visited.expression,
-          "computation",
-          "for..in traversal of opaque pattern values is not lowerable. Move this expression into computed().",
-        );
-      }
+      reportTrackedOpaqueComputation(
+        visited.expression,
+        visited.expression,
+        "for..in traversal of opaque pattern values is not lowerable. Move this expression into computed().",
+      );
     }
 
     return visited;
@@ -703,14 +700,13 @@ export function rewriteDeriveCallbackBodies(
 
     if (!ts.isCallExpression(visited)) return visited;
 
-    const callKind = detectCallKind(visited, context.checker);
-    if (callKind?.kind !== "derive") return visited;
-
     const callbackArg = getCapabilitySummaryCallbackArgument(
       visited,
       context.checker,
     );
     if (!callbackArg) return visited;
+    const callbackIndex = visited.arguments.indexOf(callbackArg);
+    if (callbackIndex !== 1 && callbackIndex !== 3) return visited;
 
     let processedBody = rewriteDeriveCallbackBodies(
       callbackArg.body,
@@ -753,7 +749,7 @@ export function rewriteDeriveCallbackBodies(
       );
 
     const args = [...visited.arguments];
-    args[args.length === 2 ? 1 : 3] = newCallback;
+    args[callbackIndex] = newCallback;
     return context.factory.updateCallExpression(
       visited,
       visited.expression,
