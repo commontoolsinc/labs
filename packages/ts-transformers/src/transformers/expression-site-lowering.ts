@@ -1,5 +1,4 @@
 import ts from "typescript";
-import { getCellKind } from "@commontools/schema-generator/cell-brand";
 import {
   classifyArrayMethodCall,
   classifyArrayMethodResultSinkCall,
@@ -15,6 +14,7 @@ import {
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
+import { classifySupportedCallRoot } from "./call-root-support.ts";
 import { rewriteExpression } from "./expression-rewrite/mod.ts";
 import {
   createReactiveWrapperForExpression,
@@ -653,133 +653,6 @@ function getHelperBoundaryKind(
   return undefined;
 }
 
-function isSupportedHelperOwnedExplicitReadRoot(
-  expression: ts.Expression,
-  context: TransformationContext,
-): expression is ts.CallExpression {
-  if (
-    !ts.isCallExpression(expression) ||
-    classifyOpaquePathTerminalCall(expression) !== "get"
-  ) {
-    return false;
-  }
-
-  const callee = expression.expression;
-  if (!ts.isPropertyAccessExpression(callee)) {
-    return false;
-  }
-
-  try {
-    const receiverType = context.checker.getTypeAtLocation(callee.expression);
-    const cellKind = getCellKind(receiverType, context.checker);
-    // Helper-owned branches may own explicit eager reads on true cell-like
-    // values, but not arbitrary method calls or opaque-ref `.get()` misuse.
-    return cellKind === "cell" || cellKind === "stream";
-  } catch {
-    return false;
-  }
-}
-
-function isSupportedHelperOwnedReceiverMethodRoot(
-  expression: ts.Expression,
-  siteInfo: ExpressionSitePolicyInfo,
-): expression is ts.CallExpression {
-  if (
-    !ts.isCallExpression(expression) ||
-    siteInfo.callRootKind !== "receiver-method"
-  ) {
-    return false;
-  }
-
-  if (classifyOpaquePathTerminalCall(expression)) {
-    return false;
-  }
-
-  return siteInfo.reactiveContext.owner === "pattern" ||
-    siteInfo.reactiveContext.owner === "render";
-}
-
-function isSupportedPatternOwnedReceiverMethodRoot(
-  expression: ts.Expression,
-  siteInfo: ExpressionSitePolicyInfo,
-): expression is ts.CallExpression {
-  if (
-    !ts.isCallExpression(expression) ||
-    siteInfo.callRootKind !== "receiver-method"
-  ) {
-    return false;
-  }
-
-  if (siteInfo.arrayMethodOwned || siteInfo.helperBoundaryKind) {
-    return false;
-  }
-
-  if (classifyOpaquePathTerminalCall(expression)) {
-    return false;
-  }
-
-  const callee = expression.expression;
-  if (
-    (ts.isPropertyAccessExpression(callee) ||
-      ts.isElementAccessExpression(callee)) &&
-    callee.questionDotToken
-  ) {
-    return false;
-  }
-
-  if (
-    (ts.isPropertyAccessExpression(callee) ||
-      ts.isElementAccessExpression(callee)) &&
-    ts.isCallExpression(callee.expression) &&
-    classifyOpaquePathTerminalCall(callee.expression)
-  ) {
-    return false;
-  }
-
-  return siteInfo.reactiveContext.owner === "pattern" ||
-    siteInfo.reactiveContext.owner === "render";
-}
-
-function isSupportedArrayMethodOwnedReceiverMethodRoot(
-  expression: ts.Expression,
-  siteInfo: ExpressionSitePolicyInfo,
-): expression is ts.CallExpression {
-  if (
-    !ts.isCallExpression(expression) ||
-    siteInfo.callRootKind !== "receiver-method"
-  ) {
-    return false;
-  }
-
-  if (!siteInfo.arrayMethodOwned || siteInfo.helperBoundaryKind) {
-    return false;
-  }
-
-  if (classifyOpaquePathTerminalCall(expression)) {
-    return false;
-  }
-
-  const callee = expression.expression;
-  if (
-    (ts.isPropertyAccessExpression(callee) ||
-      ts.isElementAccessExpression(callee)) &&
-    callee.questionDotToken
-  ) {
-    return false;
-  }
-
-  if (
-    (ts.isPropertyAccessExpression(callee) ||
-      ts.isElementAccessExpression(callee)) &&
-    ts.isCallExpression(callee.expression) &&
-    classifyOpaquePathTerminalCall(callee.expression)
-  ) {
-    return false;
-  }
-
-  return siteInfo.reactiveContext.kind === "pattern";
-}
-
 function isDeferredJsxArrayMethodExpression(
   expression: ts.Expression,
   context: TransformationContext,
@@ -1124,12 +997,18 @@ function canRewriteExpressionSite(
     return false;
   }
 
+  const supportedCallRootKind = classifySupportedCallRoot(
+    expression,
+    siteInfo,
+    context,
+  );
+
   if (
     containerKind !== "jsx-expression" &&
     !siteInfo.controlFlowRewriteRoot &&
     !isSharedPostClosureCallRoot(expression, context, analyze) &&
     !isPostClosureWrapperRewriteExpression(expression, context) &&
-    !isSupportedPatternOwnedReceiverMethodRoot(expression, siteInfo)
+    supportedCallRootKind !== "pattern-owned-receiver-method"
   ) {
     return false;
   }
@@ -1139,7 +1018,7 @@ function canRewriteExpressionSite(
     !siteInfo.controlFlowRewriteRoot &&
     !isSharedPostClosureCallRoot(expression, context, analyze) &&
     !isEligiblePatternOwnedWrapperCallbackSite(expression, context, analyze) &&
-    !isSupportedPatternOwnedReceiverMethodRoot(expression, siteInfo)
+    supportedCallRootKind !== "pattern-owned-receiver-method"
   ) {
     return false;
   }
@@ -1217,13 +1096,19 @@ function canRewriteHelperOwnedExpressionSite(
     return false;
   }
 
+  const supportedCallRootKind = classifySupportedCallRoot(
+    expression,
+    siteInfo,
+    context,
+  );
+
   if (
     !ts.isBinaryExpression(expression) &&
     !ts.isPrefixUnaryExpression(expression) &&
     !ts.isPostfixUnaryExpression(expression) &&
     !ts.isConditionalExpression(expression) &&
-    !isSupportedHelperOwnedExplicitReadRoot(expression, context) &&
-    !isSupportedHelperOwnedReceiverMethodRoot(expression, siteInfo)
+    supportedCallRootKind !== "helper-owned-explicit-read" &&
+    supportedCallRootKind !== "helper-owned-receiver-method"
   ) {
     return false;
   }
@@ -1620,7 +1505,10 @@ export function rewriteArrayMethodCallbackExpressionSites(
       context,
       analyze,
     );
-    if (!isSupportedArrayMethodOwnedReceiverMethodRoot(expression, siteInfo)) {
+    if (
+      classifySupportedCallRoot(expression, siteInfo, context) !==
+        "array-method-owned-receiver-method"
+    ) {
       return undefined;
     }
 

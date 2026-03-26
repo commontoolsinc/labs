@@ -33,7 +33,6 @@
  *   callback: ERROR (use a nested computed()/derive())
  */
 import ts from "typescript";
-import { getCellKind } from "@commontools/schema-generator/cell-brand";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
   classifyReactiveContext,
@@ -47,6 +46,7 @@ import {
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
 import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
+import { classifySupportedCallRoot } from "./call-root-support.ts";
 import {
   addBindingTargetSymbols,
   collectLocalOpaqueRootSymbols,
@@ -133,7 +133,6 @@ export class PatternContextValidationTransformer extends Transformer {
           !this.isSupportedHelperOwnedCellGetCall(
             node,
             context,
-            checker,
             analyze,
           )
         ) {
@@ -175,32 +174,14 @@ export class PatternContextValidationTransformer extends Transformer {
   private isSupportedHelperOwnedCellGetCall(
     node: ts.CallExpression,
     context: TransformationContext,
-    checker: ts.TypeChecker,
     analyze: ReturnType<typeof createDataFlowAnalyzer>,
   ): boolean {
     if (!this.isGetCall(node)) {
       return false;
     }
 
-    const target = node.expression;
-    if (!ts.isPropertyAccessExpression(target)) {
-      return false;
-    }
-
-    let receiverType: ts.Type;
-    try {
-      receiverType = checker.getTypeAtLocation(target.expression);
-    } catch {
-      return false;
-    }
-
-    const cellKind = getCellKind(receiverType, checker);
-    if (cellKind !== "cell" && cellKind !== "stream") {
-      return false;
-    }
-
     const lowerableSite = findLowerableExpressionSite(node, context, analyze);
-    if (!lowerableSite) {
+    if (!lowerableSite || lowerableSite.expression !== node) {
       return false;
     }
 
@@ -211,7 +192,8 @@ export class PatternContextValidationTransformer extends Transformer {
       analyze,
     );
 
-    return !!siteInfo.helperBoundaryKind;
+    return classifySupportedCallRoot(node, siteInfo, context) ===
+      "helper-owned-explicit-read";
   }
 
   /**
