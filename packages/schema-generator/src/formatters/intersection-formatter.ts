@@ -159,7 +159,7 @@ export class IntersectionFormatter implements TypeFormatter {
     documentedSources: string[];
     missingSources: string[];
   } {
-    const mergedProps: Record<string, JSONSchemaMutable> = {};
+    const mergedProps: Record<string, JSONSchemaMutableOrBoolean> = {};
     const requiredSet = new Set<string>();
 
     const docTexts: string[] = [];
@@ -208,7 +208,7 @@ export class IntersectionFormatter implements TypeFormatter {
             );
             continue;
           }
-          mergedProps[key] = value as JSONSchemaMutable;
+          mergedProps[key] = value;
         }
       }
 
