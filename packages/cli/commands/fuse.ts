@@ -1,5 +1,5 @@
 import { Command } from "@cliffy/command";
-import { basename, resolve } from "@std/path";
+import { basename, join, resolve } from "@std/path";
 import ports from "@commontools/ports" with { type: "json" };
 import {
   buildDenoArgs,
@@ -185,9 +185,17 @@ export const fuse = new Command()
     }
 
     if (options.background) {
-      // Detached background process
-      const cmd = new Deno.Command(spawnCmd, {
-        args: spawnArgs,
+      // Capture output to a log file so we can surface startup errors
+      await Deno.mkdir(stateDir, { recursive: true });
+      const logPath = join(stateDir, "fuse-daemon.log");
+
+      // Detached background process, redirect stdout/stderr to log via shell
+      const shellArgs = [
+        spawnCmd,
+        ...spawnArgs.map((a) => `'${a.replace(/'/g, "'\\''")}'`),
+      ].join(" ");
+      const cmd = new Deno.Command("bash", {
+        args: ["-c", `${shellArgs} >"${logPath}" 2>&1`],
         stdin: "null",
         stdout: "null",
         stderr: "null",
@@ -212,6 +220,15 @@ export const fuse = new Command()
         } catch {
           // Process may have already exited.
         }
+        // Surface the daemon log to help diagnose startup failures
+        try {
+          const log = await Deno.readTextFile(logPath);
+          if (log.trim()) {
+            console.error("--- fuse-daemon log ---");
+            console.error(log);
+            console.error("--- end log ---");
+          }
+        } catch { /* ignore read errors */ }
         throw error;
       }
 
