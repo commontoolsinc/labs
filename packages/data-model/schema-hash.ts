@@ -199,7 +199,32 @@ seedBooleanInterns();
  * calls. For mutable inputs, a new frozen copy is created each time
  * and the hash-keyed reverse map finds a structural match.
  */
-export function internSchema(schema: JSONSchema): SchemaAndHash {
+export function internSchema(
+  schema: JSONSchema,
+  wantSchemaAndHash: false,
+): JSONSchema;
+export function internSchema(
+  schema: JSONSchema,
+  wantSchemaAndHash: true,
+): SchemaAndHash;
+export function internSchema(
+  schema: JSONSchema,
+  wantSchemaAndHash?: boolean,
+): JSONSchema | SchemaAndHash;
+export function internSchema(
+  schema: JSONSchema,
+  wantSchemaAndHash: boolean = false,
+): JSONSchema | SchemaAndHash {
+  const sahResult = internSchemaReturningSchemaAndHash(schema);
+  return wantSchemaAndHash ? sahResult : sahResult.schema;
+}
+
+/**
+ * Helper for `internSchema()` which always returns a `SchemaAndHash`.
+ */
+function internSchemaReturningSchemaAndHash(
+  schema: JSONSchema,
+): SchemaAndHash {
   // Boolean schemas are primitives — return prefab instances.
   if (typeof schema === "boolean") {
     return schema ? booleanInterns.true : booleanInterns.false;
