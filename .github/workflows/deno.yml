@@ -105,6 +105,12 @@ jobs:
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
 
+      - name: 🔍 Verify lock file & install dependencies
+        run: deno install --frozen=true
+
+      - name: 📥 Download Deno dependency binaries
+        run: deno task initialize-db
+
       - name: 🧪 Run generated patterns integration tests
         working-directory: packages/generated-patterns
         run: |
@@ -281,6 +287,12 @@ jobs:
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        run: deno install --frozen=true
+
+      - name: 📥 Download Deno dependency binaries
+        run: deno task initialize-db
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v4

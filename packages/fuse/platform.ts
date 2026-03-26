@@ -141,6 +141,7 @@ export interface FusePlatform {
   createFuseArgs(args: string[]): {
     argsBuf: ArrayBuffer;
     argv: Deno.PointerValue;
+    argvBuf: BigUint64Array;
     encodedArgs: Uint8Array[];
   };
 
@@ -151,6 +152,8 @@ export interface FusePlatform {
   ENOTEMPTY: number;
   ENOSYS: number;
   ENODATA: number;
+  /** Byte offset of fh within fuse_file_info. */
+  FH_OFFSET: number;
 
   // Callback factories for ops with platform-varying signatures.
   // macOS getxattr has extra `position` param; Linux rename has extra `flags` param.

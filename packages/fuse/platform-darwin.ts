@@ -212,6 +212,7 @@ const darwinPlatform: FusePlatform = {
   ENOTEMPTY,
   ENOSYS,
   ENODATA,
+  FH_OFFSET,
 
   // macOS getxattr has extra `position` parameter (uint32_t)
   createGetxattrCallback(

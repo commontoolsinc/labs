@@ -138,7 +138,7 @@ const ENODATA = 61; // Linux equivalent of macOS ENOATTR
 // The offsets below should match v2 for all ops we use.
 // Verify with verify-structs.c.
 
-const OPS_SIZE = 320;
+const OPS_SIZE = 352; // v3 has more ops than v2 (verified by verify-structs.c)
 const OPS_OFFSETS = {
   init: 0,
   destroy: 8,
@@ -227,6 +227,7 @@ const linuxPlatform: FusePlatform = {
   ENOTEMPTY,
   ENOSYS,
   ENODATA,
+  FH_OFFSET,
 
   // Linux getxattr: no `position` parameter
   createGetxattrCallback(
