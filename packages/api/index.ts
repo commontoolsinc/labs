@@ -1287,7 +1287,7 @@ export type JSONSchemaObj = {
   readonly dependentSchemas?: Readonly<Record<string, JSONSchema>>;
   // Subschema for array
   readonly prefixItems?: readonly (JSONSchema)[]; // not always validated
-  readonly items?: Readonly<JSONSchema>;
+  readonly items?: JSONSchema;
   readonly contains?: JSONSchema; // not validated
   // Subschema for object
   readonly properties?: Readonly<Record<string, JSONSchema>>;
