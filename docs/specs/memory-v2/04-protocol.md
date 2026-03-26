@@ -306,7 +306,7 @@ Semantics:
 
 ### 4.3.5 `session.watch.add` — Extend the Session Watch Set
 
-`session.watch.add` incrementally merges new watch specs into the existing
+`session.watch.add` incrementally adds new watch specs into the existing
 session watch set by `id`.
 
 ```typescript
@@ -326,15 +326,20 @@ interface WatchAddResult {
 
 Semantics:
 
-- each provided watch is merged into the existing watch set by `id`
+- each provided watch with a new `id` is added to the existing watch set
+- if a provided watch reuses an existing `id` with the same definition, it is a
+  no-op
+- if a provided watch reuses an existing `id` with a different definition, the
+  server rejects the request; clients must use `session.watch.set` to replace
+  the full watch set
 - new graph watches are evaluated from their new roots only
 - traversal stops immediately when it reaches an already tracked
   entity-plus-selector pair
 - the server returns the inline `sync` needed for the mutation; pure additive
   growth does not emit `removes`
 - in the current pass, `removes` are only guaranteed for explicit watch-set
-  replacement or watch-id reuse; steady-state topology shrink does not yet drive
-  automatic unwatch behavior
+  replacement; steady-state topology shrink does not yet drive automatic
+  unwatch behavior
 - watch mutations are applied in order per session; clients must serialize
   `session.watch.set` and `session.watch.add`
 
@@ -410,8 +415,8 @@ When the client replaces the watch set:
   catch-up
 
 In the current pass, that `removes` guarantee only applies to explicit
-watch-set replacement or reused watch ids. Steady-state topology shrink during
-background refresh does not yet drive automatic unwatch behavior.
+watch-set replacement. Steady-state topology shrink during background refresh
+does not yet drive automatic unwatch behavior.
 
 ### 4.6.4 Cross-Session Delivery
 

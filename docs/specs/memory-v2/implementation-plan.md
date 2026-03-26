@@ -29,8 +29,8 @@ Implemented on the current branch:
 - session-scoped watch-union sync with catch-up frames, `removes`, and
   conflict-time sync flushing
 - one-shot `graph.query` support for `branch`, `since`, and `atSeq`
-- `session.watch.add` replacement-by-id semantics when an incoming watch id
-  already exists
+- `session.watch.add` duplicate-id handling: identical definitions are no-ops,
+  changed definitions are rejected
 - unsafe store-subject rejection before engine-root path construction
 - shared JSON-pointer/path-overlap helpers reused across memory and runner
 - watch-layer hot-path cleanup:
@@ -206,7 +206,8 @@ Deferred:
 - `hello` then `session.open` ordering
 - `session.watch.set` installs or replaces the current watch set
 - `session.watch.add` incrementally extends the current watch set for new ids
-  and replaces existing watch definitions when ids are reused
+  while treating duplicate identical ids as no-ops and rejecting changed
+  definitions
 - `session/effect` emits correct `upserts` and `removes`
 - `session.ack` advances server-side `seenSeq`
 - reconnect restores watch set and replays outstanding commits

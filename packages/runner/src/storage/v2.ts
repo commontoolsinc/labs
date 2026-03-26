@@ -750,12 +750,14 @@ const compactWatchEntries = (
   return compacted;
 };
 
-const watchIdForEntry = (
+export const watchIdForEntry = (
   address: { id: URI; type: MIME },
   selector: SchemaPathSelector,
+  branch = "",
 ): string =>
   `replica:${
     stableHash({
+      branch,
       id: address.id,
       type: address.type,
       selector,
@@ -1032,7 +1034,7 @@ class SpaceReplica implements ISpaceReplica {
       }
 
       const watches = watchEntries.map(([address, selector]) => ({
-        id: watchIdForEntry(address, selector),
+        id: watchIdForEntry(address, selector, ""),
         kind: "graph" as const,
         query: {
           roots: [{

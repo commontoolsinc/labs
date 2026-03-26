@@ -872,7 +872,7 @@ Deno.test("memory v2 server can bootstrap watches with session.watch.add", async
   }
 });
 
-Deno.test("memory v2 server replaces existing watch ids during session.watch.add", async () => {
+Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as no-op or protocol errors", async () => {
   const server = createServer("memory://memory-v2-server-watch-add-replace");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
@@ -968,12 +968,15 @@ Deno.test("memory v2 server replaces existing watch ids during session.watch.add
         },
       }],
     }));
-    const broadened = assertResponse<any>(shiftMessage(messages));
-    assertEquals(
-      broadened.ok?.sync.upserts.map((entry: { id: string }) => entry.id),
-      ["of:doc:2"],
-    );
-    assertEquals(broadened.ok?.sync.removes, []);
+    assertEquals(shiftMessage(messages), {
+      type: "response",
+      requestId: "watch-2",
+      error: {
+        name: "ProtocolError",
+        message:
+          "session.watch.add may not replace an existing watch id; use session.watch.set",
+      },
+    });
 
     await connection.receive(JSON.stringify({
       type: "session.watch.add",
@@ -994,12 +997,9 @@ Deno.test("memory v2 server replaces existing watch ids during session.watch.add
         },
       }],
     }));
-    const narrowed = assertResponse<any>(shiftMessage(messages));
-    assertEquals(narrowed.ok?.sync.upserts, []);
-    assertEquals(narrowed.ok?.sync.removes, [{
-      branch: "",
-      id: "of:doc:2",
-    }]);
+    const unchanged = assertResponse<any>(shiftMessage(messages));
+    assertEquals(unchanged.ok?.sync.upserts, []);
+    assertEquals(unchanged.ok?.sync.removes, []);
 
     await connection.receive(JSON.stringify({
       type: "session.watch.add",
@@ -1011,7 +1011,7 @@ Deno.test("memory v2 server replaces existing watch ids during session.watch.add
         kind: "graph",
         query: {
           roots: [{
-            id: "of:doc:1",
+            id: "of:doc:2",
             selector: {
               path: [],
               schema: false,
@@ -1020,9 +1020,15 @@ Deno.test("memory v2 server replaces existing watch ids during session.watch.add
         },
       }],
     }));
-    const unchanged = assertResponse<any>(shiftMessage(messages));
-    assertEquals(unchanged.ok?.sync.upserts, []);
-    assertEquals(unchanged.ok?.sync.removes, []);
+    assertEquals(shiftMessage(messages), {
+      type: "response",
+      requestId: "watch-4",
+      error: {
+        name: "ProtocolError",
+        message:
+          "session.watch.add may not replace an existing watch id; use session.watch.set",
+      },
+    });
 
     await connection.receive(JSON.stringify({
       type: "transact",

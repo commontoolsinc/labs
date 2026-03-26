@@ -26,7 +26,7 @@ target. In particular:
   watch specs as historical subscriptions keyed by `atSeq`
 - steady-state topology shrink does not yet drive automatic unwatch/removal
   semantics; clients should only rely on `removes` from explicit watch-set
-  replacement or reused watch ids in this pass
+  replacement in this pass
 - branch lifecycle commands are not yet exposed on the v2 wire; current branch
   creation keeps its fork-seq semantics until that cutover lands
 
@@ -103,9 +103,10 @@ only when replacing the full interest set. Watch mutations must be serialized
 per session so overlapping add/set requests cannot race to construct competing
 local watch views.
 
-When `session.watch.add` receives a watch id that already exists, treat it as a
-replacement of that watch definition rather than a no-op. Reused ids should
-recompute the full watch union and may legitimately emit `removes`.
+When `session.watch.add` receives a watch id that already exists, treat the
+request as idempotent only if the watch definition is identical. If the
+definition differs, reject the request and require the client to use
+`session.watch.set` to replace the full watch set.
 
 ## 5. Transaction Contract
 
@@ -282,7 +283,7 @@ Required test areas:
 - revision replay and snapshots
 - idempotent `(sessionId, localSeq)` replay
 - session watch installation and catch-up sync
-- `session.watch.add` replacement behavior for reused watch ids
+- duplicate-id handling for `session.watch.add`
 - one-shot `graph.query` coverage for `branch`, `since`, and `atSeq`
 - reconnect with outstanding commits
 - runner notification ordering

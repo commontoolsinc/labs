@@ -151,6 +151,20 @@ const mergeWatchesById = (
   return [...merged.values()];
 };
 
+const normalizeWatchQuery = (watch: WatchSpec): GraphQuery => ({
+  ...watch.query,
+  ...(watch.query.branch === undefined ? { branch: "" } : {}),
+});
+
+const sameWatchSpec = (
+  left: WatchSpec,
+  right: WatchSpec,
+): boolean =>
+  left.id === right.id &&
+  left.kind === right.kind &&
+  JSON.stringify(normalizeWatchQuery(left)) ===
+    JSON.stringify(normalizeWatchQuery(right));
+
 const buildFullSync = (
   previous: ReadonlyMap<string, SessionCacheEntry>,
   next: ReadonlyMap<string, SessionCacheEntry>,
@@ -669,45 +683,28 @@ export class Server {
 
     try {
       const engine = await this.openEngine(message.space);
-      const previousKeys = new Set(session.watches.map((watch) => watch.id));
-      const nextWatches = mergeWatchesById(session.watches, message.watches);
-      const replacesExisting = message.watches.some((watch) =>
-        previousKeys.has(watch.id)
+      const existingById = new Map(
+        session.watches.map((watch) => [watch.id, watch] as const),
       );
-
-      if (replacesExisting) {
-        const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
-          message.space,
-          nextWatches,
-          engine,
-        );
-        const sync = buildDiffSync(
-          session.entities,
-          entities,
-          session.lastSyncedSeq,
-          serverSeq,
-        );
-        session.watches = nextWatches;
-        session.graphs = graphs;
-        session.entities = entities;
-        session.lastSyncedSeq = serverSeq;
-        return {
-          type: "response",
-          requestId: message.requestId,
-          ok: {
-            serverSeq,
-            sync,
-          },
-        };
+      for (const watch of message.watches) {
+        const existing = existingById.get(watch.id);
+        if (existing !== undefined && !sameWatchSpec(existing, watch)) {
+          return respondTypedError<WatchAddResult>(
+            message.requestId,
+            toError(
+              "ProtocolError",
+              "session.watch.add may not replace an existing watch id; use session.watch.set",
+            ),
+          );
+        }
       }
 
-      const newWatches = nextWatches.filter((watch) =>
-        !previousKeys.has(watch.id)
+      const newWatches = message.watches.filter((watch) =>
+        !existingById.has(watch.id)
       );
 
       if (newWatches.length === 0) {
         const serverSeq = Engine.serverSeq(engine);
-        session.watches = nextWatches;
         return {
           type: "response",
           requestId: message.requestId,
@@ -723,6 +720,8 @@ export class Server {
           },
         };
       }
+
+      const nextWatches = mergeWatchesById(session.watches, newWatches);
 
       const updates = new Map<string, SessionCacheEntry>();
       for (const [branch, query] of groupedQueries(newWatches)) {
