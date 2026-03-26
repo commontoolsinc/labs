@@ -104,7 +104,22 @@ function reportReceiverMethodError(
   });
 }
 
-export function rewritePatternBody(
+export function rewritePatternCallbackBody(
+  body: ts.ConciseBody,
+  opaqueRoots: Set<string>,
+  opaqueRootSymbols: Set<ts.Symbol>,
+  context: TransformationContext,
+): ts.ConciseBody {
+  const rewrittenBody = rewriteTrackedOpaquePatternBody(
+    body,
+    opaqueRoots,
+    opaqueRootSymbols,
+    context,
+  );
+  return rewriteNestedDeriveCallbackBodies(rewrittenBody, context);
+}
+
+function rewriteTrackedOpaquePatternBody(
   body: ts.ConciseBody,
   opaqueRoots: Set<string>,
   opaqueRootSymbols: Set<ts.Symbol>,
@@ -684,14 +699,16 @@ export function rewritePatternBody(
  * Recursively process derive() callback bodies to rewrite property accesses
  * on locally-declared OpaqueRef variables (e.g., const foo = computed(...); foo.bar → foo.key("bar")).
  *
- * rewritePatternBody stops at function boundaries, so derive callback bodies
- * are not processed by it. This function finds derive() calls in the given body,
- * extracts their callbacks, and applies rewritePatternBody to each callback body
+ * rewriteTrackedOpaquePatternBody stops at function boundaries, so derive
+ * callback bodies are not processed by it. This pass finds derive() calls in
+ * the given body, extracts their callbacks, and applies the tracked-opaque
+ * rewrite to each callback body
  * with empty opaque roots (since derive callbacks receive unwrapped captures).
  * Local variables initialized from derive/computed/lift calls within the callback
- * will be detected as opaque roots by rewritePatternBody's variable tracking.
+ * will be detected as opaque roots by the tracked-opaque body's variable
+ * tracking.
  */
-export function rewriteDeriveCallbackBodies(
+function rewriteNestedDeriveCallbackBodies(
   body: ts.ConciseBody,
   context: TransformationContext,
 ): ts.ConciseBody {
@@ -708,7 +725,7 @@ export function rewriteDeriveCallbackBodies(
     const callbackIndex = visited.arguments.indexOf(callbackArg);
     if (callbackIndex !== 1 && callbackIndex !== 3) return visited;
 
-    let processedBody = rewriteDeriveCallbackBodies(
+    let processedBody = rewriteNestedDeriveCallbackBodies(
       callbackArg.body,
       context,
     );
@@ -718,7 +735,7 @@ export function rewriteDeriveCallbackBodies(
       context,
     );
 
-    processedBody = rewritePatternBody(
+    processedBody = rewriteTrackedOpaquePatternBody(
       processedBody,
       new Set(),
       localOpaqueRootSymbols,

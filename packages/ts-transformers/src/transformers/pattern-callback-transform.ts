@@ -14,8 +14,7 @@ import {
 import { addBindingTargetSymbols } from "./opaque-roots.ts";
 import {
   reportComputationError,
-  rewriteDeriveCallbackBodies,
-  rewritePatternBody,
+  rewritePatternCallbackBody,
 } from "./pattern-body-reactive-root-lowering.ts";
 
 /** Property names that correspond to reactive data in map callback params. */
@@ -250,8 +249,12 @@ export function transformPatternCallback(
   }
 
   let body: ts.ConciseBody = callback.body;
-  body = rewritePatternBody(body, opaqueRoots, opaqueRootSymbols, context);
-  body = rewriteDeriveCallbackBodies(body, context);
+  body = rewritePatternCallbackBody(
+    body,
+    opaqueRoots,
+    opaqueRootSymbols,
+    context,
+  );
 
   if (prologue.length > 0) {
     if (ts.isBlock(body)) {
