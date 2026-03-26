@@ -100,6 +100,7 @@ function validateModuleSafeValue(
     }
 
     if (proto === RegExp.prototype) {
+      validatePlainRegExp(objectValue as RegExp, path);
       validateOwnProperties(objectValue, path, visited);
       return;
     }
@@ -350,6 +351,7 @@ function freezeRegExp(
   path: string,
   converted: WeakMap<object, ModuleSafeValue>,
 ): RegExp {
+  validatePlainRegExp(value, path);
   const result = new RegExp(value.source, value.flags);
   converted.set(value, result);
   result.lastIndex = value.lastIndex;
@@ -380,6 +382,18 @@ function freezeRegExp(
   Object.freeze(result);
   verifiedPlainData.add(result);
   return result;
+}
+
+function validatePlainRegExp(
+  value: RegExp,
+  path: string,
+): void {
+  if (value.global || value.sticky) {
+    throw validationError(
+      path,
+      "Stateful RegExp values are not allowed in verified plain data",
+    );
+  }
 }
 
 function copyOwnProperties(

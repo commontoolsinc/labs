@@ -14,12 +14,39 @@ ${body}
 `;
 }
 
+function bundleWithHookedLoader(body: string): string {
+  return `
+((runtimeDeps = {}) => {
+  const __ctAmdHooks = runtimeDeps.__ctAmdHooks ?? {};
+  const { define, require } = (${LOADER_SOURCE})(__ctAmdHooks);
+  for (const [name, dep] of Object.entries(runtimeDeps)) {
+    if (name === "__ctAmdHooks") continue;
+    define(name, ["exports"], exports => Object.assign(exports, dep));
+  }
+${body}
+});
+`;
+}
+
 describe("preflightCompiledBundle()", () => {
   it("accepts a define-only AMD bundle shell", () => {
     const bundle = bundleWithCanonicalLoader(`
   for (const [name, dep] of Object.entries(runtimeDeps)) {
     define(name, ["exports"], exports => Object.assign(exports, dep));
   }
+  const console = globalThis.console;
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.default = 42;
+  });
+  return require("main");
+`);
+
+    expect(() => preflightCompiledBundle(bundle)).not.toThrow();
+  });
+
+  it("accepts the hook-enabled AMD bundle shell", () => {
+    const bundle = bundleWithHookedLoader(`
   const console = globalThis.console;
   define("main", ["require", "exports"], function (require, exports) {
     "use strict";
@@ -90,6 +117,22 @@ describe("preflightCompiledBundle()", () => {
   define("main", ["require", "exports"], function (require, exports) {
     "use strict";
     exports.default = 42;
+  });
+  return require("main");
+`);
+
+    expect(() => preflightCompiledBundle(bundle)).not.toThrow();
+  });
+
+  it("accepts regex literals inside compiled module factories", () => {
+    const bundle = bundleWithCanonicalLoader(`
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    function clean(content) {
+      return content.replace(/\\n+/g, " ").trim();
+    }
+    exports.default = (0, commontools_1.lift)(clean);
   });
   return require("main");
 `);

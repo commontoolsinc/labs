@@ -33,6 +33,8 @@ function createCompatibilityGlobals(): Record<string, unknown> {
     globals.fetch = freezeSandboxValue(globalThis.fetch.bind(globalThis));
   }
 
+  globals.Proxy = undefined;
+
   for (
     const name of [
       "Headers",

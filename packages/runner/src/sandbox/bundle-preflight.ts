@@ -14,14 +14,34 @@ const ALLOWED_TSLIB_HELPERS = new Set([
   "__setModuleDefault",
 ]);
 
-const CANONICAL_LOADER_BINDING = normalizeExact(
-  `const { define, require } = (${
-    getAMDLoader.toString().replace(/\n/g, "")
-  })();`,
-);
-const CANONICAL_RUNTIME_DEPS_LOOP = normalizeExact(
-  `for (const [name, dep] of Object.entries(runtimeDeps)) { define(name, ["exports"], exports => Object.assign(exports, dep)); }`,
-);
+const CANONICAL_LOADER_BINDINGS = [
+  normalizeExact(
+    `const { define, require } = (${
+      getAMDLoader.toString().replace(/\n/g, "")
+    })();`,
+  ),
+  normalizeExact(
+    `const { define, require } = (${
+      getAMDLoader.toString().replace(/\n/g, "")
+    })(__ctAmdHooks);`,
+  ),
+  normalizeExact(
+    `const __ctAmdHooks = runtimeDeps.__ctAmdHooks ?? {}; const { define, require } = (${
+      getAMDLoader.toString().replace(/\n/g, "")
+    })(__ctAmdHooks);`,
+  ),
+];
+const CANONICAL_AMD_HOOKS_BINDINGS = [
+  normalizeExact(`const __ctAmdHooks = runtimeDeps.__ctAmdHooks ?? {};`),
+];
+const CANONICAL_RUNTIME_DEPS_LOOPS = [
+  normalizeExact(
+    `for (const [name, dep] of Object.entries(runtimeDeps)) { define(name, ["exports"], exports => Object.assign(exports, dep)); }`,
+  ),
+  normalizeExact(
+    `for (const [name, dep] of Object.entries(runtimeDeps)) { if (name === "__ctAmdHooks") continue; define(name, ["exports"], exports => Object.assign(exports, dep)); }`,
+  ),
+];
 const CANONICAL_CONSOLE_BINDING = normalizeExact(
   `const console = globalThis.console;`,
 );
@@ -99,8 +119,9 @@ export function preflightCompiledBundle(
 
 function isBootstrapStatement(source: string): boolean {
   const normalized = normalizeExact(source);
-  return normalized === CANONICAL_LOADER_BINDING ||
-    normalized === CANONICAL_RUNTIME_DEPS_LOOP ||
+  return CANONICAL_AMD_HOOKS_BINDINGS.includes(normalized) ||
+    CANONICAL_LOADER_BINDINGS.includes(normalized) ||
+    CANONICAL_RUNTIME_DEPS_LOOPS.includes(normalized) ||
     normalized === CANONICAL_CONSOLE_BINDING ||
     isAllowedTsLibHelperDeclaration(normalized);
 }

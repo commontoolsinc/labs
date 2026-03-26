@@ -98,6 +98,17 @@ export class Engine extends EventTarget implements Harness {
   private internals: Internals | undefined;
   private ctRuntime: Runtime;
   private verifiedBundleHashes = new Set<string>();
+  private readonly loadIds = new WeakMap<JsScript, string>();
+  private nextLoadId = 0;
+  private readonly verifiedFunctions = new Map<
+    string,
+    Map<string, HarnessedFunction>
+  >();
+  private readonly verifiedFunctionIndex = new Map<string, HarnessedFunction>();
+  private readonly patternFunctions = new Map<
+    string,
+    Map<string, HarnessedFunction>
+  >();
   private consoleShim = createSafeConsoleGlobal(new Console(this));
 
   constructor(ctRuntime: Runtime) {
@@ -184,14 +195,19 @@ export class Engine extends EventTarget implements Harness {
     this.verifyCompiledBundle(jsScript, `${id}.js`);
     const { isolate, runtimeExports, exportsCallback } = await this
       .getInternals();
+    const loadId = this.getLoadId(id, jsScript);
+    const runtimeDeps = this.createRuntimeDeps(runtimeExports ?? {});
 
-    const result = isolate.execute(jsScript).invoke(runtimeExports).inner();
+    const result = isolate.execute(jsScript).invoke(runtimeDeps).inner();
     if (
       result && typeof result === "object" && "main" in result &&
       "exportMap" in result
     ) {
       const main = result.main as Exports;
       const exportMap = result.exportMap as Record<string, Exports>;
+      this.resetVerifiedFunctions(loadId);
+      this.recordVerifiedFunctions(loadId, main);
+      this.recordVerifiedFunctions(loadId, exportMap);
 
       // Create a map from exported values to `RuntimeProgram` that can
       // generate them and pass to the callback from the exports.
@@ -235,6 +251,25 @@ export class Engine extends EventTarget implements Harness {
 
   getInvocation(source: string): HarnessedFunction {
     return evaluateCallbackSourceInSES(source) as HarnessedFunction;
+  }
+
+  getVerifiedFunction(
+    implementationRef: string,
+    patternId?: string,
+  ): HarnessedFunction | undefined {
+    if (patternId) {
+      const registry = this.patternFunctions.get(patternId);
+      if (registry?.has(implementationRef)) {
+        return registry.get(implementationRef);
+      }
+    }
+    return this.verifiedFunctionIndex.get(implementationRef);
+  }
+
+  associatePattern(patternId: string, value: unknown): void {
+    const registry = new Map<string, HarnessedFunction>();
+    this.collectAssociatedFunctions(value, registry, new Set());
+    this.patternFunctions.set(patternId, registry);
   }
 
   // Map a single position to its original source location.
@@ -289,6 +324,10 @@ export class Engine extends EventTarget implements Harness {
       // Clear references to allow GC
       this.internals = undefined;
     }
+    this.verifiedFunctions.clear();
+    this.verifiedFunctionIndex.clear();
+    this.patternFunctions.clear();
+    this.verifiedBundleHashes.clear();
   }
 
   private verifyCompiledBundle(jsScript: JsScript, fallbackFilename: string) {
@@ -301,6 +340,194 @@ export class Engine extends EventTarget implements Harness {
     preflightCompiledBundle(jsScript.js, filename);
     verifyCompiledBundleModuleFactories(jsScript.js, filename);
     this.verifiedBundleHashes.add(bundleHash);
+  }
+
+  private getLoadId(compileId: string, jsScript: JsScript): string {
+    const existing = this.loadIds.get(jsScript);
+    if (existing) {
+      return existing;
+    }
+
+    const loadId = `${compileId}:load:${this.nextLoadId++}`;
+    this.loadIds.set(jsScript, loadId);
+    return loadId;
+  }
+
+  private createRuntimeDeps(
+    runtimeExports: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return Object.freeze({
+      ...runtimeExports,
+      __ctAmdHooks: Object.freeze({
+        define: (moduleId: string) => {
+          if (typeof moduleId !== "string" || moduleId.length === 0) {
+            throw new Error("AMD define() requires a non-empty string id");
+          }
+        },
+        require: (dependency: string[] | string) => {
+          if (Array.isArray(dependency)) {
+            throw new Error("AMD async require() is not allowed in SES mode");
+          }
+        },
+      }),
+    });
+  }
+
+  private recordVerifiedFunctions(
+    loadId: string,
+    value: unknown,
+    seen = new Set<unknown>(),
+  ): void {
+    if (!value || (typeof value !== "object" && typeof value !== "function")) {
+      return;
+    }
+    if (seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "implementationRef" in (value as Record<string, unknown>) &&
+      typeof (value as Record<string, unknown>).implementationRef ===
+        "string" &&
+      "implementation" in (value as Record<string, unknown>) &&
+      typeof (value as Record<string, unknown>).implementation === "function"
+    ) {
+      let registry = this.verifiedFunctions.get(loadId);
+      if (!registry) {
+        registry = new Map();
+        this.verifiedFunctions.set(loadId, registry);
+      }
+      const implementationRef = (value as Record<string, unknown>)
+        .implementationRef as string;
+      const implementation = (value as Record<string, unknown>)
+        .implementation as HarnessedFunction;
+      registry.set(implementationRef, implementation);
+      this.verifiedFunctionIndex.set(implementationRef, implementation);
+    }
+
+    if (typeof value === "function") {
+      const implementationRef = (value as { implementationRef?: string })
+        .implementationRef;
+      if (implementationRef) {
+        let registry = this.verifiedFunctions.get(loadId);
+        if (!registry) {
+          registry = new Map();
+          this.verifiedFunctions.set(loadId, registry);
+        }
+        registry.set(implementationRef, value as HarnessedFunction);
+        this.verifiedFunctionIndex.set(
+          implementationRef,
+          value as HarnessedFunction,
+        );
+      }
+    }
+
+    for (const key of Reflect.ownKeys(value as object)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
+      if (!descriptor || !("value" in descriptor)) {
+        continue;
+      }
+      this.recordVerifiedFunctions(loadId, descriptor.value, seen);
+    }
+  }
+
+  private resetVerifiedFunctions(loadId: string): void {
+    const existing = this.verifiedFunctions.get(loadId);
+    if (existing) {
+      for (const implementationRef of existing.keys()) {
+        const replacement = this.findVerifiedFunctionInOtherLoads(
+          loadId,
+          implementationRef,
+        );
+        if (replacement) {
+          this.verifiedFunctionIndex.set(implementationRef, replacement);
+        } else {
+          this.verifiedFunctionIndex.delete(implementationRef);
+        }
+      }
+    }
+    this.verifiedFunctions.set(loadId, new Map());
+  }
+
+  private findVerifiedFunctionInOtherLoads(
+    loadId: string,
+    implementationRef: string,
+  ): HarnessedFunction | undefined {
+    let replacement: HarnessedFunction | undefined;
+    for (const [otherLoadId, registry] of this.verifiedFunctions) {
+      if (otherLoadId === loadId) {
+        continue;
+      }
+      const candidate = registry.get(implementationRef);
+      if (candidate) {
+        replacement = candidate;
+      }
+    }
+    return replacement;
+  }
+
+  private collectAssociatedFunctions(
+    value: unknown,
+    registry: Map<string, HarnessedFunction>,
+    seen: Set<unknown>,
+  ): void {
+    if (!value || (typeof value !== "object" && typeof value !== "function")) {
+      return;
+    }
+    if (seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+
+    const associated = this.extractAssociatedFunction(value);
+    if (associated) {
+      registry.set(associated.implementationRef, associated.implementation);
+    }
+
+    for (const key of Reflect.ownKeys(value as object)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
+      if (!descriptor || !("value" in descriptor)) {
+        continue;
+      }
+      this.collectAssociatedFunctions(descriptor.value, registry, seen);
+    }
+  }
+
+  private extractAssociatedFunction(
+    value: unknown,
+  ): { implementationRef: string; implementation: HarnessedFunction } | null {
+    if (typeof value === "function") {
+      const implementationRef = (value as { implementationRef?: string })
+        .implementationRef;
+      return implementationRef
+        ? {
+          implementationRef,
+          implementation: value as HarnessedFunction,
+        }
+        : null;
+    }
+
+    const record = value as {
+      implementationRef?: string;
+      implementation?: unknown;
+    };
+    if (typeof record.implementationRef !== "string") {
+      return null;
+    }
+    if (typeof record.implementation === "function") {
+      return {
+        implementationRef: record.implementationRef,
+        implementation: record.implementation as HarnessedFunction,
+      };
+    }
+
+    const rebound = this.verifiedFunctionIndex.get(record.implementationRef);
+    return rebound
+      ? { implementationRef: record.implementationRef, implementation: rebound }
+      : null;
   }
 }
 

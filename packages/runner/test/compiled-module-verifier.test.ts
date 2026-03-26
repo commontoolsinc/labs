@@ -155,6 +155,23 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts regex literals inside compiled helper functions", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    function clean(content) {
+      return content.replace(/\\n+/g, " ").trim();
+    }
+    exports.default = (0, commontools_1.lift)(clean);
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("accepts canonical compiled named reexports from imports", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
@@ -273,6 +290,78 @@ describe("verifyCompiledBundleModuleFactories()", () => {
         },
       },
     });
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts compiled callbacks that declare nested callback parameters", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = (0, commontools_1.lift)((items) => items.map((_item) => _item + 1));
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts compiled trusted callbacks that contain nested handler parameters", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = (0, commontools_1.pattern)(() => ({
+      addChild: (0, commontools_1.handler)(false, {
+        type: "object",
+        properties: {
+          children: { type: "array", items: { type: "number" }, asCell: true }
+        },
+        required: ["children"]
+      }, (_, { children }) => children.push(1))({ children: [] }),
+    }));
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts compiled helper functions that only close over __ct_data()", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const STANDARD_LABELS = (0, commontools_1.__ct_data)({ email: ["Personal", "Work"] });
+    function getNextUnusedLabel(type) {
+      const standards = STANDARD_LABELS[type];
+      return standards || undefined;
+    }
+    exports.default = (0, commontools_1.lift)(() => getNextUnusedLabel("email"));
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts compiled builder callbacks that reference their own top-level binding", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const Note = (0, commontools_1.pattern)(() => ({
+      json: JSON.stringify(Note),
+    }));
+    exports.default = Note;
   });
 });
 `;

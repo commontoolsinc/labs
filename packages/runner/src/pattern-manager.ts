@@ -228,7 +228,10 @@ export class PatternManager {
 
     // If this pattern object was already registered, return its id
     const existingId = this.patternToIdMap.get(pattern);
-    if (existingId) return existingId;
+    if (existingId) {
+      this.associateVerifiedFunctions(existingId, pattern);
+      return existingId;
+    }
 
     const generatedId = src
       ? createRef({ src }, "pattern source").toString()
@@ -244,7 +247,15 @@ export class PatternManager {
       this.touchPattern(generatedId);
     }
 
+    this.associateVerifiedFunctions(generatedId, pattern);
+
     return generatedId;
+  }
+
+  getPatternId(pattern: Pattern | Module): string | undefined {
+    return this.patternToIdMap.get(
+      this.findOriginalPattern(pattern as Pattern),
+    );
   }
 
   savePattern(
@@ -421,6 +432,7 @@ export class PatternManager {
           this.patternIdMap.set(patternId, pattern);
           this.evictIfNeeded();
         }
+        this.associateVerifiedFunctions(patternId, pattern);
         return pattern;
       })
       .finally(() => {
@@ -460,6 +472,7 @@ export class PatternManager {
     this.patternIdMap.set(patternId, pattern);
     this.patternToIdMap.set(pattern, patternId);
     this.patternMetaCellById.set(patternId, metaCell.withTx());
+    this.associateVerifiedFunctions(patternId, pattern);
     this.evictIfNeeded();
     return pattern;
   }
@@ -508,5 +521,12 @@ export class PatternManager {
       const pending = this.pendingMetaById.get(patternId) ?? {};
       this.pendingMetaById.set(patternId, { ...pending, ...fields });
     }
+  }
+
+  private associateVerifiedFunctions(
+    patternId: string,
+    value: Pattern | Module,
+  ): void {
+    this.runtime.harness.associatePattern(patternId, value);
   }
 }

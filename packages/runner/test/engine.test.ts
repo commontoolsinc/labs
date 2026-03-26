@@ -294,6 +294,37 @@ describe("Engine.evaluate()", () => {
     ).rejects.toThrow("unsupported top-level executable code");
   });
 
+  it("rejects duplicate AMD module registrations during evaluate()", async () => {
+    const jsScript = {
+      filename: "duplicate-define.js",
+      js: [
+        "((runtimeDeps = {}) => {",
+        `  const { define, require } = (${getAMDLoader.toString()})();`,
+        "  for (const [name, dep] of Object.entries(runtimeDeps)) {",
+        '    define(name, ["exports"], exports => Object.assign(exports, dep));',
+        "  }",
+        "  const console = globalThis.console;",
+        '  define("main", ["require", "exports"], function (require, exports) {',
+        '    "use strict";',
+        "    exports.default = 1;",
+        "  });",
+        '  define("main", ["require", "exports"], function (require, exports) {',
+        '    "use strict";',
+        "    exports.default = 2;",
+        "  });",
+        '  const main = require("main");',
+        "  const exportMap = Object.create(null);",
+        '  exportMap["main"] = require("main");',
+        "  return { main, exportMap };",
+        "});",
+      ].join("\n"),
+    };
+
+    await expect(engine.evaluate("duplicate", jsScript, [])).rejects.toThrow(
+      "already defined",
+    );
+  });
+
   it("correctly maps exports from multi-file programs", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
@@ -333,6 +364,101 @@ describe("Engine.evaluate()", () => {
     const utilExports = result.exportMap![utilsKey!];
     expect(typeof utilExports["double"]).toBe("function");
     expect(typeof utilExports["triple"]).toBe("function");
+  });
+
+  it("serializes verified javascript modules by stable implementationRef", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { pattern, lift } from 'commontools';",
+            "const doubled = lift((value: number) => value * 2);",
+            "export default pattern<{ value: number }>(({ value }) => ({ result: doubled(value) }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await engine.compile(program);
+    const { main } = await engine.evaluate(
+      compiled.id,
+      compiled.jsScript,
+      program.files,
+    );
+    const patternId = runtime.patternManager.registerPattern(
+      main!.default as never,
+      program,
+    );
+    const pattern = main!.default as { nodes: Array<{ module: unknown }> };
+    const serialized = JSON.parse(
+      JSON.stringify(
+        pattern,
+        (_key, value) => typeof value === "function" ? undefined : value,
+      ),
+    );
+
+    const module = serialized.nodes[0].module as {
+      implementationRef?: string;
+      implementation?: string;
+    };
+    expect(typeof module.implementationRef).toBe("string");
+    expect(module.implementation).toBeUndefined();
+    expect(
+      (engine as any).getVerifiedFunction(module.implementationRef, patternId),
+    )
+      .toBeDefined();
+  });
+
+  it("keeps implementationRef stable across separate load sessions of the same source", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { pattern, lift } from 'commontools';",
+            "const doubled = lift((value: number) => value * 2);",
+            "export default pattern<{ value: number }>(({ value }) => ({ result: doubled(value) }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const firstCompiled = await engine.compile(program);
+    const secondCompiled = await engine.compile(program);
+
+    const first = await engine.evaluate(
+      firstCompiled.id,
+      firstCompiled.jsScript,
+      program.files,
+    );
+    const second = await engine.evaluate(
+      secondCompiled.id,
+      secondCompiled.jsScript,
+      program.files,
+    );
+
+    const firstSerialized = JSON.parse(
+      JSON.stringify(
+        first.main!.default,
+        (_key, value) => typeof value === "function" ? undefined : value,
+      ),
+    );
+    const secondSerialized = JSON.parse(
+      JSON.stringify(
+        second.main!.default,
+        (_key, value) => typeof value === "function" ? undefined : value,
+      ),
+    );
+
+    expect(firstSerialized.nodes[0].module.implementationRef).toBeDefined();
+    expect(firstSerialized.nodes[0].module.implementationRef).toBe(
+      secondSerialized.nodes[0].module.implementationRef,
+    );
   });
 
   it("freezes authored local-module namespace exports", async () => {
@@ -595,7 +721,7 @@ describe("Engine in SES mode", () => {
     expect(main?.default).toBeDefined();
   });
 
-  it("allows CTS-wrapped proxy-backed data snapshots", async () => {
+  it("rejects CTS-wrapped proxy-backed data snapshots when Proxy is unavailable", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -618,8 +744,9 @@ describe("Engine in SES mode", () => {
     const { jsScript, id } = await engine.compile(program);
     expect(jsScript.js).toContain("__ct_data");
 
-    const { main } = await engine.evaluate(id, jsScript, program.files);
-    expect(main?.default).toBeDefined();
+    await expect(engine.evaluate(id, jsScript, program.files)).rejects.toThrow(
+      "Proxy is not a constructor",
+    );
   });
 
   it("allows CTS-wrapped symbol-keyed data snapshots", async () => {

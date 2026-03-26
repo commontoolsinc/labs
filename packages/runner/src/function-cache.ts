@@ -1,9 +1,7 @@
 import type { Module } from "./builder/types.ts";
 
 /**
- * Cache for JavaScript functions keyed by their stringified module.
- * This allows us to avoid re-evaluating the same function strings multiple times
- * during pattern execution.
+ * Cache for verified JavaScript functions keyed by implementationRef.
  */
 export class FunctionCache {
   private cache = new Map<string, (...args: any[]) => any>();
@@ -15,7 +13,7 @@ export class FunctionCache {
    */
   get(module: Module): ((...args: any[]) => any) | undefined {
     const key = this.getKey(module);
-    return this.cache.get(key);
+    return key ? this.cache.get(key) : undefined;
   }
 
   /**
@@ -25,6 +23,9 @@ export class FunctionCache {
    */
   set(module: Module, fn: (...args: any[]) => any): void {
     const key = this.getKey(module);
+    if (!key) {
+      return;
+    }
     this.cache.set(key, fn);
   }
 
@@ -35,7 +36,7 @@ export class FunctionCache {
    */
   has(module: Module): boolean {
     const key = this.getKey(module);
-    return this.cache.has(key);
+    return key ? this.cache.has(key) : false;
   }
 
   /**
@@ -47,12 +48,11 @@ export class FunctionCache {
 
   /**
    * Get the cache key for a module.
-   * Uses JSON.stringify to create a stable key from the module object.
    * @param module The module to generate a key for
    * @returns The cache key
    */
-  private getKey(module: Module): string {
-    return JSON.stringify(module);
+  private getKey(module: Module): string | undefined {
+    return module.implementationRef;
   }
 
   /**

@@ -23,8 +23,7 @@ import { moduleToJSON } from "./json-utils.ts";
 import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
-import { getLogger } from "@commonfabric/utils/logger";
+import { createRef } from "../create-ref.ts";
 import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 
 const sourceLocationLogger = getLogger("builder.source-location", {
@@ -58,6 +57,10 @@ export function createNodeFactory<T = any, R = any>(
   // Attach source location and preview to function implementations for debugging
   if (typeof moduleSpec.implementation === "function") {
     annotateFunctionDebugMetadata(moduleSpec.implementation);
+    moduleSpec.implementationRef ??= ensureImplementationRef(
+      moduleSpec.implementation,
+      "fn",
+    );
     hardenVerifiedFunction(moduleSpec.implementation);
   }
 
@@ -288,8 +291,10 @@ function handlerInternal<E, T>(
   }
 
   // Attach source location and preview to handler function for debugging
+  let implementationRef: string | undefined;
   if (typeof handler === "function") {
     annotateFunctionDebugMetadata(handler);
+    implementationRef = ensureImplementationRef(handler, "handler");
     hardenVerifiedFunction(handler);
   }
 
@@ -303,6 +308,7 @@ function handlerInternal<E, T>(
   } = {
     type: "javascript",
     implementation: handler,
+    ...(implementationRef ? { implementationRef } : {}),
     wrapper: "handler",
     with: (inputs: Opaque<StripCell<T>>) => factory(inputs),
     // Overriding the default `bind` method on functions. The wrapper will bind
@@ -482,4 +488,33 @@ function annotateFunctionDebugMetadata(
   // Store function body preview for hover tooltips
   const fnStr = fn.toString();
   (fn as { preview?: string }).preview = fnStr.slice(0, 200);
+}
+
+function ensureImplementationRef(
+  implementation: (...args: any[]) => unknown,
+  kind: "fn" | "handler",
+): string {
+  const existing = (implementation as { implementationRef?: string })
+    .implementationRef;
+  if (existing) {
+    return existing;
+  }
+
+  const source = (implementation as { src?: string }).src ??
+    implementation.name;
+  const implementationRef = createRef({
+    kind,
+    source,
+    preview: implementation.toString(),
+  }, "verified implementation").toString();
+
+  if (Object.isExtensible(implementation)) {
+    Object.defineProperty(implementation, "implementationRef", {
+      value: implementationRef,
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  return implementationRef;
 }

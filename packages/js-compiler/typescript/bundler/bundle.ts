@@ -5,8 +5,10 @@ import { encode } from "@commonfabric/utils/encoding";
 const MAIN = "$MAIN";
 const BUNDLE_PRE = stripNewLines(`
 ((runtimeDeps={}) => {
-  const { define, require } = (${getAMDLoader.toString()})();
+  const __ctAmdHooks = runtimeDeps.__ctAmdHooks ?? {};
+  const { define, require } = (${getAMDLoader.toString()})(__ctAmdHooks);
   for (const [name, dep] of Object.entries(runtimeDeps)) {
+    if (name === "__ctAmdHooks") continue;
     define(name, ["exports"], exports => Object.assign(exports, dep));
   }`);
 const BUNDLE_POST = stripNewLines(`});`);

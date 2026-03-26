@@ -302,7 +302,11 @@ function itemsSchemaFromArray(
 }
 
 export function moduleToJSON(module: Module) {
-  const { toJSON: _, ...rest } = module as Module & { toJSON: () => any };
+  const {
+    implementation: _implementation,
+    toJSON: _,
+    ...rest
+  } = module as Module & { toJSON: () => any };
   let implementation = module.implementation;
 
   // CT-1230 WORKAROUND: Preserve pattern structure when serializing pattern modules.
@@ -328,13 +332,26 @@ export function moduleToJSON(module: Module) {
       new Map(),
       false,
     ) as unknown as Pattern;
-  } else if (typeof implementation === "function") {
-    implementation = implementation.toString();
+    return {
+      ...rest,
+      implementation,
+    };
+  }
+
+  if (typeof implementation === "function") {
+    const preview = (implementation as { preview?: string }).preview ??
+      implementation.toString().slice(0, 200);
+    const location = (implementation as { src?: string }).src;
+    return {
+      ...rest,
+      ...(preview ? { preview } : {}),
+      ...(location ? { location } : {}),
+    };
   }
 
   return {
     ...rest,
-    implementation,
+    ...(implementation !== undefined ? { implementation } : {}),
   };
 }
 

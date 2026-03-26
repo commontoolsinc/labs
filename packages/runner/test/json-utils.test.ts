@@ -6,6 +6,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
   createJsonSchema,
+  moduleToJSON,
   toJSONWithLegacyAliases,
 } from "../src/builder/json-utils.ts";
 import {
@@ -771,5 +772,53 @@ describe("json-utils", () => {
         },
       });
     });
+  });
+});
+
+describe("moduleToJSON", () => {
+  it("serializes javascript modules by implementationRef instead of executable source", () => {
+    const implementation = Object.assign(
+      (value: number) => value * 2,
+      {
+        preview: "(value) => value * 2",
+        src: "main.tsx:1:1",
+      },
+    );
+    const serialized = moduleToJSON({
+      type: "javascript",
+      implementation,
+      implementationRef: "main.tsx#000:doubled",
+    } as any);
+
+    expect(serialized).toMatchObject({
+      type: "javascript",
+      implementationRef: "main.tsx#000:doubled",
+      preview: "(value) => value * 2",
+      location: "main.tsx:1:1",
+    });
+    expect("implementation" in serialized).toBe(false);
+  });
+
+  it("serializes non-javascript function-backed modules without leaking implementations", () => {
+    const implementation = Object.assign(
+      () => "ok",
+      {
+        preview: "() => 'ok'",
+        src: "main.tsx:2:1",
+      },
+    );
+    const serialized = moduleToJSON({
+      type: "raw",
+      implementation,
+      implementationRef: "main.tsx#001:raw",
+    } as any);
+
+    expect(serialized).toMatchObject({
+      type: "raw",
+      implementationRef: "main.tsx#001:raw",
+      preview: "() => 'ok'",
+      location: "main.tsx:2:1",
+    });
+    expect("implementation" in serialized).toBe(false);
   });
 });

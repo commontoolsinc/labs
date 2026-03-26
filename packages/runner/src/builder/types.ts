@@ -168,9 +168,11 @@ declare module "@commonfabric/api" {
   export interface Module {
     type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
     implementation?: ((...args: any[]) => any) | Pattern | string;
+    implementationRef?: string;
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
+    writableProxy?: boolean;
     /** If true, this module is an effect (side-effectful) rather than a computation */
     isEffect?: boolean;
   }

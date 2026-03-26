@@ -63,6 +63,8 @@ describe("SES security regressions", () => {
             "  return {",
             '    hasProcess: typeof host.process !== "undefined",',
             '    hasFetch: typeof host.fetch !== "undefined",',
+            '    hasStructuredClone: typeof host.structuredClone !== "undefined",',
+            '    hasProxy: typeof host.Proxy !== "undefined",',
             "  };",
             "}",
           ].join("\n"),
@@ -76,6 +78,8 @@ describe("SES security regressions", () => {
     expect(main?.default()).toEqual({
       hasProcess: false,
       hasFetch: true,
+      hasStructuredClone: true,
+      hasProxy: false,
     });
   });
 
@@ -109,18 +113,24 @@ describe("SES security regressions", () => {
         return {
           hasProcess: typeof process !== "undefined",
           hasFetch: typeof fetch !== "undefined",
+          hasStructuredClone: typeof structuredClone !== "undefined",
+          hasProxy: typeof Proxy !== "undefined",
           hasConsoleHook: typeof globalThis.RUNTIME_ENGINE_CONSOLE_HOOK !== "undefined",
         };
       }
     `) as () => {
       hasProcess: boolean;
       hasFetch: boolean;
+      hasStructuredClone: boolean;
+      hasProxy: boolean;
       hasConsoleHook: boolean;
     };
 
     expect(probe()).toEqual({
       hasProcess: false,
       hasFetch: true,
+      hasStructuredClone: true,
+      hasProxy: false,
       hasConsoleHook: false,
     });
   });
@@ -160,6 +170,8 @@ describe("SES security regressions", () => {
         }
 
         result.fetchType = typeof fetch;
+        result.cloneType = typeof structuredClone;
+        result.proxyType = typeof Proxy;
         result.arrayName = Array.name;
         result.hasInjected = "injected" in globalThis;
         return result;
@@ -170,6 +182,8 @@ describe("SES security regressions", () => {
       selfWrite: string;
       addWrite: string;
       fetchType: string;
+      cloneType: string;
+      proxyType: string;
       arrayName: string;
       hasInjected: boolean;
     };
@@ -180,6 +194,8 @@ describe("SES security regressions", () => {
       selfWrite: "TypeError",
       addWrite: "TypeError",
       fetchType: "function",
+      cloneType: "function",
+      proxyType: "undefined",
       arrayName: "Array",
       hasInjected: false,
     });
@@ -221,6 +237,8 @@ describe("SES security regressions", () => {
             "    result.addWrite = (error as Error).name;",
             "  }",
             "  result.fetchType = typeof fetch;",
+            "  result.cloneType = typeof structuredClone;",
+            "  result.proxyType = typeof Proxy;",
             "  result.arrayName = Array.name;",
             '  result.hasInjected = "injected" in host;',
             "  return result;",
@@ -239,6 +257,8 @@ describe("SES security regressions", () => {
       selfWrite: "TypeError",
       addWrite: "TypeError",
       fetchType: "function",
+      cloneType: "function",
+      proxyType: "undefined",
       arrayName: "Array",
       hasInjected: false,
     });

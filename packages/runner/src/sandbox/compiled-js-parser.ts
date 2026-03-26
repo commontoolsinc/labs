@@ -689,8 +689,24 @@ function findMatchingDelimiter(
     const char = source[cursor];
     if (char === openChar) {
       depth++;
+      if (char === "(") {
+        state.parenDepth++;
+      } else if (char === "[") {
+        state.bracketDepth++;
+      } else {
+        state.braceDepth++;
+      }
+      state.regexAllowed = true;
     } else if (char === closeChar) {
       depth--;
+      if (char === ")") {
+        state.parenDepth = Math.max(0, state.parenDepth - 1);
+      } else if (char === "]") {
+        state.bracketDepth = Math.max(0, state.bracketDepth - 1);
+      } else {
+        state.braceDepth = Math.max(0, state.braceDepth - 1);
+      }
+      state.regexAllowed = false;
       if (depth === 0) {
         return cursor;
       }

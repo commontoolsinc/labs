@@ -1,5 +1,4 @@
 import {
-  collectIdentifierTokens,
   CompiledJsParseError,
   containsDynamicImport,
   findTopLevelEquals,
@@ -14,6 +13,10 @@ import {
   trimRange,
   tryParseCallExpression,
 } from "./compiled-js-parser.ts";
+import {
+  collectFreeIdentifiersFromTsFunction,
+  parseFunctionLikeFromExpressionText,
+} from "./free-identifiers.ts";
 import { ModuleVerificationError } from "./module-verification-error.ts";
 import {
   isAllowedCompiledDependencySpecifier,
@@ -49,63 +52,6 @@ const CANONICAL_HARDENING_HELPER = stripJsTrivia(
 );
 
 const SIMPLE_IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
-const RESERVED_IDENTIFIERS = new Set([
-  "async",
-  "await",
-  "break",
-  "case",
-  "catch",
-  "class",
-  "const",
-  "continue",
-  "debugger",
-  "default",
-  "delete",
-  "do",
-  "else",
-  "enum",
-  "export",
-  "extends",
-  "false",
-  "finally",
-  "for",
-  "function",
-  "if",
-  "implements",
-  "import",
-  "in",
-  "instanceof",
-  "interface",
-  "let",
-  "new",
-  "null",
-  "package",
-  "private",
-  "protected",
-  "public",
-  "return",
-  "static",
-  "super",
-  "switch",
-  "this",
-  "throw",
-  "true",
-  "try",
-  "typeof",
-  "var",
-  "void",
-  "while",
-  "with",
-  "yield",
-]);
-const DECLARATION_KEYWORDS = new Set([
-  "const",
-  "let",
-  "var",
-  "function",
-  "class",
-  "catch",
-]);
 
 export function verifyCompiledBundleModuleFactoriesWithParser(
   source: string,
@@ -314,7 +260,9 @@ function predeclareTopLevelBindings(
       if (name) {
         env.set(name, {
           kind: "function",
-          captureSafe: isJsxHelperWrapperDeclaration(statement.text),
+          captureSafe: isJsxHelperWrapperDeclaration(statement.text)
+            ? true
+            : undefined,
           hardeningHelper: isFunctionHardeningHelperDeclaration(statement.text),
           functionRange: { start: statement.start, end: statement.end },
         });
@@ -348,6 +296,16 @@ function verifyVariableStatement(
   }
 
   for (const declarator of parseVariableDeclarators(source, statement)) {
+    const provisional = provisionalBindingForExpression(
+      source,
+      declarator.initializer.start,
+      declarator.initializer.end,
+      env,
+    );
+    if (provisional) {
+      env.set(declarator.name, cloneBindingInfo(provisional));
+    }
+
     const binding = classifyExpressionText(
       source,
       filename,
@@ -357,6 +315,61 @@ function verifyVariableStatement(
     );
     env.set(declarator.name, binding);
   }
+}
+
+function provisionalBindingForExpression(
+  source: string,
+  start: number,
+  end: number,
+  env: Map<string, BindingInfo>,
+): BindingInfo | undefined {
+  const trimmed = trimRange(source, start, end);
+  const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
+
+  const directFunction = tryParseDirectFunction(source, inner.start, inner.end);
+  if (directFunction) {
+    return {
+      kind: "function",
+      functionRange: { start: directFunction.start, end: directFunction.end },
+    };
+  }
+
+  const call = tryParseCallExpression(source, inner.start, inner.end);
+  if (!call) {
+    return undefined;
+  }
+
+  const normalizedCallee = stripJsTrivia(call.callee);
+  const trustedCall = resolveTrustedCallName(normalizedCallee, env);
+  if (trustedCall) {
+    if (TRUSTED_BUILDERS.has(trustedCall)) {
+      return { kind: "builder", captureSafe: true };
+    }
+    return {
+      kind: "data",
+      captureSafe: trustedCall !== "schema",
+    };
+  }
+
+  const hardeningBinding = env.get(normalizedCallee);
+  if (!hardeningBinding?.hardeningHelper || call.args.length !== 1) {
+    return undefined;
+  }
+
+  const hardened = trimRange(source, call.args[0].start, call.args[0].end);
+  const hardenedFn = tryParseDirectFunction(
+    source,
+    hardened.start,
+    hardened.end,
+  );
+  if (!hardenedFn) {
+    return undefined;
+  }
+
+  return {
+    kind: "function",
+    functionRange: { start: hardenedFn.start, end: hardenedFn.end },
+  };
 }
 
 function verifyCompiledExportAssignment(
@@ -934,195 +947,19 @@ function collectFreeIdentifiers(
   fnStart: number,
   fnEnd: number,
 ): Set<string> {
-  const signature = resolveFunctionSignature(source, fnStart, fnEnd);
-  const locals = new Set<string>(signature.params);
-  for (
-    const local of collectLocalBindings(
-      source,
-      signature.bodyStart,
-      signature.bodyEnd,
-    )
-  ) {
-    locals.add(local);
-  }
-
-  const free = new Set<string>();
-  for (
-    const token of collectIdentifierTokens(
-      source,
-      signature.bodyStart,
-      signature.bodyEnd,
-    )
-  ) {
-    if (locals.has(token.text) || RESERVED_IDENTIFIERS.has(token.text)) {
-      continue;
-    }
-    const prev = previousSignificantChar(
-      source,
-      signature.bodyStart,
-      token.start,
-    );
-    if (prev === ".") {
-      continue;
-    }
-    const next = nextSignificantChar(source, token.end, signature.bodyEnd);
-    if (next === ":" && (prev === "{" || prev === ",")) {
-      continue;
-    }
-    free.add(token.text);
-  }
-
-  return free;
-}
-
-function resolveFunctionSignature(
-  source: string,
-  fnStart: number,
-  fnEnd: number,
-): { params: string[]; bodyStart: number; bodyEnd: number } {
-  const trimmed = trimRange(source, fnStart, fnEnd);
-  const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
-
   try {
-    const parsed = parseFunctionText(source, inner.start, inner.end);
-    return {
-      params: parsed.params,
-      bodyStart: parsed.body.start,
-      bodyEnd: parsed.body.end,
-    };
-  } catch {
-    const innerText = source.slice(inner.start, inner.end).trimStart();
-    if (innerText.startsWith("function")) {
-      const openParen = source.indexOf("(", inner.start);
-      const closeParen = source.indexOf(")", openParen + 1);
-      const openBrace = source.indexOf("{", closeParen + 1);
-      if (
-        openParen === -1 || closeParen === -1 || openBrace === -1 ||
-        openBrace >= inner.end || source[inner.end - 1] !== "}"
-      ) {
-        throw new CompiledJsParseError(
-          inner.start,
-          "Expected a direct function expression",
-        );
-      }
-      const nameMatch = innerText.match(/^function\s+([A-Za-z_$][\w$]*)\s*\(/);
-      const params = parseParameterList(source, openParen + 1, closeParen);
-      if (nameMatch) {
-        params.push(nameMatch[1]);
-      }
-      return {
-        params,
-        bodyStart: openBrace + 1,
-        bodyEnd: inner.end - 1,
-      };
-    }
-
-    const arrowIndex = source.indexOf("=>", inner.start);
-    if (arrowIndex === -1 || arrowIndex >= inner.end) {
-      throw new CompiledJsParseError(
-        inner.start,
-        "Expected a direct function expression",
-      );
-    }
-    const params = parseArrowFunctionParameters(
-      source,
-      inner.start,
-      arrowIndex,
+    return collectFreeIdentifiersFromTsFunction(
+      parseFunctionLikeFromExpressionText(
+        source.slice(fnStart, fnEnd),
+        "<compiled-callback>",
+      ),
     );
-    const body = trimRange(source, arrowIndex + 2, inner.end);
-    return {
-      params,
-      bodyStart: body.start,
-      bodyEnd: body.end,
-    };
+  } catch {
+    throw new CompiledJsParseError(
+      fnStart,
+      "Expected a direct function expression",
+    );
   }
-}
-
-function parseArrowFunctionParameters(
-  source: string,
-  start: number,
-  arrowIndex: number,
-): string[] {
-  const paramsRange = trimRange(source, start, arrowIndex);
-  const stripped = stripWholeParentheses(
-    source,
-    paramsRange.start,
-    paramsRange.end,
-  );
-  return parseParameterList(source, stripped.start, stripped.end);
-}
-
-function parseParameterList(
-  source: string,
-  start: number,
-  end: number,
-): string[] {
-  const raw = source.slice(start, end).trim();
-  if (!raw) {
-    return [];
-  }
-  if (SIMPLE_IDENTIFIER_RE.test(raw)) {
-    return [raw];
-  }
-
-  const bindings = new Set<string>();
-  for (const token of collectIdentifierTokens(source, start, end)) {
-    if (RESERVED_IDENTIFIERS.has(token.text)) {
-      continue;
-    }
-    const prev = previousSignificantChar(source, start, token.start);
-    const next = nextSignificantChar(source, token.end, end);
-    if (prev === ".") {
-      continue;
-    }
-    if (next === ":" && (prev === "{" || prev === ",")) {
-      continue;
-    }
-    bindings.add(token.text);
-  }
-  return [...bindings];
-}
-
-function collectLocalBindings(
-  source: string,
-  start: number,
-  end: number,
-): Set<string> {
-  const locals = new Set<string>();
-  const tokens = collectIdentifierTokens(source, start, end);
-  for (let index = 0; index < tokens.length - 1; index++) {
-    if (!DECLARATION_KEYWORDS.has(tokens[index].text)) {
-      continue;
-    }
-    locals.add(tokens[index + 1].text);
-  }
-  return locals;
-}
-
-function previousSignificantChar(
-  source: string,
-  start: number,
-  end: number,
-): string | undefined {
-  for (let cursor = end - 1; cursor >= start; cursor--) {
-    if (!/\s/.test(source[cursor])) {
-      return source[cursor];
-    }
-  }
-  return undefined;
-}
-
-function nextSignificantChar(
-  source: string,
-  start: number,
-  end: number,
-): string | undefined {
-  for (let cursor = start; cursor < end; cursor++) {
-    if (!/\s/.test(source[cursor])) {
-      return source[cursor];
-    }
-  }
-  return undefined;
 }
 
 function resolveTrustedCallName(
@@ -1340,7 +1177,9 @@ function registerFunctionStatement(
   if (!name) return;
   env.set(name, {
     kind: "function",
-    captureSafe: isJsxHelperWrapperDeclaration(statement.text),
+    captureSafe: isJsxHelperWrapperDeclaration(statement.text)
+      ? true
+      : undefined,
     hardeningHelper: isFunctionHardeningHelperDeclaration(statement.text),
     functionRange: { start: statement.start, end: statement.end },
   });

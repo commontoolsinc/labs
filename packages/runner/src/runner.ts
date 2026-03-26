@@ -1253,21 +1253,40 @@ export class Runner {
     const writes = findAllWriteRedirectCells(outputs, processCell);
 
     let fn: (inputs: any) => any;
+    const patternId = this.runtime.patternManager.getPatternId(pattern);
 
-    if (typeof module.implementation === "string") {
-      // Try to get from cache first
+    if (typeof module.implementation === "function") {
+      fn = module.implementation as (inputs: any) => any;
+      if (module.implementationRef && !this.functionCache.has(module)) {
+        this.functionCache.set(module, fn);
+      }
+    } else if (module.implementationRef) {
+      const cached = this.functionCache.get(module) ??
+        this.runtime.harness.getVerifiedFunction(
+          module.implementationRef,
+          patternId,
+        );
+      if (!cached) {
+        throw new Error(
+          `Unknown verified implementationRef: ${module.implementationRef}`,
+        );
+      }
+      this.functionCache.set(module, cached as (inputs: any) => any);
+      fn = cached as (inputs: any) => any;
+    } else if (typeof module.implementation === "string") {
       const cached = this.functionCache.get(module);
       if (cached) {
         fn = cached as (inputs: any) => any;
       } else {
-        // Fall back to evaluating and cache it
         fn = evaluateCallbackSourceInSES(module.implementation) as (
           inputs: any,
         ) => any;
         this.functionCache.set(module, fn);
       }
     } else {
-      fn = module.implementation as (inputs: any) => any;
+      throw new Error(
+        "JavaScript module is missing an executable implementation",
+      );
     }
 
     // Prefer .src (backup) over .name since name can be finicky
