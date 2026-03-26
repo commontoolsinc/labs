@@ -863,9 +863,22 @@ class SpaceReplica implements ISpaceReplica {
     this.#watchView?.close();
     this.#watchView = null;
     const sessionHandle = this.#sessionHandle;
+    this.#sessionHandle = undefined;
     if (sessionHandle) {
-      const { client } = await sessionHandle;
-      await client.close();
+      let resolved:
+        | {
+          client: MemoryV2Client.Client;
+          session: MemoryV2Client.SpaceSession;
+        }
+        | undefined;
+      try {
+        resolved = await sessionHandle;
+      } catch {
+        resolved = undefined;
+      }
+      if (resolved !== undefined) {
+        await resolved.client.close();
+      }
     }
     await Promise.allSettled([...this.#updatePromises]);
     this.#syncTasks.clear();
@@ -1431,7 +1444,15 @@ class SpaceReplica implements ISpaceReplica {
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }> {
-    this.#sessionHandle ??= this.#createSession();
+    if (this.#sessionHandle === undefined) {
+      const handle = this.#createSession().catch((error) => {
+        if (this.#sessionHandle === handle) {
+          this.#sessionHandle = undefined;
+        }
+        throw error;
+      });
+      this.#sessionHandle = handle;
+    }
     return this.#sessionHandle;
   }
 }

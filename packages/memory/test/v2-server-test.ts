@@ -1082,7 +1082,9 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
       space,
       session: {},
     }));
-    const opened = assertResponse<{ sessionId: string }>(shiftMessage(messages));
+    const opened = assertResponse<{ sessionId: string }>(
+      shiftMessage(messages),
+    );
     const sessionId = opened.ok!.sessionId;
 
     await connection.receive(encodeMemoryV2Boundary({

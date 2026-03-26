@@ -141,6 +141,29 @@ export interface TrackGraphOptions {
   readSeq?: number;
 }
 
+export const cloneTrackedGraphState = (
+  engine: Engine.Engine,
+  state: TrackedGraphState,
+): TrackedGraphState => {
+  const tracker = new MapSetStringToPathSelectors(true);
+  for (const [key, selectors] of state.tracker) {
+    for (const selector of selectors) {
+      tracker.add(key, selector);
+    }
+  }
+
+  const manager = new EngineObjectManager(engine, state.branch);
+  manager.mergeFrom(state.manager);
+
+  return {
+    branch: state.branch,
+    tracker,
+    entities: new Map(state.entities),
+    memo: new Map(state.memo),
+    manager,
+  };
+};
+
 const snapshotForDocKey = (
   space: string,
   manager: EngineObjectManager,

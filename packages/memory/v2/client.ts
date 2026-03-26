@@ -106,6 +106,10 @@ export class Client {
     return session;
   }
 
+  forgetSession(session: SpaceSession): void {
+    this.#spaces.delete(session);
+  }
+
   async request<Result>(message: Record<string, unknown>): Promise<Result> {
     await this.ensureConnected();
     const requestId = message.requestId as string;
@@ -323,6 +327,7 @@ export class SpaceSession {
   #ackFlushing = false;
   #background = new Set<Promise<void>>();
   #watchMutation: Promise<void> = Promise.resolve();
+  #closed = false;
 
   constructor(
     private readonly client: Client,
@@ -343,7 +348,14 @@ export class SpaceSession {
     return this.#serverSeq;
   }
 
+  #assertOpen(): void {
+    if (this.#closed) {
+      throw new Error("memory/v2 session closed");
+    }
+  }
+
   async transact(commit: ClientCommit): Promise<AppliedCommit> {
+    this.#assertOpen();
     const existing = this.#outstandingCommits.get(commit.localSeq);
     if (existing) {
       return await existing.pending.promise;
@@ -368,6 +380,7 @@ export class SpaceSession {
   }
 
   async queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
+    this.#assertOpen();
     const result = await this.client.request<GraphQueryResult>({
       type: "graph.query",
       requestId: crypto.randomUUID(),
@@ -381,6 +394,7 @@ export class SpaceSession {
   }
 
   async watchSet(watches: WatchSpec[]): Promise<WatchView> {
+    this.#assertOpen();
     const hadView = this.#watchView !== null;
     const result = await this.watchSetSync(watches);
     if (hadView && !isEmptySync(result.sync)) {
@@ -390,6 +404,7 @@ export class SpaceSession {
   }
 
   async watchSetSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
+    this.#assertOpen();
     return await this.runWatchMutation(async () => {
       const result = await this.client.request<WatchSetResult>({
         type: "session.watch.set",
@@ -414,6 +429,7 @@ export class SpaceSession {
   }
 
   async watchAdd(watches: WatchSpec[]): Promise<WatchView> {
+    this.#assertOpen();
     const hadView = this.#watchView !== null;
     const result = await this.watchAddSync(watches);
     if (hadView && !isEmptySync(result.sync)) {
@@ -423,6 +439,7 @@ export class SpaceSession {
   }
 
   async watchAddSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
+    this.#assertOpen();
     return await this.runWatchMutation(async () => {
       const result = await this.client.request<WatchAddResult>({
         type: "session.watch.add",
@@ -451,6 +468,9 @@ export class SpaceSession {
   }
 
   async ack(seenSeq: number): Promise<void> {
+    if (this.#closed) {
+      return;
+    }
     if (!this.client.isConnected() || seenSeq <= this.#ackedSeq) {
       this.#ackedSeq = Math.max(this.#ackedSeq, seenSeq);
       return;
@@ -466,6 +486,9 @@ export class SpaceSession {
   }
 
   handleEffect(effect: SessionSync): void {
+    if (this.#closed) {
+      return;
+    }
     this.noteResult(effect.toSeq);
     if (this.#watchView === null) {
       this.#watchView = WatchView.fromSync(effect);
@@ -476,7 +499,13 @@ export class SpaceSession {
   }
 
   async restore(): Promise<void> {
+    if (this.#closed) {
+      return;
+    }
     const restored = await this.reopen();
+    if (this.#closed) {
+      return;
+    }
     await this.replayOutstandingCommits();
     if (restored.sync) {
       if (this.#watchView === null) {
@@ -485,7 +514,7 @@ export class SpaceSession {
         this.#watchView.applySync(restored.sync, false);
       }
       if (!isEmptySync(restored.sync)) {
-        this.#watchView.pushSync(restored.sync);
+        this.#watchView.emit(restored.sync);
       }
       this.scheduleAck(restored.serverSeq);
     } else if (restored.resumed === true && this.#watchSpecs.length > 0) {
@@ -494,17 +523,23 @@ export class SpaceSession {
     if (restored.resumed !== true && this.#watchSpecs.length > 0) {
       const { view, sync } = await this.watchSetSync(this.#watchSpecs);
       if (!isEmptySync(sync)) {
-        view.pushSync(sync);
+        view.emit(sync);
       }
     }
   }
 
   async close(): Promise<void> {
+    if (this.#closed) {
+      return;
+    }
+    this.#closed = true;
+    this.client.forgetSession(this);
     await this.#flushing;
     for (const pending of this.#outstandingCommits.values()) {
       pending.pending.reject(new Error("memory/v2 session closed"));
     }
     this.#outstandingCommits.clear();
+    this.#watchSpecs = [];
     this.#watchView?.close();
     this.#watchView = null;
     const background = [...this.#background];
@@ -520,6 +555,9 @@ export class SpaceSession {
   }
 
   private scheduleAck(seenSeq: number): void {
+    if (this.#closed) {
+      return;
+    }
     this.#pendingAckSeq = Math.max(this.#pendingAckSeq, seenSeq);
     if (this.#ackScheduled || this.#ackFlushing) {
       return;
@@ -545,7 +583,9 @@ export class SpaceSession {
   private async flushScheduledAcks(): Promise<void> {
     while (true) {
       const target = this.#pendingAckSeq;
-      if (target <= this.#ackedSeq || !this.client.isConnected()) {
+      if (
+        this.#closed || target <= this.#ackedSeq || !this.client.isConnected()
+      ) {
         this.#ackedSeq = Math.max(this.#ackedSeq, target);
         return;
       }
@@ -564,6 +604,7 @@ export class SpaceSession {
   }
 
   private async runWatchMutation<T>(work: () => Promise<T>): Promise<T> {
+    this.#assertOpen();
     const previous = this.#watchMutation;
     const current = previous.catch(() => undefined).then(work);
     this.#watchMutation = current.then(() => undefined, () => undefined);

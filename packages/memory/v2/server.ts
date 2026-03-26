@@ -38,6 +38,7 @@ import {
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
 import {
+  cloneTrackedGraphState,
   extendTrackedGraph,
   queryGraph,
   type QueryGraphReuseContext,
@@ -57,6 +58,7 @@ type SessionState = {
   watches: WatchSpec[];
   graphs: Map<string, TrackedGraphState>;
   entities: Map<string, SessionCacheEntry>;
+  trackedIds: Set<string>;
   expiresAt: number | null;
 };
 
@@ -115,12 +117,12 @@ const toCacheEntry = (
   };
 };
 
-const trackedIdsForSession = (session: SessionState): Set<string> => {
+const trackedIdsFromEntries = (
+  entries: Iterable<SessionCacheEntry>,
+): Set<string> => {
   const ids = new Set<string>();
-  for (const graph of session.graphs.values()) {
-    for (const entity of graph.entities.values()) {
-      ids.add(entity.id);
-    }
+  for (const entry of entries) {
+    ids.add(entry.id);
   }
   return ids;
 };
@@ -263,6 +265,8 @@ export class SessionRegistry {
       watches: existing?.watches ?? [],
       graphs: existing?.graphs ?? new Map(),
       entities: existing?.entities ?? new Map(),
+      trackedIds: existing?.trackedIds ??
+        trackedIdsFromEntries(existing?.entities?.values() ?? []),
       expiresAt: null,
     });
     return {
@@ -588,9 +592,13 @@ export class Server {
 
     try {
       const engine = await this.openEngine(message.space);
+      const invocation = toInvocationRecord(message);
       const commit = Engine.applyCommit(engine, {
         sessionId: message.sessionId,
-        invocation: toInvocationRecord(message),
+        invocation,
+        invocationPayload: isRecord(message.invocation)
+          ? message.invocation
+          : invocation,
         authorization: message.authorization ?? {},
         commit: message.commit,
       });
@@ -683,6 +691,7 @@ export class Server {
       session.watches = message.watches;
       session.graphs = graphs;
       session.entities = entities;
+      session.trackedIds = trackedIdsFromEntries(entities.values());
       session.lastSyncedSeq = serverSeq;
       return {
         type: "response",
@@ -755,17 +764,18 @@ export class Server {
       }
 
       const nextWatches = mergeWatchesById(session.watches, newWatches);
+      const graphs = new Map(session.graphs);
 
       const updates = new Map<string, SessionCacheEntry>();
       for (const [branch, query] of groupedQueries(newWatches)) {
-        const existing = session.graphs.get(branch);
+        const existing = graphs.get(branch);
         if (existing === undefined) {
           const tracked = trackGraph(
             message.space,
             engine,
             query,
           );
-          session.graphs.set(branch, tracked.state);
+          graphs.set(branch, tracked.state);
           for (const entity of tracked.state.entities.values()) {
             const entry = toCacheEntry(entity);
             updates.set(cacheKeyForEntity(entry.branch, entry.id), entry);
@@ -773,10 +783,12 @@ export class Server {
           continue;
         }
 
+        const staged = cloneTrackedGraphState(engine, existing);
+        graphs.set(branch, staged);
         const extended = extendTrackedGraph(
           message.space,
           engine,
-          existing,
+          staged,
           query,
         );
         for (const entity of extended.updates.values()) {
@@ -789,6 +801,7 @@ export class Server {
       for (const [key, entry] of updates) {
         const previous = session.entities.get(key);
         session.entities.set(key, entry);
+        session.trackedIds.add(entry.id);
         if (!sameSnapshot(previous, entry)) {
           upserts.push(entry);
         }
@@ -796,6 +809,7 @@ export class Server {
 
       const serverSeq = Engine.serverSeq(engine);
       const fromSeq = session.lastSyncedSeq;
+      session.graphs = graphs;
       session.watches = nextWatches;
       session.lastSyncedSeq = serverSeq;
       return {
@@ -897,10 +911,9 @@ export class Server {
       return null;
     }
     if (dirtyIds !== undefined) {
-      const tracked = trackedIdsForSession(session);
       let touched = false;
       for (const dirtyId of dirtyIds) {
-        if (tracked.has(dirtyId)) {
+        if (session.trackedIds.has(dirtyId)) {
           touched = true;
           break;
         }
@@ -937,6 +950,7 @@ export class Server {
       for (const [key, entry] of updates) {
         const previous = session.entities.get(key);
         session.entities.set(key, entry);
+        session.trackedIds.add(entry.id);
         if (!sameSnapshot(previous, entry)) {
           upserts.push(entry);
         }
@@ -975,6 +989,7 @@ export class Server {
     );
     session.graphs = graphs;
     session.entities = entities;
+    session.trackedIds = trackedIdsFromEntries(entities.values());
     session.lastSyncedSeq = serverSeq;
     if (isEmptySync(sync)) {
       return null;
@@ -1183,13 +1198,13 @@ const toInvocationRecord = (message: TransactRequest) => {
   const invocation = message.invocation;
   if (isRecord(invocation)) {
     return {
+      ...invocation,
       iss: typeof invocation.iss === "string" ? invocation.iss : message.space,
       aud: typeof invocation.aud === "string" ? invocation.aud : null,
       cmd: typeof invocation.cmd === "string"
         ? invocation.cmd
         : "/memory/transact",
       sub: typeof invocation.sub === "string" ? invocation.sub : message.space,
-      ...invocation,
     };
   }
 

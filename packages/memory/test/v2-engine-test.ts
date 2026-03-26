@@ -249,6 +249,71 @@ Deno.test("memory v2 engine preserves source-only entity documents", async () =>
   }
 });
 
+Deno.test("memory v2 engine stores normalized invocation fields separately from raw payload", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const rawInvocation = {
+      iss: 42,
+      aud: { unexpected: true },
+      cmd: ["not", "a", "string"],
+      sub: null,
+      args: {
+        localSeq: 1,
+      },
+      note: "untrusted transport payload",
+    };
+
+    applyCommit(engine, {
+      sessionId: "session:raw-invocation",
+      invocation: {
+        iss: "did:key:space",
+        aud: null,
+        cmd: "/memory/transact",
+        sub: "did:key:space",
+        args: {
+          localSeq: 1,
+        },
+      },
+      invocationPayload: rawInvocation,
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:raw-invocation",
+          value: toEntityDocument({ ok: true }),
+        }],
+      },
+    });
+
+    const row = engine.database.prepare(
+      `SELECT i.iss, i.aud, i.cmd, i.sub, i.invocation
+       FROM "commit" c
+       JOIN invocation i ON i.ref = c.invocation_ref
+       WHERE c.session_id = ? AND c.local_seq = ?`,
+    ).get(["session:raw-invocation", 1]) as
+      | {
+        iss: string;
+        aud: string | null;
+        cmd: string;
+        sub: string;
+        invocation: string;
+      }
+      | undefined;
+    assertExists(row);
+    assertEquals(row.iss, "did:key:space");
+    assertEquals(row.aud, null);
+    assertEquals(row.cmd, "/memory/transact");
+    assertEquals(row.sub, "did:key:space");
+    assertEquals(decodeStored(row.invocation), rawInvocation);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine preserves root objects whose data includes value siblings", async () => {
   const { engine, path } = await createEngine();
 

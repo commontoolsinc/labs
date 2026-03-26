@@ -856,12 +856,22 @@ const nextWithTimeout = async <Value>(
   iterator: AsyncIterator<Value>,
   timeout = 200,
 ): Promise<IteratorResult<Value>> => {
-  return await Promise.race([
-    iterator.next(),
-    new Promise<IteratorResult<Value>>((_, reject) => {
-      setTimeout(() => reject(new Error("Timed out waiting for iterator item")), timeout);
-    }),
-  ]);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      iterator.next(),
+      new Promise<IteratorResult<Value>>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error("Timed out waiting for iterator item")),
+          timeout,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
 };
 
 Deno.test(
@@ -1050,6 +1060,21 @@ Deno.test(
 
       transport.disconnect();
       await waitFor(() => transport.watchSetCount >= 2);
+
+      const reinstall = await nextWithTimeout(updates);
+      assertEquals(reinstall.done, false);
+      assertEquals(
+        reinstall.value.entities.map((entity: EntitySnapshot) => ({
+          id: entity.id,
+          seq: entity.seq,
+          document: entity.document,
+        })),
+        [{
+          id: "of:doc:1",
+          seq: 0,
+          document: null,
+        }],
+      );
 
       const pending = updates.next();
       await writer.transact({

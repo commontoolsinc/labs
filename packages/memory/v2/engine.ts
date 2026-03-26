@@ -494,6 +494,7 @@ export type AuthorizationRecord = StorableDatum;
 export interface ApplyCommitOptions {
   sessionId: SessionId;
   invocation: InvocationRecord;
+  invocationPayload?: StorableDatum;
   authorization: AuthorizationRecord;
   commit: ClientCommit;
 }
@@ -800,7 +801,13 @@ export const applyCommit = (
 
 const applyCommitTransaction = (
   engine: Engine,
-  { sessionId, invocation, authorization, commit }: ApplyCommitOptions,
+  {
+    sessionId,
+    invocation,
+    invocationPayload,
+    authorization,
+    commit,
+  }: ApplyCommitOptions,
 ): AppliedCommit => {
   if (commit.operations.length === 0) {
     throw new Error("memory v2 commit requires at least one operation");
@@ -835,7 +842,8 @@ const applyCommitTransaction = (
   );
 
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
-  const invocationRef = toReference(invocation);
+  const storedInvocation = invocationPayload ?? invocation;
+  const invocationRef = toReference(storedInvocation);
   const authorizationRef = toReference(authorization);
   const original = encodeMemoryV2Boundary(commit);
   const resolution = encodeMemoryV2Boundary(
@@ -852,7 +860,7 @@ const applyCommitTransaction = (
     aud: invocation.aud ?? null,
     cmd: invocation.cmd,
     sub: invocation.sub,
-    invocation: encodeMemoryV2Boundary(invocation),
+    invocation: encodeMemoryV2Boundary(storedInvocation),
   });
   engine.statements.insertCommit.run({
     seq,
