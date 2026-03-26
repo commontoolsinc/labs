@@ -16,7 +16,7 @@ runs:
       with:
         deno-version: ${{ inputs.deno-version }}
 
-    # Cache version: bump to invalidate all caches (e.g., v1 -> v2)
+    # Cache version: bump to invalidate all caches (e.g., v2 -> v3)
     - name: 📦 Cache Deno dependencies
       if: inputs.cache
       uses: actions/cache@v3
@@ -24,4 +24,4 @@ runs:
         path: |
           ~/.deno
           ~/.cache/deno
-        key: v2-${{ runner.os }}-deno-${{ inputs.deno-version }}-${{ hashFiles('**/deno.json', '**/deno.lock') }}
+        key: v3-${{ runner.os }}-deno-${{ inputs.deno-version }}-${{ hashFiles('**/deno.json', '**/deno.lock') }}
