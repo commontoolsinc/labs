@@ -1,8 +1,5 @@
 import ts from "typescript";
-import type {
-  JSONSchemaMutableOrBoolean,
-  JSONSchemaObjMutable,
-} from "@commontools/api";
+import type { JSONSchemaMutable, JSONSchemaObjMutable } from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
@@ -25,7 +22,7 @@ export class UnionFormatter implements TypeFormatter {
   formatType(
     type: ts.Type,
     context: GenerationContext,
-  ): JSONSchemaMutableOrBoolean {
+  ): JSONSchemaMutable {
     const union = type as ts.UnionType;
     const members = union.types ?? [];
 
@@ -42,7 +39,7 @@ export class UnionFormatter implements TypeFormatter {
     const generate = (
       t: ts.Type,
       typeNode?: ts.TypeNode,
-    ): JSONSchemaMutableOrBoolean => {
+    ): JSONSchemaMutable => {
       const native = getNativeTypeSchema(t, context.typeChecker);
       if (native !== undefined) {
         return cloneSchemaDefinition(native);
@@ -135,12 +132,12 @@ export class UnionFormatter implements TypeFormatter {
    * {x: {enum: [10]}} | {x: {enum: [20]}} into {x: {type: "number"}}
    */
   private mergeIdenticalSchemas(
-    schemas: JSONSchemaMutableOrBoolean[],
-  ): JSONSchemaMutableOrBoolean[] {
+    schemas: JSONSchemaMutable[],
+  ): JSONSchemaMutable[] {
     if (schemas.length <= 1) return schemas;
 
     // Group schemas by their structure (ignoring enum values)
-    const groups = new Map<string, JSONSchemaMutableOrBoolean[]>();
+    const groups = new Map<string, JSONSchemaMutable[]>();
 
     for (const schema of schemas) {
       const normalized = this.normalizeSchemaForComparison(schema);
@@ -151,7 +148,7 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     // For each group with multiple schemas, try to merge them
-    const result: JSONSchemaMutableOrBoolean[] = [];
+    const result: JSONSchemaMutable[] = [];
     for (const group of groups.values()) {
       if (group.length === 1) {
         result.push(group[0]!);
@@ -170,7 +167,7 @@ export class UnionFormatter implements TypeFormatter {
    */
   private mergePrimitiveSchemaIntoAnyOf(
     anyOf: JSONSchemaObjMutable[],
-    cur: JSONSchemaMutableOrBoolean,
+    cur: JSONSchemaMutable,
   ): boolean {
     if (cur === true) {
       // One of our anyOf values was true, so return true to let our caller
@@ -262,7 +259,7 @@ export class UnionFormatter implements TypeFormatter {
    * and converting them to base types
    */
   private normalizeSchemaForComparison(
-    schema: JSONSchemaMutableOrBoolean,
+    schema: JSONSchemaMutable,
   ): Record<string, unknown> {
     if (typeof schema === "boolean") return { _bool: schema };
 
@@ -287,7 +284,7 @@ export class UnionFormatter implements TypeFormatter {
       const props: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(schema.properties)) {
         props[key] = this.normalizeSchemaForComparison(
-          value as JSONSchemaMutableOrBoolean,
+          value as JSONSchemaMutable,
         );
       }
       result.properties = props;
@@ -296,7 +293,7 @@ export class UnionFormatter implements TypeFormatter {
     // Recursively normalize items
     if ("items" in schema && schema.items) {
       result.items = this.normalizeSchemaForComparison(
-        schema.items as JSONSchemaMutableOrBoolean,
+        schema.items as JSONSchemaMutable,
       );
     }
 
@@ -313,8 +310,8 @@ export class UnionFormatter implements TypeFormatter {
    * Merge a group of structurally identical schemas by widening their enums
    */
   private mergeSchemaGroup(
-    schemas: JSONSchemaMutableOrBoolean[],
-  ): JSONSchemaMutableOrBoolean {
+    schemas: JSONSchemaMutable[],
+  ): JSONSchemaMutable {
     if (schemas.length === 0) {
       throw new Error("Cannot merge empty schema group");
     }
@@ -340,7 +337,7 @@ export class UnionFormatter implements TypeFormatter {
 
     // Recursively merge properties
     if ("properties" in first && isRecord(first.properties)) {
-      const props: Record<string, JSONSchemaMutableOrBoolean> = {};
+      const props: Record<string, JSONSchemaMutable> = {};
       for (const key of Object.keys(first.properties)) {
         const propSchemas = schemas
           .map((s) =>
@@ -348,7 +345,7 @@ export class UnionFormatter implements TypeFormatter {
               ? s.properties[key]
               : undefined
           )
-          .filter((p): p is JSONSchemaMutableOrBoolean => p !== undefined);
+          .filter((p): p is JSONSchemaMutable => p !== undefined);
 
         if (propSchemas.length > 0) {
           props[key] = this.mergeSchemaGroup(propSchemas);
@@ -365,7 +362,7 @@ export class UnionFormatter implements TypeFormatter {
             ? s.items
             : undefined
         )
-        .filter((i): i is JSONSchemaMutableOrBoolean => i !== undefined);
+        .filter((i): i is JSONSchemaMutable => i !== undefined);
 
       if (itemSchemas.length > 0) {
         result.items = this.mergeSchemaGroup(itemSchemas);

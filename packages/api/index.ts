@@ -1375,7 +1375,7 @@ export type JSONSchemaObjMutable = Mutable<JSONSchemaObj>;
  * A `JSONSchemaObjMutable` or a boolean. JSON Schema allows `true` (accept any
  * value) and `false` (reject all values) as valid schemas.
  */
-export type JSONSchemaMutableOrBoolean = JSONSchemaObjMutable | boolean;
+export type JSONSchemaMutable = JSONSchemaObjMutable | boolean;
 
 /**
  * Selects a sub-path within a document, optionally paired with a schema

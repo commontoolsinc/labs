@@ -1,5 +1,5 @@
 import ts from "typescript";
-import type { JSONSchemaMutableOrBoolean } from "@commontools/api";
+import type { JSONSchemaMutable } from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import { TypeWithInternals } from "../type-utils.ts";
 
@@ -30,14 +30,14 @@ export class PrimitiveFormatter implements TypeFormatter {
   formatType(
     type: ts.Type,
     context: GenerationContext,
-  ): JSONSchemaMutableOrBoolean {
+  ): JSONSchemaMutable {
     return PrimitiveFormatter.getSchemaType(type, context);
   }
 
   public static getSchemaType(
     type: ts.Type,
     context: GenerationContext,
-  ): JSONSchemaMutableOrBoolean {
+  ): JSONSchemaMutable {
     const flags = type.flags;
     // Handle literal types first (more specific)
     // If widenLiterals flag is set, skip enum generation and return base type

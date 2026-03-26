@@ -1,8 +1,5 @@
 import ts from "typescript";
-import type {
-  JSONSchemaMutableOrBoolean,
-  JSONSchemaObjMutable,
-} from "@commontools/api";
+import type { JSONSchemaMutable, JSONSchemaObjMutable } from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import {
   cloneSchemaDefinition,
@@ -89,7 +86,7 @@ export class ObjectFormatter implements TypeFormatter {
   formatType(
     type: ts.Type,
     context: GenerationContext,
-  ): JSONSchemaMutableOrBoolean {
+  ): JSONSchemaMutable {
     const checker = context.typeChecker;
 
     // If this is the TS `object` type (unknown object shape), emit a permissive
@@ -106,7 +103,7 @@ export class ObjectFormatter implements TypeFormatter {
     // Do not early-return for empty object types. Instead, try to enumerate
     // properties via the checker to allow type literals to surface members.
 
-    const properties: Record<string, JSONSchemaMutableOrBoolean> = {};
+    const properties: Record<string, JSONSchemaMutable> = {};
     const required: string[] = [];
 
     const props = checker.getPropertiesOfType(type);
@@ -251,7 +248,7 @@ export class ObjectFormatter implements TypeFormatter {
   private lookupBuiltInSchema(
     type: ts.Type,
     checker: ts.TypeChecker,
-  ): JSONSchemaMutableOrBoolean | undefined {
+  ): JSONSchemaMutable | undefined {
     const builtin = getNativeTypeSchema(type, checker);
     return builtin === undefined ? undefined : cloneSchemaDefinition(builtin);
   }
