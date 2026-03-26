@@ -202,7 +202,7 @@ describe("schema-hash dispatch", () => {
         } else {
           return result;
         }
-      }
+      };
 
       describe(`with \`wantSchemaAndHash = ${wantSah}\``, () => {
         it("creates a valid result with schema equal to the given one", () => {
@@ -260,7 +260,9 @@ describe("schema-hash dispatch", () => {
         });
 
         it("returns same instance for same frozen object schema", () => {
-          const schema = toDeepFrozenSchema({ type: "number" }) as JSONSchemaObj;
+          const schema = toDeepFrozenSchema({
+            type: "number",
+          }) as JSONSchemaObj;
           const result1 = callIntern(schema, true);
           const result2 = callIntern(schema, true);
           assertStrictEquals(result1, result2);
@@ -320,7 +322,7 @@ describe("schema-hash dispatch", () => {
         }
 
         return result;
-      }
+      };
 
       const expectSame = (
         got: JSONSchema | SchemaAndHash | undefined,
@@ -335,7 +337,10 @@ describe("schema-hash dispatch", () => {
 
       describe(`with \`wantSchemaAndHash = ${wantSah}\``, () => {
         it("finds a previously interned schema by FabricHash", () => {
-          const sah = internSchema({ type: "array", items: { type: "string" } }, true);
+          const sah = internSchema(
+            { type: "array", items: { type: "string" } },
+            true,
+          );
           const found = callFind(sah.hash);
           expectSame(found, sah);
         });

@@ -279,18 +279,18 @@ function internSchemaReturningSchemaAndHash(
  * the `schema` or full `SchemaAndHash` depending on the `wantSchemaAndHash`
  * argument.
  */
- export function findInternedSchema(
-   hash: FabricHash | string,
-   wantSchemaAndHash: false,
- ): JSONSchema | undefined;
- export function findInternedSchema(
-   hash: FabricHash | string,
-   wantSchemaAndHash: true,
- ): SchemaAndHash | undefined;
- export function findInternedSchema(
-   hash: FabricHash | string,
-   wantSchemaAndHash?: boolean,
- ): JSONSchema | SchemaAndHash | undefined;
+export function findInternedSchema(
+  hash: FabricHash | string,
+  wantSchemaAndHash: false,
+): JSONSchema | undefined;
+export function findInternedSchema(
+  hash: FabricHash | string,
+  wantSchemaAndHash: true,
+): SchemaAndHash | undefined;
+export function findInternedSchema(
+  hash: FabricHash | string,
+  wantSchemaAndHash?: boolean,
+): JSONSchema | SchemaAndHash | undefined;
 export function findInternedSchema(
   hash: FabricHash | string,
   wantSchemaAndHash: boolean = false,
