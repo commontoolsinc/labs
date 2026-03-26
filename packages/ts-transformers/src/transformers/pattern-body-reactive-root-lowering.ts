@@ -3,8 +3,8 @@ import {
   classifyReactiveContext,
   createDataFlowAnalyzer,
   detectCallKind,
+  getCapabilitySummaryCallbackArgument,
   getTypeAtLocationWithFallback,
-  isFunctionLikeExpression,
   isWildcardTraversalCall,
   normalizeDataFlows,
   visitEachChildWithJsx,
@@ -191,6 +191,20 @@ export function rewritePatternBody(
 
   const callTargets = new WeakSet<ts.Node>();
 
+  const getTrackedOpaqueAccessInfo = (
+    expression: ts.Expression,
+  ): ReturnType<typeof getOpaqueAccessInfo> | undefined => {
+    const info = getOpaqueAccessInfo(expression, context);
+    return isOpaqueRootInfo(
+        info,
+        activeOpaqueRoots,
+        opaqueRootSymbols,
+        context,
+      )
+      ? info
+      : undefined;
+  };
+
   const findDynamicOpaqueAccess = (
     expression: ts.Expression,
   ): ts.Expression | undefined => {
@@ -203,16 +217,8 @@ export function rewritePatternBody(
           ts.isElementAccessExpression(node)) &&
         isTopmostMemberAccess(node)
       ) {
-        const info = getOpaqueAccessInfo(node, context);
-        if (
-          info.dynamic &&
-          isOpaqueRootInfo(
-            info,
-            activeOpaqueRoots,
-            opaqueRootSymbols,
-            context,
-          )
-        ) {
+        const info = getTrackedOpaqueAccessInfo(node);
+        if (info?.dynamic) {
           culprit = node;
           return;
         }
@@ -499,16 +505,8 @@ export function rewritePatternBody(
         ts.isElementAccessExpression(visited)) &&
       isTopmostMemberAccess(visited)
     ) {
-      const info = getOpaqueAccessInfo(visited, context);
-      if (
-        !info.root ||
-        !isOpaqueRootInfo(
-          info,
-          activeOpaqueRoots,
-          opaqueRootSymbols,
-          context,
-        )
-      ) {
+      const info = getTrackedOpaqueAccessInfo(visited);
+      if (!info?.root) {
         return visited;
       }
 
@@ -636,36 +634,18 @@ export function rewritePatternBody(
 
       if (isWildcardTraversalCall(visited, context.checker)) {
         const firstArg = visited.arguments[0];
-        if (firstArg) {
-          const info = getOpaqueAccessInfo(firstArg, context);
-          if (
-            isOpaqueRootInfo(
-              info,
-              activeOpaqueRoots,
-              opaqueRootSymbols,
-              context,
-            )
-          ) {
-            reportOnce(
-              firstArg,
-              "computation",
-              "Wildcard object traversal is not lowerable in pattern context. Move this expression into computed().",
-            );
-          }
+        if (firstArg && getTrackedOpaqueAccessInfo(firstArg)) {
+          reportOnce(
+            firstArg,
+            "computation",
+            "Wildcard object traversal is not lowerable in pattern context. Move this expression into computed().",
+          );
         }
       }
     }
 
     if (ts.isSpreadElement(visited) || ts.isSpreadAssignment(visited)) {
-      const info = getOpaqueAccessInfo(visited.expression, context);
-      if (
-        isOpaqueRootInfo(
-          info,
-          activeOpaqueRoots,
-          opaqueRootSymbols,
-          context,
-        )
-      ) {
+      if (getTrackedOpaqueAccessInfo(visited.expression)) {
         reportOnce(
           visited,
           "computation",
@@ -675,15 +655,7 @@ export function rewritePatternBody(
     }
 
     if (ts.isForInStatement(visited)) {
-      const info = getOpaqueAccessInfo(visited.expression, context);
-      if (
-        isOpaqueRootInfo(
-          info,
-          activeOpaqueRoots,
-          opaqueRootSymbols,
-          context,
-        )
-      ) {
+      if (getTrackedOpaqueAccessInfo(visited.expression)) {
         reportOnce(
           visited.expression,
           "computation",
@@ -734,13 +706,11 @@ export function rewriteDeriveCallbackBodies(
     const callKind = detectCallKind(visited, context.checker);
     if (callKind?.kind !== "derive") return visited;
 
-    const callbackArg = visited.arguments.length === 2
-      ? visited.arguments[1]
-      : visited.arguments.length === 4
-      ? visited.arguments[3]
-      : undefined;
-
-    if (!callbackArg || !isFunctionLikeExpression(callbackArg)) return visited;
+    const callbackArg = getCapabilitySummaryCallbackArgument(
+      visited,
+      context.checker,
+    );
+    if (!callbackArg) return visited;
 
     let processedBody = rewriteDeriveCallbackBodies(
       callbackArg.body,
