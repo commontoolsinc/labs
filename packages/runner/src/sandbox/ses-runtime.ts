@@ -5,6 +5,7 @@ import {
   SourceMapParser,
 } from "@commontools/js-compiler";
 import "ses";
+import ts from "typescript";
 import { createCallbackCompartmentGlobals } from "./compartment-globals.ts";
 import { hardenVerifiedFunction } from "./function-hardening.ts";
 
@@ -214,16 +215,27 @@ export function evaluateFunctionSourceInSES(
 export function evaluateCallbackSourceInSES(
   source: string,
 ): unknown {
-  const value = evaluateFunctionSourceInSES(source, {
-    globals: createCallbackCompartmentGlobals(),
-    lockdown: true,
+  const normalizedSource = normalizeDirectFunctionSource(source);
+  const createCallback = getCachedCallbackCreator(normalizedSource);
+
+  return hardenVerifiedFunction((...args: unknown[]) => {
+    const fn = createCallback();
+    if (typeof fn !== "function") {
+      throw new Error("Callback source did not produce a function");
+    }
+    return Reflect.apply(
+      hardenVerifiedFunction(fn as (...args: unknown[]) => unknown),
+      undefined,
+      args,
+    );
   });
-  return typeof value === "function"
-    ? hardenVerifiedFunction(value as (...args: any[]) => unknown)
-    : value;
 }
 
 let sesInitialized = false;
+let callbackCompartment:
+  | { evaluate(source: string): unknown }
+  | undefined;
+const callbackCreatorCache = new Map<string, () => unknown>();
 
 const DEFAULT_LOCKDOWN_OPTIONS: SESLockdownOptions = {
   errorTaming: "safe",
@@ -270,6 +282,73 @@ function createCompartment(globals: Record<string, unknown>) {
   // unless we explicitly lock them down.
   Object.freeze(compartment.globalThis);
   return compartment;
+}
+
+function getCachedCallbackCreator(source: string): () => unknown {
+  const cached = callbackCreatorCache.get(source);
+  if (cached) {
+    return cached;
+  }
+
+  const compartment = getSharedCallbackCompartment();
+  const creator = compartment.evaluate(`() => (${source})`);
+  if (typeof creator !== "function") {
+    throw new Error("Callback source must evaluate to a function creator");
+  }
+
+  callbackCreatorCache.set(source, creator as () => unknown);
+  return creator as () => unknown;
+}
+
+function getSharedCallbackCompartment(): { evaluate(source: string): unknown } {
+  ensureSESInitialized(true);
+  if (!callbackCompartment) {
+    callbackCompartment = createCompartment(createCallbackCompartmentGlobals());
+  }
+  return callbackCompartment;
+}
+
+function normalizeDirectFunctionSource(source: string): string {
+  const trimmedSource = source.trim();
+  const sourceFile = ts.createSourceFile(
+    "<callback-source>",
+    trimmedSource,
+    ts.ScriptTarget.ESNext,
+    true,
+    ts.ScriptKind.JS,
+  );
+
+  if (sourceFile.statements.length !== 1) {
+    throw new Error(
+      "Callback source must be a single direct function declaration or expression",
+    );
+  }
+
+  const statement = sourceFile.statements[0];
+  if (ts.isFunctionDeclaration(statement) && statement.body) {
+    return trimmedSource;
+  }
+
+  if (ts.isExpressionStatement(statement)) {
+    const expression = unwrapParenthesizedExpression(statement.expression);
+    if (ts.isFunctionExpression(expression) || ts.isArrowFunction(expression)) {
+      return trimmedSource;
+    }
+  }
+
+  throw new Error(
+    "Callback source must be a direct function declaration or expression",
+  );
+}
+
+function unwrapParenthesizedExpression(
+  expression: ts.Expression,
+): ts.Expression {
+  let current = expression;
+  while (ts.isParenthesizedExpression(current)) {
+    current = current.expression;
+  }
+  return current;
 }
 
 function materializeHostVisibleStack(error: Error): void {

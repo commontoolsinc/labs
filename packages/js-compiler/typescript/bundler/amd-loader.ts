@@ -69,6 +69,10 @@ export function getAMDLoader() {
       }
     }
 
+    private authoredRequire(): never {
+      throw new Error("Authored AMD require() is unavailable in SES mode");
+    }
+
     private resolveModule(id: string): any {
       const module = this.modules.get(id);
       if (!module) {
@@ -87,7 +91,7 @@ export function getAMDLoader() {
 
       try {
         const resolvedDeps = module.dependencies.map((dep) => {
-          if (dep === "require") return this.require.bind(this);
+          if (dep === "require") return this.authoredRequire.bind(this);
           if (dep === "exports") return {};
           if (dep === "module") return { exports: {} };
           return this.resolveModule(dep);

@@ -205,13 +205,54 @@ describe("verifyProgramModuleScope()", () => {
             "    Object.entries(scopeMap).map(([key, value]) => [key, { value }]),",
             "  ),",
             ");",
-            "export default { years, scopes };",
+            "const payload = __ct_data({ years, scopes });",
+            "export default payload;",
           ].join("\n"),
         },
       ],
     };
 
     expect(() => verifyProgramModuleScope(program)).not.toThrow();
+  });
+
+  it("rejects raw mutable top-level exports without __ct_data()", () => {
+    const program: Program = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "export default {",
+            "  nested: { count: 1 },",
+            "};",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).toThrow();
+  });
+
+  it("rejects fragment mutation escape hatches at module scope", () => {
+    const program: Program = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "function counter() {",
+            "  const self = counter as typeof counter & { fragment?: { count: number } };",
+            "  self.fragment!.count += 1;",
+            "  return self.fragment!.count;",
+            "}",
+            "counter.fragment = { count: 0 };",
+            "export default counter;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).toThrow();
   });
 
   it("accepts __ct_data() helpers that use for...of iteration", () => {

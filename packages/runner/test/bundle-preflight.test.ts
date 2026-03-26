@@ -12,7 +12,7 @@ describe("preflightCompiledBundle()", () => {
   for (const [name, dep] of Object.entries(runtimeDeps)) {
     define(name, ["exports"], (exports) => Object.assign(exports, dep));
   }
-  const console = globalThis.RUNTIME_ENGINE_CONSOLE_HOOK;
+  const console = globalThis.console;
   var __importStar = function (mod) { return mod; };
   define("main", ["require", "exports"], function (require, exports) {
     "use strict";
@@ -131,6 +131,26 @@ describe("preflightCompiledBundle()", () => {
     exports.default = 42;
   });
   return breakOut();
+});
+`;
+
+    expect(() => preflightCompiledBundle(bundle)).toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
+  it("rejects arbitrary globalThis bootstrap bindings", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  const { define, require } = (function getAMDLoader() {
+    return { define() {}, require() {} };
+  })();
+  const leaked = globalThis.process;
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.default = 42;
+  });
+  return require("main");
 });
 `;
 

@@ -161,9 +161,11 @@ function isInjectedGlobalBinding(statement: ts.Statement): boolean {
   }
 
   const initializer = unwrapExpression(declaration.initializer);
-  return ts.isPropertyAccessExpression(initializer) &&
+  return declaration.name.text === "console" &&
+    ts.isPropertyAccessExpression(initializer) &&
     ts.isIdentifier(initializer.expression) &&
-    initializer.expression.text === "globalThis";
+    initializer.expression.text === "globalThis" &&
+    initializer.name.text === "console";
 }
 
 function isTsLibHelperDeclaration(statement: ts.Statement): boolean {

@@ -5,6 +5,7 @@ export {
 export {
   createCallbackCompartmentGlobals,
   createModuleCompartmentGlobals,
+  createSafeConsoleGlobal,
 } from "./compartment-globals.ts";
 export { hardenVerifiedFunction } from "./function-hardening.ts";
 export {

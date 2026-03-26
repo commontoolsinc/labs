@@ -6,6 +6,7 @@ import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { evaluateFunctionSourceInSES } from "../src/sandbox/mod.ts";
+import { getAMDLoader } from "../../js-compiler/typescript/bundler/amd-loader.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -240,6 +241,187 @@ describe("SES security regressions", () => {
       fetchType: "function",
       arrayName: "Array",
       hasInjected: false,
+    });
+  });
+
+  it("does not expose the internal console hook in module compartments", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "export default function probe() {",
+            "  const host = globalThis as Record<string, unknown>;",
+            "  return {",
+            '    hasConsole: typeof console !== "undefined",',
+            '    hasConsoleHook: typeof host.RUNTIME_ENGINE_CONSOLE_HOOK !== "undefined",',
+            "  };",
+            "}",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main?.default()).toEqual({
+      hasConsole: true,
+      hasConsoleHook: false,
+    });
+  });
+
+  it("freezes host constructors before exposing them to callback compartments", () => {
+    const originalAppend = Headers.prototype.append;
+
+    try {
+      const probe = engine.getInvocation(`
+        function probe() {
+          "use strict";
+          try {
+            Headers.prototype.append = function hijacked() {};
+            return "allowed";
+          } catch (error) {
+            return error.name;
+          }
+        }
+      `) as () => string;
+
+      expect(probe()).toBe("TypeError");
+      expect(Headers.prototype.append).toBe(originalAppend);
+    } finally {
+      if (Headers.prototype.append !== originalAppend) {
+        Headers.prototype.append = originalAppend;
+      }
+    }
+  });
+
+  it("freezes host constructors before exposing them to module compartments", async () => {
+    const originalAppend = Headers.prototype.append;
+
+    try {
+      const program: RuntimeProgram = {
+        main: "/main.ts",
+        files: [
+          {
+            name: "/main.ts",
+            contents: [
+              "export default function probe() {",
+              '  "use strict";',
+              "  try {",
+              "    Headers.prototype.append = function hijacked() {};",
+              '    return "allowed";',
+              "  } catch (error) {",
+              "    return (error as Error).name;",
+              "  }",
+              "}",
+            ].join("\n"),
+          },
+        ],
+      };
+
+      const { jsScript, id } = await engine.compile(program);
+      const { main } = await engine.evaluate(id, jsScript, program.files);
+
+      expect(main?.default()).toBe("TypeError");
+      expect(Headers.prototype.append).toBe(originalAppend);
+    } finally {
+      if (Headers.prototype.append !== originalAppend) {
+        Headers.prototype.append = originalAppend;
+      }
+    }
+  });
+
+  it("prevents runtime export poisoning across evaluations", async () => {
+    const poisonProgram: RuntimeProgram = {
+      main: "/poison.ts",
+      files: [
+        {
+          name: "/poison.ts",
+          contents: [
+            'import { safeDateNow } from "commontools";',
+            "export default function poison() {",
+            "  try {",
+            "    (safeDateNow as typeof safeDateNow & { poisoned?: number }).poisoned = 123;",
+            '    return "allowed";',
+            "  } catch (error) {",
+            "    return (error as Error).name;",
+            "  }",
+            "}",
+          ].join("\n"),
+        },
+      ],
+    };
+    const probeProgram: RuntimeProgram = {
+      main: "/probe.ts",
+      files: [
+        {
+          name: "/probe.ts",
+          contents: [
+            'import { safeDateNow } from "commontools";',
+            "export default function probe() {",
+            "  return (safeDateNow as typeof safeDateNow & { poisoned?: number }).poisoned ?? 0;",
+            "}",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const poisoned = await engine.compile(poisonProgram);
+    const poisonResult = await engine.evaluate(
+      poisoned.id,
+      poisoned.jsScript,
+      poisonProgram.files,
+    );
+    expect(poisonResult.main?.default()).toBe("TypeError");
+
+    const probed = await engine.compile(probeProgram);
+    const probeResult = await engine.evaluate(
+      probed.id,
+      probed.jsScript,
+      probeProgram.files,
+    );
+    expect(probeResult.main?.default()).toBe(0);
+  });
+
+  it("makes authored AMD require inert even when called indirectly", async () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  const { define, require } = (${getAMDLoader.toString()})();
+  define("dep", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.default = 42;
+  });
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.default = function probe() {
+      const alias = ({ call: require }).call;
+      try {
+        return alias("dep");
+      } catch (error) {
+        return {
+          name: error && error.name,
+          message: String(error && error.message ? error.message : error),
+        };
+      }
+    };
+  });
+  const main = require("main");
+  const exportMap = Object.create(null);
+  return { main, exportMap };
+});
+`;
+
+    const { main } = await engine.evaluate(
+      "authored-require-probe",
+      { js: bundle, filename: "authored-require-probe.js" },
+      [],
+    );
+
+    expect(main?.default()).toEqual({
+      name: "Error",
+      message: "Authored AMD require() is unavailable in SES mode",
     });
   });
 

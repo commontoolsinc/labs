@@ -5,6 +5,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { getAMDLoader } from "../../js-compiler/typescript/bundler/amd-loader.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -242,6 +243,53 @@ describe("Engine.evaluate()", () => {
     expect(result.exportMap).toBeDefined();
   });
 
+  it("rejects invalid bundles passed directly to evaluate()", async () => {
+    const jsScript = {
+      filename: "invalid-bundle.js",
+      js: [
+        "((runtimeDeps = {}) => {",
+        `  const { define, require } = (${getAMDLoader.toString()})();`,
+        "  const leaked = globalThis.process;",
+        '  define("main", ["require", "exports"], function (require, exports) {',
+        '    "use strict";',
+        "    exports.default = leaked ? 42 : 0;",
+        "  });",
+        '  const main = require("main");',
+        "  const exportMap = Object.create(null);",
+        "  return { main, exportMap };",
+        "});",
+      ].join("\n"),
+    };
+
+    await expect(engine.evaluate("invalid", jsScript, [])).rejects.toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
+  it("re-verifies compiled bundles during evaluate()", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: "export default 42;",
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const poisonedJs = jsScript.js.replace(
+      "for (const [name, dep] of Object.entries(runtimeDeps)) {",
+      "const leaked = globalThis.process;for (const [name, dep] of Object.entries(runtimeDeps)) {",
+    );
+
+    expect(poisonedJs).not.toBe(jsScript.js);
+
+    await expect(
+      engine.evaluate(id, { ...jsScript, js: poisonedJs }, program.files),
+    ).rejects.toThrow("unsupported top-level executable code");
+  });
+
   it("correctly maps exports from multi-file programs", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
@@ -311,17 +359,18 @@ describe("Engine.evaluate()", () => {
     });
   });
 
-  it("allows explicit snapshot helpers without CTS", async () => {
+  it("allows explicit __ct_data() snapshots without CTS", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
         {
           name: "/main.ts",
           contents: [
-            'import { nonPrivateRandom, safeDateNow } from "commontools";',
+            'import { __ct_data, nonPrivateRandom, safeDateNow } from "commontools";',
             "const startedAt = safeDateNow();",
             "const seed = nonPrivateRandom();",
-            "export default { startedAt, seed };",
+            "const snapshot = __ct_data({ startedAt, seed });",
+            "export default snapshot;",
           ].join("\n"),
         },
       ],
@@ -332,6 +381,24 @@ describe("Engine.evaluate()", () => {
 
     expect(typeof main?.default?.startedAt).toBe("number");
     expect(typeof main?.default?.seed).toBe("number");
+  });
+
+  it("rejects raw mutable top-level exports without __ct_data()", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "export default {",
+            "  nested: { count: 1 },",
+            "};",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    await expect(engine.compile(program)).rejects.toThrow();
   });
 
   it("throws when handler() relies on CTS inference without CTS", async () => {
@@ -516,6 +583,32 @@ describe("Engine in SES mode", () => {
 
     const { jsScript, id } = await engine.compile(program);
     expect(jsScript.js).toContain("__ct_data");
+
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    expect(main?.default).toBeDefined();
+  });
+
+  it("compiles JSX fragments without helper mutation escape hatches", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            'import { pattern } from "commontools";',
+            "export default pattern(() => ({",
+            "  ui: <>Hello</>,",
+            "}));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+
+    expect(jsScript.js).toContain("__ctFragment");
+    expect(jsScript.js).not.toContain(".fragment =");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toBeDefined();
@@ -708,6 +801,28 @@ describe("Engine in SES mode", () => {
     expect(() => (main?.default as () => number)()).toThrow();
   });
 
+  it("rejects top-level fragment mutation escape hatches", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "function counter() {",
+            "  const self = counter as typeof counter & { fragment?: { count: number } };",
+            "  self.fragment!.count += 1;",
+            "  return self.fragment!.count;",
+            "}",
+            "counter.fragment = { count: 0 };",
+            "export default counter;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    await expect(engine.compile(program)).rejects.toThrow();
+  });
+
   it("hardens trusted builder callbacks against hidden mutable state", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
@@ -741,6 +856,18 @@ describe("Engine in SES mode", () => {
     ) => number;
 
     expect(next(1)).toBe(2);
+  });
+
+  it("rejects stringified callback IIFEs", () => {
+    expect(() =>
+      engine.getInvocation(
+        "(() => { let leaked = 0; return () => ++leaked; })()",
+      )
+    ).toThrow();
+  });
+
+  it("rejects non-function callback source", () => {
+    expect(() => engine.getInvocation("42")).toThrow();
   });
 
   it("rehydrates stringified functions in the smaller callback compartment", () => {

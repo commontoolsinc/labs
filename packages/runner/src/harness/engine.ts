@@ -27,6 +27,7 @@ import { StaticCache } from "@commonfabric/static";
 import { pretransformProgram } from "./pretransform.ts";
 import {
   createModuleCompartmentGlobals,
+  createSafeConsoleGlobal,
   evaluateCallbackSourceInSES,
   getRuntimeModuleExports,
   getRuntimeModuleTypes,
@@ -38,13 +39,7 @@ import {
   verifyCompiledBundleModuleFactories,
 } from "../sandbox/mod.ts";
 
-const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
-const INJECTED_SCRIPT =
-  `const console = globalThis.${RUNTIME_ENGINE_CONSOLE_HOOK};`;
-
-declare global {
-  var [RUNTIME_ENGINE_CONSOLE_HOOK]: any;
-}
+const INJECTED_SCRIPT = "const console = globalThis.console;";
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
@@ -102,13 +97,12 @@ interface Internals {
 export class Engine extends EventTarget implements Harness {
   private internals: Internals | undefined;
   private ctRuntime: Runtime;
+  private verifiedBundleHashes = new Set<string>();
+  private consoleShim = createSafeConsoleGlobal(new Console(this));
 
   constructor(ctRuntime: Runtime) {
     super();
     this.ctRuntime = ctRuntime;
-    // We install our console shim globally so that it can be referenced
-    // by the eval script scope.
-    globalThis[RUNTIME_ENGINE_CONSOLE_HOOK] = new Console(this);
   }
 
   async initialize() {
@@ -118,9 +112,7 @@ export class Engine extends EventTarget implements Harness {
     const compiler = new TypeScriptCompiler(environmentTypes);
     const runtime = new SESRuntime({
       globals: createModuleCompartmentGlobals({
-        [RUNTIME_ENGINE_CONSOLE_HOOK]: globalThis[
-          RUNTIME_ENGINE_CONSOLE_HOOK
-        ],
+        console: this.consoleShim,
       }),
       lockdown: true,
     });
@@ -176,11 +168,7 @@ export class Engine extends EventTarget implements Harness {
       },
     });
 
-    preflightCompiledBundle(jsScript.js, jsScript.filename ?? filename);
-    verifyCompiledBundleModuleFactories(
-      jsScript.js,
-      jsScript.filename ?? filename,
-    );
+    this.verifyCompiledBundle(jsScript, filename);
 
     return { id, jsScript };
   }
@@ -193,6 +181,7 @@ export class Engine extends EventTarget implements Harness {
     jsScript: JsScript,
     files: Source[],
   ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
+    this.verifyCompiledBundle(jsScript, `${id}.js`);
     const { isolate, runtimeExports, exportsCallback } = await this
       .getInternals();
 
@@ -293,13 +282,6 @@ export class Engine extends EventTarget implements Harness {
    * Clears accumulated source maps and other state to prevent memory leaks.
    */
   dispose(): void {
-    // Clear global console hook to prevent memory leak via the Engine reference
-    // @ts-ignore: Dynamic property access for cleanup - globalThis doesn't have this symbol typed
-    if (globalThis[RUNTIME_ENGINE_CONSOLE_HOOK]) {
-      // @ts-ignore: Dynamic property deletion - TypeScript doesn't understand symbol-keyed globalThis properties
-      delete globalThis[RUNTIME_ENGINE_CONSOLE_HOOK];
-    }
-
     if (this.internals) {
       // Clear the SES runtime state which holds accumulated source maps
       this.internals.runtime.clear();
@@ -307,6 +289,18 @@ export class Engine extends EventTarget implements Harness {
       // Clear references to allow GC
       this.internals = undefined;
     }
+  }
+
+  private verifyCompiledBundle(jsScript: JsScript, fallbackFilename: string) {
+    const bundleHash = hashOf(jsScript.js).toString();
+    if (this.verifiedBundleHashes.has(bundleHash)) {
+      return;
+    }
+
+    const filename = jsScript.filename ?? fallbackFilename;
+    preflightCompiledBundle(jsScript.js, filename);
+    verifyCompiledBundleModuleFactories(jsScript.js, filename);
+    this.verifiedBundleHashes.add(bundleHash);
   }
 }
 

@@ -2,6 +2,7 @@ import { createBuilder } from "../builder/factory.ts";
 import { StaticCache } from "@commontools/static";
 import turndown from "turndown";
 import type { RuntimeModuleIdentifier } from "./runtime-module-policy.ts";
+import { freezeSandboxValue } from "./hardening.ts";
 export type { RuntimeModuleIdentifier } from "./runtime-module-policy.ts";
 export {
   isRuntimeModuleIdentifier,
@@ -32,18 +33,20 @@ export const getRuntimeModuleTypes = (() => {
 
 export function getRuntimeModuleExports() {
   const { commontools, exportsCallback } = createBuilder();
+  const runtimeExports = freezeSandboxValue({
+    "commontools": commontools,
+    // commontools/schema only exports types, no runtime values needed
+    "commontools/schema": {},
+    // __esModule lets this load in the AMD loader
+    // when finding the "default"
+    "turndown": { default: turndown, __esModule: true },
+    "@commontools/html": commontools,
+    "@commontools/builder": commontools,
+    "@commontools/runner": commontools,
+  });
+
   return {
-    runtimeExports: {
-      "commontools": commontools,
-      // commontools/schema only exports types, no runtime values needed
-      "commontools/schema": {},
-      // __esModule lets this load in the AMD loader
-      // when finding the "default"
-      "turndown": { default: turndown, __esModule: true },
-      "@commontools/html": commontools,
-      "@commontools/builder": commontools,
-      "@commontools/runner": commontools,
-    },
+    runtimeExports,
     exportsCallback,
   };
 }
