@@ -261,7 +261,11 @@ export class SessionRegistry {
       entities: existing?.entities ?? new Map(),
       expiresAt: null,
     });
-    return { sessionId, serverSeq };
+    return {
+      sessionId,
+      serverSeq,
+      resumed: existing !== undefined,
+    };
   }
 
   get(space: string, sessionId: string): SessionState | null {
@@ -489,14 +493,24 @@ export class Server {
   ): Promise<ResponseMessage<SessionOpenResult>> {
     try {
       const engine = await this.openEngine(message.space);
+      const opened = this.#sessions.open(
+        message.space,
+        message.session,
+        Engine.serverSeq(engine),
+      );
+      const catchup = opened.resumed === true
+        ? await this.syncSessionForConnection(
+          message.space,
+          opened.sessionId,
+        )
+        : null;
       return {
         type: "response",
         requestId: message.requestId,
-        ok: this.#sessions.open(
-          message.space,
-          message.session,
-          Engine.serverSeq(engine),
-        ),
+        ok: {
+          ...opened,
+          ...(catchup ? { sync: catchup.effect } : {}),
+        },
       };
     } catch (error) {
       return respondTypedError<SessionOpenResult>(

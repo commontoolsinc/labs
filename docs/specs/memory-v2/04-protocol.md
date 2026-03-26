@@ -73,6 +73,8 @@ interface SessionOpenRequest {
 interface SessionOpenResult {
   sessionId: SessionId;
   serverSeq: number;
+  resumed?: boolean;
+  sync?: SessionSync;
 }
 ```
 
@@ -85,9 +87,13 @@ Rules:
   deferred
 - `seenSeq` is the highest canonical seq the client has fully integrated into
   confirmed state
+- `resumed: true` means the server found an existing logical session for the
+  supplied `(space, sessionId)` pair
+- when a resumed session already has watches installed, `sync` carries the
+  catch-up delta the client missed while offline
 - after reconnect, the client resumes the session, replays retained commits,
-  re-establishes the session watch set, and then receives catch-up sync newer
-  than `seenSeq`
+  applies inline catch-up `sync` when present, and only re-establishes the
+  watch set if the session was reopened fresh
 
 ## 4.2 Message Format
 

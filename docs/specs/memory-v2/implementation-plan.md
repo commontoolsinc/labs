@@ -143,8 +143,8 @@ memory route.
 - On reconnect:
   - reopen the session with `seenSeq`
   - replay outstanding commits in `localSeq` order
-  - reinstall the watch set
-  - integrate catch-up sync frames
+  - apply inline catch-up sync if the session resumes
+  - reinstall the watch set only if the session reopened fresh
 - Remove subscription-id handling and seq/hash-based duplicate-confirm logic.
 
 ## Phase 4: Runner / Toolshed Integration

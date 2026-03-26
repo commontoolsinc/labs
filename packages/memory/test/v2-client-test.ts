@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
-import { Server } from "../v2/server.ts";
+import { Server, SessionRegistry } from "../v2/server.ts";
 import {
   type EntitySnapshot,
   MEMORY_V2_PROTOCOL,
@@ -863,80 +863,172 @@ const waitFor = async (
   }
 };
 
-Deno.test("memory v2 client reconnects and reinstalls watch sets", async () => {
-  const server = new Server({
-    store: new URL("memory://memory-v2-client-reconnect"),
-  });
-  const transport = new ReconnectableLoopbackTransport(server);
-  const client = await connect({ transport });
-  const writerClient = await connect({
-    transport: loopback(server),
-  });
-  const space = await client.mount("did:key:z6Mk-memory-v2-client-reconnect");
-  const writer = await writerClient.mount(
-    "did:key:z6Mk-memory-v2-client-reconnect",
-  );
-  const originalSessionId = space.sessionId;
+Deno.test(
+  "memory v2 client reconnects without reinstalling watch sets when the session resumes",
+  async () => {
+    const server = new Server({
+      store: new URL("memory://memory-v2-client-reconnect"),
+    });
+    const transport = new ReconnectableLoopbackTransport(server);
+    const client = await connect({ transport });
+    const writerClient = await connect({
+      transport: loopback(server),
+    });
+    const space = await client.mount("did:key:z6Mk-memory-v2-client-reconnect");
+    const writer = await writerClient.mount(
+      "did:key:z6Mk-memory-v2-client-reconnect",
+    );
+    const originalSessionId = space.sessionId;
 
-  try {
-    const view = await space.watchSet([{
-      id: "root",
-      kind: "graph",
-      query: {
-        roots: [{
+    try {
+      const view = await space.watchSet([{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }]);
+      const syncs = view.subscribeSync();
+
+      transport.disconnect();
+      await writer.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
           id: "of:doc:1",
-          selector: {
-            path: [],
-            schema: false,
+          value: {
+            value: {
+              hello: "while-offline",
+            },
           },
         }],
-      },
-    }]);
-    const updates = view.subscribe();
+      });
+      await waitFor(() => transport.connectionCount >= 2);
+      const resumed = await syncs.next();
 
-    transport.disconnect();
-    await waitFor(() => transport.watchSetCount >= 2);
-
-    const pending = updates.next();
-    await writer.transact({
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: "of:doc:1",
-        value: {
-          value: {
-            hello: "reconnected",
-          },
-        },
-      }],
-    });
-
-    const update = await pending;
-    assertEquals(update.done, false);
-    assertEquals(space.sessionId, originalSessionId);
-    assertEquals(
-      update.value.entities.map((entity: EntitySnapshot) => ({
-        id: entity.id,
-        seq: entity.seq,
-        document: entity.document,
-      })),
-      [{
+      assertEquals(resumed.done, false);
+      assertEquals(resumed.value.upserts, [{
+        branch: "",
         id: "of:doc:1",
         seq: 1,
-        document: {
+        doc: {
           value: {
-            hello: "reconnected",
+            hello: "while-offline",
           },
         },
-      }],
+      }]);
+      assertEquals(resumed.value.removes, []);
+      assertEquals(transport.watchSetCount, 1);
+      assertEquals(space.sessionId, originalSessionId);
+      assertEquals(
+        view.entities.map((entity: EntitySnapshot) => ({
+          id: entity.id,
+          seq: entity.seq,
+          document: entity.document,
+        })),
+        [{
+          id: "of:doc:1",
+          seq: 1,
+          document: {
+            value: {
+              hello: "while-offline",
+            },
+          },
+        }],
+      );
+    } finally {
+      await writerClient.close();
+      await client.close();
+      await server.close();
+    }
+  },
+);
+
+Deno.test(
+  "memory v2 client reinstalls watch sets when reconnect opens a fresh session",
+  async () => {
+    const server = new Server({
+      store: new URL("memory://memory-v2-client-reconnect-expired"),
+      sessions: new SessionRegistry({ ttlMs: 0 }),
+    });
+    const transport = new ReconnectableLoopbackTransport(server);
+    const client = await connect({ transport });
+    const writerClient = await connect({
+      transport: loopback(server),
+    });
+    const space = await client.mount(
+      "did:key:z6Mk-memory-v2-client-reconnect-expired",
     );
-  } finally {
-    await writerClient.close();
-    await client.close();
-    await server.close();
-  }
-});
+    const writer = await writerClient.mount(
+      "did:key:z6Mk-memory-v2-client-reconnect-expired",
+    );
+
+    try {
+      const view = await space.watchSet([{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }]);
+      const updates = view.subscribe();
+
+      transport.disconnect();
+      await waitFor(() => transport.watchSetCount >= 2);
+
+      const pending = updates.next();
+      await writer.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: {
+            value: {
+              hello: "fresh-session",
+            },
+          },
+        }],
+      });
+
+      const update = await pending;
+      assertEquals(update.done, false);
+      assertEquals(
+        update.value.entities.map((entity: EntitySnapshot) => ({
+          id: entity.id,
+          seq: entity.seq,
+          document: entity.document,
+        })),
+        [{
+          id: "of:doc:1",
+          seq: 1,
+          document: {
+            value: {
+              hello: "fresh-session",
+            },
+          },
+        }],
+      );
+    } finally {
+      await writerClient.close();
+      await client.close();
+      await server.close();
+    }
+  },
+);
 
 Deno.test("memory v2 client replays an in-flight transact after reconnect", async () => {
   const transport = new ScriptedReconnectTransport([1]);

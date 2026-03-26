@@ -7,6 +7,7 @@ import {
   type ResponseMessage,
   type ServerMessage,
   type SessionEffectMessage,
+  type SessionOpenResult,
   type SessionSync,
   type WatchAddResult,
   type WatchSetResult,
@@ -118,8 +119,8 @@ export class Client {
   async openSession(
     space: string,
     session: MountOptions,
-  ): Promise<{ sessionId: string; serverSeq: number }> {
-    return await this.request<{ sessionId: string; serverSeq: number }>({
+  ): Promise<SessionOpenResult> {
+    return await this.request<SessionOpenResult>({
       type: "session.open",
       requestId: this.nextRequestId(),
       space,
@@ -422,9 +423,22 @@ export class SpaceSession {
   }
 
   async restore(): Promise<void> {
-    await this.reopen();
+    const restored = await this.reopen();
     await this.replayOutstandingCommits();
-    if (this.#watchSpecs.length > 0) {
+    if (restored.sync) {
+      if (this.#watchView === null) {
+        this.#watchView = WatchView.fromSync(restored.sync);
+      } else {
+        this.#watchView.applySync(restored.sync, false);
+      }
+      if (!isEmptySync(restored.sync)) {
+        this.#watchView.pushSync(restored.sync);
+      }
+      this.scheduleAck(restored.serverSeq);
+    } else if (restored.resumed === true && this.#watchSpecs.length > 0) {
+      this.scheduleAck(restored.serverSeq);
+    }
+    if (restored.resumed !== true && this.#watchSpecs.length > 0) {
       const { view, sync } = await this.watchSetSync(this.#watchSpecs);
       if (!isEmptySync(sync)) {
         view.pushSync(sync);
@@ -507,13 +521,14 @@ export class SpaceSession {
     this.#serverSeq = Math.max(this.#serverSeq, serverSeq);
   }
 
-  private async reopen(): Promise<void> {
+  private async reopen(): Promise<SessionOpenResult> {
     const restored = await this.client.openSession(this.space, {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
     });
     this.#sessionId = restored.sessionId;
     this.noteResult(restored.serverSeq);
+    return restored;
   }
 
   private async replayOutstandingCommits(): Promise<void> {

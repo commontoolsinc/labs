@@ -85,8 +85,9 @@ Reconnect behavior:
 
 1. re-open the session with `sessionId` and `seenSeq`
 2. replay outstanding commits in `localSeq` order
-3. reinstall the watch set
-4. integrate catch-up sync newer than `seenSeq`
+3. if `session.open` resumes an existing session, integrate its inline
+   catch-up sync and keep the existing watch set
+4. if `session.open` opens a fresh session, reinstall the watch set
 
 The client should treat `seenSeq` as “highest canonical seq fully integrated
 into confirmed state,” not merely “latest seq observed on the wire.”

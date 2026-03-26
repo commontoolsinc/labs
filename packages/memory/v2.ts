@@ -137,6 +137,8 @@ export interface SessionOpenCommand {
 export interface SessionOpenResult {
   sessionId: SessionId;
   serverSeq: number;
+  resumed?: boolean;
+  sync?: SessionSync;
 }
 
 export interface HelloMessage {
