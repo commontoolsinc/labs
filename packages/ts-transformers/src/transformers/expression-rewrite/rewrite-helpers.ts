@@ -4,6 +4,7 @@ import {
   classifyReactiveContext,
   type DataFlowAnalysis,
   detectCallKind,
+  isReactiveArrayMethodCallSite,
   type NormalizedDataFlow,
   setParentPointers,
 } from "../../ast/mod.ts";
@@ -99,7 +100,7 @@ function getOpaqueCallKindForParameter(
   if (callKind?.kind === "builder") {
     return "builder";
   }
-  if (callKind?.kind === "array-method") {
+  if (isReactiveArrayMethodCallSite(candidate, checker)) {
     if (context) {
       const reactiveContext = classifyReactiveContext(
         candidate,

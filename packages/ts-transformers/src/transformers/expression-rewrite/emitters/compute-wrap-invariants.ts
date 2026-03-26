@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import {
+  classifyArrayMethodCall,
   classifyReactiveContext,
   detectCallKind,
   isSimpleReactiveAccessExpression,
@@ -40,7 +41,7 @@ function isHelperRewriteBoundary(
 
   const callKind = detectCallKind(node, context.checker);
   return (
-    callKind?.kind === "array-method" ||
+    !!classifyArrayMethodCall(node) ||
     callKind?.kind === "derive" ||
     callKind?.kind === "builder" ||
     callKind?.kind === "ifElse" ||
@@ -57,7 +58,7 @@ function isOwnedPatternBoundary(
 
   const callKind = detectCallKind(node, context.checker);
   return (
-    callKind?.kind === "array-method" ||
+    !!classifyArrayMethodCall(node) ||
     callKind?.kind === "derive" ||
     callKind?.kind === "builder"
   );

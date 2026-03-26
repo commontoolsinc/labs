@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { detectCallKind } from "./call-kind.ts";
+import { classifyArrayMethodCall, detectCallKind } from "./call-kind.ts";
 
 export type ReactiveContextKind = "pattern" | "compute" | "neutral";
 
@@ -274,7 +274,7 @@ export function classifyReactiveContext(
             return { kind: "compute", owner: "unknown", inJsxExpression };
           }
 
-          if (callKind?.kind === "array-method") {
+          if (classifyArrayMethodCall(callParent)) {
             // Non-transformed map callbacks inherit the parent context.
             current = current.parent;
             continue;

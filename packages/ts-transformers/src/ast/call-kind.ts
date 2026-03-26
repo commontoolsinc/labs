@@ -1,12 +1,14 @@
 /**
  * Call Kind Detection
  *
- * This module identifies CommonTools-specific call expressions (derive, ifElse,
- * pattern, etc.) to enable appropriate transformation behavior.
+ * This module identifies compiler-significant call families. Most are
+ * CommonTools-specific calls (derive, ifElse, pattern, etc.), but array-method
+ * families are also classified because they establish callback/container
+ * boundaries relevant to analysis and lowering.
  *
  * ## Detection Strategy
  *
- * Detection is provenance-first:
+ * Detection is provenance-first for CommonTools calls:
  *
  * 1. **Symbol resolution**: Resolve the callee symbol and verify it comes from
  *    CommonTools declarations or imports.
@@ -22,9 +24,10 @@
  * ## Narrow Exceptions
  *
  * The remaining syntactic fallback is intentionally limited to synthetic
- * `__ctHelpers.*` calls and unresolved bare builder identifiers. Local helpers
- * or object methods that merely share a CommonTools name should not be
- * classified as CommonTools calls.
+ * `__ctHelpers.*` calls, unresolved bare builder identifiers, and explicit
+ * reactive array-method receiver checks. Plain array methods share the same
+ * syntax family but require separate ownership classification; consumers
+ * should use `classifyArrayMethodCallSite(...)` when that distinction matters.
  */
 import ts from "typescript";
 
@@ -80,6 +83,12 @@ export type ArrayMethodFamilyName = "map" | "filter" | "flatMap";
 export interface ArrayMethodAccessKind {
   readonly family: ArrayMethodFamilyName;
   readonly lowered: boolean;
+}
+
+export type ArrayMethodOwnership = "plain" | "reactive";
+
+export interface ArrayMethodCallSiteInfo extends ArrayMethodAccessKind {
+  readonly ownership: ArrayMethodOwnership;
 }
 
 export interface ArrayMethodResultSinkCallInfo {
@@ -247,6 +256,45 @@ export function classifyArrayMethodCall(
   call: ts.CallExpression,
 ): ArrayMethodAccessKind | undefined {
   return classifyArrayMethodAccess(call.expression);
+}
+
+export function classifyArrayMethodCallSite(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ArrayMethodCallSiteInfo | undefined {
+  const access = classifyArrayMethodCall(call);
+  if (!access) {
+    return undefined;
+  }
+
+  if (access.lowered) {
+    return { ...access, ownership: "reactive" };
+  }
+
+  const target = stripWrappers(call.expression);
+  if (
+    !ts.isPropertyAccessExpression(target) &&
+    !ts.isElementAccessExpression(target)
+  ) {
+    return { ...access, ownership: "plain" };
+  }
+
+  return {
+    ...access,
+    ownership: isReactiveArrayMethodReceiverExpression(
+        target.expression,
+        checker,
+      )
+      ? "reactive"
+      : "plain",
+  };
+}
+
+export function isReactiveArrayMethodCallSite(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  return classifyArrayMethodCallSite(call, checker)?.ownership === "reactive";
 }
 
 export function classifyArrayMethodResultSinkCall(
@@ -489,8 +537,8 @@ function resolveExpressionKind(
   if (ts.isPropertyAccessExpression(target)) {
     const name = target.name.text;
     if (ARRAY_METHOD_NAMES.has(name)) {
-      // Only classify as array-map if receiver is reactive (OpaqueRef/Cell).
-      // Plain Array.prototype methods should not be treated as reactive.
+      // Fallback path: when symbol resolution doesn't already identify the
+      // array-method family, only treat it as such for reactive receivers.
       if (
         isReactiveValueExpression(target.expression, checker) ||
         isReactiveArrayMethodChain(target.expression, checker)
@@ -557,17 +605,17 @@ function isReactiveArrayMethodChain(
 ): boolean {
   const target = stripWrappers(expression);
   return ts.isCallExpression(target) &&
-    detectCallKind(target, checker)?.kind === "array-method";
+    isReactiveArrayMethodCallSite(target, checker);
 }
 
 function isLoweredReactiveArrayMethodCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
 ): boolean {
-  const target = stripWrappers(call.expression);
-  return ts.isPropertyAccessExpression(target) &&
-    target.name.text.endsWith("WithPattern") &&
-    detectCallKind(call, checker)?.kind === "array-method";
+  const callSite = classifyArrayMethodCallSite(call, checker);
+  return !!callSite &&
+    callSite.lowered &&
+    callSite.ownership === "reactive";
 }
 
 function getImplicitReactiveParameterCallKind(
@@ -671,20 +719,10 @@ function isReactiveArrayMethodReceiverExpression(
     return true;
   }
 
-  const callKind = detectCallKind(target, checker);
-  if (callKind?.kind !== "array-method") {
+  if (!isReactiveArrayMethodCallSite(target, checker)) {
     return false;
   }
-
-  const callee = stripWrappers(target.expression);
-  if (
-    !ts.isPropertyAccessExpression(callee) &&
-    !ts.isElementAccessExpression(callee)
-  ) {
-    return false;
-  }
-
-  return isReactiveArrayMethodReceiverExpression(callee.expression, checker);
+  return true;
 }
 
 function isVariableFromReactiveCallSymbol(

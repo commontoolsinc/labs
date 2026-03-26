@@ -10,6 +10,7 @@ import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import {
+  classifyArrayMethodCall,
   detectCallKind,
   isReactiveValueExpression,
   isReactiveValueSymbol,
@@ -194,6 +195,7 @@ export function createDataFlowAnalyzer(
   const handleCallExpression = (
     merged: InternalAnalysis,
     callKind: ReturnType<typeof detectCallKind>,
+    isArrayMethodFamily: boolean,
     callee: InternalAnalysis,
     rewriteHint: RewriteHint,
   ): InternalAnalysis => {
@@ -208,7 +210,7 @@ export function createDataFlowAnalyzer(
 
     // Array-map calls preserve requiresRewrite from the callee
     // to handle cases like state.items.filter(...).map(...)
-    if (callKind?.kind === "array-method") {
+    if (isArrayMethodFamily) {
       return {
         ...merged,
         requiresRewrite: callee.requiresRewrite,
@@ -661,6 +663,7 @@ export function createDataFlowAnalyzer(
 
       const combined = mergeAnalyses(...analyses);
       const callKind = detectCallKind(expression, checker);
+      const isArrayMethodFamily = !!classifyArrayMethodCall(expression);
       const rewriteHint: RewriteHint | undefined = (() => {
         if (callKind?.kind === "ifElse" && expression.arguments.length > 0) {
           const predicate = expression.arguments[0];
@@ -671,13 +674,19 @@ export function createDataFlowAnalyzer(
         if (callKind?.kind === "builder") {
           return { kind: "skip-call-rewrite", reason: "builder" };
         }
-        if (callKind?.kind === "array-method") {
+        if (isArrayMethodFamily) {
           return { kind: "skip-call-rewrite", reason: "array-method" };
         }
         return undefined;
       })();
 
-      return handleCallExpression(combined, callKind, callee, rewriteHint);
+      return handleCallExpression(
+        combined,
+        callKind,
+        isArrayMethodFamily,
+        callee,
+        rewriteHint,
+      );
     }
 
     if (isFunctionLikeExpression(expression)) {

@@ -1,6 +1,7 @@
 import ts from "typescript";
 import {
   classifyArrayMethodCall,
+  classifyArrayMethodCallSite,
   classifyArrayMethodResultSinkCall,
   classifyArrayMethodResultSinkReceiverChainCall,
   classifyReactiveContext,
@@ -14,6 +15,7 @@ import {
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
+import { classifyCallbackSupport } from "./callback-support.ts";
 import { classifySupportedCallRoot } from "./call-root-support.ts";
 import { rewriteExpression } from "./expression-rewrite/mod.ts";
 import {
@@ -353,36 +355,23 @@ function isDirectDeriveCall(
 function isEligiblePatternOwnedWrapperCallbackSite(
   expression: ts.Expression,
   context: TransformationContext,
-  analyze: AnalyzeFn,
 ): boolean {
   const callbackContext = findEnclosingCallbackContext(expression);
   if (!callbackContext) {
     return true;
   }
 
-  if (context.isArrayMethodCallback(callbackContext.callback)) {
-    return true;
-  }
-
-  const callKind = detectCallKind(callbackContext.call, context.checker);
-  if (
-    callKind?.kind === "builder" &&
-    (callKind.builderName === "pattern" || callKind.builderName === "render")
-  ) {
-    return true;
-  }
-
-  if (callKind?.kind !== "array-method") {
-    return false;
-  }
-
-  const callExpression = callbackContext.call.expression;
-  if (!ts.isPropertyAccessExpression(callExpression)) {
-    return false;
-  }
-
-  const receiverAnalysis = analyze(callExpression.expression);
-  return receiverAnalysis.containsOpaqueRef;
+  const callbackSupport = classifyCallbackSupport(
+    callbackContext.callback,
+    context.checker,
+    context,
+  );
+  return callbackSupport.kind === "supported" &&
+    (
+      callbackSupport.supportedKind === "reactive-array-method" ||
+      callbackSupport.supportedKind === "pattern-builder" ||
+      callbackSupport.supportedKind === "render-builder"
+    );
 }
 
 function containsReactiveArrayMethodSubexpression(
@@ -565,17 +554,17 @@ function isArrayMethodOwnedExpressionSite(
     return false;
   }
 
-  if (context.isArrayMethodCallback(callbackContext.callback)) {
-    return true;
-  }
-
-  const callKind = detectCallKind(callbackContext.call, context.checker);
-  return callKind?.kind === "array-method";
+  const callbackSupport = classifyCallbackSupport(
+    callbackContext.callback,
+    context.checker,
+    context,
+  );
+  return callbackSupport.kind === "supported" &&
+    callbackSupport.supportedKind === "reactive-array-method";
 }
 
 function isPlainArrayCallbackExpressionSite(
   expression: ts.Expression,
-  analyze: AnalyzeFn,
   context: TransformationContext,
 ): boolean {
   const callbackContext = findEnclosingCallbackContext(expression);
@@ -583,30 +572,20 @@ function isPlainArrayCallbackExpressionSite(
     return false;
   }
 
-  if (context.isArrayMethodCallback(callbackContext.callback)) {
-    return false;
-  }
-
-  const callKind = detectCallKind(callbackContext.call, context.checker);
-  if (callKind?.kind !== "array-method") {
-    return false;
-  }
-
-  const callExpression = callbackContext.call.expression;
-  if (!ts.isPropertyAccessExpression(callExpression)) {
-    return false;
-  }
-
-  const receiverAnalysis = analyze(callExpression.expression);
-  return !receiverAnalysis.containsOpaqueRef;
+  const callbackSupport = classifyCallbackSupport(
+    callbackContext.callback,
+    context.checker,
+    context,
+  );
+  return callbackSupport.kind === "supported" &&
+    callbackSupport.supportedKind === "plain-array-value";
 }
 
 function isLowerableJsxExpressionSiteInPlainArrayCallback(
   expression: ts.Expression,
   context: TransformationContext,
-  analyze: AnalyzeFn,
 ): boolean {
-  return isPlainArrayCallbackExpressionSite(expression, analyze, context) &&
+  return isPlainArrayCallbackExpressionSite(expression, context) &&
     !isDirectArrayMethodRootExpression(expression);
 }
 
@@ -682,7 +661,12 @@ function isDeferredJsxArrayMethodExpression(
     }
   }
 
-  return detectCallKind(current, context.checker)?.kind === "array-method";
+  const arrayMethodCallSite = classifyArrayMethodCallSite(
+    current,
+    context.checker,
+  );
+  return !!arrayMethodCallSite &&
+    arrayMethodCallSite.ownership === "reactive";
 }
 
 function isOwnedDeferredJsxArrayMethodRoot(
@@ -815,7 +799,6 @@ export function classifyJsxExpressionSiteRoute(
       !isLowerableJsxExpressionSiteInPlainArrayCallback(
         expression,
         context,
-        analyze,
       )
     ) {
       return {
@@ -966,7 +949,6 @@ function canRewriteExpressionSite(
       !isLowerableJsxExpressionSiteInPlainArrayCallback(
         expression,
         context,
-        analyze,
       )
     ) {
       return false;
@@ -1012,7 +994,7 @@ function canRewriteExpressionSite(
     containerKind !== "jsx-expression" &&
     !siteInfo.controlFlowRewriteRoot &&
     !isSharedPostClosureCallRoot(expression, context, analyze) &&
-    !isEligiblePatternOwnedWrapperCallbackSite(expression, context, analyze) &&
+    !isEligiblePatternOwnedWrapperCallbackSite(expression, context) &&
     supportedCallRootKind !== "pattern-owned-receiver-method"
   ) {
     return false;
@@ -1170,7 +1152,6 @@ function canLowerOptionalAccessExpressionSite(
   return isEligiblePatternOwnedWrapperCallbackSite(
     expression,
     context,
-    analyze,
   );
 }
 

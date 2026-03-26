@@ -35,6 +35,7 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
+  classifyArrayMethodCallSite,
   classifyReactiveContext,
   createDataFlowAnalyzer,
   detectCallKind,
@@ -47,8 +48,8 @@ import {
 } from "../ast/mod.ts";
 import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
 import { classifyUnsupportedCallRoot } from "./call-root-support.ts";
+import { classifyCallbackSupport } from "./callback-support.ts";
 import {
-  addBindingTargetSymbols,
   collectLocalOpaqueRootSymbols,
   isOpaqueSourceExpression,
   isTopmostMemberAccess,
@@ -600,70 +601,16 @@ export class PatternContextValidationTransformer extends Transformer {
       return false;
     }
 
-    const callKind = detectCallKind(parent, checker);
-    if (callKind?.kind !== "array-method") {
-      return isReactiveArrayMethodCall(
-        parent,
-        checker,
-        context.options.typeRegistry,
-      );
+    const callSite = classifyArrayMethodCallSite(parent, checker);
+    if (callSite) {
+      return callSite.ownership === "reactive";
     }
 
-    const callee = parent.expression;
-    const receiver = ts.isPropertyAccessExpression(callee)
-      ? callee.expression
-      : ts.isElementAccessExpression(callee)
-      ? callee.expression
-      : undefined;
-    if (!receiver) {
-      return false;
-    }
-
-    const owner = this.findEnclosingPatternOwnerCallback(
-      func,
+    return isReactiveArrayMethodCall(
+      parent,
       checker,
-      context,
+      context.options.typeRegistry,
     );
-    if (!owner) {
-      return false;
-    }
-
-    const opaqueRootSymbols = new Set<ts.Symbol>();
-    for (const parameter of owner.parameters) {
-      addBindingTargetSymbols(parameter.name, opaqueRootSymbols, checker);
-    }
-    for (const symbol of collectLocalOpaqueRootSymbols(owner.body, context)) {
-      opaqueRootSymbols.add(symbol);
-    }
-
-    return isOpaqueSourceExpression(
-      receiver,
-      EMPTY_OPAQUE_ROOTS,
-      opaqueRootSymbols,
-      context,
-    );
-  }
-
-  private findEnclosingPatternOwnerCallback(
-    func: ts.ArrowFunction | ts.FunctionExpression,
-    checker: ts.TypeChecker,
-    context: TransformationContext,
-  ): ts.ArrowFunction | ts.FunctionExpression | undefined {
-    let current: ts.Node | undefined = func.parent;
-    while (current) {
-      if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-        const reactiveContext = classifyReactiveContext(
-          current.body,
-          checker,
-          context,
-        );
-        if (reactiveContext.kind === "pattern") {
-          return current;
-        }
-      }
-      current = current.parent;
-    }
-    return undefined;
   }
 
   /**
@@ -681,17 +628,20 @@ export class PatternContextValidationTransformer extends Transformer {
 
     // Skip if this function IS a callback to a safe wrapper
     // e.g., computed(() => ...), action(() => ...), derive(() => ...)
-    if (this.isSafeWrapperCallback(node, checker)) return;
+    if (this.isSafeWrapperCallback(node, checker, context)) return;
 
     // Only error if inside restricted context (pattern/render)
     if (!isInsideRestrictedContext(node, checker, context)) return;
 
     if (this.isInsideJsx(node)) {
-      if (this.isSupportedJsxCallback(node, checker)) {
+      const callbackSupport = ts.isFunctionDeclaration(node)
+        ? { kind: "none" as const }
+        : classifyCallbackSupport(node, checker, context);
+      if (callbackSupport.kind === "supported") {
         return;
       }
 
-      if (this.isJsxCallbackArgument(node)) {
+      if (callbackSupport.kind === "unsupported") {
         context.reportDiagnostic({
           severity: "error",
           type: "pattern-context:callback-container",
@@ -721,6 +671,7 @@ export class PatternContextValidationTransformer extends Transformer {
   private isSafeWrapperCallback(
     node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
     checker: ts.TypeChecker,
+    context: TransformationContext,
   ): boolean {
     // Function declarations can't be callbacks
     if (ts.isFunctionDeclaration(node)) return false;
@@ -731,123 +682,11 @@ export class PatternContextValidationTransformer extends Transformer {
     // Check if this function is an argument to the call
     if (!parent.arguments.includes(node)) return false;
 
-    const callKind = detectCallKind(parent, checker);
-    if (!callKind) return false;
-
-    // derive is a safe wrapper
-    if (callKind.kind === "derive") return true;
-
-    // array method calls on cells/opaques are transformed, so callbacks are allowed
-    if (callKind.kind === "array-method") return true;
-
-    // patternTool handles closure capture for its callback
-    if (callKind.kind === "pattern-tool") return true;
-
-    // Check builder-based safe wrappers (computed, action, lift, handler)
-    // Note: derive is handled separately above (it has its own kind, not "builder")
-    if (callKind.kind === "builder") {
-      const safeBuilders = new Set([
-        "computed",
-        "action",
-        "lift",
-        "handler",
-      ]);
-      return safeBuilders.has(callKind.builderName);
-    }
-
-    return false;
-  }
-
-  private isJsxCallbackArgument(
-    node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
-  ): boolean {
-    if (ts.isFunctionDeclaration(node)) return false;
-    const parent = node.parent;
-    return !!parent && ts.isCallExpression(parent) &&
-      parent.arguments.includes(node);
-  }
-
-  private isSupportedJsxCallback(
-    node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
-    checker: ts.TypeChecker,
-  ): boolean {
-    if (ts.isFunctionDeclaration(node)) {
-      return false;
-    }
-
-    const jsxParent = node.parent;
-    if (
-      ts.isJsxExpression(jsxParent) &&
-      ts.isJsxAttribute(jsxParent.parent) &&
-      jsxParent.parent.name.getText().startsWith("on")
-    ) {
-      return true;
-    }
-
-    const parent = node.parent;
-    if (
-      !parent || !ts.isCallExpression(parent) ||
-      !parent.arguments.includes(node)
-    ) {
-      return false;
-    }
-
-    const callKind = detectCallKind(parent, checker);
-    if (
-      callKind?.kind === "array-method" ||
-      callKind?.kind === "derive" ||
-      callKind?.kind === "pattern-tool"
-    ) {
-      return true;
-    }
-
-    if (callKind?.kind === "builder") {
-      return callKind.builderName === "computed" ||
-        callKind.builderName === "action" ||
-        callKind.builderName === "lift" ||
-        callKind.builderName === "handler";
-    }
-
-    return this.isValueReturningArrayCallbackCall(parent, checker);
-  }
-
-  private isValueReturningArrayCallbackCall(
-    call: ts.CallExpression,
-    checker: ts.TypeChecker,
-  ): boolean {
-    const signature = checker.getResolvedSignature(call);
-    const declaration = signature?.declaration;
-    if (!signature || !declaration) {
-      return false;
-    }
-
-    const owner = this.findDeclarationOwnerName(declaration);
-    if (owner !== "Array" && owner !== "ReadonlyArray") {
-      return false;
-    }
-
-    const returnType = checker.getReturnTypeOfSignature(signature);
-    return (returnType.flags & ts.TypeFlags.Void) === 0;
-  }
-
-  private findDeclarationOwnerName(node: ts.Node): string | undefined {
-    let current: ts.Node | undefined = node.parent;
-    while (current) {
-      if (
-        ts.isInterfaceDeclaration(current) ||
-        ts.isClassDeclaration(current) ||
-        ts.isTypeAliasDeclaration(current)
-      ) {
-        if (current.name) {
-          return current.name.text;
-        }
-      }
-      if (ts.isSourceFile(current)) {
-        break;
-      }
-      current = current.parent;
-    }
-    return undefined;
+    const callbackSupport = classifyCallbackSupport(node, checker, context);
+    return callbackSupport.kind === "supported" &&
+      callbackSupport.supportedKind !== "event-handler-jsx" &&
+      callbackSupport.supportedKind !== "pattern-builder" &&
+      callbackSupport.supportedKind !== "render-builder";
   }
 
   private isComputedLikeCallback(
