@@ -7,7 +7,7 @@ export type ReactiveContextOwner =
   | "pattern"
   | "render"
   | "array-method"
-  | "jsx-callback"
+  | "unsupported-jsx-callback"
   | "computed"
   | "derive"
   | "action"
@@ -289,11 +289,16 @@ export function classifyReactiveContext(
             return { kind: "pattern", owner: "pattern", inJsxExpression };
           }
 
-          // Unknown callbacks inside JSX expressions should run in compute context.
-          // This ensures chains like `list.map(...).filter(...)` are treated as
-          // compute callbacks rather than pattern callbacks.
+          // Unsupported callback containers inside JSX are treated as
+          // compute-like only so nested expressions do not emit misleading
+          // pattern-context diagnostics before validation reports the
+          // callback-container error at the boundary.
           if (inJsxExpression || isWithinJsxExpression(current)) {
-            return { kind: "compute", owner: "jsx-callback", inJsxExpression };
+            return {
+              kind: "compute",
+              owner: "unsupported-jsx-callback",
+              inJsxExpression,
+            };
           }
         }
       }

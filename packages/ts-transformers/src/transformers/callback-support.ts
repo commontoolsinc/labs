@@ -7,7 +7,7 @@ import {
 import type { ReactiveContextLookup } from "../ast/reactive-context.ts";
 
 export type SupportedCallbackKind =
-  | "event-handler-jsx"
+  | "event-handler"
   | "reactive-array-method"
   | "plain-array-value"
   | "pattern-builder"
@@ -50,7 +50,7 @@ export function allowsRestrictedContextFunctionCallback(
   decision: CallbackSupportDecision,
 ): boolean {
   return decision.kind === "supported" &&
-    decision.supportedKind !== "event-handler-jsx" &&
+    decision.supportedKind !== "event-handler" &&
     decision.supportedKind !== "pattern-builder" &&
     decision.supportedKind !== "render-builder";
 }
@@ -68,7 +68,7 @@ export function classifyCallbackSupport(
   ) {
     return {
       kind: "supported",
-      supportedKind: "event-handler-jsx",
+      supportedKind: "event-handler",
     };
   }
 

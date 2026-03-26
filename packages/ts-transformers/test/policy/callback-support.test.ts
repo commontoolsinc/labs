@@ -154,7 +154,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Callback support policy: JSX event handlers stay outside the generic safe-wrapper callback bucket",
+  "Callback support policy: event handlers stay outside the generic safe-wrapper callback bucket",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -171,7 +171,7 @@ Deno.test(
 
     assertEquals(decision, {
       kind: "supported",
-      supportedKind: "event-handler-jsx",
+      supportedKind: "event-handler",
     });
     assertEquals(allowsRestrictedContextFunctionCallback(decision), false);
     assertEquals(supportsPatternOwnedWrapperCallbackSite(decision), false);
