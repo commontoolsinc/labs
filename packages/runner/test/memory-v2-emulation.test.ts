@@ -128,9 +128,20 @@ describe("Memory v2 emulation", () => {
     });
   });
 
-  it("treats source-only provider sends as documents, not deletes", async () => {
+  it("treats source-only provider sends as deletes", async () => {
     const provider = storageManager.open(space) as unknown as TestProvider;
     const uri = `of:memory-v2-source-only-${Date.now()}` as const;
+
+    const seed = await provider.send([{
+      uri,
+      value: {
+        value: { hello: "world" },
+      },
+    }]);
+    expect(seed).toEqual({ ok: {} });
+    expect(provider.get(uri)).toEqual({
+      value: { hello: "world" },
+    });
 
     const result = await provider.send([{
       uri,
@@ -141,9 +152,6 @@ describe("Memory v2 emulation", () => {
     }]);
 
     expect(result).toEqual({ ok: {} });
-    expect(provider.get(uri)).toEqual({
-      value: undefined,
-      source: { "/": "process:1" },
-    });
+    expect(provider.get(uri)).toBeUndefined();
   });
 });

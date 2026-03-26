@@ -101,6 +101,11 @@ export function setJsonEncodingConfig(enabled?: boolean): void {
   }
 }
 
+/** Returns whether unified JSON encoding mode is currently enabled. */
+export function getJsonEncodingConfig(): boolean {
+  return jsonEncodingEnabled;
+}
+
 /**
  * Restores unified JSON encoding mode to its default (disabled). Called by
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or

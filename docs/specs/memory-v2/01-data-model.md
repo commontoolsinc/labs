@@ -9,12 +9,19 @@ This section defines the core data types of Memory v2: entities, facts,
 references, blobs, patches, and snapshots. Every concept is accompanied by its
 TypeScript type definition.
 
+Unless a subsection is explicitly talking about pure JSON schema/query syntax,
+runtime payloads in the current implementation should be read as
+`StorableDatum`, not plain `JSONValue`. `StorableDatum` is the shared rich-value
+surface from the data-model layer: it includes ordinary JSON values and also
+runtime-supported richer leaves such as `bigint`, `undefined`, and the escaped
+single-slash object forms used by the boundary codec.
+
 ---
 
 ## 1. Entities
 
 An **entity** is the fundamental unit of mutable state. Each entity is
-identified by a URI and holds a JSON value that evolves over time through a
+identified by a URI and holds a storable value that evolves over time through a
 causal chain of facts.
 
 ```typescript
@@ -42,7 +49,7 @@ Entity values are stored in an **envelope** with well-known top-level keys:
 
 ```typescript
 interface EntityDocument {
-  value: JSONValue; // The cell's data. Live entities always carry a value.
+  value?: StorableDatum; // The cell's data when present.
   source?: SourceLink; // {"/":"<short-id>"} -> resolves to of:<short-id> in same space.
   // Future: labels, schema, etc.
 }
@@ -110,12 +117,12 @@ writes depending on how the value is expressed:
 
 ```typescript
 /**
- * A Write that sets the entity's value by full replacement.
+ * A Write that sets the entity's full logical document by replacement.
  */
 interface SetWrite {
   type: "set";
   id: EntityId;
-  value: JSONValue; // The complete new state
+  value: EntityDocument; // The complete new logical document
   parent: Reference; // Hash of the previous fact, or EMPTY
 }
 
@@ -433,13 +440,13 @@ type JSONPointer = string;
 interface ReplaceOp {
   op: "replace";
   path: JSONPointer;
-  value: JSONValue;
+  value: StorableDatum;
 }
 
 interface AddOp {
   op: "add";
   path: JSONPointer;
-  value: JSONValue;
+  value: StorableDatum;
   // Creates intermediate parents automatically:
   // numeric path segments → array, string segments → object,
   // schema-guided when available.
@@ -464,7 +471,7 @@ interface SpliceOp {
   path: JSONPointer; // Path to the target array
   index: number; // Start index
   remove: number; // Number of elements to remove
-  add: JSONValue[]; // Elements to insert at the index
+  add: StorableDatum[]; // Elements to insert at the index
 }
 
 type PatchOp = ReplaceOp | AddOp | RemoveOp | MoveOp | SpliceOp;
@@ -491,7 +498,7 @@ patch list is invalid (e.g., removing a non-existent path), the entire patch
 fails and the fact is rejected.
 
 ```typescript
-function applyPatch(state: JSONValue, ops: PatchOp[]): JSONValue {
+function applyPatch(state: StorableDatum, ops: PatchOp[]): StorableDatum {
   let current = state;
   for (const op of ops) {
     current = applyOp(current, op);
@@ -518,9 +525,9 @@ snapshot_v10 → apply(patch_v11) → apply(patch_v12) → ... → current_state
 A `PatchWrite` fact stores its patch operations directly. The fact's content
 hash covers the full patch operation list, ensuring integrity.
 
-In the storage layer, patch operations are serialized as JSON and stored as a
-content-addressed value in the `value` table. The fact table references this
-value via a `value_ref` column. See §02 Storage for details.
+In the storage layer, patch operations are serialized with the shared rich-value
+boundary codec and stored inline on the seq-addressed `revision.data` column.
+See §02 Storage for details.
 
 ---
 
@@ -690,7 +697,7 @@ type SpaceId = `did:${string}`;
 /** A decentralized identifier (generic). */
 type DID = `did:${string}`;
 
-/** Any valid JSON value. Use `refer` from `merkle-reference/json`. */
+/** Any valid JSON value. */
 type JSONValue =
   | null
   | boolean
@@ -698,6 +705,14 @@ type JSONValue =
   | string
   | JSONValue[]
   | { [key: string]: JSONValue };
+
+/**
+ * Any runtime value accepted by the shared memory-v2 boundary codec.
+ * This strictly contains JSONValue and additionally supports richer leaves
+ * such as bigint/undefined plus escaped slash-key objects when the active
+ * runtime experimental flags enable them.
+ */
+type StorableDatum = unknown;
 
 /** A JSON Schema definition. */
 type JSONSchema =

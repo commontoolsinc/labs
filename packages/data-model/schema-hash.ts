@@ -53,6 +53,11 @@ export function setSchemaHashConfig(enabled?: boolean): void {
   }
 }
 
+/** Returns whether modern schema hash mode is currently enabled. */
+export function getSchemaHashConfig(): boolean {
+  return modernSchemaHashEnabled;
+}
+
 /**
  * Restores modern schema hash mode to its default (disabled). Called by
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or

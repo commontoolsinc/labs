@@ -3,7 +3,11 @@ import { FakeTime } from "@std/testing/time";
 import { Identity } from "@commontools/identity";
 import type { URI } from "@commontools/memory/interface";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
-import type { SessionSync, SessionSyncUpsert } from "@commontools/memory/v2";
+import {
+  getMemoryV2Flags,
+  type SessionSync,
+  type SessionSyncUpsert,
+} from "@commontools/memory/v2";
 import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 import {
   type Options as V2Options,
@@ -13,6 +17,11 @@ import {
 
 const signer = await Identity.fromPassphrase("memory-v2-watch-refresh-race");
 const space = signer.did();
+const HELLO_OK = {
+  type: "hello.ok",
+  protocol: "memory/v2",
+  flags: getMemoryV2Flags(),
+} as const;
 
 type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): { value: unknown } | undefined;
@@ -76,10 +85,7 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
 
     switch (message.type) {
       case "hello":
-        this.#respond({
-          type: "hello.ok",
-          protocol: "memory/v2",
-        });
+        this.#respond(HELLO_OK);
         return Promise.resolve();
       case "session.open":
         this.#respond({
@@ -173,10 +179,7 @@ class IncrementalEffectTransport implements MemoryV2Client.Transport {
 
     switch (message.type) {
       case "hello":
-        this.#respond({
-          type: "hello.ok",
-          protocol: "memory/v2",
-        });
+        this.#respond(HELLO_OK);
         return Promise.resolve();
       case "session.open":
         this.#respond({

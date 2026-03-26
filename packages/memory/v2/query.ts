@@ -17,7 +17,6 @@ import { ContextualFlowControl } from "../../runner/src/cfc.ts";
 import { type Immutable, isObject } from "@commontools/utils/types";
 import type { MemorySpace, StorableDatum, URI } from "../interface.ts";
 import {
-  encodeWireEntityDocument,
   type EntitySnapshot,
   type GraphQuery,
   toDocumentSelector,
@@ -164,8 +163,8 @@ const snapshotForDocKey = (
     document: detail?.document === undefined
       ? state?.document === null || state?.document === undefined
         ? null
-        : encodeWireEntityDocument(state.document)
-      : encodeWireEntityDocument(detail.document),
+        : state.document
+      : detail.document,
   } satisfies EntitySnapshot;
 };
 

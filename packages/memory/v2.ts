@@ -1,13 +1,17 @@
+import { cloneIfNecessary } from "@commontools/data-model/fabric-value";
 import {
+  getJsonEncodingConfig,
   jsonFromValue,
   valueFromJson,
 } from "@commontools/data-model/json-encoding";
+import { getSchemaHashConfig } from "@commontools/data-model/schema-hash";
+import { getModernHashConfig } from "@commontools/data-model/value-hash";
+import type { SchemaPathSelector, StorableDatum } from "./interface.ts";
 import type {
-  JSONValue,
-  SchemaPathSelector,
-  StorableDatum,
-} from "./interface.ts";
-import type { ReconstructionContext } from "@commontools/data-model/interface";
+  FabricValue,
+  ReconstructionContext,
+} from "@commontools/data-model/interface";
+import { getExperimentalStorableConfig } from "./storable-value.ts";
 
 export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
 export const MEMORY_V2_CONTENT_TYPE = "merkle-reference/json" as const;
@@ -39,18 +43,11 @@ export interface SourceLink {
 }
 
 export type EntityDocumentField = StorableDatum | SourceLink | undefined;
-export type WireEntityDocumentField = JSONValue | SourceLink | undefined;
 
 export interface EntityDocument {
   value?: StorableDatum;
   source?: SourceLink;
   [key: string]: EntityDocumentField;
-}
-
-export interface WireEntityDocument {
-  value?: JSONValue;
-  source?: SourceLink;
-  [key: string]: WireEntityDocumentField;
 }
 
 export interface Blob {
@@ -61,8 +58,8 @@ export interface Blob {
 }
 
 export type PatchOp =
-  | { op: "replace"; path: string; value: JSONValue }
-  | { op: "add"; path: string; value: JSONValue }
+  | { op: "replace"; path: string; value: StorableDatum }
+  | { op: "add"; path: string; value: StorableDatum }
   | { op: "remove"; path: string }
   | { op: "move"; from: string; path: string }
   | {
@@ -70,13 +67,13 @@ export type PatchOp =
     path: string;
     index: number;
     remove: number;
-    add: JSONValue[];
+    add: StorableDatum[];
   };
 
 export interface SetOperation {
   op: "set";
   id: EntityId;
-  value: WireEntityDocument;
+  value: EntityDocument;
 }
 
 export interface PatchOperation {
@@ -141,14 +138,23 @@ export interface SessionOpenResult {
   sync?: SessionSync;
 }
 
+export interface MemoryV2Flags {
+  richStorableValues: boolean;
+  unifiedJsonEncoding: boolean;
+  canonicalHashing: boolean;
+  modernSchemaHash: boolean;
+}
+
 export interface HelloMessage {
   type: "hello";
   protocol: typeof MEMORY_V2_PROTOCOL;
+  flags: MemoryV2Flags;
 }
 
 export interface HelloOkMessage {
   type: "hello.ok";
   protocol: typeof MEMORY_V2_PROTOCOL;
+  flags: MemoryV2Flags;
 }
 
 export interface SessionDescriptor {
@@ -180,7 +186,7 @@ export interface EntitySnapshot {
   branch: BranchName;
   id: EntityId;
   seq: number;
-  document: WireEntityDocument | null;
+  document: EntityDocument | null;
 }
 
 export interface GraphQueryResult {
@@ -206,7 +212,7 @@ export interface SessionSyncUpsert {
   branch: BranchName;
   id: EntityId;
   seq: number;
-  doc?: WireEntityDocument;
+  doc?: EntityDocument;
   deleted?: true;
 }
 
@@ -244,7 +250,7 @@ export interface TransactRequest {
   sessionId: SessionId;
   commit: ClientCommit;
   invocation?: Record<string, unknown>;
-  authorization?: JSONValue;
+  authorization?: StorableDatum;
 }
 
 export interface GraphQueryRequest {
@@ -333,6 +339,40 @@ const memoryV2ReconstructionContext: ReconstructionContext = {
 const isDocumentRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
+export const getMemoryV2Flags = (): MemoryV2Flags => ({
+  richStorableValues: getExperimentalStorableConfig().richStorableValues,
+  unifiedJsonEncoding: getJsonEncodingConfig(),
+  canonicalHashing: getModernHashConfig(),
+  modernSchemaHash: getSchemaHashConfig(),
+});
+
+export const sameMemoryV2Flags = (
+  left: MemoryV2Flags,
+  right: MemoryV2Flags,
+): boolean =>
+  left.richStorableValues === right.richStorableValues &&
+  left.unifiedJsonEncoding === right.unifiedJsonEncoding &&
+  left.canonicalHashing === right.canonicalHashing &&
+  left.modernSchemaHash === right.modernSchemaHash;
+
+export const isMemoryV2Flags = (value: unknown): value is MemoryV2Flags =>
+  isDocumentRecord(value) &&
+  typeof value.richStorableValues === "boolean" &&
+  typeof value.unifiedJsonEncoding === "boolean" &&
+  typeof value.canonicalHashing === "boolean" &&
+  typeof value.modernSchemaHash === "boolean";
+
+export const encodeMemoryV2Boundary = (value: unknown): string =>
+  jsonFromValue(value as FabricValue);
+
+export const decodeMemoryV2Boundary = <Value = StorableDatum>(
+  source: string,
+): Value =>
+  cloneIfNecessary(
+    valueFromJson(source, memoryV2ReconstructionContext) as FabricValue,
+    { frozen: false, deep: true, force: true },
+  ) as Value;
+
 export const toSourceLink = (id: string): SourceLink => ({ "/": id });
 
 export const toDocumentPath = (path: readonly string[]): DocumentPath =>
@@ -376,25 +416,6 @@ export const toEntityDocument = (
   return document as EntityDocument;
 };
 
-export const toWireEntityDocument = (
-  value: JSONValue | undefined,
-  source?: SourceLink,
-  metadata: Record<string, WireEntityDocumentField> = {},
-): WireEntityDocument => {
-  const document: Record<string, WireEntityDocumentField> = {
-    ...metadata,
-    ...(source !== undefined ? { source } : {}),
-  };
-  if (value !== undefined) {
-    document.value = value;
-  }
-  return document as WireEntityDocument;
-};
-
-export const isWireEntityDocument = (
-  value: unknown,
-): value is WireEntityDocument => isDocumentRecord(value);
-
 export const isEntityDocument = (
   value: unknown,
 ): value is EntityDocument => isDocumentRecord(value);
@@ -407,39 +428,4 @@ export const getEntityDocumentMetadata = (
     ...metadata
   } = document;
   return metadata;
-};
-
-export const getWireEntityDocumentMetadata = (
-  document: WireEntityDocument,
-): Record<string, WireEntityDocumentField> => {
-  const {
-    value: _value,
-    ...metadata
-  } = document;
-  return metadata;
-};
-
-export const encodeWireEntityDocument = (
-  document: EntityDocument,
-): WireEntityDocument => {
-  const encoded = JSON.parse(
-    jsonFromValue(document as unknown as StorableDatum),
-  ) as JSONValue;
-  if (!isDocumentRecord(encoded)) {
-    throw new Error("memory v2 documents must encode to plain object roots");
-  }
-  return encoded as WireEntityDocument;
-};
-
-export const decodeWireEntityDocument = (
-  document: WireEntityDocument,
-): EntityDocument => {
-  const decoded = valueFromJson(
-    JSON.stringify(document),
-    memoryV2ReconstructionContext,
-  );
-  if (!isDocumentRecord(decoded)) {
-    throw new Error("memory v2 documents must decode to plain object roots");
-  }
-  return decoded as EntityDocument;
 };

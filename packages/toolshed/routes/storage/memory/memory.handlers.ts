@@ -1,4 +1,5 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
+import { encodeMemoryV2Boundary } from "@commontools/memory/v2";
 import * as MemoryV2Server from "@commontools/memory/v2/server";
 import type * as Routes from "./memory.routes.ts";
 import { Memory, memory, memoryV2Server } from "../memory.ts";
@@ -109,7 +110,7 @@ const attachV2SocketPipeline = (
     if (socket.readyState !== WebSocket.OPEN) {
       return;
     }
-    socket.send(JSON.stringify(message));
+    socket.send(encodeMemoryV2Boundary(message));
   });
   const onClose = () => {
     socket.removeEventListener("message", onMessage);

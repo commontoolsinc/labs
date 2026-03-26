@@ -1,7 +1,7 @@
 import { Database } from "@db/sqlite";
 import { fromDigest } from "merkle-reference";
 import { sha256 } from "@commontools/data-model/sha256-impl";
-import type { JSONValue } from "../interface.ts";
+import type { StorableDatum } from "../interface.ts";
 import { refer } from "../reference.ts";
 import { applyPatch } from "./patch.ts";
 import { parentPath, parsePointer, pathsOverlap } from "./path.ts";
@@ -9,17 +9,16 @@ import {
   type Blob,
   type BranchName,
   type ClientCommit,
-  decodeWireEntityDocument,
+  decodeMemoryV2Boundary,
   DEFAULT_BRANCH,
-  encodeWireEntityDocument,
+  encodeMemoryV2Boundary,
   type EntityDocument,
   type EntityId,
-  isWireEntityDocument,
+  isEntityDocument,
   type Operation,
   type PatchOp,
   type Reference,
   type SessionId,
-  type WireEntityDocument,
 } from "../v2.ts";
 
 const PRAGMAS = `
@@ -486,11 +485,11 @@ export interface InvocationRecord {
   aud?: string | null;
   cmd: string;
   sub: string;
-  args?: JSONValue;
+  args?: StorableDatum;
   [key: string]: unknown;
 }
 
-export type AuthorizationRecord = JSONValue;
+export type AuthorizationRecord = StorableDatum;
 
 export interface ApplyCommitOptions {
   sessionId: SessionId;
@@ -506,7 +505,7 @@ export interface AppliedRevision {
   opIndex: number;
   commitSeq: number;
   op: Operation["op"];
-  document?: WireEntityDocument;
+  document?: EntityDocument;
   patches?: PatchOp[];
 }
 
@@ -838,14 +837,14 @@ const applyCommitTransaction = (
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
   const invocationRef = toReference(invocation);
   const authorizationRef = toReference(authorization);
-  const original = JSON.stringify(commit);
-  const resolution = JSON.stringify(
+  const original = encodeMemoryV2Boundary(commit);
+  const resolution = encodeMemoryV2Boundary(
     resolvedPendingReads.length > 0 ? { seq, resolvedPendingReads } : { seq },
   );
 
   engine.statements.insertAuthorization.run({
     ref: authorizationRef,
-    authorization: JSON.stringify(authorization),
+    authorization: encodeMemoryV2Boundary(authorization),
   });
   engine.statements.insertInvocation.run({
     ref: invocationRef,
@@ -853,7 +852,7 @@ const applyCommitTransaction = (
     aud: invocation.aud ?? null,
     cmd: invocation.cmd,
     sub: invocation.sub,
-    invocation: JSON.stringify(invocation),
+    invocation: encodeMemoryV2Boundary(invocation),
   });
   engine.statements.insertCommit.run({
     seq,
@@ -895,20 +894,18 @@ const writeOperation = (
   const { branch, seq, opIndex, operation } = options;
   switch (operation.op) {
     case "set": {
-      if (!isWireEntityDocument(operation.value)) {
+      if (!isEntityDocument(operation.value)) {
         throw new Error(
           "memory v2 set operations require explicit document objects",
         );
       }
-      const document = decodeWireEntityDocument(operation.value);
-      const stored = encodeWireEntityDocument(document);
       engine.statements.insertRevision.run({
         branch,
         id: operation.id,
         seq,
         op_index: opIndex,
         op: "set",
-        data: JSON.stringify(stored),
+        data: encodeMemoryV2Boundary(operation.value),
         commit_seq: seq,
       });
       engine.statements.upsertHead.run({
@@ -924,7 +921,7 @@ const writeOperation = (
         opIndex,
         commitSeq: seq,
         op: "set",
-        document: stored,
+        document: operation.value,
       };
     }
     case "patch": {
@@ -934,7 +931,7 @@ const writeOperation = (
         seq,
         op_index: opIndex,
         op: "patch",
-        data: JSON.stringify(operation.patches),
+        data: encodeMemoryV2Boundary(operation.patches),
         commit_seq: seq,
       });
       engine.statements.upsertHead.run({
@@ -1076,7 +1073,7 @@ const findConflictSeq = (
   ) {
     if (
       patchOverlapsRead(
-        JSON.parse(conflict.data ?? "[]") as PatchOp[],
+        decodeStoredPatchList(conflict.data),
         readPath,
       )
     ) {
@@ -1134,13 +1131,13 @@ const selectCommitRevisions = (
     if (row.op === "set") {
       return {
         ...base,
-        document: decodeStoredWireDocument(row.data),
+        document: decodeStoredDocument(row.data),
       } satisfies AppliedRevision;
     }
     if (row.op === "patch") {
       return {
         ...base,
-        patches: JSON.parse(row.data ?? "[]") as PatchOp[],
+        patches: decodeStoredPatchList(row.data),
       } satisfies AppliedRevision;
     }
     return base as AppliedRevision;
@@ -1194,7 +1191,7 @@ const maybeMaterializeSnapshot = (
     branch,
     id,
     seq: current.seq,
-    value: JSON.stringify(encodeWireEntityDocument(current.document)),
+    value: encodeMemoryV2Boundary(current.document),
   });
   compactSnapshots(engine, branch, id);
 };
@@ -1283,7 +1280,7 @@ const reconstructPatchedDocument = (
   for (const patch of patches) {
     document = applyPatchDocument(
       document,
-      JSON.parse(patch.data ?? "[]") as PatchOp[],
+      decodeStoredPatchList(patch.data),
     );
   }
 
@@ -1367,37 +1364,32 @@ const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
 const emptyEntityDocument = (): EntityDocument => ({});
 
 const decodeStoredDocument = (data: string | null): EntityDocument => {
-  const parsed = JSON.parse(data ?? "null") as unknown;
-  if (!isWireEntityDocument(parsed)) {
-    throw new Error("memory v2 stored documents must be plain object roots");
-  }
-  return decodeWireEntityDocument(parsed);
-};
-
-const decodeStoredWireDocument = (
-  data: string | null,
-): WireEntityDocument | undefined => {
-  if (data === null) {
-    return undefined;
-  }
-  const parsed = JSON.parse(data) as unknown;
-  if (!isWireEntityDocument(parsed)) {
+  const parsed = decodeMemoryV2Boundary<unknown>(data ?? "null");
+  if (!isEntityDocument(parsed)) {
     throw new Error("memory v2 stored documents must be plain object roots");
   }
   return parsed;
+};
+
+const decodeStoredPatchList = (data: string | null): PatchOp[] => {
+  const parsed = decodeMemoryV2Boundary<unknown>(data ?? "[]");
+  if (!Array.isArray(parsed)) {
+    throw new Error("memory v2 stored patches must be arrays");
+  }
+  return parsed as PatchOp[];
 };
 
 const applyPatchDocument = (
   document: EntityDocument,
   patches: PatchOp[],
 ): EntityDocument =>
-  applyPatch(document as JSONValue, patches) as EntityDocument;
+  applyPatch(document as StorableDatum, patches) as EntityDocument;
 
 const sameStoredOriginal = (
   stored: string,
   incoming: ClientCommit,
 ): boolean => {
-  return stored === JSON.stringify(incoming);
+  return stored === encodeMemoryV2Boundary(incoming);
 };
 
 const revisionKey = (branch: BranchName, id: EntityId): string =>

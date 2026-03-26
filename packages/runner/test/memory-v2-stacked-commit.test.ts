@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import type { MIME, URI } from "@commontools/memory/interface";
+import { getMemoryV2Flags } from "@commontools/memory/v2";
 import type {
   ClientCommit,
   ConfirmedRead,
@@ -28,6 +29,11 @@ import {
 const signer = await Identity.fromPassphrase("memory-v2-stacked-commit");
 const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
+const HELLO_OK = {
+  type: "hello.ok",
+  protocol: "memory/v2",
+  flags: getMemoryV2Flags(),
+} as const;
 const DOCS = {
   A: "of:memory-v2-stacked-A" as URI,
   B: "of:memory-v2-stacked-B" as URI,
@@ -352,10 +358,7 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
     switch (message.type) {
       case "hello":
         this.model.connectionCount += 1;
-        this.respond({
-          type: "hello.ok",
-          protocol: "memory/v2",
-        });
+        this.respond(HELLO_OK);
         break;
       case "session.open":
         this.respond({

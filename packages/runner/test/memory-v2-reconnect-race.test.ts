@@ -3,6 +3,7 @@ import { Identity } from "@commontools/identity";
 import type { MIME, URI } from "@commontools/memory/interface";
 import * as Changes from "@commontools/memory/changes";
 import * as Fact from "@commontools/memory/fact";
+import { getMemoryV2Flags } from "@commontools/memory/v2";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import * as MemoryV2Server from "@commontools/memory/v2/server";
 import { StorageManager as CutoverStorageManager } from "../src/storage/cache.deno.ts";
@@ -21,6 +22,11 @@ import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 const signer = await Identity.fromPassphrase("memory-v2-reconnect-race");
 const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
+const HELLO_OK = {
+  type: "hello.ok",
+  protocol: "memory/v2",
+  flags: getMemoryV2Flags(),
+} as const;
 
 type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): { value: unknown } | undefined;
@@ -164,10 +170,7 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
 
     switch (message.type) {
       case "hello":
-        this.#respond({
-          type: "hello.ok",
-          protocol: "memory/v2",
-        });
+        this.#respond(HELLO_OK);
         return;
       case "session.open":
         this.#respond({

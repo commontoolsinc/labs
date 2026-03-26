@@ -1,5 +1,14 @@
 import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
+import { setJsonEncodingConfig } from "@commontools/data-model/json-encoding";
+import {
+  resetModernHashConfig,
+  setModernHashConfig,
+} from "@commontools/data-model/value-hash";
+import {
+  resetStorableValueConfig,
+  setStorableValueConfig,
+} from "../storable-value.ts";
 import {
   applyCommit,
   close,
@@ -11,12 +20,11 @@ import {
   read,
 } from "../v2/engine.ts";
 import {
+  decodeMemoryV2Boundary,
   DEFAULT_BRANCH,
-  encodeWireEntityDocument,
   toDocumentPath,
   toEntityDocument,
   toSourceLink,
-  toWireEntityDocument,
 } from "../v2.ts";
 
 const createEngine = async (): Promise<{
@@ -55,6 +63,9 @@ const authorization = {
   access: { "proof:1": {} },
 };
 
+const decodeStored = <Value>(source: string | null | undefined): Value =>
+  decodeMemoryV2Boundary<Value>(source ?? "null");
+
 Deno.test("memory v2 engine persists set and delete commits as seq revisions", async () => {
   const { engine, path } = await createEngine();
 
@@ -74,7 +85,7 @@ Deno.test("memory v2 engine persists set and delete commits as seq revisions", a
         operations: [{
           op: "set",
           id: "entity:1",
-          value: encodeWireEntityDocument(document),
+          value: document,
         }],
       },
     });
@@ -105,7 +116,7 @@ Deno.test("memory v2 engine persists set and delete commits as seq revisions", a
     assertEquals(commitRow.branch, DEFAULT_BRANCH);
     assertEquals(commitRow.session_id, "session:1");
     assertEquals(commitRow.local_seq, 1);
-    assertEquals(JSON.parse(commitRow.original), {
+    assertEquals(decodeStored(commitRow.original), {
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
       operations: [{
@@ -114,7 +125,7 @@ Deno.test("memory v2 engine persists set and delete commits as seq revisions", a
         value: document,
       }],
     });
-    assertEquals(JSON.parse(commitRow.resolution), { seq: 1 });
+    assertEquals(decodeStored(commitRow.resolution), { seq: 1 });
 
     const revisionRow = engine.database.prepare(
       `SELECT branch, id, seq, op_index, op, data, commit_seq
@@ -137,7 +148,7 @@ Deno.test("memory v2 engine persists set and delete commits as seq revisions", a
     assertEquals(revisionRow.seq, 1);
     assertEquals(revisionRow.op_index, 0);
     assertEquals(revisionRow.op, "set");
-    assertEquals(JSON.parse(revisionRow.data), document);
+    assertEquals(decodeStored(revisionRow.data), document);
     assertEquals(revisionRow.commit_seq, 1);
 
     const invocationRow = engine.database.prepare(
@@ -151,11 +162,11 @@ Deno.test("memory v2 engine persists set and delete commits as seq revisions", a
       | { authorization: string }
       | undefined;
     assertEquals(
-      JSON.parse(invocationRow?.invocation ?? "null"),
+      decodeStored(invocationRow?.invocation),
       invocationFor(1),
     );
     assertEquals(
-      JSON.parse(authorizationRow?.authorization ?? "null"),
+      decodeStored(authorizationRow?.authorization),
       authorization,
     );
 
@@ -223,7 +234,7 @@ Deno.test("memory v2 engine preserves source-only entity documents", async () =>
         operations: [{
           op: "set",
           id: "of:piece:1",
-          value: toWireEntityDocument(undefined, toSourceLink("process:1")),
+          value: toEntityDocument(undefined, toSourceLink("process:1")),
         }],
       },
     });
@@ -252,7 +263,7 @@ Deno.test("memory v2 engine preserves root objects whose data includes value sib
         operations: [{
           op: "set",
           id: "entity:value-siblings",
-          value: toWireEntityDocument("hello", undefined, {
+          value: toEntityDocument("hello", undefined, {
             other: "data",
           }),
         }],
@@ -293,7 +304,7 @@ Deno.test("memory v2 engine replays patch revisions for current and point-in-tim
         operations: [{
           op: "set",
           id: "entity:patch",
-          value: encodeWireEntityDocument(original),
+          value: original,
         }],
       },
     });
@@ -346,7 +357,7 @@ Deno.test("memory v2 engine replays patch revisions for current and point-in-tim
       }
       | undefined;
     assertEquals(patchRevision?.op, "patch");
-    assertEquals(JSON.parse(patchRevision?.data ?? "null"), [
+    assertEquals(decodeStored(patchRevision?.data), [
       { op: "replace", path: "/value/profile/name", value: "Bob" },
       { op: "add", path: "/value/profile/title", value: "Dr" },
       {
@@ -379,7 +390,7 @@ Deno.test("memory v2 engine materializes snapshots and reuses them for later rea
         operations: [{
           op: "set",
           id: "entity:snapshot",
-          value: toWireEntityDocument({ tags: ["one"] }),
+          value: toEntityDocument({ tags: ["one"] }),
         }],
       },
     });
@@ -420,7 +431,7 @@ Deno.test("memory v2 engine materializes snapshots and reuses them for later rea
       }
       | undefined;
     assertEquals(snapshotRow?.seq, 3);
-    assertEquals(JSON.parse(snapshotRow?.value ?? "null"), {
+    assertEquals(decodeStored(snapshotRow?.value), {
       value: { tags: ["one", "two", "three"] },
     });
 
@@ -480,7 +491,7 @@ Deno.test("memory v2 engine compacts old snapshots beyond retention", async () =
         operations: [{
           op: "set",
           id: "entity:snapshot-retention",
-          value: toWireEntityDocument({ tags: ["one"] }),
+          value: toEntityDocument({ tags: ["one"] }),
         }],
       },
     });
@@ -548,7 +559,7 @@ Deno.test("memory v2 engine rejects stale confirmed reads and allows non-overlap
         operations: [{
           op: "set",
           id: "entity:source",
-          value: toWireEntityDocument({
+          value: toEntityDocument({
             profile: { name: "Alice" },
             settings: { theme: "light" },
           }),
@@ -599,7 +610,7 @@ Deno.test("memory v2 engine rejects stale confirmed reads and allows non-overlap
         operations: [{
           op: "set",
           id: "entity:derived",
-          value: toWireEntityDocument({ derivedFromName: true }),
+          value: toEntityDocument({ derivedFromName: true }),
         }],
       },
     });
@@ -624,7 +635,7 @@ Deno.test("memory v2 engine rejects stale confirmed reads and allows non-overlap
             operations: [{
               op: "set",
               id: "entity:rejected",
-              value: toWireEntityDocument({ ok: false }),
+              value: toEntityDocument({ ok: false }),
             }],
           },
         }),
@@ -656,7 +667,7 @@ Deno.test("memory v2 engine resolves pending reads and rejects stale pending rea
         operations: [{
           op: "set",
           id: "entity:source",
-          value: toWireEntityDocument({ foo: 0, bar: 0 }),
+          value: toEntityDocument({ foo: 0, bar: 0 }),
         }],
       },
     });
@@ -701,7 +712,7 @@ Deno.test("memory v2 engine resolves pending reads and rejects stale pending rea
         operations: [{
           op: "set",
           id: "entity:target",
-          value: toWireEntityDocument({ derived: true }),
+          value: toEntityDocument({ derived: true }),
         }],
       },
     });
@@ -712,7 +723,7 @@ Deno.test("memory v2 engine resolves pending reads and rejects stale pending rea
        FROM "commit"
        WHERE session_id = 'session:1' AND local_seq = 3`,
     ).get() as { resolution: string } | undefined;
-    assertEquals(JSON.parse(resolutionRow?.resolution ?? "null"), {
+    assertEquals(decodeStored(resolutionRow?.resolution), {
       seq: 3,
       resolvedPendingReads: [{
         localSeq: 2,
@@ -754,7 +765,7 @@ Deno.test("memory v2 engine resolves pending reads and rejects stale pending rea
             operations: [{
               op: "set",
               id: "entity:broken",
-              value: toWireEntityDocument({ ok: false }),
+              value: toEntityDocument({ ok: false }),
             }],
           },
         }),
@@ -781,7 +792,7 @@ Deno.test("memory v2 engine resolves pending reads and rejects stale pending rea
             operations: [{
               op: "set",
               id: "entity:missing",
-              value: toWireEntityDocument({ ok: false }),
+              value: toEntityDocument({ ok: false }),
             }],
           },
         }),
@@ -808,7 +819,7 @@ Deno.test("memory v2 engine reconstructs state across delete boundaries", async 
         operations: [{
           op: "set",
           id: "entity:timeline",
-          value: toWireEntityDocument({
+          value: toEntityDocument({
             phase: "one",
             data: { start: true },
           }),
@@ -849,7 +860,7 @@ Deno.test("memory v2 engine reconstructs state across delete boundaries", async 
         operations: [{
           op: "set",
           id: "entity:timeline",
-          value: toWireEntityDocument({
+          value: toEntityDocument({
             phase: "two",
             data: { restart: true },
           }),
@@ -890,7 +901,7 @@ Deno.test("memory v2 engine supports branch inheritance, divergence, and deletio
         operations: [{
           op: "set",
           id: "entity:branch-doc",
-          value: toWireEntityDocument({ count: 1 }),
+          value: toEntityDocument({ count: 1 }),
         }],
       },
     });
@@ -921,7 +932,7 @@ Deno.test("memory v2 engine supports branch inheritance, divergence, and deletio
         operations: [{
           op: "set",
           id: "entity:branch-doc",
-          value: toWireEntityDocument({ count: 2 }),
+          value: toEntityDocument({ count: 2 }),
         }],
       },
     });
@@ -937,7 +948,7 @@ Deno.test("memory v2 engine supports branch inheritance, divergence, and deletio
         operations: [{
           op: "set",
           id: "entity:branch-doc",
-          value: toWireEntityDocument({ count: 10 }),
+          value: toEntityDocument({ count: 10 }),
         }],
       },
     });
@@ -998,7 +1009,7 @@ Deno.test("memory v2 engine supports branch inheritance, divergence, and deletio
             operations: [{
               op: "set",
               id: "entity:branch-doc",
-              value: toWireEntityDocument({ count: 11 }),
+              value: toEntityDocument({ count: 11 }),
             }],
           },
         }),
@@ -1008,5 +1019,73 @@ Deno.test("memory v2 engine supports branch inheritance, divergence, and deletio
   } finally {
     close(engine);
     await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine persists rich patch values at the storage boundary", async () => {
+  setStorableValueConfig({ richStorableValues: true });
+  setJsonEncodingConfig(true);
+  setModernHashConfig(true);
+  try {
+    const { engine, path } = await createEngine();
+
+    try {
+      applyCommit(engine, {
+        sessionId: "session:rich-patch",
+        invocation: invocationFor(1),
+        authorization,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "entity:rich-patch",
+            value: toEntityDocument({ counter: 1n }),
+          }],
+        },
+      });
+
+      applyCommit(engine, {
+        sessionId: "session:rich-patch",
+        invocation: invocationFor(2),
+        authorization,
+        commit: {
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "patch",
+            id: "entity:rich-patch",
+            patches: [{
+              op: "replace",
+              path: "/value/counter",
+              value: 2n,
+            }],
+          }],
+        },
+      });
+
+      assertEquals(
+        read(engine, { id: "entity:rich-patch" }),
+        toEntityDocument({ counter: 2n }),
+      );
+
+      const patchRow = engine.database.prepare(
+        `SELECT data
+         FROM revision
+         WHERE id = 'entity:rich-patch' AND seq = 2`,
+      ).get() as { data: string } | undefined;
+      assertEquals(decodeStored(patchRow?.data), [{
+        op: "replace",
+        path: "/value/counter",
+        value: 2n,
+      }]);
+    } finally {
+      close(engine);
+      await Deno.remove(path);
+    }
+  } finally {
+    resetStorableValueConfig();
+    setJsonEncodingConfig(false);
+    resetModernHashConfig();
   }
 });

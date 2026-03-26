@@ -1,14 +1,21 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { Server, SessionRegistry } from "../v2/server.ts";
 import {
   type EntitySnapshot,
+  getMemoryV2Flags,
   MEMORY_V2_PROTOCOL,
   type SessionSync,
   toDocumentPath,
 } from "../v2.ts";
 import { connect, loopback, type Transport, WatchView } from "../v2/client.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
+
+const HELLO_OK = {
+  type: "hello.ok",
+  protocol: MEMORY_V2_PROTOCOL,
+  flags: getMemoryV2Flags(),
+} as const;
 
 Deno.test("memory v2 client watch sets expand to previously hidden graph nodes", async () => {
   const server = new Server({
@@ -453,10 +460,7 @@ class ScriptedReconnectTransport implements Transport {
 
     switch (message.type) {
       case "hello":
-        this.#respond({
-          type: "hello.ok",
-          protocol: MEMORY_V2_PROTOCOL,
-        });
+        this.#respond(HELLO_OK);
         return Promise.resolve();
       case "session.open":
         this.#respond({
@@ -545,10 +549,7 @@ class AckCountingTransport implements Transport {
 
     switch (message.type) {
       case "hello":
-        this.#respond({
-          type: "hello.ok",
-          protocol: MEMORY_V2_PROTOCOL,
-        });
+        this.#respond(HELLO_OK);
         return Promise.resolve();
       case "session.open":
         this.#respond({
@@ -624,10 +625,7 @@ class HangingAckTransport implements Transport {
 
     switch (message.type) {
       case "hello":
-        this.#respond({
-          type: "hello.ok",
-          protocol: MEMORY_V2_PROTOCOL,
-        });
+        this.#respond(HELLO_OK);
         return Promise.resolve();
       case "session.open":
         this.#respond({
@@ -713,10 +711,7 @@ class ControlledReconnectTransport implements Transport {
           queueMicrotask(() => this.#closeReceiver(new Error("offline")));
           return Promise.resolve();
         }
-        this.#receiver(JSON.stringify({
-          type: "hello.ok",
-          protocol: MEMORY_V2_PROTOCOL,
-        }));
+        this.#receiver(JSON.stringify(HELLO_OK));
         return Promise.resolve();
       case "session.open":
         this.#receiver(JSON.stringify({
@@ -759,10 +754,7 @@ class CloseOnSessionOpenTransport implements Transport {
     };
 
     if (message.type === "hello") {
-      this.#receiver(JSON.stringify({
-        type: "hello.ok",
-        protocol: MEMORY_V2_PROTOCOL,
-      }));
+      this.#receiver(JSON.stringify(HELLO_OK));
       return Promise.resolve();
     }
 
@@ -803,10 +795,7 @@ class CloseOnAppliedCommitTransport implements Transport {
 
     switch (message.type) {
       case "hello":
-        this.#receiver(JSON.stringify({
-          type: "hello.ok",
-          protocol: MEMORY_V2_PROTOCOL,
-        }));
+        this.#receiver(JSON.stringify(HELLO_OK));
         return Promise.resolve();
       case "session.open":
         this.#receiver(JSON.stringify({
@@ -1187,6 +1176,38 @@ Deno.test("memory v2 client close interrupts long reconnect backoff", async () =
     Math.random = originalRandom;
     time.restore();
   }
+});
+
+Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
+  let receiver = (_payload: string) => {};
+  const transport: Transport = {
+    send(payload) {
+      const message = JSON.parse(payload) as { type?: string };
+      if (message.type === "hello") {
+        receiver(JSON.stringify({
+          type: "hello.ok",
+          protocol: MEMORY_V2_PROTOCOL,
+          flags: {
+            richStorableValues: getMemoryV2Flags().richStorableValues,
+            unifiedJsonEncoding: getMemoryV2Flags().unifiedJsonEncoding,
+            canonicalHashing: !getMemoryV2Flags().canonicalHashing,
+            modernSchemaHash: getMemoryV2Flags().modernSchemaHash,
+          },
+        }));
+      }
+    },
+    async close() {},
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+  };
+
+  await assertRejects(
+    () => connect({ transport }),
+    Error,
+    "memory/v2 flag mismatch",
+  );
 });
 
 Deno.test("memory v2 client wraps close errors with connection error names", async () => {

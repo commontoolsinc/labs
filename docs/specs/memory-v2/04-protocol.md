@@ -40,17 +40,36 @@ The WebSocket transport provides a persistent, bidirectional channel for:
 The client MUST declare its protocol version in the first WebSocket message:
 
 ```json
-{ "type": "hello", "protocol": "memory/v2" }
+{
+  "type": "hello",
+  "protocol": "memory/v2",
+  "flags": {
+    "richStorableValues": true,
+    "unifiedJsonEncoding": true,
+    "canonicalHashing": true,
+    "modernSchemaHash": false
+  }
+}
 ```
 
 If the server accepts the protocol, it returns:
 
 ```json
-{ "type": "hello.ok", "protocol": "memory/v2" }
+{
+  "type": "hello.ok",
+  "protocol": "memory/v2",
+  "flags": {
+    "richStorableValues": true,
+    "unifiedJsonEncoding": true,
+    "canonicalHashing": true,
+    "modernSchemaHash": false
+  }
+}
 ```
 
-If the server does not support the requested version, it returns a typed error
-response and does not mark the connection ready.
+If the server does not support the requested version or the advertised flags do
+not match what it implements, it returns a typed error response and does not
+mark the connection ready.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -99,14 +118,23 @@ Rules:
 
 ### 4.2.1 Client → Server: JSON Request Envelope
 
-The current wire protocol uses plain JSON request envelopes. Write-class
-requests may carry `invocation` / `authorization` payloads for persistence, but
-the transport does not yet require signed UCAN envelopes.
+The current wire protocol uses JSON message envelopes serialized at the wire
+boundary with the shared flag-dispatched value codec. The advertised `flags`
+reflect the active runtime/storage configuration and the connection MUST fail
+loudly if the client and server disagree. Write-class requests may carry
+`invocation` / `authorization` payloads for persistence, but the transport does
+not yet require signed UCAN envelopes.
 
 ```typescript
 interface HelloMessage {
   type: "hello";
   protocol: "memory/v2";
+  flags: {
+    richStorableValues: boolean;
+    unifiedJsonEncoding: boolean;
+    canonicalHashing: boolean;
+    modernSchemaHash: boolean;
+  };
 }
 
 interface RequestMessage {
@@ -198,7 +226,7 @@ interface TransactRequest {
   sessionId: SessionId;
   commit: ClientCommit;
   invocation?: Record<string, unknown>;
-  authorization?: JSONValue;
+  authorization?: StorableDatum;
 }
 
 interface Commit {

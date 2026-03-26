@@ -1,12 +1,15 @@
-import type { JSONValue } from "../interface.ts";
+import type { StorableDatum } from "../interface.ts";
 import type { PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
 
-type JSONObject = Record<string, JSONValue>;
-type JSONContainer = JSONObject | JSONValue[];
+type PatchObject = Record<string, StorableDatum>;
+type PatchContainer = PatchObject | StorableDatum[];
 const MAX_ARRAY_INDEX = 2 ** 32 - 2;
 
-export const applyPatch = (state: JSONValue, ops: PatchOp[]): JSONValue => {
+export const applyPatch = (
+  state: StorableDatum,
+  ops: PatchOp[],
+): StorableDatum => {
   // Clone once up front, then mutate the working copy per op.
   let current = structuredClone(state);
   for (const op of ops) {
@@ -15,7 +18,7 @@ export const applyPatch = (state: JSONValue, ops: PatchOp[]): JSONValue => {
   return current;
 };
 
-const applyOp = (state: JSONValue, op: PatchOp): JSONValue => {
+const applyOp = (state: StorableDatum, op: PatchOp): StorableDatum => {
   switch (op.op) {
     case "replace":
       return replaceAtPath(state, parsePointer(op.path), op.value);
@@ -37,10 +40,10 @@ const applyOp = (state: JSONValue, op: PatchOp): JSONValue => {
 };
 
 const replaceAtPath = (
-  root: JSONValue,
+  root: StorableDatum,
   path: string[],
-  value: JSONValue,
-): JSONValue => {
+  value: StorableDatum,
+): StorableDatum => {
   if (path.length === 0) {
     return structuredClone(value);
   }
@@ -56,10 +59,10 @@ const replaceAtPath = (
 };
 
 const addAtPath = (
-  root: JSONValue,
+  root: StorableDatum,
   path: string[],
-  value: JSONValue,
-): JSONValue => {
+  value: StorableDatum,
+): StorableDatum => {
   if (path.length === 0) {
     return structuredClone(value);
   }
@@ -78,7 +81,7 @@ const addAtPath = (
   return root;
 };
 
-const removeAtPath = (root: JSONValue, path: string[]): JSONValue => {
+const removeAtPath = (root: StorableDatum, path: string[]): StorableDatum => {
   if (path.length === 0) {
     throw new Error("root remove must be represented as a delete operation");
   }
@@ -96,10 +99,10 @@ const removeAtPath = (root: JSONValue, path: string[]): JSONValue => {
 };
 
 const moveValue = (
-  root: JSONValue,
+  root: StorableDatum,
   from: string[],
   path: string[],
-): JSONValue => {
+): StorableDatum => {
   if (from.length === 0) {
     throw new Error("cannot move the root value");
   }
@@ -113,12 +116,12 @@ const moveValue = (
 };
 
 const spliceAtPath = (
-  root: JSONValue,
+  root: StorableDatum,
   path: string[],
   index: number,
   remove: number,
-  add: JSONValue[],
-): JSONValue => {
+  add: StorableDatum[],
+): StorableDatum => {
   const target = path.length === 0 ? root : getAtPath(root, path);
   if (!Array.isArray(target)) {
     throw new Error(`splice target is not an array at ${encodePointer(path)}`);
@@ -134,8 +137,8 @@ const spliceAtPath = (
   return root;
 };
 
-const getAtPath = (root: JSONValue, path: string[]): JSONValue => {
-  let current: JSONValue = root;
+const getAtPath = (root: StorableDatum, path: string[]): StorableDatum => {
+  let current: StorableDatum = root;
   for (const segment of path) {
     if (Array.isArray(current)) {
       current = current[requireExistingArrayIndex(current, segment, path)];
@@ -149,11 +152,11 @@ const getAtPath = (root: JSONValue, path: string[]): JSONValue => {
 };
 
 const getExistingParent = (
-  root: JSONValue,
+  root: StorableDatum,
   path: string[],
-): { parent: JSONContainer; key: string } => {
+): { parent: PatchContainer; key: string } => {
   const key = path[path.length - 1]!;
-  let current: JSONValue = root;
+  let current: StorableDatum = root;
 
   for (const segment of path.slice(0, -1)) {
     if (Array.isArray(current)) {
@@ -181,11 +184,11 @@ const getExistingParent = (
 };
 
 const getCreatableParent = (
-  root: JSONValue,
+  root: StorableDatum,
   path: string[],
-): { parent: JSONContainer; key: string } => {
+): { parent: PatchContainer; key: string } => {
   const key = path[path.length - 1]!;
-  let current: JSONValue = root;
+  let current: StorableDatum = root;
 
   for (let index = 0; index < path.length - 1; index += 1) {
     const segment = path[index]!;
@@ -214,7 +217,7 @@ const getCreatableParent = (
   return { parent: current, key };
 };
 
-const createContainer = (nextSegment: string): JSONContainer => {
+const createContainer = (nextSegment: string): PatchContainer => {
   return isArraySegment(nextSegment) || nextSegment === "-" ? [] : {};
 };
 
@@ -238,7 +241,7 @@ const parseArrayInsertIndex = (segment: string, length: number): number => {
 };
 
 const requireExistingArrayIndex = (
-  array: JSONValue[],
+  array: StorableDatum[],
   segment: string,
   path: string[],
 ): number => {
@@ -259,8 +262,10 @@ const isStrictPrefixPath = (
 const isArraySegment = (segment: string): boolean =>
   /^(0|[1-9]\d*)$/.test(segment);
 
-const isObject = (value: JSONValue): value is JSONObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+const isObject = (value: StorableDatum): value is PatchObject =>
+  typeof value === "object" && value !== null && !Array.isArray(value) &&
+  (Object.getPrototypeOf(value) === Object.prototype ||
+    Object.getPrototypeOf(value) === null);
 
-const isContainer = (value: JSONValue): value is JSONContainer =>
+const isContainer = (value: StorableDatum): value is PatchContainer =>
   Array.isArray(value) || isObject(value);

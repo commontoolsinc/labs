@@ -1,20 +1,24 @@
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
-import type { JSONValue } from "../interface.ts";
 import { resolveSpaceStoreUrl } from "../memory.ts";
 import type { Protocol, Provider } from "../provider.ts";
 import {
   type Blob,
   type ClientCommit,
   type ClientMessage,
+  decodeMemoryV2Boundary,
+  encodeMemoryV2Boundary,
   type EntitySnapshot,
+  getMemoryV2Flags,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
+  isMemoryV2Flags,
   MEMORY_V2_PROTOCOL,
   type Reference,
   type ResponseMessage,
+  sameMemoryV2Flags,
   type ServerMessage,
   type SessionAckRequest,
   type SessionAckResult,
@@ -264,7 +268,7 @@ export class SessionRegistry {
     return {
       sessionId,
       serverSeq,
-      resumed: existing !== undefined,
+      ...(existing !== undefined ? { resumed: true } : {}),
     };
   }
 
@@ -359,10 +363,25 @@ class Connection {
         });
         return;
       }
+      const expectedFlags = getMemoryV2Flags();
+      if (!sameMemoryV2Flags(parsed.flags, expectedFlags)) {
+        this.send({
+          type: "response",
+          requestId: "handshake",
+          error: toError(
+            "ProtocolError",
+            `memory/v2 flag mismatch: client=${
+              JSON.stringify(parsed.flags)
+            } server=${JSON.stringify(expectedFlags)}`,
+          ),
+        });
+        return;
+      }
       this.#ready = true;
       this.send({
         type: "hello.ok",
         protocol: MEMORY_V2_PROTOCOL,
+        flags: expectedFlags,
       });
       return;
     }
@@ -1097,10 +1116,38 @@ export class Server {
   respond(payload: string): Promise<string | null> {
     const parsed = parseClientMessage(payload);
     if (parsed?.type === "hello") {
-      return Promise.resolve(JSON.stringify(
+      const expectedFlags = getMemoryV2Flags();
+      if (parsed.protocol !== MEMORY_V2_PROTOCOL) {
+        return Promise.resolve(encodeMemoryV2Boundary(
+          {
+            type: "response",
+            requestId: "handshake",
+            error: toError(
+              "UnsupportedProtocol",
+              `Unsupported protocol: ${parsed.protocol}`,
+            ),
+          } satisfies ResponseMessage<never>,
+        ));
+      }
+      if (!sameMemoryV2Flags(parsed.flags, expectedFlags)) {
+        return Promise.resolve(encodeMemoryV2Boundary(
+          {
+            type: "response",
+            requestId: "handshake",
+            error: toError(
+              "ProtocolError",
+              `memory/v2 flag mismatch: client=${
+                JSON.stringify(parsed.flags)
+              } server=${JSON.stringify(expectedFlags)}`,
+            ),
+          } satisfies ResponseMessage<never>,
+        ));
+      }
+      return Promise.resolve(encodeMemoryV2Boundary(
         {
           type: "hello.ok",
           protocol: MEMORY_V2_PROTOCOL,
+          flags: expectedFlags,
         } satisfies ServerMessage,
       ));
     }
@@ -1162,7 +1209,7 @@ export const parseClientMessage = (
 ): ClientMessage | null => {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(payload);
+    parsed = decodeMemoryV2Boundary(payload);
   } catch {
     return null;
   }
@@ -1171,10 +1218,15 @@ export const parseClientMessage = (
     return null;
   }
 
-  if (parsed.type === "hello" && typeof parsed.protocol === "string") {
+  if (
+    parsed.type === "hello" &&
+    typeof parsed.protocol === "string" &&
+    isMemoryV2Flags(parsed.flags)
+  ) {
     return {
       type: "hello",
       protocol: parsed.protocol as HelloMessage["protocol"],
+      flags: parsed.flags,
     };
   }
 
@@ -1213,7 +1265,7 @@ export const parseClientMessage = (
       sessionId: parsed.sessionId,
       commit: parsed.commit as unknown as TransactRequest["commit"],
       invocation: isRecord(parsed.invocation) ? parsed.invocation : undefined,
-      authorization: (parsed.authorization ?? undefined) as JSONValue,
+      authorization: parsed.authorization as TransactRequest["authorization"],
     };
   }
 

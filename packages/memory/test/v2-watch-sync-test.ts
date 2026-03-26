@@ -1,11 +1,18 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { Server } from "../v2/server.ts";
 import {
+  getMemoryV2Flags,
   MEMORY_V2_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
   type SessionEffectMessage,
 } from "../v2.ts";
+
+const HELLO = {
+  type: "hello",
+  protocol: MEMORY_V2_PROTOCOL,
+  flags: getMemoryV2Flags(),
+} as const;
 
 const shiftMessage = (messages: ServerMessage[]): ServerMessage => {
   const message = messages.shift();
@@ -38,10 +45,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
 
   try {
     for (const connection of [writer, watcher]) {
-      await connection.receive(JSON.stringify({
-        type: "hello",
-        protocol: MEMORY_V2_PROTOCOL,
-      }));
+      await connection.receive(JSON.stringify(HELLO));
     }
     shiftMessage(writerMessages);
     shiftMessage(watcherMessages);

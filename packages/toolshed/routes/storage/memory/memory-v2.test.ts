@@ -1,9 +1,20 @@
 import { assert, assertEquals } from "@std/assert";
 import app from "../../../app.ts";
-import { MEMORY_V2_PROTOCOL } from "@commontools/memory/v2";
+import {
+  decodeMemoryV2Boundary,
+  encodeMemoryV2Boundary,
+  getMemoryV2Flags,
+  MEMORY_V2_PROTOCOL,
+} from "@commontools/memory/v2";
 import { Identity } from "@commontools/identity";
 import { type JSONSchema, Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+
+const HELLO = {
+  type: "hello",
+  protocol: MEMORY_V2_PROTOCOL,
+  flags: getMemoryV2Flags(),
+} as const;
 
 const openSocket = async (url: URL): Promise<WebSocket> => {
   const socket = new WebSocket(url);
@@ -32,7 +43,7 @@ const readJsonMessage = async <Message>(
     );
   });
 
-  return JSON.parse(payload) as Message;
+  return decodeMemoryV2Boundary<Message>(payload);
 };
 
 const waitFor = async (
@@ -195,20 +206,19 @@ serialTest("memory websocket negotiates a v2 session", async () => {
 
   try {
     const socket = await openSocket(address);
-    socket.send(JSON.stringify({
-      type: "hello",
-      protocol: MEMORY_V2_PROTOCOL,
-    }));
+    socket.send(encodeMemoryV2Boundary(HELLO));
 
     const message = await readJsonMessage<{
       type: "hello.ok";
       protocol: string;
+      flags: ReturnType<typeof getMemoryV2Flags>;
     }>(socket);
 
     assertEquals(message.type, "hello.ok");
     assertEquals(message.protocol, MEMORY_V2_PROTOCOL);
+    assertEquals(message.flags, getMemoryV2Flags());
 
-    socket.send(JSON.stringify({
+    socket.send(encodeMemoryV2Boundary({
       type: "session.open",
       requestId: "open-1",
       space: "did:key:z6Mk-toolshed-open",
@@ -240,14 +250,11 @@ serialTest("memory websocket resumes a requested v2 session id", async () => {
 
   try {
     const socket = await openSocket(address);
-    socket.send(JSON.stringify({
-      type: "hello",
-      protocol: MEMORY_V2_PROTOCOL,
-    }));
+    socket.send(encodeMemoryV2Boundary(HELLO));
 
     await readJsonMessage(socket);
 
-    socket.send(JSON.stringify({
+    socket.send(encodeMemoryV2Boundary({
       type: "session.open",
       requestId: "open-1",
       space: "did:key:z6Mk-toolshed-resume",
@@ -284,7 +291,7 @@ serialTest(
 
     try {
       const socket = await openSocket(address);
-      socket.send(JSON.stringify({
+      socket.send(encodeMemoryV2Boundary({
         type: "session.open",
         requestId: "open-without-hello",
         space: "did:key:z6Mk-toolshed-no-hello",

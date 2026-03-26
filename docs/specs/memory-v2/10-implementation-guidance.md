@@ -12,7 +12,9 @@ older guidance by layering compatibility code around it.
 This guidance tracks the current implementation, not the full future protocol
 target. In particular:
 
-- the current wire protocol uses plain JSON messages, not UCAN-framed transport
+- the current wire protocol uses memory-v2 JSON envelopes encoded at the
+  boundary with the shared flag-dispatched value codec, not UCAN-framed
+  transport
 - write-class commands may persist `invocation` / `authorization` payloads, but
   transport-level UCAN verification remains deferred
 - route-level UCAN / ACL / `Origin` enforcement for the toolshed v2 websocket
@@ -129,11 +131,11 @@ Path and document-boundary rules:
 - `read()` / `write()` operate on full stored documents.
 - `readValue()` / `writeValue()` style helpers are thin adapters that prepend
   `"value"` and then delegate to those full-document operations.
-- the replica/storage layer should traffic in plain stored documents, not a
-  runner-side `StorageValue` interpretation.
+- the replica/storage layer should traffic in logical `EntityDocument` values,
+  not a runner-side `StorageValue` interpretation.
 - only the shared query/traversal layer treats selector paths as value-relative.
-- `jsonFromValue` / `valueFromJson` belong at persistence or wire boundaries,
-  not in the middle of transaction or replica logic.
+- `encodeMemoryV2Boundary` / `decodeMemoryV2Boundary` belong at persistence or
+  wire boundaries, not in the middle of transaction or replica logic.
 
 ## 6. Stable Snapshot Rule
 
@@ -176,9 +178,9 @@ Required persistent concepts:
 Required properties:
 
 - `commit` has no semantic hash column
-- `revision.data` stores inline JSON document payloads or patch arrays
+- `revision.data` stores inline encoded document payloads or patch arrays
 - `head` points at `(seq, op_index)` for the current entity state
-- `snapshot.value` stores inline full JSON document values
+- `snapshot.value` stores inline full encoded document values
 - `(session_id, local_seq)` remains unique for idempotent replay
 
 ## 9. Read Path

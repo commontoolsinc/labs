@@ -1,10 +1,15 @@
 import {
   type ClientCommit,
+  decodeMemoryV2Boundary,
+  encodeMemoryV2Boundary,
   type EntitySnapshot,
+  getMemoryV2Flags,
   type GraphQuery,
   type GraphQueryResult,
+  isMemoryV2Flags,
   MEMORY_V2_PROTOCOL,
   type ResponseMessage,
+  sameMemoryV2Flags,
   type ServerMessage,
   type SessionEffectMessage,
   type SessionOpenResult,
@@ -106,7 +111,7 @@ export class Client {
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
     this.#pending.set(requestId, pending);
-    await this.transport.send(JSON.stringify(message));
+    await this.transport.send(encodeMemoryV2Boundary(message));
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -139,9 +144,10 @@ export class Client {
   private async hello(): Promise<void> {
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
-    await this.transport.send(JSON.stringify({
+    await this.transport.send(encodeMemoryV2Boundary({
       type: "hello",
       protocol: MEMORY_V2_PROTOCOL,
+      flags: getMemoryV2Flags(),
     }));
     try {
       await ack.promise;
@@ -152,11 +158,58 @@ export class Client {
   }
 
   private onMessage(payload: string): void {
-    const message = JSON.parse(payload) as unknown;
-    if (isHelloOk(message)) {
-      this.#helloPending?.resolve();
+    let message: unknown;
+    try {
+      message = decodeMemoryV2Boundary(payload);
+    } catch (cause) {
+      const error = new Error("Unable to parse memory/v2 server message", {
+        cause,
+      });
+      error.name = "InvalidMessageError";
+      if (this.#helloPending !== null) {
+        this.#helloPending.reject(error);
+      } else {
+        this.rejectPending(error);
+      }
       return;
     }
+
+    if (this.#helloPending !== null) {
+      if (isHelloOk(message)) {
+        const expectedFlags = getMemoryV2Flags();
+        if (!sameMemoryV2Flags(message.flags, expectedFlags)) {
+          const error = new Error(
+            `memory/v2 flag mismatch: client=${
+              JSON.stringify(expectedFlags)
+            } server=${JSON.stringify(message.flags)}`,
+          );
+          error.name = "ProtocolError";
+          this.#helloPending.reject(error);
+          return;
+        }
+        this.#helloPending.resolve();
+        return;
+      }
+
+      if (isResponse(message) && message.requestId === "handshake") {
+        if (message.error) {
+          const error = new Error(message.error.message);
+          error.name = message.error.name;
+          this.#helloPending.reject(error);
+        } else {
+          const error = new Error("memory/v2 handshake failed");
+          error.name = "ProtocolError";
+          this.#helloPending.reject(error);
+        }
+        return;
+      }
+
+      const error = new Error("memory/v2 handshake expected hello.ok");
+      error.name = "ProtocolError";
+      this.#helloPending.reject(error);
+      return;
+    }
+
     if (isSessionEffect(message)) {
       for (const session of this.#spaces) {
         if (
@@ -804,7 +857,7 @@ export const connect = Client.connect;
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
   const connection = server.connect((message) => {
-    receiver(JSON.stringify(message));
+    receiver(encodeMemoryV2Boundary(message));
   });
   return {
     async send(payload: string) {
@@ -840,7 +893,9 @@ const isHelloOk = (
   message: unknown,
 ): message is Extract<ServerMessage, { type: "hello.ok" }> => {
   return typeof message === "object" && message !== null &&
-    (message as { type?: string }).type === "hello.ok";
+    (message as { type?: string }).type === "hello.ok" &&
+    (message as { protocol?: string }).protocol === MEMORY_V2_PROTOCOL &&
+    isMemoryV2Flags((message as { flags?: unknown }).flags);
 };
 
 const isSessionEffect = (

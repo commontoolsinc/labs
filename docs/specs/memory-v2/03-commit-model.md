@@ -19,7 +19,7 @@ operation targets an entity by `id`.
 interface SetOperation {
   op: "set";
   id: EntityId;
-  value: JSONValue;
+  value: EntityDocument;
 }
 
 interface PatchWriteOperation {
@@ -38,7 +38,9 @@ type Operation = SetOperation | PatchWriteOperation | DeleteOperation;
 
 Operations do not include parent hashes or other version identifiers. The server
 validates the read set, assigns a canonical `seq`, and records one or more
-sequenced revisions.
+sequenced revisions. `set` carries a logical `EntityDocument`; `patch` carries
+path-targeted edits whose leaf values use the shared rich-value surface rather
+than a JSON-only subset.
 
 ## 3.2 Transaction Structure
 

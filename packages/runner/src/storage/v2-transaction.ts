@@ -6,7 +6,7 @@ import {
   getExperimentalStorableConfig,
   isArrayIndexPropertyName,
 } from "@commontools/memory/storable-value";
-import type { JSONValue, StorableDatum } from "@commontools/memory/interface";
+import type { StorableDatum } from "@commontools/memory/interface";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
 import type {
@@ -250,40 +250,6 @@ const EMPTY_META = Object.freeze({});
 
 const normalizeReactivityPath = (path: readonly string[]): string[] =>
   path[0] === "value" ? [...path.slice(1)] : [...path];
-
-const isJSONPatchValue = (
-  value: StorableDatum | undefined,
-): value is JSONValue | undefined => {
-  if (
-    value === undefined || value === null ||
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return true;
-  }
-
-  if (typeof value === "bigint") {
-    return false;
-  }
-
-  if (Array.isArray(value)) {
-    return value.every((entry) => isJSONPatchValue(entry as StorableDatum));
-  }
-
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    return false;
-  }
-
-  return Object.values(value).every((entry) =>
-    isJSONPatchValue(entry as StorableDatum)
-  );
-};
 
 const readPathValue = (
   value: StorableDatum | undefined,
@@ -1586,8 +1552,8 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const patchDetails = new Map<string, {
       path: readonly string[];
-      value: JSONValue | undefined;
-      previousValue: JSONValue | undefined;
+      value: StorableDatum | undefined;
+      previousValue: StorableDatum | undefined;
     }>();
     for (const detail of details) {
       const arrayPatchPath = resolveArrayPatchPath(
@@ -1599,18 +1565,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       const value = readPathValue(
         doc.current.value,
         patchPath,
-      ) as JSONValue | undefined;
+      );
       const previousValue = readPathValue(
         doc.initial.value,
         patchPath,
-      ) as JSONValue | undefined;
-
-      if (
-        !isJSONPatchValue(value as StorableDatum | undefined) ||
-        !isJSONPatchValue(previousValue as StorableDatum | undefined)
-      ) {
-        return null;
-      }
+      );
       if (deepEqual(value, previousValue)) {
         continue;
       }
