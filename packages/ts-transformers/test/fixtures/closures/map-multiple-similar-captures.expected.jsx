@@ -69,10 +69,10 @@ export default pattern((state) => {
                     },
                     state: {
                         checkout: {
-                            discount: state.key("checkout").discount
+                            discount: state.key("checkout", "discount")
                         },
                         upsell: {
-                            discount: state.key("upsell").discount
+                            discount: state.key("upsell", "discount")
                         }
                     }
                 }, ({ item, state }) => item.price * state.checkout.discount * state.upsell.discount)}
@@ -144,10 +144,10 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
                     checkout: {
-                        discount: state.key("checkout").discount
+                        discount: state.key("checkout", "discount")
                     },
                     upsell: {
-                        discount: state.key("upsell").discount
+                        discount: state.key("upsell", "discount")
                     }
                 }
             })}

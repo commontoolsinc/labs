@@ -4,10 +4,9 @@ import ts from "typescript";
 import { createDataFlowAnalyzer } from "../../src/ast/mod.ts";
 import { TransformationContext } from "../../src/core/mod.ts";
 import {
-  canRewriteExpressionSite,
-  canRewriteHelperOwnedExpressionSite,
-  classifyJsxExpressionSiteRoute,
+  classifyExpressionSiteHandling,
 } from "../../src/transformers/expression-site-policy.ts";
+import type { ExpressionContainerKind } from "../../src/transformers/expression-site-types.ts";
 
 function createProgramAndContext(source: string): {
   sourceFile: ts.SourceFile;
@@ -113,7 +112,93 @@ function findFirstNode<T extends ts.Node>(
   return found;
 }
 
-type JsxRoute = ReturnType<typeof classifyJsxExpressionSiteRoute>;
+type ExpressionSiteHandling = ReturnType<typeof classifyExpressionSiteHandling>;
+type JsxRoute =
+  | { route: "shared-pre-closure" }
+  | { route: "shared-post-closure" }
+  | {
+    route: "owned-pre-closure";
+    owner: "opaque-path-terminal-root" | "generic-owned-root";
+  }
+  | {
+    route: "skip";
+    reason:
+      | "no-authored-source-site"
+      | "event-handler-jsx-attribute"
+      | "non-pattern-context"
+      | "array-method-owned"
+      | "deferred-jsx-array-method-root"
+      | "not-shared-jsx-root-kind";
+  };
+
+function toJsxRoute(decision: ExpressionSiteHandling): JsxRoute {
+  switch (decision.kind) {
+    case "shared":
+      return { route: decision.jsxRoute ?? "shared-post-closure" };
+    case "owned-pre-closure-jsx":
+      return { route: "owned-pre-closure", owner: decision.owner };
+    case "helper-owned":
+      return { route: "skip", reason: "not-shared-jsx-root-kind" };
+    case "skip":
+      return {
+        route: "skip",
+        reason: decision.reason === "not-lowerable"
+          ? "not-shared-jsx-root-kind"
+          : decision.reason,
+      };
+  }
+}
+
+function classifyJsxRoute(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: ReturnType<typeof createDataFlowAnalyzer>,
+  options?: { allowDeferredRootOwner?: boolean },
+): JsxRoute {
+  return toJsxRoute(
+    classifyExpressionSiteHandling(
+      expression,
+      "jsx-expression",
+      context,
+      analyze,
+      options,
+    ),
+  );
+}
+
+const classifyJsxExpressionSiteRoute = classifyJsxRoute;
+
+function canRewriteExpressionSite(
+  expression: ts.Expression,
+  containerKind: ExpressionContainerKind,
+  context: TransformationContext,
+  analyze: ReturnType<typeof createDataFlowAnalyzer>,
+): boolean {
+  const decision = classifyExpressionSiteHandling(
+    expression,
+    containerKind,
+    context,
+    analyze,
+  );
+  return (decision.kind === "shared" ||
+    decision.kind === "owned-pre-closure-jsx") &&
+    decision.lowerable;
+}
+
+function canRewriteHelperOwnedExpressionSite(
+  expression: ts.Expression,
+  containerKind: ExpressionContainerKind,
+  context: TransformationContext,
+  analyze: ReturnType<typeof createDataFlowAnalyzer>,
+): boolean {
+  const decision = classifyExpressionSiteHandling(
+    expression,
+    containerKind,
+    context,
+    analyze,
+  );
+  return decision.kind === "helper-owned" && decision.lowerable;
+}
 
 interface JsxRouteCase {
   name: string;
@@ -129,7 +214,7 @@ function assertJsxRouteCase(testCase: JsxRouteCase): void {
   const analyze = createDataFlowAnalyzer(checker);
 
   assertEquals(
-    classifyJsxExpressionSiteRoute(testCase.find(sourceFile), context, analyze),
+    classifyJsxRoute(testCase.find(sourceFile), context, analyze),
     testCase.expected,
   );
 }

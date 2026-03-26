@@ -21,6 +21,7 @@ import {
 import {
   classifyCallRootPolicy,
   type CallRootPolicyDecision,
+  type SupportedCallRootKind,
   type UnsupportedCallRootKind,
 } from "./call-root-support.ts";
 import { shouldDeferFallbackMapReceiverRewrite } from "./expression-rewrite/fallback-array-method-rewrite.ts";
@@ -61,23 +62,37 @@ interface ExpressionSitePolicyInfo extends ExpressionSiteCallRootPolicyInfo {
   readonly controlFlowRewriteRoot: boolean;
 }
 
-export type JsxExpressionSiteRoute =
-  | { route: "shared-pre-closure" }
-  | { route: "shared-post-closure" }
+type JsxExpressionSiteSkipReason =
+  | "no-authored-source-site"
+  | "event-handler-jsx-attribute"
+  | "non-pattern-context"
+  | "array-method-owned"
+  | "deferred-jsx-array-method-root"
+  | "not-shared-jsx-root-kind";
+
+export type ExpressionSiteHandlingDecision =
   | {
-    route: "owned-pre-closure";
-    owner: "opaque-path-terminal-root" | "generic-owned-root";
+    kind: "shared";
+    lowerable: boolean;
+    jsxRoute?: "shared-pre-closure" | "shared-post-closure";
   }
   | {
-    route: "skip";
-    reason:
-      | "no-authored-source-site"
-      | "event-handler-jsx-attribute"
-      | "non-pattern-context"
-      | "array-method-owned"
-      | "deferred-jsx-array-method-root"
-      | "not-shared-jsx-root-kind";
+    kind: "helper-owned";
+    lowerable: boolean;
+  }
+  | {
+    kind: "owned-pre-closure-jsx";
+    owner: "opaque-path-terminal-root" | "generic-owned-root";
+    lowerable: boolean;
+  }
+  | {
+    kind: "skip";
+    reason: JsxExpressionSiteSkipReason | "not-lowerable";
   };
+
+export interface ExpressionSiteHandlingOptions {
+  readonly allowDeferredRootOwner?: boolean;
+}
 
 export function containsLogicalBinaryOperator(expr: ts.Expression): boolean {
   if (ts.isBinaryExpression(expr)) {
@@ -650,6 +665,282 @@ function getExpressionSiteCallRootPolicyInfo(
   };
 }
 
+function getSupportedCallRootKind(
+  callRootPolicy: CallRootPolicyDecision,
+): SupportedCallRootKind | undefined {
+  return callRootPolicy.kind === "supported"
+    ? callRootPolicy.supportedKind
+    : undefined;
+}
+
+function isBasePatternExpressionSite(
+  siteInfo: ExpressionSitePolicyInfo,
+): boolean {
+  return siteInfo.hasAuthoredSourceSite &&
+    !siteInfo.withinEventHandlerJsxAttribute &&
+    siteInfo.reactiveContext.kind === "pattern";
+}
+
+function isExpressionSiteLowerable(
+  expression: ts.Expression,
+  containerKind: ExpressionContainerKind,
+  siteInfo: ExpressionSitePolicyInfo,
+  analysis: ReturnType<AnalyzeFn>,
+): boolean {
+  return analysis.requiresRewrite ||
+    isOptionalAccessExpression(expression) ||
+    isLogicalBinaryExpression(expression) ||
+    (
+      containerKind === "jsx-expression" &&
+      siteInfo.controlFlowRewriteRoot &&
+      analysis.containsOpaqueRef
+    );
+}
+
+function classifyHelperOwnedExpressionSiteHandling(
+  expression: ts.Expression,
+  containerKind: ExpressionContainerKind,
+  siteInfo: ExpressionSitePolicyInfo,
+  callRootPolicy: CallRootPolicyDecision,
+  analysis: ReturnType<AnalyzeFn>,
+): ExpressionSiteHandlingDecision | undefined {
+  if (
+    containerKind === "jsx-expression" ||
+    !siteInfo.helperBoundaryKind ||
+    !isBasePatternExpressionSite(siteInfo) ||
+    siteInfo.deferredJsxArrayMethod ||
+    siteInfo.syntheticComputeOwned
+  ) {
+    return undefined;
+  }
+
+  const supportedCallRootKind = getSupportedCallRootKind(callRootPolicy);
+  if (
+    !ts.isBinaryExpression(expression) &&
+    !ts.isPrefixUnaryExpression(expression) &&
+    !ts.isPostfixUnaryExpression(expression) &&
+    !ts.isConditionalExpression(expression) &&
+    supportedCallRootKind !== "helper-owned-explicit-read" &&
+    supportedCallRootKind !== "helper-owned-receiver-method"
+  ) {
+    return undefined;
+  }
+
+  return {
+    kind: "helper-owned",
+    lowerable: analysis.containsOpaqueRef && analysis.requiresRewrite,
+  };
+}
+
+export function classifyExpressionSiteHandling(
+  expression: ts.Expression,
+  containerKind: ExpressionContainerKind,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+  options?: ExpressionSiteHandlingOptions,
+): ExpressionSiteHandlingDecision {
+  const siteInfo = getExpressionSitePolicyInfo(
+    expression,
+    containerKind,
+    context,
+    analyze,
+  );
+  const analysis = analyze(expression);
+  const callRootPolicy = classifyCallRootPolicy(expression, siteInfo, context);
+  const supportedCallRootKind = getSupportedCallRootKind(callRootPolicy);
+
+  const helperOwned = classifyHelperOwnedExpressionSiteHandling(
+    expression,
+    containerKind,
+    siteInfo,
+    callRootPolicy,
+    analysis,
+  );
+  if (helperOwned) {
+    return helperOwned;
+  }
+
+  if (!siteInfo.hasAuthoredSourceSite) {
+    return { kind: "skip", reason: "no-authored-source-site" };
+  }
+
+  if (siteInfo.withinEventHandlerJsxAttribute) {
+    return { kind: "skip", reason: "event-handler-jsx-attribute" };
+  }
+
+  if (siteInfo.reactiveContext.kind !== "pattern") {
+    return { kind: "skip", reason: "non-pattern-context" };
+  }
+
+  if (containerKind === "jsx-expression") {
+    if (siteInfo.arrayMethodOwned) {
+      return {
+        kind: "skip",
+        reason: "array-method-owned",
+      };
+    }
+
+    if (siteInfo.deferredJsxArrayMethod) {
+      if (
+        options?.allowDeferredRootOwner &&
+        isOwnedDeferredJsxArrayMethodRoot(expression, context, analyze)
+      ) {
+        return {
+          kind: "owned-pre-closure-jsx",
+          owner: "generic-owned-root",
+          lowerable: analysis.requiresRewrite ||
+            isLogicalBinaryExpression(expression),
+        };
+      }
+
+      return {
+        kind: "skip",
+        reason: "deferred-jsx-array-method-root",
+      };
+    }
+
+    if (isOwnedDynamicElementAccessRoot(expression, context, analyze)) {
+      return {
+        kind: "owned-pre-closure-jsx",
+        owner: "generic-owned-root",
+        lowerable: analysis.requiresRewrite ||
+          isLogicalBinaryExpression(expression),
+      };
+    }
+
+    if (siteInfo.callRootKind === "conditional-helper") {
+      return {
+        kind: "owned-pre-closure-jsx",
+        owner: "generic-owned-root",
+        lowerable: analysis.requiresRewrite ||
+          isLogicalBinaryExpression(expression),
+      };
+    }
+
+    if (isOwnedObjectLiteralRoot(expression, analyze)) {
+      return {
+        kind: "owned-pre-closure-jsx",
+        owner: "generic-owned-root",
+        lowerable: analysis.requiresRewrite ||
+          isLogicalBinaryExpression(expression),
+      };
+    }
+
+    if (siteInfo.controlFlowRewriteRoot) {
+      return {
+        kind: "shared",
+        jsxRoute:
+          isSharedPreClosureAtomicControlFlowExpression(expression) ||
+            isSharedPreClosureDeferredArrayMethodControlFlowExpression(
+              expression,
+              context,
+              analyze,
+            )
+            ? "shared-pre-closure"
+            : "shared-post-closure",
+        lowerable: isExpressionSiteLowerable(
+          expression,
+          containerKind,
+          siteInfo,
+          analysis,
+        ),
+      };
+    }
+
+    if (
+      siteInfo.callRootKind === "free-function" ||
+      isSharedJsxLocalHelperCallRoot(expression, context, analyze)
+    ) {
+      return {
+        kind: "shared",
+        jsxRoute: "shared-post-closure",
+        lowerable: isExpressionSiteLowerable(
+          expression,
+          containerKind,
+          siteInfo,
+          analysis,
+        ),
+      };
+    }
+
+    if (siteInfo.callRootKind === "receiver-method") {
+      if (
+        ts.isCallExpression(expression) &&
+        classifyOpaquePathTerminalCall(expression)
+      ) {
+        return {
+          kind: "owned-pre-closure-jsx",
+          owner: "opaque-path-terminal-root",
+          lowerable: analysis.requiresRewrite ||
+            isLogicalBinaryExpression(expression),
+        };
+      }
+
+      return {
+        kind: "shared",
+        jsxRoute: "shared-post-closure",
+        lowerable: isExpressionSiteLowerable(
+          expression,
+          containerKind,
+          siteInfo,
+          analysis,
+        ),
+      };
+    }
+
+    if (!isPostClosureWrapperRewriteExpression(expression, context)) {
+      return { kind: "skip", reason: "not-shared-jsx-root-kind" };
+    }
+
+    return {
+      kind: "shared",
+      jsxRoute: "shared-post-closure",
+      lowerable: isExpressionSiteLowerable(
+        expression,
+        containerKind,
+        siteInfo,
+        analysis,
+      ),
+    };
+  }
+
+  if (siteInfo.deferredJsxArrayMethod) {
+    return {
+      kind: "skip",
+      reason: "deferred-jsx-array-method-root",
+    };
+  }
+
+  if (siteInfo.arrayMethodOwned && !siteInfo.controlFlowRewriteRoot) {
+    return { kind: "skip", reason: "not-lowerable" };
+  }
+
+  if (!siteInfo.controlFlowRewriteRoot) {
+    const sharedPostClosureCallRoot = siteInfo.callRootKind === "free-function";
+    const patternOwnedReceiverMethod = supportedCallRootKind ===
+      "pattern-owned-receiver-method";
+    if (!sharedPostClosureCallRoot && !patternOwnedReceiverMethod) {
+      if (!isPostClosureWrapperRewriteExpression(expression, context)) {
+        return { kind: "skip", reason: "not-lowerable" };
+      }
+
+      if (!isEligiblePatternOwnedWrapperCallbackSite(expression, context)) {
+        return { kind: "skip", reason: "not-lowerable" };
+      }
+    }
+  }
+
+  return {
+    kind: "shared",
+    lowerable: isExpressionSiteLowerable(
+      expression,
+      containerKind,
+      siteInfo,
+      analysis,
+    ),
+  };
+}
+
 export function classifyExpressionSiteCallRootPolicy(
   expression: ts.Expression,
   context: TransformationContext,
@@ -660,123 +951,6 @@ export function classifyExpressionSiteCallRootPolicy(
     getExpressionSiteCallRootPolicyInfo(expression, context, analyze),
     context,
   );
-}
-
-export function classifyJsxExpressionSiteRoute(
-  expression: ts.Expression,
-  context: TransformationContext,
-  analyze: AnalyzeFn,
-  options?: {
-    allowDeferredRootOwner?: boolean;
-  },
-): JsxExpressionSiteRoute {
-  const siteInfo = getExpressionSitePolicyInfo(
-    expression,
-    "jsx-expression",
-    context,
-    analyze,
-  );
-  const allowDeferredRootOwner = options?.allowDeferredRootOwner ?? false;
-
-  if (!siteInfo.hasAuthoredSourceSite) {
-    return { route: "skip", reason: "no-authored-source-site" };
-  }
-
-  if (siteInfo.withinEventHandlerJsxAttribute) {
-    return { route: "skip", reason: "event-handler-jsx-attribute" };
-  }
-
-  if (siteInfo.reactiveContext.kind !== "pattern") {
-    return { route: "skip", reason: "non-pattern-context" };
-  }
-
-  if (siteInfo.arrayMethodOwned) {
-    return {
-      route: "skip",
-      reason: "array-method-owned",
-    };
-  }
-
-  if (siteInfo.deferredJsxArrayMethod) {
-    if (
-      allowDeferredRootOwner &&
-      isOwnedDeferredJsxArrayMethodRoot(expression, context, analyze)
-    ) {
-      return {
-        route: "owned-pre-closure",
-        owner: "generic-owned-root",
-      };
-    }
-
-    return {
-      route: "skip",
-      reason: "deferred-jsx-array-method-root",
-    };
-  }
-
-  if (isOwnedDynamicElementAccessRoot(expression, context, analyze)) {
-    return {
-      route: "owned-pre-closure",
-      owner: "generic-owned-root",
-    };
-  }
-
-  if (siteInfo.callRootKind === "conditional-helper") {
-    return {
-      route: "owned-pre-closure",
-      owner: "generic-owned-root",
-    };
-  }
-
-  if (isOwnedObjectLiteralRoot(expression, analyze)) {
-    return {
-      route: "owned-pre-closure",
-      owner: "generic-owned-root",
-    };
-  }
-
-  if (siteInfo.controlFlowRewriteRoot) {
-    if (
-      isSharedPreClosureAtomicControlFlowExpression(expression) ||
-      isSharedPreClosureDeferredArrayMethodControlFlowExpression(
-        expression,
-        context,
-        analyze,
-      )
-    ) {
-      return { route: "shared-pre-closure" };
-    }
-
-    return { route: "shared-post-closure" };
-  }
-
-  if (siteInfo.callRootKind === "free-function") {
-    return { route: "shared-post-closure" };
-  }
-
-  if (isSharedJsxLocalHelperCallRoot(expression, context, analyze)) {
-    return { route: "shared-post-closure" };
-  }
-
-  if (siteInfo.callRootKind === "receiver-method") {
-    if (
-      ts.isCallExpression(expression) &&
-      classifyOpaquePathTerminalCall(expression)
-    ) {
-      return {
-        route: "owned-pre-closure",
-        owner: "opaque-path-terminal-root",
-      };
-    }
-
-    return { route: "shared-post-closure" };
-  }
-
-  if (!isPostClosureWrapperRewriteExpression(expression, context)) {
-    return { route: "skip", reason: "not-shared-jsx-root-kind" };
-  }
-
-  return { route: "shared-post-closure" };
 }
 
 export function classifyUnsupportedExpressionSiteCallRoot(
@@ -800,100 +974,6 @@ export function classifyUnsupportedExpressionSiteCallRoot(
   return decision.kind === "unsupported" ? decision.unsupportedKind : undefined;
 }
 
-function hasPatternExpressionSitePreconditions(
-  siteInfo: ExpressionSitePolicyInfo,
-): boolean {
-  return siteInfo.hasAuthoredSourceSite &&
-    !siteInfo.withinEventHandlerJsxAttribute &&
-    siteInfo.reactiveContext.kind === "pattern" &&
-    !siteInfo.deferredJsxArrayMethod;
-}
-
-function canRewriteExpressionSiteWithPolicyInfo(
-  expression: ts.Expression,
-  containerKind: ExpressionContainerKind,
-  siteInfo: ExpressionSitePolicyInfo,
-  analysis: ReturnType<AnalyzeFn>,
-  context: TransformationContext,
-  analyze: AnalyzeFn,
-): boolean {
-  if (!hasPatternExpressionSitePreconditions(siteInfo)) {
-    return false;
-  }
-
-  if (containerKind === "jsx-expression" && siteInfo.arrayMethodOwned) {
-    return false;
-  }
-
-  if (
-    containerKind === "jsx-expression" &&
-    siteInfo.controlFlowRewriteRoot
-  ) {
-    const route = classifyJsxExpressionSiteRoute(expression, context, analyze)
-      .route;
-    if (route !== "shared-post-closure" && route !== "shared-pre-closure") {
-      return false;
-    }
-  }
-
-  const callRootPolicy = classifyCallRootPolicy(expression, siteInfo, context);
-  const supportedCallRootKind = callRootPolicy.kind === "supported"
-    ? callRootPolicy.supportedKind
-    : undefined;
-  const sharedPostClosureCallRoot = siteInfo.callRootKind === "free-function";
-  const inNonJsxNonControlFlowContext = containerKind !== "jsx-expression" &&
-    !siteInfo.controlFlowRewriteRoot;
-
-  if (inNonJsxNonControlFlowContext) {
-    if (siteInfo.arrayMethodOwned) {
-      return false;
-    }
-
-    const patternOwnedReceiverMethod = supportedCallRootKind ===
-      "pattern-owned-receiver-method";
-    if (!sharedPostClosureCallRoot && !patternOwnedReceiverMethod) {
-      if (!isPostClosureWrapperRewriteExpression(expression, context)) {
-        return false;
-      }
-
-      if (!isEligiblePatternOwnedWrapperCallbackSite(expression, context)) {
-        return false;
-      }
-    }
-  }
-
-  return analysis.requiresRewrite ||
-    isOptionalAccessExpression(expression) ||
-    isLogicalBinaryExpression(expression) ||
-    (
-      containerKind === "jsx-expression" &&
-      siteInfo.controlFlowRewriteRoot &&
-      analysis.containsOpaqueRef
-    );
-}
-
-export function canRewriteExpressionSite(
-  expression: ts.Expression,
-  containerKind: ExpressionContainerKind,
-  context: TransformationContext,
-  analyze: AnalyzeFn,
-): boolean {
-  const siteInfo = getExpressionSitePolicyInfo(
-    expression,
-    containerKind,
-    context,
-    analyze,
-  );
-  return canRewriteExpressionSiteWithPolicyInfo(
-    expression,
-    containerKind,
-    siteInfo,
-    analyze(expression),
-    context,
-    analyze,
-  );
-}
-
 function isOptionalAccessExpression(
   expression: ts.Expression,
 ): expression is ts.PropertyAccessExpression | ts.ElementAccessExpression {
@@ -901,50 +981,6 @@ function isOptionalAccessExpression(
     ts.isPropertyAccessExpression(expression) ||
     ts.isElementAccessExpression(expression)
   ) && !!expression.questionDotToken;
-}
-
-export function canRewriteHelperOwnedExpressionSite(
-  expression: ts.Expression,
-  containerKind: ExpressionContainerKind,
-  context: TransformationContext,
-  analyze: AnalyzeFn,
-): boolean {
-  if (containerKind === "jsx-expression") {
-    return false;
-  }
-
-  const siteInfo = getExpressionSitePolicyInfo(
-    expression,
-    containerKind,
-    context,
-    analyze,
-  );
-  if (
-    !siteInfo.helperBoundaryKind ||
-    !hasPatternExpressionSitePreconditions(siteInfo) ||
-    siteInfo.syntheticComputeOwned
-  ) {
-    return false;
-  }
-
-  const callRootPolicy = classifyCallRootPolicy(expression, siteInfo, context);
-  const supportedCallRootKind = callRootPolicy.kind === "supported"
-    ? callRootPolicy.supportedKind
-    : undefined;
-
-  if (
-    !ts.isBinaryExpression(expression) &&
-    !ts.isPrefixUnaryExpression(expression) &&
-    !ts.isPostfixUnaryExpression(expression) &&
-    !ts.isConditionalExpression(expression) &&
-    supportedCallRootKind !== "helper-owned-explicit-read" &&
-    supportedCallRootKind !== "helper-owned-receiver-method"
-  ) {
-    return false;
-  }
-
-  const analysis = analyze(expression);
-  return analysis.containsOpaqueRef && analysis.requiresRewrite;
 }
 
 export function findLowerableExpressionSite(
@@ -964,19 +1000,15 @@ export function findLowerableExpressionSite(
     if (ts.isExpression(current)) {
       const containerKind = getExpressionContainerKind(current);
       if (containerKind) {
+        const decision = classifyExpressionSiteHandling(
+          current,
+          containerKind,
+          context,
+          analyze,
+        );
         if (
-          canRewriteExpressionSite(
-            current,
-            containerKind,
-            context,
-            analyze,
-          ) ||
-          canRewriteHelperOwnedExpressionSite(
-            current,
-            containerKind,
-            context,
-            analyze,
-          )
+          decision.kind !== "skip" &&
+          decision.lowerable
         ) {
           return {
             expression: current,

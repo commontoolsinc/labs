@@ -94,8 +94,8 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
                     currentUser: {
-                        firstName: state.key("currentUser").firstName,
-                        lastName: state.key("currentUser").lastName
+                        firstName: state.key("currentUser", "firstName"),
+                        lastName: state.key("currentUser", "lastName")
                     }
                 }
             })}

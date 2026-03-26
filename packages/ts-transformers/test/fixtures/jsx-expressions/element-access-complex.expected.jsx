@@ -102,8 +102,8 @@ export default pattern((state) => {
             type: ["string", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 nested: {
-                    arrays: state.key("nested").arrays,
-                    index: state.key("nested").index
+                    arrays: state.key("nested", "arrays"),
+                    index: state.key("nested", "index")
                 },
                 row: state.key("row")
             } }, ({ state }) => state.nested.arrays[state.nested.index]![state.row])}</p>

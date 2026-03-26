@@ -8,10 +8,8 @@ import {
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import {
-  canRewriteExpressionSite,
-  canRewriteHelperOwnedExpressionSite,
+  classifyExpressionSiteHandling,
   classifyExpressionSiteCallRootPolicy,
-  classifyJsxExpressionSiteRoute,
   containsLogicalBinaryOperator,
   getExpressionContainerKind,
   isControlFlowRewriteExpression,
@@ -58,7 +56,20 @@ export function rewriteExpressionSite(
     preferDeriveWrappers = false,
   } = params;
 
-  if (!canRewriteExpressionSite(expression, containerKind, context, analyze)) {
+  const handling = classifyExpressionSiteHandling(
+    expression,
+    containerKind,
+    context,
+    analyze,
+  );
+  if (
+    handling.kind !== "shared" &&
+    handling.kind !== "owned-pre-closure-jsx"
+  ) {
+    return undefined;
+  }
+
+  if (!handling.lowerable) {
     return undefined;
   }
 
@@ -204,15 +215,19 @@ export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
 
     if (ts.isExpression(visited)) {
       const containerKind = getExpressionContainerKind(visited);
-      if (
-        containerKind &&
-        canRewriteHelperOwnedExpressionSite(
+      if (containerKind) {
+        const handling = classifyExpressionSiteHandling(
           visited,
           containerKind,
           context,
           analyze,
-        )
-      ) {
+        );
+        if (handling.kind !== "helper-owned") {
+          return visited;
+        }
+        if (!handling.lowerable) {
+          return visited;
+        }
         const analysis = analyze(visited);
         const result = rewriteExpression({
           expression: visited,
@@ -247,12 +262,16 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
+      const handling = classifyExpressionSiteHandling(
+        node.expression,
+        "jsx-expression",
+        context,
+        analyze,
+      );
       if (
-        classifyJsxExpressionSiteRoute(
-          node.expression,
-          context,
-          analyze,
-        ).route !== "shared-post-closure"
+        handling.kind !== "shared" ||
+        (handling.jsxRoute ?? "shared-post-closure") !==
+          "shared-post-closure"
       ) {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
@@ -368,14 +387,15 @@ export function rewriteArrayMethodCallbackExpressionSites(
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      const route = classifyJsxExpressionSiteRoute(
+      const handling = classifyExpressionSiteHandling(
         node.expression,
+        "jsx-expression",
         context,
         analyze,
       );
       if (
-        route.route === "skip" &&
-        route.reason === "array-method-owned"
+        handling.kind === "skip" &&
+        handling.reason === "array-method-owned"
       ) {
         const rewritten = rewriteOwnedPreClosureJsxExpressionSite({
           expression: node.expression,

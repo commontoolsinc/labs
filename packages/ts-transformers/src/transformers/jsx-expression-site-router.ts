@@ -1,7 +1,7 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { createDataFlowAnalyzer, visitEachChildWithJsx } from "../ast/mod.ts";
-import { classifyJsxExpressionSiteRoute } from "./expression-site-policy.ts";
+import { classifyExpressionSiteHandling } from "./expression-site-policy.ts";
 import {
   rewriteExpressionSite,
   rewriteOpaquePathTerminalJsxExpressionSite,
@@ -28,20 +28,27 @@ function transform(context: TransformationContext): ts.SourceFile {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      const route = classifyJsxExpressionSiteRoute(
+      const handling = classifyExpressionSiteHandling(
         node.expression,
+        "jsx-expression",
         context,
         analyze,
         { allowDeferredRootOwner: true },
       );
 
-      if (route.route === "shared-post-closure") {
+      if (
+        handling.kind === "shared" &&
+        (handling.jsxRoute ?? "shared-post-closure") === "shared-post-closure"
+      ) {
         // Pattern-owned JSX roots handled by the shared post-closure
         // expression-site lowering pass.
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      if (route.route === "shared-pre-closure") {
+      if (
+        handling.kind === "shared" &&
+        handling.jsxRoute === "shared-pre-closure"
+      ) {
         const rewritten = rewriteExpressionSite({
           expression: node.expression,
           containerKind: "jsx-expression",
@@ -60,8 +67,8 @@ function transform(context: TransformationContext): ts.SourceFile {
       }
 
       if (
-        route.route === "owned-pre-closure" &&
-        route.owner === "opaque-path-terminal-root"
+        handling.kind === "owned-pre-closure-jsx" &&
+        handling.owner === "opaque-path-terminal-root"
       ) {
         const rewritten = rewriteOpaquePathTerminalJsxExpressionSite({
           expression: node.expression,
@@ -80,8 +87,8 @@ function transform(context: TransformationContext): ts.SourceFile {
       }
 
       if (
-        route.route === "owned-pre-closure" &&
-        route.owner === "generic-owned-root"
+        handling.kind === "owned-pre-closure-jsx" &&
+        handling.owner === "generic-owned-root"
       ) {
         const rewritten = rewriteOwnedPreClosureJsxExpressionSite({
           expression: node.expression,
