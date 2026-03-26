@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { lift } from "commonfabric";
 // FIXTURE: schema-generation-lift-typed-param
@@ -12,5 +20,4 @@ export const doubleValue = lift({
 } as const satisfies __cfHelpers.JSONSchema, (value: number) => value * 2);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 /**
  * Regression test: action() result used in same ternary branch as computed()
@@ -62,7 +70,7 @@ export default pattern((__ct_pattern_input) => {
         return desc && desc.length > 0;
     });
     return {
-        [UI]: (<cf-card>
+        [UI]: (<ct-card>
         {__cfHelpers.ifElse({
             type: "boolean",
             asCell: true
@@ -102,9 +110,9 @@ export default pattern((__ct_pattern_input) => {
                 }]
         } as const satisfies __cfHelpers.JSONSchema, hasDescription, <span>{card.key("description")}</span>, null)}
             {/* Action in SAME branch stays direct while JSX-local rewrites handle the computed value */}
-            <cf-button onClick={startEditing}>Edit</cf-button>
+            <ct-button onClick={startEditing}>Edit</ct-button>
           </div>)}
-      </cf-card>),
+      </ct-card>),
         card,
     };
 }, {
@@ -176,5 +184,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

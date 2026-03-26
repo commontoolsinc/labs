@@ -10,8 +10,7 @@ const HELPERS_STMT =
 
 const HELPERS_USED_STMT = `// @ts-ignore: Internals
 function h(...args: any[]) { return ${CF_HELPERS_IDENTIFIER}.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = ${CF_HELPERS_IDENTIFIER}.h.fragment`;
+`;
 
 export class CFHelpers {
   #sourceFile: ts.SourceFile;
@@ -48,6 +47,7 @@ export class CFHelpers {
       ? ts.setOriginalNode(preserved, identityNode) as T
       : preserved as T;
   }
+
   getHelperExpr(
     name: string,
     originalNode?: ts.Node,
@@ -160,7 +160,7 @@ function checkCFHelperVar(source: string) {
   const visitor = (node: ts.Node): ts.Node => {
     if (ts.isIdentifier(node) && node.text === CF_HELPERS_IDENTIFIER) {
       throw new Error(
-        `Source cannot contain reserved '${CF_HELPERS_IDENTIFIER}' symbol.`,
+        `Source cannot contain reserved helper symbol '${node.text}'.`,
       );
     }
     return ts.visitEachChild(node, visitor, undefined);

@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 /**
  * Fixture: action closing over SELF requires inputs with defaults so the
@@ -94,8 +102,8 @@ export default pattern((__ct_pattern_input) => {
     return {
         [NAME]: "Action SELF Test",
         [UI]: (<div>
-          <cf-button onClick={showSelf}>Show Self</cf-button>
-          <cf-button onClick={incrementWithSelf}>Increment with Self</cf-button>
+          <ct-button onClick={showSelf}>Show Self</ct-button>
+          <ct-button onClick={incrementWithSelf}>Increment with Self</ct-button>
         </div>),
         title,
         count,
@@ -129,5 +137,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

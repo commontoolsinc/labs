@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 /**
  * action() results used as event handlers in JSX. action() is an
@@ -48,8 +56,8 @@ export default pattern((__ct_pattern_input) => {
     return {
         [UI]: (<div>
         <span>{label}: {count}</span>
-        <cf-button onClick={increment}>+</cf-button>
-        <cf-button onClick={decrement}>-</cf-button>
+        <ct-button onClick={increment}>+</ct-button>
+        <ct-button onClick={decrement}>-</ct-button>
       </div>),
         count,
     };
@@ -97,5 +105,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

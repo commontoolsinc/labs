@@ -264,10 +264,15 @@ describe("verifyCompiledBundleModuleFactories()", () => {
   define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    const state = { count: 0 };
+    const state = (0, commontools_1.schema)({
+      type: "object",
+      properties: {
+        count: { type: "number" }
+      }
+    });
     exports.default = (0, commontools_1.lift)(() => {
       const local = 1;
-      return () => state.count + local;
+      return () => state.type + local;
     });
   });
 });

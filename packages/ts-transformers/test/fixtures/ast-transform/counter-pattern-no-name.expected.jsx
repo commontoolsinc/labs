@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { Cell, Default, handler, NAME, pattern, str, UI } from "commonfabric";
 interface CounterState {
@@ -45,7 +53,7 @@ export default pattern((state) => {
     return {
         [NAME]: str `Simple counter: ${state.key("value")}`,
         [UI]: (<div>
-        <cf-button onClick={decrement(state)}>-</cf-button>
+        <ct-button onClick={decrement(state)}>-</ct-button>
         <ul>
           <li>next number: {__cfHelpers.ifElse({
             type: "number"
@@ -75,7 +83,7 @@ export default pattern((state) => {
                 value: state.key("value")
             } }, ({ state }) => state.value + 1), "unknown")}</li>
         </ul>
-        <cf-button onClick={increment({ value: state.key("value") })}>+</cf-button>
+        <ct-button onClick={increment({ value: state.key("value") })}>+</ct-button>
       </div>),
         value: state.key("value"),
     };
@@ -126,5 +134,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

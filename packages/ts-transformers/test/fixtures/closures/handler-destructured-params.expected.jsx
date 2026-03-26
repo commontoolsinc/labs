@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { Cell, pattern, UI } from "commonfabric";
 interface State {
@@ -10,10 +18,10 @@ interface State {
 // Context: Destructured event params retain structure; event schema reflects the destructured shape
 export default pattern((state) => {
     return {
-        [UI]: (<cf-select $value={state.key("selectedValue")} items={[
+        [UI]: (<ct-select $value={state.key("selectedValue")} items={[
                 { label: "Option A", value: "a" },
                 { label: "Option B", value: "b" },
-            ]} oncf-change={__cfHelpers.handler({
+            ]} onct-change={__cfHelpers.handler({
             type: "object",
             properties: {
                 detail: {
@@ -112,5 +120,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

@@ -1,9 +1,17 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { pattern, UI, handler, Cell } from "commonfabric";
 declare global {
     namespace JSX {
         interface IntrinsicElements {
-            "cf-button": any;
+            "ct-button": any;
         }
     }
 }
@@ -41,9 +49,9 @@ export default pattern((state) => {
         {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const state = __ct_pattern_input.key("params", "state");
-                return (<cf-button onClick={handleClick({ count: state.key("count") })}>
+                return (<ct-button onClick={handleClick({ count: state.key("count") })}>
             {item.key("name")}
-          </cf-button>);
+          </ct-button>);
             }, {
                 type: "object",
                 properties: {
@@ -170,5 +178,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

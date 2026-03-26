@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { Cell, pattern, UI } from "commonfabric";
 interface State {
@@ -7,13 +15,13 @@ interface State {
 // FIXTURE: handler-event-param
 // Verifies: inline handler with a named event parameter generates event + capture schemas
 //   onct-change={(event) => ...} → handler(event schema with detail.value, capture schema, (event, { state }) => ...)({ state })
-// Context: Typed cf-select event; event param is not destructured, used as event.detail.value
+// Context: Typed ct-select event; event param is not destructured, used as event.detail.value
 export default pattern((state) => {
     return {
-        [UI]: (<cf-select $value={state.key("selectedValue")} items={[
+        [UI]: (<ct-select $value={state.key("selectedValue")} items={[
                 { label: "Option A", value: "a" },
                 { label: "Option B", value: "b" },
-            ]} oncf-change={__cfHelpers.handler({
+            ]} onct-change={__cfHelpers.handler({
             type: "object",
             properties: {
                 detail: {
@@ -99,5 +107,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

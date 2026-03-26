@@ -439,10 +439,7 @@ function verifyTopLevelStatement(
 
   if (
     ts.isExpressionStatement(statement) &&
-    (
-      isAllowedHelperMutationStatement(statement.expression, sourceFile, env) ||
-      isAllowedFunctionHardeningStatement(statement.expression, sourceFile, env)
-    )
+    isAllowedFunctionHardeningStatement(statement.expression, sourceFile, env)
   ) {
     return;
   }
@@ -557,6 +554,13 @@ function classifyTopLevelExpression(
   }
 
   if (isTopLevelDataExpression(expr, env)) {
+    if (requiresExplicitCtDataWrap(expr)) {
+      throw verificationError(
+        sourceFile,
+        expr,
+        "Mutable top-level data must be wrapped in __ct_data() in SES mode",
+      );
+    }
     return {
       kind: "data",
       captureSafe: isCaptureSafeDataExpression(expr, env),
@@ -1253,6 +1257,17 @@ function isCaptureSafeDataExpression(
   }
 
   return false;
+}
+
+function requiresExplicitCtDataWrap(
+  expression: ts.Expression,
+): boolean {
+  const expr = unwrapExpression(expression);
+
+  return ts.isArrayLiteralExpression(expr) ||
+    ts.isObjectLiteralExpression(expr) ||
+    expr.kind === ts.SyntaxKind.RegularExpressionLiteral ||
+    ts.isNewExpression(expr);
 }
 
 function verifyCtDataExpression(
@@ -2251,17 +2266,10 @@ function verifyCompiledAuthoredFactory(
 
     if (
       ts.isExpressionStatement(statement) &&
-      (
-        isAllowedHelperMutationStatement(
-          statement.expression,
-          sourceFile,
-          env,
-        ) ||
-        isAllowedFunctionHardeningStatement(
-          statement.expression,
-          sourceFile,
-          env,
-        )
+      isAllowedFunctionHardeningStatement(
+        statement.expression,
+        sourceFile,
+        env,
       )
     ) {
       continue;
@@ -2912,39 +2920,6 @@ function isPrototypeFreezeGuard(
     : statement.thenStatement;
   return !!thenStatement &&
     isObjectFreezeCallStatement(thenStatement, prototypeName);
-}
-
-function isAllowedHelperMutationStatement(
-  expression: ts.Expression,
-  sourceFile: ts.SourceFile,
-  env: Map<string, BindingInfo>,
-): boolean {
-  if (
-    !ts.isBinaryExpression(expression) ||
-    expression.operatorToken.kind !== ts.SyntaxKind.EqualsToken
-  ) {
-    return false;
-  }
-
-  if (
-    !ts.isPropertyAccessExpression(expression.left) ||
-    !ts.isIdentifier(expression.left.expression) ||
-    expression.left.name.text !== "fragment"
-  ) {
-    return false;
-  }
-
-  const binding = env.get(expression.left.expression.text);
-  if (binding?.kind !== "function") {
-    return false;
-  }
-
-  try {
-    verifyTrustedValueExpression(expression.right, sourceFile, env);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function isAllowedFunctionHardeningStatement(

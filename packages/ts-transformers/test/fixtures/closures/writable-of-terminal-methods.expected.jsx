@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 /**
  * Writable.of() result accessed via .get()/.set() in action
@@ -48,7 +56,7 @@ export default pattern((__ct_pattern_input) => {
     return {
         [UI]: (<div>
         <span>{title} {label}: {counter}</span>
-        <cf-button onClick={reset}>Reset</cf-button>
+        <ct-button onClick={reset}>Reset</ct-button>
       </div>),
         counter,
         label,
@@ -101,5 +109,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

@@ -289,11 +289,14 @@ describe("verifyProgramModuleScope()", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { lift } from "commontools";',
-            "const state = { count: 0 };",
+            'import { lift, schema } from "commontools";',
+            "const state = schema({",
+            '  type: "object",',
+            '  properties: { count: { type: "number" } },',
+            "});",
             "export default lift(() => {",
             "  const local = 1;",
-            "  return () => state.count + local;",
+            "  return () => state.type + local;",
             "});",
           ].join("\n"),
         },

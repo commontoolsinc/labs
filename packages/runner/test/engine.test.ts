@@ -607,7 +607,7 @@ describe("Engine in SES mode", () => {
 
     const { jsScript, id } = await engine.compile(program);
 
-    expect(jsScript.js).toContain("__ctFragment");
+    expect(jsScript.js).toContain("__ctHelpers.h.fragment");
     expect(jsScript.js).not.toContain(".fragment =");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
@@ -744,9 +744,12 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { lift } from "commontools";',
-            "const state = { count: 0 };",
-            "export default lift(() => state.count + 1);",
+            'import { lift, schema } from "commontools";',
+            "const state = schema({",
+            '  type: "object",',
+            '  properties: { count: { type: "number" } },',
+            "});",
+            "export default lift(() => state.type);",
           ].join("\n"),
         },
       ],

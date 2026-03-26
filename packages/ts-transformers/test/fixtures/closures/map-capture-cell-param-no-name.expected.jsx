@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { Cell, Default, handler, pattern, UI } from "commonfabric";
 interface Item {
@@ -53,9 +61,9 @@ export default pattern((__ct_pattern_input: InputSchema) => {
                 const index = __ct_pattern_input.key("index");
                 const items = __ct_pattern_input.key("params", "items");
                 return (<li key={index}>
-              <cf-button onClick={removeItem({ items, index })}>
+              <ct-button onClick={removeItem({ items, index })}>
                 Remove
-              </cf-button>
+              </ct-button>
             </li>);
             }, {
                 type: "object",
@@ -173,5 +181,4 @@ export default pattern((__ct_pattern_input: InputSchema) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

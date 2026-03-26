@@ -72,18 +72,11 @@ function transformTopLevelStatement(
 
 function transformFunctionDeclaration(
   statement: ts.FunctionDeclaration,
-  sourceFile: ts.SourceFile,
+  _sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   state: HardeningState,
 ): ts.Statement[] {
   if (!statement.body) {
-    return [statement];
-  }
-
-  if (
-    statement.name &&
-    hasFragmentMutationAssignment(sourceFile, statement.name.text)
-  ) {
     return [statement];
   }
 
@@ -142,7 +135,7 @@ function transformFunctionDeclaration(
 
 function transformVariableStatement(
   statement: ts.VariableStatement,
-  sourceFile: ts.SourceFile,
+  _sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   state: HardeningState,
 ): ts.VariableStatement {
@@ -151,9 +144,7 @@ function transformVariableStatement(
     (declaration) => {
       if (
         !declaration.initializer ||
-        !isDirectFunctionExpression(declaration.initializer) ||
-        ts.isIdentifier(declaration.name) &&
-          hasFragmentMutationAssignment(sourceFile, declaration.name.text)
+        !isDirectFunctionExpression(declaration.initializer)
       ) {
         return declaration;
       }
@@ -297,19 +288,4 @@ function retainRuntimeFunctionModifiers(
     modifier.kind === ts.SyntaxKind.AsyncKeyword
   );
   return retained?.length ? retained : undefined;
-}
-
-function hasFragmentMutationAssignment(
-  sourceFile: ts.SourceFile,
-  bindingName: string,
-): boolean {
-  return sourceFile.statements.some((statement) =>
-    ts.isExpressionStatement(statement) &&
-    ts.isBinaryExpression(statement.expression) &&
-    statement.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-    ts.isPropertyAccessExpression(statement.expression.left) &&
-    ts.isIdentifier(statement.expression.left.expression) &&
-    statement.expression.left.expression.text === bindingName &&
-    statement.expression.left.name.text === "fragment"
-  );
 }

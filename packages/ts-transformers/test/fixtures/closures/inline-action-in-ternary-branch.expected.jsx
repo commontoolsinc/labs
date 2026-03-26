@@ -1,3 +1,11 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 /**
  * Regression test: inline arrow function inside explicit computed() in JSX
@@ -18,11 +26,11 @@ interface State {
 }
 // FIXTURE: inline-action-in-ternary-branch
 // Verifies: inline arrow handler inside explicit computed() in a ternary branch is extracted and captured in derive
-//   computed(() => <cf-button onClick={() => state.isEditing.set(true)} />) → derive({ state: { isEditing: asCell } }, ..., handler(...)(...))
+//   computed(() => <ct-button onClick={() => state.isEditing.set(true)} />) → derive({ state: { isEditing: asCell } }, ..., handler(...)(...))
 // Context: Regression -- inline handler inside computed() must have its Cell ref captured in the derive wrapper
 export default pattern((state) => {
     return {
-        [UI]: (<cf-card>
+        [UI]: (<ct-card>
         {__cfHelpers.ifElse({
             type: "boolean",
             asCell: true
@@ -82,7 +90,7 @@ export default pattern((state) => {
                 }
             } as const satisfies __cfHelpers.JSONSchema, { state: {
                     isEditing: state.key("isEditing")
-                } }, ({ state }) => (<cf-button onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+                } }, ({ state }) => (<ct-button onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
                 type: "object",
                 properties: {
                     state: {
@@ -101,9 +109,9 @@ export default pattern((state) => {
                 state: {
                     isEditing: state.isEditing
                 }
-            })}>Edit</cf-button>))}
+            })}>Edit</ct-button>))}
           </div>)}
-      </cf-card>),
+      </ct-card>),
         card: state.key("card"),
     };
 }, {
@@ -179,5 +187,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

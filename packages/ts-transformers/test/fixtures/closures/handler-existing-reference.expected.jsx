@@ -1,9 +1,17 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { handler, pattern, UI } from "commonfabric";
 declare global {
     namespace JSX {
         interface IntrinsicElements {
-            "cf-button": any;
+            "ct-button": any;
         }
     }
 }
@@ -41,9 +49,9 @@ const existing = handler(false as const satisfies __cfHelpers.JSONSchema, {
 // Context: handler() declared outside the pattern; the transform adds schemas but does not re-extract
 export default pattern((state) => {
     return {
-        [UI]: (<cf-button onClick={existing({ state })}>
+        [UI]: (<ct-button onClick={existing({ state })}>
         Existing
-      </cf-button>),
+      </ct-button>),
     };
 }, {
     type: "object",
@@ -85,5 +93,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

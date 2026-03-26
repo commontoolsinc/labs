@@ -1,9 +1,17 @@
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import * as __cfHelpers from "commonfabric";
 import { Cell, Default, handler, pattern, UI } from "commonfabric";
 declare global {
     namespace JSX {
         interface IntrinsicElements {
-            "cf-button": any;
+            "ct-button": any;
         }
     }
 }
@@ -46,14 +54,14 @@ export default pattern((__ct_pattern_input) => {
         } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count + 1)}</span>
 
           {/* Event handler with OpaqueRef - should NOT be wrapped in derive */}
-          <cf-button onClick={handleClick({ count })}>
+          <ct-button onClick={handleClick({ count })}>
             Click me
-          </cf-button>
+          </ct-button>
 
           {/* Event handler inside map - should NOT be wrapped in derive */}
-          {[1, 2, 3].map((n) => (<cf-button key={n} onClick={handleClick({ count })}>
+          {[1, 2, 3].map((n) => (<ct-button key={n} onClick={handleClick({ count })}>
               Button {n}
-            </cf-button>))}
+            </ct-button>))}
         </div>),
         count,
     };
@@ -101,5 +109,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);
