@@ -15,7 +15,6 @@ import { unwrapExpression } from "../utils/expression.ts";
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
 import {
   classifyCallbackSupport,
-  isPlainArrayValueCallbackSupport,
   isReactiveArrayMethodCallbackSupport,
   supportsPatternOwnedWrapperCallbackSite,
 } from "./callback-support.ts";
@@ -201,8 +200,6 @@ export function classifyCallExpressionRoot(
     case "when":
     case "unless":
       return "conditional-helper";
-    case "array-method":
-      return "array-method";
     case "builder":
     case "derive":
     case "cell-factory":
@@ -211,9 +208,8 @@ export function classifyCallExpressionRoot(
     case "generate-text":
     case "generate-object":
     case "pattern-tool":
-      return "reactive-origin";
     case "runtime-call":
-      return callKind.reactiveOrigin ? "reactive-origin" : "other";
+      return "other";
   }
 
   const callee = expression.expression;
@@ -442,31 +438,6 @@ function isArrayMethodOwnedExpressionSite(
   return isReactiveArrayMethodCallbackSupport(callbackSupport);
 }
 
-function isPlainArrayCallbackExpressionSite(
-  expression: ts.Expression,
-  context: TransformationContext,
-): boolean {
-  const callbackContext = findEnclosingCallbackContext(expression);
-  if (!callbackContext) {
-    return false;
-  }
-
-  const callbackSupport = classifyCallbackSupport(
-    callbackContext.callback,
-    context.checker,
-    context,
-  );
-  return isPlainArrayValueCallbackSupport(callbackSupport);
-}
-
-function isLowerableJsxExpressionSiteInPlainArrayCallback(
-  expression: ts.Expression,
-  context: TransformationContext,
-): boolean {
-  return isPlainArrayCallbackExpressionSite(expression, context) &&
-    !isDirectArrayMethodRootExpression(expression);
-}
-
 const HELPER_BOUNDARY_KINDS = new Set<ExpressionSiteHelperBoundaryKind>([
   "ifElse",
   "when",
@@ -627,7 +598,6 @@ export function getExpressionSitePolicyInfo(
     context,
   );
   return {
-    containerKind,
     reactiveContext,
     hasAuthoredSourceSite: hasAuthoredSourceSite(expression),
     withinEventHandlerJsxAttribute: isWithinEventHandlerJsxAttribute(
@@ -675,17 +645,10 @@ export function classifyJsxExpressionSiteRoute(
   }
 
   if (siteInfo.arrayMethodOwned) {
-    if (
-      !isLowerableJsxExpressionSiteInPlainArrayCallback(
-        expression,
-        context,
-      )
-    ) {
-      return {
-        route: "skip",
-        reason: "array-method-owned",
-      };
-    }
+    return {
+      route: "skip",
+      reason: "array-method-owned",
+    };
   }
 
   if (siteInfo.deferredJsxArrayMethod) {
@@ -820,14 +783,7 @@ export function canRewriteExpressionSite(
   }
 
   if (containerKind === "jsx-expression" && siteInfo.arrayMethodOwned) {
-    if (
-      !isLowerableJsxExpressionSiteInPlainArrayCallback(
-        expression,
-        context,
-      )
-    ) {
-      return false;
-    }
+    return false;
   }
 
   if (

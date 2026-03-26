@@ -18,15 +18,12 @@ export type ExpressionSiteHelperBoundaryKind =
 
 export type ExpressionSiteCallRootKind =
   | "conditional-helper"
-  | "reactive-origin"
-  | "array-method"
   | "free-function"
   | "receiver-method"
   | "optional-call"
   | "other";
 
 export interface ExpressionSitePolicyInfo {
-  readonly containerKind: ExpressionContainerKind;
   readonly reactiveContext: ReactiveContextInfo;
   readonly hasAuthoredSourceSite: boolean;
   readonly withinEventHandlerJsxAttribute: boolean;

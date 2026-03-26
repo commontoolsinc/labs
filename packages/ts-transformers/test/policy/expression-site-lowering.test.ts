@@ -235,7 +235,6 @@ Deno.test(
     );
 
     assertEquals(siteInfo.deferredJsxArrayMethod, true);
-    assertEquals(siteInfo.containerKind, "jsx-expression");
     assertEquals(classifyJsxExpressionSiteRoute(mapCall, context, analyze), {
       route: "skip",
       reason: "deferred-jsx-array-method-root",
@@ -389,7 +388,6 @@ Deno.test(
       analyze,
     );
 
-    assertEquals(siteInfo.containerKind, "jsx-expression");
     assertEquals(
       classifyJsxExpressionSiteRoute(elementAccess, context, analyze),
       {
@@ -435,7 +433,6 @@ Deno.test(
       analyze,
     );
 
-    assertEquals(siteInfo.containerKind, "jsx-expression");
     assertEquals(
       classifyJsxExpressionSiteRoute(elementAccess, context, analyze),
       {
@@ -527,7 +524,6 @@ Deno.test(
       analyze,
     );
 
-    assertEquals(siteInfo.containerKind, "jsx-expression");
     assertEquals(
       classifyJsxExpressionSiteRoute(objectLiteral, context, analyze),
       {
@@ -568,7 +564,6 @@ Deno.test(
       analyze,
     );
 
-    assertEquals(siteInfo.containerKind, "jsx-expression");
     assertEquals(
       classifyJsxExpressionSiteRoute(objectLiteral, context, analyze),
       {
