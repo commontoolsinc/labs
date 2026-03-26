@@ -22,6 +22,7 @@ import {
   isCfcEventEnvelope,
   isStream,
   mintUiEventEnvelopeFromProvenance,
+  type Runtime,
   type Stream,
   UI,
   type UiProvenanceFrame,
@@ -82,10 +83,12 @@ export class WorkerReconciler {
 
   private readonly onOps: (ops: VDomOp[]) => void;
   private readonly onError?: (error: Error) => void;
+  private readonly runtime?: Runtime;
 
   constructor(options: WorkerReconcilerOptions) {
     this.onOps = options.onOps;
     this.onError = options.onError;
+    this.runtime = options.runtime;
   }
 
   /**
@@ -237,16 +240,17 @@ export class WorkerReconciler {
     provenance: readonly UiProvenanceFrame[] | undefined,
   ): (event: unknown) => void {
     let pending = Promise.resolve();
-    const streamRuntime = (stream as unknown as { runtime?: unknown }).runtime;
+    const eventRuntime = this.runtime ??
+      (stream as unknown as { runtime?: unknown }).runtime;
     return (event: unknown) => {
-      if (isCfcEventEnvelope(event) || !streamRuntime) {
+      if (isCfcEventEnvelope(event) || !eventRuntime) {
         stream.send(event);
         return;
       }
 
       pending = pending.then(async () => {
         const envelope = await mintUiEventEnvelopeFromProvenance(
-          streamRuntime as Parameters<
+          eventRuntime as Parameters<
             typeof mintUiEventEnvelopeFromProvenance
           >[0],
           provenance ?? [],
@@ -263,6 +267,11 @@ export class WorkerReconciler {
             },
           },
         );
+        console.log("[worker-ui-event-debug]", {
+          eventType,
+          provenance,
+          integrity: envelope.integrity,
+        });
         stream.send(envelope);
       }).catch((error) => {
         this.onError?.(
@@ -429,6 +438,10 @@ export class WorkerReconciler {
           error instanceof Error ? error : new Error(String(error)),
         );
       }
+    } else {
+      this.onError?.(
+        new Error(`No worker VDOM handler registered for id ${handlerId}`),
+      );
     }
   }
 
@@ -911,13 +924,23 @@ export class WorkerReconciler {
           }
 
           if (handler) {
-            this.installRegisteredEventHandler(
-              ctx,
-              state,
-              eventType,
-              handler as (event: unknown) => void,
-              state.provenance,
-            );
+            if (isStream(handler)) {
+              this.installStreamEventHandler(
+                ctx,
+                state,
+                eventType,
+                handler as Stream<unknown>,
+                state.provenance,
+              );
+            } else if (isEventHandler(handler)) {
+              this.installRegisteredEventHandler(
+                ctx,
+                state,
+                eventType,
+                handler as (event: unknown) => void,
+                state.provenance,
+              );
+            }
           }
         },
       );
@@ -1582,14 +1605,23 @@ export class WorkerReconciler {
               }
 
               if (handler) {
-                // Cast handler to mutable function type for registration
-                this.installRegisteredEventHandler(
-                  ctx,
-                  state,
-                  eventType,
-                  handler as (event: unknown) => void,
-                  state.provenance,
-                );
+                if (isStream(handler)) {
+                  this.installStreamEventHandler(
+                    ctx,
+                    state,
+                    eventType,
+                    handler as Stream<unknown>,
+                    state.provenance,
+                  );
+                } else if (isEventHandler(handler)) {
+                  this.installRegisteredEventHandler(
+                    ctx,
+                    state,
+                    eventType,
+                    handler as (event: unknown) => void,
+                    state.provenance,
+                  );
+                }
               }
             },
           );

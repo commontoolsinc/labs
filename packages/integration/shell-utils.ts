@@ -83,6 +83,14 @@ export class ShellIntegration {
     return this.#page!;
   }
 
+  errorLogs(): readonly string[] {
+    return [...this.#errorLogs];
+  }
+
+  clearErrorLogs(): void {
+    this.#errorLogs.length = 0;
+  }
+
   async state(): Promise<AppState | undefined> {
     this.checkIsOk();
     const page = this.page();

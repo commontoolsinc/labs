@@ -38,6 +38,7 @@ type PersistedLabelsCache = Map<
   string,
   ReturnType<typeof normalizePersistedPathLabels> | undefined
 >;
+type RootSchemaCache = Map<string, unknown>;
 
 function normalizeFramePath(path: readonly string[]): readonly string[] {
   return path.map((segment) => String(segment));
@@ -145,6 +146,36 @@ async function loadPersistedLabels(
   }
 }
 
+function rootSchemaCacheKey(link: UiProvenanceFrameLink): string {
+  return JSON.stringify([link.space, link.id, link.type]);
+}
+
+function loadRootSchemaFromRuntime(
+  runtime: Runtime,
+  link: UiProvenanceFrameLink,
+  cache: RootSchemaCache,
+): unknown {
+  const key = rootSchemaCacheKey(link);
+  if (cache.has(key)) {
+    return cache.get(key);
+  }
+
+  let resolved: unknown;
+  try {
+    resolved = runtime.getCellFromLink({
+      space: link.space as never,
+      id: link.id as never,
+      type: link.type as never,
+      path: [],
+    }).asSchemaFromLinks().schema;
+  } catch {
+    resolved = undefined;
+  }
+
+  cache.set(key, resolved);
+  return resolved;
+}
+
 export function frameFromLink(
   link: UiProvenanceFrameLink,
   path: readonly string[],
@@ -165,6 +196,7 @@ export async function resolveUiProvenanceIntegrity(
   frames: readonly UiProvenanceFrame[],
 ): Promise<readonly CfcAtom[]> {
   const cache: PersistedLabelsCache = new Map();
+  const rootSchemaCache: RootSchemaCache = new Map();
   const seen = new Set<string>();
   let joined: readonly CfcAtom[] | undefined;
 
@@ -179,8 +211,14 @@ export async function resolveUiProvenanceIntegrity(
     const fromPersisted = persisted
       ? resolveObservationLabel(persisted, `/${frame.path.join("/")}`, "shape")
       : undefined;
-    const fromSchema = frame.link.schema
-      ? normalizeSchemaLabels(schemaAtPath(frame.link.schema, frame.path))
+    const runtimeRootSchema = loadRootSchemaFromRuntime(
+      runtime,
+      frame.link,
+      rootSchemaCache,
+    );
+    const schemaSource = runtimeRootSchema ?? frame.link.schema;
+    const fromSchema = schemaSource
+      ? normalizeSchemaLabels(schemaAtPath(schemaSource, frame.path))
       : undefined;
     joined = joinIntegrityLabels(
       joined,

@@ -19,6 +19,7 @@ const shareActionContractAtom = {
 
 export default pattern(() => {
   const row = MessageShareRow({
+    messageId: "m-row",
     subject: "Escalation summary",
     sender: "ops@example.com",
     shareTarget: "did:key:reviewer",
@@ -44,10 +45,14 @@ export default pattern(() => {
   });
 
   const assert_row_initially_not_shared = computed(() => row.shared === false);
+  const assert_row_still_not_shared_after_untrusted = computed(() =>
+    row.shared === false
+  );
+  const assert_row_shared_after_trusted = computed(() => row.shared === true);
   const assert_list_initially_empty = computed(() => list.sharedCount === 0);
-  const assert_list_shared_after_click = computed(() => list.sharedCount === 1);
 
   return {
+    allowRuntimeErrors: true,
     tests: [
       { assertion: assert_row_initially_not_shared },
       { assertion: assert_list_initially_empty },
@@ -71,20 +76,39 @@ export default pattern(() => {
       },
       {
         uiEvent: {
-          target: "list",
-          schema: SHARE_LIST_OUTPUT_SCHEMA,
+          target: "row",
+          schema: MESSAGE_SHARE_ROW_OUTPUT_SCHEMA,
+          attr: {
+            name: "data-ui-action",
+            value: "ShareReviewedMessageUntrusted",
+          },
+          expectedNodePath: `/${UI}/children/3`,
+          sourceGestureId: "gesture-mapped-share-list-pattern-test-untrusted",
+        },
+      },
+      { assertion: assert_row_still_not_shared_after_untrusted },
+      {
+        runtimeErrorAssertion: {
+          includes: [
+            "CfcEventIntegrityViolationError",
+            "ShareReviewedMessage",
+          ],
+        },
+      },
+      {
+        uiEvent: {
+          target: "row",
+          schema: MESSAGE_SHARE_ROW_OUTPUT_SCHEMA,
           attr: {
             name: "data-ui-action",
             value: "ShareReviewedMessage",
           },
-          occurrence: 0,
           expectedNodePath: `/${UI}/children/2`,
-          integrityIncludes: [messageRowPlacementAtom],
-          traceIncludesPaths: [`/${UI}/children/2/children/0/0`],
-          sourceGestureId: "gesture-mapped-share-list-pattern-test",
+          integrityIncludes: [shareActionContractAtom],
+          sourceGestureId: "gesture-mapped-share-list-pattern-test-trusted",
         },
       },
-      { assertion: assert_list_shared_after_click },
+      { assertion: assert_row_shared_after_trusted },
     ],
     row,
     list,

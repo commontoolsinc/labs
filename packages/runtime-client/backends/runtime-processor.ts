@@ -26,11 +26,7 @@ import {
   CachedCompiler,
   IDBCompilationCache,
 } from "@commontools/runner/compilation-cache";
-import {
-  NameSchema,
-  nameSchema,
-  rendererVDOMSchema,
-} from "@commontools/runner/schemas";
+import { NameSchema, rendererVDOMSchema } from "@commontools/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
   type NormalizedFullLink,
@@ -600,10 +596,9 @@ export class RuntimeProcessor {
   handlePageGet(
     request: PageGetRequest,
   ): PageResponse {
-    let cell = this.runtime.getCellFromEntityId(this.space, {
+    const cell = this.runtime.getCellFromEntityId(this.space, {
       "/": request.pageId,
     });
-    cell = cell.asSchema(nameSchema);
 
     if (request.runIt) {
       this.runtime.start(cell).catch(console.error);
@@ -886,6 +881,7 @@ export class RuntimeProcessor {
           stackTrace: error.stack,
         });
       },
+      runtime: this.runtime,
     });
 
     // Mount the cell - the reconciler will subscribe and emit initial ops

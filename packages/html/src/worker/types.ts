@@ -9,6 +9,7 @@ import type {
   Cancel,
   Cell,
   JSONSchema,
+  Runtime,
   UiProvenanceFrame,
 } from "@commontools/runner";
 import type { CellRef, JSONValue } from "@commontools/runtime-client";
@@ -183,6 +184,9 @@ export interface WorkerReconcilerOptions {
 
   /** Optional: callback when an error occurs */
   onError?: (error: Error) => void;
+
+  /** Optional: runtime to use when minting trusted UI event envelopes */
+  runtime?: Runtime;
 }
 
 /**

@@ -419,6 +419,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
       const reconciler = new WorkerReconciler({
         onOps: collector.onOps,
         onError: (error) => renderErrors.push(error),
+        runtime,
       });
 
       const propsCell = new MockPropsCell({ className: "foo" });
@@ -618,6 +619,114 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     assertEquals(setBindingOps.length >= 1, true, "Should have set-binding");
     assertEquals((setBindingOps[0] as any).propName, "value");
   });
+
+  await t.step(
+    "cell-backed stream event props mint integrity from same-tree UI provenance",
+    async () => {
+      const collector = createOpsCollector();
+      const renderErrors: Error[] = [];
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+        onError: (error) => renderErrors.push(error),
+        runtime,
+      });
+
+      const actionAtom = {
+        type: "https://commonfabric.org/cfc/atom/UiActionContract",
+        action: "SubmitDirectCommand",
+      } as const;
+
+      const clickStream = new MockStream({
+        space: signer.did(),
+        id: "of:ui-direct-command-stream",
+        type: "application/json",
+        path: [],
+      });
+      (clickStream as unknown as { runtime?: Runtime }).runtime = undefined;
+      const handlerCell = new MockCell(clickStream);
+      const rootCell = new MockCell({
+        [UI]: {
+          type: "vnode",
+          name: "ct-vstack",
+          props: {},
+          children: [{
+            type: "vnode",
+            name: "ct-button",
+            props: {
+              "data-ui-action": "SubmitDirectCommand",
+              onClick: handlerCell,
+            },
+            children: ["Submit direct command"],
+          }],
+        },
+      }, {
+        space: signer.did(),
+        id: "of:ui-direct-command-piece",
+        type: "application/json",
+        path: [],
+        schema: {
+          type: "object",
+          properties: {
+            [UI]: {
+              type: "object",
+              properties: {
+                children: {
+                  type: "array",
+                  prefixItems: [{
+                    type: "object",
+                    ifc: {
+                      addIntegrity: [actionAtom],
+                    },
+                    properties: {
+                      props: {
+                        type: "object",
+                        properties: {
+                          "data-ui-action": { type: "string" },
+                        },
+                      },
+                    },
+                  }],
+                },
+              },
+            },
+          },
+          required: [UI],
+        },
+      });
+
+      reconciler.mount(rootCell as any);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      const setEventOps = collector.getOpsOfType("set-event");
+      assertEquals(
+        setEventOps.length >= 1,
+        true,
+        "Should register click handler",
+      );
+
+      const clickHandlerId =
+        (setEventOps[0] as { handlerId: number }).handlerId;
+      reconciler.dispatchEvent(clickHandlerId, {
+        type: "click",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      if (renderErrors.length > 0) {
+        throw renderErrors[0];
+      }
+      assertEquals(clickStream.sent.length, 1);
+      const envelope = clickStream.sent[0];
+      assert(isCfcEventEnvelope(envelope));
+      assertEquals(
+        envelope.integrity.some((atom) =>
+          isUiAtom(atom) &&
+          atom.type === actionAtom.type &&
+          atom.action === actionAtom.action
+        ),
+        true,
+      );
+    },
+  );
 
   await t.step(
     "stream events mint integrity from parent and child UI provenance",

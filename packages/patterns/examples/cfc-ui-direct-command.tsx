@@ -29,6 +29,163 @@ const submitActionContractAtom = {
   action: "SubmitDirectCommand",
 } as const;
 
+const renderLeafSchema = {
+  anyOf: [
+    { type: "string" },
+    { type: "number" },
+    { type: "boolean" },
+    { type: "null" },
+    { type: "undefined" },
+    { type: "object", properties: {} },
+    { type: "array" },
+  ],
+} as const satisfies JSONSchema;
+
+const vdomPropsSchema = {
+  type: "object",
+  properties: {
+    style: { anyOf: [{ type: "object" }, { type: "string" }] },
+  },
+  additionalProperties: {
+    anyOf: [
+      { type: "string" },
+      { type: "number" },
+      { type: "boolean" },
+      { type: "null" },
+      { type: "undefined" },
+      {
+        type: "object",
+        properties: {},
+      },
+      {
+        type: "array",
+        items: { type: "null" },
+      },
+      {
+        asStream: true,
+        type: "unknown",
+      },
+    ],
+  },
+  asCell: true,
+} as const satisfies JSONSchema;
+
+const baseVNodeSchema = {
+  type: "object",
+  properties: {
+    type: { type: "string" },
+    name: { type: "string" },
+    props: vdomPropsSchema,
+    children: {
+      type: "array",
+      items: renderLeafSchema,
+    },
+  },
+  required: ["type", "name", "props", "children"],
+} as const satisfies JSONSchema;
+
+const disclosureCardSchema = {
+  ...baseVNodeSchema,
+  ifc: {
+    addIntegrity: [disclosureContractAtom],
+  },
+  properties: {
+    ...baseVNodeSchema.properties,
+    props: {
+      ...vdomPropsSchema,
+      properties: {
+        ...(vdomPropsSchema.properties ?? {}),
+        "data-ui-disclosure": { type: "string" },
+        "data-ui-disclosure-kind": { type: "string" },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
+
+const promptTextareaSchema = {
+  ...baseVNodeSchema,
+  ifc: {
+    addIntegrity: [promptSlotContractAtom],
+  },
+  properties: {
+    ...baseVNodeSchema.properties,
+    props: {
+      ...vdomPropsSchema,
+      properties: {
+        ...(vdomPropsSchema.properties ?? {}),
+        "data-ui-role": { type: "string" },
+        "data-ui-surface": { type: "string" },
+        placeholder: { type: "string" },
+        rows: { type: "number" },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
+
+const trustedButtonSchema = {
+  ...baseVNodeSchema,
+  ifc: {
+    addIntegrity: [submitActionContractAtom],
+  },
+  properties: {
+    ...baseVNodeSchema.properties,
+    props: {
+      ...vdomPropsSchema,
+      properties: {
+        ...(vdomPropsSchema.properties ?? {}),
+        "data-ui-action": { type: "string" },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
+
+const untrustedButtonSchema = {
+  ...baseVNodeSchema,
+  properties: {
+    ...baseVNodeSchema.properties,
+    props: {
+      ...vdomPropsSchema,
+      properties: {
+        ...(vdomPropsSchema.properties ?? {}),
+        "data-ui-action": { type: "string" },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
+
+const countNodeSchema = {
+  ...baseVNodeSchema,
+  properties: {
+    ...baseVNodeSchema.properties,
+    props: {
+      ...vdomPropsSchema,
+      properties: {
+        ...(vdomPropsSchema.properties ?? {}),
+        id: { type: "string" },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
+
+const directCommandUiSchema = {
+  ...baseVNodeSchema,
+  properties: {
+    ...baseVNodeSchema.properties,
+    children: {
+      type: "array",
+      prefixItems: [
+        baseVNodeSchema,
+        disclosureCardSchema,
+        promptTextareaSchema,
+        trustedButtonSchema,
+        untrustedButtonSchema,
+        countNodeSchema,
+      ],
+      items: renderLeafSchema,
+    },
+  },
+} as const satisfies JSONSchema;
+
 export interface DirectCommandInput {
   draft: Writable<Default<string, "Summarize the latest inbox triage notes.">>;
   submittedCount: Writable<Default<number, 0>>;
@@ -53,76 +210,12 @@ export const DIRECT_COMMAND_INPUT_SCHEMA = {
 export const DIRECT_COMMAND_OUTPUT_SCHEMA = {
   type: "object",
   properties: {
+    [NAME]: { type: "string" },
     draft: { type: "string" },
     submittedCount: { type: "number" },
-    [UI]: {
-      type: "object",
-      properties: {
-        children: {
-          type: "array",
-          prefixItems: [
-            { type: "object" },
-            {
-              type: "object",
-              ifc: {
-                addIntegrity: [disclosureContractAtom],
-              },
-              properties: {
-                props: {
-                  type: "object",
-                  properties: {
-                    "data-ui-disclosure": { type: "string" },
-                    "data-ui-disclosure-kind": { type: "string" },
-                  },
-                },
-              },
-            },
-            {
-              type: "object",
-              ifc: {
-                addIntegrity: [promptSlotContractAtom],
-              },
-              properties: {
-                props: {
-                  type: "object",
-                  properties: {
-                    "data-ui-role": { type: "string" },
-                    "data-ui-surface": { type: "string" },
-                  },
-                },
-              },
-            },
-            {
-              type: "object",
-              ifc: {
-                addIntegrity: [submitActionContractAtom],
-              },
-              properties: {
-                props: {
-                  type: "object",
-                  properties: {
-                    "data-ui-action": { type: "string" },
-                  },
-                },
-              },
-            },
-            {
-              type: "object",
-              properties: {
-                props: {
-                  type: "object",
-                  properties: {
-                    "data-ui-action": { type: "string" },
-                  },
-                },
-              },
-            },
-          ],
-        },
-      },
-    },
+    [UI]: directCommandUiSchema,
   },
-  required: ["draft", "submittedCount", UI],
+  required: [NAME, "draft", "submittedCount", UI],
 } as const satisfies JSONSchema;
 
 const submitDirectCommand = requireEventIntegrity(
@@ -194,7 +287,7 @@ export default pattern<DirectCommandInput, DirectCommandOutput>(
           >
             Submit without trusted contract
           </ct-button>
-          <p style={{ color: "#5f5f5f" }}>
+          <p id="direct-command-count" style={{ color: "#5f5f5f" }}>
             Submitted commands: {submittedCount}
           </p>
         </ct-vstack>

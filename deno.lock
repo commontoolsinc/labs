@@ -43,6 +43,7 @@
     "jsr:@std/fs@^1.0.21": "1.0.21",
     "jsr:@std/fs@^1.0.6": "1.0.21",
     "jsr:@std/html@^1.0.5": "1.0.5",
+    "jsr:@std/http@*": "1.0.23",
     "jsr:@std/http@1": "1.0.23",
     "jsr:@std/internal@^1.0.10": "1.0.12",
     "jsr:@std/internal@^1.0.12": "1.0.12",

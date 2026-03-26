@@ -6,7 +6,7 @@ import { RuntimeInternals } from "../lib/runtime.ts";
 import "../components/OmniLayout.ts";
 import { CellHandle, PageHandle, VNode } from "@commontools/runtime-client";
 import { rendererVDOMSchema } from "@commontools/runner/schemas";
-import type { JSONSchema } from "@commontools/runner/shared";
+import { type JSONSchema, UI } from "@commontools/runner/shared";
 
 type SubPages = {
   sidebarUI?: VNode;
@@ -175,7 +175,11 @@ export class XBodyView extends BaseView {
       : this.activePattern
       ? html`
         <ct-piece slot="main" .pieceId="${this.activePattern.id()}">
-          <ct-render .cell="${this.activePattern.cell()}"></ct-render>
+          <ct-render
+            .cell="${this.activePattern.cell().key(UI).asSchema<VNode>(
+              rendererVDOMSchema,
+            )}"
+          ></ct-render>
         </ct-piece>
       `
       : null;

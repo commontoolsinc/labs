@@ -1,16 +1,58 @@
 /// <cts-enable />
 import {
-  action,
   computed,
   Default,
+  handler,
   JSONSchema,
   NAME,
   pattern,
+  requireEventIntegrity,
   Stream,
   UI,
   VNode,
   Writable,
 } from "commontools";
+
+const renderLeafSchema = {
+  anyOf: [
+    { type: "string" },
+    { type: "number" },
+    { type: "boolean" },
+    { type: "null" },
+    { type: "undefined" },
+    { type: "object", properties: {} },
+    { type: "array" },
+  ],
+} as const satisfies JSONSchema;
+
+const vdomPropsSchema = {
+  type: "object",
+  properties: {
+    style: { anyOf: [{ type: "object" }, { type: "string" }] },
+  },
+  additionalProperties: {
+    anyOf: [
+      { type: "string" },
+      { type: "number" },
+      { type: "boolean" },
+      { type: "null" },
+      { type: "undefined" },
+      {
+        type: "object",
+        properties: {},
+      },
+      {
+        type: "array",
+        items: { type: "null" },
+      },
+      {
+        asStream: true,
+        type: "unknown",
+      },
+    ],
+  },
+  asCell: true,
+} as const satisfies JSONSchema;
 
 const messageRowPlacementAtom = {
   type: "https://commonfabric.org/cfc/atom/UiPlacement",
@@ -23,6 +65,132 @@ const shareActionContractAtom = {
   action: "ShareReviewedMessage",
 } as const;
 
+const baseVNodeSchema = {
+  type: "object",
+  properties: {
+    type: { type: "string" },
+    name: { type: "string" },
+    props: vdomPropsSchema,
+    children: {
+      type: "array",
+      items: renderLeafSchema,
+    },
+  },
+  required: ["type", "name", "props", "children"],
+} as const satisfies JSONSchema;
+
+const shareButtonPropsSchema = {
+  ...vdomPropsSchema,
+  properties: {
+    ...(vdomPropsSchema.properties ?? {}),
+    "data-ui-action": { type: "string" },
+    "data-share-target": { type: "string" },
+    "data-message-id": { type: "string" },
+  },
+} as const satisfies JSONSchema;
+
+const trustedShareButtonSchema = {
+  ...baseVNodeSchema,
+  ifc: {
+    addIntegrity: [shareActionContractAtom],
+  },
+  properties: {
+    ...baseVNodeSchema.properties,
+    props: shareButtonPropsSchema,
+  },
+} as const satisfies JSONSchema;
+
+const untrustedShareButtonSchema = {
+  ...baseVNodeSchema,
+  properties: {
+    ...baseVNodeSchema.properties,
+    props: shareButtonPropsSchema,
+  },
+} as const satisfies JSONSchema;
+
+const rowPlacementChildSchema = {
+  type: "object",
+  ifc: {
+    addIntegrity: [messageRowPlacementAtom],
+  },
+  properties: {
+    [UI]: {
+      ...baseVNodeSchema,
+      properties: {
+        ...baseVNodeSchema.properties,
+        children: {
+          type: "array",
+          prefixItems: [
+            baseVNodeSchema,
+            baseVNodeSchema,
+            trustedShareButtonSchema,
+            untrustedShareButtonSchema,
+          ],
+          items: renderLeafSchema,
+        },
+      },
+    },
+  },
+  required: [UI],
+} as const satisfies JSONSchema;
+
+const messageRowUiSchema = {
+  ...baseVNodeSchema,
+  properties: {
+    ...baseVNodeSchema.properties,
+    children: {
+      type: "array",
+      prefixItems: [
+        baseVNodeSchema,
+        baseVNodeSchema,
+        trustedShareButtonSchema,
+        untrustedShareButtonSchema,
+      ],
+      items: renderLeafSchema,
+    },
+  },
+} as const satisfies JSONSchema;
+
+const shareCountNodeSchema = {
+  ...baseVNodeSchema,
+  properties: {
+    ...baseVNodeSchema.properties,
+    props: {
+      ...vdomPropsSchema,
+      properties: {
+        ...(vdomPropsSchema.properties ?? {}),
+        id: { type: "string" },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
+
+const shareListUiSchema = {
+  ...baseVNodeSchema,
+  properties: {
+    ...baseVNodeSchema.properties,
+    children: {
+      type: "array",
+      prefixItems: [
+        baseVNodeSchema,
+        baseVNodeSchema,
+        {
+          ...baseVNodeSchema,
+          properties: {
+            ...baseVNodeSchema.properties,
+            children: {
+              type: "array",
+              items: rowPlacementChildSchema,
+            },
+          },
+        },
+        shareCountNodeSchema,
+      ],
+      items: renderLeafSchema,
+    },
+  },
+} as const satisfies JSONSchema;
+
 export interface ReviewMessage {
   id: string;
   sender: string;
@@ -31,6 +199,7 @@ export interface ReviewMessage {
 }
 
 export interface MessageShareRowInput {
+  messageId: string;
   subject: string;
   sender: string;
   shareTarget: string;
@@ -46,57 +215,48 @@ export interface MessageShareRowOutput {
 export const MESSAGE_SHARE_ROW_INPUT_SCHEMA = {
   type: "object",
   properties: {
+    messageId: { type: "string" },
     subject: { type: "string" },
     sender: { type: "string" },
     shareTarget: { type: "string" },
     shared: { type: "boolean" },
   },
-  required: ["subject", "sender", "shareTarget", "shared"],
+  required: ["messageId", "subject", "sender", "shareTarget", "shared"],
 } as const satisfies JSONSchema;
 
 export const MESSAGE_SHARE_ROW_OUTPUT_SCHEMA = {
   type: "object",
   properties: {
+    [NAME]: { type: "string" },
     shared: { type: "boolean" },
-    [UI]: {
-      type: "object",
-      properties: {
-        children: {
-          type: "array",
-          prefixItems: [
-            { type: "object" },
-            { type: "object" },
-            {
-              type: "object",
-              ifc: {
-                addIntegrity: [shareActionContractAtom],
-              },
-              properties: {
-                props: {
-                  type: "object",
-                  properties: {
-                    "data-ui-action": { type: "string" },
-                    "data-share-target": { type: "string" },
-                  },
-                },
-              },
-            },
-          ],
-        },
-      },
-    },
+    [UI]: messageRowUiSchema,
   },
-  required: ["shared", UI],
+  required: [NAME, "shared", UI],
 } as const satisfies JSONSchema;
+
+const toggleReviewedMessageShared = requireEventIntegrity(
+  handler(
+    (
+      _: void,
+      {
+        shared,
+      }: {
+        shared: Writable<Default<boolean, false>>;
+      },
+    ) => {
+      shared.set(!shared.get());
+    },
+  ),
+  [shareActionContractAtom],
+  { label: "ShareReviewedMessage" },
+);
 
 export const MessageShareRow = pattern<
   MessageShareRowInput,
   MessageShareRowOutput
 >(
-  ({ subject, sender, shareTarget, shared }) => {
-    const toggleShared = action(() => {
-      shared.set(!shared.get());
-    });
+  ({ messageId, subject, sender, shareTarget, shared }) => {
+    const toggleShared = toggleReviewedMessageShared({ shared });
 
     return {
       [NAME]: computed(() => `Message row: ${subject}`),
@@ -114,6 +274,7 @@ export const MessageShareRow = pattern<
           <ct-button
             data-ui-action="ShareReviewedMessage"
             data-share-target={shareTarget}
+            data-message-id={messageId}
             onClick={toggleShared}
           >
             {computed(() =>
@@ -121,6 +282,14 @@ export const MessageShareRow = pattern<
                 ? `Shared with ${shareTarget}`
                 : `Share with ${shareTarget}`
             )}
+          </ct-button>
+          <ct-button
+            data-ui-action="ShareReviewedMessageUntrusted"
+            data-share-target={shareTarget}
+            data-message-id={messageId}
+            onClick={toggleShared}
+          >
+            Attempt untrusted share
           </ct-button>
         </ct-card>
       ),
@@ -185,36 +354,12 @@ export const SHARE_LIST_INPUT_SCHEMA = {
 export const SHARE_LIST_OUTPUT_SCHEMA = {
   type: "object",
   properties: {
+    [NAME]: { type: "string" },
     shareTarget: { type: "string" },
     sharedCount: { type: "number" },
-    [UI]: {
-      type: "object",
-      properties: {
-        children: {
-          type: "array",
-          prefixItems: [
-            { type: "object" },
-            { type: "object" },
-            {
-              type: "object",
-              properties: {
-                children: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    ifc: {
-                      addIntegrity: [messageRowPlacementAtom],
-                    },
-                  },
-                },
-              },
-            },
-          ],
-        },
-      },
-    },
+    [UI]: shareListUiSchema,
   },
-  required: ["shareTarget", "sharedCount", UI],
+  required: [NAME, "shareTarget", "sharedCount", UI],
 } as const satisfies JSONSchema;
 
 export default pattern<ShareListInput, ShareListOutput>(
@@ -242,6 +387,7 @@ export default pattern<ShareListInput, ShareListOutput>(
           <ct-vstack gap="2">
             {messages.map((message) => (
               <MessageShareRow
+                messageId={message.id}
                 subject={message.subject}
                 sender={message.sender}
                 shareTarget={shareTarget}
@@ -249,6 +395,7 @@ export default pattern<ShareListInput, ShareListOutput>(
               />
             ))}
           </ct-vstack>
+          <p id="mapped-share-count">Shared messages: {sharedCount}</p>
         </ct-vstack>
       ),
       shareTarget,

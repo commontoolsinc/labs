@@ -118,6 +118,24 @@ export class Runner {
     return this.pendingSetups.size > 0 || this.pendingStarts.size > 0;
   }
 
+  private annotateStreamOutputSources(
+    tx: IExtendedStorageTransaction,
+    processCell: Cell<any>,
+    outputLinks: readonly NormalizedFullLink[],
+  ): void {
+    for (const link of outputLinks) {
+      const outputCell = this.runtime.getCellFromLink(link, undefined, tx);
+      const raw = outputCell.getRaw({ meta: ignoreReadForScheduling });
+      if (!isStreamValue(raw)) {
+        continue;
+      }
+      if (outputCell.getSourceCell()) {
+        continue;
+      }
+      outputCell.setSourceCell(processCell);
+    }
+  }
+
   async idle(): Promise<void> {
     await Promise.all([
       ...this.pendingSetups.values(),
@@ -1231,6 +1249,7 @@ export class Runner {
 
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
     const writes = findAllWriteRedirectCells(outputs, processCell);
+    this.annotateStreamOutputSources(tx, processCell, writes);
 
     let fn: (inputs: any) => any;
 
