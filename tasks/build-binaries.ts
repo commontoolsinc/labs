@@ -293,6 +293,7 @@ async function buildCli(config: BuildConfig): Promise<void> {
       "--allow-env",
       "--allow-ffi", // for @db/sqlite
       "--allow-net", // for @db/sqlite lazy download
+      "--allow-run", // for ct fuse mount (spawns ct fuse-daemon)
       "--include",
       config.staticTypesPath(),
       "--include",
