@@ -788,10 +788,22 @@ Important details:
 
 - the bundle itself stays in AMD form until execution
 - the runtime performs bundle preflight before any Compartment evaluation
+- `Engine.evaluate()` is the authoritative execution boundary: compile-time
+  verification may fail early, but execution must re-run verification before
+  evaluating a bundle
+- successful bundle verification may be memoized by bundle hash as a
+  performance optimization only; it must not change the execution-boundary
+  policy
 - runtime capability injection happens explicitly through trusted AMD
   `runtimeDeps`
 - after preflight, the verifier runs at the AMD module factory boundary before
   any factory may be required or executed
+- authored AMD factories never receive a live loader capability: the trusted
+  bundle tail may keep its internal `require`, but the authored factory
+  parameter resolves to an inert throwing stub
+- verifier rejection of direct `require()` usage is diagnostic hardening only;
+  security must not depend on syntactically detecting every obfuscated path to
+  `require`
 - the harness uses the resulting `exportMap` to associate exported runtime
   values with their source `RuntimeProgram`
 - the runtime preserves the existing bundle ABI unless there is a deliberate
@@ -904,12 +916,22 @@ That path must use SES, but not the full pattern-load authority surface. It
 must execute inside a smaller Compartment with:
 
 - only the minimal globals required to call the function
+- only direct function source: a single function declaration, function
+  expression, or arrow function expression. IIFEs and arbitrary expressions are
+  rejected
 - no AMD loader state
 - no runtime-module dependency injection
 - the same temporary compatibility web globals (`fetch`, `Headers`, `Request`,
   `Response`, `URL`, `URLSearchParams`) currently exposed in authored SES
   compartments
+- a direct `console` global only; internal runtime hook globals such as
+  `RUNTIME_ENGINE_CONSOLE_HOOK` are not part of the authored surface
 - no shared mutable state other than explicit trusted runtime objects passed in
+
+The runtime may cache a zero-argument creator per normalized function source as
+a performance optimization, but each callback invocation must still
+materialize a fresh function object/closure before it is called. Creator caching
+is allowed; closure-state reuse across invocations is not.
 
 A standalone `evaluateStringSync()` utility may still exist for trusted
 internal tooling or diagnostics, but it is outside this threat model and MUST
@@ -1110,12 +1132,17 @@ the point they are first called.
 
 That secondary path is allowed only under all of the following constraints:
 
-- it evaluates function source only, not arbitrary module/program strings
+- it evaluates only a single direct function declaration/expression, not
+  arbitrary module/program strings or IIFE-produced callables
 - it runs inside a smaller SES Compartment than the main pattern-load path
 - that smaller Compartment receives a narrower authority surface than the main
   verified module Compartment
 - it must not expose AMD loader hooks, runtime-module injection, or host
   capabilities beyond the minimal callback invocation surface
+- it exposes `console` only as an approved global and does not expose internal
+  runtime globals such as `RUNTIME_ENGINE_CONSOLE_HOOK`
+- it may cache a source-specific creator function, but each invocation must
+  create a fresh callable/closure from that creator before running user code
 - it must not share mutable module-scope state across independently evaluated
   string-backed implementations except through explicit trusted runtime objects
 
@@ -2194,10 +2221,12 @@ await runner.start(resultCell);
 
 | Threat | Mitigation |
 |--------|------------|
-| Arbitrary code execution | Bundle preflight, SES Compartments, and controlled runtime-module injection |
+| Arbitrary code execution | Bundle preflight, AMD-factory verification at the execution boundary, SES Compartments, and controlled runtime-module injection |
 | Collusion between callbacks in the same pattern | Runtime module verifier, direct-callback enforcement, and verified module-safe-data freezing |
 | Compiler/transformer compromise | Runner-side bundle preflight plus AMD-factory verification |
+| AMD loader hook abuse | Authored `require` is inert at runtime; verifier rejection is defense in depth |
 | Global pollution | Frozen intrinsics, controlled globals |
+| Internal runtime-global exposure | Only approved globals are installed; implementation hooks like `RUNTIME_ENGINE_CONSOLE_HOOK` stay hidden |
 | Prototype pollution | Frozen prototypes (SES default) |
 | Closure-based data leakage | No surviving mutable module bindings; function hardening plus verified environments |
 | State leakage via modules | Verified immutable top-level bindings; dynamic imports rejected in v1 |
@@ -2245,9 +2274,10 @@ Potential escape routes and their status:
 | `eval()` | Allowed inside SES compartments | Current lockdown uses `evalTaming: "safe-eval"` |
 | `Function()` | Allowed inside SES compartments | Same `safe-eval` policy as `eval()` |
 | `import()` | Rejected in v1 | Dynamic imports are deferred and verifier-rejected |
+| authored AMD `require` | Inert | Authored factories receive a throwing stub; trusted tail wiring keeps its own loader state |
 | Prototype access | Blocked | Frozen prototypes |
 | ambient web-fetch globals | Temporarily allowed | Compatibility shim in authored SES compartments; planned deprecation |
-| `globalThis` | Controlled | Custom minimal Compartment globals; runtime freezes the compartment global object after installing bindings |
+| `globalThis` | Controlled | Custom minimal Compartment globals; runtime freezes the compartment global object after installing bindings and does not expose internal console-hook globals |
 
 ---
 
