@@ -109,6 +109,9 @@ exported stream directly, the runner:
 
 This is useful when you want to verify behavior that depends on a handler being
 invoked through a trusted UI surface rather than by directly calling `.send()`.
+Traversal follows composed UI structure, including mapped child arrays rendered
+through parent containers, so a parent list test can target a child row button
+by selector.
 
 ## Writing Actions
 
@@ -160,6 +163,22 @@ Selectors can use:
 
 Use `schema` when the authored manual JSON schema carries UI IFC labels that are
 not recoverable from TypeScript-generated runtime schema metadata alone.
+
+For repeated child UI, prefer an attribute selector plus `occurrence`:
+
+```tsx
+{
+  uiEvent: {
+    target: "list",
+    attr: {
+      name: "data-ui-action",
+      value: "ShareReviewedMessage",
+    },
+    occurrence: 0,
+    sourceGestureId: "gesture-first-share-click",
+  },
+}
+```
 
 ## Writing Assertions
 

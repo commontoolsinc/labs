@@ -45,7 +45,7 @@ export default pattern(() => {
 
   const assert_row_initially_not_shared = computed(() => row.shared === false);
   const assert_list_initially_empty = computed(() => list.sharedCount === 0);
-  const assert_row_shared_after_click = computed(() => row.shared === true);
+  const assert_list_shared_after_click = computed(() => list.sharedCount === 1);
 
   return {
     tests: [
@@ -71,16 +71,16 @@ export default pattern(() => {
       },
       {
         uiEvent: {
-          target: "row",
-          schema: MESSAGE_SHARE_ROW_OUTPUT_SCHEMA,
+          target: "list",
           attr: {
             name: "data-ui-action",
             value: "ShareReviewedMessage",
           },
+          occurrence: 0,
           sourceGestureId: "gesture-mapped-share-list-pattern-test",
         },
       },
-      { assertion: assert_row_shared_after_click },
+      { assertion: assert_list_shared_after_click },
     ],
     row,
     list,

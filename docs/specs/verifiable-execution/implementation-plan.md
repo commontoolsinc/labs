@@ -324,14 +324,14 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 
 ### 4.4 UI-Origin Event Integrity (In Progress)
 
-- [~] Runner can mint `CfcEventEnvelope` integrity from declared `[UI]` output
+- [x] Runner can mint `CfcEventEnvelope` integrity from declared `[UI]` output
   labels for explicitly targeted UI nodes
 - [x] `ct test` supports synthetic `uiEvent` steps that traverse `[UI]`, find a
   declared node, and dispatch through the bound event stream with minted CFC
   event context
 - [x] Pattern tests can assert authored UI contract labels separately from the
   dispatched event path
-- [ ] Extend traversal/minting to fully composed mapped child UI reached through
+- [x] Traversal/minting follows fully composed mapped child UI reached through
   parent render containers, not just directly targeted UI outputs
 
 **Files to modify / maintain:**

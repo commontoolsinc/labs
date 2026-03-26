@@ -23,6 +23,17 @@ const submitActionContractAtom = {
   action: "SubmitDirectCommand",
 } as const;
 
+const messageRowPlacementAtom = {
+  type: "https://commonfabric.org/cfc/atom/UiPlacement",
+  surface: "InboxList",
+  slot: "message-row",
+} as const;
+
+const shareActionContractAtom = {
+  type: "https://commonfabric.org/cfc/atom/UiActionContract",
+  action: "ShareReviewedMessage",
+} as const;
+
 const uiSchema = {
   type: "object",
   properties: {
@@ -44,6 +55,75 @@ const uiSchema = {
                   properties: {
                     "data-ui-action": { type: "string" },
                     onClick: true,
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    },
+  },
+  required: [UI],
+} as const satisfies JSONSchema;
+
+const nestedChildUiPatternHash = "sha256:trusted-ui-share-row";
+const nestedChildCodeHashAtom = {
+  type: "https://commonfabric.org/cfc/atom/CodeHash",
+  hash: nestedChildUiPatternHash,
+} as const;
+
+const nestedChildUiSchema = {
+  type: "object",
+  properties: {
+    [UI]: {
+      type: "object",
+      properties: {
+        children: {
+          type: "array",
+          prefixItems: [{
+            type: "object",
+            ifc: {
+              addIntegrity: [shareActionContractAtom],
+            },
+            properties: {
+              props: {
+                type: "object",
+                properties: {
+                  "data-ui-action": { type: "string" },
+                  onClick: true,
+                },
+              },
+            },
+          }],
+        },
+      },
+    },
+  },
+  required: [UI],
+} as const satisfies JSONSchema;
+
+const nestedParentUiSchema = {
+  type: "object",
+  properties: {
+    [UI]: {
+      type: "object",
+      properties: {
+        children: {
+          type: "array",
+          prefixItems: [
+            { type: "object" },
+            { type: "object" },
+            {
+              type: "object",
+              properties: {
+                children: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    ifc: {
+                      addIntegrity: [messageRowPlacementAtom],
+                    },
                   },
                 },
               },
@@ -110,6 +190,74 @@ describe("CFC UI event minting", () => {
     return runtime.getCell<unknown>(space, id, uiSchema);
   }
 
+  async function seedNestedChildUiOutput(id: string, clickStream: unknown) {
+    const tx = runtime.edit();
+    const cell = runtime.getCell<unknown>(space, id, nestedChildUiSchema, tx);
+    cell.set({
+      [UI]: {
+        type: "vnode",
+        name: "ct-card",
+        props: {},
+        children: [{
+          type: "vnode",
+          name: "ct-button",
+          props: {
+            "data-ui-action": "ShareReviewedMessage",
+            onClick: clickStream,
+          },
+          children: ["Share reviewed message"],
+        }],
+      },
+    });
+    await prepareCfcCommitIfNeeded(tx, {
+      implementationIdentity: codeHashImplementationIdentity(
+        nestedChildUiPatternHash,
+      ),
+    });
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+    return runtime.getCell<unknown>(space, id, nestedChildUiSchema);
+  }
+
+  async function seedNestedParentUiOutput(
+    id: string,
+    rowOutputs: readonly unknown[],
+  ) {
+    const tx = runtime.edit();
+    const cell = runtime.getCell<unknown>(space, id, nestedParentUiSchema, tx);
+    cell.set({
+      [UI]: {
+        type: "vnode",
+        name: "ct-vstack",
+        props: {},
+        children: [
+          {
+            type: "vnode",
+            name: "h2",
+            props: {},
+            children: ["Mapped child-slot delegation example"],
+          },
+          {
+            type: "vnode",
+            name: "p",
+            props: {},
+            children: ["Parent-composed mapped children"],
+          },
+          {
+            type: "vnode",
+            name: "ct-vstack",
+            props: { gap: "2" },
+            children: [rowOutputs],
+          },
+        ],
+      },
+    });
+    await prepareCfcCommitIfNeeded(tx);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+    return runtime.getCell<unknown>(space, id, nestedParentUiSchema);
+  }
+
   it("mints a CFC event envelope from declared UI labels and delivers it to the handler", async () => {
     const clickStream = await createClickStream("ui-click-stream");
     const targetCell = await seedUiOutput("ui-click-target", clickStream);
@@ -155,6 +303,73 @@ describe("CFC UI event minting", () => {
     expect(deliveredEvent?.integrity).toEqual(expect.arrayContaining([
       uiCodeHashAtom,
       submitActionContractAtom,
+    ]));
+  });
+
+  it("traverses parent-composed mapped child UI and joins parent placement with child action integrity", async () => {
+    const firstClickStream = await createClickStream("mapped-share-stream-1");
+    const secondClickStream = await createClickStream("mapped-share-stream-2");
+    const firstRow = await seedNestedChildUiOutput(
+      "mapped-share-row-1",
+      firstClickStream,
+    );
+    const secondRow = await seedNestedChildUiOutput(
+      "mapped-share-row-2",
+      secondClickStream,
+    );
+    const parentTarget = await seedNestedParentUiOutput(
+      "mapped-share-parent",
+      [firstRow, secondRow],
+    );
+
+    const resolved = await resolveUiEventTarget(runtime, parentTarget, {
+      attr: {
+        name: "data-ui-action",
+        value: "ShareReviewedMessage",
+      },
+      occurrence: 0,
+    });
+
+    expect(resolved.nodePath).toBe(`/${UI}/children/0`);
+    expect(resolved.trace).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: `/${UI}/children/2/children/0/0`,
+      }),
+    ]));
+    expect(resolved.integrity).toEqual(expect.arrayContaining([
+      messageRowPlacementAtom,
+      nestedChildCodeHashAtom,
+      shareActionContractAtom,
+    ]));
+
+    let deliveredEvent: CfcEventEnvelope<unknown> | undefined;
+    let deliveredPayload: unknown;
+    runtime.scheduler.addEventHandler(
+      (tx, payload) => {
+        deliveredEvent = tx.currentCfcEvent;
+        deliveredPayload = payload;
+      },
+      firstClickStream.getAsNormalizedFullLink(),
+    );
+
+    await dispatchUiEvent(runtime, parentTarget, {
+      attr: {
+        name: "data-ui-action",
+        value: "ShareReviewedMessage",
+      },
+      occurrence: 0,
+      sourceGestureId: "gesture-mapped-share-row-test",
+    });
+    await runtime.scheduler.idle();
+
+    expect(deliveredPayload).toEqual({ type: "click" });
+    expect(deliveredEvent?.sourceGestureId).toBe(
+      "gesture-mapped-share-row-test",
+    );
+    expect(deliveredEvent?.integrity).toEqual(expect.arrayContaining([
+      messageRowPlacementAtom,
+      nestedChildCodeHashAtom,
+      shareActionContractAtom,
     ]));
   });
 });

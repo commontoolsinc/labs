@@ -1,8 +1,9 @@
 import type { Cell } from "../cell.ts";
 import { isCell } from "../cell.ts";
-import { isCellResult } from "../query-result-proxy.ts";
+import { getCellOrThrow, isCellResult } from "../query-result-proxy.ts";
 import type { Runtime } from "../runtime.ts";
 import { UI, type VNode } from "../builder/types.ts";
+import { debugVDOMSchema } from "../schemas.ts";
 import {
   type CfcAtom,
   joinIntegrityLabels,
@@ -57,6 +58,7 @@ interface UiTraversalFrame {
 }
 
 interface UiNodeMatch {
+  readonly nodeCell: Cell<unknown>;
   readonly rootCell: Cell<unknown>;
   readonly path: string;
   readonly node: VNode;
@@ -108,19 +110,10 @@ function isVNode(value: unknown): value is VNode {
 
 function resolveRenderableValue(value: unknown): unknown {
   if (isCell(value)) {
-    return value.get();
+    return value.getAsQueryResult();
   }
   if (isCellResult(value)) {
-    const maybeCellResult = value as {
-      resolveAsCell?: () => Cell<unknown>;
-      get?: () => unknown;
-    };
-    if (typeof maybeCellResult.resolveAsCell === "function") {
-      return maybeCellResult.resolveAsCell().get();
-    }
-    if (typeof maybeCellResult.get === "function") {
-      return maybeCellResult.get();
-    }
+    return getCellOrThrow(value).getAsQueryResult();
   }
   return value;
 }
@@ -209,8 +202,7 @@ function normalizeChildren(
 }
 
 async function resolveNodeChildren(
-  rootCell: Cell<unknown>,
-  path: string,
+  currentCell: Cell<unknown>,
   node: VNode,
 ): Promise<Array<{ value: unknown; segment: string }>> {
   const directChildren = normalizeChildren(node.children);
@@ -218,7 +210,21 @@ async function resolveNodeChildren(
     return directChildren;
   }
   try {
-    const lazyChildren = await getCellAtPath(rootCell, `${path}/children`)
+    const queryChildren = (currentCell.key("children")
+      .getAsQueryResult() as {
+        children?: VNode["children"];
+      }) ?? currentCell.key("children").getAsQueryResult();
+    const normalized = normalizeChildren(
+      Array.isArray(queryChildren) ? queryChildren : queryChildren.children,
+    );
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  } catch {
+    // Fall through to direct cell pull below.
+  }
+  try {
+    const lazyChildren = await currentCell.key("children")
       .asSchema(true)
       .pull() as
         | VNode["children"]
@@ -390,6 +396,7 @@ function absoluteSelectorPath(
 }
 
 async function findUiNodeMatch(
+  currentCell: Cell<unknown>,
   rootCell: Cell<unknown>,
   path: string,
   value: unknown,
@@ -399,9 +406,37 @@ async function findUiNodeMatch(
   trace: readonly UiTraversalFrame[] = [],
 ): Promise<void> {
   value = resolveRenderableValue(value);
+  if (Array.isArray(value)) {
+    const fullTrace = [...trace, { rootCell, path }];
+    for (let index = 0; index < value.length; index++) {
+      const childPath = `${path}/${index}`;
+      let childCell = currentCell;
+      let childValue = value[index];
+      try {
+        childCell = currentCell.key(index).resolveAsCell();
+        childValue = childCell.getAsQueryResult();
+      } catch {
+        childValue = value[index];
+      }
+      await findUiNodeMatch(
+        childCell,
+        rootCell,
+        childPath,
+        childValue,
+        options,
+        matches,
+        visited,
+        fullTrace,
+      );
+    }
+    return;
+  }
+
   if (isUiRenderable(value)) {
-    const childRootCell = getCellAtPath(rootCell, path);
+    const childRootCell = currentCell.resolveAsCell();
+    const childUiCell = childRootCell.key(UI).asSchema(debugVDOMSchema);
     await findUiNodeMatch(
+      childUiCell,
       childRootCell,
       `/${UI}`,
       value[UI],
@@ -429,18 +464,44 @@ async function findUiNodeMatch(
     (targetPath && path === targetPath) ||
     (!targetPath && matchesAttr(node, options.attr))
   ) {
-    matches.push({ rootCell, path, node, trace: fullTrace });
+    matches.push({
+      nodeCell: currentCell,
+      rootCell,
+      path,
+      node,
+      trace: fullTrace,
+    });
   }
 
-  for (const child of await resolveNodeChildren(rootCell, path, node)) {
+  for (const child of await resolveNodeChildren(currentCell, node)) {
     const childPath = `${path}/${child.segment}`;
     let childValue = child.value;
     try {
-      childValue = getCellAtPath(rootCell, childPath).get();
+      const childSegments = child.segment.split("/");
+      let childCell = currentCell;
+      for (const segment of childSegments) {
+        childCell = childCell.key(
+          /^\d+$/.test(segment) ? Number(segment) : segment,
+        )
+          .resolveAsCell();
+      }
+      childValue = childCell.getAsQueryResult();
+      await findUiNodeMatch(
+        childCell,
+        rootCell,
+        childPath,
+        childValue,
+        options,
+        matches,
+        visited,
+        fullTrace,
+      );
+      continue;
     } catch {
       childValue = child.value;
     }
     await findUiNodeMatch(
+      currentCell,
       rootCell,
       childPath,
       childValue,
@@ -459,11 +520,14 @@ export async function resolveUiEventTarget(
 ): Promise<ResolvedUiEventTarget> {
   const rootCell = targetCell.resolveAsCell();
   const rootPath = rootPathForTraversal(options);
-  const rootValue = await getCellAtPath(rootCell, rootPath).asSchema(true)
-    .pull();
+  const rootUiCell = getCellAtPath(rootCell, rootPath).asSchema(
+    debugVDOMSchema,
+  );
+  const rootValue = rootUiCell.getAsQueryResult();
   const matches: UiNodeMatch[] = [];
   const visited: Array<{ path: string; propKeys: readonly string[] }> = [];
   await findUiNodeMatch(
+    rootUiCell,
     rootCell,
     rootPath,
     rootValue,
@@ -490,10 +554,8 @@ export async function resolveUiEventTarget(
 
   const eventName = options.event ?? "click";
   const eventProp = eventPropName(eventName);
-  const eventStream = getCellAtPath(
-    match.rootCell,
-    `${match.path}/props/${eventProp}`,
-  ).resolveAsCell();
+  const eventStream = match.nodeCell.key("props").key(eventProp)
+    .resolveAsCell();
 
   const integrity = await resolveTraceIntegrity(
     runtime,
