@@ -35,7 +35,6 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
-  classifyArrayMethodCallSite,
   classifyReactiveContext,
   createDataFlowAnalyzer,
   detectCallKind,
@@ -43,13 +42,13 @@ import {
   isInRestrictedReactiveContext,
   isInsideRestrictedContext,
   isInsideSafeCallbackWrapper,
-  isReactiveArrayMethodCall,
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
 import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
 import {
   allowsRestrictedContextFunctionCallback,
   classifyCallbackSupport,
+  supportsPatternOwnedWrapperCallbackSite,
 } from "./callback-support.ts";
 import {
   collectLocalOpaqueRootSymbols,
@@ -549,49 +548,8 @@ export class PatternContextValidationTransformer extends Transformer {
     context: TransformationContext,
     checker: ts.TypeChecker,
   ): boolean {
-    const parent = func.parent;
-    if (
-      !parent || !ts.isCallExpression(parent) ||
-      !parent.arguments.includes(func)
-    ) {
-      return false;
-    }
-
-    if (this.isPatternOwnedArrayMethodCallback(func, context, checker)) {
-      return true;
-    }
-
-    const callKind = detectCallKind(parent, checker);
-    if (!callKind) return false;
-
-    return callKind.kind === "builder" &&
-      (callKind.builderName === "pattern" ||
-        callKind.builderName === "render");
-  }
-
-  private isPatternOwnedArrayMethodCallback(
-    func: ts.ArrowFunction | ts.FunctionExpression,
-    context: TransformationContext,
-    checker: ts.TypeChecker,
-  ): boolean {
-    const parent = func.parent;
-    if (
-      !parent || !ts.isCallExpression(parent) ||
-      !parent.arguments.includes(func)
-    ) {
-      return false;
-    }
-
-    const callSite = classifyArrayMethodCallSite(parent, checker);
-    if (callSite) {
-      return callSite.ownership === "reactive";
-    }
-
-    return isReactiveArrayMethodCall(
-      parent,
-      checker,
-      context.options.typeRegistry,
-    );
+    const callbackSupport = classifyCallbackSupport(func, checker, context);
+    return supportsPatternOwnedWrapperCallbackSite(callbackSupport);
   }
 
   /**
@@ -607,17 +565,18 @@ export class PatternContextValidationTransformer extends Transformer {
     // Skip if inside safe wrapper callback (computed, action, derive, lift, handler)
     if (isInsideSafeCallbackWrapper(node, checker, context)) return;
 
+    const callbackSupport = ts.isFunctionDeclaration(node)
+      ? { kind: "none" as const }
+      : classifyCallbackSupport(node, checker, context);
+
     // Skip if this function IS a callback to a safe wrapper
     // e.g., computed(() => ...), action(() => ...), derive(() => ...)
-    if (this.isSafeWrapperCallback(node, checker, context)) return;
+    if (allowsRestrictedContextFunctionCallback(callbackSupport)) return;
 
     // Only error if inside restricted context (pattern/render)
     if (!isInsideRestrictedContext(node, checker, context)) return;
 
     if (this.isInsideJsx(node)) {
-      const callbackSupport = ts.isFunctionDeclaration(node)
-        ? { kind: "none" as const }
-        : classifyCallbackSupport(node, checker, context);
       if (callbackSupport.kind === "supported") {
         return;
       }
@@ -643,28 +602,6 @@ export class PatternContextValidationTransformer extends Transformer {
         `Note: callbacks inside computed(), action(), and .map() are allowed.`,
       node,
     });
-  }
-
-  /**
-   * Checks if a function is being passed directly as a callback to a safe wrapper
-   * (computed, action, derive, lift, handler) or to a .map() call on cells/opaques.
-   */
-  private isSafeWrapperCallback(
-    node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
-    checker: ts.TypeChecker,
-    context: TransformationContext,
-  ): boolean {
-    // Function declarations can't be callbacks
-    if (ts.isFunctionDeclaration(node)) return false;
-
-    const parent = node.parent;
-    if (!parent || !ts.isCallExpression(parent)) return false;
-
-    // Check if this function is an argument to the call
-    if (!parent.arguments.includes(node)) return false;
-
-    const callbackSupport = classifyCallbackSupport(node, checker, context);
-    return allowsRestrictedContextFunctionCallback(callbackSupport);
   }
 
   private isComputedLikeCallback(
