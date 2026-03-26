@@ -17,10 +17,14 @@ import {
   type Cancel,
   type Cell,
   convertCellsToLinks,
+  frameFromLink,
   isCell,
+  isCfcEventEnvelope,
   isStream,
+  mintUiEventEnvelopeFromProvenance,
   type Stream,
   UI,
+  type UiProvenanceFrame,
   useCancelGroup,
 } from "@commontools/runner";
 import { getLogger } from "@commontools/utils/logger";
@@ -66,6 +70,7 @@ export class WorkerReconciler {
   private nodeIdCounter = 0;
   private handlerIdCounter = 0;
   private handlers = new Map<number, (event: unknown) => void>();
+  private handlerProvenance = new Map<number, readonly UiProvenanceFrame[]>();
   private batchIdCounter = 0;
 
   private pendingOps: VDomOp[] = [];
@@ -97,9 +102,209 @@ export class WorkerReconciler {
       },
       unregisterHandler: (id) => {
         this.handlers.delete(id);
+        this.handlerProvenance.delete(id);
       },
       getHandler: (id) => this.handlers.get(id),
     };
+  }
+
+  private toFramePath(path: readonly (string | number)[]): readonly string[] {
+    return path.map((segment) => String(segment));
+  }
+
+  private sameFrameDoc(
+    left: UiProvenanceFrame | undefined,
+    right: UiProvenanceFrame | undefined,
+  ): boolean {
+    if (!left || !right) {
+      return false;
+    }
+    return left.link.space === right.link.space &&
+      left.link.id === right.link.id &&
+      left.link.type === right.link.type;
+  }
+
+  private updateLastFramePath(
+    frames: readonly UiProvenanceFrame[],
+    path: readonly (string | number)[],
+  ): readonly UiProvenanceFrame[] {
+    if (frames.length === 0) {
+      return frames;
+    }
+    const nextPath = this.toFramePath(path);
+    return [
+      ...frames.slice(0, -1),
+      {
+        ...frames[frames.length - 1],
+        path: nextPath,
+      },
+    ];
+  }
+
+  private appendToLastFramePath(
+    frames: readonly UiProvenanceFrame[],
+    segments: readonly (string | number)[],
+  ): readonly UiProvenanceFrame[] {
+    if (frames.length === 0 || segments.length === 0) {
+      return frames;
+    }
+    const last = frames[frames.length - 1];
+    return this.updateLastFramePath(
+      frames,
+      [...last.path, ...segments],
+    );
+  }
+
+  private tryFrameForCell(
+    cell: Cell<unknown>,
+    path?: readonly (string | number)[],
+  ): UiProvenanceFrame | undefined {
+    try {
+      const link = cell.getAsNormalizedFullLink();
+      return frameFromLink(
+        {
+          space: link.space,
+          id: link.id,
+          type: link.type,
+          schema: link.schema,
+        },
+        path ? this.toFramePath(path) : this.toFramePath(link.path),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  private pushCellFrame(
+    frames: readonly UiProvenanceFrame[],
+    cell: Cell<unknown>,
+    path?: readonly (string | number)[],
+  ): readonly UiProvenanceFrame[] {
+    const nextFrame = this.tryFrameForCell(cell, path);
+    if (!nextFrame) {
+      return frames;
+    }
+    const last = frames[frames.length - 1];
+    if (this.sameFrameDoc(last, nextFrame)) {
+      return [
+        ...frames.slice(0, -1),
+        nextFrame,
+      ];
+    }
+    return [...frames, nextFrame];
+  }
+
+  private rootProvenanceForCell(
+    cell: Cell<unknown>,
+  ): readonly UiProvenanceFrame[] {
+    const frame = this.tryFrameForCell(cell);
+    return frame ? [frame] : [];
+  }
+
+  private childProvenance(
+    parentProvenance: readonly UiProvenanceFrame[],
+    childSegments: readonly (string | number)[],
+  ): readonly UiProvenanceFrame[] {
+    return this.appendToLastFramePath(parentProvenance, childSegments);
+  }
+
+  private enterUiChain(
+    provenance: readonly UiProvenanceFrame[],
+  ): readonly UiProvenanceFrame[] {
+    return this.appendToLastFramePath(provenance, [UI]);
+  }
+
+  private rememberHandlerProvenance(
+    handlerId: number,
+    provenance: readonly UiProvenanceFrame[] | undefined,
+  ): void {
+    if (!provenance || provenance.length === 0) {
+      this.handlerProvenance.delete(handlerId);
+      return;
+    }
+    this.handlerProvenance.set(
+      handlerId,
+      provenance.map((frame) => ({
+        link: { ...frame.link },
+        path: [...frame.path],
+      })),
+    );
+  }
+
+  private wrapStreamEventHandler(
+    stream: Stream<unknown>,
+    eventType: string,
+    provenance: readonly UiProvenanceFrame[] | undefined,
+  ): (event: unknown) => void {
+    let pending = Promise.resolve();
+    const streamRuntime = (stream as unknown as { runtime?: unknown }).runtime;
+    return (event: unknown) => {
+      if (isCfcEventEnvelope(event) || !streamRuntime) {
+        stream.send(event);
+        return;
+      }
+
+      pending = pending.then(async () => {
+        const envelope = await mintUiEventEnvelopeFromProvenance(
+          streamRuntime as Parameters<
+            typeof mintUiEventEnvelopeFromProvenance
+          >[0],
+          provenance ?? [],
+          {
+            payload: event,
+            evidence: {
+              uiEvent: eventType,
+              uiProvenance: (provenance ?? []).map((frame) => ({
+                space: frame.link.space,
+                id: frame.link.id,
+                type: frame.link.type,
+                path: [...frame.path],
+              })),
+            },
+          },
+        );
+        stream.send(envelope);
+      }).catch((error) => {
+        this.onError?.(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      });
+    };
+  }
+
+  private installRegisteredEventHandler(
+    ctx: ReconcileContext,
+    state: NodeState,
+    eventType: string,
+    handler: (event: unknown) => void,
+    provenance?: readonly UiProvenanceFrame[],
+  ): number {
+    const handlerId = ctx.registerHandler(handler);
+    this.rememberHandlerProvenance(handlerId, provenance);
+    state.eventHandlers.set(eventType, handlerId);
+    this.queueOps([{
+      op: "set-event",
+      nodeId: state.nodeId,
+      eventType,
+      handlerId,
+    }]);
+    return handlerId;
+  }
+
+  private installStreamEventHandler(
+    ctx: ReconcileContext,
+    state: NodeState,
+    eventType: string,
+    stream: Stream<unknown>,
+    provenance?: readonly UiProvenanceFrame[],
+  ): number {
+    return this.installRegisteredEventHandler(
+      ctx,
+      state,
+      eventType,
+      this.wrapStreamEventHandler(stream, eventType, provenance),
+      provenance,
+    );
   }
 
   /**
@@ -127,6 +332,7 @@ export class WorkerReconciler {
     if (isCell(vnode)) {
       // Create a wrapper state that tracks the current child in the container
       const wrapperState = this.createWrapperState(ctx, CONTAINER_NODE_ID);
+      const rootProvenance = this.rootProvenanceForCell(vnode as Cell<unknown>);
 
       // Ensure the current child is cancelled when the root is cancelled
       addCancel(() => wrapperState.cancel());
@@ -147,6 +353,7 @@ export class WorkerReconciler {
             ctx,
             wrapperState,
             resolvedVnode as WorkerRenderNode,
+            rootProvenance,
           );
           // Track the root child for cleanup
           this.rootChildId = wrapperState.currentChild?.nodeId ?? null;
@@ -154,7 +361,7 @@ export class WorkerReconciler {
       );
     } else {
       // Static VNode - render directly into container
-      const state = this.renderNode(ctx, vnode, new Set());
+      const state = this.renderNode(ctx, vnode, new Set(), []);
       if (state) {
         addCancel(state.cancel);
         this.rootChildId = state.nodeId;
@@ -363,6 +570,7 @@ export class WorkerReconciler {
       cancel: Cancel;
     },
     node: WorkerRenderNode,
+    provenance: readonly UiProvenanceFrame[],
   ): void {
     const newVNode = this.extractVNode(node);
     const oldState = wrapper.currentChild;
@@ -394,6 +602,7 @@ export class WorkerReconciler {
           strategy: "update-in-place",
           tagName: newTagName,
         }));
+        oldState.provenance = provenance;
         // Update props in place with proper diffing
         this.updatePropsInPlace(ctx, oldState, sanitized.props);
 
@@ -404,6 +613,7 @@ export class WorkerReconciler {
             oldState,
             sanitized.children,
             new Set(),
+            provenance,
           );
         }
         return;
@@ -430,7 +640,7 @@ export class WorkerReconciler {
     }
 
     // Render new node - renderNode handles all render node types
-    const state = this.renderNode(ctx, node, new Set());
+    const state = this.renderNode(ctx, node, new Set(), provenance);
 
     if (state) {
       this.queueOps([
@@ -657,30 +867,26 @@ export class WorkerReconciler {
 
     if (isStream(value)) {
       const stream = value as Stream<unknown>;
-      const handlerId = ctx.registerHandler((event: unknown) => {
-        stream.send(event);
-      });
-      state.eventHandlers.set(eventType, handlerId);
-      this.queueOps([{
-        op: "set-event",
-        nodeId: state.nodeId,
+      this.installStreamEventHandler(
+        ctx,
+        state,
         eventType,
-        handlerId,
-      }]);
+        stream,
+        state.provenance,
+      );
       state.propSubscriptions.set(key, {
         cell: undefined,
         cancel: () => {},
         currentValue: value,
       });
     } else if (isEventHandler(value)) {
-      const handlerId = ctx.registerHandler(value);
-      state.eventHandlers.set(eventType, handlerId);
-      this.queueOps([{
-        op: "set-event",
-        nodeId: state.nodeId,
+      this.installRegisteredEventHandler(
+        ctx,
+        state,
         eventType,
-        handlerId,
-      }]);
+        value,
+        state.provenance,
+      );
       state.propSubscriptions.set(key, {
         cell: undefined,
         cancel: () => {},
@@ -705,16 +911,13 @@ export class WorkerReconciler {
           }
 
           if (handler) {
-            const handlerId = ctx.registerHandler(
-              handler as (event: unknown) => void,
-            );
-            state.eventHandlers.set(eventType, handlerId);
-            this.queueOps([{
-              op: "set-event",
-              nodeId: state.nodeId,
+            this.installRegisteredEventHandler(
+              ctx,
+              state,
               eventType,
-              handlerId,
-            }]);
+              handler as (event: unknown) => void,
+              state.provenance,
+            );
           }
         },
       );
@@ -854,16 +1057,13 @@ export class WorkerReconciler {
           }
           if (existingState) existingState.cancel();
 
-          const handlerId = ctx.registerHandler((event: unknown) =>
-            resolvedTarget.send(event)
-          );
-          state.eventHandlers.set(eventType, handlerId);
-          this.queueOps([{
-            op: "set-event",
-            nodeId: state.nodeId,
+          this.installStreamEventHandler(
+            ctx,
+            state,
             eventType,
-            handlerId,
-          }]);
+            resolvedTarget as unknown as Stream<unknown>,
+            state.provenance,
+          );
           state.propSubscriptions.set(key, {
             cell: resolvedTarget,
             cancel: () => {},
@@ -1010,6 +1210,7 @@ export class WorkerReconciler {
     state: NodeState,
     children: WorkerRenderNode | WorkerRenderNode[],
     visited: Set<object>,
+    provenance: readonly UiProvenanceFrame[],
   ): void {
     // Handle Cell<children> - check if same Cell
     if (isCell(children)) {
@@ -1035,7 +1236,13 @@ export class WorkerReconciler {
                 ? resolvedChildren.length
                 : 1,
             }));
-            this.updateChildren(ctx, state, resolvedChildren, visited);
+            this.updateChildren(
+              ctx,
+              state,
+              resolvedChildren,
+              visited,
+              provenance,
+            );
           },
         );
 
@@ -1050,7 +1257,7 @@ export class WorkerReconciler {
         state.childrenState = undefined;
       }
       // Update children directly
-      this.updateChildren(ctx, state, children, visited);
+      this.updateChildren(ctx, state, children, visited, provenance);
     }
   }
 
@@ -1061,6 +1268,7 @@ export class WorkerReconciler {
     ctx: ReconcileContext,
     inputNode: WorkerRenderNode,
     visited: Set<object>,
+    provenance: readonly UiProvenanceFrame[],
   ): NodeState | null {
     // Handle null/undefined
     if (inputNode === null || inputNode === undefined) {
@@ -1074,7 +1282,7 @@ export class WorkerReconciler {
 
     // Handle arrays - render as fragment wrapper
     if (Array.isArray(inputNode)) {
-      return this.renderArrayAsFragment(ctx, inputNode, visited);
+      return this.renderArrayAsFragment(ctx, inputNode, visited, provenance);
     }
 
     const [cancel, addCancel] = useCancelGroup();
@@ -1092,6 +1300,7 @@ export class WorkerReconciler {
         return this.createCyclePlaceholder(ctx);
       }
       visited.add(node as object);
+      provenance = this.enterUiChain(provenance);
       // deno-lint-ignore no-explicit-any
       node = (node as any)[UI];
     }
@@ -1108,6 +1317,7 @@ export class WorkerReconciler {
         ctx,
         node as WorkerRenderNode[],
         visited,
+        provenance,
       );
     }
 
@@ -1150,6 +1360,7 @@ export class WorkerReconciler {
       propSubscriptions: new Map(),
       eventHandlers: new Map(),
       childOrder: [],
+      provenance,
     };
 
     // Bind props
@@ -1157,7 +1368,9 @@ export class WorkerReconciler {
 
     // Bind children
     if (sanitized.children !== undefined) {
-      addCancel(this.bindChildren(ctx, state, sanitized.children, visited));
+      addCancel(
+        this.bindChildren(ctx, state, sanitized.children, visited, provenance),
+      );
     }
 
     return state;
@@ -1215,6 +1428,7 @@ export class WorkerReconciler {
     ctx: ReconcileContext,
     nodes: WorkerRenderNode[],
     visited: Set<object>,
+    provenance: readonly UiProvenanceFrame[],
   ): NodeState | null {
     const nodeId = ctx.nextNodeId();
     this.queueOps([
@@ -1231,11 +1445,18 @@ export class WorkerReconciler {
       propSubscriptions: new Map(),
       eventHandlers: new Map(),
       childOrder: [],
+      provenance,
     };
 
     // Render each child and insert it
-    for (const childNode of nodes) {
-      const childState = this.renderNode(ctx, childNode, new Set(visited));
+    for (let index = 0; index < nodes.length; index++) {
+      const childNode = nodes[index];
+      const childState = this.renderNode(
+        ctx,
+        childNode,
+        new Set(visited),
+        this.childProvenance(provenance, [index]),
+      );
       if (childState) {
         addCancel(childState.cancel);
         this.queueOps([
@@ -1318,16 +1539,13 @@ export class WorkerReconciler {
         // Handle Streams (actions) - wrap in a handler that calls .send()
         if (isStream(value)) {
           const stream = value as Stream<unknown>;
-          const handlerId = ctx.registerHandler((event: unknown) => {
-            stream.send(event);
-          });
-          state.eventHandlers.set(eventType, handlerId);
-          this.queueOps([{
-            op: "set-event",
-            nodeId: state.nodeId,
+          this.installStreamEventHandler(
+            ctx,
+            state,
             eventType,
-            handlerId,
-          }]);
+            stream,
+            state.provenance,
+          );
           state.propSubscriptions.set(key, {
             cell: undefined,
             cancel: () => {},
@@ -1335,14 +1553,13 @@ export class WorkerReconciler {
           });
         } else if (isEventHandler(value)) {
           // Plain function event handler
-          const handlerId = ctx.registerHandler(value);
-          state.eventHandlers.set(eventType, handlerId);
-          this.queueOps([{
-            op: "set-event",
-            nodeId: state.nodeId,
+          this.installRegisteredEventHandler(
+            ctx,
+            state,
             eventType,
-            handlerId,
-          }]);
+            value,
+            state.provenance,
+          );
           state.propSubscriptions.set(key, {
             cell: undefined,
             cancel: () => {},
@@ -1366,16 +1583,13 @@ export class WorkerReconciler {
 
               if (handler) {
                 // Cast handler to mutable function type for registration
-                const handlerId = ctx.registerHandler(
-                  handler as (event: unknown) => void,
-                );
-                state.eventHandlers.set(eventType, handlerId);
-                this.queueOps([{
-                  op: "set-event",
-                  nodeId: state.nodeId,
+                this.installRegisteredEventHandler(
+                  ctx,
+                  state,
                   eventType,
-                  handlerId,
-                }]);
+                  handler as (event: unknown) => void,
+                  state.provenance,
+                );
               }
             },
           );
@@ -1517,6 +1731,7 @@ export class WorkerReconciler {
     state: NodeState,
     children: WorkerRenderNode | WorkerRenderNode[],
     visited: Set<object>,
+    provenance: readonly UiProvenanceFrame[],
   ): Cancel {
     const [cancel, addCancel] = useCancelGroup();
 
@@ -1525,7 +1740,13 @@ export class WorkerReconciler {
       const sinkCancel = (
         children as Cell<WorkerRenderNode | WorkerRenderNode[]>
       ).sink((resolvedChildren) => {
-        this.updateChildren(ctx, state, resolvedChildren, visited);
+        this.updateChildren(
+          ctx,
+          state,
+          resolvedChildren,
+          visited,
+          provenance,
+        );
       });
       addCancel(sinkCancel);
       // Track the children Cell for diffing
@@ -1535,7 +1756,7 @@ export class WorkerReconciler {
       };
     } else {
       // Static children
-      this.updateChildren(ctx, state, children, visited);
+      this.updateChildren(ctx, state, children, visited, provenance);
       state.childrenState = undefined;
     }
 
@@ -1586,7 +1807,9 @@ export class WorkerReconciler {
       | null
       | undefined,
     visited: Set<object>,
+    provenance: readonly UiProvenanceFrame[],
   ): void {
+    const childrenAreArray = Array.isArray(childrenValue);
     // Normalize to array
     const newChildren = Array.isArray(childrenValue)
       ? childrenValue
@@ -1614,10 +1837,26 @@ export class WorkerReconciler {
 
         // Update if it's an element with new data
         // (For now, we trust the key - updates happen through Cell subscriptions)
+        if (existingState.elementState) {
+          existingState.elementState.provenance = this.childProvenance(
+            provenance,
+            childrenAreArray ? ["children", String(i)] : ["children"],
+          );
+        }
       } else {
         // Create new child, passing parent state and key for position tracking
         hasNewChildren = true;
-        const childState = this.renderChild(ctx, child, visited, state, key);
+        const childState = this.renderChild(
+          ctx,
+          child,
+          visited,
+          state,
+          key,
+          this.childProvenance(
+            provenance,
+            childrenAreArray ? ["children", String(i)] : ["children"],
+          ),
+        );
         if (childState) {
           newMapping.set(key, childState);
         }
@@ -1687,6 +1926,7 @@ export class WorkerReconciler {
     visited: Set<object>,
     parentState: NodeState,
     childKey: string,
+    provenance: readonly UiProvenanceFrame[],
   ): ChildNodeState | null {
     // Handle Cell children - no wrapper, track position dynamically
     if (isCell(child)) {
@@ -1696,11 +1936,12 @@ export class WorkerReconciler {
         visited,
         parentState,
         childKey,
+        provenance,
       );
     }
 
     // Handle non-Cell content
-    return this.renderChildContent(ctx, child, visited);
+    return this.renderChildContent(ctx, child, visited, provenance);
   }
 
   /**
@@ -1712,6 +1953,7 @@ export class WorkerReconciler {
     visited: Set<object>,
     parentState: NodeState,
     childKey: string,
+    provenance: readonly UiProvenanceFrame[],
   ): ChildNodeState {
     const [cancel, addCancel] = useCancelGroup();
 
@@ -1727,6 +1969,7 @@ export class WorkerReconciler {
 
     addCancel(
       cell.sink((resolvedChild) => {
+        const childProvenance = this.pushCellFrame(provenance, cell);
         const isInitialRender = childState.nodeId === -1;
 
         // Dedupe updates
@@ -1765,6 +2008,7 @@ export class WorkerReconciler {
                 sanitized &&
                 sanitized.name === childState.elementState.tagName
               ) {
+                childState.elementState.provenance = childProvenance;
                 // Same tag - update props in place
                 this.updatePropsInPlace(
                   ctx,
@@ -1785,6 +2029,7 @@ export class WorkerReconciler {
                       childState.elementState,
                       sanitized.children,
                       new Set(),
+                      childState.elementState.provenance ?? [],
                     );
                   }
                 }
@@ -1830,6 +2075,7 @@ export class WorkerReconciler {
           ctx,
           resolvedChild,
           new Set(visited),
+          childProvenance,
         );
         if (newState) {
           childState.nodeId = newState.nodeId;
@@ -1879,6 +2125,7 @@ export class WorkerReconciler {
     ctx: ReconcileContext,
     child: unknown,
     visited: Set<object>,
+    provenance: readonly UiProvenanceFrame[],
   ): ChildNodeState | null {
     // Handle arrays - wrap in a span with display:contents
     if (Array.isArray(child)) {
@@ -1888,7 +2135,12 @@ export class WorkerReconciler {
         props: { style: "display:contents" },
         children: child,
       };
-      const state = this.renderNode(ctx, wrapperVNode, new Set(visited));
+      const state = this.renderNode(
+        ctx,
+        wrapperVNode,
+        new Set(visited),
+        provenance,
+      );
       if (!state) return null;
 
       return {
@@ -1901,7 +2153,7 @@ export class WorkerReconciler {
 
     // Handle VNode
     if (isWorkerVNode(child)) {
-      const state = this.renderNode(ctx, child, new Set(visited));
+      const state = this.renderNode(ctx, child, new Set(visited), provenance);
       if (!state) return null;
 
       return {
@@ -1921,6 +2173,7 @@ export class WorkerReconciler {
         ctx,
         child as WorkerRenderNode,
         new Set(visited),
+        provenance,
       );
       if (!state) return null;
 

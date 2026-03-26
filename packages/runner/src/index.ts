@@ -128,11 +128,17 @@ export { opaqueRef as cell } from "./builder/opaque-ref.ts";
 export { ContextualFlowControl } from "./cfc.ts";
 export {
   dispatchUiEvent,
+  frameFromLink,
+  isCfcEventEnvelope,
+  mintUiEventEnvelopeFromProvenance,
   type ResolvedUiEventTarget,
   type ResolveUiEventOptions,
   resolveUiEventTarget,
+  resolveUiProvenanceIntegrity,
   type UiEventAttributeSelector,
   type UiEventSelector,
+  type UiProvenanceFrame,
+  type UiProvenanceFrameLink,
 } from "./cfc/ui-event.ts";
 export type { Mutable } from "@commontools/utils/types";
 export {

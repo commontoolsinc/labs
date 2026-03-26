@@ -338,11 +338,54 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 - [~] Parent-targeted `uiEvent` minting currently recovers parent slot / placement
   integrity across composed mapped children, but inline child-local contracts are
   not yet re-derived unless they are also present on the targeted output tree
+- [x] Design direction for the remaining gap is now explicit: preserve
+  per-node provenance as contributing `(doc link, path)` frames instead of
+  duplicating child-local contracts onto the parent tree
+- [ ] Define and thread `UiProvenanceFrame[]` through worker reconciliation:
+
+```ts
+type UiProvenanceFrame = {
+  link: {
+    space: string;
+    id: string;
+    type: string;
+  };
+  path: readonly string[];
+};
+```
+
+- [ ] Extend `packages/html/src/worker/reconciler.ts` render paths to carry the
+  active provenance stack:
+  - `renderNode(...)`
+  - `renderChild(...)`
+  - `renderCellChild(...)`
+  - `renderChildContent(...)`
+- [ ] Push a new provenance frame whenever reconciliation enters a different
+  cell-backed output document or follows a `[UI]` chain rooted in a different
+  document
+- [ ] Store provenance by registered `handlerId`, for example with
+  `Map<number, readonly UiProvenanceFrame[]>`, so event dispatch can recover the
+  exact contributing document paths
+- [ ] Wrap stream event handlers in the worker reconciler so they mint
+  `CfcEventEnvelope` integrity from stored provenance frames instead of sending
+  the raw DOM/browser event directly
+- [ ] Keep `ct test uiEvent` on the same interpretation by sharing the
+  provenance-to-integrity resolution logic between the HTML renderer and
+  `packages/runner/src/cfc/ui-event.ts`
+- [ ] Add renderer/provenance tests that prove:
+  - parent placement + child-local action contract both mint onto the same event
+    without duplicating the child contract on the parent tree
+  - trusted parent slot + untrusted child does not mint the child-local contract
+  - plain child VNodes returned from cell-backed documents still recover child
+    provenance even when no explicit `[UI]` wrapper survives in the final tree
 
 **Files to modify / maintain:**
 
 - `packages/runner/src/cfc/ui-event.ts` - shared UI-event minting helper
 - `packages/cli/lib/test-runner.ts` - `uiEvent` test step
+- `packages/html/src/worker/reconciler.ts` - provenance threading and
+  handler-bound event minting
+- `packages/html/src/worker/types.ts` - provenance frame / handler state types
 - `docs/common/workflows/pattern-testing.md` - pattern-test workflow docs
 
 ---

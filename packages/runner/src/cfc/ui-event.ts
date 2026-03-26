@@ -4,21 +4,26 @@ import { getCellOrThrow, isCellResult } from "../query-result-proxy.ts";
 import type { Runtime } from "../runtime.ts";
 import { UI, type VNode } from "../builder/types.ts";
 import { debugVDOMSchema } from "../schemas.ts";
-import {
-  type CfcAtom,
-  joinIntegrityLabels,
-  normalizeConfidentialityLabel,
-  normalizeIntegrityLabel,
-} from "./label-algebra.ts";
-import {
-  cfcLabelsAddress,
-  normalizePersistedPathLabels,
-  resolveObservationLabel,
-} from "./shared.ts";
+import { type CfcAtom } from "./label-algebra.ts";
 import {
   type CfcEventEnvelope,
   createCfcEventEnvelope,
 } from "./event-envelope.ts";
+export { isCfcEventEnvelope } from "./event-envelope.ts";
+export type {
+  UiProvenanceFrame,
+  UiProvenanceFrameLink,
+} from "./ui-provenance.ts";
+export {
+  frameFromLink,
+  mintUiEventEnvelopeFromProvenance,
+  resolveUiProvenanceIntegrity,
+} from "./ui-provenance.ts";
+import {
+  frameFromLink,
+  resolveUiProvenanceIntegrity,
+  type UiProvenanceFrame,
+} from "./ui-provenance.ts";
 
 export interface UiEventAttributeSelector {
   readonly name: string;
@@ -235,78 +240,6 @@ async function resolveNodeChildren(
   }
 }
 
-function resolveLocalSchemaLabel(
-  runtime: Runtime,
-  schema: unknown,
-  observationPath: string,
-): {
-  integrity?: readonly CfcAtom[];
-} | undefined {
-  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
-    return undefined;
-  }
-  const schemaAtPath = runtime.cfc.getSchemaAtPath(
-    schema as never,
-    parsePath(observationPath),
-  );
-  if (
-    !schemaAtPath || typeof schemaAtPath !== "object" ||
-    Array.isArray(schemaAtPath)
-  ) {
-    return undefined;
-  }
-  const rawIfc = (schemaAtPath as { ifc?: unknown }).ifc;
-  if (!rawIfc || typeof rawIfc !== "object" || Array.isArray(rawIfc)) {
-    return undefined;
-  }
-
-  normalizeConfidentialityLabel(
-    (rawIfc as { classification?: unknown }).classification,
-  );
-  const integrity = joinIntegrityLabels(
-    normalizeIntegrityLabel((rawIfc as { integrity?: unknown }).integrity),
-    normalizeIntegrityLabel(
-      (rawIfc as { addIntegrity?: unknown }).addIntegrity,
-    ),
-  );
-
-  if (!integrity) {
-    return undefined;
-  }
-  return { integrity };
-}
-
-async function loadPersistedLabels(
-  runtime: Runtime,
-  cell: Cell<unknown>,
-  cache: Map<string, ReturnType<typeof normalizePersistedPathLabels>>,
-): Promise<ReturnType<typeof normalizePersistedPathLabels> | undefined> {
-  const link = cell.getAsNormalizedFullLink();
-  const cacheKey = `${link.space}:${link.id}:${link.type}`;
-  if (cache.has(cacheKey)) {
-    return cache.get(cacheKey);
-  }
-
-  const tx = runtime.edit();
-  try {
-    const value = tx.readOrThrow(cfcLabelsAddress({
-      space: link.space,
-      id: link.id,
-      type: link.type,
-    }));
-    const { error } = await tx.commit();
-    if (error) {
-      return undefined;
-    }
-    const normalized = normalizePersistedPathLabels(value);
-    cache.set(cacheKey, normalized);
-    return normalized;
-  } catch {
-    tx.abort();
-    return undefined;
-  }
-}
-
 function resolveFrameSchema(
   frameRootCell: Cell<unknown>,
   rootLink: ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>,
@@ -336,40 +269,25 @@ function resolveFrameSchema(
   }
 }
 
-async function resolveTraceIntegrity(
-  runtime: Runtime,
+function provenanceFramesFromTrace(
   trace: readonly UiTraversalFrame[],
   rootCell: Cell<unknown>,
   fallbackSchema: unknown,
-): Promise<readonly CfcAtom[]> {
-  const labelsCache = new Map<
-    string,
-    ReturnType<typeof normalizePersistedPathLabels>
-  >();
-  let joined: readonly CfcAtom[] | undefined;
+): readonly UiProvenanceFrame[] {
   const rootLink = rootCell.getAsNormalizedFullLink();
 
-  for (const frame of trace) {
-    const persisted = await loadPersistedLabels(
-      runtime,
-      frame.rootCell,
-      labelsCache,
+  return trace.map((frame) => {
+    const link = frame.rootCell.getAsNormalizedFullLink();
+    return frameFromLink(
+      {
+        space: link.space,
+        id: link.id,
+        type: link.type,
+        schema: resolveFrameSchema(frame.rootCell, rootLink, fallbackSchema),
+      },
+      parsePath(frame.path),
     );
-    const fromPersisted = persisted
-      ? resolveObservationLabel(persisted, frame.path, "shape")
-      : undefined;
-    const fromSchema = resolveLocalSchemaLabel(
-      runtime,
-      resolveFrameSchema(frame.rootCell, rootLink, fallbackSchema),
-      frame.path,
-    );
-    joined = joinIntegrityLabels(
-      joined,
-      fromPersisted?.integrity ?? fromSchema?.integrity,
-    );
-  }
-
-  return joined ?? [];
+  });
 }
 
 function buildPayload(
@@ -585,11 +503,9 @@ export async function resolveUiEventTarget(
   const eventStream = match.nodeCell.key("props").key(eventProp)
     .resolveAsCell();
 
-  const integrity = await resolveTraceIntegrity(
+  const integrity = await resolveUiProvenanceIntegrity(
     runtime,
-    match.trace,
-    rootCell,
-    options.schema,
+    provenanceFramesFromTrace(match.trace, rootCell, options.schema),
   );
 
   return {

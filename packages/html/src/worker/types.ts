@@ -5,7 +5,12 @@
  * where cells are accessed synchronously via cell.get() and cell.sink().
  */
 
-import type { Cancel, Cell, JSONSchema } from "@commontools/runner";
+import type {
+  Cancel,
+  Cell,
+  JSONSchema,
+  UiProvenanceFrame,
+} from "@commontools/runner";
 import type { CellRef, JSONValue } from "@commontools/runtime-client";
 
 /**
@@ -117,6 +122,9 @@ export interface NodeState {
 
   /** Track child order to optimize inserts */
   childOrder: string[];
+
+  /** Current UI provenance frames for this rendered node */
+  provenance?: readonly UiProvenanceFrame[];
 }
 
 /**

@@ -1,11 +1,13 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
 import type { WorkerVNode } from "../src/worker/types.ts";
 
 import type { VDomOp } from "../src/vdom-ops.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Runtime } from "@commontools/runner";
+import { isCfcEventEnvelope, Runtime, UI } from "@commontools/runner";
+import type { NormalizedLink } from "@commontools/runner";
+import { cfcLabelsAddress } from "../../runner/src/cfc/shared.ts";
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -41,8 +43,8 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
   class MockCell extends (CellImplConstructor as any) {
     private subscribers = new Set<(value: any) => void>();
 
-    constructor(public value: any) {
-      super(runtime, undefined, undefined, false, undefined, "cell");
+    constructor(public value: any, link?: NormalizedLink) {
+      super(runtime, undefined, link, false, undefined, "cell");
       this.value = value;
     }
 
@@ -135,8 +137,8 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
   class MockStream extends MockCell {
     public sent: unknown[] = [];
 
-    constructor() {
-      super(undefined);
+    constructor(link?: NormalizedLink) {
+      super(undefined, link);
     }
 
     override isStream() {
@@ -146,6 +148,17 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     send(event: unknown) {
       this.sent.push(event);
     }
+  }
+
+  function isUiAtom(
+    value: unknown,
+  ): value is {
+    type: string;
+    surface?: string;
+    slot?: string;
+    action?: string;
+  } {
+    return typeof value === "object" && value !== null && "type" in value;
   }
 
   // --- Test cases ---
@@ -402,8 +415,10 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     "Cell<Props> same cell on update → no re-bind",
     async () => {
       const collector = createOpsCollector();
+      const renderErrors: Error[] = [];
       const reconciler = new WorkerReconciler({
         onOps: collector.onOps,
+        onError: (error) => renderErrors.push(error),
       });
 
       const propsCell = new MockPropsCell({ className: "foo" });
@@ -603,4 +618,146 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     assertEquals(setBindingOps.length >= 1, true, "Should have set-binding");
     assertEquals((setBindingOps[0] as any).propName, "value");
   });
+
+  await t.step(
+    "stream events mint integrity from parent and child UI provenance",
+    async () => {
+      const collector = createOpsCollector();
+      const renderErrors: Error[] = [];
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+        onError: (error) => renderErrors.push(error),
+      });
+
+      const placementAtom = {
+        type: "https://commonfabric.org/cfc/atom/UiPlacement",
+        surface: "InboxList",
+        slot: "message-row",
+      } as const;
+      const actionAtom = {
+        type: "https://commonfabric.org/cfc/atom/UiActionContract",
+        action: "ShareReviewedMessage",
+      } as const;
+
+      const tx = runtime.edit();
+      const parentResult = runtime.getCell(
+        signer.did(),
+        "ui-parent-provenance-test",
+        undefined,
+        tx,
+      );
+      const childResult = runtime.getCell(
+        signer.did(),
+        "ui-child-provenance-test",
+        undefined,
+        tx,
+      );
+      const mockStream = new MockStream({
+        space: signer.did(),
+        id: "of:ui-child-provenance-click-stream",
+        type: "application/json",
+        path: [],
+      });
+
+      parentResult.set({});
+      childResult.set({});
+
+      tx.writeOrThrow(
+        cfcLabelsAddress(parentResult.getAsNormalizedFullLink()),
+        {
+          "/$UI/children/0": {
+            shape: {
+              integrity: [placementAtom],
+            },
+          },
+        },
+      );
+
+      tx.writeOrThrow(cfcLabelsAddress(childResult.getAsNormalizedFullLink()), {
+        "/$UI": {
+          shape: {
+            integrity: [actionAtom],
+          },
+        },
+      });
+
+      const committed = await tx.commit();
+      assertEquals(committed.error, undefined);
+
+      const parentLink = parentResult.getAsNormalizedFullLink();
+      const childLink = childResult.getAsNormalizedFullLink();
+      const linkedChildCell = new MockCell({
+        [UI]: {
+          type: "vnode",
+          name: "ct-button",
+          props: {
+            "data-ui-action": "ShareReviewedMessage",
+            onClick: mockStream,
+          },
+          children: ["Share"],
+        },
+      }, {
+        space: childLink.space,
+        id: childLink.id,
+        type: childLink.type,
+        path: [],
+      });
+      const rootUiCell = new MockCell({
+        type: "vnode",
+        name: "ct-vstack",
+        props: {},
+        children: [linkedChildCell],
+      }, {
+        space: parentLink.space,
+        id: parentLink.id,
+        type: parentLink.type,
+        path: [UI],
+      });
+      reconciler.mount(rootUiCell as any);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      const setEventOps = collector.getOpsOfType("set-event");
+      assertEquals(
+        setEventOps.length >= 1,
+        true,
+        "Should register click handler",
+      );
+
+      const clickHandlerId =
+        (setEventOps[0] as { handlerId: number }).handlerId;
+      reconciler.dispatchEvent(clickHandlerId, {
+        type: "click",
+        target: {
+          dataset: {
+            uiAction: "ShareReviewedMessage",
+          },
+        },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      if (renderErrors.length > 0) {
+        throw renderErrors[0];
+      }
+      assertEquals(mockStream.sent.length, 1);
+      const envelope = mockStream.sent[0];
+      assert(isCfcEventEnvelope(envelope));
+      assertEquals(
+        envelope.integrity.some((atom) =>
+          isUiAtom(atom) &&
+          atom.type === placementAtom.type &&
+          atom.surface === placementAtom.surface &&
+          atom.slot === placementAtom.slot
+        ),
+        true,
+      );
+      assertEquals(
+        envelope.integrity.some((atom) =>
+          isUiAtom(atom) &&
+          atom.type === actionAtom.type &&
+          atom.action === actionAtom.action
+        ),
+        true,
+      );
+    },
+  );
 });
