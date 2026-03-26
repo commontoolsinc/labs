@@ -47,7 +47,7 @@ type UserSessionResult = {
   user: User;
 };
 
-// Event payload type for cf-message-input's ct-send event
+// Event payload type for cf-message-input's cf-send event
 type InputEventType = {
   detail: {
     message: string;
