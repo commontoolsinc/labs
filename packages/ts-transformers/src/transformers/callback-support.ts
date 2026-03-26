@@ -28,6 +28,40 @@ export type CallbackSupportDecision =
   | { kind: "unsupported"; unsupportedKind: UnsupportedCallbackKind }
   | { kind: "none" };
 
+export function isReactiveArrayMethodCallbackSupport(
+  decision: CallbackSupportDecision,
+): boolean {
+  return decision.kind === "supported" &&
+    decision.supportedKind === "reactive-array-method";
+}
+
+export function isPlainArrayValueCallbackSupport(
+  decision: CallbackSupportDecision,
+): boolean {
+  return decision.kind === "supported" &&
+    decision.supportedKind === "plain-array-value";
+}
+
+export function supportsPatternOwnedWrapperCallbackSite(
+  decision: CallbackSupportDecision,
+): boolean {
+  return decision.kind === "supported" &&
+    (
+      decision.supportedKind === "reactive-array-method" ||
+      decision.supportedKind === "pattern-builder" ||
+      decision.supportedKind === "render-builder"
+    );
+}
+
+export function allowsRestrictedContextFunctionCallback(
+  decision: CallbackSupportDecision,
+): boolean {
+  return decision.kind === "supported" &&
+    decision.supportedKind !== "event-handler-jsx" &&
+    decision.supportedKind !== "pattern-builder" &&
+    decision.supportedKind !== "render-builder";
+}
+
 export function classifyCallbackSupport(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,

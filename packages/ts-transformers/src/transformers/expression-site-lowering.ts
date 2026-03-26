@@ -15,7 +15,12 @@ import {
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
-import { classifyCallbackSupport } from "./callback-support.ts";
+import {
+  classifyCallbackSupport,
+  isPlainArrayValueCallbackSupport,
+  isReactiveArrayMethodCallbackSupport,
+  supportsPatternOwnedWrapperCallbackSite,
+} from "./callback-support.ts";
 import { classifySupportedCallRoot } from "./call-root-support.ts";
 import { rewriteExpression } from "./expression-rewrite/mod.ts";
 import {
@@ -366,12 +371,7 @@ function isEligiblePatternOwnedWrapperCallbackSite(
     context.checker,
     context,
   );
-  return callbackSupport.kind === "supported" &&
-    (
-      callbackSupport.supportedKind === "reactive-array-method" ||
-      callbackSupport.supportedKind === "pattern-builder" ||
-      callbackSupport.supportedKind === "render-builder"
-    );
+  return supportsPatternOwnedWrapperCallbackSite(callbackSupport);
 }
 
 function containsReactiveArrayMethodSubexpression(
@@ -559,8 +559,7 @@ function isArrayMethodOwnedExpressionSite(
     context.checker,
     context,
   );
-  return callbackSupport.kind === "supported" &&
-    callbackSupport.supportedKind === "reactive-array-method";
+  return isReactiveArrayMethodCallbackSupport(callbackSupport);
 }
 
 function isPlainArrayCallbackExpressionSite(
@@ -577,8 +576,7 @@ function isPlainArrayCallbackExpressionSite(
     context.checker,
     context,
   );
-  return callbackSupport.kind === "supported" &&
-    callbackSupport.supportedKind === "plain-array-value";
+  return isPlainArrayValueCallbackSupport(callbackSupport);
 }
 
 function isLowerableJsxExpressionSiteInPlainArrayCallback(

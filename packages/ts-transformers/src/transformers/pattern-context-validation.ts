@@ -48,7 +48,10 @@ import {
 } from "../ast/mod.ts";
 import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
 import { classifyUnsupportedCallRoot } from "./call-root-support.ts";
-import { classifyCallbackSupport } from "./callback-support.ts";
+import {
+  allowsRestrictedContextFunctionCallback,
+  classifyCallbackSupport,
+} from "./callback-support.ts";
 import {
   collectLocalOpaqueRootSymbols,
   isOpaqueSourceExpression,
@@ -683,10 +686,7 @@ export class PatternContextValidationTransformer extends Transformer {
     if (!parent.arguments.includes(node)) return false;
 
     const callbackSupport = classifyCallbackSupport(node, checker, context);
-    return callbackSupport.kind === "supported" &&
-      callbackSupport.supportedKind !== "event-handler-jsx" &&
-      callbackSupport.supportedKind !== "pattern-builder" &&
-      callbackSupport.supportedKind !== "render-builder";
+    return allowsRestrictedContextFunctionCallback(callbackSupport);
   }
 
   private isComputedLikeCallback(
