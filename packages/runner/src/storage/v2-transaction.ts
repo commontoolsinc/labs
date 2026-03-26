@@ -1201,10 +1201,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       },
       value,
       {
-        scopeId:
-          (this as { writeTraceScopeId?: string }).writeTraceScopeId,
-        writerActionId:
-          (this as { debugActionId?: string }).debugActionId,
+        scopeId: (this as { writeTraceScopeId?: string }).writeTraceScopeId,
+        writerActionId: (this as { debugActionId?: string }).debugActionId,
       },
     );
 
