@@ -1181,7 +1181,7 @@ Deno.test("memory v2 client close interrupts long reconnect backoff", async () =
 Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
   let receiver = (_payload: string) => {};
   const transport: Transport = {
-    send(payload) {
+    send(payload): Promise<void> {
       const message = JSON.parse(payload) as { type?: string };
       if (message.type === "hello") {
         receiver(JSON.stringify({
@@ -1195,6 +1195,7 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
           },
         }));
       }
+      return Promise.resolve();
     },
     async close() {},
     setReceiver(next) {
