@@ -260,8 +260,10 @@ const Note = pattern<NoteInput, NoteOutput>(
     // Exported stream for external content editing
     const editContent = action(
       (rawInput: { detail: { value: string } }) => {
-        const input = rawInput as unknown as { detail?: { value?: unknown } };
-        if (typeof input?.detail?.value !== "string") {
+        // Single widening cast to allow runtime validation of unexpected shapes
+        const loose = rawInput as { detail?: { value?: unknown } };
+        const value = loose?.detail?.value;
+        if (typeof value !== "string") {
           console.error(
             `editContent: invalid input shape. Expected { detail: { value: string } }, got: ${
               JSON.stringify(rawInput)
@@ -269,7 +271,7 @@ const Note = pattern<NoteInput, NoteOutput>(
           );
           return;
         }
-        content.set(input.detail.value);
+        content.set(value);
       },
     );
 
