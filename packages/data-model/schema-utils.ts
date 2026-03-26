@@ -4,7 +4,6 @@
 
 import type {
   JSONSchema,
-  JSONSchemaMutable,
   JSONSchemaObj,
   JSONSchemaObjMutable,
 } from "@commontools/api";
@@ -92,9 +91,9 @@ export function toDeepFrozenSchema<T extends JSONSchema>(
 }
 
 /**
- * Return a deep mutable copy of a JSONSchema. Boolean and `undefined` schemas
- * are returned as `{}` when `forceObject` is `true`; boolean schemas are
- * returned as-is otherwise, and `undefined` returns `{}`.
+ * Return a deep mutable object copy of a JSONSchema. Boolean schemas (`true`
+ * and `false`) and `undefined` are converted to their object-form equivalents:
+ * `undefined` and `true` become `{}` (accept any value), `false` becomes `{}`.
  *
  * Note: do not use this on proxy-wrapped schemas from the runtime — those
  * sites should continue using `JSON.parse(JSON.stringify(...))` until the
@@ -102,18 +101,9 @@ export function toDeepFrozenSchema<T extends JSONSchema>(
  */
 export function cloneSchemaMutable(
   schema: JSONSchema | undefined,
-  forceObject: true,
-): JSONSchemaObjMutable;
-export function cloneSchemaMutable(
-  schema: JSONSchema | undefined,
-  forceObject?: false,
-): JSONSchemaMutable;
-export function cloneSchemaMutable(
-  schema: JSONSchema | undefined,
-  forceObject: boolean = false,
-): JSONSchemaMutable {
+): JSONSchemaObjMutable {
   if (schema === undefined) return {};
-  if (typeof schema === "boolean") return forceObject ? {} : schema;
+  if (typeof schema === "boolean") return {};
   return cloneIfNecessary(schema, {
     frozen: false,
     deep: true,

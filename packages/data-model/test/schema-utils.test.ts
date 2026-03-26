@@ -368,31 +368,16 @@ describe("isNontrivialSchema", () => {
 });
 
 describe("cloneSchemaMutable", () => {
-  it("returns boolean true as-is", () => {
-    assertEquals(cloneSchemaMutable(true), true);
+  it("returns {} for boolean true", () => {
+    assertEquals(cloneSchemaMutable(true), {});
   });
 
-  it("returns boolean false as-is", () => {
-    assertEquals(cloneSchemaMutable(false), false);
+  it("returns {} for boolean false", () => {
+    assertEquals(cloneSchemaMutable(false), {});
   });
 
   it("returns {} for undefined", () => {
     const result = cloneSchemaMutable(undefined);
-    assertEquals(result, {});
-  });
-
-  it("forceObject returns {} for undefined", () => {
-    const result = cloneSchemaMutable(undefined, true);
-    assertEquals(result, {});
-  });
-
-  it("forceObject returns {} for boolean true", () => {
-    const result = cloneSchemaMutable(true, true);
-    assertEquals(result, {});
-  });
-
-  it("forceObject returns {} for boolean false", () => {
-    const result = cloneSchemaMutable(false, true);
     assertEquals(result, {});
   });
 
