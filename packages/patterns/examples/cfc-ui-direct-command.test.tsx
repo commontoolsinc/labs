@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { action, computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commontools";
 import DirectCommand, {
   DIRECT_COMMAND_OUTPUT_SCHEMA,
 } from "./cfc-ui-direct-command.tsx";
@@ -24,10 +24,6 @@ export default pattern(() => {
   const subject = DirectCommand({
     draft: "Summarize the latest inbox triage notes.",
     submittedCount: 0,
-  });
-
-  const action_submit = action(() => {
-    subject.submit.send();
   });
 
   const assert_initial_draft = computed(() =>
@@ -72,7 +68,17 @@ export default pattern(() => {
           integrityIncludes: [submitActionContractAtom],
         },
       },
-      { action: action_submit },
+      {
+        uiEvent: {
+          target: "subject",
+          schema: DIRECT_COMMAND_OUTPUT_SCHEMA,
+          attr: {
+            name: "data-ui-action",
+            value: "SubmitDirectCommand",
+          },
+          sourceGestureId: "gesture-direct-command-pattern-test",
+        },
+      },
       { assertion: assert_submit_count_after_send },
       { assertion: assert_draft_cleared_after_send },
     ],

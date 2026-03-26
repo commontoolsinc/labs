@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { action, computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commontools";
 import ShareList, {
   MESSAGE_SHARE_ROW_OUTPUT_SCHEMA,
   MessageShareRow,
@@ -43,13 +43,9 @@ export default pattern(() => {
     ],
   });
 
-  const action_toggle_row_share = action(() => {
-    row.toggleShared.send();
-  });
-
   const assert_row_initially_not_shared = computed(() => row.shared === false);
-  const assert_row_shared_after_toggle = computed(() => row.shared === true);
   const assert_list_initially_empty = computed(() => list.sharedCount === 0);
+  const assert_row_shared_after_click = computed(() => row.shared === true);
 
   return {
     tests: [
@@ -73,8 +69,18 @@ export default pattern(() => {
           integrityIncludes: [messageRowPlacementAtom],
         },
       },
-      { action: action_toggle_row_share },
-      { assertion: assert_row_shared_after_toggle },
+      {
+        uiEvent: {
+          target: "row",
+          schema: MESSAGE_SHARE_ROW_OUTPUT_SCHEMA,
+          attr: {
+            name: "data-ui-action",
+            value: "ShareReviewedMessage",
+          },
+          sourceGestureId: "gesture-mapped-share-list-pattern-test",
+        },
+      },
+      { assertion: assert_row_shared_after_click },
     ],
     row,
     list,

@@ -88,12 +88,27 @@ Tests use a **discriminated union** format:
 return {
   tests: [
     { action: action_do_something },     // Runner calls .send()
+    { uiEvent: { attr: { name: "data-ui-action", value: "Submit" } } },
     { assertion: assert_something },     // Runner checks === true
   ],
 };
 ```
 
-Each step is either `{ action: Stream<void> }` or `{ assertion: boolean }`.
+Each step is one of:
+- `{ action: Stream<void> }`
+- `{ uiEvent: UiEventSpec }`
+- `{ assertion: boolean }`
+- `{ labelAssertion: LabelAssertionSpec }`
+
+`uiEvent` is for testing UI-declared event integrity. Instead of calling an
+exported stream directly, the runner:
+- pulls the target pattern's `[UI]` output
+- finds a node by path or attribute selector
+- mints a `CfcEventEnvelope` from the node's declared labels
+- dispatches that envelope through the bound event stream
+
+This is useful when you want to verify behavior that depends on a handler being
+invoked through a trusted UI surface rather than by directly calling `.send()`.
 
 ## Writing Actions
 
@@ -116,6 +131,35 @@ const action_setup_game = action(() => {
   game.startGame.send();
 });
 ```
+
+## Writing UI Events
+
+Use `uiEvent` when the test should simulate an event coming from declared UI:
+
+```tsx
+return {
+  tests: [
+    {
+      uiEvent: {
+        target: "subject",
+        attr: {
+          name: "data-ui-action",
+          value: "SubmitDirectCommand",
+        },
+        sourceGestureId: "gesture-test-submit",
+      },
+    },
+  ],
+};
+```
+
+Selectors can use:
+- `path`: relative to `/$UI` by default, such as `"/children/3"`
+- `attr`: match a UI node by declared prop like `data-ui-action`
+- `occurrence`: pick the Nth attr match when there are multiple matches
+
+Use `schema` when the authored manual JSON schema carries UI IFC labels that are
+not recoverable from TypeScript-generated runtime schema metadata alone.
 
 ## Writing Assertions
 

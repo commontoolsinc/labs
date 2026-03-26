@@ -126,6 +126,14 @@ export {
 export { createNodeFactory } from "./builder/module.ts";
 export { opaqueRef as cell } from "./builder/opaque-ref.ts";
 export { ContextualFlowControl } from "./cfc.ts";
+export {
+  dispatchUiEvent,
+  type ResolvedUiEventTarget,
+  type ResolveUiEventOptions,
+  resolveUiEventTarget,
+  type UiEventAttributeSelector,
+  type UiEventSelector,
+} from "./cfc/ui-event.ts";
 export type { Mutable } from "@commontools/utils/types";
 export {
   RuntimeTelemetry,

@@ -9,6 +9,8 @@
  * TestStep is a discriminated union:
  * - { assertion: OpaqueRef<boolean> } from computed(() => condition)
  * - { action: Stream<void> } from action(() => sideEffect)
+ * - { uiEvent: UiEventSpec } to mint and dispatch an event via declared [UI]
+ * - { labelAssertion: LabelAssertionSpec } to assert resolved CFC labels
  *
  * The discriminated union avoids TypeScript declaration emit issues
  * that occur when mixing Cell and Stream types in the same array.
@@ -17,6 +19,7 @@
  * tests: [
  *   { assertion: computed(() => game.phase === "playing") },
  *   { action: action(() => game.start.send(undefined)) },
+ *   { uiEvent: { attr: { name: "data-ui-action", value: "StartGame" } } },
  *   { assertion: computed(() => game.phase === "started") },
  * ]
  *
@@ -32,9 +35,11 @@ import type {
   ErrorWithContext,
   Pattern,
   ReadObservationOp,
+  ResolveUiEventOptions,
   SettleStats,
   Stream,
 } from "@commontools/runner";
+import { dispatchUiEvent } from "@commontools/runner";
 import type { OpaqueRef } from "@commontools/api";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { basename } from "@std/path";
@@ -68,14 +73,16 @@ import {
 import { prepareCfcCommitIfNeeded } from "../../runner/src/cfc/prepare-shim.ts";
 
 /**
- * A test step is an object with either an 'assertion' or 'action' property.
+ * A test step is an object with an 'assertion', 'action', 'uiEvent', or
+ * 'labelAssertion' property.
  * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
  * Add `skip: true` to temporarily disable a step (like it.skip in other frameworks).
  */
 export type TestStep =
   | { assertion: OpaqueRef<boolean>; skip?: boolean }
   | { action: Stream<void>; skip?: boolean }
-  | { labelAssertion: LabelAssertionSpec; skip?: boolean };
+  | { labelAssertion: LabelAssertionSpec; skip?: boolean }
+  | { uiEvent: UiEventSpec; skip?: boolean };
 
 export interface LabelAssertionSpec {
   /**
@@ -105,6 +112,14 @@ export interface LabelAssertionSpec {
    * least one resolved confidentiality clause.
    */
   confidentialityIncludes?: readonly CfcConfidentialityClause[];
+}
+
+export interface UiEventSpec extends ResolveUiEventOptions {
+  /**
+   * Top-level key on the test pattern output that resolves to the target cell.
+   * Omit to dispatch against the root test-pattern result.
+   */
+  target?: string;
 }
 
 export interface TestResult {
@@ -217,6 +232,50 @@ function resolveLocalSchemaLabel(
   };
 }
 
+function resolveTargetCell(
+  runtime: Runtime,
+  patternResult: Cell<Record<string, unknown>>,
+  rootResultCell: Cell<Record<string, unknown>>,
+  target: string | undefined,
+  schema: unknown,
+): {
+  targetRef: Cell<unknown>;
+  targetCell: Cell<unknown>;
+  targetLink: ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>;
+  targetSchema: unknown;
+} {
+  const targetRef = target
+    ? patternResult.key(target) as Cell<unknown>
+    : rootResultCell;
+  const targetCell = targetRef.resolveAsCell();
+  const targetLink = targetCell.getAsNormalizedFullLink();
+  let targetSchema = schema ??
+    targetRef.schema ??
+    targetLink.schema ??
+    targetCell.schema;
+  if (!targetSchema) {
+    try {
+      targetSchema = targetRef.asSchemaFromLinks().schema ??
+        targetCell.asSchemaFromLinks().schema;
+    } catch {
+      // Fall through to the last-resort root schema lookup below.
+    }
+  }
+  if (
+    !targetSchema &&
+    !target &&
+    schema &&
+    typeof schema === "object" &&
+    !Array.isArray(schema)
+  ) {
+    targetSchema = runtime.cfc.getSchemaAtPath(
+      schema as never,
+      [],
+    );
+  }
+  return { targetRef, targetCell, targetLink, targetSchema };
+}
+
 async function runLabelAssertion(
   runtime: Runtime,
   patternResult: Cell<Record<string, unknown>>,
@@ -225,35 +284,13 @@ async function runLabelAssertion(
   rootPatternSchema: unknown,
 ): Promise<{ passed: boolean; error?: string }> {
   try {
-    const targetRef = spec.target
-      ? patternResult.key(spec.target) as Cell<unknown>
-      : rootResultCell;
-    const targetCell = targetRef.resolveAsCell();
-    const targetLink = targetCell.getAsNormalizedFullLink();
-    let targetSchema = spec.schema ??
-      targetRef.schema ??
-      targetLink.schema ??
-      targetCell.schema;
-    if (!targetSchema) {
-      try {
-        targetSchema = targetRef.asSchemaFromLinks().schema ??
-          targetCell.asSchemaFromLinks().schema;
-      } catch {
-        // Fall through to the last-resort root schema lookup below.
-      }
-    }
-    if (
-      !targetSchema &&
-      !spec.target &&
-      rootPatternSchema &&
-      typeof rootPatternSchema === "object" &&
-      !Array.isArray(rootPatternSchema)
-    ) {
-      targetSchema = runtime.cfc.getSchemaAtPath(
-        rootPatternSchema as never,
-        [],
-      );
-    }
+    const { targetLink, targetSchema } = resolveTargetCell(
+      runtime,
+      patternResult,
+      rootResultCell,
+      spec.target,
+      spec.schema ?? rootPatternSchema,
+    );
     const observationPath = joinRelativePath(targetLink.path, spec.path);
     const op = spec.op ?? "value";
 
@@ -348,6 +385,36 @@ async function runLabelAssertion(
       error: error instanceof Error
         ? (error.stack ?? error.message)
         : String(error),
+    };
+  }
+}
+
+async function runUiEvent(
+  runtime: Runtime,
+  patternResult: Cell<Record<string, unknown>>,
+  rootResultCell: Cell<Record<string, unknown>>,
+  spec: UiEventSpec,
+  rootPatternSchema: unknown,
+): Promise<{ passed: boolean; error?: string }> {
+  try {
+    const { targetCell, targetSchema } = resolveTargetCell(
+      runtime,
+      patternResult,
+      rootResultCell,
+      spec.target,
+      spec.schema ?? rootPatternSchema,
+    );
+    await dispatchUiEvent(runtime, targetCell, {
+      ...spec,
+      schema: targetSchema,
+    });
+    return { passed: true };
+  } catch (error) {
+    return {
+      passed: false,
+      error: `Error dispatching UI event: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     };
   }
 }
@@ -918,17 +985,19 @@ export async function runTestPattern(
         action?: unknown;
         assertion?: unknown;
         labelAssertion?: unknown;
+        uiEvent?: unknown;
         skip?: boolean;
       };
 
-      // Check if this step has 'action' or 'assertion' key
+      // Check which kind of step this is
       const isAction = "action" in stepValue;
       const isAssertion = "assertion" in stepValue;
       const isLabelAssertion = "labelAssertion" in stepValue;
+      const isUiEvent = "uiEvent" in stepValue;
 
-      if (!isAction && !isAssertion && !isLabelAssertion) {
+      if (!isAction && !isAssertion && !isLabelAssertion && !isUiEvent) {
         throw new Error(
-          `Test step at index ${i} must have either 'action', 'assertion', or 'labelAssertion' key. Got: ${
+          `Test step at index ${i} must have either 'action', 'assertion', 'labelAssertion', or 'uiEvent' key. Got: ${
             JSON.stringify(Object.keys(stepValue))
           }`,
         );
@@ -936,7 +1005,7 @@ export async function runTestPattern(
 
       // Handle skipped steps
       if (stepValue.skip) {
-        if (isAction) {
+        if (isAction || isUiEvent) {
           actionCount++;
           const actionName = `action_${actionCount}`;
           if (options.verbose) {
@@ -966,7 +1035,7 @@ export async function runTestPattern(
         continue;
       }
 
-      if (isAction) {
+      if (isAction || isUiEvent) {
         // It's an action - invoke it
         actionCount++;
         lastActionIndex = i;
@@ -989,13 +1058,31 @@ export async function runTestPattern(
           }
         }
 
-        // Get the action stream via .key()
-        const actionStream = testsCell.key(i).key(
-          "action",
-        ) as unknown as Stream<unknown>;
-
-        // Send undefined for void streams
-        actionStream.send(undefined);
+        if (isAction) {
+          const actionStream = testsCell.key(i).key(
+            "action",
+          ) as unknown as Stream<unknown>;
+          actionStream.send(undefined);
+        } else {
+          const uiEventSpec = stepValue.uiEvent as UiEventSpec;
+          const dispatchResult = await runUiEvent(
+            runtime,
+            patternResult,
+            resultCell,
+            uiEventSpec,
+            testPatternFactory.resultSchema,
+          );
+          if (!dispatchResult.passed) {
+            results.push({
+              name: actionName,
+              passed: false,
+              afterAction: null,
+              error: dispatchResult.error,
+              durationMs: performance.now() - itemStart,
+            });
+            continue;
+          }
+        }
 
         // Wait for idle, then settle commits and re-idle.
         // Optimistic commits can fail (CAS conflicts), causing rollbacks
@@ -1249,7 +1336,7 @@ export async function runTestPattern(
         const statsThreshold = options.statsThreshold ?? 5000;
         const stepDuration = performance.now() - itemStart;
         if (stepDuration > statsThreshold || statsThreshold === 0) {
-          const stepLabel = isAction
+          const stepLabel = (isAction || isUiEvent)
             ? `action_${actionCount}`
             : isLabelAssertion
             ? `label_assertion_${assertionCount}`
