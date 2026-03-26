@@ -188,9 +188,34 @@ describe("shell piece tests", () => {
       });
     };
 
-    const clickDecrement = async () => {
+    const clickDecrement = async (
+      fromValue: number,
+      toValue: number,
+    ) => {
       await waitFor(async () => {
-        return await page.evaluate(async (expectedPieceId) => {
+        return await page.evaluate(async (
+          expectedPieceId,
+          expectedFromValue,
+          expectedToValue,
+        ) => {
+          const findElementById = (
+            root: Document | ShadowRoot,
+            id: string,
+          ): HTMLElement | null => {
+            for (const element of root.querySelectorAll<HTMLElement>("*")) {
+              if (element.id === id) {
+                return element;
+              }
+              if (element.shadowRoot) {
+                const nested = findElementById(element.shadowRoot, id);
+                if (nested) {
+                  return nested;
+                }
+              }
+            }
+            return null;
+          };
+
           const rootView = document.querySelector("x-root-view");
           const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
             | {
@@ -213,11 +238,35 @@ describe("shell piece tests", () => {
           if (!activePattern || activePattern.id() !== expectedPieceId) {
             return false;
           }
-          const decrement = activePattern.cell().key("decrement");
-          await decrement.sync();
-          await decrement.send(undefined);
-          return true;
-        }, { args: [pieceId] });
+          const value = activePattern.cell().key("value");
+          const currentValue = await value.sync();
+          if (currentValue === expectedToValue) {
+            return true;
+          }
+          if (currentValue !== expectedFromValue) {
+            return false;
+          }
+          const decrementButton = findElementById(
+            document,
+            "counter-decrement",
+          );
+          if (!decrementButton) {
+            return false;
+          }
+          decrementButton.click();
+          const deadline = Date.now() + 2_000;
+          while (Date.now() < deadline) {
+            const nextValue = await value.sync();
+            if (nextValue === expectedToValue) {
+              return true;
+            }
+            if (nextValue !== expectedFromValue) {
+              return false;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          return false;
+        }, { args: [pieceId, fromValue, toValue] });
       });
     };
 
@@ -229,7 +278,7 @@ describe("shell piece tests", () => {
     }
     await waitFor(async () => (await piece.result.get(["value"])) === 0);
 
-    await clickDecrement();
+    await clickDecrement(0, -1);
     try {
       await waitFor(async () => (await piece.result.get(["value"])) === -1);
     } catch (error) {
@@ -237,7 +286,7 @@ describe("shell piece tests", () => {
       throw error;
     }
 
-    await clickDecrement();
+    await clickDecrement(-1, -2);
     try {
       await waitFor(async () => (await piece.result.get(["value"])) === -2);
     } catch (error) {
