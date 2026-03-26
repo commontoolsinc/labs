@@ -271,9 +271,18 @@ function predeclareTopLevelBindings(
     }
 
     if (!isVariableStatement(statement.text)) continue;
-    for (const { name } of parseVariableDeclarators(source, statement)) {
-      if (!env.has(name)) {
-        env.set(name, { kind: "unknown" });
+    for (const declarator of parseVariableDeclarators(source, statement)) {
+      const provisional = provisionalBindingForExpression(
+        source,
+        declarator.initializer.start,
+        declarator.initializer.end,
+        env,
+      );
+      if (!env.has(declarator.name)) {
+        env.set(
+          declarator.name,
+          provisional ? cloneBindingInfo(provisional) : { kind: "unknown" },
+        );
       }
     }
   }
@@ -1187,7 +1196,9 @@ function registerFunctionStatement(
 
 function getFunctionDeclarationName(source: string): string | undefined {
   const trimmed = source.trimStart();
-  const match = trimmed.match(/^function\s+([A-Za-z_$][\w$]*)\s*\(/);
+  const match = trimmed.match(
+    /^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/,
+  );
   return match?.[1];
 }
 
@@ -1198,7 +1209,7 @@ function tryParseDirectFunction(
 ): ParsedDefineCall["factory"] | undefined {
   const normalized = stripJsTrivia(source, start, end);
   if (
-    /^function(?:[A-Za-z_$][\w$]*)?\(/.test(normalized) ||
+    /^(?:async)?function(?:[A-Za-z_$][\w$]*)?\(/.test(normalized) ||
     /^(?:async)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)=>/.test(normalized)
   ) {
     return {
@@ -1253,7 +1264,7 @@ function isStringDirective(source: string): boolean {
 }
 
 function isFunctionDeclarationStatement(source: string): boolean {
-  return source.trimStart().startsWith("function ");
+  return /^(?:async\s+)?function\b/.test(source.trimStart());
 }
 
 function isClassDeclarationStatement(source: string): boolean {
@@ -1278,7 +1289,30 @@ function isPrimitiveLikeExpression(normalized: string): boolean {
     normalized === "false" ||
     /^-?\d/.test(normalized) ||
     /^(['"]).*\1$/.test(normalized) ||
+    isNoSubstitutionTemplateLiteral(normalized) ||
     /^\d+n$/.test(normalized);
+}
+
+function isNoSubstitutionTemplateLiteral(normalized: string): boolean {
+  if (!normalized.startsWith("`") || !normalized.endsWith("`")) {
+    return false;
+  }
+
+  for (let index = 1; index < normalized.length - 1; index++) {
+    const char = normalized[index];
+    if (char === "\\") {
+      index++;
+      continue;
+    }
+    if (char === "$" && normalized[index + 1] === "{") {
+      return false;
+    }
+    if (char === "`") {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function isRegexLiteral(normalized: string): boolean {

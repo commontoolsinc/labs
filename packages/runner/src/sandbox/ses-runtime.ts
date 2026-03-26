@@ -212,6 +212,10 @@ export function evaluateFunctionSourceInSES(
   }
 }
 
+export function ensureSESLockdown(): void {
+  ensureSESInitialized(true);
+}
+
 export function evaluateCallbackSourceInSES(
   source: string,
 ): unknown {
@@ -236,6 +240,7 @@ let callbackCompartment:
   | { evaluate(source: string): unknown }
   | undefined;
 const callbackCreatorCache = new Map<string, () => unknown>();
+const SES_RUNTIME_STATE = Symbol.for("@commontools/runner/ses-runtime-state");
 
 const DEFAULT_LOCKDOWN_OPTIONS: SESLockdownOptions = {
   errorTaming: "safe",
@@ -255,7 +260,12 @@ const DEFAULT_LOCKDOWN_OPTIONS: SESLockdownOptions = {
 };
 
 function ensureSESInitialized(lockdownEnabled: boolean): void {
-  if (sesInitialized || !lockdownEnabled) {
+  if (!lockdownEnabled) {
+    return;
+  }
+  const globalState = getGlobalSESRuntimeState();
+  if (sesInitialized || globalState.lockdownInitialized) {
+    sesInitialized = true;
     return;
   }
   const lockdownFn = (globalThis as {
@@ -265,6 +275,7 @@ function ensureSESInitialized(lockdownEnabled: boolean): void {
     throw new Error("SES lockdown() is unavailable");
   }
   lockdownFn(DEFAULT_LOCKDOWN_OPTIONS);
+  globalState.lockdownInitialized = true;
   sesInitialized = true;
 }
 
@@ -383,3 +394,13 @@ function sanitizeInternalFrames(stack: string): string {
 const CT_INTERNAL = "    at <CT_INTERNAL>";
 const RUNNER_INTERNAL_FRAME_PATTERN =
   /^\s*at(?: .*?)? \(?(?:file:\/\/)?(?:[^)\n]*\/)?packages\/runner\/src\/[^)\n]+:\d+:\d+\)?$/;
+
+function getGlobalSESRuntimeState(): { lockdownInitialized: boolean } {
+  const globalObject = globalThis as typeof globalThis & {
+    [SES_RUNTIME_STATE]?: { lockdownInitialized: boolean };
+  };
+  if (!globalObject[SES_RUNTIME_STATE]) {
+    globalObject[SES_RUNTIME_STATE] = { lockdownInitialized: false };
+  }
+  return globalObject[SES_RUNTIME_STATE];
+}

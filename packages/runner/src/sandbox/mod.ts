@@ -9,6 +9,7 @@ export {
 } from "./compartment-globals.ts";
 export { hardenVerifiedFunction } from "./function-hardening.ts";
 export {
+  ensureSESLockdown,
   evaluateCallbackSourceInSES,
   evaluateFunctionSourceInSES,
   SESIsolate,

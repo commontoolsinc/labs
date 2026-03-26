@@ -1,5 +1,9 @@
 import ts from "typescript";
-import { TransformationContext, Transformer } from "../core/mod.ts";
+import {
+  CT_HELPERS_IDENTIFIER,
+  TransformationContext,
+  Transformer,
+} from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 
 const TRUSTED_BUILDER_NAMES = new Set([
@@ -20,16 +24,30 @@ const TRUSTED_DATA_HELPER_NAMES = new Set([
 const CT_DATA_CONSTRUCTOR_NAMES = new Set(["Map", "Set", "Proxy"]);
 
 export class ModuleScopeCtDataTransformer extends Transformer {
-  override filter(context: TransformationContext): boolean {
-    return context.ctHelpers.sourceHasHelpers();
+  override filter(_context: TransformationContext): boolean {
+    return true;
   }
 
   override transform(context: TransformationContext): ts.SourceFile {
     const { factory, sourceFile } = context;
     const localCallableBindings = collectTopLevelCallableBindings(sourceFile);
-    const statements = sourceFile.statements.map((statement) =>
-      transformTopLevelStatement(statement, context, localCallableBindings)
-    );
+    let changed = false;
+    const transformedStatements = sourceFile.statements.map((statement) => {
+      const next = transformTopLevelStatement(
+        statement,
+        context,
+        localCallableBindings,
+      );
+      changed ||= next !== statement;
+      return next;
+    });
+    if (!changed) {
+      return sourceFile;
+    }
+
+    const statements = context.ctHelpers.sourceHasHelpers()
+      ? transformedStatements
+      : [createCtHelpersImport(factory), ...transformedStatements];
     return factory.updateSourceFile(sourceFile, statements);
   }
 }
@@ -53,6 +71,7 @@ function transformTopLevelStatement(
           !declaration.initializer ||
           !shouldWrapTopLevelExpression(
             declaration.initializer,
+            context,
             localCallableBindings,
           )
         ) {
@@ -82,7 +101,11 @@ function transformTopLevelStatement(
 
   if (
     ts.isExportAssignment(statement) &&
-    shouldWrapTopLevelExpression(statement.expression, localCallableBindings)
+    shouldWrapTopLevelExpression(
+      statement.expression,
+      context,
+      localCallableBindings,
+    )
   ) {
     return factory.updateExportAssignment(
       statement,
@@ -98,8 +121,14 @@ function wrapWithCtData(
   expression: ts.Expression,
   context: TransformationContext,
 ): ts.CallExpression {
+  const helperExpr = context.ctHelpers.sourceHasHelpers()
+    ? context.ctHelpers.getHelperExpr("__ct_data")
+    : context.factory.createPropertyAccessExpression(
+      context.factory.createIdentifier(CT_HELPERS_IDENTIFIER),
+      "__ct_data",
+    );
   return context.factory.createCallExpression(
-    context.ctHelpers.getHelperExpr("__ct_data"),
+    helperExpr,
     undefined,
     [expression],
   );
@@ -107,6 +136,7 @@ function wrapWithCtData(
 
 function shouldWrapTopLevelExpression(
   expression: ts.Expression,
+  context: TransformationContext,
   localCallableBindings: ReadonlySet<string>,
 ): boolean {
   if (isAnyLikeTypeAssertion(expression)) {
@@ -114,6 +144,7 @@ function shouldWrapTopLevelExpression(
   }
 
   const expr = unwrapExpression(expression);
+  const helpersPresent = context.ctHelpers.sourceHasHelpers();
 
   if (
     ts.isArrowFunction(expr) ||
@@ -123,12 +154,17 @@ function shouldWrapTopLevelExpression(
     return false;
   }
 
+  if (!helpersPresent) {
+    return ts.isCallExpression(expr) && isPrimitiveSnapshotCall(expr, context);
+  }
+
   if (ts.isCallExpression(expr)) {
     if (isTrustedBuilderCall(expr)) return false;
     return isTrustedDataHelperCall(expr) ||
       isImmediatelyInvokedFunction(expr) ||
       isIntrinsicCtDataCall(expr) ||
       isTopLevelLocalHelperCall(expr, localCallableBindings) ||
+      isPrimitiveSnapshotCall(expr, context) ||
       ts.isPropertyAccessExpression(unwrapExpression(expr.expression));
   }
 
@@ -145,6 +181,21 @@ function shouldWrapTopLevelExpression(
   }
 
   return false;
+}
+
+function createCtHelpersImport(factory: ts.NodeFactory): ts.ImportDeclaration {
+  return factory.createImportDeclaration(
+    undefined,
+    factory.createImportClause(
+      false,
+      undefined,
+      factory.createNamespaceImport(
+        factory.createIdentifier(CT_HELPERS_IDENTIFIER),
+      ),
+    ),
+    factory.createStringLiteral("commontools"),
+    undefined,
+  );
 }
 
 function isTrustedBuilderCall(expression: ts.CallExpression): boolean {
@@ -177,6 +228,42 @@ function isTopLevelLocalHelperCall(
 ): boolean {
   const target = unwrapExpression(expression.expression);
   return ts.isIdentifier(target) && localCallableBindings.has(target.text);
+}
+
+function isPrimitiveSnapshotCall(
+  expression: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  const target = unwrapExpression(expression.expression);
+  if (!ts.isIdentifier(target)) {
+    return false;
+  }
+
+  const type = context.checker.getTypeAtLocation(expression);
+  return isPrimitiveLikeType(type);
+}
+
+function isPrimitiveLikeType(type: ts.Type): boolean {
+  if (type.isUnion()) {
+    return type.types.every((member) => isPrimitiveLikeType(member));
+  }
+
+  if (type.isIntersection()) {
+    return type.types.every((member) => isPrimitiveLikeType(member));
+  }
+
+  return !!(
+    type.flags &
+    (
+      ts.TypeFlags.StringLike |
+      ts.TypeFlags.NumberLike |
+      ts.TypeFlags.BooleanLike |
+      ts.TypeFlags.BigIntLike |
+      ts.TypeFlags.Null |
+      ts.TypeFlags.Undefined |
+      ts.TypeFlags.Void
+    )
+  );
 }
 
 function hasNamedTarget(

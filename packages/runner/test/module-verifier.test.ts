@@ -303,6 +303,25 @@ describe("verifyProgramModuleScope()", () => {
     expect(() => verifyProgramModuleScope(program)).not.toThrow();
   });
 
+  it("accepts callbacks that capture later const helper bindings", () => {
+    const program: Program = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { lift } from "commontools";',
+            "const readValue = lift((value: number) => formatValue(value));",
+            "const formatValue = (value: number) => value;",
+            "export default readValue;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    expect(() => verifyProgramModuleScope(program)).not.toThrow();
+  });
+
   it("rejects nested closure captures of unsafe top-level state", () => {
     const program: Program = {
       main: "/main.ts",

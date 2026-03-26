@@ -28,6 +28,7 @@ import { pretransformProgram } from "./pretransform.ts";
 import {
   createModuleCompartmentGlobals,
   createSafeConsoleGlobal,
+  ensureSESLockdown,
   evaluateCallbackSourceInSES,
   getRuntimeModuleExports,
   getRuntimeModuleTypes,
@@ -121,11 +122,12 @@ export class Engine extends EventTarget implements Harness {
       this.ctRuntime.staticCache,
     );
     const compiler = new TypeScriptCompiler(environmentTypes);
+    ensureSESLockdown();
     const runtime = new SESRuntime({
       globals: createModuleCompartmentGlobals({
         console: this.consoleShim,
       }),
-      lockdown: true,
+      lockdown: false,
     });
     const isolate = runtime.getIsolate("");
     const { runtimeExports, exportsCallback } = await getRuntimeModuleExports();

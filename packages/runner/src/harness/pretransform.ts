@@ -1,4 +1,9 @@
 import { transformCfDirective } from "@commonfabric/ts-transformers";
+import {
+  injectCfHelpers,
+  sourceUsesCfDirective,
+  transformCfDirective,
+} from "@commonfabric/ts-transformers";
 import { RuntimeProgram } from "./types.ts";
 
 export function pretransformProgram(
@@ -17,11 +22,21 @@ export function pretransformProgram(
 export function transformInjectHelperModule(
   program: RuntimeProgram,
 ): RuntimeProgram {
+  const propagateHelpers = program.files.some((source) =>
+    sourceUsesCfDirective(source.contents)
+  );
   return {
     main: program.main,
     files: program.files.map((source) => ({
       name: source.name,
       contents: transformCfDirective(source.contents),
+      contents: source.name.endsWith(".d.ts")
+        ? source.contents
+        : propagateHelpers
+        ? sourceUsesCfDirective(source.contents)
+          ? transformCfDirective(source.contents)
+          : injectCfHelpers(source.contents)
+        : transformCfDirective(source.contents),
     })),
     mainExport: program.mainExport,
   };

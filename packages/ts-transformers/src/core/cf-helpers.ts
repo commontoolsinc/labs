@@ -135,7 +135,7 @@ export function transformCfDirective(
   checkCFHelperVar(source);
 
   const lines = source.split("\n");
-  if (!lines[0] || !isCTSEnabled(lines[0])) {
+  if (!lines[0] || !sourceUsesCfDirective(source)) {
     return source;
   }
   return [
@@ -143,6 +143,20 @@ export function transformCfDirective(
     ...lines.slice(1),
     HELPERS_USED_STMT,
   ].join("\n");
+}
+
+export function injectCfHelpers(source: string): string {
+  checkCFHelperVar(source);
+  return [
+    HELPERS_STMT,
+    source,
+    HELPERS_USED_STMT,
+  ].join("\n");
+}
+
+export function sourceUsesCfDirective(source: string): boolean {
+  const lines = source.split("\n");
+  return !!lines[0] && isCTSEnabled(lines[0]);
 }
 
 function isCTSEnabled(line: string) {

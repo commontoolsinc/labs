@@ -5,7 +5,13 @@ export type {
   TransformationOptions,
   TransformMode,
 } from "./core/mod.ts";
-export { Pipeline, transformCfDirective, Transformer } from "./core/mod.ts";
+export {
+  injectCfHelpers,
+  Pipeline,
+  sourceUsesCfDirective,
+  transformCfDirective,
+  Transformer,
+} from "./core/mod.ts";
 
 export {
   CastValidationTransformer,

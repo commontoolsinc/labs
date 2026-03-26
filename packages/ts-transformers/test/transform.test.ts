@@ -157,6 +157,29 @@ export default function probe() {
       "explicit helper calls should not be rewritten",
     );
   });
+
+  it("injects __ctHelpers on demand for non-CTS top-level snapshots", async () => {
+    const output = await transformFiles({
+      "/main.ts": `
+function pow(x: number): number {
+  return x * x;
+}
+
+export default pow(5);
+`,
+    });
+
+    const main = output["/main.ts"]!;
+
+    assertStringIncludes(
+      main,
+      'import * as __ctHelpers from "commontools";',
+    );
+    assertStringIncludes(
+      main,
+      "export default __ctHelpers.__ct_data(pow(5));",
+    );
+  });
 });
 
 describe("CFHelpers handling", () => {

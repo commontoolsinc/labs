@@ -369,6 +369,24 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts compiled callbacks that capture later const helper bindings", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const readValue = (0, commontools_1.lift)((value) => formatValue(value));
+    const formatValue = (value) => {
+      return value;
+    };
+    exports.default = readValue;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("rejects raw top-level helper calls without __ct_data()", () => {
     const bundle = `
 ((runtimeDeps = {}) => {

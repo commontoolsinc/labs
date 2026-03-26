@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import {
+  FileSystemProgramResolver,
+  InMemoryProgram,
+} from "@commonfabric/js-compiler";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
@@ -96,6 +100,55 @@ describe("Engine.compile()", () => {
     expect(main?.default).toBe(21);
   });
 
+  it("accepts top-level async function declarations in SES bundles", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "export async function load() {",
+            "  return 21;",
+            "}",
+            "export default load;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(await main?.default()).toBe(21);
+  });
+
+  it("accepts module-scope handlers that capture async function declarations", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { handler, type Writable } from "commontools";',
+            "const trigger = handler<unknown, { value: Writable<number> }>(",
+            "  async (_event, state) => {",
+            "    state.value.set(await process(state.value.get()));",
+            "  },",
+            ");",
+            "export async function process(value: number): Promise<number> {",
+            "  return value + 1;",
+            "}",
+            "export default trigger;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript } = await engine.compile(program);
+
+    expect(jsScript.js).toContain("process");
+  });
+
   it("produces a source map", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
@@ -129,6 +182,29 @@ describe("Engine.compile()", () => {
 
     expect(first.jsScript.js).toBe(second.jsScript.js);
     expect(first.id).toBe(second.id);
+  });
+
+  it("resolves programs when host fetch is mocked before SES init", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = () =>
+      Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    try {
+      const program = await engine.resolve(
+        new InMemoryProgram("/main.ts", {
+          "/main.ts": "export default 1;",
+        }),
+      );
+
+      expect(program.main).toBe("/main.ts");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("throws on compilation errors", async () => {
@@ -587,6 +663,35 @@ describe("Engine.evaluate()", () => {
     );
   });
 
+  it("compiles non-CTS default export calls that evaluate to primitive snapshots", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/math.ts",
+          contents: [
+            "export function pow(x: number): number {",
+            "  return x * x;",
+            "}",
+          ].join("\n"),
+        },
+        {
+          name: "/main.ts",
+          contents: [
+            'import { pow } from "./math.ts";',
+            "export default pow(5);",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    expect(jsScript.js).toContain("__ct_data(");
+
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    expect(main?.default).toBe(25);
+  });
+
   it("throws when handler() relies on CTS inference without CTS", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
@@ -881,6 +986,84 @@ describe("Engine in SES mode", () => {
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toBeInstanceOf(RegExp);
     expect(main?.default?.test("hello")).toBe(true);
+  });
+
+  it("allows top-level template literal snapshots", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "const layout = `# Aisle 1",
+            "Milk",
+            "Eggs`;",
+            "export default layout;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main?.default).toContain("# Aisle 1");
+    expect(main?.default).toContain("Eggs");
+  });
+
+  it("wraps imported helper modules inside CTS graphs", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            'import { TEMPLATE_REGISTRY } from "./template-registry.ts";',
+            'export { INTERNAL_MODULE_TYPES } from "./schema-utils-pure.ts";',
+            "export default TEMPLATE_REGISTRY.person.label;",
+          ].join("\n"),
+        },
+        {
+          name: "/template-registry.ts",
+          contents: [
+            "export const TEMPLATE_REGISTRY = {",
+            '  person: { label: "Person" },',
+            "};",
+          ].join("\n"),
+        },
+        {
+          name: "/schema-utils-pure.ts",
+          contents:
+            'export const INTERNAL_MODULE_TYPES = new Set(["type-picker"]);',
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    expect(jsScript.js).toContain(
+      "exports.TEMPLATE_REGISTRY = __ctHelpers.__ct_data({",
+    );
+    expect(jsScript.js).toContain(
+      'exports.INTERNAL_MODULE_TYPES = __ctHelpers.__ct_data(new Set(["type-picker"]));',
+    );
+
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    expect(main?.default).toBe("Person");
+  });
+
+  it("compiles the self-improving classifier pattern", async () => {
+    const repoRoot = new URL("../../../", import.meta.url).pathname;
+    const sourcePath = new URL(
+      "../../patterns/self-improving-classifier.tsx",
+      import.meta.url,
+    ).pathname;
+    const program = await engine.resolve(
+      new FileSystemProgramResolver(sourcePath, repoRoot),
+    );
+
+    const { jsScript } = await engine.compile(program);
+    expect(jsScript.js.length).toBeGreaterThan(0);
   });
 
   it("rejects top-level mutable bindings", async () => {

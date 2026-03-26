@@ -140,6 +140,19 @@ describe("preflightCompiledBundle()", () => {
     expect(() => preflightCompiledBundle(bundle)).not.toThrow();
   });
 
+  it("accepts complex regex literals with adjacent character classes", () => {
+    const bundle = bundleWithCanonicalLoader(`
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    const nestedQuantifiers = /\\([^)]*[+*][^)]*\\)[+*]|\\([^)]*\\)[+*][+*]/;
+    exports.default = nestedQuantifiers.test("a");
+  });
+  return require("main");
+`);
+
+    expect(() => preflightCompiledBundle(bundle)).not.toThrow();
+  });
+
   it("rejects executable code outside AMD registrations", () => {
     const bundle = bundleWithCanonicalLoader(`
   breakOut();

@@ -69,5 +69,7 @@ export * from "./common-fabric-symbols.ts";
 export {
   CF_HELPERS_IDENTIFIER,
   CFHelpers,
+  injectCfHelpers,
+  sourceUsesCfDirective,
   transformCfDirective,
 } from "./cf-helpers.ts";

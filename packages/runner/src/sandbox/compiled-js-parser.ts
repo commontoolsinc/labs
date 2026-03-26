@@ -144,9 +144,17 @@ export function parseFunctionText(
   const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
   const functionStart = inner.start;
   const firstWord = readLeadingIdentifier(source, functionStart, inner.end);
+  let functionKeyword = firstWord;
+  if (firstWord?.text === "async") {
+    const asyncEnd = skipTrivia(source, firstWord.end, inner.end);
+    const maybeFunction = readLeadingIdentifier(source, asyncEnd, inner.end);
+    if (maybeFunction?.text === "function") {
+      functionKeyword = maybeFunction;
+    }
+  }
 
-  if (firstWord?.text === "function") {
-    const paramsStart = skipTrivia(source, firstWord.end, inner.end);
+  if (functionKeyword?.text === "function") {
+    const paramsStart = skipTrivia(source, functionKeyword.end, inner.end);
     const openParen = expectChar(source, paramsStart, inner.end, "(");
     const closeParen = findMatchingDelimiter(source, openParen, "(", ")");
     const bodyStart = skipTrivia(source, closeParen + 1, inner.end);
@@ -399,13 +407,72 @@ function parseWrappedFunction(source: string): ParsedFunction {
     throw new CompiledJsParseError(0, "Compiled bundle cannot be empty");
   }
 
-  let expr = stripWholeParentheses(source, trimmed.start, trimmed.end);
-  if (source[expr.end - 1] === ";") {
-    expr = trimRange(source, expr.start, expr.end - 1);
-    expr = stripWholeParentheses(source, expr.start, expr.end);
+  const candidates: SourceRange[] = [];
+  const seen = new Set<string>();
+  const pushCandidate = (range: SourceRange) => {
+    const key = `${range.start}:${range.end}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(range);
+  };
+
+  const stripped = stripWholeParentheses(source, trimmed.start, trimmed.end);
+  pushCandidate(stripped);
+
+  let semicolonTrimmed = stripped;
+  if (source[semicolonTrimmed.end - 1] === ";") {
+    semicolonTrimmed = trimRange(
+      source,
+      semicolonTrimmed.start,
+      semicolonTrimmed.end - 1,
+    );
+    pushCandidate(stripWholeParentheses(
+      source,
+      semicolonTrimmed.start,
+      semicolonTrimmed.end,
+    ));
   }
 
-  return parseFunctionText(source, expr.start, expr.end);
+  let manuallyUnwrapped = semicolonTrimmed;
+  while (
+    manuallyUnwrapped.start < manuallyUnwrapped.end &&
+    source[manuallyUnwrapped.start] === "(" &&
+    source[manuallyUnwrapped.end - 1] === ")"
+  ) {
+    manuallyUnwrapped = trimRange(
+      source,
+      manuallyUnwrapped.start + 1,
+      manuallyUnwrapped.end - 1,
+    );
+    pushCandidate(manuallyUnwrapped);
+    const manuallyStripped = stripWholeParentheses(
+      source,
+      manuallyUnwrapped.start,
+      manuallyUnwrapped.end,
+    );
+    pushCandidate(manuallyStripped);
+    if (
+      manuallyStripped.start === manuallyUnwrapped.start &&
+      manuallyStripped.end === manuallyUnwrapped.end
+    ) {
+      break;
+    }
+    manuallyUnwrapped = manuallyStripped;
+  }
+
+  let lastError: unknown;
+  for (const candidate of candidates) {
+    try {
+      return parseFunctionText(source, candidate.start, candidate.end);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new CompiledJsParseError(0, "Expected a direct function expression");
 }
 
 function splitTopLevelStatements(
@@ -842,7 +909,7 @@ function advanceScanner(
     if (source[cursor + 1] === "/" || source[cursor + 1] === "*") {
       return skipTrivia(source, cursor, end);
     }
-    if (state.regexAllowed) {
+    if (state.regexAllowed || looksLikeRegexStart(source, cursor)) {
       state.regexAllowed = false;
       return scanRegexLiteral(source, cursor, end);
     }
@@ -927,6 +994,19 @@ function advanceScanner(
       state.regexAllowed = false;
       return cursor + 1;
   }
+}
+
+function looksLikeRegexStart(source: string, cursor: number): boolean {
+  let index = cursor - 1;
+  while (index >= 0 && /\s/.test(source[index])) {
+    index--;
+  }
+
+  if (index < 0) {
+    return true;
+  }
+
+  return /[=([{,:;!?*%^&|<>]/.test(source[index]);
 }
 
 function scanStringLiteral(
