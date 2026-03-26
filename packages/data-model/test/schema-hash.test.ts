@@ -187,8 +187,14 @@ describe("schema-hash dispatch", () => {
             });
 
             it("property order does not affect interning", () => {
-              const result1 = callIntern({ type: "object", title: "foo" }, true);
-              const result2 = callIntern({ title: "foo", type: "object" }, true);
+              const result1 = callIntern(
+                { type: "object", title: "foo" },
+                true,
+              );
+              const result2 = callIntern(
+                { title: "foo", type: "object" },
+                true,
+              );
               assertStrictEquals(result1, result2);
             });
 
