@@ -16,6 +16,7 @@ import {
 import { createBuilder } from "../src/builder/factory.ts";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("bench push pull patterns");
 const space = signer.did();
@@ -336,10 +337,14 @@ addEventListener("unload", () => {
 });
 
 function createEnv(pullMode: boolean): BenchEnv {
-  const storageManager = StorageManager.emulate({ as: signer });
+  const storageManager = StorageManager.emulate({
+    as: signer,
+    memoryVersion: BENCH_MEMORY_VERSION,
+  });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
+    memoryVersion: BENCH_MEMORY_VERSION,
   });
 
   if (pullMode) runtime.scheduler.enablePullMode();
