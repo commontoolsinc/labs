@@ -81,7 +81,7 @@ export const main = new Command()
       .hidden()
       .useRawArgs()
       // deno-lint-ignore no-explicit-any
-      .action(async (...rawArgs: any[]) => {
+      .action(async (_options: any, ...rawArgs: any[]) => {
         const { main } = await import("@commontools/fuse");
         await main(rawArgs as string[]);
       }),
