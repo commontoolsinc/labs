@@ -1195,6 +1195,10 @@ export class CellBridge {
   ): Promise<bigint> {
     const pieceIno = existingIno ?? this.tree.addDir(parentIno, name);
 
+    // Clear existing meta.json if reusing a stub dir (avoids orphaned inode)
+    const existingMetaIno = this.tree.lookup(pieceIno, "meta.json");
+    if (existingMetaIno !== undefined) this.tree.clear(existingMetaIno);
+
     // Create meta.json first so it's always present
     let patternName = "";
     try {
