@@ -6,14 +6,32 @@ interface State {
 // FIXTURE: map-plain-array-no-transform
 // Verifies: .map() on a plain (non-reactive) array is NOT transformed to mapWithPattern
 //   plainArray.map(fn) → plainArray.map(fn) (unchanged)
-//   n * state.multiplier → derive() wrapping the expression
-// Context: NEGATIVE TEST -- the array is a local literal [1,2,3,4,5], not a reactive Cell array
+//   nested JSX-local reactive expressions inside the callback still lower via derive()
+// Context: NEGATIVE TEST for callback-root ownership -- the array is a local literal [1,2,3,4,5], not a reactive Cell array
 export default pattern((state) => {
     const plainArray = [1, 2, 3, 4, 5];
     return {
         [UI]: (<div>
         {/* Plain array should NOT be transformed, even with captures */}
-        {plainArray.map((n) => (<span>{n * state.multiplier}</span>))}
+        {plainArray.map((n) => (<span>{__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    state: {
+                        type: "object",
+                        properties: {
+                            multiplier: {
+                                type: "number"
+                            }
+                        },
+                        required: ["multiplier"]
+                    }
+                },
+                required: ["state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, { state: {
+                    multiplier: state.multiplier
+                } }, ({ state }) => n * state.multiplier)}</span>))}
       </div>),
     };
 }, {

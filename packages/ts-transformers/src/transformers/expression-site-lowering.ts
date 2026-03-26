@@ -601,13 +601,13 @@ function isPlainArrayCallbackExpressionSite(
   return !receiverAnalysis.containsOpaqueRef;
 }
 
-function isOwnedDynamicElementAccessInPlainArrayCallbackRoot(
+function isLowerableJsxExpressionSiteInPlainArrayCallback(
   expression: ts.Expression,
   context: TransformationContext,
   analyze: AnalyzeFn,
 ): boolean {
-  return isOwnedDynamicElementAccessRoot(expression, context, analyze) &&
-    isPlainArrayCallbackExpressionSite(expression, analyze, context);
+  return isPlainArrayCallbackExpressionSite(expression, analyze, context) &&
+    !isDirectArrayMethodRootExpression(expression);
 }
 
 const HELPER_BOUNDARY_KINDS = new Set<ExpressionSiteHelperBoundaryKind>([
@@ -812,22 +812,17 @@ export function classifyJsxExpressionSiteRoute(
 
   if (siteInfo.arrayMethodOwned) {
     if (
-      isOwnedDynamicElementAccessInPlainArrayCallbackRoot(
+      !isLowerableJsxExpressionSiteInPlainArrayCallback(
         expression,
         context,
         analyze,
       )
     ) {
       return {
-        route: "owned-pre-closure",
-        owner: "dynamic-element-access-root",
+        route: "skip",
+        reason: "array-method-owned",
       };
     }
-
-    return {
-      route: "skip",
-      reason: "array-method-owned",
-    };
   }
 
   if (siteInfo.deferredJsxArrayMethod) {
@@ -968,7 +963,7 @@ function canRewriteExpressionSite(
 
   if (containerKind === "jsx-expression" && siteInfo.arrayMethodOwned) {
     if (
-      !isOwnedDynamicElementAccessInPlainArrayCallbackRoot(
+      !isLowerableJsxExpressionSiteInPlainArrayCallback(
         expression,
         context,
         analyze,

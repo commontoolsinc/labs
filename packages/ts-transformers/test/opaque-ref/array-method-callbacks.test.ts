@@ -456,6 +456,53 @@ describe("OpaqueRef map callbacks", () => {
     );
   });
 
+  it("rewrites arithmetic JSX bindings inside plain array callbacks without claiming the callback root", async () => {
+    const output = await transformSource(
+      `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface State {
+  multiplier: number;
+}
+
+export default pattern<State>((state) => {
+  const plainArray = [1, 2, 3];
+
+  return {
+    [UI]: (
+      <div>
+        {plainArray.map((n) => (
+          <span>{n * state.multiplier}</span>
+        ))}
+      </div>
+    ),
+  };
+});
+`,
+      {
+        types: { "commontools.d.ts": commontools },
+      },
+    );
+    const normalized = output.replace(/\s+/g, " ");
+
+    assertStringIncludes(
+      normalized,
+      "plainArray.map((n) => (<span>{__ctHelpers.derive(",
+    );
+    assertStringIncludes(
+      normalized,
+      "state: { multiplier: state.multiplier }",
+    );
+    assertStringIncludes(
+      normalized,
+      "({ state }) => n * state.multiplier",
+    );
+    assert(
+      !normalized.includes(".mapWithPattern("),
+      "plain array callback roots should stay plain .map() calls while the JSX-local arithmetic binding is derived",
+    );
+  });
+
   it("derives map callback parameters and unary negations (capability-first)", async () => {
     const output = await transformSource(SOURCE, {
       types: { "commontools.d.ts": commontools },

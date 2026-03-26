@@ -1045,6 +1045,48 @@ Deno.test(
 );
 
 Deno.test(
+  "Expression site policy: plain-array callback JSX arithmetic roots use the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          span: any;
+        }
+      }
+
+      interface Array<T> {
+        map<U>(callback: (value: T) => U): U[];
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>{[1, 2, 3].map((n: number) => <span>{n * state.multiplier}</span>)}</div>
+      ));
+    `);
+
+    const binary = findFirstNode(
+      sourceFile,
+      (node): node is ts.BinaryExpression =>
+        ts.isBinaryExpression(node) &&
+        ts.isIdentifier(node.left) &&
+        node.left.text === "n" &&
+        ts.isPropertyAccessExpression(node.right) &&
+        ts.isIdentifier(node.right.expression) &&
+        node.right.expression.text === "state" &&
+        node.right.name.text === "multiplier",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyJsxExpressionSiteRoute(binary, context, analyze),
+      { route: "shared-post-closure" },
+    );
+  },
+);
+
+Deno.test(
   "Expression site policy: JSX wrapper roots over reactive array-method results use the shared post-closure path",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
