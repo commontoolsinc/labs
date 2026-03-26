@@ -372,8 +372,8 @@ describe("cloneSchemaMutable", () => {
     assertEquals(cloneSchemaMutable(true), {});
   });
 
-  it("returns {} for boolean false", () => {
-    assertEquals(cloneSchemaMutable(false), {});
+  it("returns { not: true } for boolean false", () => {
+    assertEquals(cloneSchemaMutable(false), { not: true });
   });
 
   it("returns {} for undefined", () => {
