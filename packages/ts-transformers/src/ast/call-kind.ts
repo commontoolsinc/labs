@@ -633,10 +633,7 @@ function resolveExpressionKind(
     if (ARRAY_METHOD_NAMES.has(name)) {
       // Fallback path: when symbol resolution doesn't already identify the
       // array-method family, only treat it as such for reactive receivers.
-      if (
-        isReactiveValueExpression(target.expression, checker) ||
-        isReactiveArrayMethodChain(target.expression, checker)
-      ) {
+      if (isReactiveArrayMethodReceiverExpression(target.expression, checker)) {
         return { kind: "array-method" };
       }
     }
@@ -693,17 +690,6 @@ function stripInitializerAccess(expression: ts.Expression): ts.Expression {
   return current;
 }
 
-function isReactiveArrayMethodChain(
-  expression: ts.Expression,
-  checker: ts.TypeChecker,
-): boolean {
-  const target = stripWrappers(expression);
-  const callSite = ts.isCallExpression(target)
-    ? classifyArrayMethodCallSite(target, checker)
-    : undefined;
-  return !!callSite && callSite.ownership === "reactive";
-}
-
 function isLoweredReactiveArrayMethodCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -745,42 +731,19 @@ function hasImplicitReactiveParameterContext(
     }
     if (!candidate) continue;
 
-    const callKind = detectCallKind(candidate as ts.CallExpression, checker);
+    const call = candidate as ts.CallExpression;
+    const callKind = detectCallKind(call, checker);
     if (callKind?.kind === "builder") {
       return true;
     }
 
-    if (
-      callKind?.kind === "array-method" &&
-      isImplicitReactiveArrayMethodCallback(
-        candidate as ts.CallExpression,
-        checker,
-      )
-    ) {
+    if (classifyArrayCallbackContainerCall(call, checker) ===
+      "reactive-array-method") {
       return true;
     }
   }
 
   return false;
-}
-
-function isImplicitReactiveArrayMethodCallback(
-  call: ts.CallExpression,
-  checker: ts.TypeChecker,
-): boolean {
-  if (isLoweredReactiveArrayMethodCall(call, checker)) {
-    return true;
-  }
-
-  const target = stripWrappers(call.expression);
-  if (
-    !ts.isPropertyAccessExpression(target) &&
-    !ts.isElementAccessExpression(target)
-  ) {
-    return false;
-  }
-
-  return isReactiveArrayMethodReceiverExpression(target.expression, checker);
 }
 
 function isReactiveArrayMethodReceiverExpression(
@@ -808,10 +771,7 @@ function isReactiveArrayMethodReceiverExpression(
     return false;
   }
 
-  if (
-    isReactiveOriginCall(target, checker) ||
-    isLoweredReactiveArrayMethodCall(target, checker)
-  ) {
+  if (isReactiveOriginCall(target, checker)) {
     return true;
   }
 
@@ -1254,21 +1214,31 @@ function detectCellMethodFromDeclaration(
 }
 
 function isArrayMethodDeclaration(declaration: ts.Declaration): boolean {
-  if (!hasIdentifierName(declaration)) return false;
-  if (!ARRAY_METHOD_NAMES.has(declaration.name.text)) return false;
-
-  const owner = findOwnerName(declaration);
-  if (!owner) return false;
-  return ARRAY_OWNER_NAMES.has(owner);
+  return isMethodDeclarationOwnedBy(
+    declaration,
+    ARRAY_METHOD_NAMES,
+    ARRAY_OWNER_NAMES,
+  );
 }
 
 function isOpaqueRefMethodDeclaration(declaration: ts.Declaration): boolean {
+  return isMethodDeclarationOwnedBy(
+    declaration,
+    ARRAY_METHOD_NAMES,
+    OPAQUE_REF_OWNER_NAMES,
+  );
+}
+
+function isMethodDeclarationOwnedBy(
+  declaration: ts.Declaration,
+  methodNames: ReadonlySet<string>,
+  ownerNames: ReadonlySet<string>,
+): boolean {
   if (!hasIdentifierName(declaration)) return false;
-  if (!ARRAY_METHOD_NAMES.has(declaration.name.text)) return false;
+  if (!methodNames.has(declaration.name.text)) return false;
 
   const owner = findOwnerName(declaration);
-  if (!owner) return false;
-  return OPAQUE_REF_OWNER_NAMES.has(owner);
+  return !!owner && ownerNames.has(owner);
 }
 
 function findOwnerName(node: ts.Node): string | undefined {
