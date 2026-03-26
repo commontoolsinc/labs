@@ -38,6 +38,8 @@ const ALL_PACKAGES = [...PACKAGES_WITH_SERVER, ...PACKAGES_WITHOUT_SERVER];
 // Packages that need HEADLESS=1 for browser tests
 const HEADLESS_PACKAGES = ["shell", "background-charm-service", "patterns"];
 
+let sqliteWarmupPromise: Promise<void> | undefined;
+
 async function runCommand(
   cmd: string[],
   options: {
@@ -95,6 +97,24 @@ async function startServers(
   await new Promise((resolve) => setTimeout(resolve, 3000));
 
   return true;
+}
+
+async function ensureSqliteInitialized(rootDir: string): Promise<void> {
+  sqliteWarmupPromise ??= (async () => {
+    console.log("Preloading sqlite dependency...");
+    const result = await runCommand(
+      ["deno", "task", "initialize-db"],
+      { cwd: rootDir, inheritStdio: true },
+    );
+
+    if (!result.success) {
+      throw new Error(
+        `Failed to preload sqlite dependency (exit code: ${result.code})`,
+      );
+    }
+  })();
+
+  await sqliteWarmupPromise;
 }
 
 /**
@@ -379,6 +399,10 @@ async function runPackageIntegration(
     if (pipeConsoleEnv) {
       env.PIPE_CONSOLE = pipeConsoleEnv;
     }
+  }
+
+  if (pkg === "generated-patterns" || pkg === "pattern-tests") {
+    await ensureSqliteInitialized(rootDir);
   }
 
   let result: { success: boolean; code: number };
