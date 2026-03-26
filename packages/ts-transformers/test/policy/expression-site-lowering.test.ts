@@ -381,12 +381,6 @@ Deno.test(
     );
 
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      elementAccess,
-      "jsx-expression",
-      context,
-      analyze,
-    );
 
     assertEquals(
       classifyJsxExpressionSiteRoute(elementAccess, context, analyze),
@@ -426,12 +420,6 @@ Deno.test(
     );
 
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      elementAccess,
-      "jsx-expression",
-      context,
-      analyze,
-    );
 
     assertEquals(
       classifyJsxExpressionSiteRoute(elementAccess, context, analyze),
@@ -517,12 +505,6 @@ Deno.test(
     );
 
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      objectLiteral,
-      "jsx-expression",
-      context,
-      analyze,
-    );
 
     assertEquals(
       classifyJsxExpressionSiteRoute(objectLiteral, context, analyze),
@@ -557,12 +539,6 @@ Deno.test(
     );
 
     const analyze = createDataFlowAnalyzer(checker);
-    const siteInfo = getExpressionSitePolicyInfo(
-      objectLiteral,
-      "jsx-expression",
-      context,
-      analyze,
-    );
 
     assertEquals(
       classifyJsxExpressionSiteRoute(objectLiteral, context, analyze),
