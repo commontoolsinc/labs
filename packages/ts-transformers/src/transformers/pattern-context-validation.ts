@@ -35,6 +35,7 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
+  classifyArrayMethodCallSite,
   classifyReactiveContext,
   createDataFlowAnalyzer,
   detectCallKind,
@@ -44,7 +45,6 @@ import {
   isInsideSafeCallbackWrapper,
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
-import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
 import {
   allowsRestrictedContextFunctionCallback,
   classifyCallbackSupport,
@@ -722,6 +722,7 @@ export class PatternContextValidationTransformer extends Transformer {
 
       if (ts.isCallExpression(node)) {
         const callKind = detectCallKind(node, checker);
+        const arrayMethodCallSite = classifyArrayMethodCallSite(node, checker);
 
         if (callKind) {
           // Check for computed() calls
@@ -754,27 +755,18 @@ export class PatternContextValidationTransformer extends Transformer {
             return;
           }
 
-          // Check for array method on CellLike types
-          if (callKind.kind === "array-method") {
-            // Check if this is an array method on a CellLike type (not a plain array)
-            if (ts.isPropertyAccessExpression(node.expression)) {
-              const receiverType = checker.getTypeAtLocation(
-                node.expression.expression,
-              );
-              if (this.isCellLikeOrOpaqueRefType(receiverType, checker)) {
-                context.reportDiagnostic({
-                  severity: "error",
-                  type: "standalone-function:reactive-operation",
-                  message:
-                    `.map() on reactive types is not allowed inside standalone functions. ` +
-                    `Standalone functions cannot capture reactive closures. ` +
-                    `Move the .map() call to the pattern body, or use patternTool() to enable automatic closure capture. ` +
-                    `If this is an explicit Cell/Writable value and eager mapping is acceptable, use <cell>.get().map(...).`,
-                  node,
-                });
-                return;
-              }
-            }
+          if (arrayMethodCallSite?.ownership === "reactive") {
+            context.reportDiagnostic({
+              severity: "error",
+              type: "standalone-function:reactive-operation",
+              message:
+                `.${arrayMethodCallSite.family}() on reactive types is not allowed inside standalone functions. ` +
+                `Standalone functions cannot capture reactive closures. ` +
+                `Move the .${arrayMethodCallSite.family}() call to the pattern body, or use patternTool() to enable automatic closure capture. ` +
+                `If this is an explicit Cell/Writable value and eager ${arrayMethodCallSite.family}ing is acceptable, use <cell>.get().${arrayMethodCallSite.family}(...).`,
+              node,
+            });
+            return;
           }
         }
       }
@@ -785,36 +777,5 @@ export class PatternContextValidationTransformer extends Transformer {
     if (func.body) {
       visitBody(func.body);
     }
-  }
-
-  /**
-   * Checks if a type is a CellLike or OpaqueRef type that would require
-   * reactive handling in .map() calls inside standalone functions.
-   *
-   * Includes OpaqueRef/OpaqueRefMethods because standalone helper functions
-   * may accept pattern parameters (typed as OpaqueRef<T[]>) and call .map()
-   * on them.
-   */
-  private isCellLikeOrOpaqueRefType(
-    type: ts.Type,
-    checker: ts.TypeChecker,
-  ): boolean {
-    // Check if it's an OpaqueRef type
-    if (isOpaqueRefType(type, checker)) {
-      return true;
-    }
-
-    // Check the type name for Cell-like types
-    const typeStr = checker.typeToString(type);
-    const cellLikePatterns = [
-      "Cell<",
-      "OpaqueCell<",
-      "Writable<",
-      "Stream<",
-      "OpaqueRef<",
-      "OpaqueRefMethods<",
-    ];
-
-    return cellLikePatterns.some((pattern) => typeStr.includes(pattern));
   }
 }

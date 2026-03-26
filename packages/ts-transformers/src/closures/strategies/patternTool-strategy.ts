@@ -528,8 +528,9 @@ function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
  * The isOpaqueRefType brand check is included as a safety net; it shouldn't
  * match in practice because isModuleScopedDeclaration filters first.
  *
- * See also: isCellLikeOrOpaqueRefType in pattern-context-validation.ts,
- * which additionally matches OpaqueRef for validating .map() receivers.
+ * See also: standalone-function validation in pattern-context-validation.ts,
+ * which now relies on shared array-method ownership classification for
+ * reactive receiver checks.
  */
 function isCellLikeType(type: ts.Type, checker: ts.TypeChecker): boolean {
   if (isOpaqueRefType(type, checker)) {
