@@ -47,7 +47,6 @@ import {
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
 import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
-import { classifyUnsupportedCallRoot } from "./call-root-support.ts";
 import {
   allowsRestrictedContextFunctionCallback,
   classifyCallbackSupport,
@@ -58,9 +57,8 @@ import {
   isTopmostMemberAccess,
 } from "./opaque-roots.ts";
 import {
+  classifyUnsupportedExpressionSiteCallRoot,
   findLowerableExpressionSite,
-  getExpressionContainerKind,
-  getExpressionSitePolicyInfo,
 } from "./expression-site-policy.ts";
 
 const EMPTY_OPAQUE_ROOTS = new Set<string>();
@@ -136,7 +134,7 @@ export class PatternContextValidationTransformer extends Transformer {
         // Check for lift/handler inside pattern
         this.validateBuilderPlacement(node, context, checker);
 
-        const unsupportedCallRoot = this.getUnsupportedCallRoot(
+        const unsupportedCallRoot = classifyUnsupportedExpressionSiteCallRoot(
           node,
           context,
           analyze,
@@ -174,30 +172,6 @@ export class PatternContextValidationTransformer extends Transformer {
     return ts.visitNode(context.sourceFile, visit) as ts.SourceFile;
   }
 
-  private getUnsupportedCallRoot(
-    node: ts.CallExpression,
-    context: TransformationContext,
-    analyze: ReturnType<typeof createDataFlowAnalyzer>,
-  ) {
-    if (!isInRestrictedReactiveContext(node, context.checker, context)) {
-      return undefined;
-    }
-
-    const containerKind = getExpressionContainerKind(node);
-    if (!containerKind) {
-      return undefined;
-    }
-
-    const siteInfo = getExpressionSitePolicyInfo(
-      node,
-      containerKind,
-      context,
-      analyze,
-    );
-
-    return classifyUnsupportedCallRoot(node, siteInfo, context);
-  }
-
   private isOptionalCallTargetHandledByCallRootPolicy(
     node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
     context: TransformationContext,
@@ -212,7 +186,11 @@ export class PatternContextValidationTransformer extends Transformer {
       return false;
     }
 
-    return this.getUnsupportedCallRoot(parent, context, analyze) ===
+    return classifyUnsupportedExpressionSiteCallRoot(
+      parent,
+      context,
+      analyze,
+    ) ===
       "optional-call";
   }
 

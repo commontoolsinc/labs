@@ -15,7 +15,6 @@ import {
   cloneKeyExpression,
   isCommonToolsKeyExpression,
 } from "../utils/reactive-keys.ts";
-import { classifyUnsupportedCallRoot } from "./call-root-support.ts";
 import {
   collectDestructureBindings,
   createKeyCall,
@@ -40,8 +39,7 @@ import {
   findPendingComputeWrapCandidate,
 } from "./expression-rewrite/emitters/compute-wrap-invariants.ts";
 import {
-  getExpressionContainerKind,
-  getExpressionSitePolicyInfo,
+  classifyUnsupportedExpressionSiteCallRoot,
 } from "./expression-site-policy.ts";
 
 const KNOWN_PATH_TERMINAL_METHODS = new Set([
@@ -163,21 +161,6 @@ export function rewritePatternBody(
   const diagnosticsSeen = new Set<number>();
   const syntheticDiagnosticsSeen = new WeakSet<ts.Node>();
   const analyze = createDataFlowAnalyzer(context.checker);
-  const getUnsupportedCallRoot = (node: ts.CallExpression) => {
-    const containerKind = getExpressionContainerKind(node);
-    if (!containerKind) {
-      return undefined;
-    }
-
-    const siteInfo = getExpressionSitePolicyInfo(
-      node,
-      containerKind,
-      context,
-      analyze,
-    );
-
-    return classifyUnsupportedCallRoot(node, siteInfo, context);
-  };
   const resolveDiagnosticNode = (node: ts.Node): ts.Node => {
     const original = ts.getOriginalNode(node);
     if (original.pos >= 0) {
@@ -549,7 +532,11 @@ export function rewritePatternBody(
         const parentCall = visited.parent;
         const unsupportedCallRoot = parentCall &&
             ts.isCallExpression(parentCall)
-          ? getUnsupportedCallRoot(parentCall)
+          ? classifyUnsupportedExpressionSiteCallRoot(
+            parentCall,
+            context,
+            analyze,
+          )
           : undefined;
 
         if (
@@ -616,7 +603,11 @@ export function rewritePatternBody(
     }
 
     if (ts.isCallExpression(visited)) {
-      const unsupportedCallRoot = getUnsupportedCallRoot(visited);
+      const unsupportedCallRoot = classifyUnsupportedExpressionSiteCallRoot(
+        visited,
+        context,
+        analyze,
+      );
       if (unsupportedCallRoot === "unsupported-receiver-method") {
         const reactiveContext = classifyReactiveContext(
           visited,

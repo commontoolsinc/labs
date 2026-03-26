@@ -7,6 +7,7 @@ import {
   findEnclosingCallbackContext,
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
+  isInRestrictedReactiveContext,
   isWildcardTraversalCall,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
@@ -18,7 +19,11 @@ import {
   isReactiveArrayMethodCallbackSupport,
   supportsPatternOwnedWrapperCallbackSite,
 } from "./callback-support.ts";
-import { classifySupportedCallRoot } from "./call-root-support.ts";
+import {
+  classifySupportedCallRoot,
+  classifyUnsupportedCallRoot,
+  type UnsupportedCallRootKind,
+} from "./call-root-support.ts";
 import { shouldDeferFallbackMapReceiverRewrite } from "./expression-rewrite/fallback-array-method-rewrite.ts";
 import {
   isJsxLocalRewriteContainer,
@@ -765,6 +770,39 @@ export function classifyJsxExpressionSiteRoute(
   return { route: "shared-post-closure" };
 }
 
+export function classifyUnsupportedExpressionSiteCallRoot(
+  expression: ts.CallExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): UnsupportedCallRootKind | undefined {
+  if (!isInRestrictedReactiveContext(expression, context.checker, context)) {
+    return undefined;
+  }
+
+  const containerKind = getExpressionContainerKind(expression);
+  if (!containerKind) {
+    return undefined;
+  }
+
+  const siteInfo = getExpressionSitePolicyInfo(
+    expression,
+    containerKind,
+    context,
+    analyze,
+  );
+
+  return classifyUnsupportedCallRoot(expression, siteInfo, context);
+}
+
+function hasPatternExpressionSitePreconditions(
+  siteInfo: ExpressionSitePolicyInfo,
+): boolean {
+  return siteInfo.hasAuthoredSourceSite &&
+    !siteInfo.withinEventHandlerJsxAttribute &&
+    siteInfo.reactiveContext.kind === "pattern" &&
+    !siteInfo.deferredJsxArrayMethod;
+}
+
 export function canRewriteExpressionSite(
   expression: ts.Expression,
   containerKind: ExpressionContainerKind,
@@ -777,19 +815,7 @@ export function canRewriteExpressionSite(
     context,
     analyze,
   );
-  if (!siteInfo.hasAuthoredSourceSite) {
-    return false;
-  }
-
-  if (siteInfo.withinEventHandlerJsxAttribute) {
-    return false;
-  }
-
-  if (siteInfo.reactiveContext.kind !== "pattern") {
-    return false;
-  }
-
-  if (siteInfo.deferredJsxArrayMethod) {
+  if (!hasPatternExpressionSitePreconditions(siteInfo)) {
     return false;
   }
 
@@ -864,25 +890,11 @@ function canDeferExpressionSiteToHelperBoundary(
   siteInfo: ExpressionSitePolicyInfo,
   analysis: ReturnType<AnalyzeFn>,
 ): boolean {
-  if (!siteInfo.helperBoundaryKind) {
-    return false;
-  }
-
   if (
-    !siteInfo.hasAuthoredSourceSite || siteInfo.withinEventHandlerJsxAttribute
+    !siteInfo.helperBoundaryKind ||
+    !hasPatternExpressionSitePreconditions(siteInfo) ||
+    siteInfo.syntheticComputeOwned
   ) {
-    return false;
-  }
-
-  if (siteInfo.syntheticComputeOwned) {
-    return false;
-  }
-
-  if (siteInfo.reactiveContext.kind !== "pattern") {
-    return false;
-  }
-
-  if (siteInfo.deferredJsxArrayMethod) {
     return false;
   }
 
@@ -905,21 +917,11 @@ export function canRewriteHelperOwnedExpressionSite(
     context,
     analyze,
   );
-  if (!siteInfo.helperBoundaryKind) {
-    return false;
-  }
-
   if (
-    !siteInfo.hasAuthoredSourceSite || siteInfo.withinEventHandlerJsxAttribute
+    !siteInfo.helperBoundaryKind ||
+    !hasPatternExpressionSitePreconditions(siteInfo) ||
+    siteInfo.syntheticComputeOwned
   ) {
-    return false;
-  }
-
-  if (siteInfo.syntheticComputeOwned || siteInfo.deferredJsxArrayMethod) {
-    return false;
-  }
-
-  if (siteInfo.reactiveContext.kind !== "pattern") {
     return false;
   }
 
@@ -979,13 +981,7 @@ function canLowerOptionalAccessExpressionSite(
     analyze,
   );
 
-  if (
-    !siteInfo.hasAuthoredSourceSite || siteInfo.withinEventHandlerJsxAttribute
-  ) {
-    return false;
-  }
-
-  if (siteInfo.reactiveContext.kind !== "pattern") {
+  if (!hasPatternExpressionSitePreconditions(siteInfo)) {
     return false;
   }
 
