@@ -1270,7 +1270,7 @@ const p = pattern((input) => input?.foo());
       diagnostic.type === "pattern-context:optional-chaining"
     );
 
-    assert(optionalDiagnostics.length >= 1);
+    assertEquals(optionalDiagnostics.length, 1);
     assertStringIncludes(optionalDiagnostics[0]!.message, "Optional chaining");
   },
 );

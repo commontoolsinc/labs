@@ -10,6 +10,16 @@ export type SupportedCallRootKind =
   | "pattern-owned-receiver-method"
   | "array-method-owned-receiver-method";
 
+export type UnsupportedCallRootKind =
+  | "restricted-get-call"
+  | "optional-call"
+  | "unsupported-receiver-method";
+
+export type CallRootPolicyDecision =
+  | { kind: "supported"; supportedKind: SupportedCallRootKind }
+  | { kind: "unsupported"; unsupportedKind: UnsupportedCallRootKind }
+  | { kind: "none" };
+
 function hasOptionalChainedCallee(
   callee: ts.LeftHandSideExpression,
 ): boolean {
@@ -35,65 +45,106 @@ export function classifySupportedCallRoot(
   siteInfo: ExpressionSitePolicyInfo,
   context: TransformationContext,
 ): SupportedCallRootKind | undefined {
+  const decision = classifyCallRootPolicy(expression, siteInfo, context);
+  return decision.kind === "supported" ? decision.supportedKind : undefined;
+}
+
+export function classifyUnsupportedCallRoot(
+  expression: ts.Expression,
+  siteInfo: ExpressionSitePolicyInfo,
+  context: TransformationContext,
+): UnsupportedCallRootKind | undefined {
+  const decision = classifyCallRootPolicy(expression, siteInfo, context);
+  return decision.kind === "unsupported" ? decision.unsupportedKind : undefined;
+}
+
+export function classifyCallRootPolicy(
+  expression: ts.Expression,
+  siteInfo: ExpressionSitePolicyInfo,
+  context: TransformationContext,
+): CallRootPolicyDecision {
   if (!ts.isCallExpression(expression)) {
-    return undefined;
+    return { kind: "none" };
   }
 
   if (classifyOpaquePathTerminalCall(expression) === "get") {
-    if (!siteInfo.helperBoundaryKind) {
-      return undefined;
+    if (siteInfo.helperBoundaryKind) {
+      const callee = expression.expression;
+      if (ts.isPropertyAccessExpression(callee)) {
+        try {
+          const receiverType = context.checker.getTypeAtLocation(
+            callee.expression,
+          );
+          const cellKind = getCellKind(receiverType, context.checker);
+          if (cellKind === "cell" || cellKind === "stream") {
+            return {
+              kind: "supported",
+              supportedKind: "helper-owned-explicit-read",
+            };
+          }
+        } catch {
+          // Fall through to the shared unsupported decision below.
+        }
+      }
     }
 
-    const callee = expression.expression;
-    if (!ts.isPropertyAccessExpression(callee)) {
-      return undefined;
+    if (siteInfo.reactiveContext.kind === "pattern") {
+      return {
+        kind: "unsupported",
+        unsupportedKind: "restricted-get-call",
+      };
     }
 
-    try {
-      const receiverType = context.checker.getTypeAtLocation(callee.expression);
-      const cellKind = getCellKind(receiverType, context.checker);
-      return cellKind === "cell" || cellKind === "stream"
-        ? "helper-owned-explicit-read"
-        : undefined;
-    } catch {
-      return undefined;
-    }
+    return { kind: "none" };
   }
 
   if (
-    siteInfo.reactiveContext.kind !== "pattern" ||
-    siteInfo.callRootKind !== "receiver-method"
+    siteInfo.reactiveContext.kind !== "pattern"
   ) {
-    return undefined;
+    return { kind: "none" };
+  }
+
+  if (
+    siteInfo.callRootKind === "optional-call" ||
+    hasOptionalChainedCallee(expression.expression)
+  ) {
+    return {
+      kind: "unsupported",
+      unsupportedKind: "optional-call",
+    };
+  }
+
+  if (siteInfo.callRootKind !== "receiver-method") {
+    return { kind: "none" };
   }
 
   if (classifyOpaquePathTerminalCall(expression)) {
-    return undefined;
+    return { kind: "none" };
   }
 
   const callee = expression.expression;
-  if (
-    hasOptionalChainedCallee(callee) ||
-    hasOpaquePathTerminalReceiverChain(callee)
-  ) {
-    return undefined;
+  if (hasOpaquePathTerminalReceiverChain(callee)) {
+    return { kind: "none" };
   }
 
   if (siteInfo.arrayMethodOwned) {
     return siteInfo.helperBoundaryKind
-      ? undefined
-      : "array-method-owned-receiver-method";
+      ? { kind: "unsupported", unsupportedKind: "unsupported-receiver-method" }
+      : {
+        kind: "supported",
+        supportedKind: "array-method-owned-receiver-method",
+      };
   }
 
   if (siteInfo.helperBoundaryKind) {
     return siteInfo.reactiveContext.owner === "pattern" ||
         siteInfo.reactiveContext.owner === "render"
-      ? "helper-owned-receiver-method"
-      : undefined;
+      ? { kind: "supported", supportedKind: "helper-owned-receiver-method" }
+      : { kind: "unsupported", unsupportedKind: "unsupported-receiver-method" };
   }
 
   return siteInfo.reactiveContext.owner === "pattern" ||
       siteInfo.reactiveContext.owner === "render"
-    ? "pattern-owned-receiver-method"
-    : undefined;
+    ? { kind: "supported", supportedKind: "pattern-owned-receiver-method" }
+    : { kind: "unsupported", unsupportedKind: "unsupported-receiver-method" };
 }

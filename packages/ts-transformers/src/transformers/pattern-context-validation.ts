@@ -46,7 +46,7 @@ import {
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
 import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
-import { classifySupportedCallRoot } from "./call-root-support.ts";
+import { classifyUnsupportedCallRoot } from "./call-root-support.ts";
 import {
   addBindingTargetSymbols,
   collectLocalOpaqueRootSymbols,
@@ -55,6 +55,7 @@ import {
 } from "./opaque-roots.ts";
 import {
   findLowerableExpressionSite,
+  getExpressionContainerKind,
   getExpressionSitePolicyInfo,
 } from "./expression-site-lowering.ts";
 
@@ -107,6 +108,11 @@ export class PatternContextValidationTransformer extends Transformer {
         node.questionDotToken
       ) {
         if (
+          !this.isOptionalCallTargetHandledByCallRootPolicy(
+            node,
+            context,
+            analyze,
+          ) &&
           isInRestrictedReactiveContext(node, checker, context) &&
           !findLowerableExpressionSite(node, context, analyze)
         ) {
@@ -126,16 +132,21 @@ export class PatternContextValidationTransformer extends Transformer {
         // Check for lift/handler inside pattern
         this.validateBuilderPlacement(node, context, checker);
 
-        // Check for .get() calls
-        if (
-          this.isGetCall(node) &&
-          isInRestrictedReactiveContext(node, checker, context) &&
-          !this.isSupportedHelperOwnedCellGetCall(
+        const unsupportedCallRoot = this.getUnsupportedCallRoot(
+          node,
+          context,
+          analyze,
+        );
+        if (unsupportedCallRoot === "optional-call") {
+          context.reportDiagnostic({
+            severity: "error",
+            type: "pattern-context:optional-chaining",
+            message:
+              `Optional chaining '?.' is not allowed in reactive context. ` +
+              `Use ifElse() or wrap in computed() for conditional access.`,
             node,
-            context,
-            analyze,
-          )
-        ) {
+          });
+        } else if (unsupportedCallRoot === "restricted-get-call") {
           context.reportDiagnostic({
             severity: "error",
             type: "pattern-context:get-call",
@@ -159,41 +170,46 @@ export class PatternContextValidationTransformer extends Transformer {
     return ts.visitNode(context.sourceFile, visit) as ts.SourceFile;
   }
 
-  /**
-   * Checks if a call expression is a .get() call
-   */
-  private isGetCall(node: ts.CallExpression): boolean {
-    const expr = node.expression;
-    return (
-      ts.isPropertyAccessExpression(expr) &&
-      expr.name.text === "get" &&
-      node.arguments.length === 0
-    );
-  }
-
-  private isSupportedHelperOwnedCellGetCall(
+  private getUnsupportedCallRoot(
     node: ts.CallExpression,
     context: TransformationContext,
     analyze: ReturnType<typeof createDataFlowAnalyzer>,
-  ): boolean {
-    if (!this.isGetCall(node)) {
-      return false;
+  ) {
+    if (!isInRestrictedReactiveContext(node, context.checker, context)) {
+      return undefined;
     }
 
-    const lowerableSite = findLowerableExpressionSite(node, context, analyze);
-    if (!lowerableSite || lowerableSite.expression !== node) {
-      return false;
+    const containerKind = getExpressionContainerKind(node);
+    if (!containerKind) {
+      return undefined;
     }
 
     const siteInfo = getExpressionSitePolicyInfo(
-      lowerableSite.expression,
-      lowerableSite.containerKind,
+      node,
+      containerKind,
       context,
       analyze,
     );
 
-    return classifySupportedCallRoot(node, siteInfo, context) ===
-      "helper-owned-explicit-read";
+    return classifyUnsupportedCallRoot(node, siteInfo, context);
+  }
+
+  private isOptionalCallTargetHandledByCallRootPolicy(
+    node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+    context: TransformationContext,
+    analyze: ReturnType<typeof createDataFlowAnalyzer>,
+  ): boolean {
+    if (!node.questionDotToken) {
+      return false;
+    }
+
+    const parent = node.parent;
+    if (!parent || !ts.isCallExpression(parent) || parent.expression !== node) {
+      return false;
+    }
+
+    return this.getUnsupportedCallRoot(parent, context, analyze) ===
+      "optional-call";
   }
 
   /**

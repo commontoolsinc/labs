@@ -20,6 +20,7 @@ import {
   cloneKeyExpression,
   isCommonToolsKeyExpression,
 } from "../utils/reactive-keys.ts";
+import { classifyUnsupportedCallRoot } from "./call-root-support.ts";
 import {
   collectDestructureBindings,
   createKeyCall,
@@ -43,6 +44,10 @@ import {
   assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
 } from "./expression-rewrite/emitters/compute-wrap-invariants.ts";
+import {
+  getExpressionContainerKind,
+  getExpressionSitePolicyInfo,
+} from "./expression-site-lowering.ts";
 
 const KNOWN_PATH_TERMINAL_METHODS = new Set([
   "set",
@@ -149,19 +154,6 @@ function reportComputationError(
   });
 }
 
-function reportOptionalError(
-  context: TransformationContext,
-  node: ts.Node,
-  message: string,
-): void {
-  context.reportDiagnostic({
-    severity: "error",
-    type: "pattern-context:optional-chaining",
-    message,
-    node,
-  });
-}
-
 function reportReceiverMethodError(
   context: TransformationContext,
   node: ts.Node,
@@ -231,6 +223,21 @@ function rewritePatternBody(
   const diagnosticsSeen = new Set<number>();
   const syntheticDiagnosticsSeen = new WeakSet<ts.Node>();
   const analyze = createDataFlowAnalyzer(context.checker);
+  const getUnsupportedCallRoot = (node: ts.CallExpression) => {
+    const containerKind = getExpressionContainerKind(node);
+    if (!containerKind) {
+      return undefined;
+    }
+
+    const siteInfo = getExpressionSitePolicyInfo(
+      node,
+      containerKind,
+      context,
+      analyze,
+    );
+
+    return classifyUnsupportedCallRoot(node, siteInfo, context);
+  };
   const resolveDiagnosticNode = (node: ts.Node): ts.Node => {
     const original = ts.getOriginalNode(node);
     if (original.pos >= 0) {
@@ -240,7 +247,7 @@ function rewritePatternBody(
   };
   const reportOnce = (
     node: ts.Node,
-    type: "computation" | "optional" | "receiver-method",
+    type: "computation" | "receiver-method",
     message: string,
   ): void => {
     const diagnosticNode = resolveDiagnosticNode(node);
@@ -254,8 +261,6 @@ function rewritePatternBody(
     }
     if (type === "computation") {
       reportComputationError(context, diagnosticNode, message);
-    } else if (type === "optional") {
-      reportOptionalError(context, diagnosticNode, message);
     } else {
       reportReceiverMethodError(context, diagnosticNode, message);
     }
@@ -604,21 +609,16 @@ function rewritePatternBody(
 
       if (ts.isPropertyAccessExpression(visited)) {
         const isCallTarget = callTargets.has(node);
+        const parentCall = visited.parent;
+        const unsupportedCallRoot = parentCall &&
+            ts.isCallExpression(parentCall)
+          ? getUnsupportedCallRoot(parentCall)
+          : undefined;
 
         if (
           KNOWN_PATH_TERMINAL_METHODS.has(visited.name.text) && isCallTarget
         ) {
-          const parentCall = visited.parent;
-          if (
-            (parentCall && ts.isCallExpression(parentCall) &&
-              parentCall.questionDotToken) ||
-            visited.questionDotToken
-          ) {
-            reportOnce(
-              visited,
-              "optional",
-              "Optional-call forms are not lowerable in pattern context. Move this access into computed().",
-            );
+          if (unsupportedCallRoot === "optional-call") {
             return visited;
           }
 
@@ -642,39 +642,11 @@ function rewritePatternBody(
         }
 
         if (isCallTarget) {
-          const parentCall = visited.parent;
           if (
-            (parentCall && ts.isCallExpression(parentCall) &&
-              parentCall.questionDotToken) ||
-            visited.questionDotToken
+            unsupportedCallRoot === "optional-call" ||
+            unsupportedCallRoot === "unsupported-receiver-method"
           ) {
-            reportOnce(
-              visited,
-              "optional",
-              "Optional-call forms are not lowerable in pattern context. Move this access into computed().",
-            );
             return visited;
-          }
-
-          if (parentCall && ts.isCallExpression(parentCall)) {
-            const reactiveContext = classifyReactiveContext(
-              parentCall,
-              context.checker,
-              context,
-            );
-            if (
-              reactiveContext.kind === "pattern" &&
-              (reactiveContext.owner === "pattern" ||
-                reactiveContext.owner === "render") &&
-              !reactiveContext.inJsxExpression
-            ) {
-              reportOnce(
-                parentCall,
-                "receiver-method",
-                "Method calls on reactive values are not yet supported directly in non-JSX pattern bodies. Move this call into computed(() => ...), derive(...), or another safe wrapper.",
-              );
-              return visited;
-            }
           }
 
           reportOnce(
@@ -707,20 +679,29 @@ function rewritePatternBody(
     }
 
     if (ts.isCallExpression(visited)) {
-      if (visited.questionDotToken) {
-        const info = getOpaqueAccessInfo(visited.expression, context);
+      const unsupportedCallRoot = getUnsupportedCallRoot(visited);
+      if (unsupportedCallRoot === "unsupported-receiver-method") {
+        const reactiveContext = classifyReactiveContext(
+          visited,
+          context.checker,
+          context,
+        );
         if (
-          isOpaqueRootInfo(
-            info,
-            activeOpaqueRoots,
-            opaqueRootSymbols,
-            context,
-          )
+          reactiveContext.kind === "pattern" &&
+          (reactiveContext.owner === "pattern" ||
+            reactiveContext.owner === "render") &&
+          !reactiveContext.inJsxExpression
         ) {
           reportOnce(
             visited,
-            "optional",
-            "Optional-call forms are not lowerable in pattern context. Move this expression into computed().",
+            "receiver-method",
+            "Method calls on reactive values are not yet supported directly in non-JSX pattern bodies. Move this call into computed(() => ...), derive(...), or another safe wrapper.",
+          );
+        } else {
+          reportOnce(
+            visited,
+            "receiver-method",
+            "Method calls on opaque pattern values are not lowerable. Move this call into computed().",
           );
         }
       }
