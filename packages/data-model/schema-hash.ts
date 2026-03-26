@@ -201,7 +201,7 @@ seedBooleanInterns();
  */
 export function internSchema(
   schema: JSONSchema,
-  wantSchemaAndHash: false,
+  wantSchemaAndHash?: false,
 ): JSONSchema;
 export function internSchema(
   schema: JSONSchema,
@@ -281,7 +281,7 @@ function internSchemaReturningSchemaAndHash(
  */
 export function findInternedSchema(
   hash: FabricHash | string,
-  wantSchemaAndHash: false,
+  wantSchemaAndHash?: false,
 ): JSONSchema | undefined;
 export function findInternedSchema(
   hash: FabricHash | string,
