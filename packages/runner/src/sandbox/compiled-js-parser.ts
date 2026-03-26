@@ -312,6 +312,15 @@ export function findTopLevelEquals(
       state.bracketDepth === 0 &&
       source[cursor + 1] !== "=" &&
       source[cursor + 1] !== ">" &&
+      source[cursor - 1] !== "+" &&
+      source[cursor - 1] !== "-" &&
+      source[cursor - 1] !== "*" &&
+      source[cursor - 1] !== "/" &&
+      source[cursor - 1] !== "%" &&
+      source[cursor - 1] !== "^" &&
+      source[cursor - 1] !== "&" &&
+      source[cursor - 1] !== "|" &&
+      source[cursor - 1] !== "?" &&
       source[cursor - 1] !== "!" &&
       source[cursor - 1] !== "<" &&
       source[cursor - 1] !== ">"

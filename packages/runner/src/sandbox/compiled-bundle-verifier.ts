@@ -1083,7 +1083,7 @@ function isStringDirective(source: string): boolean {
 }
 
 function isFunctionDeclarationStatement(source: string): boolean {
-  return /^(?:async\s+)?function\b/.test(source.trimStart());
+  return getFunctionDeclarationName(source) !== undefined;
 }
 
 function isClassDeclarationStatement(source: string): boolean {

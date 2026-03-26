@@ -198,7 +198,8 @@ describe("pattern", () => {
     const json = JSON.stringify(doublePattern);
     const parsed = JSON.parse(json);
     expect(json.length).toBeGreaterThan(200);
-    expect(parsed.nodes[0].module.implementation).toBeUndefined();
+    expect("implementation" in parsed.nodes[0].module).toBe(false);
+    expect("implementationRef" in parsed.nodes[0].module).toBe(true);
     expect(typeof parsed.nodes[0].module.implementationRef).toBe("string");
   });
 

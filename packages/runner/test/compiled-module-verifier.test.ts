@@ -170,6 +170,24 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("rejects compiled top-level generator declarations", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    function* foo() {
+      yield 1;
+    }
+    exports.foo = foo;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Compiled AMD module contains unsupported top-level executable code",
+    );
+  });
+
   it("accepts canonical compiled named reexports from imports", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
