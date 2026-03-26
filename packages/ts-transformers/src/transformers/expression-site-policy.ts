@@ -240,16 +240,6 @@ export function classifyCallExpressionRoot(
   return "other";
 }
 
-function isSharedPostClosureCallRoot(
-  expression: ts.Expression,
-  context: TransformationContext,
-  analyze: AnalyzeFn,
-): boolean {
-  return ts.isCallExpression(expression) &&
-    classifyCallExpressionRoot(expression, context, analyze) ===
-      "free-function";
-}
-
 function isSharedJsxLocalHelperCallRoot(
   expression: ts.Expression,
   context: TransformationContext,
@@ -838,11 +828,12 @@ export function canRewriteExpressionSite(
     siteInfo,
     context,
   );
+  const sharedPostClosureCallRoot = siteInfo.callRootKind === "free-function";
 
   if (
     containerKind !== "jsx-expression" &&
     !siteInfo.controlFlowRewriteRoot &&
-    !isSharedPostClosureCallRoot(expression, context, analyze) &&
+    !sharedPostClosureCallRoot &&
     !isPostClosureWrapperRewriteExpression(expression, context) &&
     supportedCallRootKind !== "pattern-owned-receiver-method"
   ) {
@@ -852,7 +843,7 @@ export function canRewriteExpressionSite(
   if (
     containerKind !== "jsx-expression" &&
     !siteInfo.controlFlowRewriteRoot &&
-    !isSharedPostClosureCallRoot(expression, context, analyze) &&
+    !sharedPostClosureCallRoot &&
     !isEligiblePatternOwnedWrapperCallbackSite(expression, context) &&
     supportedCallRootKind !== "pattern-owned-receiver-method"
   ) {

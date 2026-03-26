@@ -112,6 +112,27 @@ function findFirstNode<T extends ts.Node>(
   return found;
 }
 
+type JsxRoute = ReturnType<typeof classifyJsxExpressionSiteRoute>;
+
+interface JsxRouteCase {
+  name: string;
+  source: string;
+  find: (sourceFile: ts.SourceFile) => ts.Expression;
+  expected: JsxRoute;
+}
+
+function assertJsxRouteCase(testCase: JsxRouteCase): void {
+  const { sourceFile, checker, context } = createProgramAndContext(
+    testCase.source,
+  );
+  const analyze = createDataFlowAnalyzer(checker);
+
+  assertEquals(
+    classifyJsxExpressionSiteRoute(testCase.find(sourceFile), context, analyze),
+    testCase.expected,
+  );
+}
+
 Deno.test(
   "Expression site policy: array-method callback call arguments are tracked separately from helper-owned branches",
   () => {
@@ -966,10 +987,11 @@ Deno.test(
   },
 );
 
-Deno.test(
-  "Expression site policy: plain-array callback JSX arithmetic roots use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+const sharedPostClosureJsxRouteCases: JsxRouteCase[] = [
+  {
+    name:
+      "plain-array callback JSX arithmetic roots use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -986,32 +1008,25 @@ Deno.test(
       const view = pattern((state: any) => (
         <div>{[1, 2, 3].map((n: number) => <span>{n * state.multiplier}</span>)}</div>
       ));
-    `);
-
-    const binary = findFirstNode(
-      sourceFile,
-      (node): node is ts.BinaryExpression =>
-        ts.isBinaryExpression(node) &&
-        ts.isIdentifier(node.left) &&
-        node.left.text === "n" &&
-        ts.isPropertyAccessExpression(node.right) &&
-        ts.isIdentifier(node.right.expression) &&
-        node.right.expression.text === "state" &&
-        node.right.name.text === "multiplier",
-    );
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(
-      classifyJsxExpressionSiteRoute(binary, context, analyze),
-      { route: "shared-post-closure" },
-    );
+    `,
+    find: (sourceFile) =>
+      findFirstNode(
+        sourceFile,
+        (node): node is ts.BinaryExpression =>
+          ts.isBinaryExpression(node) &&
+          ts.isIdentifier(node.left) &&
+          node.left.text === "n" &&
+          ts.isPropertyAccessExpression(node.right) &&
+          ts.isIdentifier(node.right.expression) &&
+          node.right.expression.text === "state" &&
+          node.right.name.text === "multiplier",
+      ),
+    expected: { route: "shared-post-closure" },
   },
-);
-
-Deno.test(
-  "Expression site policy: JSX wrapper roots over reactive array-method results use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "JSX wrapper roots over reactive array-method results use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -1023,28 +1038,21 @@ Deno.test(
       const view = pattern((state: any) => (
         <div>{state.items.filter((item: any) => item.active).length}</div>
       ));
-    `);
-
-    const propertyAccess = findFirstNode(
-      sourceFile,
-      (node): node is ts.PropertyAccessExpression =>
-        ts.isPropertyAccessExpression(node) &&
-        node.name.text === "length" &&
-        ts.isCallExpression(node.expression),
-    );
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(
-      classifyJsxExpressionSiteRoute(propertyAccess, context, analyze),
-      { route: "shared-post-closure" },
-    );
+    `,
+    find: (sourceFile) =>
+      findFirstNode(
+        sourceFile,
+        (node): node is ts.PropertyAccessExpression =>
+          ts.isPropertyAccessExpression(node) &&
+          node.name.text === "length" &&
+          ts.isCallExpression(node.expression),
+      ),
+    expected: { route: "shared-post-closure" },
   },
-);
-
-Deno.test(
-  "Expression site policy: JSX comparison wrappers over reactive array-method results use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "JSX comparison wrappers over reactive array-method results use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -1056,26 +1064,20 @@ Deno.test(
       const view = pattern((state: any) => (
         <div>{state.items.filter((item: any) => item.active).length > 0}</div>
       ));
-    `);
-
-    const binary = findFirstNode(
-      sourceFile,
-      (node): node is ts.BinaryExpression =>
-        ts.isBinaryExpression(node) &&
-        node.operatorToken.kind === ts.SyntaxKind.GreaterThanToken,
-    );
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(classifyJsxExpressionSiteRoute(binary, context, analyze), {
-      route: "shared-post-closure",
-    });
+    `,
+    find: (sourceFile) =>
+      findFirstNode(
+        sourceFile,
+        (node): node is ts.BinaryExpression =>
+          ts.isBinaryExpression(node) &&
+          node.operatorToken.kind === ts.SyntaxKind.GreaterThanToken,
+      ),
+    expected: { route: "shared-post-closure" },
   },
-);
-
-Deno.test(
-  "Expression site policy: pure JSX ternary branches over map subtrees use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "pure JSX ternary branches over map subtrees use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -1096,24 +1098,14 @@ Deno.test(
             )}
         </div>
       ));
-    `);
-
-    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(
-      classifyJsxExpressionSiteRoute(conditional, context, analyze),
-      {
-        route: "shared-post-closure",
-      },
-    );
+    `,
+    find: (sourceFile) => findFirstNode(sourceFile, ts.isConditionalExpression),
+    expected: { route: "shared-post-closure" },
   },
-);
-
-Deno.test(
-  "Expression site policy: length guards over JSX-local map containers use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "length guards over JSX-local map containers use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -1134,26 +1126,20 @@ Deno.test(
           </div>
         );
       });
-    `);
-
-    const logical = findFirstNode(
-      sourceFile,
-      (node): node is ts.BinaryExpression =>
-        ts.isBinaryExpression(node) &&
-        node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken,
-    );
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(classifyJsxExpressionSiteRoute(logical, context, analyze), {
-      route: "shared-post-closure",
-    });
+    `,
+    find: (sourceFile) =>
+      findFirstNode(
+        sourceFile,
+        (node): node is ts.BinaryExpression =>
+          ts.isBinaryExpression(node) &&
+          node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken,
+      ),
+    expected: { route: "shared-post-closure" },
   },
-);
-
-Deno.test(
-  "Expression site policy: logical roots with reactive get guards and direct map values use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "logical roots with reactive get guards and direct map values use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           span: any;
@@ -1165,26 +1151,20 @@ Deno.test(
       const view = pattern((state: any) => (
         <div>{state.recentEvents.get() && state.recentEvents.map((event: any) => <span>{event.label}</span>)}</div>
       ));
-    `);
-
-    const logical = findFirstNode(
-      sourceFile,
-      (node): node is ts.BinaryExpression =>
-        ts.isBinaryExpression(node) &&
-        node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken,
-    );
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(classifyJsxExpressionSiteRoute(logical, context, analyze), {
-      route: "shared-post-closure",
-    });
+    `,
+    find: (sourceFile) =>
+      findFirstNode(
+        sourceFile,
+        (node): node is ts.BinaryExpression =>
+          ts.isBinaryExpression(node) &&
+          node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken,
+      ),
+    expected: { route: "shared-post-closure" },
   },
-);
-
-Deno.test(
-  "Expression site policy: JSX-local ternary branch containers with nested scalar lowerables use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "JSX-local ternary branch containers with nested scalar lowerables use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -1210,24 +1190,14 @@ Deno.test(
             : null}
         </div>
       ));
-    `);
-
-    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(
-      classifyJsxExpressionSiteRoute(conditional, context, analyze),
-      {
-        route: "shared-post-closure",
-      },
-    );
+    `,
+    find: (sourceFile) => findFirstNode(sourceFile, ts.isConditionalExpression),
+    expected: { route: "shared-post-closure" },
   },
-);
-
-Deno.test(
-  "Expression site policy: nested logical branches with structural map subtrees use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "nested logical branches with structural map subtrees use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -1251,24 +1221,14 @@ Deno.test(
               ))}
         </div>
       ));
-    `);
-
-    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(
-      classifyJsxExpressionSiteRoute(conditional, context, analyze),
-      {
-        route: "shared-post-closure",
-      },
-    );
+    `,
+    find: (sourceFile) => findFirstNode(sourceFile, ts.isConditionalExpression),
+    expected: { route: "shared-post-closure" },
   },
-);
-
-Deno.test(
-  "Expression site policy: parenthesized nested ternary branches use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "parenthesized nested ternary branches use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -1285,24 +1245,14 @@ Deno.test(
             : "Inactive"}
         </div>
       ));
-    `);
-
-    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(
-      classifyJsxExpressionSiteRoute(conditional, context, analyze),
-      {
-        route: "shared-post-closure",
-      },
-    );
+    `,
+    find: (sourceFile) => findFirstNode(sourceFile, ts.isConditionalExpression),
+    expected: { route: "shared-post-closure" },
   },
-);
-
-Deno.test(
-  "Expression site policy: parenthesized nested logical branches use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "parenthesized nested logical branches use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -1317,29 +1267,20 @@ Deno.test(
           {state.isAdult && (state.name || "Anonymous Adult")}
         </div>
       ));
-    `);
-
-    const logical = findFirstNode(
-      sourceFile,
-      (node): node is ts.BinaryExpression =>
-        ts.isBinaryExpression(node) &&
-        node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken,
-    );
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(
-      classifyJsxExpressionSiteRoute(logical, context, analyze),
-      {
-        route: "shared-post-closure",
-      },
-    );
+    `,
+    find: (sourceFile) =>
+      findFirstNode(
+        sourceFile,
+        (node): node is ts.BinaryExpression =>
+          ts.isBinaryExpression(node) &&
+          node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken,
+      ),
+    expected: { route: "shared-post-closure" },
   },
-);
-
-Deno.test(
-  "Expression site policy: logical JSX branches with non-JSX wrapper roots use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "logical JSX branches with non-JSX wrapper roots use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -1359,36 +1300,20 @@ Deno.test(
           </div>
         );
       });
-    `);
-
-    const logicalBranches: ts.BinaryExpression[] = [];
-    const visit = (node: ts.Node): void => {
-      if (
-        ts.isBinaryExpression(node) &&
-        node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
-      ) {
-        logicalBranches.push(node);
-      }
-      ts.forEachChild(node, visit);
-    };
-    visit(sourceFile);
-    const analyze = createDataFlowAnalyzer(checker);
-
-    for (const logical of logicalBranches) {
-      assertEquals(
-        classifyJsxExpressionSiteRoute(logical, context, analyze),
-        {
-          route: "shared-post-closure",
-        },
-      );
-    }
+    `,
+    find: (sourceFile) =>
+      findFirstNode(
+        sourceFile,
+        (node): node is ts.BinaryExpression =>
+          ts.isBinaryExpression(node) &&
+          node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken,
+      ),
+    expected: { route: "shared-post-closure" },
   },
-);
-
-Deno.test(
-  "Expression site policy: ternary JSX branches with non-JSX wrapper roots use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "ternary JSX branches with non-JSX wrapper roots use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -1406,34 +1331,14 @@ Deno.test(
             : state.user.name + " has notifications off"}</p>
         </div>
       ));
-    `);
-
-    const conditionals: ts.ConditionalExpression[] = [];
-    const visit = (node: ts.Node): void => {
-      if (ts.isConditionalExpression(node)) {
-        conditionals.push(node);
-      }
-      ts.forEachChild(node, visit);
-    };
-    visit(sourceFile);
-
-    const analyze = createDataFlowAnalyzer(checker);
-
-    for (const conditional of conditionals) {
-      assertEquals(
-        classifyJsxExpressionSiteRoute(conditional, context, analyze),
-        {
-          route: "shared-post-closure",
-        },
-      );
-    }
+    `,
+    find: (sourceFile) => findFirstNode(sourceFile, ts.isConditionalExpression),
+    expected: { route: "shared-post-closure" },
   },
-);
-
-Deno.test(
-  "Expression site policy: logical JSX fallbacks with opaque path-terminal call values use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "logical JSX fallbacks with opaque path-terminal call values use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -1453,29 +1358,20 @@ Deno.test(
           </div>
         );
       });
-    `);
-
-    const logical = findFirstNode(
-      sourceFile,
-      (node): node is ts.BinaryExpression =>
-        ts.isBinaryExpression(node) &&
-        node.operatorToken.kind === ts.SyntaxKind.BarBarToken,
-    );
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(
-      classifyJsxExpressionSiteRoute(logical, context, analyze),
-      {
-        route: "shared-post-closure",
-      },
-    );
+    `,
+    find: (sourceFile) =>
+      findFirstNode(
+        sourceFile,
+        (node): node is ts.BinaryExpression =>
+          ts.isBinaryExpression(node) &&
+          node.operatorToken.kind === ts.SyntaxKind.BarBarToken,
+      ),
+    expected: { route: "shared-post-closure" },
   },
-);
-
-Deno.test(
-  "Expression site policy: ternary JSX branches with opaque path-terminal call values use the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
+  {
+    name:
+      "ternary JSX branches with opaque path-terminal call values use the shared post-closure path",
+    source: `
       declare namespace JSX {
         interface IntrinsicElements {
           div: any;
@@ -1495,19 +1391,33 @@ Deno.test(
           </div>
         );
       });
-    `);
-
-    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(
-      classifyJsxExpressionSiteRoute(conditional, context, analyze),
-      {
-        route: "shared-post-closure",
-      },
-    );
+    `,
+    find: (sourceFile) => findFirstNode(sourceFile, ts.isConditionalExpression),
+    expected: { route: "shared-post-closure" },
   },
-);
+  {
+    name: "JSX nullish-coalescing roots defer to the shared post-closure path",
+    source: `
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => <div>{state.label ?? "Pending"}</div>);
+    `,
+    find: (sourceFile) => findFirstNode(sourceFile, ts.isBinaryExpression),
+    expected: { route: "shared-post-closure" },
+  },
+];
+
+for (const testCase of sharedPostClosureJsxRouteCases) {
+  Deno.test(`Expression site policy: ${testCase.name}`, () => {
+    assertJsxRouteCase(testCase);
+  });
+}
 
 Deno.test(
   "Expression site policy: whole-branch compute-wrap ternaries use the shared pre-closure path",
@@ -1632,29 +1542,5 @@ Deno.test(
         reason: "array-method-owned",
       },
     );
-  },
-);
-
-Deno.test(
-  "Expression site policy: JSX nullish-coalescing roots defer to the shared post-closure path",
-  () => {
-    const { sourceFile, checker, context } = createProgramAndContext(`
-      declare namespace JSX {
-        interface IntrinsicElements {
-          div: any;
-        }
-      }
-
-      declare function pattern<T>(fn: (state: any) => T): T;
-
-      const view = pattern((state: any) => <div>{state.label ?? "Pending"}</div>);
-    `);
-
-    const binary = findFirstNode(sourceFile, ts.isBinaryExpression);
-    const analyze = createDataFlowAnalyzer(checker);
-
-    assertEquals(classifyJsxExpressionSiteRoute(binary, context, analyze), {
-      route: "shared-post-closure",
-    });
   },
 );
