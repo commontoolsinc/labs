@@ -3,6 +3,7 @@ import { CTHelpers } from "../../core/ct-helpers.ts";
 import {
   getExpressionText,
   getTypeAtLocationWithFallback,
+  setParentPointers,
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
 import {
@@ -204,6 +205,8 @@ export function createDeriveCall(
     return undefined;
   }
 
+  context.markSyntheticComputeOwnedSubtree?.(expression);
+
   const parameter = createParameterForPlan(
     factory,
     captureTree,
@@ -228,6 +231,7 @@ export function createDeriveCall(
     factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
     lambdaBody,
   );
+  context.markAsSyntheticComputeCallback?.(arrowFunction);
 
   const deriveArgs = [
     ...createDeriveArgs(factory, captureTree, fallbackEntries),
@@ -263,6 +267,10 @@ export function createDeriveCall(
       context.options.typeRegistry,
     );
   }
+
+  // Maintain parent chains and compute-wrapper ownership for later passes that
+  // revisit synthetic derive callbacks after post-closure lowering.
+  setParentPointers(deriveCall, expression.parent);
 
   return deriveCall;
 }

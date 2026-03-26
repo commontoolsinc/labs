@@ -454,7 +454,7 @@ const ownedOrSkippedJsxRouteCases: JsxRouteCase[] = [
   },
   {
     name:
-      "reactive direct JSX object-literal roots use the generic owned pre-closure route",
+      "reactive direct JSX object-literal roots use the shared post-closure route",
     source: `
       declare namespace JSX {
         interface IntrinsicElements {
@@ -479,8 +479,7 @@ const ownedOrSkippedJsxRouteCases: JsxRouteCase[] = [
           node.getText(sourceFile).includes("color: state.theme.primary"),
       ),
     expected: {
-      route: "owned-pre-closure",
-      owner: "generic-owned-root",
+      route: "shared-post-closure",
     },
   },
   {

@@ -95,7 +95,7 @@ export default pattern((state) => {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
-                    age: state.key("user").age
+                    age: state.key("user", "age")
                 }
             } }, ({ state }) => state.user.age + 1)}</p>
         <p>Name length: {state.key("user", "name", "length")}</p>
@@ -123,7 +123,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
-                    name: state.key("user").name
+                    name: state.key("user", "name")
                 }
             } }, ({ state }) => state.user.name.toUpperCase())}</p>
         <p>
@@ -167,7 +167,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     profile: {
-                        location: state.key("user").profile.location
+                        location: state.key("user", "profile", "location")
                     }
                 }
             } }, ({ state }) => state.user.profile.location.includes("City")), "Yes", "No")}
@@ -340,9 +340,9 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
-                    name: state.key("user").name,
+                    name: state.key("user", "name"),
                     profile: {
-                        location: state.key("user").profile.location
+                        location: state.key("user", "profile", "location")
                     }
                 }
             } }, ({ state }) => state.user.name + " from " + state.user.profile.location)}</p>
@@ -377,7 +377,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     theme: {
-                        fontSize: state.key("config").theme.fontSize
+                        fontSize: state.key("config", "theme", "fontSize")
                     }
                 }
             } }, ({ state }) => state.config.theme.fontSize + 2)}px</p>

@@ -819,8 +819,8 @@ export function classifyExpressionSiteHandling(
 
     if (isOwnedObjectLiteralRoot(expression, analyze)) {
       return {
-        kind: "owned-pre-closure-jsx",
-        owner: "generic-owned-root",
+        kind: "shared",
+        jsxRoute: "shared-post-closure",
         lowerable: analysis.requiresRewrite ||
           isLogicalBinaryExpression(expression),
       };

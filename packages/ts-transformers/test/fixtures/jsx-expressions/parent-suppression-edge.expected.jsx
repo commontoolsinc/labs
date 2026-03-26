@@ -129,10 +129,10 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
-                    name: state.key("user").name,
+                    name: state.key("user", "name"),
                     profile: {
-                        location: state.key("user").profile.location,
-                        bio: state.key("user").profile.bio
+                        location: state.key("user", "profile", "location"),
+                        bio: state.key("user", "profile", "bio")
                     }
                 }
             } }, ({ state }) => state.user.name + " from " + state.user.profile.location + " - " +
@@ -165,7 +165,7 @@ export default pattern((state) => {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
-                    age: state.key("user").age
+                    age: state.key("user", "age")
                 }
             } }, ({ state }) => state.user.age * 12)} months, or{" "}
           {__ctHelpers.derive({
@@ -192,7 +192,7 @@ export default pattern((state) => {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
-                    age: state.key("user").age
+                    age: state.key("user", "age")
                 }
             } }, ({ state }) => state.user.age * 365)} days
         </p>
@@ -308,9 +308,9 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
-                    name: state.key("user").name,
+                    name: state.key("user", "name"),
                     settings: {
-                        theme: state.key("user").settings.theme
+                        theme: state.key("user", "settings", "theme")
                     }
                 }
             } }, ({ state }) => state.user.name + " has notifications on with " +
@@ -338,7 +338,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
-                    name: state.key("user").name
+                    name: state.key("user", "name")
                 }
             } }, ({ state }) => state.user.name + " has notifications off"))}
         </p>
@@ -389,9 +389,9 @@ export default pattern((state) => {
                 config: {
                     theme: {
                         spacing: {
-                            small: state.key("config").theme.spacing.small,
-                            medium: state.key("config").theme.spacing.medium,
-                            large: state.key("config").theme.spacing.large
+                            small: state.key("config", "theme", "spacing", "small"),
+                            medium: state.key("config", "theme", "spacing", "medium"),
+                            large: state.key("config", "theme", "spacing", "large")
                         }
                     }
                 }
@@ -447,7 +447,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
-                    name: state.key("user").name
+                    name: state.key("user", "name")
                 }
             } }, ({ state }) => state.user.name.toUpperCase())} -{" "}
           {__ctHelpers.derive({
@@ -474,7 +474,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
-                    email: state.key("user").email
+                    email: state.key("user", "email")
                 }
             } }, ({ state }) => state.user.email.toLowerCase())}
         </p>

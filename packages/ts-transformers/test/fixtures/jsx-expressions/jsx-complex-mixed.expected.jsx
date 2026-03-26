@@ -498,7 +498,7 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 filter: {
-                    length: state.key("filter").length
+                    length: state.key("filter", "length")
                 }
             } }, ({ state }) => state.filter.length > 0)} data-discount={state.key("discount")}>
           Object attributes
