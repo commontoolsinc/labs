@@ -279,9 +279,13 @@ function parseObjectInput(
     };
   }
 
-  for (const key of requiredFlags(schema)) {
-    if (!(key in input)) {
-      throw new Error(`Missing required flag --${flagNameForKey(key)}`);
+  // Only enforce required fields for schema-derived flags.
+  // JSON input validation is deferred to the runner.
+  if (!usedJson) {
+    for (const key of requiredFlags(schema)) {
+      if (!(key in input)) {
+        throw new Error(`Missing required flag --${flagNameForKey(key)}`);
+      }
     }
   }
 
