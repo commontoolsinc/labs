@@ -1066,6 +1066,131 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
   }
 });
 
+Deno.test("memory v2 server rolls back failed watch.add mutations", async () => {
+  const server = createServer("memory://memory-v2-server-watch-add-rollback");
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-server-watch-add-rollback";
+
+  try {
+    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    assertEquals(shiftMessage(messages), HELLO_OK);
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+    }));
+    const opened = assertResponse<{ sessionId: string }>(shiftMessage(messages));
+    const sessionId = opened.ok!.sessionId;
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "transact",
+      requestId: "seed",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { one: 1 } },
+        }, {
+          op: "set",
+          id: "of:doc:2",
+          value: { value: { two: 2 } },
+        }],
+      },
+    }));
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "session.watch.set",
+      requestId: "watch-1",
+      space,
+      sessionId,
+      watches: [{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }],
+    }));
+    assertEquals(
+      assertResponse<any>(shiftMessage(messages)).ok?.sync.upserts.map((
+        entry: { id: string },
+      ) => entry.id),
+      ["of:doc:1"],
+    );
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "session.watch.add",
+      requestId: "watch-2",
+      space,
+      sessionId,
+      watches: [{
+        id: "extra",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:2",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }, {
+        id: "broken",
+        kind: "graph",
+        query: {
+          branch: "branch:broken",
+          roots: [{
+            id: "of:doc:3",
+          } as any],
+        },
+      }],
+    } as any));
+    const failed = assertResponse<any>(shiftMessage(messages));
+    assertEquals(failed.requestId, "watch-2");
+    assertEquals(failed.error?.name, "QueryError");
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "transact",
+      requestId: "update-doc-2",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:2",
+          value: { value: { two: 3 } },
+        }],
+      },
+    }));
+    assertEquals(
+      assertResponse<any>(shiftMessage(messages)).requestId,
+      "update-doc-2",
+    );
+
+    await tick();
+    assertEquals(messages, []);
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 server watch set replacement emits removes for entities that leave scope", async () => {
   const server = createServer("memory://memory-v2-server-watch-replace");
   const messages: ServerMessage[] = [];

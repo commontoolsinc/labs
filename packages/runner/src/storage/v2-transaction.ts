@@ -64,6 +64,7 @@ import {
   isReadIgnoredForScheduling,
   isReadMarkedAsPotentialWrite,
 } from "./reactivity-log.ts";
+import { recordWriteStackTrace } from "./write-stack-trace.ts";
 
 type RootAttestation = IAttestation;
 
@@ -988,24 +989,13 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     doc.current = collapsedNext;
     doc.frozenReads.clear();
-    const writeActivity = {
+    this.recordWriteActivity(
       space,
-      id: address.id,
-      type: address.type,
-      path: address.path,
-    };
-    const key = encodePointer(address.path);
-    const existingDetail = doc.writeDetails.get(key);
-    if (existingDetail) {
-      existingDetail.value = isolatedValue;
-    } else {
-      doc.writeDetails.set(key, {
-        address: writeActivity,
-        value: isolatedValue,
-        previousValue: previous.kind === "ok" ? previous.value : undefined,
-      });
-    }
-    this.invalidateReactivityLog();
+      address,
+      isolatedValue,
+      previous.kind === "ok" ? previous.value : undefined,
+      doc,
+    );
 
     return { ok: collapsedNext };
   }
@@ -1095,24 +1085,13 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     doc.current = collapsedNext;
     doc.frozenReads.clear();
-    const writeActivity = {
+    this.recordWriteActivity(
       space,
-      id: address.id,
-      type: address.type,
-      path: address.path,
-    };
-    const key = encodePointer(address.path);
-    const existing = doc.writeDetails.get(key);
-    if (existing) {
-      existing.value = isolatedValue;
-    } else {
-      doc.writeDetails.set(key, {
-        address: writeActivity,
-        value: isolatedValue,
-        previousValue: undefined,
-      });
-    }
-    this.invalidateReactivityLog();
+      address,
+      isolatedValue,
+      undefined,
+      doc,
+    );
 
     return { ok: collapsedNext };
   }
@@ -1213,6 +1192,22 @@ export class V2StorageTransaction implements IStorageTransaction {
     previousValue: StorableDatum | undefined,
     doc: WritableDocumentEntry,
   ): void {
+    recordWriteStackTrace(
+      {
+        space,
+        id: address.id,
+        type: address.type,
+        path: address.path,
+      },
+      value,
+      {
+        scopeId:
+          (this as { writeTraceScopeId?: string }).writeTraceScopeId,
+        writerActionId:
+          (this as { debugActionId?: string }).debugActionId,
+      },
+    );
+
     const writeActivity = {
       space,
       id: address.id,

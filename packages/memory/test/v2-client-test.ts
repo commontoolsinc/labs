@@ -852,6 +852,18 @@ const waitFor = async (
   }
 };
 
+const nextWithTimeout = async <Value>(
+  iterator: AsyncIterator<Value>,
+  timeout = 200,
+): Promise<IteratorResult<Value>> => {
+  return await Promise.race([
+    iterator.next(),
+    new Promise<IteratorResult<Value>>((_, reject) => {
+      setTimeout(() => reject(new Error("Timed out waiting for iterator item")), timeout);
+    }),
+  ]);
+};
+
 Deno.test(
   "memory v2 client reconnects without reinstalling watch sets when the session resumes",
   async () => {
@@ -884,6 +896,7 @@ Deno.test(
         },
       }]);
       const syncs = view.subscribeSync();
+      const snapshots = view.subscribe();
 
       transport.disconnect();
       await writer.transact({
@@ -901,6 +914,7 @@ Deno.test(
       });
       await waitFor(() => transport.connectionCount >= 2);
       const resumed = await syncs.next();
+      const snapshot = await nextWithTimeout(snapshots);
 
       assertEquals(resumed.done, false);
       assertEquals(resumed.value.upserts, [{
@@ -914,6 +928,23 @@ Deno.test(
         },
       }]);
       assertEquals(resumed.value.removes, []);
+      assertEquals(snapshot.done, false);
+      assertEquals(
+        snapshot.value.entities.map((entity: EntitySnapshot) => ({
+          id: entity.id,
+          seq: entity.seq,
+          document: entity.document,
+        })),
+        [{
+          id: "of:doc:1",
+          seq: 1,
+          document: {
+            value: {
+              hello: "while-offline",
+            },
+          },
+        }],
+      );
       assertEquals(transport.watchSetCount, 1);
       assertEquals(space.sessionId, originalSessionId);
       assertEquals(
@@ -934,6 +965,48 @@ Deno.test(
       );
     } finally {
       await writerClient.close();
+      await client.close();
+      await server.close();
+    }
+  },
+);
+
+Deno.test(
+  "memory v2 client does not restore a closed session after reconnect",
+  async () => {
+    const server = new Server({
+      store: new URL("memory://memory-v2-client-closed-session-reconnect"),
+      sessions: new SessionRegistry({ ttlMs: 0 }),
+    });
+    const transport = new ReconnectableLoopbackTransport(server);
+    const client = await connect({ transport });
+    const space = await client.mount(
+      "did:key:z6Mk-memory-v2-client-closed-session-reconnect",
+    );
+
+    try {
+      await space.watchSet([{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: {
+              path: [],
+              schema: false,
+            },
+          }],
+        },
+      }]);
+      assertEquals(transport.watchSetCount, 1);
+
+      await space.close();
+      transport.disconnect();
+      await waitFor(() => transport.connectionCount >= 2);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      assertEquals(transport.watchSetCount, 1);
+    } finally {
       await client.close();
       await server.close();
     }

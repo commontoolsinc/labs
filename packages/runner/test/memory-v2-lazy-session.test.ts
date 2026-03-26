@@ -148,6 +148,66 @@ describe("Memory v2 lazy session creation", () => {
     await storage.close();
     expect(closes).toBe(1);
   });
+
+  it("retries lazy session creation after a transient failure", async () => {
+    let sessionCreates = 0;
+    let commits = 0;
+    let closes = 0;
+    const storage = new TestStorageManager({
+      create(_space: MemorySpace) {
+        sessionCreates += 1;
+        if (sessionCreates === 1) {
+          return Promise.reject(new Error("temporary session failure"));
+        }
+        return Promise.resolve({
+          client: {
+            close: () => {
+              closes += 1;
+              return Promise.resolve();
+            },
+          } as never,
+          session: {
+            transact: (commit: { operations: { id: URI }[] }) => {
+              commits += 1;
+              return Promise.resolve(
+                appliedCommitFor(commit.operations.map((op) => op.id)),
+              );
+            },
+          } as never,
+        });
+      },
+    });
+
+    const firstTx = storage.edit();
+    firstTx.write({
+      space,
+      id: "of:memory-v2-lazy-session-first-failure",
+      type,
+      path: [],
+    }, {
+      value: { count: 1 },
+    });
+    const first = await firstTx.commit();
+    expect(first.error).toBeDefined();
+
+    const secondTx = storage.edit();
+    secondTx.write({
+      space,
+      id: "of:memory-v2-lazy-session-second-try" as URI,
+      type,
+      path: [],
+    }, {
+      value: { count: 2 },
+    });
+    const second = await secondTx.commit();
+
+    expect(second).toEqual({ ok: {} });
+    expect(sessionCreates).toBe(2);
+    expect(commits).toBe(1);
+
+    await storage.close();
+    expect(closes).toBe(1);
+  });
 });
 
 describe("Memory v2 lazy emulated server creation", () => {
