@@ -1134,6 +1134,44 @@ const p = pattern(({ [key]: foo }) => <div>{foo}</div>);
 );
 
 Deno.test(
+  "Capability-first: manual mapWithPattern preserves computed plain-capture keys",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+const key = "small" as const;
+const p = pattern<{ items: string[] }>((state) => ({
+  [UI]: (
+    <div>
+      {state.items.mapWithPattern(
+        pattern(({ params: { style: { [key]: fontSize } } }) => (
+          <span>{fontSize}</span>
+        )),
+        { style: { small: 12, large: 16 }, key },
+      )}
+    </div>
+  ),
+}));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(
+      output,
+      "const fontSize = __ct_pattern_input.params.style[key];",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: computed literal member defaults are preserved in schema",
   async () => {
     const source = `/// <cts-enable />
@@ -1197,6 +1235,55 @@ const p = pattern<State>((state) => {
       'const right = __ct_pattern_input.key("element", "1");',
     );
     assertStringIncludes(output, ".mapWithPattern(");
+  },
+);
+
+Deno.test(
+  "Capability-first: destructured opaque locals stay reactive when captured by nested map callbacks",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+interface State {
+  sections: { tasks: { label: string }[]; tags: { name: string }[] }[];
+}
+const p = pattern<State>((state) => ({
+  [UI]: (
+    <div>
+      {state.sections.map((section) => {
+        const { tasks } = section;
+        return (
+          <div>
+            {section.tags.map((tag) => (
+              <span>{tag.name}:{tasks.length}</span>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  ),
+}));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(
+      output,
+      'const tasks = __ct_pattern_input.key("params", "tasks");',
+    );
+    assertStringIncludes(output, 'tasks.key("length")');
+    assert(
+      !output.includes("const tasks = __ct_pattern_input.params.tasks;"),
+      "destructured opaque locals captured by nested map callbacks should remain reactive, not plain params values",
+    );
   },
 );
 

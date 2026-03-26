@@ -55,6 +55,33 @@ function isReactiveArrayMethodBinding(
   return true;
 }
 
+function buildPlainCaptureAccessExpression(
+  root: ts.Expression,
+  binding: DestructureBinding,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  if (binding.directKeyExpression) {
+    return factory.createElementAccessExpression(
+      root,
+      cloneKeyExpression(binding.directKeyExpression, factory),
+    );
+  }
+
+  let current = root;
+  for (const segment of binding.path) {
+    current = typeof segment === "string"
+      ? factory.createPropertyAccessExpression(
+        current,
+        factory.createIdentifier(segment),
+      )
+      : factory.createElementAccessExpression(
+        current,
+        cloneKeyExpression(segment, factory),
+      );
+  }
+  return current;
+}
+
 export function registerCapabilitySummary(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   context: TransformationContext,
@@ -184,15 +211,11 @@ export function transformPatternCallback(
           isArrayMethodCallback &&
           isNonReactiveCapture(binding, nonReactiveCaptures)
         ) {
-          initializer = factory.createIdentifier(inputIdentifier.text);
-          for (const segment of binding.path) {
-            if (typeof segment === "string") {
-              initializer = factory.createPropertyAccessExpression(
-                initializer,
-                factory.createIdentifier(segment),
-              );
-            }
-          }
+          initializer = buildPlainCaptureAccessExpression(
+            factory.createIdentifier(inputIdentifier.text),
+            binding,
+            factory,
+          );
         }
 
         return factory.createVariableStatement(

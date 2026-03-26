@@ -54,7 +54,6 @@ export function collectPatternCallbackPreScan(
       for (const decl of stmt.declarationList.declarations) {
         if (!decl.initializer) continue;
         if (
-          ts.isIdentifier(decl.name) &&
           isOpaqueSourceExpression(
             decl.initializer,
             scope.opaqueNames,
@@ -62,9 +61,12 @@ export function collectPatternCallbackPreScan(
             context,
           )
         ) {
-          scope.opaqueNames.add(decl.name.text);
-          const sym = context.checker.getSymbolAtLocation(decl.name);
-          if (sym) scope.opaqueSymbols.add(sym);
+          collectBindingNames(decl.name, scope.opaqueNames);
+          addBindingTargetSymbols(
+            decl.name,
+            scope.opaqueSymbols,
+            context.checker,
+          );
         }
       }
     }
