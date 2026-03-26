@@ -329,10 +329,15 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 - [x] `ct test` supports synthetic `uiEvent` steps that traverse `[UI]`, find a
   declared node, and dispatch through the bound event stream with minted CFC
   event context
+- [x] `ct test` can assert minted UI-event integrity, resolved node path, and
+  composed traversal trace before dispatch
 - [x] Pattern tests can assert authored UI contract labels separately from the
   dispatched event path
 - [x] Traversal/minting follows fully composed mapped child UI reached through
   parent render containers, not just directly targeted UI outputs
+- [~] Parent-targeted `uiEvent` minting currently recovers parent slot / placement
+  integrity across composed mapped children, but inline child-local contracts are
+  not yet re-derived unless they are also present on the targeted output tree
 
 **Files to modify / maintain:**
 

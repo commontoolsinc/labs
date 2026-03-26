@@ -72,11 +72,15 @@ export default pattern(() => {
       {
         uiEvent: {
           target: "list",
+          schema: SHARE_LIST_OUTPUT_SCHEMA,
           attr: {
             name: "data-ui-action",
             value: "ShareReviewedMessage",
           },
           occurrence: 0,
+          expectedNodePath: `/${UI}/children/2`,
+          integrityIncludes: [messageRowPlacementAtom],
+          traceIncludesPaths: [`/${UI}/children/2/children/0/0`],
           sourceGestureId: "gesture-mapped-share-list-pattern-test",
         },
       },

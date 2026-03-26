@@ -39,7 +39,7 @@ import type {
   SettleStats,
   Stream,
 } from "@commontools/runner";
-import { dispatchUiEvent } from "@commontools/runner";
+import { resolveUiEventTarget } from "@commontools/runner";
 import type { OpaqueRef } from "@commontools/api";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { basename } from "@std/path";
@@ -120,6 +120,18 @@ export interface UiEventSpec extends ResolveUiEventOptions {
    * Omit to dispatch against the root test-pattern result.
    */
   target?: string;
+  /**
+   * Integrity atom patterns that must appear on the minted event before dispatch.
+   */
+  integrityIncludes?: readonly CfcAtom[];
+  /**
+   * Exact trace paths that must appear in the composed UI traversal trace.
+   */
+  traceIncludesPaths?: readonly string[];
+  /**
+   * Exact resolved node path that must be targeted before dispatch.
+   */
+  expectedNodePath?: string;
 }
 
 export interface TestResult {
@@ -404,10 +416,61 @@ async function runUiEvent(
       spec.target,
       spec.schema ?? rootPatternSchema,
     );
-    await dispatchUiEvent(runtime, targetCell, {
-      ...spec,
+    const {
+      integrityIncludes,
+      traceIncludesPaths,
+      expectedNodePath,
+      target: _target,
+      ...resolveSpec
+    } = spec;
+    const resolved = await resolveUiEventTarget(runtime, targetCell, {
+      ...resolveSpec,
       schema: targetSchema,
     });
+
+    if (
+      expectedNodePath !== undefined && resolved.nodePath !== expectedNodePath
+    ) {
+      return {
+        passed: false,
+        error:
+          `UI event matched node ${resolved.nodePath}, expected ${expectedNodePath}`,
+      };
+    }
+
+    if ((integrityIncludes?.length ?? 0) > 0) {
+      const actualIntegrity = resolved.integrity ?? [];
+      const missingAtom = integrityIncludes?.find((patternAtom) =>
+        !actualIntegrity.some((actualAtom) =>
+          matchesCfcAtomPattern(actualAtom, patternAtom)
+        )
+      );
+      if (missingAtom) {
+        return {
+          passed: false,
+          error: `Missing UI event integrity atom pattern ${
+            JSON.stringify(missingAtom)
+          }; actual=${JSON.stringify(actualIntegrity)}`,
+        };
+      }
+    }
+
+    if ((traceIncludesPaths?.length ?? 0) > 0) {
+      const actualPaths = resolved.trace.map((frame) => frame.path);
+      const missingPath = traceIncludesPaths?.find((path) =>
+        !actualPaths.includes(path)
+      );
+      if (missingPath) {
+        return {
+          passed: false,
+          error: `Missing UI event trace path ${missingPath}; actual=${
+            JSON.stringify(actualPaths)
+          }`,
+        };
+      }
+    }
+
+    resolved.eventStream.send(resolved.envelope);
     return { passed: true };
   } catch (error) {
     return {

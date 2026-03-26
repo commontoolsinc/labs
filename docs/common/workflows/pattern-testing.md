@@ -161,6 +161,11 @@ Selectors can use:
 - `attr`: match a UI node by declared prop like `data-ui-action`
 - `occurrence`: pick the Nth attr match when there are multiple matches
 
+`uiEvent` can also assert what was minted before dispatch:
+- `integrityIncludes`: atom patterns that must appear on the minted event
+- `traceIncludesPaths`: composed UI traversal paths that must be present
+- `expectedNodePath`: exact resolved node path that must be targeted
+
 Use `schema` when the authored manual JSON schema carries UI IFC labels that are
 not recoverable from TypeScript-generated runtime schema metadata alone.
 
@@ -175,6 +180,18 @@ For repeated child UI, prefer an attribute selector plus `occurrence`:
       value: "ShareReviewedMessage",
     },
     occurrence: 0,
+    integrityIncludes: [
+      {
+        type: "https://commonfabric.org/cfc/atom/UiPlacement",
+        surface: "InboxList",
+        slot: "message-row",
+      },
+      {
+        type: "https://commonfabric.org/cfc/atom/UiActionContract",
+        action: "ShareReviewedMessage",
+      },
+    ],
+    traceIncludesPaths: ["/$UI/children/2/children/0/0"],
     sourceGestureId: "gesture-first-share-click",
   },
 }

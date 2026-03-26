@@ -307,6 +307,35 @@ async function loadPersistedLabels(
   }
 }
 
+function resolveFrameSchema(
+  frameRootCell: Cell<unknown>,
+  rootLink: ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>,
+  fallbackSchema: unknown,
+): unknown {
+  const frameLink = frameRootCell.getAsNormalizedFullLink();
+  if (
+    frameLink.id === rootLink.id &&
+    frameLink.space === rootLink.space &&
+    frameLink.type === rootLink.type &&
+    fallbackSchema !== undefined
+  ) {
+    return fallbackSchema;
+  }
+
+  const linkedSchema = frameLink.schema;
+  if (linkedSchema !== undefined) {
+    return linkedSchema;
+  }
+  if (frameRootCell.schema !== undefined) {
+    return frameRootCell.schema;
+  }
+  try {
+    return frameRootCell.asSchemaFromLinks().schema;
+  } catch {
+    return undefined;
+  }
+}
+
 async function resolveTraceIntegrity(
   runtime: Runtime,
   trace: readonly UiTraversalFrame[],
@@ -329,12 +358,11 @@ async function resolveTraceIntegrity(
     const fromPersisted = persisted
       ? resolveObservationLabel(persisted, frame.path, "shape")
       : undefined;
-    const frameLink = frame.rootCell.getAsNormalizedFullLink();
-    const fromSchema = frameLink.id === rootLink.id &&
-        frameLink.space === rootLink.space &&
-        frameLink.type === rootLink.type
-      ? resolveLocalSchemaLabel(runtime, fallbackSchema, frame.path)
-      : undefined;
+    const fromSchema = resolveLocalSchemaLabel(
+      runtime,
+      resolveFrameSchema(frame.rootCell, rootLink, fallbackSchema),
+      frame.path,
+    );
     joined = joinIntegrityLabels(
       joined,
       fromPersisted?.integrity ?? fromSchema?.integrity,

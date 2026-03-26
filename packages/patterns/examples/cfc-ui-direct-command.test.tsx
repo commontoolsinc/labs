@@ -76,6 +76,8 @@ export default pattern(() => {
             name: "data-ui-action",
             value: "SubmitDirectCommand",
           },
+          expectedNodePath: `/${UI}/children/3`,
+          integrityIncludes: [submitActionContractAtom],
           sourceGestureId: "gesture-direct-command-pattern-test",
         },
       },
