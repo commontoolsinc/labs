@@ -95,6 +95,7 @@ The top-level pattern body should stay declarative.
 
 ```ts
 pattern(({ items, show }) => ({
+  upper: items[0].name.toUpperCase(),
   visibleCount: ifElse(show, items.length, 0),
   [UI]: <div>{items.map((item) => item.name)}</div>,
 }));
@@ -104,7 +105,6 @@ pattern(({ items, show }) => ({
 
 ```ts
 pattern(({ user, count }) => ({
-  upper: user.name.toUpperCase(),
   value: count.get(),
 }));
 ```
@@ -113,6 +113,7 @@ Why:
 
 - top-level helper control flow is part of the language
 - top-level receiver-method roots are supported at lowerable non-JSX
+  expression sites
 - eager `.get()` reads still move into JSX, authored helper control flow, or an explicit
   computation callback
 
@@ -194,6 +195,8 @@ expression context.
 
 ```ts
 items.map((item) => item.name)
+items.map((item) => item.toUpperCase())
+items.map((item) => identity(item.toUpperCase()))
 items.map((item) => ifElse(item.active, item.name, "hidden"))
 items.map((item) => <span>{item.name.toUpperCase()}</span>)
 ```
@@ -201,44 +204,15 @@ items.map((item) => <span>{item.name.toUpperCase()}</span>)
 Why:
 
 - the outer callback belongs to the supported reactive collection operator
-- structural access, helper control flow, and nested JSX-local expressions are
-  valid here
+- structural access, receiver-method value expressions, helper control flow,
+  and nested JSX-local expressions are valid here
 - inner plain arrays stay plain JS and are not implicitly promoted into
   pattern-owned collection operators
-- bare callback-local receiver-method roots like `items.map((item) =>
-  item.toUpperCase())` are still a separate boundary, not a generally
-  supported collection-callback form
 
 ## 4.2 Common Relocation Patterns
 
 When an authored form is unsupported, the right answer is usually to move it
 into a context that already has a clear language meaning.
-
-### Top-Level Receiver Method -> JSX Or Computation Callback
-
-**Avoid**
-
-```ts
-pattern(({ user }) => ({
-  upper: user.name.toUpperCase(),
-}));
-```
-
-**Prefer**
-
-```ts
-pattern(({ user }) => ({
-  upper: computed(() => user.name.toUpperCase()),
-}));
-```
-
-or:
-
-```tsx
-pattern(({ user }) => ({
-  [UI]: <div>{user.name.toUpperCase()}</div>,
-}));
-```
 
 ### Top-Level Eager `.get()` -> Helper Control Flow Or Computation Callback
 
@@ -477,24 +451,27 @@ The real rule is:
 - ordinary opaque/reactive values should still prefer direct property access
   and canonical lowered traversal rather than authored `.get()`
 
+One important nuance: there are still transform-only continuity tests around
+explicitly typed `Writable` / `Cell` inputs and top-level `.key(...).get()`
+reads. Those tests preserve schema/input-shape behavior for invalid programs,
+but they do **not** make direct top-level eager reads part of the target
+language while validation still rejects them.
+
 ## 6. Remaining Design Questions
 
 These are the main semantic questions still worth revisiting after the current
 v1 draft:
 
-1. whether bare callback-local receiver-method roots inside supported
-   collection callbacks deserve promotion, or whether the current “use nested
-   JSX, helper control flow, or an explicit computation callback” boundary
-   should stay strict
-2. whether the remaining invalid-program callback-container pass-through should
+1. whether the remaining invalid-program callback-container pass-through should
    be removed entirely from implementation now that diagnostics exist
-3. whether the explicit-cell `.key(...)` / `.get()` boundary is the right
+2. whether the explicit-cell `.key(...)` / `.get()` boundary is the right
    long-term authored API surface, or whether it should be narrowed or
    documented more aggressively relative to ordinary opaque/property access
-4. whether true-cell eager reads should remain limited to JSX, helper control
-   flow, and explicit computation callbacks, or whether any broader direct
-   pattern-body eager-read forms deserve support
-5. whether optional-call on reactive receivers should remain outside the
+3. whether top-level lowerable direct `.get()` reads on explicitly declared
+   cell-like inputs should eventually be promoted into the language, or remain
+   invalid despite transform-continuity behavior that still exists for some
+   typed-input cases
+4. whether optional-call on reactive receivers should remain outside the
    language permanently, or whether there is a future explicit semantics worth
    supporting
 
