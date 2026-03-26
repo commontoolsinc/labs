@@ -16,6 +16,10 @@ import {
 import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { rewriteExpression } from "./expression-rewrite/mod.ts";
+import {
+  createReactiveWrapperForExpression,
+  filterRelevantDataFlows,
+} from "./expression-rewrite/rewrite-helpers.ts";
 import { shouldDeferFallbackMapReceiverRewrite } from "./expression-rewrite/fallback-array-method-rewrite.ts";
 import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
 import type { AnalyzeFn } from "./expression-rewrite/types.ts";
@@ -23,6 +27,7 @@ import {
   isJsxLocalRewriteContainer,
 } from "./expression-rewrite/emitters/compute-wrap-invariants.ts";
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
+import { normalizeDataFlows } from "../ast/mod.ts";
 import type {
   ExpressionContainerKind,
   ExpressionSiteCallRootKind,
@@ -733,6 +738,46 @@ function isSupportedPatternOwnedReceiverMethodRoot(
 
   return siteInfo.reactiveContext.owner === "pattern" ||
     siteInfo.reactiveContext.owner === "render";
+}
+
+function isSupportedArrayMethodOwnedReceiverMethodRoot(
+  expression: ts.Expression,
+  siteInfo: ExpressionSitePolicyInfo,
+): expression is ts.CallExpression {
+  if (
+    !ts.isCallExpression(expression) ||
+    siteInfo.callRootKind !== "receiver-method"
+  ) {
+    return false;
+  }
+
+  if (!siteInfo.arrayMethodOwned || siteInfo.helperBoundaryKind) {
+    return false;
+  }
+
+  if (classifyOpaquePathTerminalCall(expression)) {
+    return false;
+  }
+
+  const callee = expression.expression;
+  if (
+    (ts.isPropertyAccessExpression(callee) ||
+      ts.isElementAccessExpression(callee)) &&
+    callee.questionDotToken
+  ) {
+    return false;
+  }
+
+  if (
+    (ts.isPropertyAccessExpression(callee) ||
+      ts.isElementAccessExpression(callee)) &&
+    ts.isCallExpression(callee.expression) &&
+    classifyOpaquePathTerminalCall(callee.expression)
+  ) {
+    return false;
+  }
+
+  return siteInfo.reactiveContext.kind === "pattern";
 }
 
 function isDeferredJsxArrayMethodExpression(
@@ -1559,6 +1604,47 @@ export function rewriteArrayMethodCallbackExpressionSites(
 ): ts.ConciseBody {
   const analyze = createDataFlowAnalyzer(context.checker);
 
+  const rewriteArrayMethodOwnedReceiverMethodExpressionSite = (
+    expression: ts.Expression,
+  ): ts.Expression | undefined => {
+    const containerKind = expression === body
+      ? "return-expression"
+      : getExpressionContainerKind(expression);
+    if (!containerKind || containerKind === "jsx-expression") {
+      return undefined;
+    }
+
+    const siteInfo = getExpressionSitePolicyInfo(
+      expression,
+      containerKind,
+      context,
+      analyze,
+    );
+    if (!isSupportedArrayMethodOwnedReceiverMethodRoot(expression, siteInfo)) {
+      return undefined;
+    }
+
+    const analysis = analyze(expression);
+    const relevantDataFlows = filterRelevantDataFlows(
+      normalizeDataFlows(analysis.graph, analysis.dataFlows).all,
+      analysis,
+      context,
+    );
+    if (relevantDataFlows.length === 0) {
+      return undefined;
+    }
+
+    return createReactiveWrapperForExpression(
+      expression,
+      relevantDataFlows,
+      context,
+      {
+        allowDirectExpressionWrap: true,
+        preferDeriveWrapper: true,
+      },
+    );
+  };
+
   const visit: ts.Visitor = (node) => {
     if (
       node !== body &&
@@ -1608,6 +1694,12 @@ export function rewriteArrayMethodCallbackExpressionSites(
         ? "return-expression"
         : getExpressionContainerKind(node);
       if (containerKind && containerKind !== "jsx-expression") {
+        const callbackOwnedReceiverRewrite =
+          rewriteArrayMethodOwnedReceiverMethodExpressionSite(node);
+        if (callbackOwnedReceiverRewrite) {
+          return callbackOwnedReceiverRewrite;
+        }
+
         const rewritten = rewriteExpressionSite({
           expression: node,
           containerKind,

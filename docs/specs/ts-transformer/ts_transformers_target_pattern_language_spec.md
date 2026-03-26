@@ -76,6 +76,7 @@ Each construct family is classified as one of:
 | Residual callback-container pass-through behavior for invalid programs | Compatibility-only | Some invalid callback-container shapes may still survive as plain JS in current emitted output, but that is residual implementation behavior rather than supported language policy |
 | Optional-call on reactive receivers | Unsupported | Optional-call forms are outside the intended language because they are difficult to lower without semantic ambiguity |
 | Direct non-JSX receiver-method calls on reactive values in top-level pattern-body expression sites | Supported | Value-like receiver-method roots at top-level object-property, call-argument, variable-initializer, array-element, or return-expression sites lower to derived local value expressions |
+| Direct receiver-method roots inside supported collection callbacks | Supported | Callback-local value-like receiver-method roots lower to callback-local `derive(...)` expressions instead of remaining raw or requiring manual wrapper calls |
 | Direct top-level `.get()` reads in pattern-owned reactive context | Unsupported | Even on true cell-like values, eager `.get()` reads should move into JSX or an explicit computation callback such as `computed`, `derive`, `action`, `lift`, or `handler` rather than living directly in the top-level declarative pattern body |
 | `.get()` on ordinary opaque/reactive values | Unsupported | Pattern inputs, `computed` results, `derive` results, and other ordinary reactive values should be read directly rather than through `.get()` |
 | Statement-boundary imperative constructs in top-level pattern-owned code (`let`, loops, function creation, early return) | Unsupported | Top-level pattern context is intentionally declarative; imperative statement structure belongs in explicit callback bodies such as `computed`, `action`, `lift`, or `handler` |
@@ -421,18 +422,20 @@ The intended split is:
    - examples:
      - JSX expression sites like `{state.name.toUpperCase()}`
      - `computed(() => state.name.toUpperCase())`
-      - `action(() => state.name.trim())`
+     - `action(() => state.name.trim())`
      - `ifElse(show, state.name.trim(), "fallback")`
-3. **bare callback-local receiver-method roots in supported collection callbacks**
-   - still outside the v1 target language for now
-   - examples:
      - `items.map((item) => item.toUpperCase())`
-     - `items.map((item) => item.name.trim())` as a direct non-JSX callback root
+     - `items.map((item) => identity(item.toUpperCase()))`
+3. **optional-call / ambiguous receiver-call forms**
+   - still outside the target language
+   - examples:
+     - `input?.foo()`
+     - `items.map((item) => item?.toUpperCase())`
 
 So the language should not be read as “receiver methods are unsupported.” The
 real rule is that **receiver methods are supported in explicit local expression
-contexts and at lowerable top-level non-JSX pattern sites, but not yet as bare
-non-JSX collection-callback roots**.
+contexts, inside supported collection callbacks, and at lowerable top-level
+non-JSX pattern sites, but optional-call receiver forms remain unsupported**.
 
 ## 5.7 `.key(...)` And `.get()` Are Cell-Semantics-Split
 

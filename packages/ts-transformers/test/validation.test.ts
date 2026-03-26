@@ -737,7 +737,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   );
 
   await t.step(
-    "does not add the direct-pattern receiver-method diagnostic inside pattern-owned array-method callbacks",
+    "allows direct receiver-method root inside pattern-owned array-method callbacks",
     async () => {
       const source = `/// <cts-enable />
       import { pattern } from "commontools";
@@ -749,10 +749,47 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
-      const receiverErrors = getErrors(diagnostics).filter((error) =>
-        error.type === "pattern-context:receiver-method-call"
-      );
-      assertEquals(receiverErrors.length, 0);
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "allows call-argument receiver-method root inside pattern-owned array-method callbacks",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const identity = <T,>(value: T) => value;
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        return items.map((item) => identity(item.toUpperCase()));
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "still errors on optional receiver-call root inside pattern-owned array-method callbacks",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ items: Array<string | undefined> }>(({ items }) => {
+        return items.map((item) => item?.toUpperCase());
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:optional-chaining");
     },
   );
 });

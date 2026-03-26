@@ -3227,6 +3227,58 @@ export default pattern<{ name: string; show: boolean }>(({ name, show }) => ({
 );
 
 Deno.test(
+  "Capability-first: direct receiver-method root inside map callback lowers reactively",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+export default pattern<{ items: string[] }>(({ items }) =>
+  items.map((item) => item.toUpperCase())
+);
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, "return __ctHelpers.derive(");
+    assertStringIncludes(output, "({ item }) => item.toUpperCase()");
+    assert(
+      !output.includes("return item.toUpperCase();"),
+      "expected direct map callback receiver-method root to lower through a callback-local derive",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: call-argument receiver-method root inside map callback lowers reactively",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+const identity = <T,>(value: T) => value;
+
+export default pattern<{ items: string[] }>(({ items }) =>
+  items.map((item) => identity(item.toUpperCase()))
+);
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, "identity(__ctHelpers.derive(");
+    assertStringIncludes(output, "({ item }) => item.toUpperCase()");
+    assert(
+      !output.includes("identity(item.toUpperCase())"),
+      "expected callback-local receiver-method call argument to lower reactively",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: helper-owned child key references stay structural",
   async () => {
     const source = `/// <cts-enable />
