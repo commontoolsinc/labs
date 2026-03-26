@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 import ts from "typescript";
 
 import {
+  classifyArrayCallbackContainerCall,
   classifyArrayMethodCallSite,
   detectCallKind,
   getCapabilitySummaryCallbackArgument,
@@ -91,6 +92,10 @@ Deno.test("detectCallKind keeps array-method as a family classification while ca
     lowered: false,
     ownership: "plain",
   });
+  assertEquals(
+    classifyArrayCallbackContainerCall(expression, checker),
+    "plain-array-value",
+  );
 });
 
 Deno.test("classifyArrayMethodCallSite reports reactive ownership for reactive receivers", () => {
@@ -110,6 +115,10 @@ Deno.test("classifyArrayMethodCallSite reports reactive ownership for reactive r
     lowered: false,
     ownership: "reactive",
   });
+  assertEquals(
+    classifyArrayCallbackContainerCall(expression, checker),
+    "reactive-array-method",
+  );
 });
 
 Deno.test("classifyArrayMethodCallSite treats lowered *WithPattern methods as reactive", () => {
@@ -135,6 +144,52 @@ Deno.test("classifyArrayMethodCallSite treats lowered *WithPattern methods as re
     lowered: true,
     ownership: "reactive",
   });
+  assertEquals(
+    classifyArrayCallbackContainerCall(expression, checker),
+    "reactive-array-method",
+  );
+});
+
+Deno.test("classifyArrayCallbackContainerCall recognizes plain value-returning non-map array callbacks", () => {
+  const { sourceFile, checker } = createProgram(`
+    interface Array<T> {
+      find(
+        callback: (value: T) => boolean,
+      ): T | undefined;
+    }
+
+    const value = [1, 2, 3].find((n: number) => n > 1);
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isCallExpression(expression)) {
+    throw new Error("Expected call expression initializer");
+  }
+
+  assertEquals(
+    classifyArrayCallbackContainerCall(expression, checker),
+    "plain-array-value",
+  );
+});
+
+Deno.test("classifyArrayCallbackContainerCall recognizes plain void array callbacks", () => {
+  const { sourceFile, checker } = createProgram(`
+    interface Array<T> {
+      forEach(callback: (value: T) => void): void;
+    }
+
+    const value = [1, 2, 3].forEach((n: number) => console.log(n));
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isCallExpression(expression)) {
+    throw new Error("Expected call expression initializer");
+  }
+
+  assertEquals(
+    classifyArrayCallbackContainerCall(expression, checker),
+    "plain-array-void",
+  );
 });
 
 Deno.test("getPatternBuilderCallbackArgument preserves unresolved property-access pattern fallback", () => {

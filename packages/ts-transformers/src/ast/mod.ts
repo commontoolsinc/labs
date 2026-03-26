@@ -1,4 +1,5 @@
 export {
+  type ArrayCallbackContainerCallKind,
   type ArrayMethodAccessKind,
   type ArrayMethodCallSiteInfo,
   type ArrayMethodFamilyName,
@@ -6,6 +7,7 @@ export {
   type ArrayMethodResultSinkCallInfo,
   type ArrayMethodResultSinkReceiverChainCallInfo,
   type CallKind,
+  classifyArrayCallbackContainerCall,
   classifyArrayMethodAccess,
   classifyArrayMethodCall,
   classifyArrayMethodCallSite,

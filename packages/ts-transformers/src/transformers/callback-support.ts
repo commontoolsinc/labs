@@ -1,6 +1,6 @@
 import ts from "typescript";
 import {
-  classifyArrayMethodCallSite,
+  classifyArrayCallbackContainerCall,
   detectCallKind,
   isEventHandlerJsxAttribute,
 } from "../ast/mod.ts";
@@ -33,13 +33,6 @@ export function isReactiveArrayMethodCallbackSupport(
 ): boolean {
   return decision.kind === "supported" &&
     decision.supportedKind === "reactive-array-method";
-}
-
-export function isPlainArrayValueCallbackSupport(
-  decision: CallbackSupportDecision,
-): boolean {
-  return decision.kind === "supported" &&
-    decision.supportedKind === "plain-array-value";
 }
 
 export function supportsPatternOwnedWrapperCallbackSite(
@@ -144,91 +137,30 @@ export function classifyCallbackSupport(
     }
   }
 
-  const arrayMethodCallSite = classifyArrayMethodCallSite(parent, checker);
-  if (arrayMethodCallSite?.ownership === "reactive") {
-    return {
-      kind: "supported",
-      supportedKind: "reactive-array-method",
-    };
-  }
-
-  if (
-    arrayMethodCallSite?.ownership === "plain" &&
-    !arrayMethodCallSite.lowered
-  ) {
-    return {
-      kind: "supported",
-      supportedKind: "plain-array-value",
-    };
-  }
-
-  if (isValueReturningArrayCallbackCall(parent, checker)) {
-    return {
-      kind: "supported",
-      supportedKind: "plain-array-value",
-    };
-  }
-
-  if (isPlainArrayCallbackCall(parent, checker)) {
-    return {
-      kind: "unsupported",
-      unsupportedKind: "plain-array-void",
-    };
+  const arrayCallbackContainer = classifyArrayCallbackContainerCall(
+    parent,
+    checker,
+  );
+  switch (arrayCallbackContainer) {
+    case "reactive-array-method":
+      return {
+        kind: "supported",
+        supportedKind: "reactive-array-method",
+      };
+    case "plain-array-value":
+      return {
+        kind: "supported",
+        supportedKind: "plain-array-value",
+      };
+    case "plain-array-void":
+      return {
+        kind: "unsupported",
+        unsupportedKind: "plain-array-void",
+      };
   }
 
   return {
     kind: "unsupported",
     unsupportedKind: "unsupported-container",
   };
-}
-
-function isPlainArrayCallbackCall(
-  call: ts.CallExpression,
-  checker: ts.TypeChecker,
-): boolean {
-  const signature = checker.getResolvedSignature(call);
-  const declaration = signature?.declaration;
-  if (!signature || !declaration) {
-    return false;
-  }
-
-  const owner = findDeclarationOwnerName(declaration);
-  return owner === "Array" || owner === "ReadonlyArray";
-}
-
-function isValueReturningArrayCallbackCall(
-  call: ts.CallExpression,
-  checker: ts.TypeChecker,
-): boolean {
-  if (!isPlainArrayCallbackCall(call, checker)) {
-    return false;
-  }
-
-  const signature = checker.getResolvedSignature(call);
-  if (!signature) {
-    return false;
-  }
-
-  const returnType = checker.getReturnTypeOfSignature(signature);
-  return (returnType.flags & ts.TypeFlags.Void) === 0;
-}
-
-function findDeclarationOwnerName(node: ts.Node): string | undefined {
-  let current: ts.Node | undefined = node.parent;
-  while (current) {
-    if (
-      ts.isInterfaceDeclaration(current) ||
-      ts.isClassDeclaration(current) ||
-      ts.isTypeAliasDeclaration(current)
-    ) {
-      if (current.name) {
-        return current.name.text;
-      }
-    }
-    if (ts.isSourceFile(current)) {
-      break;
-    }
-    current = current.parent;
-  }
-  return undefined;
 }

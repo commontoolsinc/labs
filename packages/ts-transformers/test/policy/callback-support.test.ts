@@ -5,7 +5,6 @@ import { TransformationContext } from "../../src/core/mod.ts";
 import {
   allowsRestrictedContextFunctionCallback,
   classifyCallbackSupport,
-  isPlainArrayValueCallbackSupport,
   isReactiveArrayMethodCallbackSupport,
   supportsPatternOwnedWrapperCallbackSite,
 } from "../../src/transformers/callback-support.ts";
@@ -101,7 +100,31 @@ Deno.test(
       kind: "supported",
       supportedKind: "plain-array-value",
     });
-    assertEquals(isPlainArrayValueCallbackSupport(decision), true);
+    assertEquals(isReactiveArrayMethodCallbackSupport(decision), false);
+    assertEquals(allowsRestrictedContextFunctionCallback(decision), true);
+    assertEquals(supportsPatternOwnedWrapperCallbackSite(decision), false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: plain array find callbacks stay plain-array value callbacks",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      interface Array<T> {
+        find(callback: (value: T) => boolean): T | undefined;
+      }
+
+      const items = [1, 2, 3];
+      const result = items.find((item) => item > 1);
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const decision = classifyCallbackSupport(callback, checker, context);
+
+    assertEquals(decision, {
+      kind: "supported",
+      supportedKind: "plain-array-value",
+    });
     assertEquals(isReactiveArrayMethodCallbackSupport(decision), false);
     assertEquals(allowsRestrictedContextFunctionCallback(decision), true);
     assertEquals(supportsPatternOwnedWrapperCallbackSite(decision), false);
@@ -125,7 +148,6 @@ Deno.test(
       supportedKind: "reactive-array-method",
     });
     assertEquals(isReactiveArrayMethodCallbackSupport(decision), true);
-    assertEquals(isPlainArrayValueCallbackSupport(decision), false);
     assertEquals(allowsRestrictedContextFunctionCallback(decision), true);
     assertEquals(supportsPatternOwnedWrapperCallbackSite(decision), true);
   },

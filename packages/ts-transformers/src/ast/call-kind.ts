@@ -91,6 +91,11 @@ export interface ArrayMethodCallSiteInfo extends ArrayMethodAccessKind {
   readonly ownership: ArrayMethodOwnership;
 }
 
+export type ArrayCallbackContainerCallKind =
+  | "reactive-array-method"
+  | "plain-array-value"
+  | "plain-array-void";
+
 export interface ArrayMethodResultSinkCallInfo {
   readonly sink: "join";
   readonly receiverFamily: ArrayMethodFamilyName;
@@ -351,6 +356,39 @@ export function classifyArrayMethodCallSite(
       ? "reactive"
       : "plain",
   };
+}
+
+export function classifyArrayCallbackContainerCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ArrayCallbackContainerCallKind | undefined {
+  const arrayMethodCallSite = classifyArrayMethodCallSite(call, checker);
+  if (arrayMethodCallSite?.ownership === "reactive") {
+    return "reactive-array-method";
+  }
+
+  if (
+    arrayMethodCallSite?.ownership === "plain" &&
+    !arrayMethodCallSite.lowered
+  ) {
+    return "plain-array-value";
+  }
+
+  const signature = checker.getResolvedSignature(call);
+  const declaration = signature?.declaration;
+  if (!signature || !declaration) {
+    return undefined;
+  }
+
+  const owner = findOwnerName(declaration);
+  if (!owner || !ARRAY_OWNER_NAMES.has(owner)) {
+    return undefined;
+  }
+
+  const returnType = checker.getReturnTypeOfSignature(signature);
+  return (returnType.flags & ts.TypeFlags.Void) === 0
+    ? "plain-array-value"
+    : "plain-array-void";
 }
 
 export function classifyArrayMethodResultSinkCall(
