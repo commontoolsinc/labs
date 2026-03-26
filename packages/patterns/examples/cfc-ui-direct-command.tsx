@@ -1,11 +1,12 @@
 /// <cts-enable />
 import {
-  action,
   computed,
   Default,
+  handler,
   JSONSchema,
   NAME,
   pattern,
+  requireEventIntegrity,
   Stream,
   UI,
   VNode,
@@ -105,6 +106,17 @@ export const DIRECT_COMMAND_OUTPUT_SCHEMA = {
                 },
               },
             },
+            {
+              type: "object",
+              properties: {
+                props: {
+                  type: "object",
+                  properties: {
+                    "data-ui-action": { type: "string" },
+                  },
+                },
+              },
+            },
           ],
         },
       },
@@ -113,15 +125,32 @@ export const DIRECT_COMMAND_OUTPUT_SCHEMA = {
   required: ["draft", "submittedCount", UI],
 } as const satisfies JSONSchema;
 
-export default pattern<DirectCommandInput, DirectCommandOutput>(
-  ({ draft, submittedCount }) => {
-    const submit = action(() => {
+const submitDirectCommand = requireEventIntegrity(
+  handler(
+    (
+      _: void,
+      {
+        draft,
+        submittedCount,
+      }: {
+        draft: Writable<string>;
+        submittedCount: Writable<number>;
+      },
+    ) => {
       if (!draft.get().trim()) {
         return;
       }
       submittedCount.set(submittedCount.get() + 1);
       draft.set("");
-    });
+    },
+  ),
+  [submitActionContractAtom],
+  { label: "SubmitDirectCommand" },
+);
+
+export default pattern<DirectCommandInput, DirectCommandOutput>(
+  ({ draft, submittedCount }) => {
+    const submit = submitDirectCommand({ draft, submittedCount });
 
     return {
       [NAME]: computed(
@@ -158,6 +187,12 @@ export default pattern<DirectCommandInput, DirectCommandOutput>(
           />
           <ct-button data-ui-action="SubmitDirectCommand" onClick={submit}>
             Submit direct command
+          </ct-button>
+          <ct-button
+            data-ui-action="SubmitDirectCommandUntrusted"
+            onClick={submit}
+          >
+            Submit without trusted contract
           </ct-button>
           <p style={{ color: "#5f5f5f" }}>
             Submitted commands: {submittedCount}

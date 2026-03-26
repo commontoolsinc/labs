@@ -32,12 +32,19 @@ export default pattern(() => {
   const assert_initial_submit_count = computed(() =>
     subject.submittedCount === 0
   );
+  const assert_submit_count_after_rejected_send = computed(() =>
+    subject.submittedCount === 0
+  );
+  const assert_draft_preserved_after_rejected_send = computed(() =>
+    subject.draft === "Summarize the latest inbox triage notes."
+  );
   const assert_submit_count_after_send = computed(() =>
     subject.submittedCount === 1
   );
   const assert_draft_cleared_after_send = computed(() => subject.draft === "");
 
   return {
+    allowRuntimeErrors: true,
     tests: [
       { assertion: assert_initial_draft },
       { assertion: assert_initial_submit_count },
@@ -66,6 +73,28 @@ export default pattern(() => {
           path: `/${UI}/children/3`,
           op: "shape",
           integrityIncludes: [submitActionContractAtom],
+        },
+      },
+      {
+        uiEvent: {
+          target: "subject",
+          schema: DIRECT_COMMAND_OUTPUT_SCHEMA,
+          attr: {
+            name: "data-ui-action",
+            value: "SubmitDirectCommandUntrusted",
+          },
+          expectedNodePath: `/${UI}/children/4`,
+          sourceGestureId: "gesture-direct-command-untrusted-pattern-test",
+        },
+      },
+      { assertion: assert_submit_count_after_rejected_send },
+      { assertion: assert_draft_preserved_after_rejected_send },
+      {
+        runtimeErrorAssertion: {
+          includes: [
+            "CfcEventIntegrityViolationError",
+            "SubmitDirectCommand",
+          ],
         },
       },
       {

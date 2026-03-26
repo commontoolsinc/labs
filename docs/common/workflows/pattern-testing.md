@@ -99,6 +99,7 @@ Each step is one of:
 - `{ uiEvent: UiEventSpec }`
 - `{ assertion: boolean }`
 - `{ labelAssertion: LabelAssertionSpec }`
+- `{ runtimeErrorAssertion: RuntimeErrorAssertionSpec }`
 
 `uiEvent` is for testing UI-declared event integrity. Instead of calling an
 exported stream directly, the runner:
@@ -112,6 +113,36 @@ invoked through a trusted UI surface rather than by directly calling `.send()`.
 Traversal follows composed UI structure, including mapped child arrays rendered
 through parent containers, so a parent list test can target a child row button
 by selector.
+
+If the pattern intentionally rejects an event and logs a runtime error, return
+`allowRuntimeErrors: true` from the test pattern and assert the specific error
+after the action:
+
+```tsx
+return {
+  allowRuntimeErrors: true,
+  tests: [
+    {
+      uiEvent: {
+        target: "subject",
+        attr: {
+          name: "data-ui-action",
+          value: "DangerousAction",
+        },
+      },
+    },
+    { assertion: assert_state_did_not_change },
+    {
+      runtimeErrorAssertion: {
+        includes: [
+          "CfcEventIntegrityViolationError",
+          "DangerousAction",
+        ],
+      },
+    },
+  ],
+};
+```
 
 ## Writing Actions
 
@@ -196,6 +227,29 @@ For repeated child UI, prefer an attribute selector plus `occurrence`:
   },
 }
 ```
+
+## Guarding Handlers By Event Integrity
+
+Use `requireEventIntegrity()` on a module-scope `handler()` when the mutation
+should only run if the current event carries specific CFC integrity atoms:
+
+```tsx
+import { handler, requireEventIntegrity } from "commontools";
+
+const guardedShare = requireEventIntegrity(
+  handler((_: void, { shared }) => {
+    shared.set(!shared.get());
+  }),
+  [{
+    type: "https://commonfabric.org/cfc/atom/UiActionContract",
+    action: "ShareReviewedMessage",
+  }],
+  { label: "ShareReviewedMessage" },
+);
+```
+
+If the current event is missing one of the required atoms, the handler body does
+not run and the runtime records a `CfcEventIntegrityViolationError`.
 
 ## Writing Assertions
 

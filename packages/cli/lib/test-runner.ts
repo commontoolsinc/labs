@@ -11,6 +11,8 @@
  * - { action: Stream<void> } from action(() => sideEffect)
  * - { uiEvent: UiEventSpec } to mint and dispatch an event via declared [UI]
  * - { labelAssertion: LabelAssertionSpec } to assert resolved CFC labels
+ * - { runtimeErrorAssertion: RuntimeErrorAssertionSpec } to assert captured
+ *   runtime errors since the last action
  *
  * The discriminated union avoids TypeScript declaration emit issues
  * that occur when mixing Cell and Stream types in the same array.
@@ -20,6 +22,7 @@
  *   { assertion: computed(() => game.phase === "playing") },
  *   { action: action(() => game.start.send(undefined)) },
  *   { uiEvent: { attr: { name: "data-ui-action", value: "StartGame" } } },
+ *   { runtimeErrorAssertion: { includes: "SomeExpectedError" } },
  *   { assertion: computed(() => game.phase === "started") },
  * ]
  *
@@ -74,7 +77,7 @@ import { prepareCfcCommitIfNeeded } from "../../runner/src/cfc/prepare-shim.ts";
 
 /**
  * A test step is an object with an 'assertion', 'action', 'uiEvent', or
- * 'labelAssertion' property.
+ * 'labelAssertion' or 'runtimeErrorAssertion' property.
  * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
  * Add `skip: true` to temporarily disable a step (like it.skip in other frameworks).
  */
@@ -82,7 +85,8 @@ export type TestStep =
   | { assertion: OpaqueRef<boolean>; skip?: boolean }
   | { action: Stream<void>; skip?: boolean }
   | { labelAssertion: LabelAssertionSpec; skip?: boolean }
-  | { uiEvent: UiEventSpec; skip?: boolean };
+  | { uiEvent: UiEventSpec; skip?: boolean }
+  | { runtimeErrorAssertion: RuntimeErrorAssertionSpec; skip?: boolean };
 
 export interface LabelAssertionSpec {
   /**
@@ -132,6 +136,18 @@ export interface UiEventSpec extends ResolveUiEventOptions {
    * Exact resolved node path that must be targeted before dispatch.
    */
   expectedNodePath?: string;
+}
+
+export interface RuntimeErrorAssertionSpec {
+  /**
+   * One or more substrings that must all appear in captured runtime errors.
+   */
+  includes: string | readonly string[];
+  /**
+   * When true, search all captured runtime errors. Defaults to checking only
+   * runtime errors captured since the last action or uiEvent step.
+   */
+  fromAllErrors?: boolean;
 }
 
 export interface TestResult {
@@ -1037,6 +1053,7 @@ export async function runTestPattern(
     let lastActionIndex: number | null = null;
     let assertionCount = 0;
     let actionCount = 0;
+    let runtimeErrorStartForLastAction = 0;
 
     for (let i = 0; i < testsValue.length; i++) {
       if (options.verbose) {
@@ -1049,6 +1066,7 @@ export async function runTestPattern(
         assertion?: unknown;
         labelAssertion?: unknown;
         uiEvent?: unknown;
+        runtimeErrorAssertion?: unknown;
         skip?: boolean;
       };
 
@@ -1057,10 +1075,14 @@ export async function runTestPattern(
       const isAssertion = "assertion" in stepValue;
       const isLabelAssertion = "labelAssertion" in stepValue;
       const isUiEvent = "uiEvent" in stepValue;
+      const isRuntimeErrorAssertion = "runtimeErrorAssertion" in stepValue;
 
-      if (!isAction && !isAssertion && !isLabelAssertion && !isUiEvent) {
+      if (
+        !isAction && !isAssertion && !isLabelAssertion && !isUiEvent &&
+        !isRuntimeErrorAssertion
+      ) {
         throw new Error(
-          `Test step at index ${i} must have either 'action', 'assertion', 'labelAssertion', or 'uiEvent' key. Got: ${
+          `Test step at index ${i} must have either 'action', 'assertion', 'labelAssertion', 'runtimeErrorAssertion', or 'uiEvent' key. Got: ${
             JSON.stringify(Object.keys(stepValue))
           }`,
         );
@@ -1078,6 +1100,8 @@ export async function runTestPattern(
           assertionCount++;
           const assertionName = isLabelAssertion
             ? `label_assertion_${assertionCount}`
+            : isRuntimeErrorAssertion
+            ? `runtime_error_assertion_${assertionCount}`
             : `assertion_${assertionCount}`;
           const suffix = lastActionIndex !== null
             ? ` (after action_${actionCount})`
@@ -1103,6 +1127,7 @@ export async function runTestPattern(
         actionCount++;
         lastActionIndex = i;
         currentActionIndex = i;
+        runtimeErrorStartForLastAction = runtimeErrors.length;
         const actionName = `action_${actionCount}`;
 
         if (options.verbose) {
@@ -1359,7 +1384,7 @@ export async function runTestPattern(
             : "";
           console.log(`  ${status} ${assertionName}${suffix}`);
         }
-      } else {
+      } else if (isLabelAssertion) {
         assertionCount++;
         const assertionName = `label_assertion_${assertionCount}`;
 
@@ -1392,6 +1417,47 @@ export async function runTestPattern(
             : "";
           console.log(`  ${status} ${assertionName}${suffix}`);
         }
+      } else {
+        assertionCount++;
+        const assertionName = `runtime_error_assertion_${assertionCount}`;
+        const errorSpec = stepValue
+          .runtimeErrorAssertion as RuntimeErrorAssertionSpec;
+        const expectedSubstrings = Array.isArray(errorSpec.includes)
+          ? errorSpec.includes
+          : [errorSpec.includes];
+        const observedErrors = (
+          errorSpec.fromAllErrors
+            ? runtimeErrors
+            : runtimeErrors.slice(runtimeErrorStartForLastAction)
+        ).map((error) => String(error));
+
+        const missingSubstring = expectedSubstrings.find((substring) =>
+          !observedErrors.some((error) => error.includes(substring))
+        );
+        const passed = missingSubstring === undefined;
+        const error = passed
+          ? undefined
+          : `Expected runtime error containing ${
+            JSON.stringify(missingSubstring)
+          }. Observed: ${JSON.stringify(observedErrors)}`;
+
+        results.push({
+          name: assertionName,
+          passed,
+          afterAction: lastActionIndex !== null
+            ? `action_${actionCount}`
+            : null,
+          error,
+          durationMs: performance.now() - itemStart,
+        });
+
+        if (options.verbose) {
+          const status = passed ? "✓" : "✗";
+          const suffix = lastActionIndex !== null
+            ? ` (after action_${actionCount})`
+            : "";
+          console.log(`  ${status} ${assertionName}${suffix}`);
+        }
       }
 
       // Print delta stats for slow steps
@@ -1403,6 +1469,8 @@ export async function runTestPattern(
             ? `action_${actionCount}`
             : isLabelAssertion
             ? `label_assertion_${assertionCount}`
+            : isRuntimeErrorAssertion
+            ? `runtime_error_assertion_${assertionCount}`
             : `assertion_${assertionCount}`;
           printLoggerStats(
             performance.now() - startTime,

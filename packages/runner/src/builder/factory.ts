@@ -25,7 +25,15 @@ import {
 } from "./types.ts";
 import { h } from "@commontools/html";
 import { pattern } from "./pattern.ts";
-import { action, byRef, computed, derive, handler, lift } from "./module.ts";
+import {
+  action,
+  byRef,
+  computed,
+  derive,
+  handler,
+  lift,
+  requireEventIntegrity,
+} from "./module.ts";
 import {
   compileAndRun,
   fetchData,
@@ -88,6 +96,7 @@ export const createBuilder = (): {
       lift,
       handler,
       action,
+      requireEventIntegrity,
       derive,
       computed,
 

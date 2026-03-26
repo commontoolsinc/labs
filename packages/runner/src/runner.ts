@@ -63,6 +63,7 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
+import { assertRequiredEventIntegrity } from "./cfc/event-integrity-guard.ts";
 import { deriveImplementationIdentity } from "./cfc/implementation-identity.ts";
 import { withInternalVerifierRead } from "./cfc/read-observation-logging.ts";
 
@@ -1385,6 +1386,15 @@ export class Runner {
               ],
             );
           }
+
+          if (isValidArgument && module.cfcRequiredEventIntegrity) {
+            assertRequiredEventIntegrity(
+              tx.currentCfcEvent,
+              module.cfcRequiredEventIntegrity,
+              module.cfcRequiredEventIntegrityLabel ?? name,
+            );
+          }
+
           // We only run the action if we have a valid argument, or the function's schema
           // is false (like an input of `never`).
           const result = isValidArgument ? fn(argument) : undefined;

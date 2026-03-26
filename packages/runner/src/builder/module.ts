@@ -1,4 +1,6 @@
 import type {
+  EventIntegrityAtomPattern,
+  EventIntegrityGuardOptions,
   Handler,
   HandlerFactory,
   JSONSchema,
@@ -262,6 +264,8 @@ function handlerInternal<E, T>(
     return eventStream;
   }, module);
 
+  (factory as { __module?: typeof module }).__module = module;
+
   return factory;
 }
 
@@ -294,6 +298,37 @@ export function handler<E, T>(
   handler?: (event: E, props: T) => any,
 ): HandlerFactory<T, E> {
   return handlerInternal(eventSchema, stateSchema, handler);
+}
+
+export function requireEventIntegrity<T, E>(
+  handlerFactory: HandlerFactory<T, E>,
+  patterns: readonly EventIntegrityAtomPattern[],
+  options?: EventIntegrityGuardOptions,
+): HandlerFactory<T, E> {
+  if (
+    typeof handlerFactory !== "function" ||
+    handlerFactory.type !== "javascript" ||
+    handlerFactory.wrapper !== "handler"
+  ) {
+    throw new Error(
+      "requireEventIntegrity() expects a handler/action factory before binding",
+    );
+  }
+
+  const normalizedPatterns = patterns.map((pattern) => ({
+    ...pattern,
+  }));
+  const internalModule = (
+    handlerFactory as { __module?: Handler<T, E> & toJSON }
+  ).__module;
+
+  handlerFactory.cfcRequiredEventIntegrity = normalizedPatterns;
+  handlerFactory.cfcRequiredEventIntegrityLabel = options?.label;
+  if (internalModule) {
+    internalModule.cfcRequiredEventIntegrity = normalizedPatterns;
+    internalModule.cfcRequiredEventIntegrityLabel = options?.label;
+  }
+  return handlerFactory;
 }
 
 export function derive<

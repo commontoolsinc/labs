@@ -1091,6 +1091,20 @@ export type HandlerFactory<T, R> =
   & Handler<T, R>
   & toJSON;
 
+export interface EventIntegrityGuardOptions {
+  readonly label?: string;
+}
+
+export type EventIntegrityAtomPattern = Readonly<Record<string, unknown>>;
+
+export interface RequireEventIntegrityFunction {
+  <T, E>(
+    handlerFactory: HandlerFactory<T, E>,
+    patterns: readonly EventIntegrityAtomPattern[],
+    options?: EventIntegrityGuardOptions,
+  ): HandlerFactory<T, E>;
+}
+
 // JSON types
 
 export type JSONValue =
@@ -1627,6 +1641,8 @@ export type ActionFunction = {
   // Overload 2: Parameterized callback returns Stream<T>
   <T>(fn: (event: T) => void): Stream<T>;
 };
+
+export declare const requireEventIntegrity: RequireEventIntegrityFunction;
 
 /**
  * DeriveFunction creates a reactive computation that transforms input values.

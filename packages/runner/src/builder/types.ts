@@ -16,6 +16,7 @@ import type {
   ComputedFunction,
   DeriveFunction,
   EqualsFunction,
+  EventIntegrityAtomPattern,
   FetchDataFunction,
   FetchProgramFunction,
   GenerateObjectFunction,
@@ -39,6 +40,7 @@ import type {
   OpaqueRef,
   Pattern,
   PatternToolFunction,
+  RequireEventIntegrityFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
   StreamDataFunction,
@@ -92,6 +94,8 @@ export type {
   Cell,
   CellKind,
   CellTypeConstructor,
+  EventIntegrityAtomPattern,
+  EventIntegrityGuardOptions,
   Handler,
   HandlerFactory,
   HKT,
@@ -120,6 +124,7 @@ export type {
   Props,
   RenderNode,
   RequireDefaults,
+  RequireEventIntegrityFunction,
   Stream,
   StripCell,
   StripDefaultBrand,
@@ -166,6 +171,8 @@ declare module "@commontools/api" {
     resultSchema?: JSONSchema;
     /** If true, this module is an effect (side-effectful) rather than a computation */
     isEffect?: boolean;
+    cfcRequiredEventIntegrity?: readonly EventIntegrityAtomPattern[];
+    cfcRequiredEventIntegrityLabel?: string;
   }
 }
 
@@ -244,6 +251,7 @@ export interface BuilderFunctionsAndConstants {
   lift: LiftFunction;
   handler: HandlerFunction;
   action: ActionFunction;
+  requireEventIntegrity: RequireEventIntegrityFunction;
   derive: DeriveFunction;
   computed: ComputedFunction;
 
