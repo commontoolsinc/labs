@@ -1,6 +1,6 @@
 # TypeScript Transformers Target Pattern Language Specification
 
-**Status:** Draft v1 (normative target language)\
+**Status:** Candidate v1 (normative target language for current hardening phase)\
 **Package:** `@commontools/ts-transformers`\
 **Related:**
 
@@ -21,9 +21,10 @@ answers:
 3. which constructs are merely tolerated compatibility behavior
 4. which constructs are outside the language and should diagnose clearly
 
-If this document and the current implementation disagree, treat the difference
-as a design question to resolve. Do not silently let implementation accident
-become language policy.
+If this document and the current implementation disagree on a supported or
+unsupported construct family, treat the implementation as needing correction or
+an explicitly recorded follow-up in the design-deltas/current-behavior docs. Do
+not silently let implementation accident become language policy.
 
 ## 2. Scope
 
@@ -45,9 +46,6 @@ Each construct family is classified as one of:
 
 - **Supported**
   - first-class part of the intended language
-- **Transitional**
-  - currently supported and likely to remain, but the exact formulation or
-    boundary may still tighten
 - **Compatibility-only**
   - tolerated behavior for existing code, but not something we want to bless as
     a core target-language construct
@@ -454,26 +452,24 @@ The real rule is:
 One important nuance: there are still transform-only continuity tests around
 explicitly typed `Writable` / `Cell` inputs and top-level `.key(...).get()`
 reads. Those tests preserve schema/input-shape behavior for invalid programs,
-but they do **not** make direct top-level eager reads part of the target
-language while validation still rejects them.
+but they do **not** promote direct top-level eager reads into the supported
+target language while validation still rejects them.
 
-## 6. Remaining Design Questions
+## 6. Non-Normative Hardening Follow-Ups
 
-These are the main semantic questions still worth revisiting after the current
-v1 draft:
+These are implementation/documentation follow-ups, not unresolved v1 language
+questions:
 
-1. whether the remaining invalid-program callback-container pass-through should
-   be removed entirely from implementation now that diagnostics exist
-2. whether the explicit-cell `.key(...)` / `.get()` boundary is the right
-   long-term authored API surface, or whether it should be narrowed or
-   documented more aggressively relative to ordinary opaque/property access
-3. whether top-level lowerable direct `.get()` reads on explicitly declared
-   cell-like inputs should eventually be promoted into the language, or remain
-   invalid despite transform-continuity behavior that still exists for some
-   typed-input cases
-4. whether optional-call on reactive receivers should remain outside the
-   language permanently, or whether there is a future explicit semantics worth
-   supporting
+1. remove residual invalid-program callback-container pass-through where
+   feasible; until then it remains compatibility-only and may disappear without
+   language change
+2. keep the explicit-cell `.key(...)` / `.get()` boundary documented
+   consistently across diagnostics, examples, and specs; any future narrowing
+   would be a later language revision rather than an unresolved v1 semantic
+3. preserve typed-input/schema continuity tests around explicit cell-like
+   inputs without promoting direct top-level `.get()` reads into the language
+4. keep optional-call on reactive receivers unsupported in v1 unless a future
+   language revision defines an explicit evaluation model
 
 ## 7. Use This Spec
 
@@ -486,3 +482,5 @@ Instead ask:
    outright?
 
 That is the intended role of this document: to make those decisions explicit.
+If current implementation behavior still differs, record that as a follow-up in
+the descriptive docs rather than softening this spec by accident.

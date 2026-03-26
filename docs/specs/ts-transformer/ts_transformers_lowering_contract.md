@@ -1,6 +1,6 @@
 # TypeScript Transformers Lowering Contract
 
-**Status:** Draft v1 (normative semantic contract)\
+**Status:** Candidate v1 (normative semantic contract for current hardening phase)\
 **Package:** `@commontools/ts-transformers`\
 **Related:**
 
@@ -16,6 +16,10 @@ does rewrite supported pattern-language constructs.
 It is intentionally narrower than a full implementation spec. The point is to
 state **what must be preserved**, not to freeze the current module layout or
 pipeline internals.
+
+For supported target-language constructs, this contract is the source of truth.
+If current implementation behavior disagrees, fix the implementation or record
+the divergence in descriptive docs rather than weakening the contract.
 
 ## 2. Contract Scope
 
@@ -153,7 +157,8 @@ This is especially important for:
 
 - optional-call
 - non-lowerable wildcard traversal
-- direct non-JSX receiver-method calls on reactive values
+- foreign callback-container roots in pattern-facing contexts
+- direct top-level eager `.get()` reads on reactive or cell-like values
 - imperative statement-boundary constructs in top-level pattern context
 
 ## 3.10 Phase Choice Is An Implementation Detail

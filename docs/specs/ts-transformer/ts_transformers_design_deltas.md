@@ -831,14 +831,18 @@ without major compile-time regression.
 
 **Exit criteria:** new path is default, old path removed or hard-deprecated.
 
-## Open Questions
+## Remaining Hardening Follow-Ups
 
-1. Should ternary in compute context JSX also be preserved (no `ifElse`
-   lowering), mirroring the proposed `&&`/`||` rule?
-2. Do we want a strict “context policy matrix” test suite that all operator
-   rewrites must satisfy before merge?
-3. For path shrinking, which operations should immediately force wildcard shape
-   fallback vs allow partial precision?
-4. For compute context, what interprocedural scope is required in MVP
-   (same-module direct calls only vs broader), given pattern-context signatures
-   are intentionally direct/local?
+Normative language decisions now live in the target-language spec and lowering
+contract. The items below are rollout/hardening follow-ups, not unresolved
+source-language policy.
+
+1. Decide and pin whether compute-context JSX ternary should preserve authored
+   ternary (no `ifElse` lowering), mirroring the current `&&`/`||` direction.
+2. Add a strict context-policy matrix test suite if we want a permanent gate on
+   operator rewrite behavior.
+3. Tighten wildcard-fallback rules for path shrinking so partial precision vs
+   full-shape fallback is consistently classified.
+4. Tighten the compute-context interprocedural MVP scope (for example
+   same-module direct calls vs broader) while keeping pattern-context legality
+   intentionally direct/local.
