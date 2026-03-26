@@ -651,6 +651,11 @@ export class CellBridge {
 
     if (toRemove.length === 0 && toAdd.length === 0) return;
 
+    // Capture removed entity IDs before removePieceFromSpace deletes them from pieceMap
+    const removedEntityIds = toRemove.map((n) => state.pieceMap.get(n)).filter(
+      (id): id is string => id !== undefined,
+    );
+
     for (const name of toRemove) {
       this.removePieceFromSpace(state, name);
       console.log(`[${spaceName}] Removed piece: ${name}`);
@@ -681,9 +686,15 @@ export class CellBridge {
       // Also invalidate "pieces" entry on the space dir so readdir refreshes
       this.onInvalidate(state.spaceIno, ["pieces"]);
     }
-    // Invalidate newly added entity dirs
-    if (this.onInvalidate && toAdd.length > 0) {
-      this.onInvalidate(state.entitiesIno, toAdd.map((p) => p.id));
+    // Invalidate added and removed entity dirs
+    if (this.onInvalidate) {
+      const entityInvalidIds = [
+        ...removedEntityIds,
+        ...toAdd.map((p) => p.id),
+      ];
+      if (entityInvalidIds.length > 0) {
+        this.onInvalidate(state.entitiesIno, entityInvalidIds);
+      }
     }
     // Invalidate cached inode data for pieces dir (forces readdir refresh)
     if (this.onInvalidateInode) {
