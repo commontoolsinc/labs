@@ -64,6 +64,7 @@ import {
   fromMemoryV2Document,
   toMemoryV2DocumentFromStorageValue,
   toMemoryV2DocumentFromTransactionValue,
+  toMemoryV2DocumentFromValue,
   toTransactionDocumentValue,
 } from "./v2-document.ts";
 import * as V2Transaction from "./v2-transaction.ts";
@@ -638,7 +639,12 @@ class Provider implements IStorageProviderWithReplica {
   send<T extends StorableValue = StorableValue>(
     batch: { uri: URI; value: StorageValue<T> }[],
   ): Promise<Result<Unit, Error>> {
-    return this.replica.send(batch) as Promise<Result<Unit, Error>>;
+    return this.replica.send(batch.map(({ uri, value }) => ({
+      uri,
+      document: hasStoredDocumentValue(value)
+        ? toStoredDocumentFromStorageValue(value)
+        : undefined,
+    }))) as Promise<Result<Unit, Error>>;
   }
 
   sync(uri: URI, selector?: SchemaPathSelector): Promise<Result<Unit, Error>> {
@@ -650,16 +656,28 @@ class Provider implements IStorageProviderWithReplica {
   }
 
   get<T extends StorableValue = StorableValue>(uri: URI): OptStorageValue<T> {
-    return this.replica.getStorageValue(uri) as OptStorageValue<T>;
+    const document = this.replica.getDocument(uri);
+    return (
+      document === undefined
+        ? undefined
+        : toStorageValueFromStoredDocument(document)
+    ) as OptStorageValue<T>;
   }
 
   sink<T extends StorableValue = StorableValue>(
     uri: URI,
     callback: (value: StorageValue<T> | undefined) => void,
   ): Cancel {
-    return this.replica.sink(
+    return this.replica.sinkDocument(
       uri,
-      callback as (value: StorageValue | undefined) => void,
+      (document) =>
+        callback(
+          (
+            document === undefined
+              ? undefined
+              : toStorageValueFromStoredDocument(document)
+          ) as StorageValue<T> | undefined,
+        ),
     );
   }
 
@@ -764,7 +782,7 @@ class SpaceReplica implements ISpaceReplica {
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
     URI,
-    Set<(value: StorageValue | undefined) => void>
+    Set<(document: WireEntityDocument | undefined) => void>
   >();
   #watchView: MemoryV2Client.WatchView | null = null;
   #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
@@ -797,7 +815,10 @@ class SpaceReplica implements ISpaceReplica {
     ]]);
   }
 
-  sink(uri: URI, callback: (value: StorageValue | undefined) => void): Cancel {
+  sinkDocument(
+    uri: URI,
+    callback: (document: WireEntityDocument | undefined) => void,
+  ): Cancel {
     let subscribers = this.#sinks.get(uri);
     if (!subscribers) {
       subscribers = new Set();
@@ -815,13 +836,13 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async send(
-    batch: { uri: URI; value: StorageValue }[],
+    batch: { uri: URI; document: WireEntityDocument | undefined }[],
   ): Promise<Result<Unit, PushError>> {
-    const operations = batch.map(({ uri, value }) =>
-      value.value === undefined ? { op: "delete" as const, id: uri } : {
+    const operations = batch.map(({ uri, document }) =>
+      document === undefined ? { op: "delete" as const, id: uri } : {
         op: "set" as const,
         id: uri,
-        value: toStoredDocumentFromStorageValue(value),
+        value: document,
       }
     );
     return await this.commitOperations(operations, undefined);
@@ -829,13 +850,6 @@ class SpaceReplica implements ISpaceReplica {
 
   async synced(): Promise<void> {
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
-  }
-
-  getStorageValue(uri: URI): OptStorageValue {
-    const document = this.visibleDocument(uri);
-    return document === undefined
-      ? undefined
-      : toStorageValueFromStoredDocument(document);
   }
 
   getDocument(uri: URI): WireEntityDocument | undefined {
@@ -945,9 +959,7 @@ class SpaceReplica implements ISpaceReplica {
           : {
             op: "set" as const,
             id: fact.of as URI,
-            value: toStoredDocumentFromStorageValue({
-              value: fact.is as StorableValue,
-            }),
+            value: toMemoryV2DocumentFromValue(fact.is as StorableValue),
           }
       );
 
@@ -1403,7 +1415,7 @@ class SpaceReplica implements ISpaceReplica {
       ids.add(change.address.id as URI);
     }
     for (const id of ids) {
-      const current = this.getStorageValue(id);
+      const current = this.visibleDocument(id);
       for (const callback of this.#sinks.get(id) ?? []) {
         try {
           callback(current);
@@ -1435,6 +1447,9 @@ const toStoredDocumentFromStorageValue = (
 const toStorageValueFromStoredDocument = (
   document: WireEntityDocument,
 ): StorageValue | undefined => fromMemoryV2Document(document);
+
+const hasStoredDocumentValue = (value: StorageValue): boolean =>
+  value.value !== undefined || value.source !== undefined;
 
 const toConnectionError = (error: unknown): IConnectionError =>
   ({

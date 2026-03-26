@@ -20,6 +20,7 @@ import {
   encodeWireEntityDocument,
   type EntitySnapshot,
   type GraphQuery,
+  toDocumentSelector,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
 
@@ -217,10 +218,7 @@ export const trackGraph = (
   const sharedMemo = createSchemaMemo();
 
   for (const root of query.roots) {
-    const selector: SchemaPathSelector = {
-      path: ["value", ...root.selector.path],
-      schema: root.selector.schema ?? false,
-    };
+    const selector = toDocumentSelector(root.selector);
     const loaded = manager.load({ id: root.id, type: "application/json" });
     if (loaded !== null) {
       loadFactsForDoc(
@@ -271,10 +269,7 @@ export const extendTrackedGraph = (
   const touched = new Set<QueryDocKey>();
 
   for (const root of query.roots) {
-    const selector: SchemaPathSelector = {
-      path: ["value", ...root.selector.path],
-      schema: root.selector.schema ?? false,
-    };
+    const selector = toDocumentSelector(root.selector);
     const rootKey = toDocKey(space, root.id, "application/json");
     touched.add(rootKey);
     evaluateTrackedDocument(

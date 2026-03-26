@@ -248,6 +248,9 @@ const collapseEmptyJsonDocumentEnvelope = (
 
 const EMPTY_META = Object.freeze({});
 
+const normalizeReactivityPath = (path: readonly string[]): string[] =>
+  path[0] === "value" ? [...path.slice(1)] : [...path];
+
 const isJSONPatchValue = (
   value: StorableDatum | undefined,
 ): value is JSONValue | undefined => {
@@ -1350,7 +1353,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         space: read.space,
         id: read.id,
         type: read.type,
-        path: read.path.slice(1),
+        path: normalizeReactivityPath(read.path),
       };
 
       if (read.nonRecursive === true) {
@@ -1376,7 +1379,7 @@ export class V2StorageTransaction implements IStorageTransaction {
             space: detail.address.space,
             id: detail.address.id,
             type: detail.address.type,
-            path: detail.address.path.slice(1),
+            path: normalizeReactivityPath(detail.address.path),
           });
         }
       }

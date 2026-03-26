@@ -23,7 +23,16 @@ export type Reference = string & {
 export type DocumentPath = readonly string[] & {
   readonly __memoryV2DocumentPath: unique symbol;
 };
+export type ValuePath = readonly string[] & {
+  readonly __memoryV2ValuePath: unique symbol;
+};
 export type ReadPath = DocumentPath;
+export type DocumentSchemaPathSelector =
+  & Omit<SchemaPathSelector, "path">
+  & { path: DocumentPath };
+export type ValueSchemaPathSelector =
+  & Omit<SchemaPathSelector, "path">
+  & { path: ValuePath };
 
 export interface SourceLink {
   "/": string;
@@ -326,6 +335,16 @@ export const toSourceLink = (id: string): SourceLink => ({ "/": id });
 
 export const toDocumentPath = (path: readonly string[]): DocumentPath =>
   path as DocumentPath;
+
+export const toValuePath = (path: readonly string[]): ValuePath =>
+  path as ValuePath;
+
+export const toDocumentSelector = (
+  selector: Pick<SchemaPathSelector, "path" | "schema">,
+): DocumentSchemaPathSelector => ({
+  ...selector,
+  path: toDocumentPath(["value", ...selector.path]),
+});
 
 export const toBlobMetadataId = (hash: Reference): EntityId =>
   `urn:blob-meta:${hash}`;

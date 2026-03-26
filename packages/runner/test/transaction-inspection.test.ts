@@ -183,6 +183,65 @@ describe("transaction inspection", () => {
     }
   });
 
+  it("preserves full-document paths in native v2 reactivity logs", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+
+    try {
+      const id =
+        "test:transaction-inspection-direct-v2-document-paths" as const;
+
+      const seed = storageManager.edit();
+      seed.write({
+        space,
+        id,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { count: 1 },
+        source: { "/": "origin" },
+        meta: { updatedAt: "before" },
+      });
+      await seed.commit();
+
+      const tx = storageManager.edit();
+      tx.read({
+        space,
+        id,
+        type: "application/json",
+        path: ["source"],
+      });
+      tx.write({
+        space,
+        id,
+        type: "application/json",
+        path: ["meta", "updatedAt"],
+      }, "after");
+
+      const expected: TransactionReactivityLog = {
+        reads: [{
+          space,
+          id,
+          type: "application/json",
+          path: ["source"],
+        }],
+        shallowReads: [],
+        writes: [{
+          space,
+          id,
+          type: "application/json",
+          path: ["meta", "updatedAt"],
+        }],
+      };
+
+      assertEquals(tx.getReactivityLog?.(), expected);
+    } finally {
+      await storageManager.close();
+    }
+  });
+
   it("forwards native v2 hooks through extended transaction wrappers", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,

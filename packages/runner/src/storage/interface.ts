@@ -642,7 +642,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Reads a value from a (local) memory address and throws on error, except for
    * `NotFoundError` which is returned as undefined.
    *
-   * Also prepends `value` to path, for how source metadata currently works.
+   * Thin convenience wrapper over `readOrThrow()` that prepends `"value"` to
+   * the supplied path.
    *
    * @param address - Memory address to read from.
    * @returns The read value.
@@ -668,7 +669,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Writes a value into a storage at a given address, including creating parent
    * entries in the document if a path is provided or throws an error.
    *
-   * Also prepends `value` to path, for how source metadata currently works.
+   * Thin convenience wrapper over `writeOrThrow()` that prepends `"value"` to
+   * the supplied path.
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
@@ -680,7 +682,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
 
   /**
    * Optional batched write helper that preserves the extended transaction's
-   * `["value", ...path]` addressing semantics.
+   * `["value", ...path]` helper semantics on top of `writeBatch`.
    */
   writeValuesOrThrow?(
     writes: Iterable<ITransactionWriteRequest>,

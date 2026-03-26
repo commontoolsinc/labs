@@ -7,9 +7,12 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { Cell } from "../src/cell.ts";
 
 type TestProvider = {
-  get(uri: string): { value: unknown } | undefined;
+  get(uri: string): { value: unknown; source?: { "/": string } } | undefined;
   send(
-    batch: { uri: string; value: { value: unknown; labels?: unknown } }[],
+    batch: {
+      uri: string;
+      value: { value: unknown; source?: { "/": string }; labels?: unknown };
+    }[],
   ): Promise<
     {
       ok?: Record<PropertyKey, never>;
@@ -122,6 +125,25 @@ describe("Memory v2 emulation", () => {
         value: "hello",
         other: "data",
       },
+    });
+  });
+
+  it("treats source-only provider sends as documents, not deletes", async () => {
+    const provider = storageManager.open(space) as unknown as TestProvider;
+    const uri = `of:memory-v2-source-only-${Date.now()}` as const;
+
+    const result = await provider.send([{
+      uri,
+      value: {
+        value: undefined,
+        source: { "/": "process:1" },
+      },
+    }]);
+
+    expect(result).toEqual({ ok: {} });
+    expect(provider.get(uri)).toEqual({
+      value: undefined,
+      source: { "/": "process:1" },
     });
   });
 });

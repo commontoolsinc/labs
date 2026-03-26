@@ -7,6 +7,11 @@ import type {
   Operation,
   PendingRead,
 } from "@commontools/memory/v2";
+import {
+  parentPath,
+  parsePointer,
+  pathsOverlap,
+} from "../../memory/v2/path.ts";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import type { AppliedCommit } from "@commontools/memory/v2/engine";
 import type {
@@ -563,30 +568,25 @@ const touchedWritesForOperation = (operation: Operation): TouchedWrite[] => {
   if (operation.op !== "patch") {
     return [{ id: operation.id as URI, paths: [[]] }];
   }
-  const paths = operation.patches.flatMap((patch) =>
-    patch.op === "move"
-      ? [parsePointer(patch.from), parsePointer(patch.path)]
-      : [parsePointer(patch.path)]
-  );
+  const paths = operation.patches.flatMap((patch) => {
+    switch (patch.op) {
+      case "replace":
+      case "splice":
+        return [parsePointer(patch.path)];
+      case "add":
+      case "remove": {
+        const path = parsePointer(patch.path);
+        return [path, parentPath(path)];
+      }
+      case "move": {
+        const from = parsePointer(patch.from);
+        const to = parsePointer(patch.path);
+        return [from, to, parentPath(from), parentPath(to)];
+      }
+    }
+  });
   return [{ id: operation.id as URI, paths }];
 };
-
-const pathsOverlap = (left: readonly string[], right: readonly string[]) => {
-  const limit = Math.min(left.length, right.length);
-  for (let index = 0; index < limit; index += 1) {
-    if (left[index] !== right[index]) {
-      return false;
-    }
-  }
-  return true;
-};
-
-const parsePointer = (pointer: string): string[] =>
-  pointer === ""
-    ? []
-    : pointer.slice(1).split("/").map((segment) =>
-      segment.replaceAll("~1", "/").replaceAll("~0", "~")
-    );
 
 const applyOperation = (operation: Operation): RootValue => {
   if (operation.op === "delete") {

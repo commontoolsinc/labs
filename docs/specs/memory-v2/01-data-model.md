@@ -56,6 +56,15 @@ The `value` property holds the cell's actual data. Storing it under a key
 (rather than as the top-level value) lets the envelope carry sibling metadata
 like `source` that travel with the value but are not part of it.
 
+Below the query layer, the storage engine, replica, and transaction APIs treat
+this as an ordinary plain document root. They do not attach special operational
+meaning to `value` or `source`; higher layers may add other sibling fields over
+time. The current runtime-facing helpers simply provide two addressing
+conventions over that same stored document:
+
+- **Document paths** address the full stored document root.
+- **Value-relative paths** address only the `document.value` subtree.
+
 **Deletion is explicit**: removing an entity is represented only by a `Delete`
 fact (section 2.2). A missing `value` field is NOT used as a tombstone in v2.
 Supporting a live "undefined" cell value is deferred; if we need it later, it
@@ -72,15 +81,19 @@ server executes a subscription with graph traversal, it MUST follow `source`
 links transitively (and any `source` links on those entities, etc.) to include
 the full provenance chain.
 
-**Fact paths**: Because the envelope wraps the cell value under `"value"`, fact
-paths include a `"value"` prefix. For example, accessing `items[0]` on a cell
-corresponds to the fact path `["value", "items", "0"]`. The `readValueOrThrow()`
-API automatically prepends `"value"` to client paths.
+**Document paths**: Transaction/storage reads and writes operate on full
+document paths. For example, the source link lives at `["source"]`, while the
+cell payload root lives at `["value"]`.
 
-**SchemaPathSelector paths**: The selector's `path` field is relative to the
-cell value (e.g., `[]` for the root cell, `["items"]` for a sub-path). The
-server-side traversal code re-roots this to `["value", ...path]` before walking
-the entity document.
+**Value-relative paths**: `readValueOrThrow()` and `writeValueOrThrow()` are
+thin convenience helpers that call the full-document APIs after prepending
+`"value"` to the supplied path. Accessing `items[0]` on the cell value
+therefore maps to the document path `["value", "items", "0"]`.
+
+**SchemaPathSelector paths**: Query selectors stay value-relative
+(e.g. `[]` for the root cell, `["items"]` for a sub-path). The shared
+query/traversal layer re-roots those selectors to `["value", ...path]` before
+walking the stored document.
 
 ---
 

@@ -15,11 +15,20 @@ target. In particular:
 - the current wire protocol uses plain JSON messages, not UCAN-framed transport
 - write-class commands may persist `invocation` / `authorization` payloads, but
   transport-level UCAN verification remains deferred
+- route-level UCAN / ACL / `Origin` enforcement for the toolshed v2 websocket
+  remains deferred; treat the current endpoint as trusted-only for now
 - session resume still uses caller-provided `sessionId` values; principal
   binding and server-issued session ids remain deferred
 - one-shot `graph.query` now honors `branch`, `since`, and `atSeq`
+- the public one-shot read surface in this pass is `graph.query`; the older
+  simple `query` / wildcard selector shape remains future protocol design
 - watch installation remains current-state only in this pass; do not treat
   watch specs as historical subscriptions keyed by `atSeq`
+- steady-state topology shrink does not yet drive automatic unwatch/removal
+  semantics; clients should only rely on `removes` from explicit watch-set
+  replacement or reused watch ids in this pass
+- branch lifecycle commands are not yet exposed on the v2 wire; current branch
+  creation keeps its fork-seq semantics until that cutover lands
 
 ## 1. Source Of Truth
 
@@ -112,6 +121,17 @@ The storage-visible notification behavior must remain:
 - optimistic `"commit"` before the async round trip completes
 - `"revert"` synchronously before the promise resolves on conflict
 - `"integrate"` for remote sync
+
+Path and document-boundary rules:
+
+- `read()` / `write()` operate on full stored documents.
+- `readValue()` / `writeValue()` style helpers are thin adapters that prepend
+  `"value"` and then delegate to those full-document operations.
+- the replica/storage layer should traffic in plain stored documents, not a
+  runner-side `StorageValue` interpretation.
+- only the shared query/traversal layer treats selector paths as value-relative.
+- `jsonFromValue` / `valueFromJson` belong at persistence or wire boundaries,
+  not in the middle of transaction or replica logic.
 
 ## 6. Stable Snapshot Rule
 

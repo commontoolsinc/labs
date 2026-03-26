@@ -5,14 +5,13 @@ import type {
 import {
   decodeWireEntityDocument,
   encodeWireEntityDocument,
-  type EntityDocument,
-  isEntityDocument,
   type SourceLink,
-  toEntityDocument,
   toSourceLink,
   type WireEntityDocument,
 } from "@commontools/memory/v2";
 import type { StorageValue } from "./interface.ts";
+
+type EncodableDocument = Parameters<typeof encodeWireEntityDocument>[0];
 
 const toDocumentSourceLink = (
   source: StorageValue["source"] | undefined,
@@ -31,13 +30,16 @@ const toDocumentSourceLink = (
   return toSourceLink(shortId);
 };
 
-const toTransactionDocument = (value: StorableDatum): EntityDocument => {
-  if (!isEntityDocument(value)) {
+const isDocumentRoot = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const toTransactionDocument = (value: StorableDatum): EncodableDocument => {
+  if (!isDocumentRoot(value)) {
     throw new Error(
       "memory v2 transactions require explicit full-document roots",
     );
   }
-  return value;
+  return value as EncodableDocument;
 };
 
 export const toMemoryV2Document = (value: StorableDatum): WireEntityDocument =>
@@ -47,21 +49,31 @@ export const toMemoryV2DocumentFromTransactionValue = (
   value: StorableDatum,
 ): WireEntityDocument => toMemoryV2Document(value);
 
+export const toMemoryV2DocumentFromValue = (
+  value: StorableValue,
+): WireEntityDocument =>
+  encodeWireEntityDocument({ value } as EncodableDocument);
+
 export const toMemoryV2DocumentFromStorageValue = (
   value: StorageValue,
-): WireEntityDocument =>
-  encodeWireEntityDocument(
-    toEntityDocument(
-      value.value as StorableValue,
-      toDocumentSourceLink(value.source),
-    ),
-  );
+): WireEntityDocument => {
+  const document: Record<string, StorableDatum | SourceLink> = {
+    ...(value.value !== undefined
+      ? { value: value.value as StorableValue }
+      : {}),
+  };
+  const source = toDocumentSourceLink(value.source);
+  if (source !== undefined) {
+    document.source = source;
+  }
+  return encodeWireEntityDocument(document as EncodableDocument);
+};
 
 export const fromMemoryV2Document = (
   document: WireEntityDocument,
 ): StorageValue | undefined => {
   const decoded = decodeWireEntityDocument(document);
-  if (decoded.value === undefined) {
+  if (decoded.value === undefined && decoded.source === undefined) {
     return undefined;
   }
 

@@ -4,6 +4,21 @@ This section defines how clients retrieve data from a Space. The query system
 supports simple pattern matching, schema-driven graph traversal, point-in-time
 reads, session watch sets, and branch-aware retrieval.
 
+## Status Note
+
+The current implementation only exposes the schema-guided `graph.query` shape on
+the v2 wire:
+
+- one-shot reads use `roots: [{ id, selector }]` plus `branch`, `since`, and
+  `atSeq`
+- watch specs also reuse that graph-shaped query payload in the current pass
+- the older simple `query` / wildcard selector surface remains documented design
+  but is not yet shipped on the wire
+- steady-state watch refresh does not yet guarantee automatic `removes` when a
+  topology shrink makes previously reachable entities irrelevant
+- selector paths remain value-relative; the storage/transaction layer still uses
+  full document paths
+
 ## 5.1 Query Types
 
 There are two query types, each with increasing expressiveness:
@@ -124,7 +139,7 @@ type SchemaSelector = Record<EntityId | "*", SchemaPathSelector>;
 // A path + schema pair that describes what to traverse
 // within a matched entity's value.
 interface SchemaPathSelector {
-  path: string[]; // Path segments into the entity value
+  path: string[]; // Value-relative path segments into document.value
   schema?: JSONSchema; // JSON Schema constraining traversal
 }
 ```
@@ -132,6 +147,10 @@ interface SchemaPathSelector {
 The `path` field navigates into the entity's value before applying the schema.
 For example, `{ path: ["settings", "theme"], schema: { type: "object" } }` would
 navigate to the `settings.theme` sub-object and traverse it as an object.
+
+This is intentionally different from transaction/storage path handling. Query
+selectors are value-relative, while lower layers operate on full document paths
+such as `["value", "settings", "theme"]` or `["source"]`.
 
 ### 5.3.2 Schema Traversal Algorithm
 

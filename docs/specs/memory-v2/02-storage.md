@@ -76,6 +76,9 @@ Notes:
 - For `set`, `data` stores the full `EntityDocument`.
 - For `patch`, `data` stores the serialized patch list.
 - For `delete`, `data` is `NULL`.
+- The storage/transaction layer operates on full-document paths. Only the
+  query/traversal layer treats selector paths as value-relative and re-roots
+  them through `["value", ...path]`.
 
 ### 3.2 `head` — Current State Pointer
 
@@ -96,6 +99,9 @@ CREATE INDEX idx_head_branch ON head (branch);
 
 The `head` table is a pointer only. The full current value is reconstructed from
 the nearest snapshot at or before `seq`, then by replaying later revisions.
+
+At this layer the reconstructed value is the full stored document object, not a
+special runner-side `StorageValue` projection.
 
 ### 3.3 `commit` — Sequenced Write Log
 

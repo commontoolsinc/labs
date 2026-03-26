@@ -1,14 +1,31 @@
 # 4. Protocol
 
-The protocol defines how clients communicate with the memory server. It uses
-WebSocket transport, signed UCAN invocations for client commands, `task/return`
-receipts for command results, and session-scoped catch-up sync frames for data
-delivery.
+The protocol defines how clients communicate with the memory server. The
+current implementation uses WebSocket transport, a lightweight JSON
+request/response framing layer, and session-scoped catch-up sync frames for
+data delivery.
 
 The major protocol change in this revision is that live data updates are no
 longer tied to the invocation id of an individual subscription. The server
 tracks a session's active watch set and the client's integrated `seenSeq`, then
 pushes whatever that session needs to catch up.
+
+## Status Note
+
+This chapter tracks the currently shipped wire behavior for the memory-v2
+rewrite. In particular:
+
+- the handshake is `hello` / `hello.ok`, not a bare `{ "protocol": ... }`
+  declaration
+- request messages are plain JSON envelopes; transport-level UCAN framing
+  remains deferred for this pass
+- route-level auth / ACL / `Origin` enforcement is also deferred on the current
+  toolshed v2 websocket route, so the endpoint should be treated as trusted-only
+- session resume remains keyed by caller-supplied `(space, sessionId)` rather
+  than a server-issued, principal-bound identifier
+- the public one-shot read surface is currently `graph.query`
+- watch-set mutations return inline `sync` payloads, and steady-state topology
+  shrink does not yet guarantee automatic `removes`
 
 ## 4.1 Transport
 
@@ -23,14 +40,17 @@ The WebSocket transport provides a persistent, bidirectional channel for:
 The client MUST declare its protocol version in the first WebSocket message:
 
 ```json
-{ "protocol": "memory/v2" }
+{ "type": "hello", "protocol": "memory/v2" }
 ```
 
-If the server does not support the requested version, it returns:
+If the server accepts the protocol, it returns:
 
 ```json
-{ "error": { "name": "UnsupportedProtocol", "supported": ["memory/v2"] } }
+{ "type": "hello.ok", "protocol": "memory/v2" }
 ```
+
+If the server does not support the requested version, it returns a typed error
+response and does not mark the connection ready.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -40,20 +60,19 @@ logical session per space rather than to one TCP connection.
 ```typescript
 type SessionId = string;
 
-interface SessionOpenCommand {
-  cmd: "/memory/session/open";
-  sub: SpaceId;
-  args: {
+interface SessionOpenRequest {
+  type: "session.open";
+  requestId: string;
+  space: SpaceId;
+  session: {
     sessionId?: SessionId;
     seenSeq?: number;
   };
 }
 
 interface SessionOpenResult {
-  ok: {
-    sessionId: SessionId;
-    serverSeq: number;
-  };
+  sessionId: SessionId;
+  serverSeq: number;
 }
 ```
 
@@ -61,8 +80,9 @@ Rules:
 
 - the client MUST open or resume a session before issuing any memory commands
   for that space on the current connection
-- `sessionId` is server-issued and bound to the authenticated principal and
-  space
+- `sessionId` is caller-supplied in the current pass when the client wants to
+  resume an existing logical session; server-issued, principal-bound ids remain
+  deferred
 - `seenSeq` is the highest canonical seq the client has fully integrated into
   confirmed state
 - after reconnect, the client resumes the session, replays retained commits,
@@ -71,61 +91,60 @@ Rules:
 
 ## 4.2 Message Format
 
-### 4.2.1 Client → Server: UCAN Invocation
+### 4.2.1 Client → Server: JSON Request Envelope
 
-Every client message is a signed UCAN invocation.
+The current wire protocol uses plain JSON request envelopes. Write-class
+requests may carry `invocation` / `authorization` payloads for persistence, but
+the transport does not yet require signed UCAN envelopes.
 
 ```typescript
-interface ClientMessage<Cmd extends Command = Command> {
-  invocation: Cmd;
-  authorization: Authorization<Cmd>;
+interface HelloMessage {
+  type: "hello";
+  protocol: "memory/v2";
 }
 
-interface Command<
-  Ability extends string = string,
-  Subject extends SpaceId = SpaceId,
-  Args extends Record<string, unknown> = Record<string, unknown>,
-> {
-  cmd: Ability;
-  sub: Subject;
-  args: Args;
-  iss: DID;
-  prf: Delegation[];
-  iat?: number;
-  exp?: number;
-  nonce?: Uint8Array;
-  meta?: Record<string, string>;
+interface RequestMessage {
+  type:
+    | "session.open"
+    | "transact"
+    | "graph.query"
+    | "session.watch.set"
+    | "session.watch.add"
+    | "session.ack";
+  requestId: string;
+  space: SpaceId;
+  sessionId?: SessionId;
 }
 ```
 
-Successful write-class commands preserve both the canonical invocation object
-and the verified authorization object in storage.
+Successful write-class commands currently preserve whatever invocation /
+authorization payload the caller provided; verification remains deferred in this
+pass.
 
-### 4.2.2 Server → Client: Receipt and Session Effect
+### 4.2.2 Server → Client: Response and Session Effect
 
 The server sends:
 
-- `task/return` for command results
+- `response` for command results
 - `session/effect` for catch-up sync on an open logical session
 
 ```typescript
-interface TaskReturn<Result> {
-  the: "task/return";
-  of: InvocationId;
-  is: Result;
+interface ResponseMessage<Result> {
+  type: "response";
+  requestId: string;
+  ok?: Result;
+  error?: { name: string; message: string };
 }
 
 interface SessionEffect<Effect> {
-  the: "session/effect";
+  type: "session/effect";
+  space: SpaceId;
   sessionId: SessionId;
-  is: Effect;
+  effect: Effect;
 }
-
-type InvocationId = `job:${string}`;
 ```
 
-The server MAY continue to expose invocation ids for commands, but live data
-delivery is not routed through the initiating command's invocation id.
+Live data delivery is not routed through the initiating request id.
 
 ### 4.2.3 Session Sync Payload
 
@@ -156,30 +175,24 @@ Semantics:
 - `removes` are not deletions in storage; they mean the entity is no longer in
   the session's relevant watch-set result
 
-### 4.2.4 Batch Invocations
+### 4.2.4 Batching
 
-Multiple invocations can still be batched into one signed message. Batching
-optimizes signature overhead, not atomicity.
+The current JSON wire format does not define a separate batch envelope. Clients
+issue one request per message in this pass.
 
 ## 4.3 Commands
 
 ### 4.3.1 `transact` — Write Operations
 
 ```typescript
-interface TransactCommand {
-  cmd: "/memory/transact";
-  sub: SpaceId;
-  args: {
-    localSeq: number;
-    reads: {
-      confirmed: ConfirmedRead[];
-      pending: PendingRead[];
-    };
-    operations: Operation[];
-    codeCID?: Reference;
-    branch?: BranchId;
-    merge?: MergeContext;
-  };
+interface TransactRequest {
+  type: "transact";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  commit: ClientCommit;
+  invocation?: Record<string, unknown>;
+  authorization?: JSONValue;
 }
 
 interface Commit {
@@ -205,37 +218,42 @@ type TransactResult =
   | { error: AuthorizationError };
 ```
 
-### 4.3.2 `query` — One-Shot Query
+Path conventions on the wire:
 
-`query` remains the one-shot path for simple reads.
+- `ClientCommit` reads and writes use full document paths.
+- `readValue` / `writeValue` style helpers are client-side conveniences that
+  prepend `"value"` before constructing those commit paths.
+- query selectors remain value-relative and are re-rooted by the shared
+  traversal layer.
 
-```typescript
-interface QueryCommand {
-  cmd: "/memory/query";
-  sub: SpaceId;
-  args: {
-    select: Selector;
-    branch?: BranchId;
-    since?: number;
-    atSeq?: number;
-  };
-}
+### 4.3.2 `query` — Deferred In This Pass
 
-interface QueryResult {
-  ok: FactSet;
-}
-```
+The older simple `/memory/query` surface is not currently exposed on the v2
+wire. One-shot reads in this pass use `graph.query` directly.
 
 ### 4.3.3 `graph.query` — One-Shot Schema Traversal
 
 `graph.query` performs one-shot schema-guided traversal.
 
 ```typescript
-interface GraphQueryCommand {
-  cmd: "/memory/graph/query";
-  sub: SpaceId;
-  args: {
-    selectSchema: SchemaSelector;
+type ValuePath = readonly string[];
+
+type ValueSchemaPathSelector = Omit<SchemaPathSelector, "path"> & {
+  path: ValuePath;
+};
+
+interface GraphQueryRoot {
+  id: EntityId;
+  selector: ValueSchemaPathSelector;
+}
+
+interface GraphQueryRequest {
+  type: "graph.query";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  query: {
+    roots: GraphQueryRoot[];
     branch?: BranchId;
     since?: number;
     atSeq?: number;
@@ -243,9 +261,14 @@ interface GraphQueryCommand {
 }
 
 interface GraphQueryResult {
-  ok: FactSet;
+  serverSeq: number;
+  entities: EntitySnapshot[];
 }
 ```
+
+The selector path is relative to `document.value`, not the full stored document
+root. The server converts it to a document path by prepending `"value"` before
+running shared traversal.
 
 ### 4.3.4 `session.watch.set` — Replace the Session Watch Set
 
@@ -256,22 +279,20 @@ up to date.
 interface WatchSpec {
   id: string;
   kind: "query" | "graph";
-  query: Query | SchemaQuery;
+  query: GraphQuery;
 }
 
-interface WatchSetCommand {
-  cmd: "/memory/session/watch/set";
-  sub: SpaceId;
-  args: {
-    watches: WatchSpec[];
-  };
+interface WatchSetRequest {
+  type: "session.watch.set";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  watches: WatchSpec[];
 }
 
 interface WatchSetResult {
-  ok: {
-    watches: string[];
-    serverSeq: number;
-  };
+  serverSeq: number;
+  sync: SessionSync;
 }
 ```
 
@@ -279,8 +300,9 @@ Semantics:
 
 - the provided watch list replaces the entire prior watch set for the session
 - the server recomputes the union of watched entities
-- after the watch set is installed, the server emits `session/effect` sync to
-  bring the session cache in line with the new interest set
+- the response carries the initial `sync` needed to bring the session cache in
+  line with the new interest set
+- later committed changes continue to arrive via `session/effect`
 
 ### 4.3.5 `session.watch.add` — Extend the Session Watch Set
 
@@ -288,19 +310,17 @@ Semantics:
 session watch set by `id`.
 
 ```typescript
-interface WatchAddCommand {
-  cmd: "/memory/session/watch/add";
-  sub: SpaceId;
-  args: {
-    watches: WatchSpec[];
-  };
+interface WatchAddRequest {
+  type: "session.watch.add";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  watches: WatchSpec[];
 }
 
 interface WatchAddResult {
-  ok: {
-    watches: string[];
-    serverSeq: number;
-  };
+  serverSeq: number;
+  sync: SessionSync;
 }
 ```
 
@@ -310,40 +330,19 @@ Semantics:
 - new graph watches are evaluated from their new roots only
 - traversal stops immediately when it reaches an already tracked
   entity-plus-selector pair
-- the server returns only the additional `upserts` needed for the new watches;
-  pure adds do not emit `removes`
+- the server returns the inline `sync` needed for the mutation; pure additive
+  growth does not emit `removes`
+- in the current pass, `removes` are only guaranteed for explicit watch-set
+  replacement or watch-id reuse; steady-state topology shrink does not yet drive
+  automatic unwatch behavior
 - watch mutations are applied in order per session; clients must serialize
   `session.watch.set` and `session.watch.add`
 
 ### 4.3.6 Branch Lifecycle Commands
 
-Branch create, merge preparation, delete, and list remain protocol commands.
-They continue to use `localSeq` for replay safety when they mutate storage.
-
-```typescript
-interface CreateBranchCommand {
-  cmd: "/memory/branch/create";
-  sub: SpaceId;
-  args: {
-    localSeq: number;
-    name: BranchName;
-    fromBranch?: BranchName;
-    atSeq?: number;
-  };
-}
-
-interface DeleteBranchCommand {
-  cmd: "/memory/branch/delete";
-  sub: SpaceId;
-  args: {
-    localSeq: number;
-    name: BranchName;
-  };
-}
-```
-
-Merge preparation continues to return a proposal that the client wraps in a
-normal `/memory/transact`.
+Branch create / delete / merge lifecycle commands are not currently exposed on
+the v2 wire. The engine already carries branch state internally, but public wire
+commands for that surface remain deferred in this pass.
 
 ## 4.4 Selectors
 
@@ -353,24 +352,26 @@ model for delivering live updates.
 
 ## 4.5 Authentication
 
-### 4.5.1 UCAN Structure
+### 4.5.1 Current Pass
 
-All commands are authorized via UCAN. The server verifies:
+Transport-level authentication remains deferred in this pass. Write-class
+requests may carry `invocation` / `authorization` payloads so they can be
+persisted alongside accepted commits, but the current wire protocol does not
+require signed UCAN envelopes and the toolshed websocket route does not yet
+enforce UCAN / ACL / `Origin` checks.
 
-- the signature
-- the delegation chain
-- the command ability
-- the target subject/space
+### 4.5.2 Future Target
 
-### 4.5.2 Authorization Flow
-
-The invocation object defines the command. The authorization object proves that
+The longer-term target is still UCAN-authorized memory commands. When that
+cutover lands, the invocation object will define the command and the
+authorization object will prove that
 the issuer was allowed to submit it. Successful write-class commands persist
 both references for later audit.
 
 ### 4.5.3 Space Authorization
 
-Read commands require read access. Write-class commands require write access.
+When transport-level authorization lands, read commands will require read
+access and write-class commands will require write access.
 
 ## 4.6 Session Sync Delivery
 
@@ -408,6 +409,10 @@ When the client replaces the watch set:
 - entities still relevant but unchanged are not resent unless needed for
   catch-up
 
+In the current pass, that `removes` guarantee only applies to explicit
+watch-set replacement or reused watch ids. Steady-state topology shrink during
+background refresh does not yet drive automatic unwatch behavior.
+
 ### 4.6.4 Cross-Session Delivery
 
 Commits from one session must still trigger sync for all other sessions whose
@@ -424,7 +429,7 @@ The runtime-facing scheduler rules remain the same:
 
 ## 4.7 Error Responses
 
-All errors are returned in `task/return`.
+All errors are returned in `response`.
 
 ```typescript
 interface ConflictError extends Error {

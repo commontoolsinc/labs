@@ -4,8 +4,10 @@ import {
   isSourceLink,
   MEMORY_V2_PROTOCOL,
   toDocumentPath,
+  toDocumentSelector,
   toEntityDocument,
   toSourceLink,
+  toValuePath,
   toWireEntityDocument,
 } from "../v2.ts";
 
@@ -30,6 +32,20 @@ Deno.test("memory v2 document paths are explicit full-document paths", () => {
   assertEquals(
     toDocumentPath(["value", "items", "0", "title"]),
     toDocumentPath(["value", "items", "0", "title"]),
+  );
+});
+
+Deno.test("memory v2 value-relative paths stay distinct from document paths", () => {
+  assertEquals(toValuePath([]), toValuePath([]));
+  assertEquals(
+    toDocumentSelector({
+      path: toValuePath(["items", "0"]),
+      schema: false,
+    }),
+    {
+      path: toDocumentPath(["value", "items", "0"]),
+      schema: false,
+    },
   );
 });
 
