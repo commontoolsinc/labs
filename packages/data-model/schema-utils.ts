@@ -4,6 +4,7 @@
 
 import type {
   JSONSchema,
+  JSONSchemaMutable,
   JSONSchemaObj,
   JSONSchemaObjMutable,
 } from "@commontools/api";
@@ -106,11 +107,11 @@ export function cloneSchemaMutable(
 export function cloneSchemaMutable(
   schema: JSONSchema | undefined,
   forceObject?: false,
-): JSONSchemaObjMutable | boolean;
+): JSONSchemaMutable;
 export function cloneSchemaMutable(
   schema: JSONSchema | undefined,
   forceObject: boolean = false,
-): JSONSchemaObjMutable | boolean {
+): JSONSchemaMutable {
   if (schema === undefined) return {};
   if (typeof schema === "boolean") return forceObject ? {} : schema;
   return cloneIfNecessary(schema, {
