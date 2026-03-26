@@ -116,9 +116,11 @@ jobs:
         run: deno task initialize-db
 
       - name: 🧪 Run generated patterns integration tests
+        working-directory: packages/generated-patterns
         run: |
-          mkdir -p test-results
-          deno task integration --junit-dir=test-results generated-patterns
+          mkdir -p ../../test-results
+          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/generated-patterns.xml" \
+          deno task integration
 
       - name: 📤 Upload test timing data
         if: always()
