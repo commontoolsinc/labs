@@ -279,11 +279,9 @@ function parseObjectInput(
     };
   }
 
-  if (!usedJson) {
-    for (const key of requiredFlags(schema)) {
-      if (!(key in input)) {
-        throw new Error(`Missing required flag --${flagNameForKey(key)}`);
-      }
+  for (const key of requiredFlags(schema)) {
+    if (!(key in input)) {
+      throw new Error(`Missing required flag --${flagNameForKey(key)}`);
     }
   }
 

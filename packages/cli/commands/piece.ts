@@ -86,8 +86,8 @@ function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
   if (tail[0] === "--json") {
     if (tail.length === 1) {
       // --json alone is a no-op: ct piece call always outputs JSON.
-      // Treat as empty JSON input so stdin is not read unnecessarily.
-      return ["--json", "{}"];
+      // Return machine-readable schema (same as --help --json) to exit cleanly.
+      return ["--help", "--json"];
     }
     // --json followed by other args: existing behavior (forward as-is).
     return ["--json"];
