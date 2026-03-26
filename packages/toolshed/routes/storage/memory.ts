@@ -1,4 +1,5 @@
 import * as Memory from "@commontools/memory";
+import * as Stitch from "@commontools/memory/stitch";
 import * as Path from "@std/path";
 import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
@@ -29,5 +30,13 @@ if (result.error) {
 
 export const memory = result.ok;
 console.log("Memory: Provider initialized successfully");
+
+// Initialize StitchHub when the stitch protocol is enabled.
+export const stitchHub = env.EXPERIMENTAL_STITCH
+  ? new Stitch.StitchHub(storeUrl)
+  : null;
+if (env.EXPERIMENTAL_STITCH) {
+  console.log("Memory: StitchHub enabled");
+}
 
 export { Memory };

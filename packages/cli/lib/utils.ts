@@ -21,6 +21,7 @@ export function experimentalOptionsFromEnv(): ExperimentalOptions {
     modernDataModel: read("EXPERIMENTAL_MODERN_DATA_MODEL"),
     unifiedJsonEncoding: read("EXPERIMENTAL_UNIFIED_JSON_ENCODING"),
     modernHash: read("EXPERIMENTAL_MODERN_HASH"),
+    stitch: read("EXPERIMENTAL_STITCH"),
   };
   const active = Object.entries(opts).filter(([, v]) => v);
   if (active.length > 0) {

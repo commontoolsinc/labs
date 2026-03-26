@@ -1,5 +1,6 @@
 import {
   type Cell,
+  type ExperimentalOptions,
   type JSONSchema,
   Runtime,
   RuntimeProgram,
@@ -115,10 +116,11 @@ export class PiecesController<T = unknown> {
     }
   }
 
-  static async initialize({ apiUrl, identity, spaceName }: {
+  static async initialize({ apiUrl, identity, spaceName, experimental }: {
     apiUrl: URL;
     identity: Identity;
     spaceName: string;
+    experimental?: ExperimentalOptions;
   }): Promise<PiecesController> {
     const session = await createSession({ identity, spaceName });
     const runtime = new Runtime({
@@ -128,6 +130,7 @@ export class PiecesController<T = unknown> {
         address: new URL("/api/storage/memory", apiUrl),
         spaceIdentity: session.spaceIdentity,
       }),
+      experimental,
     });
 
     const manager = new PieceManager(session, runtime);

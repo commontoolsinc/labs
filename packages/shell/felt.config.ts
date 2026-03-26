@@ -46,6 +46,9 @@ const config: Config = {
       "$EXPERIMENTAL_MODERN_HASH": Deno.env.get(
         "EXPERIMENTAL_MODERN_HASH",
       ),
+      "$EXPERIMENTAL_STITCH": Deno.env.get(
+        "EXPERIMENTAL_STITCH",
+      ),
       "$COMPILATION_CACHE_CLIENT": Deno.env.get(
         "COMPILATION_CACHE_CLIENT",
       ) ?? "true",

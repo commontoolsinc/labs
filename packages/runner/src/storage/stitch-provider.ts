@@ -8,7 +8,6 @@
 
 import { assert } from "@commontools/memory/fact";
 import type { FabricDatum } from "@commontools/data-model/fabric-value";
-import type { BaseMemoryAddress } from "@commontools/runner/traverse";
 import type {
   Fact,
   ISpaceReplica,
@@ -200,8 +199,8 @@ export class StitchReplica implements ISpaceReplica {
       }
     }
 
-    // Convert Invariants → read-set (just the URIs).
-    const readSet: URI[] = transaction.claims.map((c) => c.of);
+    // Convert Invariants → read-set (just the URIs, deduplicated).
+    const readSet: URI[] = [...new Set(transaction.claims.map((c) => c.of))];
 
     // Snapshot current state so we can revert on rejection.
     const snapshots = new Map<string, State | undefined>();
@@ -275,6 +274,9 @@ class StitchConnection {
   #clientSeq = 0;
   #destroyed = false;
 
+  /** Messages buffered while the WebSocket is connecting. */
+  readonly #sendQueue: ClientMessage[] = [];
+
   /** FIFO queue of pending subscribe resolvers — each subscribe message
    *  generates exactly one subscribed response from the server. */
   readonly #pendingSubscribes: Array<
@@ -321,6 +323,7 @@ class StitchConnection {
   destroy(): void {
     this.#destroyed = true;
     this.#ws?.close();
+    this.#sendQueue.length = 0;
     // Reject all pending promises so callers don't hang.
     const err = storeError("connection destroyed");
     for (const resolve of this.#pendingSubscribes.splice(0)) {
@@ -344,6 +347,13 @@ class StitchConnection {
     const ws = new WebSocket(url.href);
     this.#ws = ws;
 
+    ws.addEventListener("open", () => {
+      // Flush any messages that arrived before the connection opened.
+      for (const msg of this.#sendQueue.splice(0)) {
+        ws.send(JSON.stringify(msg));
+      }
+    });
+
     ws.addEventListener("message", (event: MessageEvent) => {
       this.#onMessage(event.data as string);
     });
@@ -363,9 +373,10 @@ class StitchConnection {
   #send(msg: ClientMessage): void {
     if (this.#ws?.readyState === WebSocket.OPEN) {
       this.#ws.send(JSON.stringify(msg));
+    } else {
+      // Buffer the message until the connection opens.
+      this.#sendQueue.push(msg);
     }
-    // If not yet connected, the message is dropped. A future iteration could
-    // queue messages and replay them on reconnect.
   }
 
   #track(promise: Promise<unknown>): void {
@@ -500,8 +511,9 @@ export class StitchStorageProvider implements IStorageProviderWithReplica {
     return this.#connection.synced();
   }
 
-  async destroy(): Promise<void> {
+  destroy(): Promise<void> {
     this.#connection.destroy();
+    return Promise.resolve();
   }
 
   getReplica(): string | undefined {

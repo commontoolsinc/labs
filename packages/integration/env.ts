@@ -21,6 +21,11 @@ export const PIPE_CONSOLE = envToBool(Deno.env.get("PIPE_CONSOLE"));
 export const SPACE_NAME = Deno.env.get("SPACE_NAME") ??
   globalThis.crypto.randomUUID();
 
+/** Experimental feature flags read from env vars, passed to Runtime. */
+export const EXPERIMENTAL = {
+  stitch: envToBool(Deno.env.get("EXPERIMENTAL_STITCH")),
+};
+
 function ensureTrailing(value: string): string {
   return value.substr(-1) === "/" ? value : `${value}/`;
 }

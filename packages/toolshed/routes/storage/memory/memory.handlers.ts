@@ -1,6 +1,6 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type * as Routes from "./memory.routes.ts";
-import { Memory, memory } from "../memory.ts";
+import { Memory, memory, stitchHub } from "../memory.ts";
 import * as Codec from "@commontools/memory/codec";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
 
@@ -92,18 +92,41 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
       span.setAttribute("websocket.upgrade", "success");
 
       createSpan("memory.socket.setup", (setupSpan) => {
-        const { readable, writable } = Memory.Socket.from<string, string>(
-          socket,
-        );
         setupSpan.setAttribute("socket.setup", "complete");
 
-        // We can't await the pipeline in a WebSocket handler,
-        // so we just record that we've set it up
-        readable
-          .pipeThrough(Codec.UCAN.fromStringStream())
-          .pipeThrough(memory.session())
-          .pipeThrough(Codec.Receipt.toStringStream())
-          .pipeTo(writable);
+        if (stitchHub) {
+          // Stitch protocol: route through StitchHub using space DID from URL.
+          const spaceDid = new URL(c.req.url).searchParams.get("space") ?? "";
+          const { readable, writable } = stitchHub.createSession(spaceDid);
+          const writer = writable.getWriter();
+          socket.onmessage = (e) => writer.write(e.data as string);
+          socket.onclose = () => writer.close().catch(() => {});
+          socket.onerror = () => writer.close().catch(() => {});
+          (async () => {
+            const reader = readable.getReader();
+            try {
+              for (;;) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                if (socket.readyState === WebSocket.OPEN) socket.send(value);
+              }
+            } catch {
+              // Ignore errors on cleanup.
+            }
+          })();
+        } else {
+          // Legacy UCAN protocol.
+          const { readable, writable } = Memory.Socket.from<string, string>(
+            socket,
+          );
+          // We can't await the pipeline in a WebSocket handler,
+          // so we just record that we've set it up
+          readable
+            .pipeThrough(Codec.UCAN.fromStringStream())
+            .pipeThrough(memory.session())
+            .pipeThrough(Codec.Receipt.toStringStream())
+            .pipeTo(writable);
+        }
       });
 
       return response;
