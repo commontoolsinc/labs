@@ -212,6 +212,12 @@ jobs:
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
 
+      - name: 📦 Install libfuse3 for FUSE integration tests
+        run: |
+          sudo apt-get update && sudo apt-get install -y libfuse3-dev fuse3
+          # Ensure /dev/fuse is accessible to the runner user
+          sudo chmod 666 /dev/fuse
+
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v4
 
@@ -228,6 +234,11 @@ jobs:
         working-directory: packages/cli
         run: |
           API_URL=http://localhost:8000 ./integration/integration.sh
+
+      - name: 🧪 Run FUSE exec integration tests
+        working-directory: packages/cli
+        run: |
+          API_URL=http://localhost:8000 ./integration/fuse-exec.sh
 
   pattern-integration-test:
     name: "Pattern Integration Tests"
