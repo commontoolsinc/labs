@@ -41,12 +41,7 @@ export type JsxExpressionSiteRoute =
   | { route: "shared-post-closure" }
   | {
     route: "owned-pre-closure";
-    owner:
-      | "opaque-path-terminal-root"
-      | "deferred-jsx-array-method-root"
-      | "dynamic-element-access-root"
-      | "helper-call-root"
-      | "object-literal-root";
+    owner: "opaque-path-terminal-root" | "generic-owned-root";
   }
   | {
     route: "skip";
@@ -658,7 +653,7 @@ export function classifyJsxExpressionSiteRoute(
     ) {
       return {
         route: "owned-pre-closure",
-        owner: "deferred-jsx-array-method-root",
+        owner: "generic-owned-root",
       };
     }
 
@@ -671,21 +666,21 @@ export function classifyJsxExpressionSiteRoute(
   if (isOwnedDynamicElementAccessRoot(expression, context, analyze)) {
     return {
       route: "owned-pre-closure",
-      owner: "dynamic-element-access-root",
+      owner: "generic-owned-root",
     };
   }
 
   if (siteInfo.callRootKind === "conditional-helper") {
     return {
       route: "owned-pre-closure",
-      owner: "helper-call-root",
+      owner: "generic-owned-root",
     };
   }
 
   if (isOwnedObjectLiteralRoot(expression, analyze)) {
     return {
       route: "owned-pre-closure",
-      owner: "object-literal-root",
+      owner: "generic-owned-root",
     };
   }
 

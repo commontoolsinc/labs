@@ -202,7 +202,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: reactive direct JSX array-method roots use the explicit deferred array-method owner",
+  "Expression site policy: reactive direct JSX array-method roots use the generic owned pre-closure route when enabled",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -245,7 +245,7 @@ Deno.test(
       }),
       {
         route: "owned-pre-closure",
-        owner: "deferred-jsx-array-method-root",
+        owner: "generic-owned-root",
       },
     );
   },
@@ -356,7 +356,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: reactive dynamic JSX element-access roots use the explicit dynamic element-access owner",
+  "Expression site policy: reactive dynamic JSX element-access roots use the generic owned pre-closure route",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -386,7 +386,7 @@ Deno.test(
       classifyJsxExpressionSiteRoute(elementAccess, context, analyze),
       {
         route: "owned-pre-closure",
-        owner: "dynamic-element-access-root",
+        owner: "generic-owned-root",
       },
     );
   },
@@ -432,7 +432,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: direct JSX helper-call roots use the explicit helper-call owner",
+  "Expression site policy: direct JSX helper-call roots use the generic owned pre-closure route",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -471,14 +471,14 @@ Deno.test(
       classifyJsxExpressionSiteRoute(helperCall, context, analyze),
       {
         route: "owned-pre-closure",
-        owner: "helper-call-root",
+        owner: "generic-owned-root",
       },
     );
   },
 );
 
 Deno.test(
-  "Expression site policy: reactive direct JSX object-literal roots use the explicit object-literal owner",
+  "Expression site policy: reactive direct JSX object-literal roots use the generic owned pre-closure route",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -510,7 +510,7 @@ Deno.test(
       classifyJsxExpressionSiteRoute(objectLiteral, context, analyze),
       {
         route: "owned-pre-closure",
-        owner: "object-literal-root",
+        owner: "generic-owned-root",
       },
     );
   },
