@@ -465,8 +465,15 @@ export class CellBridge {
     entitiesIno: bigint,
     entityId: string,
   ): Promise<boolean> {
-    // Already resolved?
-    if (this.tree.lookup(entitiesIno, entityId) !== undefined) return true;
+    // Already fully resolved? (has result or input content, not just a stub)
+    const existingEntityIno = this.tree.lookup(entitiesIno, entityId);
+    if (existingEntityIno !== undefined) {
+      const hasContent = this.tree.lookup(existingEntityIno, "result") !==
+          undefined ||
+        this.tree.lookup(existingEntityIno, "input") !== undefined;
+      if (hasContent) return true;
+      // Stub dir exists — fall through to populate it in-place
+    }
 
     // Find the space that owns this entities/ dir
     let state: SpaceState | undefined;
@@ -494,12 +501,14 @@ export class CellBridge {
     }
     if (!matchedPiece) return false;
 
-    // Build the piece tree under entities/<entityId> and subscribe for updates
+    // Build the piece tree under entities/<entityId> and subscribe for updates.
+    // Pass existingEntityIno to reuse the stub dir rather than creating a new one.
     const pieceIno = await this.loadPieceTree(
       matchedPiece,
       entitiesIno,
       entityId,
       spaceName,
+      existingEntityIno,
     );
     const subs = await this.subscribePiece(
       matchedPiece,
@@ -549,20 +558,20 @@ export class CellBridge {
     const subs = await this.subscribePiece(piece, pieceIno, name, spaceName);
     state.pieceSubs.set(name, subs);
 
-    // Eagerly populate entities/<id>/ for stable ID-based access (CT-1391)
-    const entityIno = await this.loadPieceTree(
-      piece,
-      state.entitiesIno,
-      piece.id,
-      spaceName,
+    // Create a lightweight stub entity dir so `ls entities/` shows stable IDs
+    // immediately. Full content is populated lazily by resolveEntity() on
+    // first access, avoiding doubled subscriptions and startup cost.
+    const entityStubIno = this.tree.addDir(state.entitiesIno, piece.id);
+    this.tree.addFile(
+      entityStubIno,
+      "meta.json",
+      JSON.stringify(
+        { id: piece.id, entityId: piece.id, name: piece.name() || "" },
+        null,
+        2,
+      ),
+      "object",
     );
-    const entitySubs = await this.subscribePiece(
-      piece,
-      entityIno,
-      `entity:${piece.id}`,
-      spaceName,
-    );
-    state.pieceSubs.set(`entity:${piece.id}`, entitySubs);
 
     return name;
   }
@@ -1182,8 +1191,9 @@ export class CellBridge {
     parentIno: bigint,
     name: string,
     spaceName: string,
+    existingIno?: bigint,
   ): Promise<bigint> {
-    const pieceIno = this.tree.addDir(parentIno, name);
+    const pieceIno = existingIno ?? this.tree.addDir(parentIno, name);
 
     // Create meta.json first so it's always present
     let patternName = "";
