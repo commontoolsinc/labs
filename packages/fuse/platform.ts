@@ -302,6 +302,7 @@ export function createFuseArgs(
 ): {
   argsBuf: ArrayBuffer;
   argv: Deno.PointerValue;
+  argvBuf: BigUint64Array;
   encodedArgs: Uint8Array[];
 } {
   const encoder = new TextEncoder();
@@ -322,7 +323,7 @@ export function createFuseArgs(
   view.setBigUint64(8, BigInt(Deno.UnsafePointer.value(argv)), true); // argv
   view.setInt32(16, 0, true); // allocated
 
-  return { argsBuf, argv, encodedArgs };
+  return { argsBuf, argv, argvBuf, encodedArgs };
 }
 
 // --- Platform dispatcher ---

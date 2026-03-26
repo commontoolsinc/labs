@@ -13,17 +13,24 @@ Deno.test({
     const src = `${dir}verify-structs.c`;
     const bin = `${dir}verify-structs`;
 
-    // Compile
+    // Get FUSE3 cflags
     const pkgConfig = new Deno.Command("pkg-config", {
       args: ["--cflags", "fuse3"],
       stdout: "piped",
+      stderr: "piped",
     });
     const pkgOut = await pkgConfig.output();
+    if (!pkgOut.success) {
+      throw new Error(
+        `pkg-config failed: ${new TextDecoder().decode(pkgOut.stderr)}`,
+      );
+    }
     const cflags = new TextDecoder()
       .decode(pkgOut.stdout)
       .trim()
       .split(/\s+/);
 
+    // Compile
     const compile = new Deno.Command("gcc", {
       args: ["-o", bin, src, ...cflags],
       stderr: "piped",
@@ -35,9 +42,16 @@ Deno.test({
       );
     }
 
-    // Run
-    const run = new Deno.Command(bin, { stdout: "piped" });
+    // Run and check exit status
+    const run = new Deno.Command(bin, { stdout: "piped", stderr: "piped" });
     const runResult = await run.output();
+    if (!runResult.success) {
+      throw new Error(
+        `verify-structs exited with code ${runResult.code}: ${
+          new TextDecoder().decode(runResult.stderr)
+        }`,
+      );
+    }
     const output = new TextDecoder().decode(runResult.stdout);
 
     // Parse key=value pairs
@@ -71,6 +85,11 @@ Deno.test({
       values.get("file_info_size"),
       p.FUSE_FILE_INFO_SIZE,
       "FUSE_FILE_INFO_SIZE mismatch",
+    );
+    assertEquals(
+      values.get("file_info_fh"),
+      16, // FH_OFFSET in platform-linux.ts
+      "fuse_file_info fh offset mismatch",
     );
 
     // fuse_args
