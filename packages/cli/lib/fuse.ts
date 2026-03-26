@@ -217,17 +217,42 @@ export function fuseMod(importMetaUrl: string): string {
   return resolve(cliCommandsDir, "../../fuse/mod.ts");
 }
 
+/** Detect whether we're running as a Deno-compiled binary. */
+function isCompiledBinary(): boolean {
+  // Deno-compiled binaries extract to a temp dir; import.meta.url will contain
+  // a path like /tmp/deno-compile-<name>/... which is read-only. The reliable
+  // signal is that Deno.execPath() does NOT end in "deno" — it's the compiled
+  // binary itself.
+  const exec = Deno.execPath();
+  const base = basename(exec);
+  return base !== "deno" && base !== "deno.exe";
+}
+
 export async function ensureExecShim(
   stateDir = defaultStateDir(),
   importMetaUrl = import.meta.url,
 ): Promise<string> {
-  const shimPath = join(repoRoot(importMetaUrl), ".ct", "fuse", "ct-exec");
-  const denoPath = Deno.execPath();
-  const modPath = cliMod(importMetaUrl);
-  const script = `#!/usr/bin/env bash
+  let shimPath: string;
+  let script: string;
+
+  if (isCompiledBinary()) {
+    // Compiled binary: the exec shim calls the binary itself (which is `ct`).
+    const ctBinary = Deno.execPath();
+    shimPath = join(stateDir, "ct-exec");
+    script = `#!/usr/bin/env bash
+export CT_EXEC_SHEBANG=1
+exec "${ctBinary}" "$@"
+`;
+  } else {
+    // Source mode: the shim calls deno run with the CLI mod.ts.
+    shimPath = join(repoRoot(importMetaUrl), ".ct", "fuse", "ct-exec");
+    const denoPath = Deno.execPath();
+    const modPath = cliMod(importMetaUrl);
+    script = `#!/usr/bin/env bash
 export CT_EXEC_SHEBANG=1
 exec "${denoPath}" run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run "${modPath}" "$@"
 `;
+  }
 
   await Deno.mkdir(stateDir, { recursive: true });
   await Deno.mkdir(dirname(shimPath), { recursive: true });

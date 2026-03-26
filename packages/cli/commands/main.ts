@@ -72,6 +72,21 @@ export const main = new Command()
   .command("exec", exec)
   // @ts-ignore for the above type issue
   .command("fuse", fuse)
+  .command(
+    "fuse-daemon",
+    new Command()
+      .description(
+        "Internal: run the FUSE filesystem directly (used by compiled binary).",
+      )
+      .hidden()
+      .useRawArgs()
+      // deno-lint-ignore no-explicit-any
+      .action(async (...rawArgs: any[]) => {
+        // Override Deno.args so the fuse module sees the raw args (mountpoint, flags, etc.)
+        Object.defineProperty(Deno, "args", { value: rawArgs });
+        await import("@commontools/fuse");
+      }),
+  )
   .command("id", identity)
   .command("init", init)
   .command("test", test)
