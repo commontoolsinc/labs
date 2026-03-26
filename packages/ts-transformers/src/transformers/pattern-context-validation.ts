@@ -45,9 +45,7 @@ import {
   isInsideSafeCallbackWrapper,
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
-import {
-  classifyCallbackSupport,
-} from "./callback-support.ts";
+import { classifyCallbackSupport } from "./callback-support.ts";
 import { classifyCallbackBoundary } from "../policy/callback-boundary.ts";
 import {
   collectLocalOpaqueRootSymbols,
@@ -121,10 +119,10 @@ export class PatternContextValidationTransformer extends Transformer {
           ts.isCallExpression(node.parent) &&
           node.parent.expression === node &&
           classifyUnsupportedExpressionSiteCallRoot(
-            node.parent,
-            context,
-            analyze,
-          ) === "optional-call";
+              node.parent,
+              context,
+              analyze,
+            ) === "optional-call";
         if (
           !optionalCallTargetHandledByCallRootPolicy &&
           isInRestrictedReactiveContext(node, checker, context) &&

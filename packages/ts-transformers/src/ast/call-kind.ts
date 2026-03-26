@@ -347,9 +347,9 @@ export function classifyArrayMethodCallSite(
   return {
     ...access,
     ownership: isReactiveArrayMethodReceiverExpression(
-      target.expression,
-      checker,
-    )
+        target.expression,
+        checker,
+      )
       ? "reactive"
       : "plain",
   };
@@ -737,8 +737,10 @@ function hasImplicitReactiveParameterContext(
       return true;
     }
 
-    if (classifyArrayCallbackContainerCall(call, checker) ===
-      "reactive-array-method") {
+    if (
+      classifyArrayCallbackContainerCall(call, checker) ===
+        "reactive-array-method"
+    ) {
       return true;
     }
   }

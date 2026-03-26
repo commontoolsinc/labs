@@ -19,8 +19,8 @@ import {
   supportsPatternOwnedWrapperCallbackSite,
 } from "./callback-support.ts";
 import {
-  classifyCallRootPolicy,
   type CallRootPolicyDecision,
+  classifyCallRootPolicy,
   type SupportedCallRootKind,
   type UnsupportedCallRootKind,
 } from "./call-root-support.ts";
@@ -829,15 +829,14 @@ export function classifyExpressionSiteHandling(
     if (siteInfo.controlFlowRewriteRoot) {
       return {
         kind: "shared",
-        jsxRoute:
-          isSharedPreClosureAtomicControlFlowExpression(expression) ||
+        jsxRoute: isSharedPreClosureAtomicControlFlowExpression(expression) ||
             isSharedPreClosureDeferredArrayMethodControlFlowExpression(
               expression,
               context,
               analyze,
             )
-            ? "shared-pre-closure"
-            : "shared-post-closure",
+          ? "shared-pre-closure"
+          : "shared-post-closure",
         lowerable: isExpressionSiteLowerable(
           expression,
           containerKind,

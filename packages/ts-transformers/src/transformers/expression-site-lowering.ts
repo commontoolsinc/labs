@@ -8,8 +8,8 @@ import {
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import {
-  classifyExpressionSiteHandling,
   classifyExpressionSiteCallRootPolicy,
+  classifyExpressionSiteHandling,
   containsLogicalBinaryOperator,
   getExpressionContainerKind,
   isControlFlowRewriteExpression,

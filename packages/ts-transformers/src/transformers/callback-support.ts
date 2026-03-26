@@ -1,7 +1,7 @@
 import ts from "typescript";
 import {
-  classifyCallbackBoundary,
   type CallbackBoundaryLookup,
+  classifyCallbackBoundary,
   type SupportedCallbackBoundaryKind as SupportedCallbackKind,
   type UnsupportedCallbackBoundaryKind as UnsupportedCallbackKind,
 } from "../policy/callback-boundary.ts";
