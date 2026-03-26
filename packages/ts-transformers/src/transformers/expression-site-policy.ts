@@ -20,7 +20,6 @@ import {
 } from "./callback-support.ts";
 import {
   classifyCallRootPolicy,
-  classifySupportedCallRoot,
   type CallRootPolicyDecision,
   type UnsupportedCallRootKind,
 } from "./call-root-support.ts";
@@ -765,8 +764,7 @@ export function classifyUnsupportedExpressionSiteCallRoot(
     return undefined;
   }
 
-  const containerKind = getExpressionContainerKind(expression);
-  if (!containerKind) {
+  if (!getExpressionContainerKind(expression)) {
     return undefined;
   }
 
@@ -814,39 +812,30 @@ function canRewriteExpressionSiteWithPolicyInfo(
     }
   }
 
-  if (
-    containerKind !== "jsx-expression" &&
-    !siteInfo.controlFlowRewriteRoot &&
-    siteInfo.arrayMethodOwned
-  ) {
-    return false;
-  }
-
-  const supportedCallRootKind = classifySupportedCallRoot(
-    expression,
-    siteInfo,
-    context,
-  );
+  const callRootPolicy = classifyCallRootPolicy(expression, siteInfo, context);
+  const supportedCallRootKind = callRootPolicy.kind === "supported"
+    ? callRootPolicy.supportedKind
+    : undefined;
   const sharedPostClosureCallRoot = siteInfo.callRootKind === "free-function";
+  const inNonJsxNonControlFlowContext = containerKind !== "jsx-expression" &&
+    !siteInfo.controlFlowRewriteRoot;
 
-  if (
-    containerKind !== "jsx-expression" &&
-    !siteInfo.controlFlowRewriteRoot &&
-    !sharedPostClosureCallRoot &&
-    !isPostClosureWrapperRewriteExpression(expression, context) &&
-    supportedCallRootKind !== "pattern-owned-receiver-method"
-  ) {
-    return false;
-  }
+  if (inNonJsxNonControlFlowContext) {
+    if (siteInfo.arrayMethodOwned) {
+      return false;
+    }
 
-  if (
-    containerKind !== "jsx-expression" &&
-    !siteInfo.controlFlowRewriteRoot &&
-    !sharedPostClosureCallRoot &&
-    !isEligiblePatternOwnedWrapperCallbackSite(expression, context) &&
-    supportedCallRootKind !== "pattern-owned-receiver-method"
-  ) {
-    return false;
+    const patternOwnedReceiverMethod = supportedCallRootKind ===
+      "pattern-owned-receiver-method";
+    if (!sharedPostClosureCallRoot && !patternOwnedReceiverMethod) {
+      if (!isPostClosureWrapperRewriteExpression(expression, context)) {
+        return false;
+      }
+
+      if (!isEligiblePatternOwnedWrapperCallbackSite(expression, context)) {
+        return false;
+      }
+    }
   }
 
   return analysis.requiresRewrite ||
@@ -879,21 +868,6 @@ export function canRewriteExpressionSite(
     context,
     analyze,
   );
-}
-
-function canDeferExpressionSiteToHelperBoundary(
-  siteInfo: ExpressionSitePolicyInfo,
-  analysis: ReturnType<AnalyzeFn>,
-): boolean {
-  if (
-    !siteInfo.helperBoundaryKind ||
-    !hasPatternExpressionSitePreconditions(siteInfo) ||
-    siteInfo.syntheticComputeOwned
-  ) {
-    return false;
-  }
-
-  return analysis.containsOpaqueRef && analysis.requiresRewrite;
 }
 
 function isOptionalAccessExpression(
@@ -929,11 +903,10 @@ export function canRewriteHelperOwnedExpressionSite(
     return false;
   }
 
-  const supportedCallRootKind = classifySupportedCallRoot(
-    expression,
-    siteInfo,
-    context,
-  );
+  const callRootPolicy = classifyCallRootPolicy(expression, siteInfo, context);
+  const supportedCallRootKind = callRootPolicy.kind === "supported"
+    ? callRootPolicy.supportedKind
+    : undefined;
 
   if (
     !ts.isBinaryExpression(expression) &&
@@ -983,7 +956,13 @@ export function findLowerableExpressionSite(
             context,
             analyze,
           ) ||
-          canDeferExpressionSiteToHelperBoundary(siteInfo, analysis)
+          (
+            siteInfo.helperBoundaryKind &&
+            hasPatternExpressionSitePreconditions(siteInfo) &&
+            !siteInfo.syntheticComputeOwned &&
+            analysis.containsOpaqueRef &&
+            analysis.requiresRewrite
+          )
         ) {
           return {
             expression: current,

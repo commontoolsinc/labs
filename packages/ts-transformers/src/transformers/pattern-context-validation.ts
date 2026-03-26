@@ -86,14 +86,22 @@ export class PatternContextValidationTransformer extends Transformer {
           this.validateStandaloneFunction(node, context, checker);
         }
 
-        if (
-          (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
-          this.isComputedLikeCallback(node, context, checker)
-        ) {
-          this.validateLocalReactiveAliasUsage(node, context);
-        }
-
         if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+          const callbackSupport = classifyCallbackSupport(
+            node,
+            checker,
+            context,
+          );
+          if (
+            callbackSupport.kind === "supported" &&
+            (
+              callbackSupport.supportedKind === "derive" ||
+              callbackSupport.supportedKind === "computed-builder"
+            )
+          ) {
+            this.validateLocalReactiveAliasUsage(node, context);
+          }
+
           this.validateSupportedPatternStatements(node, context, checker);
         }
       }
@@ -108,12 +116,18 @@ export class PatternContextValidationTransformer extends Transformer {
         ) &&
         node.questionDotToken
       ) {
-        if (
-          !this.isOptionalCallTargetHandledByCallRootPolicy(
-            node,
+        const optionalCallTargetHandledByCallRootPolicy =
+          !!node.questionDotToken &&
+          !!node.parent &&
+          ts.isCallExpression(node.parent) &&
+          node.parent.expression === node &&
+          classifyUnsupportedExpressionSiteCallRoot(
+            node.parent,
             context,
             analyze,
-          ) &&
+          ) === "optional-call";
+        if (
+          !optionalCallTargetHandledByCallRootPolicy &&
           isInRestrictedReactiveContext(node, checker, context) &&
           !findLowerableExpressionSite(node, context, analyze)
         ) {
@@ -169,28 +183,6 @@ export class PatternContextValidationTransformer extends Transformer {
     };
 
     return ts.visitNode(context.sourceFile, visit) as ts.SourceFile;
-  }
-
-  private isOptionalCallTargetHandledByCallRootPolicy(
-    node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
-    context: TransformationContext,
-    analyze: ReturnType<typeof createDataFlowAnalyzer>,
-  ): boolean {
-    if (!node.questionDotToken) {
-      return false;
-    }
-
-    const parent = node.parent;
-    if (!parent || !ts.isCallExpression(parent) || parent.expression !== node) {
-      return false;
-    }
-
-    return classifyUnsupportedExpressionSiteCallRoot(
-      parent,
-      context,
-      analyze,
-    ) ===
-      "optional-call";
   }
 
   /**
@@ -438,7 +430,9 @@ export class PatternContextValidationTransformer extends Transformer {
     const bodyContext = classifyReactiveContext(func.body, checker, context);
     if (
       bodyContext.kind !== "pattern" ||
-      !this.isPatternOwnedStatementBoundary(func, context, checker)
+      !supportsPatternOwnedWrapperCallbackSite(
+        classifyCallbackSupport(func, checker, context),
+      )
     ) {
       return;
     }
@@ -522,7 +516,8 @@ export class PatternContextValidationTransformer extends Transformer {
 
       if (
         ts.isBinaryExpression(node) &&
-        this.isAssignmentOperator(node.operatorToken.kind)
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
       ) {
         reportOnce(
           node,
@@ -536,20 +531,6 @@ export class PatternContextValidationTransformer extends Transformer {
     };
 
     visit(func.body);
-  }
-
-  private isAssignmentOperator(kind: ts.SyntaxKind): boolean {
-    return kind >= ts.SyntaxKind.FirstAssignment &&
-      kind <= ts.SyntaxKind.LastAssignment;
-  }
-
-  private isPatternOwnedStatementBoundary(
-    func: ts.ArrowFunction | ts.FunctionExpression,
-    context: TransformationContext,
-    checker: ts.TypeChecker,
-  ): boolean {
-    const callbackSupport = classifyCallbackSupport(func, checker, context);
-    return supportsPatternOwnedWrapperCallbackSite(callbackSupport);
   }
 
   /**
@@ -602,19 +583,6 @@ export class PatternContextValidationTransformer extends Transformer {
         `Note: callbacks inside computed(), action(), and .map() are allowed.`,
       node,
     });
-  }
-
-  private isComputedLikeCallback(
-    node: ts.ArrowFunction | ts.FunctionExpression,
-    context: TransformationContext,
-    checker: ts.TypeChecker,
-  ): boolean {
-    const callbackSupport = classifyCallbackSupport(node, checker, context);
-    return callbackSupport.kind === "supported" &&
-      (
-        callbackSupport.supportedKind === "derive" ||
-        callbackSupport.supportedKind === "computed-builder"
-      );
   }
 
   /**

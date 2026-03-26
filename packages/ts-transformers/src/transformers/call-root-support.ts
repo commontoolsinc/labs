@@ -40,24 +40,6 @@ function hasOpaquePathTerminalReceiverChain(
     !!classifyOpaquePathTerminalCall(callee.expression);
 }
 
-export function classifySupportedCallRoot(
-  expression: ts.Expression,
-  siteInfo: ExpressionSiteCallRootPolicyInfo,
-  context: TransformationContext,
-): SupportedCallRootKind | undefined {
-  const decision = classifyCallRootPolicy(expression, siteInfo, context);
-  return decision.kind === "supported" ? decision.supportedKind : undefined;
-}
-
-export function classifyUnsupportedCallRoot(
-  expression: ts.Expression,
-  siteInfo: ExpressionSiteCallRootPolicyInfo,
-  context: TransformationContext,
-): UnsupportedCallRootKind | undefined {
-  const decision = classifyCallRootPolicy(expression, siteInfo, context);
-  return decision.kind === "unsupported" ? decision.unsupportedKind : undefined;
-}
-
 export function classifyCallRootPolicy(
   expression: ts.Expression,
   siteInfo: ExpressionSiteCallRootPolicyInfo,
