@@ -594,7 +594,7 @@ const plaidUpdater = handler(
     // Add new transactions
     if (syncResult.added.length > 0) {
       console.log(`Adding ${syncResult.added.length} new transactions`);
-      // Add ID field for Common Tools
+      // Add ID field for Common Fabric
       syncResult.added.forEach((t: any) => {
         t[ID] = t.transactionId;
       });
