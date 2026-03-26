@@ -189,9 +189,9 @@ CREATE INDEX idx_branch_status ON branch (status);
 CREATE INDEX idx_branch_parent ON branch (parent_branch);
 ```
 
-### 3.6 `invocation` — Persisted UCAN Invocations
+### 3.6 `invocation` — Persisted Invocation Payloads
 
-Stores the canonical invocation object for successful write-class commands.
+Stores the persisted invocation payload for successful write-class commands.
 
 ```sql
 CREATE TABLE invocation (
@@ -209,9 +209,19 @@ CREATE INDEX idx_invocation_cmd ON invocation (cmd);
 CREATE INDEX idx_invocation_iss ON invocation (iss);
 ```
 
-### 3.7 `authorization` — Verified Authorization Blobs
+Current implementation note:
 
-Stores the verified authorization object that covered one or more invocations.
+- the JSON blob is persisted verbatim from the current transport payload
+- `iss` / `aud` / `cmd` / `sub` columns store the normalized fields extracted by
+  the server for indexing
+- because transport-level verification is deferred in this pass, treat the blob
+  and extracted fields as untrusted audit data, not as verified authorization
+  proof
+
+### 3.7 `authorization` — Persisted Authorization Payloads
+
+Stores the persisted authorization payload that accompanied one or more
+invocations.
 
 ```sql
 CREATE TABLE authorization (
@@ -220,6 +230,14 @@ CREATE TABLE authorization (
   created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 ```
+
+Current implementation note:
+
+- the authorization blob is persisted verbatim from the current transport
+  payload
+- verification and binding to the websocket caller remain deferred in this pass
+- treat persisted authorization JSON as untrusted audit data until verification
+  lands
 
 ### 3.8 `blob_store` — Immutable Content-Addressed Binary Data
 

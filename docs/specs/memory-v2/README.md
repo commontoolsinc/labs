@@ -234,11 +234,18 @@ interface SessionSync {
 ```
 
 Successful write-class commands (`/memory/transact`, `/memory/branch/create`,
-`/memory/branch/delete`) preserve the authenticated UCAN transport envelope as
+`/memory/branch/delete`) preserve the current transport payloads as
 content-addressed audit data:
 
-- `invocationRef` points to the canonical invocation object
-- `authorizationRef` points to the verified authorization object
+- `invocationRef` points to the persisted invocation payload
+- `authorizationRef` points to the persisted authorization payload
+
+Current implementation note:
+
+- these payload blobs are stored verbatim for audit/debugging
+- transport-level UCAN verification remains deferred in this pass
+- treat persisted invocation/authorization JSON as untrusted input until
+  verification lands
 
 The semantic JSON write path itself is seq-addressed rather than hash-addressed.
 
