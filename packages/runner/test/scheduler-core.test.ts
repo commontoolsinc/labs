@@ -330,6 +330,7 @@ describe("scheduler", () => {
       entityId: expect.stringMatching(/^of:/),
       path: [],
     });
+  });
 
   it("falls back to value-path write details for non-JSON diagnostics", () => {
     const scheduler = runtime.scheduler as any;
