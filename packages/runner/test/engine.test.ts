@@ -1248,7 +1248,7 @@ describe("Engine in SES mode", () => {
     expect(() => implementation()).toThrow();
   });
 
-  it("reconstructs stringified functions without raw eval", () => {
+  it("reconstructs stringified functions through cached callback creators", () => {
     const next = engine.getInvocation("function next(x) { return x + 1; }") as (
       input: number,
     ) => number;
@@ -1256,16 +1256,27 @@ describe("Engine in SES mode", () => {
     expect(next(1)).toBe(2);
   });
 
-  it("rejects stringified callback IIFEs", () => {
-    expect(() =>
-      engine.getInvocation(
-        "(() => { let leaked = 0; return () => ++leaked; })()",
-      )
-    ).toThrow();
+  it("accepts function-producing callback expressions with fresh state", () => {
+    const next = engine.getInvocation(
+      "(() => { let leaked = 0; return () => ++leaked; })()",
+    ) as () => number;
+
+    expect(next()).toBe(1);
+    expect(next()).toBe(1);
   });
 
-  it("rejects non-function callback source", () => {
-    expect(() => engine.getInvocation("42")).toThrow();
+  it("rejects non-function callback source when invoked", () => {
+    const notFn = engine.getInvocation("42") as () => unknown;
+
+    expect(() => notFn()).toThrow();
+  });
+
+  it("reconstructs callbacks with embedded quotes safely", () => {
+    const probe = engine.getInvocation(
+      `() => 'single "double" \`template\` \\\\ slash'`,
+    ) as () => string;
+
+    expect(probe()).toBe(`single "double" \`template\` \\ slash`);
   });
 
   it("rehydrates stringified functions in the smaller callback compartment", () => {

@@ -5,7 +5,6 @@ import {
   SourceMapParser,
 } from "@commontools/js-compiler";
 import "ses";
-import ts from "typescript";
 import { createCallbackCompartmentGlobals } from "./compartment-globals.ts";
 import { hardenVerifiedFunction } from "./function-hardening.ts";
 
@@ -302,7 +301,7 @@ function getCachedCallbackCreator(source: string): () => unknown {
   }
 
   const compartment = getSharedCallbackCompartment();
-  const creator = compartment.evaluate(`() => (${source})`);
+  const creator = compartment.evaluate(createCallbackCreatorSource(source));
   if (typeof creator !== "function") {
     throw new Error("Callback source must evaluate to a function creator");
   }
@@ -321,45 +320,24 @@ function getSharedCallbackCompartment(): { evaluate(source: string): unknown } {
 
 function normalizeDirectFunctionSource(source: string): string {
   const trimmedSource = source.trim();
-  const sourceFile = ts.createSourceFile(
-    "<callback-source>",
-    trimmedSource,
-    ts.ScriptTarget.ESNext,
-    true,
-    ts.ScriptKind.JS,
-  );
-
-  if (sourceFile.statements.length !== 1) {
-    throw new Error(
-      "Callback source must be a single direct function declaration or expression",
-    );
+  if (trimmedSource.length === 0) {
+    throw new Error("Callback source must not be empty");
   }
-
-  const statement = sourceFile.statements[0];
-  if (ts.isFunctionDeclaration(statement) && statement.body) {
-    return trimmedSource;
-  }
-
-  if (ts.isExpressionStatement(statement)) {
-    const expression = unwrapParenthesizedExpression(statement.expression);
-    if (ts.isFunctionExpression(expression) || ts.isArrowFunction(expression)) {
-      return trimmedSource;
-    }
-  }
-
-  throw new Error(
-    "Callback source must be a direct function declaration or expression",
-  );
+  return trimmedSource;
 }
 
-function unwrapParenthesizedExpression(
-  expression: ts.Expression,
-): ts.Expression {
-  let current = expression;
-  while (ts.isParenthesizedExpression(current)) {
-    current = current.expression;
-  }
-  return current;
+function createCallbackCreatorSource(source: string): string {
+  const callbackExpression = JSON.stringify(`(${source})`);
+  return `(() => {
+    const source = ${callbackExpression};
+    return () => {
+      const fn = (0, eval)(source);
+      if (typeof fn !== "function") {
+        throw new Error("Callback source did not produce a function");
+      }
+      return fn;
+    };
+  })()`;
 }
 
 function materializeHostVisibleStack(error: Error): void {
