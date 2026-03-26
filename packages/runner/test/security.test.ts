@@ -65,6 +65,7 @@ describe("SES security regressions", () => {
             '    hasFetch: typeof host.fetch !== "undefined",',
             '    hasStructuredClone: typeof host.structuredClone !== "undefined",',
             '    hasProxy: typeof host.Proxy !== "undefined",',
+            '    hasProxyKey: Object.prototype.hasOwnProperty.call(host, "Proxy"),',
             "  };",
             "}",
           ].join("\n"),
@@ -80,6 +81,7 @@ describe("SES security regressions", () => {
       hasFetch: true,
       hasStructuredClone: true,
       hasProxy: false,
+      hasProxyKey: true,
     });
   });
 

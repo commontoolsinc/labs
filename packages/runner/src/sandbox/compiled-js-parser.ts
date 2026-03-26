@@ -324,35 +324,6 @@ export function findTopLevelEquals(
   return undefined;
 }
 
-export function containsDynamicImport(
-  source: string,
-  start: number,
-  end: number,
-): boolean {
-  const state: ScanState = {
-    parenDepth: 0,
-    braceDepth: 0,
-    bracketDepth: 0,
-    regexAllowed: true,
-  };
-
-  for (let cursor = start; cursor < end;) {
-    const identifier = tryReadIdentifier(source, cursor, end);
-    if (identifier) {
-      const after = skipTrivia(source, identifier.end, end);
-      if (identifier.text === "import" && source[after] === "(") {
-        return true;
-      }
-      state.regexAllowed = !endsExpression(identifier.text);
-      cursor = identifier.end;
-      continue;
-    }
-    cursor = advanceScanner(source, cursor, end, state);
-  }
-
-  return false;
-}
-
 export function collectIdentifierTokens(
   source: string,
   start: number,

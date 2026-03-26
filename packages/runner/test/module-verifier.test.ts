@@ -64,7 +64,7 @@ describe("verifyProgramModuleScope()", () => {
     );
   });
 
-  it("rejects dynamic import() inside builder callbacks", () => {
+  it("defers dynamic import() inside builder callbacks to SES", () => {
     const program: Program = {
       main: "/main.ts",
       files: [
@@ -85,9 +85,7 @@ describe("verifyProgramModuleScope()", () => {
       ],
     };
 
-    expect(() => verifyProgramModuleScope(program)).toThrow(
-      "Dynamic import() is not allowed in SES mode",
-    );
+    expect(() => verifyProgramModuleScope(program)).not.toThrow();
   });
 
   it("accepts canonical top-level function hardening", () => {
@@ -138,7 +136,7 @@ describe("verifyProgramModuleScope()", () => {
     expect(() => verifyProgramModuleScope(program)).not.toThrow();
   });
 
-  it("ignores JSX intrinsic tags in callback capture analysis", () => {
+  it("accepts JSX intrinsic tags in builder callbacks", () => {
     const program: Program = {
       main: "/main.tsx",
       files: [
@@ -322,7 +320,7 @@ describe("verifyProgramModuleScope()", () => {
     expect(() => verifyProgramModuleScope(program)).not.toThrow();
   });
 
-  it("rejects nested closure captures of unsafe top-level state", () => {
+  it("accepts trusted-builder callbacks that capture top-level schema snapshots", () => {
     const program: Program = {
       main: "/main.ts",
       files: [
@@ -343,9 +341,7 @@ describe("verifyProgramModuleScope()", () => {
       ],
     };
 
-    expect(() => verifyProgramModuleScope(program)).toThrow(
-      "Callback captures top-level data binding 'state'",
-    );
+    expect(() => verifyProgramModuleScope(program)).not.toThrow();
   });
 
   it("accepts verified __ct_data() accessors with inert bodies", () => {
@@ -373,7 +369,7 @@ describe("verifyProgramModuleScope()", () => {
     expect(() => verifyProgramModuleScope(program)).not.toThrow();
   });
 
-  it("rejects __ct_data() accessors that capture unsafe top-level state", () => {
+  it("accepts __ct_data() accessors without inspecting captured bindings", () => {
     const program: Program = {
       main: "/main.ts",
       files: [
@@ -397,8 +393,6 @@ describe("verifyProgramModuleScope()", () => {
       ],
     };
 
-    expect(() => verifyProgramModuleScope(program)).toThrow(
-      "__ct_data() cannot capture unsafe top-level identifier 'state'",
-    );
+    expect(() => verifyProgramModuleScope(program)).not.toThrow();
   });
 });

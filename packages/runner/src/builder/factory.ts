@@ -18,7 +18,7 @@ import {
   ID_FIELD,
   isPattern,
   NAME,
-  schema,
+  schema as schemaIdentity,
   SELF,
   TYPE,
   UI,
@@ -68,6 +68,8 @@ const toSchema: ToSchemaFunction = (_options?) => {
       "help: enable CTS with /// <cts-enable /> directive, ensure using correct build process",
   );
 };
+
+const runtimeSchema = freezeVerifiedPlainData as typeof schemaIdentity;
 
 /**
  * Creates a set of builder functions with the given runtime
@@ -153,7 +155,7 @@ export const createBuilder = (): {
     FS,
 
     // Schema utilities
-    schema,
+    schema: runtimeSchema,
     toSchema,
     __ct_data: freezeVerifiedPlainData,
     AuthSchema,

@@ -87,7 +87,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     );
   });
 
-  it("rejects dynamic import() inside compiled callbacks", () => {
+  it("defers dynamic import() inside compiled callbacks to SES", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
   define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
@@ -97,9 +97,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 });
 `;
 
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Dynamic import() is not allowed in SES mode",
-    );
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
   it("rejects compiled dependencies outside the shared import policy", () => {
@@ -345,6 +343,21 @@ describe("verifyCompiledBundleModuleFactories()", () => {
       return standards || undefined;
     }
     exports.default = (0, commontools_1.lift)(() => getNextUnusedLabel("email"));
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts compiled builder callbacks that capture top-level schema snapshots", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const state = (0, commontools_1.schema)({ type: "object", properties: { count: { type: "number" } } });
+    exports.default = (0, commontools_1.lift)(() => state.type);
   });
 });
 `;

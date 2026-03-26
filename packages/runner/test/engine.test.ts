@@ -1107,7 +1107,7 @@ describe("Engine in SES mode", () => {
     );
   });
 
-  it("rejects trusted-builder callbacks that capture top-level data", async () => {
+  it("allows trusted-builder callbacks that capture top-level schema snapshots", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
@@ -1125,9 +1125,34 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow(
-      "Callback captures top-level data binding 'state'",
-    );
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main?.default).toBeDefined();
+  });
+
+  it("allows trusted-builder callbacks that capture top-level schema snapshots via shorthand properties", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { lift, schema } from "commontools";',
+            "const state = schema({",
+            '  type: "object",',
+            '  properties: { count: { type: "number" } },',
+            "});",
+            "export default lift(() => ({ state }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main?.default).toBeDefined();
   });
 
   it("rejects untransformed toSchema() before evaluation in SES mode", async () => {

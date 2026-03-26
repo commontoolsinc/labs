@@ -6,7 +6,7 @@
 - AI-assisted specification
 
 ## Last Updated
-2026-03-25
+2026-03-26
 
 This document is the sole authoritative SES sandboxing specification for the
 current reimplementation effort. It supersedes prior divergence notes and
@@ -36,8 +36,7 @@ hardening of module-scope definitions at load time.
    similar trusted builders must receive direct callbacks, not IIFE-produced or
    otherwise computed callables.
 4. **Safe Top-Level Functions**: Standalone top-level functions are allowed
-   only when they are direct functions and their captured module environment is
-   reduced to immutable verified values and trusted hardened capabilities.
+   only when they are direct functions.
 5. **Verified Module-Safe Data**: Any other top-level value must be proven to
    be a versioned, recursively inert subset of `StorableValue` and then
    hardened by a custom checker/freezer. Computing that value via an IIFE is
@@ -285,9 +284,8 @@ The trusted verifier must confirm both:
 
 #### 4.2.2 Direct Top-Level Functions
 
-Standalone top-level functions are allowed, including functions that close over
-other module-level symbols, provided those captured symbols are themselves
-verified immutable values or trusted hardened capabilities.
+Standalone top-level functions are allowed when they are direct function
+declarations or direct function-valued initializers.
 
 ```typescript
 function helperFunction(x: number): number {
@@ -299,36 +297,9 @@ const helper2 = (x: number): number => {
 };
 ```
 
-These function objects are hardened immediately after definition, but that
-hardening is only safe because the verifier has already constrained the module
-environment they may close over.
-
-The transformer should normalize top-level functions to a canonical wrapped
-assignment before verification, for example:
-
-```javascript
-const helperFunction = __ctHardenFn(function (x) {
-  return x * 2;
-});
-```
-
-This lets the verifier accept one function shape rather than many syntactic
-variants. The verifier must still inspect the wrapped expression and confirm it
-is a direct `function` expression.
-
-If a top-level helper is intended to be callable from `__ct_data(...)`, it must
-be approved under a stricter data-safe constraint. In the current
-implementation that is a verifier property, not a separate wrapper class. Such
-helpers require:
-
-- captures limited to module-safe data or other previously approved local
-  helpers with the same property
-- no references to builder entrypoints, graph constructors, or arbitrary runtime
-  imports
-
-Ordinary `__ctHardenFn(...)` helpers are callable from builder/pattern code but
-are not assumed to be safe inside data wrappers unless the verifier can prove
-their captures are module-safe.
+These function objects are hardened immediately after definition. The verifier
+only needs to accept direct function forms here; they are not part of the
+`__ct_data(...)` plain-data bucket.
 
 #### 4.2.3 Verified Module-Safe Data
 
@@ -361,35 +332,16 @@ const LOOKUP = __ct_data((() => {
 })());
 ```
 
-Within `__ct_data(...)`, the allowed operation set is narrower than normal
-pattern construction. A data initializer may use:
-
-- literals and operators
-- previously verified module-safe-data bindings
-- approved top-level local helper calls whose captures are themselves limited to
-  module-safe data
-- selected intrinsic data-construction helpers such as `Array.from(...)`,
-  `Object.entries(...)`, `Object.fromEntries(...)`, and pure collection/string
-  methods over already-safe inputs
-- explicit runtime snapshot helpers such as `safeDateNow()` and
-  `nonPrivateRandom()`
-
-Local helper bodies used by `__ct_data(...)` are allowed to use ordinary
-synchronous control flow and local mutation of ephemeral locals, as long as they
-do not reach out to builder/runtime capabilities and the surviving result still
-passes module-safe-data validation.
+The verifier does not need to semantically interpret the body of a
+`__ct_data(...)` initializer. It only needs to recognize the wrapper boundary
+and confirm the call shape. The runtime helper then evaluates the initializer,
+validates the value that survives module load, and freezes the surviving inert
+snapshot.
 
 Proxy-backed values and accessor-backed values are also allowed as transient
 snapshot sources. Their traps/getters may run during one-time snapshot
 materialization, but the surviving exported value must be a copied inert graph
 with no live proxy or accessor behavior remaining.
-
-A data initializer MUST NOT call:
-
-- trusted builder entrypoints such as `pattern`, `lift`, or `handler`
-- graph-construction built-ins such as `fetchData`, `compileAndRun`,
-  `navigateTo`, or `wish`
-- arbitrary imported runtime-module functions
 
 Direct ambient `Date.now()` and `Math.random()` are not relied upon as the
 stable SES contract. Pattern authors should call `safeDateNow()` and
@@ -477,8 +429,7 @@ Import/export policy:
 #### 4.2.5 Disallowed Module-Scope Forms
 
 The following are rejected unless they are normalized into `__ct_data(...)`,
-satisfy the stricter data-initializer rules above, and the final escaping value
-passes module-safe-data validation:
+and the final escaping value passes module-safe-data validation:
 
 ```typescript
 // ❌ Arbitrary call result at module scope
@@ -502,14 +453,11 @@ const state = { count: 0 };
 The compiler/transformer is not in the TCB. It may assist by:
 
 - inserting stable sentinel comments before each top-level item
-- rewriting trusted builders, top-level functions, and data initializers into a
-  small canonical wrapper language such as `__ct_builder(...)`,
-  `__ctHardenFn(...)`, and `__ct_data(...)`
+- rewriting trusted builders and data initializers into a small canonical
+  wrapper language such as `__ct_builder(...)` and `__ct_data(...)`
 - rewriting candidate plain-data initializers into
   `freezeVerifiedPlainData(...)`
 - hoisting inline callbacks to make direct-callback verification easier
-- emitting capture manifests or equivalent canonical metadata for `__ct_data(...)`
-  items so the verifier can reject references to builder/runtime capabilities
 - emitting those wrappers during compilation so source maps and stack traces
   continue to point back to authored source, rather than introducing wrappers at
   runtime
@@ -535,9 +483,6 @@ not a general JavaScript parser. It only needs to:
   up
 - confirm that each surviving top-level item matches one of the canonical
   wrapper forms or allowed import/export/type forms
-- for `__ct_data(...)` items, confirm their declared captures resolve only to
-  previously approved module-safe-data bindings or approved local helper calls
-  whose captures are themselves module-safe
 - reject anything outside that mini-language
 
 The trusted verifier does **not** need to understand arbitrary JavaScript AST
@@ -945,8 +890,9 @@ Dynamic import support is not part of this implementation baseline.
 
 Normative v1 behavior:
 
-- any authored `import()` expression is rejected by the verifier
 - no import-hook implementation is assumed or required for this baseline
+- authored `import()` remains unavailable because the default SES compartment
+  configuration rejects the syntax
 - the escape-hatch and threat-model analysis must treat dynamic imports as
   unavailable, not controlled
 
@@ -1027,33 +973,9 @@ At invocation time:
 #### 7.2.3 Function Hardening Is Necessary but Not Sufficient
 
 All approved top-level functions and builder implementations are frozen after
-load, but freezing the function object alone is not enough:
-
-```typescript
-const fn = (() => {
-  let counter = 0;
-  return () => ++counter;
-})();
-harden(fn);
-```
-
-The function object above is frozen, but its closed-over lexical state is still
-mutable shared state. Therefore, this spec requires both:
-
-- function hardening after definition
-- verification that any captured module-level bindings are themselves safe
-  immutable values or trusted hardened capabilities
-
-Safe example:
-
-```typescript
-const TABLE = freezeVerifiedPlainData({ a: 1, b: [2, 3] });
-
-function helper(x: number) {
-  return TABLE.a + x;
-}
-harden(helper);
-```
+load. In this spec, that hardening works together with the stricter top-level
+grammar: surviving module-scope values are direct functions, trusted builder
+definitions, or module-safe data.
 
 #### 7.2.4 Custom Module-Safe Data Checker/Freezer
 
@@ -1769,8 +1691,6 @@ Examples:
 - insert stable sentinel comments before each top-level item
 - normalize trusted builders into canonical forms such as
   `__ct_builder("lift", function ...)`
-- normalize direct top-level functions into a canonical hardening form such as
-  `const localFn = __ctHardenFn(function ...)` or `__ctHardenFn(localFn)`
 - normalize data bindings into canonical forms such as
   `__ct_data(expr)`
 - rewrite module-safe-data candidates into `freezeVerifiedPlainData(...)` within the
@@ -1819,8 +1739,7 @@ compiler output from executing statements outside `define(...)` registrations.
 The verifier must check:
 
 - trusted builders receive direct callbacks only
-- top-level functions are direct functions only, optionally wrapped in the
-  canonical hardening helper form
+- top-level functions are direct functions only
 - all other surviving top-level values are module-safe data and hardened
 - no unclassified top-level side effects survive
 
@@ -1867,23 +1786,19 @@ snapshot that escapes module load.
 #### 2.3 Harden approved functions immediately after load (Priority: High)
 
 Direct top-level functions and trusted builder implementations must be hardened
-as soon as they are created, but only after the verifier has constrained the
-environment they may close over.
+as soon as they are created.
 
-In the current implementation this splits into two canonical paths:
+The spec does not require a helper-shaped encoding for direct top-level
+functions. Implementations may harden them however they choose, provided the
+verifier only needs to recognize direct top-level function forms. Trusted
+builder implementations are hardened in the runtime builder layer as soon as
+`lift(...)`, `handler(...)`, `pattern(...)`, or related constructors receive
+them.
 
-- direct top-level functions are rewritten by the non-TCB transformer into a
-  local `__ctHardenFn(...)` helper pattern that freezes the function object and
-  its prototype immediately after definition
-- trusted builder implementations are hardened in the runtime builder layer as
-  soon as `lift(...)`, `handler(...)`, `pattern(...)`, or related constructors
-  receive them
-
-The compiled-bundle verifier treats the `__ctHardenFn(...)` helper declaration
-and its direct call sites as part of the accepted canonical wrapper grammar.
-It also treats TypeScript's canonical import-normalization rebindings as part
-of that grammar, including `local = __importStar(local)` and
-`local = __importDefault(local)` when `local` is already the AMD factory's
+The compiled-bundle verifier also treats TypeScript's canonical
+import-normalization rebindings as part of the accepted grammar, including
+`local = __importStar(local)` and `local = __importDefault(local)` when `local`
+is already the AMD factory's
 import binding for that dependency. These statements are normalization steps
 over an already-verified import edge, not new capability acquisition.
 
@@ -2228,7 +2143,7 @@ await runner.start(resultCell);
 | Global pollution | Frozen intrinsics, controlled globals |
 | Internal runtime-global exposure | Only approved globals are installed; implementation hooks like `RUNTIME_ENGINE_CONSOLE_HOOK` stay hidden |
 | Prototype pollution | Frozen prototypes (SES default) |
-| Closure-based data leakage | No surviving mutable module bindings; function hardening plus verified environments |
+| Closure-based data leakage | No surviving mutable module bindings; direct-function-only top-level forms plus function hardening |
 | State leakage via modules | Verified immutable top-level bindings; dynamic imports rejected in v1 |
 | Resource exhaustion | Future: Add CPU/memory limits (not in this spec) |
 | Ambient network/time/random authority at module load | Narrow Compartment globals; temporary compatibility web-fetch shim only, no `Temporal`, `secureRandom`, or `randomUUID` |

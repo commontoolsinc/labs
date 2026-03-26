@@ -1,6 +1,5 @@
 import {
   CompiledJsParseError,
-  containsDynamicImport,
   findTopLevelEquals,
   locationFromOffset,
   parseCompiledBundleSource,
@@ -13,10 +12,6 @@ import {
   trimRange,
   tryParseCallExpression,
 } from "./compiled-js-parser.ts";
-import {
-  collectFreeIdentifiersFromTsFunction,
-  parseFunctionLikeFromExpressionText,
-} from "./free-identifiers.ts";
 import { ModuleVerificationError } from "./module-verification-error.ts";
 import {
   isAllowedCompiledDependencySpecifier,
@@ -36,7 +31,6 @@ interface BindingInfo {
   trustedRuntimeName?: string;
   namespaceImport?: boolean;
   hardeningHelper?: boolean;
-  captureSafe?: boolean;
   functionRange?: { start: number; end: number };
 }
 
@@ -115,21 +109,6 @@ function verifyAuthoredFactory(
   filename: string,
   defineCall: ParsedDefineCall,
 ): void {
-  if (
-    containsDynamicImport(
-      source,
-      defineCall.factory.body.start,
-      defineCall.factory.body.end,
-    )
-  ) {
-    throw verificationErrorAt(
-      source,
-      filename,
-      defineCall.factory.start,
-      "Dynamic import() is not allowed in SES mode",
-    );
-  }
-
   const env = new Map<string, BindingInfo>();
   predeclareFactoryDependencies(defineCall, env);
   predeclareTopLevelBindings(source, defineCall, env);
@@ -260,9 +239,6 @@ function predeclareTopLevelBindings(
       if (name) {
         env.set(name, {
           kind: "function",
-          captureSafe: isJsxHelperWrapperDeclaration(statement.text)
-            ? true
-            : undefined,
           hardeningHelper: isFunctionHardeningHelperDeclaration(statement.text),
           functionRange: { start: statement.start, end: statement.end },
         });
@@ -352,11 +328,10 @@ function provisionalBindingForExpression(
   const trustedCall = resolveTrustedCallName(normalizedCallee, env);
   if (trustedCall) {
     if (TRUSTED_BUILDERS.has(trustedCall)) {
-      return { kind: "builder", captureSafe: true };
+      return { kind: "builder" };
     }
     return {
       kind: "data",
-      captureSafe: trustedCall !== "schema",
     };
   }
 
@@ -420,7 +395,7 @@ function classifyExpressionText(
   const normalized = stripJsTrivia(text);
 
   if (isPrimitiveLikeExpression(normalized) || normalized === "void0") {
-    return { kind: "data", captureSafe: true };
+    return { kind: "data" };
   }
 
   if (isRawMutableExpression(normalized)) {
@@ -471,7 +446,7 @@ function classifyExpressionText(
           call.args,
           env,
         );
-        return { kind: "builder", captureSafe: true };
+        return { kind: "builder" };
       }
       verifyTrustedDataCall(
         source,
@@ -482,7 +457,6 @@ function classifyExpressionText(
       );
       return {
         kind: "data",
-        captureSafe: trustedCall !== "schema",
       };
     }
 
@@ -533,7 +507,7 @@ function classifyExpressionText(
 
   if (SIMPLE_IDENTIFIER_RE.test(text)) {
     if (text === "undefined" || text === "NaN" || text === "Infinity") {
-      return { kind: "data", captureSafe: true };
+      return { kind: "data" };
     }
     const binding = env.get(text);
     if (!binding || binding.kind === "unknown") {
@@ -610,7 +584,7 @@ function verifyTrustedDataCall(
     return;
   }
 
-  if (trustedName === "schema" && argCount >= 1) {
+  if (trustedName === "schema" && argCount === 1) {
     return;
   }
 
@@ -656,14 +630,6 @@ function verifyTrustedBuilderCall(
           `Trusted builder '${builderName}' must receive a direct callback, not an indirect reference`,
         );
       }
-      rejectUnsafeCaptures(
-        source,
-        filename,
-        callback.start,
-        callback.end,
-        argument.start,
-        env,
-      );
       continue;
     }
     verifyTrustedValueExpression(
@@ -830,145 +796,6 @@ function resolveTrustedBuilderCallback(
   }
 
   return binding.functionRange;
-}
-
-function rejectUnsafeCaptures(
-  source: string,
-  filename: string,
-  fnStart: number,
-  fnEnd: number,
-  errorOffset: number,
-  env: Map<string, BindingInfo>,
-): void {
-  const unsafe = findUnsafeCapture(
-    source,
-    fnStart,
-    fnEnd,
-    env,
-    new Set(),
-  );
-  if (!unsafe) {
-    return;
-  }
-
-  throw verificationErrorAt(
-    source,
-    filename,
-    errorOffset,
-    unsafe.message,
-  );
-}
-
-function findUnsafeCapture(
-  source: string,
-  fnStart: number,
-  fnEnd: number,
-  env: Map<string, BindingInfo>,
-  visiting: Set<string>,
-): { identifier: string; message: string } | undefined {
-  const freeIdentifiers = collectFreeIdentifiers(source, fnStart, fnEnd);
-  for (const identifier of freeIdentifiers) {
-    if (SAFE_GLOBAL_IDENTIFIERS.has(identifier)) {
-      continue;
-    }
-
-    const binding = env.get(identifier);
-    if (!binding || binding.kind === "unknown") {
-      return {
-        identifier,
-        message:
-          `Callback captures unknown top-level identifier '${identifier}' in SES mode`,
-      };
-    }
-
-    if (
-      binding.kind === "data" &&
-      !isBindingCaptureSafe(source, identifier, env, visiting)
-    ) {
-      return {
-        identifier,
-        message:
-          `Callback captures top-level data binding '${identifier}', which is disallowed in SES mode`,
-      };
-    }
-
-    if (
-      binding.kind === "function" &&
-      !isBindingCaptureSafe(source, identifier, env, visiting)
-    ) {
-      return {
-        identifier,
-        message:
-          `Callback captures top-level function binding '${identifier}', which closes over unsafe state in SES mode`,
-      };
-    }
-  }
-
-  return undefined;
-}
-
-function isBindingCaptureSafe(
-  source: string,
-  identifier: string,
-  env: Map<string, BindingInfo>,
-  visiting: Set<string>,
-): boolean {
-  const binding = env.get(identifier);
-  if (!binding) {
-    return false;
-  }
-
-  if (binding.kind === "import" || binding.kind === "builder") {
-    return true;
-  }
-
-  if (binding.kind === "data") {
-    return binding.captureSafe ?? false;
-  }
-
-  if (binding.kind !== "function" || !binding.functionRange) {
-    return false;
-  }
-
-  if (binding.captureSafe !== undefined) {
-    return binding.captureSafe;
-  }
-
-  if (visiting.has(identifier)) {
-    return true;
-  }
-
-  visiting.add(identifier);
-  const unsafe = findUnsafeCapture(
-    source,
-    binding.functionRange.start,
-    binding.functionRange.end,
-    env,
-    visiting,
-  );
-  visiting.delete(identifier);
-  binding.captureSafe = !unsafe;
-  return binding.captureSafe;
-}
-
-function collectFreeIdentifiers(
-  source: string,
-  fnStart: number,
-  fnEnd: number,
-): Set<string> {
-  try {
-    return collectFreeIdentifiersFromTsFunction(
-      parseFunctionLikeFromExpressionText(
-        source.slice(fnStart, fnEnd),
-        "<compiled-callback>",
-      ),
-    );
-  } catch {
-    throw new CompiledJsParseError(
-      fnStart,
-      "Expected a direct function expression",
-    );
-  }
 }
 
 function resolveTrustedCallName(
@@ -1173,11 +1000,6 @@ function isFunctionHardeningHelperDeclaration(source: string): boolean {
   return stripJsTrivia(source) === CANONICAL_HARDENING_HELPER;
 }
 
-function isJsxHelperWrapperDeclaration(source: string): boolean {
-  return /^function[A-Za-z_$][\w$]*\(\.\.\.[A-Za-z_$][\w$]*\)\{return__ctHelpers\.h\.apply\(null,[A-Za-z_$][\w$]*\);\}$/
-    .test(stripJsTrivia(source));
-}
-
 function registerFunctionStatement(
   statement: StatementChunk,
   env: Map<string, BindingInfo>,
@@ -1186,9 +1008,6 @@ function registerFunctionStatement(
   if (!name) return;
   env.set(name, {
     kind: "function",
-    captureSafe: isJsxHelperWrapperDeclaration(statement.text)
-      ? true
-      : undefined,
     hardeningHelper: isFunctionHardeningHelperDeclaration(statement.text),
     functionRange: { start: statement.start, end: statement.end },
   });
