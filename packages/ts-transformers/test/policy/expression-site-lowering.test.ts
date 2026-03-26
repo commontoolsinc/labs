@@ -5,6 +5,7 @@ import { createDataFlowAnalyzer } from "../../src/ast/mod.ts";
 import { TransformationContext } from "../../src/core/mod.ts";
 import {
   classifyExpressionSiteHandling,
+  findLowerableExpressionSite,
 } from "../../src/transformers/expression-site-policy.ts";
 import type { ExpressionContainerKind } from "../../src/transformers/expression-site-types.ts";
 
@@ -585,6 +586,48 @@ Deno.test(
       ),
       false,
     );
+  },
+);
+
+Deno.test(
+  "Expression site policy: lowerable-site search skips non-pattern JSX roots without analyzing them",
+  () => {
+    const { sourceFile, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      const ui = <div>{value}</div>;
+    `);
+
+    const valueRef = findFirstNode(
+      sourceFile,
+      (node): node is ts.Identifier =>
+        ts.isIdentifier(node) && node.text === "value",
+    );
+
+    let analyzeCalls = 0;
+    const analyze = (_expression: ts.Expression) => {
+      analyzeCalls++;
+      return {
+        containsOpaqueRef: false,
+        requiresRewrite: false,
+        dataFlows: [],
+        graph: {
+          nodes: [],
+          scopes: [],
+          rootScopeId: 0,
+        },
+      };
+    };
+
+    assertEquals(
+      findLowerableExpressionSite(valueRef, context, analyze),
+      undefined,
+    );
+    assertEquals(analyzeCalls, 0);
   },
 );
 

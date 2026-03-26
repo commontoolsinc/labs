@@ -759,7 +759,6 @@ export function classifyExpressionSiteHandling(
   if (helperOwned) {
     return helperOwned;
   }
-
   if (!siteInfo.hasAuthoredSourceSite) {
     return { kind: "skip", reason: "no-authored-source-site" };
   }
@@ -995,6 +994,24 @@ export function findLowerableExpressionSite(
     if (ts.isExpression(current)) {
       const containerKind = getExpressionContainerKind(current);
       if (containerKind) {
+        if (!hasAuthoredSourceSite(current)) {
+          current = current.parent;
+          continue;
+        }
+
+        if (isWithinEventHandlerJsxAttribute(current, context.checker)) {
+          current = current.parent;
+          continue;
+        }
+
+        if (
+          classifyReactiveContext(current, context.checker, context).kind !==
+            "pattern"
+        ) {
+          current = current.parent;
+          continue;
+        }
+
         const decision = classifyExpressionSiteHandling(
           current,
           containerKind,
