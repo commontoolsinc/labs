@@ -117,8 +117,8 @@ export function cloneSchemaMutable(
 }
 
 /**
- * Return a frozen shallow copy of a schema with the given property overrides
- * applied.
+ * Return a deep-frozen shallow copy of a schema with the given property
+ * overrides applied.
  *
  * - `undefined` and `true` ("accept everything") are treated as `{}` before
  *   applying overrides.
