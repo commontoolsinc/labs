@@ -91,10 +91,14 @@ export function toDeepFrozenSchema<T extends JSONSchema>(
 }
 
 /**
- * Return a deep mutable object copy of a JSONSchema. Boolean schemas (`true`
- * and `false`) and `undefined` are converted to their object-form equivalents:
+ * Return a mutable object copy of a JSONSchema. Boolean schemas (`true` and
+ * `false`) and `undefined` are converted to their object-form equivalents:
  * `undefined` and `true` become `{}` (accept any value), `false` becomes
  * `{ not: true }` (reject all values).
+ *
+ * @param deep When `true`, nested objects are recursively cloned (deep copy).
+ *   Defaults to `false` (shallow copy). Pass `true` when the caller intends to
+ *   mutate nested properties.
  *
  * Note: do not use this on proxy-wrapped schemas from the runtime — those
  * sites should continue using `JSON.parse(JSON.stringify(...))` until the
@@ -102,12 +106,13 @@ export function toDeepFrozenSchema<T extends JSONSchema>(
  */
 export function cloneSchemaMutable(
   schema: JSONSchema | undefined,
+  deep: boolean = false,
 ): JSONSchemaObjMutable {
   if (schema === undefined) return {};
   if (typeof schema === "boolean") return schema ? {} : { not: true };
   return cloneIfNecessary(schema, {
     frozen: false,
-    deep: true,
+    deep,
   }) as JSONSchemaObjMutable;
 }
 

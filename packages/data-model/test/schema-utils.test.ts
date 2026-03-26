@@ -381,7 +381,7 @@ describe("cloneSchemaMutable", () => {
     assertEquals(result, {});
   });
 
-  it("returns a deep copy of an object schema", () => {
+  it("returns a shallow copy by default", () => {
     const inner: JSONSchemaObj = { type: "string" };
     const schema: JSONSchemaObj = {
       type: "object",
@@ -390,7 +390,25 @@ describe("cloneSchemaMutable", () => {
 
     const result = cloneSchemaMutable(schema) as JSONSchemaObj;
 
-    // Different reference.
+    // Different top-level reference.
+    assertEquals(result !== schema, true);
+    // Content is equal.
+    assertEquals(result.type, "object");
+    assertEquals((result.properties!.name as JSONSchemaObj).type, "string");
+    // Nested objects share references (shallow).
+    assertEquals(result.properties === schema.properties, true);
+  });
+
+  it("returns a deep copy when deep=true", () => {
+    const inner: JSONSchemaObj = { type: "string" };
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { name: inner },
+    };
+
+    const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
+
+    // Different top-level reference.
     assertEquals(result !== schema, true);
     // Content is equal.
     assertEquals(result.type, "object");
@@ -399,13 +417,13 @@ describe("cloneSchemaMutable", () => {
     assertEquals(result.properties !== schema.properties, true);
   });
 
-  it("result is deeply mutable", () => {
+  it("result is deeply mutable when deep=true", () => {
     const schema: JSONSchemaObj = {
       type: "object",
       properties: { x: { type: "number" } },
     };
 
-    const result = cloneSchemaMutable(schema) as JSONSchemaObj;
+    const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
     assertEquals(Object.isFrozen(result), false);
 
     // Top-level mutation should work.
@@ -432,13 +450,13 @@ describe("cloneSchemaMutable", () => {
     assertEquals(schema.type, "object");
   });
 
-  it("clones a frozen schema into a mutable copy", () => {
+  it("deep clone of a frozen schema is fully mutable", () => {
     const schema = toDeepFrozenSchema({
       type: "object",
       properties: { y: { type: "number" } },
     } as JSONSchemaObj);
 
-    const result = cloneSchemaMutable(schema) as JSONSchemaObj;
+    const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
 
     assertEquals(Object.isFrozen(result), false);
     assertEquals(result.type, "object");
@@ -449,12 +467,12 @@ describe("cloneSchemaMutable", () => {
     );
   });
 
-  it("handles schema with arrays (anyOf)", () => {
+  it("handles schema with arrays (anyOf) when deep=true", () => {
     const schema: JSONSchemaObj = {
       anyOf: [{ type: "string" }, { type: "number" }],
     };
 
-    const result = cloneSchemaMutable(schema) as JSONSchemaObj;
+    const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
 
     assertEquals(result !== schema, true);
     assertEquals(result.anyOf!.length, 2);
