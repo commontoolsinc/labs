@@ -1,8 +1,8 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { createDataFlowAnalyzer, visitEachChildWithJsx } from "../ast/mod.ts";
+import { classifyJsxExpressionSiteRoute } from "./expression-site-policy.ts";
 import {
-  classifyJsxExpressionSiteRoute,
   rewriteExpressionSite,
   rewriteOpaquePathTerminalJsxExpressionSite,
   rewriteOwnedPreClosureJsxExpressionSite,

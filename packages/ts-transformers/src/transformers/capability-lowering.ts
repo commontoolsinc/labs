@@ -47,7 +47,7 @@ import {
 import {
   getExpressionContainerKind,
   getExpressionSitePolicyInfo,
-} from "./expression-site-lowering.ts";
+} from "./expression-site-policy.ts";
 
 const KNOWN_PATH_TERMINAL_METHODS = new Set([
   "set",

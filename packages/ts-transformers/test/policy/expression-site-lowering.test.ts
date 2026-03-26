@@ -6,7 +6,7 @@ import { TransformationContext } from "../../src/core/mod.ts";
 import {
   classifyJsxExpressionSiteRoute,
   getExpressionSitePolicyInfo,
-} from "../../src/transformers/expression-site-lowering.ts";
+} from "../../src/transformers/expression-site-policy.ts";
 
 function createProgramAndContext(source: string): {
   sourceFile: ts.SourceFile;

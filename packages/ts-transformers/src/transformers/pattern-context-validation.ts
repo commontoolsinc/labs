@@ -61,7 +61,7 @@ import {
   findLowerableExpressionSite,
   getExpressionContainerKind,
   getExpressionSitePolicyInfo,
-} from "./expression-site-lowering.ts";
+} from "./expression-site-policy.ts";
 
 const EMPTY_OPAQUE_ROOTS = new Set<string>();
 
