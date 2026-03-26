@@ -10,7 +10,6 @@ import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import {
-  classifyArrayMethodCall,
   detectCallKind,
   isReactiveValueExpression,
   isReactiveValueSymbol,
@@ -661,9 +660,9 @@ export function createDataFlowAnalyzer(
         }
       }
 
-      const combined = mergeAnalyses(...analyses);
       const callKind = detectCallKind(expression, checker);
-      const isArrayMethodFamily = !!classifyArrayMethodCall(expression);
+      const isArrayMethodFamily = callKind?.kind === "array-method";
+      const combined = mergeAnalyses(...analyses);
       const rewriteHint: RewriteHint | undefined = (() => {
         if (callKind?.kind === "ifElse" && expression.arguments.length > 0) {
           const predicate = expression.arguments[0];

@@ -962,10 +962,6 @@ export function classifyUnsupportedExpressionSiteCallRoot(
     return undefined;
   }
 
-  if (!getExpressionContainerKind(expression)) {
-    return undefined;
-  }
-
   const decision = classifyExpressionSiteCallRootPolicy(
     expression,
     context,

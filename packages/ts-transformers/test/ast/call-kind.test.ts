@@ -121,17 +121,18 @@ Deno.test("classifyArrayMethodCallSite reports reactive ownership for reactive r
   );
 });
 
-Deno.test("classifyArrayMethodCallSite treats lowered *WithPattern methods as reactive", () => {
+Deno.test("classifyArrayMethodCallSite treats lowered *WithPattern methods as reactive when the receiver is reactive", () => {
   const { sourceFile, checker } = createProgram(`
     interface OpaqueRefMethods<T> {
+      key(path: string): OpaqueRef<T>;
       mapWithPattern<U>(callback: (value: any) => U): U[];
     }
 
     type OpaqueRef<T> = T & OpaqueRefMethods<T>;
 
-    declare const items: OpaqueRef<number[]>;
+    declare const items: OpaqueRef<{ values: number[] }>;
 
-    const value = items.mapWithPattern((n: number) => n + 1);
+    const value = items.key("values").mapWithPattern((n: number) => n + 1);
   `);
 
   const expression = findInitializer(sourceFile, "value");
@@ -147,6 +148,32 @@ Deno.test("classifyArrayMethodCallSite treats lowered *WithPattern methods as re
   assertEquals(
     classifyArrayCallbackContainerCall(expression, checker),
     "reactive-array-method",
+  );
+});
+
+Deno.test("classifyArrayMethodCallSite does not mark custom lowered *WithPattern methods reactive by name alone", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare const collection: {
+      mapWithPattern<U>(callback: (value: number) => U): U[];
+    };
+
+    const value = collection.mapWithPattern((n: number) => n + 1);
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isCallExpression(expression)) {
+    throw new Error("Expected call expression initializer");
+  }
+
+  assertEquals(detectCallKind(expression, checker), undefined);
+  assertEquals(classifyArrayMethodCallSite(expression, checker), {
+    family: "map",
+    lowered: true,
+    ownership: "plain",
+  });
+  assertEquals(
+    classifyArrayCallbackContainerCall(expression, checker),
+    undefined,
   );
 });
 
@@ -214,21 +241,29 @@ Deno.test("getPatternBuilderCallbackArgument preserves unresolved property-acces
 Deno.test("getCapabilitySummaryCallbackArgument recognizes derive and builder callback families", () => {
   const { sourceFile, checker } = createProgram(`
     declare function derive<T, U>(input: T, callback: (value: T) => U): U;
+    declare function derive<T, U>(
+      inputSchema: unknown,
+      resultSchema: unknown,
+      input: T,
+      callback: (value: T) => U,
+    ): U;
     declare function computed<T>(callback: () => T): T;
     declare function action<T>(callback: () => T): T;
 
     const first = derive(1, (value: number) => value + 1);
-    const second = computed(() => 1);
-    const third = action(() => 2);
+    const second = derive({}, {}, 1, (value: number) => value + 2);
+    const third = computed(() => 1);
+    const fourth = action(() => 2);
   `);
 
   const first = findInitializer(sourceFile, "first");
   const second = findInitializer(sourceFile, "second");
   const third = findInitializer(sourceFile, "third");
+  const fourth = findInitializer(sourceFile, "fourth");
 
   if (
     !ts.isCallExpression(first) || !ts.isCallExpression(second) ||
-    !ts.isCallExpression(third)
+    !ts.isCallExpression(third) || !ts.isCallExpression(fourth)
   ) {
     throw new Error("Expected call expression initializers");
   }
@@ -236,4 +271,5 @@ Deno.test("getCapabilitySummaryCallbackArgument recognizes derive and builder ca
   assertEquals(!!getCapabilitySummaryCallbackArgument(first, checker), true);
   assertEquals(!!getCapabilitySummaryCallbackArgument(second, checker), true);
   assertEquals(!!getCapabilitySummaryCallbackArgument(third, checker), true);
+  assertEquals(!!getCapabilitySummaryCallbackArgument(fourth, checker), true);
 });

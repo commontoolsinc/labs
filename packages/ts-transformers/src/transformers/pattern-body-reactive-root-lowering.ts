@@ -676,6 +676,14 @@ function rewriteTrackedOpaquePatternBody(
       );
     }
 
+    if (ts.isForOfStatement(visited)) {
+      reportTrackedOpaqueComputation(
+        visited.expression,
+        visited.expression,
+        "for..of traversal of opaque pattern values is not lowerable. Move this expression into computed().",
+      );
+    }
+
     return visited;
   };
 

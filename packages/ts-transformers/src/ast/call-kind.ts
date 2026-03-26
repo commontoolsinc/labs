@@ -40,6 +40,7 @@ import {
   COMMONTOOLS_RUNTIME_EXPORTS_BY_NAME,
 } from "../core/commontools-runtime-registry.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
 
 const ARRAY_METHOD_NAMES = new Set([
   "map",
@@ -189,7 +190,7 @@ export function getCapabilitySummaryCallbackArgument(
 
   let callbackArg: ts.Expression | undefined;
   if (callKind.kind === "derive") {
-    callbackArg = call.arguments[1];
+    callbackArg = call.arguments[call.arguments.length - 1];
   } else if (
     callKind.kind === "builder" &&
     (
@@ -335,10 +336,6 @@ export function classifyArrayMethodCallSite(
     return undefined;
   }
 
-  if (access.lowered) {
-    return { ...access, ownership: "reactive" };
-  }
-
   const target = stripWrappers(call.expression);
   if (
     !ts.isPropertyAccessExpression(target) &&
@@ -350,9 +347,9 @@ export function classifyArrayMethodCallSite(
   return {
     ...access,
     ownership: isReactiveArrayMethodReceiverExpression(
-        target.expression,
-        checker,
-      )
+      target.expression,
+      checker,
+    )
       ? "reactive"
       : "plain",
   };
@@ -554,6 +551,9 @@ export function isReactiveValueExpression(
   }
 
   if (ts.isCallExpression(target)) {
+    if (classifyOpaquePathTerminalCall(target) === "key") {
+      return true;
+    }
     if (isReactiveOriginCall(target, checker)) {
       return true;
     }

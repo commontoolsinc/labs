@@ -180,3 +180,31 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "findPendingComputeWrapCandidate does not treat custom map methods as supported rewrite boundaries",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare const CELL_BRAND: unique symbol;
+      type BrandedCell<T, Brand extends string> = {
+        readonly [CELL_BRAND]: Brand;
+      };
+      type OpaqueRef<T> = BrandedCell<T, "opaque">;
+      declare const count: OpaqueRef<number>;
+      declare const collection: {
+        map<T>(fn: (item: number) => T): T[];
+      };
+
+      const branch = { value: collection.map((item) => item + count) };
+    `);
+
+    const analyze = createDataFlowAnalyzer(checker);
+    const branch = findInitializer(sourceFile, "branch");
+    const value = findObjectPropertyInitializer(branch, "value");
+
+    assertStrictEquals(
+      findPendingComputeWrapCandidate(branch, analyze, context),
+      value,
+    );
+  },
+);

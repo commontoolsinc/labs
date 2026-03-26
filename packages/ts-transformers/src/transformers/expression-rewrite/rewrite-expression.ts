@@ -3,6 +3,7 @@ import ts from "typescript";
 import {
   classifyArrayMethodCall,
   classifyReactiveContext,
+  detectCallKind,
   isInsideSafeCallbackWrapper,
   normalizeDataFlows,
   visitEachChildWithJsx,
@@ -59,7 +60,10 @@ function rewriteChildExpressions(
   const visitor = (child: ts.Node): ts.Node => {
     if (ts.isExpression(child)) {
       if (ts.isCallExpression(child)) {
-        const arrayMethodCall = classifyArrayMethodCall(child);
+        const arrayMethodCall =
+          detectCallKind(child, context.checker)?.kind === "array-method"
+            ? classifyArrayMethodCall(child)
+            : undefined;
         if (arrayMethodCall) {
           if (arrayMethodCall.lowered) {
             return child;
