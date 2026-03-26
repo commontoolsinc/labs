@@ -1,8 +1,8 @@
 import ts from "typescript";
 import { getCellKind } from "@commontools/schema-generator/cell-brand";
+import type { ReactiveContextInfo } from "../ast/reactive-context.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
-import type { ExpressionSiteCallRootPolicyInfo } from "./expression-site-types.ts";
 
 export type SupportedCallRootKind =
   | "helper-owned-explicit-read"
@@ -19,6 +19,28 @@ export type CallRootPolicyDecision =
   | { kind: "supported"; supportedKind: SupportedCallRootKind }
   | { kind: "unsupported"; unsupportedKind: UnsupportedCallRootKind }
   | { kind: "none" };
+
+type ExpressionSiteHelperBoundaryKind =
+  | "ifElse"
+  | "when"
+  | "unless"
+  | "builder"
+  | "derive"
+  | "pattern-tool";
+
+type ExpressionSiteCallRootKind =
+  | "conditional-helper"
+  | "free-function"
+  | "receiver-method"
+  | "optional-call"
+  | "other";
+
+type CallRootPolicySiteInfo = {
+  readonly reactiveContext: ReactiveContextInfo;
+  readonly arrayMethodOwned: boolean;
+  readonly helperBoundaryKind?: ExpressionSiteHelperBoundaryKind;
+  readonly callRootKind?: ExpressionSiteCallRootKind;
+};
 
 function hasOptionalChainedCallee(
   callee: ts.LeftHandSideExpression,
@@ -42,7 +64,7 @@ function hasOpaquePathTerminalReceiverChain(
 
 export function classifyCallRootPolicy(
   expression: ts.Expression,
-  siteInfo: ExpressionSiteCallRootPolicyInfo,
+  siteInfo: CallRootPolicySiteInfo,
   context: TransformationContext,
 ): CallRootPolicyDecision {
   if (!ts.isCallExpression(expression)) {

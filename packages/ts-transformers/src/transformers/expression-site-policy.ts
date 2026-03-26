@@ -29,13 +29,37 @@ import {
 } from "./expression-rewrite/emitters/compute-wrap-invariants.ts";
 import type { AnalyzeFn } from "./expression-rewrite/types.ts";
 import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
-import type {
-  ExpressionContainerKind,
-  ExpressionSiteCallRootKind,
-  ExpressionSiteCallRootPolicyInfo,
-  ExpressionSiteHelperBoundaryKind,
-  ExpressionSitePolicyInfo,
-} from "./expression-site-types.ts";
+import type { ExpressionContainerKind } from "./expression-site-types.ts";
+
+type ExpressionSiteHelperBoundaryKind =
+  | "ifElse"
+  | "when"
+  | "unless"
+  | "builder"
+  | "derive"
+  | "pattern-tool";
+
+type ExpressionSiteCallRootKind =
+  | "conditional-helper"
+  | "free-function"
+  | "receiver-method"
+  | "optional-call"
+  | "other";
+
+interface ExpressionSiteCallRootPolicyInfo {
+  readonly reactiveContext: ReturnType<typeof classifyReactiveContext>;
+  readonly arrayMethodOwned: boolean;
+  readonly helperBoundaryKind?: ExpressionSiteHelperBoundaryKind;
+  readonly callRootKind?: ExpressionSiteCallRootKind;
+}
+
+interface ExpressionSitePolicyInfo extends ExpressionSiteCallRootPolicyInfo {
+  readonly hasAuthoredSourceSite: boolean;
+  readonly withinEventHandlerJsxAttribute: boolean;
+  readonly syntheticComputeOwned: boolean;
+  readonly deferredJsxArrayMethod: boolean;
+  readonly controlFlowRewriteRoot: boolean;
+}
 
 export type JsxExpressionSiteRoute =
   | { route: "shared-pre-closure" }
@@ -940,28 +964,18 @@ export function findLowerableExpressionSite(
     if (ts.isExpression(current)) {
       const containerKind = getExpressionContainerKind(current);
       if (containerKind) {
-        const siteInfo = getExpressionSitePolicyInfo(
-          current,
-          containerKind,
-          context,
-          analyze,
-        );
-        const analysis = analyze(current);
         if (
-          canRewriteExpressionSiteWithPolicyInfo(
+          canRewriteExpressionSite(
             current,
             containerKind,
-            siteInfo,
-            analysis,
             context,
             analyze,
           ) ||
-          (
-            siteInfo.helperBoundaryKind &&
-            hasPatternExpressionSitePreconditions(siteInfo) &&
-            !siteInfo.syntheticComputeOwned &&
-            analysis.containsOpaqueRef &&
-            analysis.requiresRewrite
+          canRewriteHelperOwnedExpressionSite(
+            current,
+            containerKind,
+            context,
+            analyze,
           )
         ) {
           return {
