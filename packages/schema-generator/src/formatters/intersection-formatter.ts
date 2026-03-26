@@ -233,10 +233,7 @@ export class IntersectionFormatter implements TypeFormatter {
 
   private isObjectSchema(
     schema: JSONSchemaMutableOrBoolean,
-  ): schema is JSONSchemaMutable & {
-    properties?: Record<string, JSONSchemaMutable>;
-    required?: string[];
-  } {
+  ): schema is JSONSchemaMutable & { type: "object" } {
     return (
       typeof schema === "object" &&
       schema !== null &&
@@ -247,12 +244,7 @@ export class IntersectionFormatter implements TypeFormatter {
   private resolveObjectSchema(
     schema: JSONSchemaMutableOrBoolean,
     context: GenerationContext,
-  ):
-    | (JSONSchemaMutable & {
-      properties?: Record<string, JSONSchemaMutable>;
-      required?: string[];
-    })
-    | undefined {
+  ): (JSONSchemaMutable & { type: "object" }) | undefined {
     if (this.isObjectSchema(schema)) return schema;
     if (
       typeof schema === "object" &&
