@@ -299,12 +299,10 @@ CALL_HELP_JSON=$(ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --h
 echo "$CALL_HELP_JSON" | jq -e '.inputSchema.properties.query.type == "string"' > /dev/null ||
   error "Top-level --help --json should return the machine-readable schema"
 
-REDUNDANT_JSON_ERR=$(mktemp)
-if ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --json > /dev/null 2>"$REDUNDANT_JSON_ERR"; then
-  error "Explicit --json should be rejected on ct piece call"
-fi
-grep -q "reads JSON by default" "$REDUNDANT_JSON_ERR" ||
-  error "Redundant --json should explain that piece call already reads JSON by default"
+# --json is now a registered no-op on ct piece call (CT-1393): agents expect
+# it to work because it's valid on all other piece subcommands.
+ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --json < /dev/null > /dev/null 2>&1 ||
+  error "Redundant --json should be accepted (no-op) on ct piece call"
 
 ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID recordMessage -- --message "piece-flags"
 RESULT=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID lastMessage)
