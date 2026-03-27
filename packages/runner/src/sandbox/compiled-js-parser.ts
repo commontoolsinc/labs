@@ -85,6 +85,23 @@ export function stripJsTrivia(
   start = 0,
   end = source.length,
 ): string {
+  for (let cursor = start; cursor < end; cursor++) {
+    const charCode = source.charCodeAt(cursor);
+    if (isWhitespaceCode(charCode)) {
+      break;
+    }
+    if (
+      charCode === 47 &&
+      (source.charCodeAt(cursor + 1) === 47 ||
+        source.charCodeAt(cursor + 1) === 42)
+    ) {
+      break;
+    }
+    if (cursor === end - 1) {
+      return source.slice(start, end);
+    }
+  }
+
   let cursor = start;
   let output = "";
   const state: ScanState = {
