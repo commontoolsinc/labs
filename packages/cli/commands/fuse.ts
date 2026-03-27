@@ -185,22 +185,35 @@ export const fuse = new Command()
     }
 
     if (options.background) {
-      // Capture output to a log file so we can surface startup errors.
-      // Use `exec` so bash replaces itself and the PID tracks the real daemon.
       await Deno.mkdir(stateDir, { recursive: true });
       const logPath = join(stateDir, "fuse-daemon.log");
-      const shellArgs = [
-        spawnCmd,
-        ...spawnArgs.map((a) => `'${a.replace(/'/g, "'\\''")}'`),
-      ].join(" ");
-      const cmd = new Deno.Command("bash", {
-        args: ["-c", `exec ${shellArgs} >"${logPath}" 2>&1`],
+
+      // Detached background process with piped output for logging
+      const cmd = new Deno.Command(spawnCmd, {
+        args: spawnArgs,
         stdin: "null",
-        stdout: "null",
-        stderr: "null",
+        stdout: "piped",
+        stderr: "piped",
       });
       const child = cmd.spawn();
       child.unref();
+
+      // Drain stdout/stderr to log file asynchronously (don't block)
+      const logFile = await Deno.open(logPath, {
+        write: true,
+        create: true,
+        truncate: true,
+      });
+      child.stdout.pipeTo(logFile.writable, { preventClose: true }).catch(
+        () => {},
+      );
+      child.stderr.pipeTo(
+        new WritableStream({
+          async write(chunk) {
+            await logFile.write(chunk);
+          },
+        }),
+      ).catch(() => {});
 
       const pid = child.pid;
       let statePath: string;
