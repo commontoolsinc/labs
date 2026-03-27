@@ -172,8 +172,42 @@ function timestamp(): string {
 
 // ===== Main =====
 
+async function deployNote(
+  spaceConfig: SpaceConfig,
+  noteEntry: EntryConfig,
+  note: { title: string; content: string },
+  log: (msg: string) => void,
+): Promise<{ name: string; id: string; pattern: string }> {
+  log(`[bench-setup] Deploying note: "${note.title}"...`);
+  const id = await newPiece(spaceConfig, noteEntry);
+  const pieceConfig = { ...spaceConfig, piece: id };
+  try {
+    await callPieceHandler(pieceConfig, "setTitle", note.title);
+  } catch (err) {
+    log(
+      `[bench-setup]   Warning: setTitle failed for "${note.title}": ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  try {
+    await callPieceHandler(pieceConfig, "editContent", {
+      detail: { value: note.content },
+    });
+  } catch (err) {
+    log(
+      `[bench-setup]   Warning: editContent failed for "${note.title}": ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  log(`[bench-setup]   Done. id=${id}`);
+  return { name: note.title, id, pattern: "note" };
+}
+
 async function main() {
   const opts = parseArgs(Deno.args);
+  const t0 = Date.now();
 
   const spaceName = `bench-${timestamp()}`;
 
@@ -201,45 +235,14 @@ async function main() {
     rootPath: opts.rootPath,
   };
 
-  const pieces: Array<{
-    name: string;
-    id: string;
-    pattern: string;
-  }> = [];
+  const pieces: Array<{ name: string; id: string; pattern: string }> = [];
 
-  // Deploy note pieces
+  // Sequential deployment. Concurrent writes cause allPieces O(n^2) traversal
+  // and transaction retry overhead — sequential is faster in practice.
+  log(`[bench-setup] Deploying ${NOTES.length} notes...`);
   for (const note of NOTES) {
-    log(`[bench-setup] Deploying note: "${note.title}"...`);
     try {
-      const id = await newPiece(spaceConfig, noteEntry);
-      const pieceConfig = { ...spaceConfig, piece: id };
-
-      // Set title
-      try {
-        await callPieceHandler(pieceConfig, "setTitle", note.title);
-      } catch (err) {
-        log(
-          `[bench-setup]   Warning: setTitle failed for "${note.title}": ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
-
-      // Set content
-      try {
-        await callPieceHandler(pieceConfig, "editContent", {
-          detail: { value: note.content },
-        });
-      } catch (err) {
-        log(
-          `[bench-setup]   Warning: editContent failed for "${note.title}": ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
-
-      pieces.push({ name: note.title, id, pattern: "note" });
-      log(`[bench-setup]   Done. id=${id}`);
+      pieces.push(await deployNote(spaceConfig, noteEntry, note, log));
     } catch (err) {
       console.error(
         `[bench-setup] ERROR deploying note "${note.title}": ${
@@ -278,13 +281,11 @@ async function main() {
     );
   }
 
-  // Emit manifest to stdout
-  const manifest = {
-    space: spaceName,
-    api_url: opts.apiUrl,
-    pieces,
-  };
+  const setup_ms = Date.now() - t0;
+  log(`[bench-setup] Done in ${(setup_ms / 1000).toFixed(1)}s`);
 
+  // Emit manifest to stdout
+  const manifest = { space: spaceName, api_url: opts.apiUrl, setup_ms, pieces };
   console.log(JSON.stringify(manifest, null, 2));
 }
 
