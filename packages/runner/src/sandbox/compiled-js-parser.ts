@@ -1162,7 +1162,7 @@ function tryReadIdentifier(
   };
 }
 
-function findTopLevelArrow(
+export function findTopLevelArrow(
   source: string,
   start: number,
   end: number,

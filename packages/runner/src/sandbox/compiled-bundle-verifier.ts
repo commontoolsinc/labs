@@ -1,5 +1,6 @@
 import {
   CompiledJsParseError,
+  findTopLevelArrow,
   findTopLevelEquals,
   locationFromOffset,
   parseCompiledBundleSource,
@@ -50,6 +51,12 @@ const CANONICAL_HARDENING_HELPER = stripJsTrivia(
 );
 
 const SIMPLE_IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
+
+interface ParsedNormalizedCallReference {
+  kind: "identifier" | "member" | "commaMember";
+  root: string;
+  property?: string;
+}
 
 export function verifyCompiledBundleModuleFactoriesWithParser(
   source: string,
@@ -882,8 +889,13 @@ function isLocalCallableExpression(
   normalizedCallee: string,
   env: Map<string, BindingInfo>,
 ): boolean {
-  if (SIMPLE_IDENTIFIER_RE.test(normalizedCallee)) {
-    const binding = env.get(normalizedCallee);
+  const ref = parseNormalizedCallReference(normalizedCallee);
+  if (!ref) {
+    return false;
+  }
+
+  if (ref.kind === "identifier") {
+    const binding = env.get(ref.root);
     return !!binding &&
       (
         binding.kind === "function" ||
@@ -891,25 +903,9 @@ function isLocalCallableExpression(
       );
   }
 
-  const commaCall = normalizedCallee.match(
-    /^\(0,([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\)$/,
-  );
-  if (commaCall) {
-    const binding = env.get(commaCall[1]);
-    return !!binding && binding.kind === "import" &&
-      !binding.trustedRuntimeName;
-  }
-
-  const memberCall = normalizedCallee.match(
-    /^([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)$/,
-  );
-  if (memberCall) {
-    const binding = env.get(memberCall[1]);
-    return !!binding && binding.kind === "import" &&
-      !binding.trustedRuntimeName;
-  }
-
-  return false;
+  const binding = env.get(ref.root);
+  return !!binding && binding.kind === "import" &&
+    !binding.trustedRuntimeName;
 }
 
 function resolveTrustedBuilderCallback(
@@ -944,8 +940,13 @@ function resolveTrustedCallName(
   normalizedCallee: string,
   env: Map<string, BindingInfo>,
 ): string | undefined {
-  if (SIMPLE_IDENTIFIER_RE.test(normalizedCallee)) {
-    const binding = env.get(normalizedCallee);
+  const ref = parseNormalizedCallReference(normalizedCallee);
+  if (!ref) {
+    return undefined;
+  }
+
+  if (ref.kind === "identifier") {
+    const binding = env.get(ref.root);
     if (
       binding?.trustedRuntimeName &&
       (TRUSTED_BUILDERS.has(binding.trustedRuntimeName) ||
@@ -956,34 +957,15 @@ function resolveTrustedCallName(
     return undefined;
   }
 
-  const commaCall = normalizedCallee.match(
-    /^\(0,([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\)$/,
-  );
-  if (commaCall) {
-    const binding = env.get(commaCall[1]);
-    if (
-      binding?.namespaceImport &&
-      binding.trustedRuntimeName &&
-      (TRUSTED_BUILDERS.has(commaCall[2]) ||
-        TRUSTED_DATA_HELPERS.has(commaCall[2]))
-    ) {
-      return commaCall[2];
-    }
-  }
-
-  const memberCall = normalizedCallee.match(
-    /^([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)$/,
-  );
-  if (memberCall) {
-    const binding = env.get(memberCall[1]);
-    if (
-      binding?.namespaceImport &&
-      binding.trustedRuntimeName &&
-      (TRUSTED_BUILDERS.has(memberCall[2]) ||
-        TRUSTED_DATA_HELPERS.has(memberCall[2]))
-    ) {
-      return memberCall[2];
-    }
+  const binding = env.get(ref.root);
+  if (
+    binding?.namespaceImport &&
+    binding.trustedRuntimeName &&
+    ref.property &&
+    (TRUSTED_BUILDERS.has(ref.property) ||
+      TRUSTED_DATA_HELPERS.has(ref.property))
+  ) {
+    return ref.property;
   }
 
   return undefined;
@@ -1174,6 +1156,10 @@ function tryParseDirectFunction(
   start: number,
   end: number,
 ): ParsedDefineCall["factory"] | undefined {
+  if (!looksLikeDirectFunctionSyntax(source, start, end)) {
+    return undefined;
+  }
+
   const normalized = stripJsTrivia(source, start, end);
   if (
     /^(?:async)?function(?:[A-Za-z_$][\w$]*)?\(/.test(normalized) ||
@@ -1197,20 +1183,27 @@ function tryParseDirectFunction(
   }
 }
 
+function looksLikeDirectFunctionSyntax(
+  source: string,
+  start: number,
+  end: number,
+): boolean {
+  const trimmed = trimRange(source, start, end);
+  const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
+  if (inner.start >= inner.end) {
+    return false;
+  }
+
+  return source.startsWith("function", inner.start) ||
+    source.startsWith("async", inner.start) ||
+    findTopLevelArrow(source, inner.start, inner.end) !== undefined;
+}
+
 function parseMemberReference(
   source: string,
 ): { root: string; property?: string } | undefined {
   const normalized = stripJsTrivia(source);
-  const property = normalized.match(
-    /^([A-Za-z_$][\w$]*)(?:\.([A-Za-z_$][\w$]*)|\[(["'])([^"']+)\3\])+$/,
-  );
-  if (!property) return undefined;
-  const lastDot = property[2];
-  const lastBracket = property[4];
-  return {
-    root: property[1],
-    property: lastBracket ?? lastDot,
-  };
+  return parseNormalizedMemberReference(normalized);
 }
 
 function getExportsPropertyName(
@@ -1257,6 +1250,141 @@ function isPrimitiveLikeExpression(normalized: string): boolean {
     /^(['"]).*\1$/.test(normalized) ||
     isNoSubstitutionTemplateLiteral(normalized) ||
     /^\d+n$/.test(normalized);
+}
+
+function parseNormalizedCallReference(
+  normalized: string,
+): ParsedNormalizedCallReference | undefined {
+  if (isSimpleIdentifierText(normalized)) {
+    return {
+      kind: "identifier",
+      root: normalized,
+    };
+  }
+
+  if (
+    normalized.startsWith("(0,") &&
+    normalized.endsWith(")")
+  ) {
+    const inner = parseNormalizedMemberReference(
+      normalized.slice(3, normalized.length - 1),
+    );
+    if (!inner?.property) {
+      return undefined;
+    }
+    return {
+      kind: "commaMember",
+      root: inner.root,
+      property: inner.property,
+    };
+  }
+
+  const member = parseNormalizedMemberReference(normalized);
+  if (!member?.property) {
+    return undefined;
+  }
+  return {
+    kind: "member",
+    root: member.root,
+    property: member.property,
+  };
+}
+
+function parseNormalizedMemberReference(
+  normalized: string,
+): { root: string; property?: string } | undefined {
+  const rootEnd = readSimpleIdentifierEnd(normalized, 0);
+  if (rootEnd === undefined) {
+    return undefined;
+  }
+
+  const root = normalized.slice(0, rootEnd);
+  let cursor = rootEnd;
+  let property: string | undefined;
+  let sawSegment = false;
+
+  while (cursor < normalized.length) {
+    const char = normalized[cursor];
+    if (char === ".") {
+      const propertyStart = cursor + 1;
+      const propertyEnd = readSimpleIdentifierEnd(normalized, propertyStart);
+      if (propertyEnd === undefined) {
+        return undefined;
+      }
+      property = normalized.slice(propertyStart, propertyEnd);
+      cursor = propertyEnd;
+      sawSegment = true;
+      continue;
+    }
+
+    if (char === "[") {
+      const quote = normalized[cursor + 1];
+      if (quote !== "'" && quote !== '"') {
+        return undefined;
+      }
+      let index = cursor + 2;
+      while (index < normalized.length && normalized[index] !== quote) {
+        if (normalized[index] === "\\") {
+          index += 2;
+          continue;
+        }
+        index++;
+      }
+      if (index >= normalized.length || normalized[index + 1] !== "]") {
+        return undefined;
+      }
+      property = normalized.slice(cursor + 2, index);
+      cursor = index + 2;
+      sawSegment = true;
+      continue;
+    }
+
+    return undefined;
+  }
+
+  if (!sawSegment) {
+    return undefined;
+  }
+
+  return { root, property };
+}
+
+function isSimpleIdentifierText(source: string): boolean {
+  return readSimpleIdentifierEnd(source, 0) === source.length;
+}
+
+function readSimpleIdentifierEnd(
+  source: string,
+  start: number,
+): number | undefined {
+  if (start >= source.length) {
+    return undefined;
+  }
+
+  const firstCode = source.charCodeAt(start);
+  if (
+    !(firstCode === 36 || firstCode === 95 ||
+      (firstCode >= 65 && firstCode <= 90) ||
+      (firstCode >= 97 && firstCode <= 122))
+  ) {
+    return undefined;
+  }
+
+  let cursor = start + 1;
+  while (cursor < source.length) {
+    const charCode = source.charCodeAt(cursor);
+    if (
+      charCode === 36 || charCode === 95 ||
+      (charCode >= 48 && charCode <= 57) ||
+      (charCode >= 65 && charCode <= 90) ||
+      (charCode >= 97 && charCode <= 122)
+    ) {
+      cursor++;
+      continue;
+    }
+    break;
+  }
+  return cursor;
 }
 
 function isNoSubstitutionTemplateLiteral(normalized: string): boolean {
