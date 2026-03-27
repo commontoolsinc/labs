@@ -77,7 +77,7 @@ export default pattern((_) => {
                 const items = __ct_pattern_input.params.items;
                 return (<li>
             {item.key("name")}
-            <button onClick={removeItem({ items, item })}>Remove</button>
+            <button type="button" onClick={removeItem({ items, item })}>Remove</button>
           </li>);
             }, {
                 type: "object",

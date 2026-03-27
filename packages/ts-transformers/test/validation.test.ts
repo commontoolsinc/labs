@@ -139,7 +139,11 @@ Deno.test("Cast Validation", async (t) => {
 
 Deno.test("Empty Array .of() Validation", async (t) => {
   const errorCases = [
-    { name: "errors on Cell.of([])", imports: "Cell", expression: "Cell.of([])" },
+    {
+      name: "errors on Cell.of([])",
+      imports: "Cell",
+      expression: "Cell.of([])",
+    },
     {
       name: "errors on Writable.of([])",
       imports: "Writable",

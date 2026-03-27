@@ -33,7 +33,9 @@ export default pattern<Record<string, never>>((_) => {
         {items.map((item) => (
           <li>
             {item.name}
-            <button onClick={removeItem({ items, item })}>Remove</button>
+            <button type="button" onClick={removeItem({ items, item })}>
+              Remove
+            </button>
           </li>
         ))}
       </ul>
