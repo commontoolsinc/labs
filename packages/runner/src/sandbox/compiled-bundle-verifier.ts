@@ -210,14 +210,66 @@ function verifyAuthoredFactory(
     logger.timeStart("verifyAuthoredFactory", "statements");
     try {
       for (const statement of defineCall.factory.body.statements) {
-        const statementText = source.slice(statement.start, statement.end);
-        if (isStringDirective(statementText)) continue;
-        if (isCompiledEsModuleMarker(statementText)) continue;
-        if (isCompiledImportNormalizationRebinding(statementText, env)) {
+        const trimmed = trimRange(source, statement.start, statement.end);
+        if (trimmed.start >= trimmed.end) continue;
+
+        if (isStringDirectiveRange(source, trimmed.start, trimmed.end)) {
           continue;
         }
 
-        const reexport = tryParseCompiledReexport(statementText);
+        const functionName = getFunctionDeclarationNameFromRange(
+          source,
+          trimmed.start,
+          trimmed.end,
+        );
+        if (functionName) {
+          registerFunctionStatement(source, statement, env, functionName);
+          continue;
+        }
+
+        const variableKind = getVariableStatementKindFromRange(
+          source,
+          trimmed.start,
+          trimmed.end,
+        );
+        if (variableKind) {
+          verifyVariableStatement(
+            source,
+            filename,
+            statement,
+            env,
+            variableKind,
+          );
+          continue;
+        }
+
+        if (isClassDeclarationRange(source, trimmed.start, trimmed.end)) {
+          throw verificationErrorAt(
+            source,
+            filename,
+            statement.start,
+            "Top-level class declarations are not allowed in SES mode",
+          );
+        }
+
+        if (
+          startsWithStatementWord(source, trimmed.start, trimmed.end, "exports")
+        ) {
+          verifyCompiledExportAssignment(source, filename, statement, env);
+          continue;
+        }
+
+        const normalized = stripJsTrivia(
+          source,
+          statement.start,
+          statement.end,
+        );
+        if (isCompiledEsModuleMarkerNormalized(normalized)) continue;
+        if (isCompiledImportNormalizationRebindingNormalized(normalized, env)) {
+          continue;
+        }
+
+        const reexport = tryParseCompiledReexportNormalized(normalized);
         if (reexport) {
           if (reexport.exportedName === "__esModule") {
             continue;
@@ -243,33 +295,9 @@ function verifyAuthoredFactory(
           continue;
         }
 
-        if (isCompiledExportStarStatement(statementText)) continue;
+        if (isCompiledExportStarStatementNormalized(normalized)) continue;
 
-        if (isCompiledExportAssignment(statementText)) {
-          verifyCompiledExportAssignment(source, filename, statement, env);
-          continue;
-        }
-
-        if (isFunctionDeclarationStatement(statementText)) {
-          registerFunctionStatement(source, statement, env);
-          continue;
-        }
-
-        if (isClassDeclarationStatement(statementText)) {
-          throw verificationErrorAt(
-            source,
-            filename,
-            statement.start,
-            "Top-level class declarations are not allowed in SES mode",
-          );
-        }
-
-        if (isVariableStatement(statementText)) {
-          verifyVariableStatement(source, filename, statement, env);
-          continue;
-        }
-
-        if (isAllowedFunctionHardeningStatement(statementText, env)) {
+        if (isAllowedFunctionHardeningStatementNormalized(normalized, env)) {
           continue;
         }
 
@@ -296,12 +324,20 @@ function verifyIndexFactory(
   const start = performance.now();
   try {
     for (const statement of defineCall.factory.body.statements) {
-      const statementText = source.slice(statement.start, statement.end);
-      if (isStringDirective(statementText)) continue;
-      if (isCompiledEsModuleMarker(statementText)) continue;
-      if (isCompiledExportStarStatement(statementText)) continue;
-      if (isCompiledExportAssignment(statementText)) continue;
-      if (tryParseCompiledReexport(statementText)) continue;
+      const trimmed = trimRange(source, statement.start, statement.end);
+      if (trimmed.start >= trimmed.end) continue;
+      if (isStringDirectiveRange(source, trimmed.start, trimmed.end)) continue;
+
+      if (
+        startsWithStatementWord(source, trimmed.start, trimmed.end, "exports")
+      ) {
+        continue;
+      }
+
+      const normalized = stripJsTrivia(source, statement.start, statement.end);
+      if (isCompiledEsModuleMarkerNormalized(normalized)) continue;
+      if (isCompiledExportStarStatementNormalized(normalized)) continue;
+      if (tryParseCompiledReexportNormalized(normalized)) continue;
 
       throw verificationErrorAt(
         source,
@@ -352,22 +388,24 @@ function predeclareTopLevelBindings(
   const start = performance.now();
   try {
     for (const statement of defineCall.factory.body.statements) {
-      const statementText = source.slice(statement.start, statement.end);
-      if (isFunctionDeclarationStatement(statementText)) {
-        const name = getFunctionDeclarationName(statementText);
-        if (name) {
-          env.set(name, {
-            kind: "function",
-            hardeningHelper: isFunctionHardeningHelperDeclaration(
-              statementText,
-            ),
-            functionRange: { start: statement.start, end: statement.end },
-          });
-        }
+      const trimmed = trimRange(source, statement.start, statement.end);
+      if (trimmed.start >= trimmed.end) continue;
+
+      const functionName = getFunctionDeclarationNameFromRange(
+        source,
+        trimmed.start,
+        trimmed.end,
+      );
+      if (functionName) {
+        registerFunctionStatement(source, statement, env, functionName);
         continue;
       }
 
-      if (!isVariableStatement(statementText)) continue;
+      if (
+        !getVariableStatementKindFromRange(source, trimmed.start, trimmed.end)
+      ) {
+        continue;
+      }
       for (const declarator of parseVariableDeclarators(source, statement)) {
         const provisional = provisionalBindingForExpression(
           source,
@@ -393,12 +431,14 @@ function verifyVariableStatement(
   filename: string,
   statement: StatementChunk,
   env: Map<string, BindingInfo>,
+  kind = getVariableStatementKindFromRange(
+    source,
+    trimRange(source, statement.start, statement.end).start,
+    trimRange(source, statement.start, statement.end).end,
+  ),
 ): void {
   const start = performance.now();
   try {
-    const kind = getVariableStatementKind(
-      source.slice(statement.start, statement.end),
-    );
     if (kind !== "const") {
       throw verificationErrorAt(
         source,
@@ -990,9 +1030,15 @@ function parseVariableDeclarators(
 ): Array<{ name: string; initializer: { start: number; end: number } }> {
   const measureStart = performance.now();
   try {
-    const statementText = source.slice(statement.start, statement.end);
     const trimmed = trimRange(source, statement.start, statement.end);
-    const keyword = getVariableStatementKind(statementText);
+    const keyword = getVariableStatementKindFromRange(
+      source,
+      trimmed.start,
+      trimmed.end,
+    );
+    if (!keyword) {
+      throw new Error("Expected a variable statement");
+    }
     const listStart = trimmed.start + keyword.length;
     const listEnd =
       stripTrailingSemicolonRange(source, trimmed.start, trimmed.end)
@@ -1081,10 +1127,9 @@ function parseExportAssignmentChain(
   };
 }
 
-function tryParseCompiledReexport(
-  source: string,
+function tryParseCompiledReexportNormalized(
+  normalized: string,
 ): { exportedName: string; target: string } | undefined {
-  const normalized = stripJsTrivia(source);
   const match = normalized.match(
     /^Object\.defineProperty\(exports,(["'])([^"']+)\1,\{enumerable:true,get:function\(\)\{return(.+);\}\}\);?$/,
   );
@@ -1095,26 +1140,19 @@ function tryParseCompiledReexport(
   };
 }
 
-function isCompiledExportStarStatement(source: string): boolean {
-  return /^__exportStar\([A-Za-z_$][\w$]*,exports\);?$/.test(
-    stripJsTrivia(source),
-  );
+function isCompiledExportStarStatementNormalized(normalized: string): boolean {
+  return /^__exportStar\([A-Za-z_$][\w$]*,exports\);?$/.test(normalized);
 }
 
-function isCompiledExportAssignment(source: string): boolean {
-  return stripJsTrivia(source).startsWith("exports.");
-}
-
-function isCompiledEsModuleMarker(source: string): boolean {
-  return stripJsTrivia(source) ===
+function isCompiledEsModuleMarkerNormalized(normalized: string): boolean {
+  return normalized ===
     `Object.defineProperty(exports,"__esModule",{value:true});`;
 }
 
-function isCompiledImportNormalizationRebinding(
-  source: string,
+function isCompiledImportNormalizationRebindingNormalized(
+  normalized: string,
   env: Map<string, BindingInfo>,
 ): boolean {
-  const normalized = stripJsTrivia(source);
   const match = normalized.match(
     /^([A-Za-z_$][\w$]*)=__(importDefault|importStar)\(\1\);?$/,
   );
@@ -1122,11 +1160,10 @@ function isCompiledImportNormalizationRebinding(
   return env.get(match[1])?.kind === "import";
 }
 
-function isAllowedFunctionHardeningStatement(
-  source: string,
+function isAllowedFunctionHardeningStatementNormalized(
+  normalized: string,
   env: Map<string, BindingInfo>,
 ): boolean {
-  const normalized = stripJsTrivia(source);
   const match = normalized.match(
     /^([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\);?$/,
   );
@@ -1145,10 +1182,14 @@ function registerFunctionStatement(
   source: string,
   statement: StatementChunk,
   env: Map<string, BindingInfo>,
+  name = getFunctionDeclarationNameFromRange(
+    source,
+    trimRange(source, statement.start, statement.end).start,
+    trimRange(source, statement.start, statement.end).end,
+  ),
 ): void {
-  const statementText = source.slice(statement.start, statement.end);
-  const name = getFunctionDeclarationName(statementText);
   if (!name) return;
+  const statementText = source.slice(statement.start, statement.end);
   env.set(name, {
     kind: "function",
     hardeningHelper: isFunctionHardeningHelperDeclaration(statementText),
@@ -1156,12 +1197,32 @@ function registerFunctionStatement(
   });
 }
 
-function getFunctionDeclarationName(source: string): string | undefined {
-  const trimmed = source.trimStart();
-  const match = trimmed.match(
-    /^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/,
-  );
-  return match?.[1];
+function getFunctionDeclarationNameFromRange(
+  source: string,
+  start: number,
+  end: number,
+): string | undefined {
+  let cursor = start;
+  if (startsWithStatementWord(source, cursor, end, "async")) {
+    cursor += 5;
+    cursor = skipInlineWhitespace(source, cursor, end);
+  }
+
+  if (!startsWithStatementWord(source, cursor, end, "function")) {
+    return undefined;
+  }
+
+  cursor += "function".length;
+  cursor = skipInlineWhitespace(source, cursor, end);
+  if (source[cursor] === "*") {
+    return undefined;
+  }
+
+  const nameEnd = readIdentifierEnd(source, cursor, end);
+  if (nameEnd === undefined) {
+    return undefined;
+  }
+  return source.slice(cursor, nameEnd);
 }
 
 function tryParseDirectFunction(
@@ -1224,28 +1285,102 @@ function getExportsPropertyName(
   return bracketMatch?.[2];
 }
 
-function isStringDirective(source: string): boolean {
-  return /^(['"]).*\1;?$/.test(source.trim());
-}
-
-function isFunctionDeclarationStatement(source: string): boolean {
-  return getFunctionDeclarationName(source) !== undefined;
-}
-
-function isClassDeclarationStatement(source: string): boolean {
-  return source.trimStart().startsWith("class ");
-}
-
-function isVariableStatement(source: string): boolean {
-  return /^(const|let|var)\b/.test(source.trimStart());
-}
-
-function getVariableStatementKind(source: string): "const" | "let" | "var" {
-  const match = source.trimStart().match(/^(const|let|var)\b/);
-  if (!match) {
-    throw new Error("Expected a variable statement");
+function isStringDirectiveRange(
+  source: string,
+  start: number,
+  end: number,
+): boolean {
+  const quote = source[start];
+  if ((quote !== "'" && quote !== '"') || source[end - 1] !== quote) {
+    return source[end - 1] === ";" && end - start >= 2 &&
+      source[end - 2] === quote;
   }
-  return match[1] as "const" | "let" | "var";
+  return true;
+}
+
+function isClassDeclarationRange(
+  source: string,
+  start: number,
+  end: number,
+): boolean {
+  return startsWithStatementWord(source, start, end, "class");
+}
+
+function getVariableStatementKindFromRange(
+  source: string,
+  start: number,
+  end: number,
+): "const" | "let" | "var" | undefined {
+  if (startsWithStatementWord(source, start, end, "const")) return "const";
+  if (startsWithStatementWord(source, start, end, "let")) return "let";
+  if (startsWithStatementWord(source, start, end, "var")) return "var";
+  return undefined;
+}
+
+function startsWithStatementWord(
+  source: string,
+  start: number,
+  end: number,
+  word: string,
+): boolean {
+  if (!source.startsWith(word, start)) {
+    return false;
+  }
+
+  const next = source.charCodeAt(start + word.length);
+  return start + word.length >= end || !isIdentifierPartCode(next);
+}
+
+function skipInlineWhitespace(
+  source: string,
+  start: number,
+  end: number,
+): number {
+  let cursor = start;
+  while (cursor < end) {
+    const code = source.charCodeAt(cursor);
+    if (
+      code === 9 || code === 10 || code === 11 || code === 12 || code === 13 ||
+      code === 32
+    ) {
+      cursor++;
+      continue;
+    }
+    break;
+  }
+  return cursor;
+}
+
+function readIdentifierEnd(
+  source: string,
+  start: number,
+  end: number,
+): number | undefined {
+  if (start >= end) {
+    return undefined;
+  }
+
+  const first = source.charCodeAt(start);
+  if (
+    !(first === 36 || first === 95 ||
+      (first >= 65 && first <= 90) ||
+      (first >= 97 && first <= 122))
+  ) {
+    return undefined;
+  }
+
+  let cursor = start + 1;
+  while (cursor < end && isIdentifierPartCode(source.charCodeAt(cursor))) {
+    cursor++;
+  }
+  return cursor;
+}
+
+function isIdentifierPartCode(charCode: number): boolean {
+  return charCode === 36 || charCode === 95 ||
+    (charCode >= 48 && charCode <= 57) ||
+    (charCode >= 65 && charCode <= 90) ||
+    (charCode >= 97 && charCode <= 122);
 }
 
 function isPrimitiveLikeExpression(normalized: string): boolean {
