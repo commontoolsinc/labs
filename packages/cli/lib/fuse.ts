@@ -63,6 +63,11 @@ function repoRoot(importMetaUrl: string): string {
   return resolve(cliLibDir, "../../..");
 }
 
+function isFsWriteError(error: unknown): boolean {
+  return error instanceof Deno.errors.PermissionDenied ||
+    error instanceof Deno.errors.NotSupported;
+}
+
 async function hashMountLookupKey(key: string): Promise<string> {
   const data = new TextEncoder().encode(key);
   const hash = await crypto.subtle.digest("SHA-256", data);
@@ -221,7 +226,6 @@ export async function ensureExecShim(
   stateDir = defaultStateDir(),
   importMetaUrl = import.meta.url,
 ): Promise<string> {
-  const shimPath = join(repoRoot(importMetaUrl), ".ct", "fuse", "ct-exec");
   const denoPath = Deno.execPath();
   const modPath = cliMod(importMetaUrl);
   const script = `#!/usr/bin/env bash
@@ -230,10 +234,31 @@ exec "${denoPath}" run --allow-net --allow-ffi --allow-read --allow-write --allo
 `;
 
   await Deno.mkdir(stateDir, { recursive: true });
-  await Deno.mkdir(dirname(shimPath), { recursive: true });
-  await Deno.writeTextFile(shimPath, script);
-  await Deno.chmod(shimPath, 0o755);
-  return shimPath;
+
+  const preferredShimPath = join(
+    repoRoot(importMetaUrl),
+    ".ct",
+    "fuse",
+    "ct-exec",
+  );
+  const fallbackShimPath = join(stateDir, "ct-exec");
+
+  const writeShim = async (shimPath: string): Promise<void> => {
+    await Deno.mkdir(dirname(shimPath), { recursive: true });
+    await Deno.writeTextFile(shimPath, script);
+    await Deno.chmod(shimPath, 0o755);
+  };
+
+  try {
+    await writeShim(preferredShimPath);
+    return preferredShimPath;
+  } catch (error) {
+    if (!isFsWriteError(error)) {
+      throw error;
+    }
+    await writeShim(fallbackShimPath);
+    return fallbackShimPath;
+  }
 }
 
 /** Build the deno subprocess args for running the FUSE module. */

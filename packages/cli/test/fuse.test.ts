@@ -342,6 +342,28 @@ describe("mount state operations", () => {
     expect(shim).toContain('"$@"');
   });
 
+  it("ensureExecShim falls back to stateDir when repo root is not writable", async () => {
+    const stateDir = join(tmpDir, "state");
+    const repoRoot = join(tmpDir, "readonly-repo");
+    await Deno.mkdir(join(repoRoot, "packages/cli/lib"), { recursive: true });
+    await Deno.chmod(repoRoot, 0o555);
+
+    try {
+      const importMetaUrl =
+        toFileUrl(join(repoRoot, "packages/cli/lib/fuse.ts"))
+          .href;
+      const shimPath = await ensureExecShim(stateDir, importMetaUrl);
+      const shim = await Deno.readTextFile(shimPath);
+
+      expect(shimPath).toBe(join(stateDir, "ct-exec"));
+      expect(shim).toContain("#!/usr/bin/env bash");
+      expect(shim).toContain("export CT_EXEC_SHEBANG=1");
+      expect(shim).toContain(join(repoRoot, "packages/cli/mod.ts"));
+    } finally {
+      await Deno.chmod(repoRoot, 0o755);
+    }
+  });
+
   it("always removes foreground mount state files before exiting", async () => {
     const statePath = await writeMountState(tmpDir, {
       pid: Deno.pid,
