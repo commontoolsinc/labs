@@ -267,8 +267,7 @@
           strategies["object-hash"] = (obj) => objectHash.default(obj);
 
           // hash-it
-          strategies["hash-it"] = (obj) =>
-            hashIt.default(obj).toString();
+          strategies["hash-it"] = (obj) => hashIt.default(obj).toString();
 
           // safe-stable-stringify with all hash functions
           for (
@@ -331,9 +330,7 @@
           for (const [name, strategy] of Object.entries(strategies)) {
             const stable = testStability(strategy);
             log(
-              `${name.padEnd(35)} ${
-                stable ? "✓ STABLE" : "✗ UNSTABLE"
-              }`,
+              `${name.padEnd(35)} ${stable ? "✓ STABLE" : "✗ UNSTABLE"}`,
             );
           }
 
@@ -416,9 +413,7 @@
                   ? `${(ops / 1000).toFixed(1)}K`
                   : ops.toFixed(0);
                 log(
-                  `${name.padEnd(35)} ${
-                    time.toFixed(1)
-                  }ms (${opsStr} ops/sec)`,
+                  `${name.padEnd(35)} ${time.toFixed(1)}ms (${opsStr} ops/sec)`,
                 );
               } catch (err) {
                 log(`${name.padEnd(35)} ERROR: ${err.message}`);
@@ -433,9 +428,9 @@
 
           log(
             "Strategy".padEnd(35) +
-              tests.map((t) =>
-                t.split("/")[1].substring(0, 8).padEnd(10)
-              ).join(""),
+              tests.map((t) => t.split("/")[1].substring(0, 8).padEnd(10)).join(
+                "",
+              ),
           );
           log("-".repeat(35 + tests.length * 10));
 

@@ -789,7 +789,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         if (original) {
           const newNote = Note({
             title: (original.get().title ?? "Note") + " (Copy)",
-            content: (original.get().content ?? ""),
+            content: original.get().content ?? "",
             isHidden: true,
             parentNotebook: self, // Set parent for back navigation
           });
