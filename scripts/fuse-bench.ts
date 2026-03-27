@@ -149,11 +149,24 @@ function parseArgs(args: string[]): ParsedArgs | null {
     ops = new Set(ALL_OPS);
   }
 
+  const n = parsed.n ? parseInt(parsed.n, 10) : 10;
+  const timeout = parsed.timeout ? parseInt(parsed.timeout, 10) : 5000;
+  if (!Number.isFinite(n) || n < 1) {
+    console.error(`Error: --n must be a positive integer, got: ${parsed.n}`);
+    return null;
+  }
+  if (!Number.isFinite(timeout) || timeout < 1) {
+    console.error(
+      `Error: --timeout must be a positive integer (ms), got: ${parsed.timeout}`,
+    );
+    return null;
+  }
+
   return {
     mount: parsed.mount,
     space: parsed.space,
-    n: parsed.n ? parseInt(parsed.n, 10) : 10,
-    timeout: parsed.timeout ? parseInt(parsed.timeout, 10) : 5000,
+    n,
+    timeout,
     ops,
     writePiece: parsed["write-piece"],
     inputPath: parsed["input-path"] ?? "input/content",
