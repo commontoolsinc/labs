@@ -28,7 +28,10 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import {
+  schemaWithProperties,
+  toDeepFrozenSchema,
+} from "@commontools/data-model/schema-utils";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   addressKey,
@@ -111,9 +114,12 @@ function internSet(
   cache: Map<string, JSONSchema>,
   key: string,
   value: JSONSchema,
-) {
+): JSONSchema {
   if (cache.size >= INTERN_CACHE_MAX) cache.clear();
-  cache.set(key, toDeepFrozenSchema(value, true));
+
+  const result = toDeepFrozenSchema(value, true);
+  cache.set(key, result);
+  return result;
 }
 
 /**
@@ -1368,8 +1374,7 @@ export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
   const cached = _mergeSchemaFlagsCache.get(key);
   if (cached !== undefined) return cached;
   const result = _mergeSchemaFlagsUncached(flagSchema, schema);
-  internSet(_mergeSchemaFlagsCache, key, result);
-  return result;
+  return internSet(_mergeSchemaFlagsCache, key, result);
 }
 
 function _mergeSchemaFlagsUncached(
@@ -1381,19 +1386,11 @@ function _mergeSchemaFlagsUncached(
     // the value in the schema
     const { asCell, asStream } = flagSchema;
     if (asCell || asStream) {
-      if (schema === true) {
-        return {
-          ...(asCell && { asCell: true }),
-          ...(asStream && { asStream: true }),
-        };
-      } else if (schema === false) {
-        return false;
-      }
-      return {
-        ...schema,
-        ...((asCell || schema.asCell) && { asCell: true }),
-        ...((asStream || schema.asStream) && { asStream: true }),
+      const props = {
+        ...(asCell && { asCell: true }),
+        ...(asStream && { asStream: true }),
       };
+      return schemaWithProperties(schema, props);
     }
   }
   return schema;
@@ -1429,8 +1426,7 @@ export function combineSchema(
   const cached = _combineSchemaCache.get(key);
   if (cached !== undefined) return cached;
   const result = _combineSchemaUncached(parentSchema, linkSchema);
-  internSet(_combineSchemaCache, key, result);
-  return result;
+  return internSet(_combineSchemaCache, key, result);
 }
 
 function _combineSchemaUncached(
@@ -2978,8 +2974,7 @@ function mergeSchemaOption(
     : innerSchema
     ? outerSchema // innerSchema === true
     : false; // innerSchema === false
-  internSet(_mergeSchemaOptionCache, key, result as JSONSchema);
-  return result;
+  return internSet(_mergeSchemaOptionCache, key, result as JSONSchema);
 }
 
 /**
