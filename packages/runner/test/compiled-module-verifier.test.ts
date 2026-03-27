@@ -586,6 +586,38 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     );
   });
 
+  it("rejects compiled factories that omit require capture", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["exports"], function (exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = 42;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Compiled AMD factories must shadow outer require with a canonical 'require' dependency parameter",
+    );
+  });
+
+  it("rejects compiled factories that rename the require capture", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports"], function (__ctRequire, exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = 42;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Compiled AMD factories must shadow outer require with a canonical 'require' dependency parameter",
+    );
+  });
+
   it("rejects direct authored require() calls in compiled factories", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
@@ -598,7 +630,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 `;
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
-      "Authored AMD require() is not allowed in SES mode",
+      "Top-level call results must be wrapped in __ct_data() in SES mode",
     );
   });
 

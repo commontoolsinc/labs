@@ -124,6 +124,8 @@ function verifyDefineCall(
       logger.timeEnd("verifyDefineCall", "dependencies");
     }
 
+    verifyCanonicalRequireCapture(source, filename, defineCall);
+
     if (defineCall.moduleId === "index") {
       logger.timeStart("verifyDefineCall", "indexFactory");
       try {
@@ -142,6 +144,24 @@ function verifyDefineCall(
     }
   } finally {
     logger.time(start, "verifyDefineCall");
+  }
+}
+
+function verifyCanonicalRequireCapture(
+  source: string,
+  filename: string,
+  defineCall: ParsedDefineCall,
+): void {
+  const requireIndex = defineCall.dependencies.indexOf("require");
+  if (
+    requireIndex < 0 || defineCall.factory.params[requireIndex] !== "require"
+  ) {
+    throw verificationErrorAt(
+      source,
+      filename,
+      defineCall.statement.start,
+      "Compiled AMD factories must shadow outer require with a canonical 'require' dependency parameter",
+    );
   }
 }
 
@@ -520,15 +540,6 @@ function classifyExpressionText(
     const call = tryParseCallExpression(source, inner.start, inner.end);
     if (call) {
       const normalizedCallee = stripJsTrivia(call.callee);
-      if (normalizedCallee === "require") {
-        throw verificationErrorAt(
-          source,
-          filename,
-          call.start,
-          "Authored AMD require() is not allowed in SES mode",
-        );
-      }
-
       const trustedCall = resolveTrustedCallName(normalizedCallee, env);
       if (trustedCall) {
         if (TRUSTED_BUILDERS.has(trustedCall)) {
