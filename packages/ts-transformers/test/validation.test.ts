@@ -2233,7 +2233,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
 
 Deno.test("Pattern Result Schema Inference", async (t) => {
   await t.step(
-    "emits true when pattern return type infers as any (one type arg)",
+    "errors when pattern return type infers as any (one type arg)",
     async () => {
       const source = `/// <cts-enable />
       import { pattern } from "commontools";
@@ -2244,21 +2244,17 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
         return fetchAny();
       });
     `;
-      const { diagnostics, output } = await validateSource(source, {
+      const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertEquals(errors.length, 0, "any result types should not error");
-      assertStringIncludes(
-        output,
-        "true as const satisfies __ctHelpers.JSONSchema",
-        "Direct any result inference should emit a permissive true schema",
-      );
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern:any-result-schema");
     },
   );
 
   await t.step(
-    "emits true when pattern return type infers as any (no type args)",
+    "errors when pattern return type infers as any (no type args)",
     async () => {
       const source = `/// <cts-enable />
       import { pattern } from "commontools";
@@ -2269,21 +2265,17 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
         return fetchAny();
       });
     `;
-      const { diagnostics, output } = await validateSource(source, {
+      const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertEquals(errors.length, 0, "any result types should not error");
-      assertStringIncludes(
-        output,
-        "true as const satisfies __ctHelpers.JSONSchema",
-        "Direct any result inference should emit a permissive true schema",
-      );
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern:any-result-schema");
     },
   );
 
   await t.step(
-    'emits { type: "unknown" } when pattern return type infers as unknown',
+    "errors when pattern return type infers as unknown",
     async () => {
       const source = `/// <cts-enable />
       import { pattern } from "commontools";
@@ -2294,16 +2286,12 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
         return fetchUnknown();
       });
     `;
-      const { diagnostics, output } = await validateSource(source, {
+      const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertEquals(errors.length, 0, "unknown result types should not error");
-      assertStringIncludes(
-        output,
-        'type: "unknown"',
-        "Direct unknown result inference should emit an explicit unknown schema",
-      );
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern:any-result-schema");
     },
   );
 

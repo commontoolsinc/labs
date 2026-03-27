@@ -309,19 +309,19 @@ Diagnostics emitted in all modes:
 ### 6.6 Pattern Result Schema Inference
 
 When `pattern()` is called with zero or one type parameters and the result
-schema must be inferred, CTS now preserves the actual result-type semantics
-instead of collapsing `any` and `unknown` together:
+schema must be inferred, CTS requires the inferred top-level result shape to be
+structurally representable.
 
-- `any` result types emit `true`
-- `unknown` result types emit `{ type: "unknown" }`
 - structurally recoverable object-literal returns still emit concrete object
   schemas even when some individual property values come from `any`-typed
   expressions
+- direct top-level `any` / `unknown` result inference emits
+  `pattern:any-result-schema`
+- authors who intentionally want a permissive/opaque output boundary must make
+  it explicit with `pattern<Input, Output>(...)`
 
 This inference runs through `collectFunctionSchemaTypeNodes` via
-`inferReturnType`, object-literal recovery, and direct projection recovery. The
-result path no longer emits a dedicated diagnostic just because a result is
-permissive (`any`) or opaque (`unknown`).
+`inferReturnType`, object-literal recovery, and direct projection recovery.
 
 ## 7. JSX Expression Site Routing And Early Rewriting
 
@@ -546,13 +546,15 @@ Cases:
   - if 1 schema arg present: treated as input schema, infer result schema
   - if none: infer both
 
-When inferring the result schema (0 or 1 type args), preserves permissive and
-opaque result semantics directly:
+When inferring the result schema (0 or 1 type args), CTS requires a
+structurally representable top-level result:
 
-- `any` result types emit `true`
-- `unknown` result types emit `{ type: "unknown" }`
 - structurally recoverable object-literal returns still emit concrete object
   schemas when CTS can recover their shape (see §6.6)
+- direct top-level `any` / `unknown` result inference emits
+  `pattern:any-result-schema`
+- permissive/opaque result semantics are still allowed when made explicit via a
+  result type parameter
 
 ### 10.3 `handler(...)`
 

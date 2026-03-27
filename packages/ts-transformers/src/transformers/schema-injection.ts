@@ -1312,12 +1312,53 @@ function detectSchemaArguments(
   return schemas;
 }
 
+function unwrapParenthesizedTypeNode(node: ts.TypeNode): ts.TypeNode {
+  let current = node;
+  while (ts.isParenthesizedTypeNode(current)) {
+    current = current.type;
+  }
+  return current;
+}
+
+function isTopLevelAnyOrUnknownTypeNode(
+  node: ts.TypeNode | undefined,
+): boolean {
+  if (!node) return false;
+  const current = unwrapParenthesizedTypeNode(node);
+  return current.kind === ts.SyntaxKind.AnyKeyword ||
+    current.kind === ts.SyntaxKind.UnknownKeyword;
+}
+
+function shouldReportPermissiveInferredPatternResult(
+  resultNode: ts.TypeNode | undefined,
+  resultType: ts.Type | undefined,
+): boolean {
+  if (!resultNode) return true;
+  if (isTopLevelAnyOrUnknownTypeNode(resultNode)) return true;
+  return isAnyOrUnknownType(resultType);
+}
+
 /**
  * Handler for pattern schema injection.
  * Argument order is function-first: [function, inputSchema, resultSchema]
  *
  * @returns The transformed node, or undefined if no transformation was performed
  */
+
+function reportAnyResultSchema(
+  context: TransformationContext,
+  node: ts.CallExpression,
+): void {
+  context.reportDiagnostic({
+    severity: "error",
+    type: "pattern:any-result-schema",
+    message:
+      `pattern() inferred result schema resolves to 'any' or 'unknown'. ` +
+      `CTS only allows permissive output schemas when made explicit. ` +
+      `Add an explicit Output type parameter: pattern<Input, Output>(...).`,
+    node: node.expression,
+  });
+}
 
 function isMapWithPatternCallbackPatternCall(node: ts.CallExpression): boolean {
   const parent = node.parent;
@@ -1418,6 +1459,14 @@ function handlePatternSchemaInjection(
       argumentCapabilityMode,
       context,
     );
+    if (
+      shouldReportPermissiveInferredPatternResult(
+        inferred.result,
+        inferred.resultType,
+      )
+    ) {
+      reportAnyResultSchema(context, node);
+    }
     resultTypeNode = inferred.result ??
       factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
     resultType = getTypeFromRegistryOrFallback(
@@ -1449,6 +1498,14 @@ function handlePatternSchemaInjection(
         argumentCapabilityMode,
         context,
       );
+      if (
+        shouldReportPermissiveInferredPatternResult(
+          inferred.result,
+          inferred.resultType,
+        )
+      ) {
+        reportAnyResultSchema(context, node);
+      }
       resultTypeNode = inferred.result ??
         factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
       resultType = getTypeFromRegistryOrFallback(
@@ -1479,6 +1536,14 @@ function handlePatternSchemaInjection(
         argumentCapabilityMode,
         context,
       );
+      if (
+        shouldReportPermissiveInferredPatternResult(
+          inferred.result,
+          inferred.resultType,
+        )
+      ) {
+        reportAnyResultSchema(context, node);
+      }
 
       inputTypeNode = inferred.argument ??
         getParameterSchemaType(factory, inputParam);

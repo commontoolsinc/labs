@@ -44,8 +44,10 @@ without rereading the whole branch history
 - Validation and lowering now share more real policy seams instead of
   rediscovering support independently.
 - Schema behavior is now explicitly split between:
-  - semantic `any` -> `true`
-  - semantic `unknown` -> `{ type: "unknown" }`
+  - inferred `pattern()` result `any` / `unknown` -> diagnostic unless output
+    type is explicit
+  - semantic `any` / `unknown` is still representable elsewhere when that
+    boundary is explicit
   - unresolved generic definition-site type params -> `{ type: "unknown" }`
 - `capability-lowering.ts` is no longer the central junk drawer; major
   responsibilities are split into focused policy and transform files.
@@ -69,8 +71,8 @@ without rereading the whole branch history
 
 | Case                                                                          | Current rule                                                             |
 | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `pattern()` result inferred as `any`                                          | emit `true`                                                              |
-| `pattern()` result inferred as `unknown`                                      | emit `{ type: "unknown" }`                                               |
+| `pattern()` result inferred as `any`                                          | error unless an explicit Output type/schema is provided                  |
+| `pattern()` result inferred as `unknown`                                      | error unless an explicit Output type/schema is provided                  |
 | inline-destructured `pattern(({...}: T) => ...)` vs `pattern<T>(...)`         | equivalent input/result schemas                                          |
 | generic helper definition site `wish<T>` / `generateObject<T>` / `Cell.of<T>` | degrade unresolved type params to `{ type: "unknown" }`                  |
 | explicit-generic builder definition site `lift<T, U>` / `handler<E, S>`       | degrade unresolved type params to `{ type: "unknown" }`                  |
