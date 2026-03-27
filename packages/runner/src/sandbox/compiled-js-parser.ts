@@ -792,6 +792,21 @@ export function trimRange(
   start: number,
   end: number,
 ): SourceRange {
+  if (start >= end) {
+    return { start: end, end };
+  }
+
+  const firstCode = source.charCodeAt(start);
+  const lastCode = source.charCodeAt(end - 1);
+  if (
+    !isWhitespaceCode(firstCode) &&
+    firstCode !== 47 &&
+    !isWhitespaceCode(lastCode) &&
+    lastCode !== 47
+  ) {
+    return { start, end };
+  }
+
   const state: ScanState = {
     parenDepth: 0,
     braceDepth: 0,
