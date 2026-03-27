@@ -1,5 +1,5 @@
 import { Command } from "@cliffy/command";
-import { basename, join, resolve } from "@std/path";
+import { basename, resolve } from "@std/path";
 import ports from "@commontools/ports" with { type: "json" };
 import {
   buildDenoArgs,
@@ -185,35 +185,15 @@ export const fuse = new Command()
     }
 
     if (options.background) {
-      await Deno.mkdir(stateDir, { recursive: true });
-      const logPath = join(stateDir, "fuse-daemon.log");
-
-      // Detached background process with piped output for logging
+      // Detached background process
       const cmd = new Deno.Command(spawnCmd, {
         args: spawnArgs,
         stdin: "null",
-        stdout: "piped",
-        stderr: "piped",
+        stdout: "null",
+        stderr: "null",
       });
       const child = cmd.spawn();
       child.unref();
-
-      // Drain stdout/stderr to log file asynchronously (don't block)
-      const logFile = await Deno.open(logPath, {
-        write: true,
-        create: true,
-        truncate: true,
-      });
-      child.stdout.pipeTo(logFile.writable, { preventClose: true }).catch(
-        () => {},
-      );
-      child.stderr.pipeTo(
-        new WritableStream({
-          async write(chunk) {
-            await logFile.write(chunk);
-          },
-        }),
-      ).catch(() => {});
 
       const pid = child.pid;
       let statePath: string;
@@ -232,15 +212,6 @@ export const fuse = new Command()
         } catch {
           // Process may have already exited.
         }
-        // Surface the daemon log to help diagnose startup failures
-        try {
-          const log = await Deno.readTextFile(logPath);
-          if (log.trim()) {
-            console.error("--- fuse-daemon log ---");
-            console.error(log);
-            console.error("--- end log ---");
-          }
-        } catch { /* ignore read errors */ }
         throw error;
       }
 
