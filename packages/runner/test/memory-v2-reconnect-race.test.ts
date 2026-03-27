@@ -1,7 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import type { MIME, URI } from "@commontools/memory/interface";
-import * as Fact from "@commontools/memory/fact";
 import { type EntityDocument, getMemoryV2Flags } from "@commontools/memory/v2";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import * as MemoryV2Server from "@commontools/memory/v2/server";
@@ -572,14 +571,17 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
 
   storageManager.subscribe(notifications);
 
-  const commitWithSeq = (seq: number, value: number) =>
-    (provider.replica as any).commit({
-      facts: [Fact.assert({
-        the: DOCUMENT_MIME,
-        of: uri,
-        is: { version: value },
-      })],
-      claims: [],
+  const commitWithSeq = (seq: number, value: number) => {
+    if (!provider.replica.commitNative) {
+      throw new Error("Expected memory v2 replica to support commitNative()");
+    }
+    return provider.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: uri,
+        type: DOCUMENT_MIME,
+        value: { value: { version: value } },
+      }],
     }, {
       getReadActivities() {
         return [{
@@ -590,7 +592,8 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
           meta: { seq },
         }];
       },
-    });
+    } as any);
+  };
 
   let remoteClient: MemoryV2Client.Client | undefined;
   try {

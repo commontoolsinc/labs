@@ -373,8 +373,11 @@ export const commit = async (
           `Committing ${changes.facts.length} writes to replica`,
         ]);
       }
-      const promise = hasWrites
-        ? replica!.commit(changes, transaction)
+      if (hasWrites && !replica?.commit) {
+        throw new Error("Storage replica does not support legacy commit()");
+      }
+      const promise = hasWrites && replica
+        ? replica.commit!(changes, transaction)
         : Promise.resolve({ ok: {} });
 
       mutate(transaction, {

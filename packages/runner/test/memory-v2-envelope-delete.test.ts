@@ -1,5 +1,4 @@
 import { assertEquals } from "@std/assert";
-import { assert } from "@commontools/memory/fact";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import * as Chronicle from "../src/storage/transaction/chronicle.ts";
@@ -15,15 +14,16 @@ Deno.test("memory v2 chronicle retracts an empty JSON envelope", async () => {
 
   try {
     const replica = storage.open(space).replica;
-    await replica.commit({
-      facts: [
-        assert({
-          the: "application/json",
-          of: "test:delete-envelope",
-          is: { value: { name: "ToDelete", active: true } },
-        }),
-      ],
-      claims: [],
+    if (!replica.commitNative) {
+      throw new Error("Expected memory v2 replica to support commitNative()");
+    }
+    await replica.commitNative({
+      operations: [{
+        op: "set",
+        id: "test:delete-envelope",
+        type: "application/json",
+        value: { value: { name: "ToDelete", active: true } },
+      }],
     });
 
     const chronicle = Chronicle.open(replica);
@@ -53,15 +53,16 @@ Deno.test("memory v2 chronicle treats an explicit empty root envelope as deletio
 
   try {
     const replica = storage.open(space).replica;
-    await replica.commit({
-      facts: [
-        assert({
-          the: "application/json",
-          of: "test:keep-empty-object",
-          is: { value: { value: "hello", other: true } },
-        }),
-      ],
-      claims: [],
+    if (!replica.commitNative) {
+      throw new Error("Expected memory v2 replica to support commitNative()");
+    }
+    await replica.commitNative({
+      operations: [{
+        op: "set",
+        id: "test:keep-empty-object",
+        type: "application/json",
+        value: { value: { value: "hello", other: true } },
+      }],
     });
 
     const chronicle = Chronicle.open(replica);

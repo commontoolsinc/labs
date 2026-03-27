@@ -15,6 +15,16 @@ describe("Journal", () => {
   let storage: ReturnType<typeof StorageManager.emulate>;
   let journal: ReturnType<typeof Journal.open>;
 
+  const legacyReplica = (spaceDid: typeof space) => {
+    const replica = storage.open(spaceDid).replica;
+    if (!replica.commit) {
+      throw new Error("Expected legacy replica to support commit()");
+    }
+    return replica as typeof replica & {
+      commit: NonNullable<typeof replica.commit>;
+    };
+  };
+
   beforeEach(() => {
     // This suite asserts the legacy raw JSON replica shape. V2 coverage lives in
     // the memory-v2-* tests that exercise the document-envelope model directly.
@@ -70,7 +80,7 @@ describe("Journal", () => {
     it("should read existing data from replica", async () => {
       // Pre-populate replica
       const testData = { name: "Charlie", age: 25 };
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -98,7 +108,7 @@ describe("Journal", () => {
 
     it("should read nested paths from replica data", async () => {
       // Pre-populate replica
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -130,7 +140,7 @@ describe("Journal", () => {
     it("should read with metadata options", async () => {
       // Pre-populate replica
       const testData = { name: "MetaTest", version: 1 };
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -579,7 +589,7 @@ describe("Journal", () => {
 
     it("should handle mixed reads from replica and writes", async () => {
       // Pre-populate replica
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -829,7 +839,7 @@ describe("Journal", () => {
 
     it("should track read invariants in history", async () => {
       // Pre-populate replica
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -866,7 +876,7 @@ describe("Journal", () => {
 
     it("should capture original replica read in history, not merged result", async () => {
       // Pre-populate replica
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -978,7 +988,7 @@ describe("Journal", () => {
 
   describe("trackReadWithoutLoad reads", () => {
     it("records read activity but skips loading from storage", async () => {
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({
@@ -1015,7 +1025,7 @@ describe("Journal", () => {
     });
 
     it("does not consult the replica when only tracking the read", async () => {
-      const replica = storage.open(space).replica;
+      const replica = legacyReplica(space);
       await replica.commit({
         facts: [
           assert({

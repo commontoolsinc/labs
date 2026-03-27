@@ -11,7 +11,6 @@ import type {
   StorageNotification,
 } from "../src/storage/interface.ts";
 import type { MIME, URI } from "@commontools/memory/interface";
-import * as Fact from "@commontools/memory/fact";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-storage-subscription");
@@ -151,7 +150,13 @@ describe("Memory v2 storage notifications", () => {
       }],
     });
 
-    const { replica } = storageManager.open(space);
+    const { replica: openedReplica } = storageManager.open(space);
+    const replica = openedReplica as typeof openedReplica & {
+      commitNative: (
+        transaction: unknown,
+        source?: unknown,
+      ) => Promise<{ ok?: unknown; error?: unknown }>;
+    };
     await storageManager.open(space).sync(uri);
 
     await remoteSession.transact({
@@ -183,13 +188,16 @@ describe("Memory v2 storage notifications", () => {
     } as any;
 
     const factAddress = { id: uri, type: "application/json" as MIME };
-    const commitPromise = (replica as any).commit({
-      facts: [Fact.assert({
-        the: "application/json",
-        of: uri,
-        is: { version: 2 },
-      })],
-      claims: [],
+    if (!replica.commitNative) {
+      throw new Error("Expected memory v2 replica to support commitNative()");
+    }
+    const commitPromise = replica.commitNative({
+      operations: [{
+        op: "set",
+        id: uri,
+        type: "application/json",
+        value: { value: { version: 2 } },
+      }],
     }, source);
     expect(replica.get(factAddress)?.is).toEqual({ value: { version: 2 } });
 
@@ -217,7 +225,12 @@ describe("Memory v2 storage notifications", () => {
 
     const uri = `of:memory-v2-retry-${Date.now()}` as URI;
     const provider = storageManager.open(space);
-    const { replica } = provider;
+    const replica = provider.replica as typeof provider.replica & {
+      commitNative: (
+        transaction: unknown,
+        source?: unknown,
+      ) => Promise<{ ok?: unknown; error?: unknown }>;
+    };
     await provider.sync(uri);
 
     await remoteSession.transact({
@@ -259,13 +272,16 @@ describe("Memory v2 storage notifications", () => {
     } as any;
 
     const factAddress = { id: uri, type: "application/json" as MIME };
-    const commitPromise = (replica as any).commit({
-      facts: [Fact.assert({
-        the: "application/json",
-        of: uri,
-        is: { version: 2 },
-      })],
-      claims: [],
+    if (!replica.commitNative) {
+      throw new Error("Expected memory v2 replica to support commitNative()");
+    }
+    const commitPromise = replica.commitNative({
+      operations: [{
+        op: "set",
+        id: uri,
+        type: "application/json",
+        value: { value: { version: 2 } },
+      }],
     }, source);
     expect(replica.get(factAddress)?.is).toEqual({ value: { version: 2 } });
 

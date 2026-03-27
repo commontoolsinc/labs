@@ -6,7 +6,6 @@ import {
   type SchemaPathSelector,
   type Signer,
   type StorableDatum,
-  type StorableValue,
   type TransactionError,
   type URI,
 } from "@commontools/memory/interface";
@@ -18,7 +17,6 @@ import {
   type PatchOp,
   type SessionSync,
   toDocumentPath,
-  toEntityDocument,
 } from "@commontools/memory/v2";
 import type { AppliedCommit } from "@commontools/memory/v2/engine";
 import { getLogger } from "@commontools/utils/logger";
@@ -945,29 +943,6 @@ class SpaceReplica implements ISpaceReplica {
         }
       }
     }
-  }
-
-  async commit(
-    transaction: { facts: any[]; claims: any[] },
-    source?: IStorageTransaction,
-  ): Promise<Result<Unit, StorageTransactionRejected>> {
-    const operations = transaction.facts
-      .filter((fact) => fact.the === DOCUMENT_MIME)
-      .map((fact) =>
-        fact.is === undefined
-          ? { op: "delete" as const, id: fact.of as URI }
-          : {
-            op: "set" as const,
-            id: fact.of as URI,
-            value: toEntityDocument(fact.is as StorableValue),
-          }
-      );
-
-    if (operations.length === 0) {
-      return { ok: {} };
-    }
-
-    return await this.commitOperations(operations, source);
   }
 
   async commitNative(

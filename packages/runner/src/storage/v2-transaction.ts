@@ -1273,9 +1273,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const replica = this.storage.open(writeSpace).replica;
-    const promise = replica.commitNative
-      ? replica.commitNative(native!, this)
-      : replica.commit(this.buildTransaction(writeSpace), this);
+    if (!replica.commitNative) {
+      throw new Error("memory v2 replica does not support commitNative()");
+    }
+    const promise = replica.commitNative(native!, this);
     this.#state = { status: "pending", promise };
     const result = await promise;
     this.#state = { status: "done", result };
@@ -1489,35 +1490,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
     }
     return { ok: {} };
-  }
-
-  private buildTransaction(
-    space: MemorySpace,
-  ): { facts: any[]; claims: any[] } {
-    const branch = this.#branches.get(space);
-    if (!branch) {
-      return { facts: [], claims: [] };
-    }
-
-    const facts: any[] = [];
-    for (const [key, doc] of branch.docs.entries()) {
-      if (!isWritableDocument(doc)) {
-        continue;
-      }
-      if (doc.writeDetails.size === 0) {
-        continue;
-      }
-      if (deepEqual(doc.current.value, doc.initial.value)) {
-        continue;
-      }
-      const { id, type } = this.parseDocKey(key);
-      if (doc.current.value === undefined) {
-        facts.push({ the: type, of: id });
-      } else {
-        facts.push({ the: type, of: id, is: doc.current.value });
-      }
-    }
-    return { facts, claims: [] };
   }
 
   private docKey(address: Pick<IMemoryAddress, "id" | "type">): string {

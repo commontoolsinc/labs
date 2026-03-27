@@ -923,7 +923,7 @@ export interface ISpaceReplica extends ISpace {
    */
   get(entry: BaseMemoryAddress): State | undefined;
 
-  commit(
+  commit?(
     transaction: ITransaction,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
