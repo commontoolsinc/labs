@@ -22,9 +22,8 @@ import {
 import {
   decodeMemoryV2Boundary,
   DEFAULT_BRANCH,
+  type EntityDocument,
   toDocumentPath,
-  toEntityDocument,
-  toSourceLink,
 } from "../v2.ts";
 
 const createEngine = async (): Promise<{
@@ -65,6 +64,23 @@ const authorization = {
 
 const decodeStored = <Value>(source: string | null | undefined): Value =>
   decodeMemoryV2Boundary<Value>(source ?? "null");
+
+const toSourceLink = (id: string) => ({ "/": id } as const);
+
+const toEntityDocument = (
+  value: unknown,
+  source?: { "/": string },
+  metadata: Record<string, unknown> = {},
+): EntityDocument => {
+  const document: Record<string, unknown> = {
+    ...metadata,
+    ...(source !== undefined ? { source } : {}),
+  };
+  if (value !== undefined) {
+    document.value = value;
+  }
+  return document as EntityDocument;
+};
 
 Deno.test("memory v2 engine persists set and delete commits as seq revisions", async () => {
   const { engine, path } = await createEngine();

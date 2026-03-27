@@ -24,10 +24,25 @@ import {
   MEMORY_V2_PROTOCOL,
   toDocumentPath,
   toDocumentSelector,
-  toEntityDocument,
-  toSourceLink,
   toValuePath,
 } from "../v2.ts";
+
+const toSourceLink = (id: string) => ({ "/": id } as const);
+
+const toEntityDocument = (
+  value: unknown,
+  source?: { "/": string },
+  metadata: Record<string, unknown> = {},
+) => {
+  const document: Record<string, unknown> = {
+    ...metadata,
+    ...(source !== undefined ? { source } : {}),
+  };
+  if (value !== undefined) {
+    document.value = value;
+  }
+  return document;
+};
 
 Deno.test("memory v2 exports the phase-1 protocol constants", () => {
   assertEquals(MEMORY_V2_PROTOCOL, "memory/v2");

@@ -9,7 +9,6 @@ import {
   putBlob,
   read,
 } from "../v2/engine.ts";
-import { toBlobMetadataId } from "../v2.ts";
 
 const createEngine = async () => {
   const path = await Deno.makeTempFile({ suffix: ".sqlite" });
@@ -131,7 +130,6 @@ Deno.test("memory v2 engine keeps blob payloads separate from JSON entity revisi
 
     assertEquals(blob.size, payload.byteLength);
     assertEquals(blob.contentType, "application/octet-stream");
-    assertEquals(toBlobMetadataId(blob.hash), `urn:blob-meta:${blob.hash}`);
     assertEquals(getBlob(engine, blob.hash), {
       hash: blob.hash,
       value: payload,

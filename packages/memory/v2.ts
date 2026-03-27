@@ -11,6 +11,7 @@ import type {
   FabricValue,
   ReconstructionContext,
 } from "@commontools/data-model/interface";
+import { isObject, isRecord } from "@commontools/utils/types";
 import { getExperimentalStorableConfig } from "./storable-value.ts";
 
 export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
@@ -336,9 +337,6 @@ const memoryV2ReconstructionContext: ReconstructionContext = {
   },
 };
 
-const isDocumentRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
-
 export const getMemoryV2Flags = (): MemoryV2Flags => ({
   richStorableValues: getExperimentalStorableConfig().richStorableValues,
   unifiedJsonEncoding: getJsonEncodingConfig(),
@@ -355,12 +353,16 @@ export const sameMemoryV2Flags = (
   left.canonicalHashing === right.canonicalHashing &&
   left.modernSchemaHash === right.modernSchemaHash;
 
-export const isMemoryV2Flags = (value: unknown): value is MemoryV2Flags =>
-  isDocumentRecord(value) &&
-  typeof value.richStorableValues === "boolean" &&
-  typeof value.unifiedJsonEncoding === "boolean" &&
-  typeof value.canonicalHashing === "boolean" &&
-  typeof value.modernSchemaHash === "boolean";
+export const isMemoryV2Flags = (value: unknown): value is MemoryV2Flags => {
+  if (!isRecord(value) || Array.isArray(value)) {
+    return false;
+  }
+
+  return typeof value.richStorableValues === "boolean" &&
+    typeof value.unifiedJsonEncoding === "boolean" &&
+    typeof value.canonicalHashing === "boolean" &&
+    typeof value.modernSchemaHash === "boolean";
+};
 
 export const encodeMemoryV2Boundary = (value: unknown): string =>
   jsonFromValue(value as FabricValue);
@@ -372,8 +374,6 @@ export const decodeMemoryV2Boundary = <Value = StorableDatum>(
     valueFromJson(source, memoryV2ReconstructionContext) as FabricValue,
     { frozen: false, deep: true, force: true },
   ) as Value;
-
-export const toSourceLink = (id: string): SourceLink => ({ "/": id });
 
 export const toDocumentPath = (path: readonly string[]): DocumentPath =>
   path as DocumentPath;
@@ -388,9 +388,6 @@ export const toDocumentSelector = (
   path: toDocumentPath(["value", ...selector.path]),
 });
 
-export const toBlobMetadataId = (hash: Reference): EntityId =>
-  `urn:blob-meta:${hash}`;
-
 export const isSourceLink = (value: unknown): value is SourceLink => {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return false;
@@ -401,24 +398,9 @@ export const isSourceLink = (value: unknown): value is SourceLink => {
     typeof candidate["/"] === "string";
 };
 
-export const toEntityDocument = (
-  value: StorableDatum | undefined,
-  source?: SourceLink,
-  metadata: Record<string, EntityDocumentField> = {},
-): EntityDocument => {
-  const document: Record<string, EntityDocumentField> = {
-    ...metadata,
-    ...(source !== undefined ? { source } : {}),
-  };
-  if (value !== undefined) {
-    document.value = value;
-  }
-  return document as EntityDocument;
-};
-
 export const isEntityDocument = (
   value: unknown,
-): value is EntityDocument => isDocumentRecord(value);
+): value is EntityDocument => isObject(value);
 
 export const getEntityDocumentMetadata = (
   document: EntityDocument,
