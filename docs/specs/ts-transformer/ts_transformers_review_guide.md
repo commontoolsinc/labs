@@ -43,6 +43,9 @@ without rereading the whole branch history
   sink.
 - Validation and lowering now share more real policy seams instead of
   rediscovering support independently.
+- Compute-context interprocedural capability summaries are intentionally
+  limited to same-source-file concrete helper bodies; broader expansion is
+  deferred.
 - Schema behavior is now explicitly split between:
   - inferred `pattern()` result `any` / `unknown` -> diagnostic unless output
     type is explicit
@@ -77,7 +80,7 @@ without rereading the whole branch history
 | generic helper definition site `wish<T>` / `generateObject<T>` / `Cell.of<T>` | degrade unresolved type params to `{ type: "unknown" }`                  |
 | explicit-generic builder definition site `lift<T, U>` / `handler<E, S>`       | degrade unresolved type params to `{ type: "unknown" }`                  |
 | transformed structural cell values                                            | preserve recovered structure rather than collapsing to `any` / `unknown` |
-| reactive array element access `items[index]`                                  | preserve `string                                                         |
+| reactive array element access `items[index]`                                  | preserve `string \| undefined` precision                                 |
 | boolean result schemas                                                        | normalized as plain `type: "boolean"` in current supported cases         |
 
 Primary proof surface:
@@ -100,7 +103,7 @@ Primary proof surface:
 - removing the current `/// <cts-enable />` rollout gate
 - call-site specialization for generic helpers
 - broader interprocedural capability-analysis expansion beyond the current
-  landed slice
+  same-source-file concrete-helper slice
 - removing deprecated bare `cell(...)` compatibility support
 
 ## Fast Review Path

@@ -1,10 +1,11 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import ts from "typescript";
 
 import { createDataFlowAnalyzer } from "../../src/ast/mod.ts";
 import { TransformationContext } from "../../src/core/mod.ts";
 import {
   classifyExpressionSiteHandling,
+  classifyRestrictedReactiveComputation,
   findLowerableExpressionSite,
 } from "../../src/transformers/expression-site-policy.ts";
 import type { ExpressionContainerKind } from "../../src/transformers/expression-site-types.ts";
@@ -677,6 +678,69 @@ Deno.test(
       undefined,
     );
     assertEquals(analyzeCalls, 0);
+  },
+);
+
+Deno.test(
+  "Expression site policy: restricted reactive computation classification reuses lowerable expression-site handling",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare function pattern<T>(fn: (state: any) => T): T;
+      declare function identity<T>(value: T): T;
+
+      const view = pattern((state: any) => {
+        const label = identity(state.done ? "Done" : "Pending");
+        return label;
+      });
+    `);
+
+    const conditional = findFirstNode(sourceFile, ts.isConditionalExpression);
+    const analyze = createDataFlowAnalyzer(checker);
+    const decision = classifyRestrictedReactiveComputation(
+      conditional,
+      context,
+      analyze,
+    );
+
+    assertEquals(decision.kind, "allowed");
+    assert(decision.kind === "allowed");
+    assertEquals(decision.lowerableSite?.containerKind, "call-argument");
+    assertEquals(decision.lowerableSite?.expression, conditional);
+  },
+);
+
+Deno.test(
+  "Expression site policy: restricted reactive if-conditions still require computed()",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => {
+        if (state.done && state.name) {
+          return <div>{state.name}</div>;
+        }
+        return <div>Pending</div>;
+      });
+    `);
+
+    const condition = findFirstNode(
+      sourceFile,
+      (node): node is ts.BinaryExpression =>
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken,
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(
+      classifyRestrictedReactiveComputation(condition, context, analyze),
+      { kind: "requires-computed" },
+    );
   },
 );
 

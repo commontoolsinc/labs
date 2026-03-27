@@ -198,9 +198,13 @@ from capability analysis.
 
 When interprocedural analysis is enabled (compute-context builders like `lift`,
 `derive`, `handler`), read paths discovered in helper function bodies propagate
-back to the caller's parameter summary. This means a `lift` callback that
-delegates to a local helper which reads `(x as any).foo` will trigger shrink
-validation on the caller's parameter type.
+back to the caller's parameter summary, but the current MVP intentionally only
+does this for resolved helper bodies in the same source file. Cross-file or
+otherwise unsupported helper calls fall back to the conservative wildcard path
+instead of taking partial transitive precision. This means a `lift` callback
+that delegates to a local helper which reads `(x as any).foo` will trigger
+shrink validation on the caller's parameter type, while the same helper body in
+another file will conservatively disable shrinking for that parameter.
 
 When a wildcard parameter (one passed to an opaque/unanalyzable function like
 `console.log`) is typed `unknown`, validation emits `schema:unknown-type-access`
@@ -302,6 +306,8 @@ Diagnostics emitted in all modes:
 - **Error** `pattern-context:computation`
   - binary/unary/conditional computations using opaque dependencies outside
     wrappers
+  - validation first checks the shared lowerable-expression-site policy; only
+    non-lowerable computation sites still report this error
 - **Error** `pattern-context:map-on-fallback`
   - `(opaqueExpr ?? fallback).map(...)` or `(opaqueExpr || fallback).map(...)`
     where left is reactive and right is not

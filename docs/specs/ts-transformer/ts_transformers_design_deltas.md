@@ -773,10 +773,21 @@ produce hard errors rather than silently degrading.
 
 1. Replace map/logical receiver classification inputs with capability summaries.
 2. Remove remaining `OpaqueRef`-specific heuristic branches where superseded.
-3. Start routing pattern-context validation diagnostics through lowering
-   eligibility checks.
+3. ~~Start routing pattern-context validation diagnostics through lowering
+   eligibility checks.~~ Done for restricted-reactive computation diagnostics:
+   validation now consults shared expression-site lowerability before
+   reporting `pattern-context:computation`.
 
-**Exit criteria:** operator rewrite matrix decisions are capability-backed.
+Remaining work:
+
+1. Keep shrinking residual heuristic branches where no capability-backed
+   replacement exists yet.
+2. Expand matrix-style policy coverage if we want a permanent gate on
+   expression-site / operator behavior.
+
+**Exit criteria:** operator rewrite matrix decisions are capability-backed and
+validation-side computation diagnostics no longer rediscover lowerability
+independently.
 
 ## Phase D6: Opaque Path Navigation Lowering
 
@@ -799,16 +810,20 @@ unsupported optional-call cases.
 Implemented in current MVP:
 
 1. Compute-context capability analysis reuses callee summaries through resolved
-   function signatures with concrete function bodies.
+   function signatures with concrete function bodies in the same source file.
 2. Transitive read/write paths from helper callees propagate to caller compute
    boundaries.
-3. Pattern-context legality summaries remain direct/local (no helper-driven
+3. Cross-file or otherwise unsupported helper calls fall back to the existing
+   conservative wildcard path rather than taking partial transitive precision.
+4. Pattern-context legality summaries remain direct/local (no helper-driven
    widening).
+5. Recursion still bails out conservatively via the existing `recursive`
+   summary path.
 
 Remaining work:
 
-1. Expand/clarify interprocedural scope boundaries (for example unsupported
-   declaration forms and cross-module behavior expectations).
+1. Decide whether to widen beyond same-source-file concrete helper bodies (for
+   example broader declaration forms or cross-module calls).
 2. Add dedicated fixture matrix for interprocedural edge cases and recursion
    boundaries.
 

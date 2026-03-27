@@ -56,6 +56,7 @@ import {
   isTopmostMemberAccess,
 } from "./opaque-roots.ts";
 import {
+  classifyRestrictedReactiveComputation,
   classifyUnsupportedExpressionSiteCallRoot,
   findLowerableExpressionSite,
 } from "./expression-site-policy.ts";
@@ -176,7 +177,7 @@ export class PatternContextValidationTransformer extends Transformer {
       // Check for property access used in computation (not just pass-through)
       // This applies to expressions in binary operators, conditionals, etc.
       if (this.isComputationExpression(node)) {
-        this.validateComputationExpression(node, context, checker, analyze);
+        this.validateComputationExpression(node, context, analyze);
       }
 
       return ts.visitEachChild(node, visit, context.tsContext);
@@ -204,39 +205,31 @@ export class PatternContextValidationTransformer extends Transformer {
   private validateComputationExpression(
     node: ts.Node,
     context: TransformationContext,
-    checker: ts.TypeChecker,
     analyze: ReturnType<typeof createDataFlowAnalyzer>,
   ): void {
-    // Skip if not in restricted reactive context
-    if (!isInRestrictedReactiveContext(node, checker, context)) {
-      return;
-    }
-
     const expression = node as ts.Expression;
-    if (findLowerableExpressionSite(expression, context, analyze)) {
+    const decision = classifyRestrictedReactiveComputation(
+      expression,
+      context,
+      analyze,
+    );
+    if (decision.kind !== "requires-computed") {
       return;
     }
 
-    // Analyze the expression for reactive dependencies
-    const analysis = analyze(expression);
+    const problemAccess = this.findProblematicAccess(node);
+    const accessText = problemAccess
+      ? `'${problemAccess.getText()}'`
+      : "property access";
 
-    // If this computation contains reactive refs, it should be wrapped in computed()
-    if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
-      // Find the specific property access that's causing the issue
-      const problemAccess = this.findProblematicAccess(node);
-      const accessText = problemAccess
-        ? `'${problemAccess.getText()}'`
-        : "property access";
-
-      context.reportDiagnostic({
-        severity: "error",
-        type: "pattern-context:computation",
-        message:
-          `Property access ${accessText} used in computation is not allowed in reactive context. ` +
-          `Wrap the computation in computed(() => ...) instead.`,
-        node,
-      });
-    }
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:computation",
+      message:
+        `Property access ${accessText} used in computation is not allowed in reactive context. ` +
+        `Wrap the computation in computed(() => ...) instead.`,
+      node,
+    });
   }
 
   /**

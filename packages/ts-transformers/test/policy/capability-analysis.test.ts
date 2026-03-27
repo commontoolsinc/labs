@@ -35,7 +35,18 @@ function createProgramWithSource(source: string): {
   program: ts.Program;
   sourceFile: ts.SourceFile;
 } {
-  const fileName = "/test.ts";
+  return createProgramWithFiles({
+    "/test.ts": source,
+  });
+}
+
+function createProgramWithFiles(
+  files: Record<string, string>,
+  entryFileName = "/test.ts",
+): {
+  program: ts.Program;
+  sourceFile: ts.SourceFile;
+} {
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ESNext,
     module: ts.ModuleKind.ESNext,
@@ -44,8 +55,8 @@ function createProgramWithSource(source: string): {
   };
 
   const host: ts.CompilerHost = {
-    fileExists: (name) => name === fileName,
-    readFile: (name) => (name === fileName ? source : undefined),
+    fileExists: (name) => files[name] !== undefined,
+    readFile: (name) => files[name],
     directoryExists: () => true,
     getDirectories: () => [],
     getCanonicalFileName: (name) => name,
@@ -55,19 +66,19 @@ function createProgramWithSource(source: string): {
     useCaseSensitiveFileNames: () => true,
     writeFile: () => {},
     getSourceFile: (name, languageVersion) =>
-      name === fileName
+      files[name] !== undefined
         ? ts.createSourceFile(
-          fileName,
-          source,
+          name,
+          files[name]!,
           languageVersion,
           true,
-          ts.ScriptKind.TS,
+          name.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
         )
         : undefined,
   };
 
-  const program = ts.createProgram([fileName], options, host);
-  const sourceFile = program.getSourceFile(fileName);
+  const program = ts.createProgram([entryFileName], options, host);
+  const sourceFile = program.getSourceFile(entryFileName);
   if (!sourceFile) {
     throw new Error("Expected source file in program.");
   }
@@ -438,5 +449,28 @@ const caller = (input) => callee(input);`;
     assertEquals(input.capability, "readonly");
     assert(input.readPaths.includes("foo"));
     assertEquals(input.wildcard, false);
+  },
+);
+
+Deno.test(
+  "Capability analysis interprocedural propagation stays conservative across source-file boundaries",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/helper.ts": `const helper = (value) => value.foo;`,
+      "/test.ts": `const fn = (input) => helper(input);`,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+
+    const summary = analyzeFunctionCapabilities(fn, {
+      checker,
+      interprocedural: true,
+    });
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.passthrough, true);
+    assertEquals(input.wildcard, true);
+    assertEquals(input.readPaths.length, 0);
   },
 );

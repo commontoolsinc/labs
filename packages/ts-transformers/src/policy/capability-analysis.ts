@@ -77,6 +77,14 @@ function isCapabilityAnalyzableFunction(
     !!node.body;
 }
 
+function isInterproceduralSummaryTarget(
+  declaration: ts.Node | undefined,
+  sourceFile: ts.SourceFile,
+): declaration is CapabilityAnalyzableFunction {
+  return isCapabilityAnalyzableFunction(declaration) &&
+    declaration.getSourceFile() === sourceFile;
+}
+
 function isLiteralElement(
   expr: ts.Expression | undefined,
 ): expr is
@@ -380,6 +388,7 @@ export function analyzeFunctionCapabilities(
   try {
     const checker = options?.checker;
     const interprocedural = !!options?.interprocedural && !!checker;
+    const summarySourceFile = fn.getSourceFile();
 
     if (!fn.body) {
       const empty = { params: [] };
@@ -745,7 +754,7 @@ export function analyzeFunctionCapabilities(
       const signature = checker.getResolvedSignature(call);
       if (!signature) return undefined;
       const declaration = signature.declaration;
-      if (!isCapabilityAnalyzableFunction(declaration)) {
+      if (!isInterproceduralSummaryTarget(declaration, summarySourceFile)) {
         return undefined;
       }
 

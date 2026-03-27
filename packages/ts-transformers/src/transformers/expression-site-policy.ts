@@ -93,6 +93,20 @@ export interface ExpressionSiteHandlingOptions {
   readonly allowDeferredRootOwner?: boolean;
 }
 
+export interface LowerableExpressionSite {
+  readonly expression: ts.Expression;
+  readonly containerKind: ExpressionContainerKind;
+}
+
+export type RestrictedReactiveComputationDecision =
+  | {
+    kind: "allowed";
+    lowerableSite?: LowerableExpressionSite;
+  }
+  | {
+    kind: "requires-computed";
+  };
+
 export function containsLogicalBinaryOperator(expr: ts.Expression): boolean {
   if (ts.isBinaryExpression(expr)) {
     const op = expr.operatorToken.kind;
@@ -993,9 +1007,7 @@ export function findLowerableExpressionSite(
   expression: ts.Expression,
   context: TransformationContext,
   analyze: AnalyzeFn,
-):
-  | { expression: ts.Expression; containerKind: ExpressionContainerKind }
-  | undefined {
+): LowerableExpressionSite | undefined {
   let current: ts.Node | undefined = expression;
 
   while (current) {
@@ -1046,4 +1058,33 @@ export function findLowerableExpressionSite(
   }
 
   return undefined;
+}
+
+export function classifyRestrictedReactiveComputation(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): RestrictedReactiveComputationDecision {
+  if (!isInRestrictedReactiveContext(expression, context.checker, context)) {
+    return { kind: "allowed" };
+  }
+
+  const lowerableSite = findLowerableExpressionSite(
+    expression,
+    context,
+    analyze,
+  );
+  if (lowerableSite) {
+    return {
+      kind: "allowed",
+      lowerableSite,
+    };
+  }
+
+  const analysis = analyze(expression);
+  if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
+    return { kind: "requires-computed" };
+  }
+
+  return { kind: "allowed" };
 }
