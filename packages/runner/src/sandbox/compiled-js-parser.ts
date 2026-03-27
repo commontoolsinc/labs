@@ -51,20 +51,6 @@ const BLOCK_TERMINATED_KEYWORDS = new Set([
   "while",
 ]);
 
-const REGEX_PREFIX_KEYWORDS = new Set([
-  "case",
-  "delete",
-  "else",
-  "in",
-  "instanceof",
-  "new",
-  "return",
-  "throw",
-  "typeof",
-  "void",
-  "yield",
-]);
-
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
 
 interface ScanState {
@@ -348,7 +334,11 @@ export function collectIdentifierTokens(
     const identifier = tryReadIdentifier(source, tokenStart, end);
     if (identifier) {
       identifiers.push(identifier);
-      state.regexAllowed = !endsExpression(identifier.text);
+      state.regexAllowed = isRegexPrefixKeyword(
+        source,
+        identifier.start,
+        identifier.end,
+      );
       cursor = identifier.end;
       continue;
     }
@@ -823,21 +813,22 @@ function skipTrivia(
 ): number {
   let cursor = start;
   while (cursor < end) {
-    const char = source[cursor];
-    if (/\s/.test(char)) {
+    const charCode = source.charCodeAt(cursor);
+    if (isWhitespaceCode(charCode)) {
       cursor++;
       continue;
     }
-    if (char === "/" && source[cursor + 1] === "/") {
+    if (charCode === 47 && source.charCodeAt(cursor + 1) === 47) {
       cursor += 2;
-      while (cursor < end && source[cursor] !== "\n") cursor++;
+      while (cursor < end && source.charCodeAt(cursor) !== 10) cursor++;
       continue;
     }
-    if (char === "/" && source[cursor + 1] === "*") {
+    if (charCode === 47 && source.charCodeAt(cursor + 1) === 42) {
       cursor += 2;
       while (
         cursor + 1 < end &&
-        !(source[cursor] === "*" && source[cursor + 1] === "/")
+        !(source.charCodeAt(cursor) === 42 &&
+          source.charCodeAt(cursor + 1) === 47)
       ) {
         cursor++;
       }
@@ -864,20 +855,21 @@ function advanceScanner(
   const cursor = start;
   if (cursor >= end) return cursor;
 
-  const char = source[cursor];
+  const charCode = source.charCodeAt(cursor);
 
-  if (char === "'" || char === '"') {
+  if (charCode === 39 || charCode === 34) {
     state.regexAllowed = false;
-    return scanStringLiteral(source, cursor, char, end);
+    return scanStringLiteral(source, cursor, charCode, end);
   }
 
-  if (char === "`") {
+  if (charCode === 96) {
     state.regexAllowed = false;
     return scanTemplateLiteral(source, cursor, end);
   }
 
-  if (char === "/") {
-    if (source[cursor + 1] === "/" || source[cursor + 1] === "*") {
+  if (charCode === 47) {
+    const nextCode = source.charCodeAt(cursor + 1);
+    if (nextCode === 47 || nextCode === 42) {
       return skipTrivia(source, cursor, end);
     }
     if (state.regexAllowed || looksLikeRegexStart(source, cursor)) {
@@ -885,80 +877,86 @@ function advanceScanner(
       return scanRegexLiteral(source, cursor, end);
     }
     state.regexAllowed = true;
-    return cursor + (source[cursor + 1] === "=" ? 2 : 1);
+    return cursor + (nextCode === 61 ? 2 : 1);
   }
 
-  const identifier = tryReadIdentifier(source, cursor, end);
-  if (identifier) {
-    state.regexAllowed = !endsExpression(identifier.text);
-    return identifier.end;
+  const identifierEnd = scanIdentifierEnd(source, cursor, end);
+  if (identifierEnd !== undefined) {
+    state.regexAllowed = isRegexPrefixKeyword(source, cursor, identifierEnd);
+    return identifierEnd;
   }
 
-  if (isDigit(char) || (char === "." && isDigit(source[cursor + 1] ?? ""))) {
+  if (
+    isDigitCode(charCode) ||
+    (charCode === 46 && isDigitCode(source.charCodeAt(cursor + 1)))
+  ) {
     state.regexAllowed = false;
     return scanNumberLiteral(source, cursor, end);
   }
 
-  switch (char) {
-    case "(":
+  switch (charCode) {
+    case 40: // (
       state.parenDepth++;
       state.regexAllowed = true;
       return cursor + 1;
-    case ")":
+    case 41: // )
       state.parenDepth = Math.max(0, state.parenDepth - 1);
       state.regexAllowed = false;
       return cursor + 1;
-    case "[":
+    case 91: // [
       state.bracketDepth++;
       state.regexAllowed = true;
       return cursor + 1;
-    case "]":
+    case 93: // ]
       state.bracketDepth = Math.max(0, state.bracketDepth - 1);
       state.regexAllowed = false;
       return cursor + 1;
-    case "{":
+    case 123: // {
       state.braceDepth++;
       state.regexAllowed = true;
       return cursor + 1;
-    case "}":
+    case 125: // }
       state.braceDepth = Math.max(0, state.braceDepth - 1);
       state.regexAllowed = false;
       return cursor + 1;
-    case ".":
+    case 46: // .
       state.regexAllowed = false;
       return cursor + 1;
-    case "+":
-    case "-":
+    case 43: // +
+    case 45: // -
       state.regexAllowed = true;
-      if (source[cursor + 1] === char) return cursor + 2;
+      if (source.charCodeAt(cursor + 1) === charCode) return cursor + 2;
       return cursor + 1;
-    case "=":
+    case 61: // =
       state.regexAllowed = true;
-      if (source[cursor + 1] === ">" || source[cursor + 1] === "=") {
-        return cursor + 2 + Number(source[cursor + 2] === "=");
+      if (
+        source.charCodeAt(cursor + 1) === 62 ||
+        source.charCodeAt(cursor + 1) === 61
+      ) {
+        return cursor + 2 + Number(source.charCodeAt(cursor + 2) === 61);
       }
       return cursor + 1;
-    case "!":
-    case "<":
-    case ">":
+    case 33: // !
+    case 60: // <
+    case 62: // >
       state.regexAllowed = true;
-      if (source[cursor + 1] === "=") {
-        return cursor + 2 + Number(source[cursor + 2] === "=");
+      if (source.charCodeAt(cursor + 1) === 61) {
+        return cursor + 2 + Number(source.charCodeAt(cursor + 2) === 61);
       }
       return cursor + 1;
-    case "&":
-    case "|":
+    case 38: // &
+    case 124: // |
       state.regexAllowed = true;
-      if (source[cursor + 1] === char) return cursor + 2;
+      if (source.charCodeAt(cursor + 1) === charCode) return cursor + 2;
       return cursor + 1;
-    case ",":
-    case ":":
-    case ";":
-    case "?":
-    case "*":
-    case "%":
-    case "^":
-    case "~":
+    case 44: // ,
+    case 58: // :
+    case 59: // ;
+    case 63: // ?
+    case 42: // *
+    case 37: // %
+    case 94: // ^
+    case 126: // ~
       state.regexAllowed = true;
       return cursor + 1;
     default:
@@ -969,7 +967,7 @@ function advanceScanner(
 
 function looksLikeRegexStart(source: string, cursor: number): boolean {
   let index = cursor - 1;
-  while (index >= 0 && /\s/.test(source[index])) {
+  while (index >= 0 && isWhitespaceCode(source.charCodeAt(index))) {
     index--;
   }
 
@@ -977,26 +975,26 @@ function looksLikeRegexStart(source: string, cursor: number): boolean {
     return true;
   }
 
-  return /[=([{,:;!?*%^&|<>]/.test(source[index]);
+  return isRegexPrefixPunctuation(source.charCodeAt(index));
 }
 
 function scanStringLiteral(
   source: string,
   start: number,
-  quote: string,
+  quoteCode: number,
   end: number,
 ): number {
   let cursor = start + 1;
   while (cursor < end) {
-    const char = source[cursor];
-    if (char === "\\") {
+    const charCode = source.charCodeAt(cursor);
+    if (charCode === 92) {
       cursor += 2;
       continue;
     }
-    if (char === quote) {
+    if (charCode === quoteCode) {
       return cursor + 1;
     }
-    if (char === "\n" || char === "\r") {
+    if (charCode === 10 || charCode === 13) {
       throw new CompiledJsParseError(start, "Unterminated string literal");
     }
     cursor++;
@@ -1011,15 +1009,15 @@ function scanTemplateLiteral(
 ): number {
   let cursor = start + 1;
   while (cursor < end) {
-    const char = source[cursor];
-    if (char === "\\") {
+    const charCode = source.charCodeAt(cursor);
+    if (charCode === 92) {
       cursor += 2;
       continue;
     }
-    if (char === "`") {
+    if (charCode === 96) {
       return cursor + 1;
     }
-    if (char === "$" && source[cursor + 1] === "{") {
+    if (charCode === 36 && source.charCodeAt(cursor + 1) === 123) {
       cursor = scanTemplateExpression(source, cursor + 2, end);
       continue;
     }
@@ -1041,9 +1039,9 @@ function scanTemplateExpression(
   };
   let cursor = start;
   while (cursor < end) {
-    const char = source[cursor];
+    const charCode = source.charCodeAt(cursor);
     if (
-      char === "}" &&
+      charCode === 125 &&
       state.parenDepth === 0 &&
       state.bracketDepth === 0 &&
       state.braceDepth === 1
@@ -1063,27 +1061,27 @@ function scanRegexLiteral(
   let cursor = start + 1;
   let inClass = false;
   while (cursor < end) {
-    const char = source[cursor];
-    if (char === "\\") {
+    const charCode = source.charCodeAt(cursor);
+    if (charCode === 92) {
       cursor += 2;
       continue;
     }
-    if (char === "\n" || char === "\r") {
+    if (charCode === 10 || charCode === 13) {
       throw new CompiledJsParseError(start, "Unterminated regular expression");
     }
-    if (char === "[") {
+    if (charCode === 91) {
       inClass = true;
       cursor++;
       continue;
     }
-    if (char === "]") {
+    if (charCode === 93) {
       inClass = false;
       cursor++;
       continue;
     }
-    if (char === "/" && !inClass) {
+    if (charCode === 47 && !inClass) {
       cursor++;
-      while (cursor < end && /[A-Za-z]/.test(source[cursor])) {
+      while (cursor < end && isAsciiLetterCode(source.charCodeAt(cursor))) {
         cursor++;
       }
       return cursor;
@@ -1101,7 +1099,7 @@ function scanNumberLiteral(
   let cursor = start;
   while (
     cursor < end &&
-    /[0-9A-Za-z_.$]/.test(source[cursor])
+    isNumberLiteralCode(source.charCodeAt(cursor))
   ) {
     cursor++;
   }
@@ -1121,17 +1119,14 @@ function tryReadIdentifier(
   start: number,
   end: number,
 ): { text: string; start: number; end: number } | undefined {
-  if (start >= end || !isIdentifierStart(source[start])) {
+  const identifierEnd = scanIdentifierEnd(source, start, end);
+  if (identifierEnd === undefined) {
     return undefined;
   }
-  let cursor = start + 1;
-  while (cursor < end && isIdentifierPart(source[cursor])) {
-    cursor++;
-  }
   return {
-    text: source.slice(start, cursor),
+    text: source.slice(start, identifierEnd),
     start,
-    end: cursor,
+    end: identifierEnd,
   };
 }
 
@@ -1162,18 +1157,117 @@ function findTopLevelArrow(
   return undefined;
 }
 
-function endsExpression(token: string): boolean {
-  return !REGEX_PREFIX_KEYWORDS.has(token);
+function scanIdentifierEnd(
+  source: string,
+  start: number,
+  end: number,
+): number | undefined {
+  if (start >= end || !isIdentifierStartCode(source.charCodeAt(start))) {
+    return undefined;
+  }
+  let cursor = start + 1;
+  while (cursor < end && isIdentifierPartCode(source.charCodeAt(cursor))) {
+    cursor++;
+  }
+  return cursor;
 }
 
-function isIdentifierStart(char: string | undefined): boolean {
-  return !!char && /[A-Za-z_$]/.test(char);
+function isRegexPrefixKeyword(
+  source: string,
+  start: number,
+  end: number,
+): boolean {
+  const length = end - start;
+  switch (length) {
+    case 2:
+      return source.startsWith("in", start);
+    case 3:
+      return source.startsWith("new", start);
+    case 4:
+      return source.startsWith("case", start) ||
+        source.startsWith("else", start) ||
+        source.startsWith("void", start);
+    case 5:
+      return source.startsWith("throw", start) ||
+        source.startsWith("yield", start);
+    case 6:
+      return source.startsWith("delete", start) ||
+        source.startsWith("return", start) ||
+        source.startsWith("typeof", start);
+    case 10:
+      return source.startsWith("instanceof", start);
+    default:
+      return false;
+  }
 }
 
-function isIdentifierPart(char: string | undefined): boolean {
-  return !!char && /[\w$]/.test(char);
+function isIdentifierStartCode(charCode: number): boolean {
+  return (charCode >= 65 && charCode <= 90) ||
+    (charCode >= 97 && charCode <= 122) ||
+    charCode === 95 ||
+    charCode === 36;
 }
 
-function isDigit(char: string | undefined): boolean {
-  return !!char && /[0-9]/.test(char);
+function isIdentifierPartCode(charCode: number): boolean {
+  return isIdentifierStartCode(charCode) ||
+    (charCode >= 48 && charCode <= 57);
+}
+
+function isDigitCode(charCode: number): boolean {
+  return charCode >= 48 && charCode <= 57;
+}
+
+function isAsciiLetterCode(charCode: number): boolean {
+  return (charCode >= 65 && charCode <= 90) ||
+    (charCode >= 97 && charCode <= 122);
+}
+
+function isWhitespaceCode(charCode: number): boolean {
+  return charCode === 9 ||
+    charCode === 10 ||
+    charCode === 11 ||
+    charCode === 12 ||
+    charCode === 13 ||
+    charCode === 32 ||
+    charCode === 160 ||
+    charCode === 5760 ||
+    (charCode >= 8192 && charCode <= 8202) ||
+    charCode === 8232 ||
+    charCode === 8233 ||
+    charCode === 8239 ||
+    charCode === 8287 ||
+    charCode === 12288 ||
+    charCode === 65279;
+}
+
+function isRegexPrefixPunctuation(charCode: number): boolean {
+  switch (charCode) {
+    case 61: // =
+    case 40: // (
+    case 91: // [
+    case 123: // {
+    case 44: // ,
+    case 58: // :
+    case 59: // ;
+    case 33: // !
+    case 63: // ?
+    case 42: // *
+    case 37: // %
+    case 94: // ^
+    case 38: // &
+    case 124: // |
+    case 60: // <
+    case 62: // >
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isNumberLiteralCode(charCode: number): boolean {
+  return isDigitCode(charCode) ||
+    isAsciiLetterCode(charCode) ||
+    charCode === 95 || // _
+    charCode === 46 || // .
+    charCode === 36; // $
 }
