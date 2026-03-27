@@ -235,10 +235,16 @@ export async function ensureExecShim(
   await Deno.mkdir(stateDir, { recursive: true });
 
   const compiled = isCompiledBinary();
+  const stateScopedShimPath = join(
+    stateDir,
+    `ct-exec-${await hashMountLookupKey(
+      compiled ? Deno.execPath() : cliMod(importMetaUrl),
+    )}`,
+  );
   const preferredShimPath = compiled
-    ? join(stateDir, "ct-exec")
+    ? stateScopedShimPath
     : join(repoRoot(importMetaUrl), ".ct", "fuse", "ct-exec");
-  const fallbackShimPath = join(stateDir, "ct-exec");
+  const fallbackShimPath = stateScopedShimPath;
 
   const script = compiled
     ? `#!/usr/bin/env bash
