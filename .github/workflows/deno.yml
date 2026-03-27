@@ -230,6 +230,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y jq fuse3 libfuse3-dev
+          sudo chmod 666 /dev/fuse
 
       - name: 🧪 Run CLI integration tests
         working-directory: packages/cli
@@ -239,7 +240,11 @@ jobs:
       - name: 🧪 Run CLI FUSE integration tests
         working-directory: packages/cli
         run: |
-          CT_CLI_INTEGRATION_USE_LOCAL=1 API_URL=http://localhost:8000 ./integration/fuse-exec.sh
+          API_URL=http://localhost:8000 ./integration/fuse-exec.sh
+
+      - name: 📋 FUSE daemon log (on failure)
+        if: failure()
+        run: cat ~/.ct/fuse/fuse-daemon.log 2>/dev/null || echo "No daemon log found"
 
   pattern-integration-test:
     name: "Pattern Integration Tests"

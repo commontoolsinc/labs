@@ -68,6 +68,12 @@ function isFsWriteError(error: unknown): boolean {
     error instanceof Deno.errors.NotSupported;
 }
 
+function isCompiledBinary(): boolean {
+  const exec = Deno.execPath();
+  const base = basename(exec);
+  return base !== "deno" && base !== "deno.exe";
+}
+
 async function hashMountLookupKey(key: string): Promise<string> {
   const data = new TextEncoder().encode(key);
   const hash = await crypto.subtle.digest("SHA-256", data);
@@ -226,22 +232,25 @@ export async function ensureExecShim(
   stateDir = defaultStateDir(),
   importMetaUrl = import.meta.url,
 ): Promise<string> {
-  const denoPath = Deno.execPath();
-  const modPath = cliMod(importMetaUrl);
-  const script = `#!/usr/bin/env bash
-export CT_EXEC_SHEBANG=1
-exec "${denoPath}" run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run "${modPath}" "$@"
-`;
-
   await Deno.mkdir(stateDir, { recursive: true });
 
-  const preferredShimPath = join(
-    repoRoot(importMetaUrl),
-    ".ct",
-    "fuse",
-    "ct-exec",
-  );
+  const compiled = isCompiledBinary();
+  const preferredShimPath = compiled
+    ? join(stateDir, "ct-exec")
+    : join(repoRoot(importMetaUrl), ".ct", "fuse", "ct-exec");
   const fallbackShimPath = join(stateDir, "ct-exec");
+
+  const script = compiled
+    ? `#!/usr/bin/env bash
+export CT_EXEC_SHEBANG=1
+exec "${Deno.execPath()}" "$@"
+`
+    : `#!/usr/bin/env bash
+export CT_EXEC_SHEBANG=1
+exec "${Deno.execPath()}" run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run "${
+      cliMod(importMetaUrl)
+    }" "$@"
+`;
 
   const writeShim = async (shimPath: string): Promise<void> => {
     await Deno.mkdir(dirname(shimPath), { recursive: true });
@@ -253,7 +262,7 @@ exec "${denoPath}" run --allow-net --allow-ffi --allow-read --allow-write --allo
     await writeShim(preferredShimPath);
     return preferredShimPath;
   } catch (error) {
-    if (!isFsWriteError(error)) {
+    if (!isFsWriteError(error) || compiled) {
       throw error;
     }
     await writeShim(fallbackShimPath);
