@@ -35,16 +35,31 @@ import { HandleMap } from "./handles.ts";
 
 const encoder = new TextEncoder();
 
+// Operation ring buffer — last 50 ops for crash diagnostics
+const OP_RING: string[] = [];
+const OP_RING_SIZE = 50;
+function logOp(name: string, detail: string): void {
+  const entry = `${Date.now()} ${name} ${detail}`;
+  if (OP_RING.length >= OP_RING_SIZE) OP_RING.shift();
+  OP_RING.push(entry);
+}
+function dumpOpRing(): void {
+  console.error("[fuse:crash] Last operations:");
+  for (const e of OP_RING) console.error("  " + e);
+}
+
 // Prevent uncaught errors from crashing the FUSE daemon.
 // Pattern recomputation and cell operations can throw from setTimeout
 // callbacks (e.g. "Cannot create cell link - space required"). These
 // errors should be logged, not fatal.
 globalThis.addEventListener("unhandledrejection", (e) => {
+  dumpOpRing();
   console.error("[FUSE] Unhandled promise rejection:", e.reason);
   e.preventDefault();
 });
 
 globalThis.addEventListener("error", (e) => {
+  dumpOpRing();
   console.error("[FUSE] Uncaught error:", e.error ?? e.message);
   e.preventDefault();
 });
@@ -188,6 +203,7 @@ async function main() {
       parentIno: number | bigint,
       namePtr: Deno.PointerValue,
     ) => {
+      logOp("lookup", parentIno.toString());
       const name = readCString(namePtr);
       const parent = BigInt(parentIno);
       const ino = tree.lookup(parent, name);
@@ -252,6 +268,7 @@ async function main() {
       _ino: number | bigint,
       _nlookup: number | bigint,
     ) => {
+      logOp("forget", _ino.toString());
       fuse.symbols.fuse_reply_none(req);
     },
   );
@@ -261,6 +278,7 @@ async function main() {
   const getattrCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
     (req: Deno.PointerValue, ino: number | bigint, _fi: Deno.PointerValue) => {
+      logOp("getattr", ino.toString());
       const inode = BigInt(ino);
       const node = tree.getNode(inode);
 
@@ -290,6 +308,7 @@ async function main() {
   const readlinkCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64"], result: "void" } as const,
     (req: Deno.PointerValue, ino: number | bigint) => {
+      logOp("readlink", ino.toString());
       const node = tree.getNode(BigInt(ino));
       if (!node || node.kind !== "symlink") {
         fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -311,6 +330,7 @@ async function main() {
       ino: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("open", ino.toString());
       const inode = BigInt(ino);
       const node = tree.getNode(inode);
       if (!node) {
@@ -388,6 +408,7 @@ async function main() {
       offset: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("read", ino.toString());
       const inode = BigInt(ino);
 
       // If we have an open handle with a buffer, read from it
@@ -448,6 +469,7 @@ async function main() {
       ino: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("opendir", ino.toString());
       const node = tree.getNode(BigInt(ino));
       if (!node || node.kind !== "dir") {
         fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -471,6 +493,7 @@ async function main() {
       offset: number | bigint,
       _fi: Deno.PointerValue,
     ) => {
+      logOp("readdir", ino.toString());
       const inode = BigInt(ino);
       const node = tree.getNode(inode);
       if (!node || node.kind !== "dir") {
@@ -664,6 +687,7 @@ async function main() {
       offset: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("write", _ino.toString());
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
       if (!handle) {
@@ -695,6 +719,7 @@ async function main() {
       _ino: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("flush", _ino.toString());
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
 
@@ -729,6 +754,7 @@ async function main() {
       toSet: number,
       fi: Deno.PointerValue,
     ) => {
+      logOp("setattr", ino.toString());
       const inode = BigInt(ino);
       const node = tree.getNode(inode);
       if (!node) {
@@ -779,6 +805,7 @@ async function main() {
   const releaseCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
     (req: Deno.PointerValue, _ino: number | bigint, fi: Deno.PointerValue) => {
+      logOp("release", _ino.toString());
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
 
@@ -799,6 +826,7 @@ async function main() {
   const releasedirCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
     (req: Deno.PointerValue, _ino: number | bigint, _fi: Deno.PointerValue) => {
+      logOp("releasedir", _ino.toString());
       fuse.symbols.fuse_reply_err(req, 0); // success
     },
   );
@@ -812,6 +840,7 @@ async function main() {
       namePtr: Deno.PointerValue,
       size: bigint,
     ) => {
+      logOp("getxattr", ino.toString());
       const attrName = readCString(namePtr);
       const node = tree.getNode(ino);
 
@@ -914,6 +943,7 @@ async function main() {
       _mode: number,
       fi: Deno.PointerValue,
     ) => {
+      logOp("create", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -983,6 +1013,7 @@ async function main() {
       namePtr: Deno.PointerValue,
       _mode: number,
     ) => {
+      logOp("mkdir", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -1022,6 +1053,7 @@ async function main() {
       parentIno: number | bigint,
       namePtr: Deno.PointerValue,
     ) => {
+      logOp("unlink", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -1104,6 +1136,7 @@ async function main() {
       parentIno: number | bigint,
       namePtr: Deno.PointerValue,
     ) => {
+      logOp("rmdir", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -1186,6 +1219,7 @@ async function main() {
       newParentIno: bigint,
       newNamePtr: Deno.PointerValue,
     ) => {
+      logOp("rename", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
