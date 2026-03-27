@@ -10,6 +10,14 @@ and link pieces together with `ln -s`.
 Install [FUSE-T](https://www.fuse-t.org/) (preferred) or
 [macFUSE](https://osxfuse.github.io/) on macOS.
 
+On Linux (Debian/Ubuntu), install FUSE plus the toolchain and runtime library
+expected by this package:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y fuse3 libfuse3-dev pkg-config gcc
+```
+
 ## Quick Start
 
 ```bash

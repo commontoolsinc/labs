@@ -52,8 +52,10 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         run: deno install --frozen=true
 
-      - name: 📦 Install libfuse3-dev for FUSE package
-        run: sudo apt-get update && sudo apt-get install -y libfuse3-dev fuse3
+      - name: 📦 Install Linux FUSE test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config gcc libfuse3-dev fuse3
 
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
@@ -224,10 +226,20 @@ jobs:
           echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
           ./common-binaries/toolshed &
 
+      - name: 📦 Install Linux FUSE runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq fuse3 libfuse3-dev
+
       - name: 🧪 Run CLI integration tests
         working-directory: packages/cli
         run: |
           API_URL=http://localhost:8000 ./integration/integration.sh
+
+      - name: 🧪 Run CLI FUSE integration tests
+        working-directory: packages/cli
+        run: |
+          API_URL=http://localhost:8000 ./integration/fuse-exec.sh
 
   pattern-integration-test:
     name: "Pattern Integration Tests"
