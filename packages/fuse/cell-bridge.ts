@@ -465,8 +465,15 @@ export class CellBridge {
     entitiesIno: bigint,
     entityId: string,
   ): Promise<boolean> {
-    // Already resolved?
-    if (this.tree.lookup(entitiesIno, entityId) !== undefined) return true;
+    // Already fully resolved? (has result or input content, not just a stub)
+    const existingEntityIno = this.tree.lookup(entitiesIno, entityId);
+    if (existingEntityIno !== undefined) {
+      const hasContent = this.tree.lookup(existingEntityIno, "result") !==
+          undefined ||
+        this.tree.lookup(existingEntityIno, "input") !== undefined;
+      if (hasContent) return true;
+      // Stub dir exists — fall through to populate it in-place
+    }
 
     // Find the space that owns this entities/ dir
     let state: SpaceState | undefined;
@@ -494,12 +501,14 @@ export class CellBridge {
     }
     if (!matchedPiece) return false;
 
-    // Build the piece tree under entities/<entityId> and subscribe for updates
+    // Build the piece tree under entities/<entityId> and subscribe for updates.
+    // Pass existingEntityIno to reuse the stub dir rather than creating a new one.
     const pieceIno = await this.loadPieceTree(
       matchedPiece,
       entitiesIno,
       entityId,
       spaceName,
+      existingEntityIno,
     );
     const subs = await this.subscribePiece(
       matchedPiece,
@@ -549,6 +558,21 @@ export class CellBridge {
     const subs = await this.subscribePiece(piece, pieceIno, name, spaceName);
     state.pieceSubs.set(name, subs);
 
+    // Create a lightweight stub entity dir so `ls entities/` shows stable IDs
+    // immediately. Full content is populated lazily by resolveEntity() on
+    // first access, avoiding doubled subscriptions and startup cost.
+    const entityStubIno = this.tree.addDir(state.entitiesIno, piece.id);
+    this.tree.addFile(
+      entityStubIno,
+      "meta.json",
+      JSON.stringify(
+        { id: piece.id, entityId: piece.id, name: piece.name() || "" },
+        null,
+        2,
+      ),
+      "object",
+    );
+
     return name;
   }
 
@@ -565,6 +589,18 @@ export class CellBridge {
 
     // Remove tree nodes
     this.tree.removeChild(state.piecesIno, name);
+
+    // Clean up entity tree
+    const pieceId = state.pieceMap.get(name);
+    if (pieceId) {
+      this.tree.removeChild(state.entitiesIno, pieceId);
+      const entitySubsKey = `entity:${pieceId}`;
+      const entitySubs = state.pieceSubs.get(entitySubsKey);
+      if (entitySubs) {
+        for (const cancel of entitySubs) cancel();
+        state.pieceSubs.delete(entitySubsKey);
+      }
+    }
 
     state.pieceMap.delete(name);
     state.pieceControllers.delete(name);
@@ -624,6 +660,11 @@ export class CellBridge {
 
     if (toRemove.length === 0 && toAdd.length === 0) return;
 
+    // Capture removed entity IDs before removePieceFromSpace deletes them from pieceMap
+    const removedEntityIds = toRemove.map((n) => state.pieceMap.get(n)).filter(
+      (id): id is string => id !== undefined,
+    );
+
     for (const name of toRemove) {
       this.removePieceFromSpace(state, name);
       console.log(`[${spaceName}] Removed piece: ${name}`);
@@ -654,6 +695,16 @@ export class CellBridge {
       // Also invalidate "pieces" entry on the space dir so readdir refreshes
       this.onInvalidate(state.spaceIno, ["pieces"]);
     }
+    // Invalidate added and removed entity dirs
+    if (this.onInvalidate) {
+      const entityInvalidIds = [
+        ...removedEntityIds,
+        ...toAdd.map((p) => p.id),
+      ];
+      if (entityInvalidIds.length > 0) {
+        this.onInvalidate(state.entitiesIno, entityInvalidIds);
+      }
+    }
     // Invalidate cached inode data for pieces dir (forces readdir refresh)
     if (this.onInvalidateInode) {
       this.onInvalidateInode(state.piecesIno);
@@ -668,6 +719,7 @@ export class CellBridge {
       name: string;
       pattern: string;
       summary: string;
+      entityPath: string;
     }> = [];
 
     for (const [name, id] of state.pieceMap) {
@@ -693,7 +745,13 @@ export class CellBridge {
         // Summary not always available
       }
 
-      entries.push({ id, name, pattern, summary });
+      entries.push({
+        id,
+        name,
+        pattern,
+        summary,
+        entityPath: `entities/${id}`,
+      });
     }
 
     const existingIno = this.tree.lookup(state.piecesIno, "pieces.json");
@@ -829,9 +887,11 @@ export class CellBridge {
       const childCell = rootCell.key(key).asSchemaFromLinks();
       let childValue: unknown;
       try {
-        childValue = childCell.getRaw?.();
-        if (childValue === undefined) {
-          childValue = childCell.get?.();
+        childValue = childCell.get?.();
+        // Override with raw link reference only for sigil links (enables FUSE symlinks)
+        const rawValue = childCell.getRaw?.();
+        if (isSigilLink(rawValue)) {
+          childValue = rawValue;
         }
       } catch {
         childValue = undefined;
@@ -1131,8 +1191,13 @@ export class CellBridge {
     parentIno: bigint,
     name: string,
     spaceName: string,
+    existingIno?: bigint,
   ): Promise<bigint> {
-    const pieceIno = this.tree.addDir(parentIno, name);
+    const pieceIno = existingIno ?? this.tree.addDir(parentIno, name);
+
+    // Clear existing meta.json if reusing a stub dir (avoids orphaned inode)
+    const existingMetaIno = this.tree.lookup(pieceIno, "meta.json");
+    if (existingMetaIno !== undefined) this.tree.clear(existingMetaIno);
 
     // Create meta.json first so it's always present
     let patternName = "";

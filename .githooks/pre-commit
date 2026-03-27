@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "${repo_root}"
+
+if ! git diff --quiet --ignore-submodules --; then
+  cat <<'EOF' >&2
+pre-commit: unstaged tracked changes detected.
+Stage or stash tracked changes before committing.
+This hook runs repo-level deno fmt and deno lint.
+EOF
+  exit 1
+fi
+
+echo "pre-commit: running deno fmt"
+staged_files=()
+while IFS= read -r path; do
+  if [[ -n "${path}" ]]; then
+    staged_files+=("${path}")
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMRTUXB)
+
+deno fmt
+
+formatted_files=()
+while IFS= read -r path; do
+  if [[ -n "${path}" ]]; then
+    formatted_files+=("${path}")
+  fi
+done < <(git diff --name-only --diff-filter=ACMRTUXB)
+
+if (( ${#formatted_files[@]} > 0 )); then
+  declare -A staged_lookup=()
+  for path in "${staged_files[@]}"; do
+    staged_lookup["${path}"]=1
+  done
+
+  unrelated_files=()
+  for path in "${formatted_files[@]}"; do
+    if [[ -z "${staged_lookup[${path}]:-}" ]]; then
+      unrelated_files+=("${path}")
+    fi
+  done
+
+  if (( ${#unrelated_files[@]} > 0 )); then
+    echo "pre-commit: deno fmt changed tracked files outside the staged set:" >&2
+    printf '  %s\n' "${unrelated_files[@]}" >&2
+    cat <<'EOF' >&2
+Review and stage those formatting changes explicitly, then retry the commit.
+EOF
+    exit 1
+  fi
+
+  git add -- "${formatted_files[@]}"
+fi
+
+echo "pre-commit: running deno lint"
+deno lint
+
+echo "pre-commit: checks passed"

@@ -187,19 +187,43 @@ function resetInternCache(): void {
 seedBooleanInterns();
 
 /**
- * Intern a schema: freeze it, compute its hash, and cache the
- * bidirectional mapping. Returns the existing `SchemaAndHash` if the
- * schema (or a structurally-identical one with the same hash) has
- * already been interned.
+ * Intern a schema: Freeze it, compute its hash, and cache the bidirectional
+ * mapping. Returns the actual interned schema object or, optionally, the full
+ * `SchemaAndHash`. The returned schema object is the same as (`===` to) the
+ * given `schema` only if an identical schema was not already interned.
  *
- * **Caching behaviour:** only deep-frozen schema objects are used as
- * cache keys — mutable inputs are never cached by identity.
- * `toDeepFrozenSchema()` returns the same reference if the input is
- * already deep-frozen, so such schemas hit the WeakMap on repeated
- * calls. For mutable inputs, a new frozen copy is created each time
- * and the hash-keyed reverse map finds a structural match.
+ * If given a non-deep-frozen `schema`, this function will _always_ make it
+ * deep-frozen as a side effect. Callers must be okay with this! This design is
+ * motivated by the desire to minimize unnecessary cloning of objects, colored
+ * by the observation that most mutable schemas are built by starting with an
+ * effectively -- if not actually -- deep-immutable schema and selectively
+ * shallow-cloned as mutable, for the express purpose of tactical modification
+ * and then immediately treated once again as deep-immutable.
  */
-export function internSchema(schema: JSONSchema): SchemaAndHash {
+export function internSchema(
+  schema: JSONSchema,
+  wantSchemaAndHash?: false,
+): JSONSchema;
+export function internSchema(
+  schema: JSONSchema,
+  wantSchemaAndHash: true,
+): SchemaAndHash;
+export function internSchema(
+  schema: JSONSchema,
+  wantSchemaAndHash?: boolean,
+): JSONSchema | SchemaAndHash;
+export function internSchema(
+  schema: JSONSchema,
+  wantSchemaAndHash: boolean = false,
+): JSONSchema | SchemaAndHash {
+  const sahResult = internSchemaReturningSchemaAndHash(schema);
+  return wantSchemaAndHash ? sahResult : sahResult.schema;
+}
+
+/**
+ * Helper for `internSchema()` which always returns a `SchemaAndHash`.
+ */
+function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
   // Boolean schemas are primitives — return prefab instances.
   if (typeof schema === "boolean") {
     return schema ? booleanInterns.true : booleanInterns.false;
@@ -209,8 +233,8 @@ export function internSchema(schema: JSONSchema): SchemaAndHash {
   const cached = schemaToSah.get(schema);
   if (cached) return cached;
 
-  // toDeepFrozenSchema returns the same reference if already deep-frozen.
-  const frozen = toDeepFrozenSchema(schema) as JSONSchemaObj;
+  // `toDeepFrozenSchema()` returns the same reference if already deep-frozen.
+  const frozen = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
 
   // Check the hash-keyed reverse map (structurally-equal but different object).
   const hash = _hashSchemaItemAsFabricHash(frozen);
@@ -250,11 +274,26 @@ export function internSchema(schema: JSONSchema): SchemaAndHash {
 /**
  * Look up a previously interned schema by its hash. Accepts a
  * `FabricHash` or a plain string. Returns `undefined` if the schema
- * has not been interned or has been garbage-collected.
+ * has not been interned or has been garbage-collected. If found, returns either
+ * the `schema` or full `SchemaAndHash` depending on the `wantSchemaAndHash`
+ * argument.
  */
 export function findInternedSchema(
   hash: FabricHash | string,
-): SchemaAndHash | undefined {
+  wantSchemaAndHash?: false,
+): JSONSchema | undefined;
+export function findInternedSchema(
+  hash: FabricHash | string,
+  wantSchemaAndHash: true,
+): SchemaAndHash | undefined;
+export function findInternedSchema(
+  hash: FabricHash | string,
+  wantSchemaAndHash?: boolean,
+): JSONSchema | SchemaAndHash | undefined;
+export function findInternedSchema(
+  hash: FabricHash | string,
+  wantSchemaAndHash: boolean = false,
+): JSONSchema | SchemaAndHash | undefined {
   const hashStr = typeof hash === "string" ? hash : hash.toString();
 
   const ref = hashToRef.get(hashStr);
@@ -267,5 +306,8 @@ export function findInternedSchema(
     return undefined;
   }
 
-  return schemaToSah.get(schema);
+  // Note: Because of the special treatment of `boolean` schemas, we can't just
+  // return `schema` here when `wantSchemaAndHash = false`.
+  const resultSah = schemaToSah.get(schema);
+  return wantSchemaAndHash ? resultSah : resultSah!.schema;
 }

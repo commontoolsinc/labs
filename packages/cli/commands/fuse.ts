@@ -275,7 +275,7 @@ export const fuse = new Command()
       console.log("Process still alive, trying system unmount...");
       const unmountCmd = Deno.build.os === "darwin"
         ? new Deno.Command("umount", { args: [absMountpoint] })
-        : new Deno.Command("fusermount", { args: ["-u", absMountpoint] });
+        : new Deno.Command("fusermount3", { args: ["-u", absMountpoint] });
       try {
         await unmountCmd.output();
       } catch {

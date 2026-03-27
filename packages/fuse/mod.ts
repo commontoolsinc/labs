@@ -9,18 +9,14 @@
 
 import { parseArgs } from "@std/cli/parse-args";
 import { CellBridge } from "./cell-bridge.ts";
-import { openFuse } from "./ffi.ts";
 import {
-  createFuseArgs,
   DIR_MODE,
   EACCES,
   EINVAL,
   EIO,
   EISDIR,
-  ENODATA,
   ENOENT,
   ENOTDIR,
-  ENTRY_PARAM_SIZE,
   ERANGE,
   EXDEV,
   FILE_MODE,
@@ -28,34 +24,42 @@ import {
   FILE_MODE_RWX,
   FILE_MODE_RX,
   FUSE_SET_ATTR_SIZE,
+  getPlatform,
   O_RDWR,
-  O_TRUNC,
   O_WRONLY,
-  OPS_OFFSETS,
-  OPS_SIZE,
   readCString,
-  readFileInfo,
-  STAT_SIZE,
   SYMLINK_MODE,
-  writeEntryParam,
-  writeFileInfo,
-  writeStat,
-} from "./ffi-types.ts";
+} from "./platform.ts";
 import { FsTree } from "./tree.ts";
 import { HandleMap } from "./handles.ts";
 
 const encoder = new TextEncoder();
+
+// Operation ring buffer — last 50 ops for crash diagnostics
+const OP_RING: string[] = [];
+const OP_RING_SIZE = 50;
+function logOp(name: string, detail: string): void {
+  const entry = `${Date.now()} ${name} ${detail}`;
+  if (OP_RING.length >= OP_RING_SIZE) OP_RING.shift();
+  OP_RING.push(entry);
+}
+function dumpOpRing(): void {
+  console.error("[fuse:crash] Last operations:");
+  for (const e of OP_RING) console.error("  " + e);
+}
 
 // Prevent uncaught errors from crashing the FUSE daemon.
 // Pattern recomputation and cell operations can throw from setTimeout
 // callbacks (e.g. "Cannot create cell link - space required"). These
 // errors should be logged, not fatal.
 globalThis.addEventListener("unhandledrejection", (e) => {
+  dumpOpRing();
   console.error("[FUSE] Unhandled promise rejection:", e.reason);
   e.preventDefault();
 });
 
 globalThis.addEventListener("error", (e) => {
+  dumpOpRing();
   console.error("[FUSE] Uncaught error:", e.error ?? e.message);
   e.preventDefault();
 });
@@ -91,8 +95,22 @@ async function main() {
     Deno.mkdirSync(mountpoint, { recursive: true });
   }
 
-  // Open libfuse
-  const fuse = openFuse();
+  // Open libfuse via platform abstraction
+  const platform = await getPlatform();
+  const fuse = platform.openFuse();
+  const {
+    STAT_SIZE,
+    ENTRY_PARAM_SIZE,
+    OPS_SIZE,
+    OPS_OFFSETS,
+    STAT_ST_SIZE_OFFSET,
+    writeStat,
+    writeEntryParam,
+    readFileInfo,
+    writeFileInfo,
+    O_TRUNC,
+    ENODATA,
+  } = platform;
 
   // Create filesystem tree
   const tree = new FsTree();
@@ -185,6 +203,7 @@ async function main() {
       parentIno: number | bigint,
       namePtr: Deno.PointerValue,
     ) => {
+      logOp("lookup", parentIno.toString());
       const name = readCString(namePtr);
       const parent = BigInt(parentIno);
       const ino = tree.lookup(parent, name);
@@ -249,6 +268,7 @@ async function main() {
       _ino: number | bigint,
       _nlookup: number | bigint,
     ) => {
+      logOp("forget", _ino.toString());
       fuse.symbols.fuse_reply_none(req);
     },
   );
@@ -258,6 +278,7 @@ async function main() {
   const getattrCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
     (req: Deno.PointerValue, ino: number | bigint, _fi: Deno.PointerValue) => {
+      logOp("getattr", ino.toString());
       const inode = BigInt(ino);
       const node = tree.getNode(inode);
 
@@ -287,6 +308,7 @@ async function main() {
   const readlinkCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64"], result: "void" } as const,
     (req: Deno.PointerValue, ino: number | bigint) => {
+      logOp("readlink", ino.toString());
       const node = tree.getNode(BigInt(ino));
       if (!node || node.kind !== "symlink") {
         fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -308,6 +330,7 @@ async function main() {
       ino: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("open", ino.toString());
       const inode = BigInt(ino);
       const node = tree.getNode(inode);
       if (!node) {
@@ -385,6 +408,7 @@ async function main() {
       offset: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("read", ino.toString());
       const inode = BigInt(ino);
 
       // If we have an open handle with a buffer, read from it
@@ -445,6 +469,7 @@ async function main() {
       ino: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("opendir", ino.toString());
       const node = tree.getNode(BigInt(ino));
       if (!node || node.kind !== "dir") {
         fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -468,6 +493,7 @@ async function main() {
       offset: number | bigint,
       _fi: Deno.PointerValue,
     ) => {
+      logOp("readdir", ino.toString());
       const inode = BigInt(ino);
       const node = tree.getNode(inode);
       if (!node || node.kind !== "dir") {
@@ -661,6 +687,7 @@ async function main() {
       offset: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("write", _ino.toString());
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
       if (!handle) {
@@ -692,6 +719,7 @@ async function main() {
       _ino: number | bigint,
       fi: Deno.PointerValue,
     ) => {
+      logOp("flush", _ino.toString());
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
 
@@ -726,6 +754,7 @@ async function main() {
       toSet: number,
       fi: Deno.PointerValue,
     ) => {
+      logOp("setattr", ino.toString());
       const inode = BigInt(ino);
       const node = tree.getNode(inode);
       if (!node) {
@@ -735,9 +764,9 @@ async function main() {
 
       // Handle truncate / size change
       if (toSet & FUSE_SET_ATTR_SIZE) {
-        // Read new size from attr struct (st_size @ offset 96)
+        // Read new size from attr struct
         const attrView = new Deno.UnsafePointerView(_attrPtr!);
-        const newSize = Number(attrView.getBigInt64(96));
+        const newSize = Number(attrView.getBigInt64(STAT_ST_SIZE_OFFSET));
         const { fh } = readFileInfo(fi);
         const handle = handles.get(fh);
         if (handle) {
@@ -776,6 +805,7 @@ async function main() {
   const releaseCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
     (req: Deno.PointerValue, _ino: number | bigint, fi: Deno.PointerValue) => {
+      logOp("release", _ino.toString());
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
 
@@ -796,27 +826,23 @@ async function main() {
   const releasedirCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
     (req: Deno.PointerValue, _ino: number | bigint, _fi: Deno.PointerValue) => {
+      logOp("releasedir", _ino.toString());
       fuse.symbols.fuse_reply_err(req, 0); // success
     },
   );
   callbacks.push(releasedirCb);
 
-  // getxattr(req, ino, name_ptr, size, position)
-  // macOS FUSE has an extra `position` parameter (uint32_t) — always ignored for user attrs
-  const getxattrCb = new Deno.UnsafeCallback(
-    {
-      parameters: ["pointer", "u64", "pointer", "usize", "u32"],
-      result: "void",
-    } as const,
+  // getxattr — platform factory handles macOS extra `position` param vs Linux 4-param signature
+  const getxattrCb = platform.createGetxattrCallback(
     (
       req: Deno.PointerValue,
-      ino: number | bigint,
+      ino: bigint,
       namePtr: Deno.PointerValue,
-      size: number | bigint,
-      _position: number,
+      size: bigint,
     ) => {
+      logOp("getxattr", ino.toString());
       const attrName = readCString(namePtr);
-      const node = tree.getNode(BigInt(ino));
+      const node = tree.getNode(ino);
 
       // Determine the xattr value (if any)
       let attrValue: Uint8Array | null = null;
@@ -917,6 +943,7 @@ async function main() {
       _mode: number,
       fi: Deno.PointerValue,
     ) => {
+      logOp("create", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -986,6 +1013,7 @@ async function main() {
       namePtr: Deno.PointerValue,
       _mode: number,
     ) => {
+      logOp("mkdir", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -1025,6 +1053,7 @@ async function main() {
       parentIno: number | bigint,
       namePtr: Deno.PointerValue,
     ) => {
+      logOp("unlink", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -1107,6 +1136,7 @@ async function main() {
       parentIno: number | bigint,
       namePtr: Deno.PointerValue,
     ) => {
+      logOp("rmdir", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -1180,27 +1210,24 @@ async function main() {
   );
   callbacks.push(rmdirCb);
 
-  // rename(req, parent_ino, name_ptr, newparent_ino, newname_ptr)
-  const renameCb = new Deno.UnsafeCallback(
-    {
-      parameters: ["pointer", "u64", "pointer", "u64", "pointer"],
-      result: "void",
-    } as const,
+  // rename — platform factory handles Linux v3 extra `flags` param
+  const renameCb = platform.createRenameCallback(
     (
       req: Deno.PointerValue,
-      parentIno: number | bigint,
+      parentIno: bigint,
       namePtr: Deno.PointerValue,
-      newParentIno: number | bigint,
+      newParentIno: bigint,
       newNamePtr: Deno.PointerValue,
     ) => {
+      logOp("rename", parentIno.toString());
       if (!bridge) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
 
-      const oldParent = BigInt(parentIno);
+      const oldParent = parentIno;
       const oldName = readCString(namePtr);
-      const newParent = BigInt(newParentIno);
+      const newParent = newParentIno;
       const newName = readCString(newNamePtr);
 
       const childIno = tree.lookup(oldParent, oldName);
@@ -1372,38 +1399,26 @@ async function main() {
   setOp(OPS_OFFSETS.create, createCb);
 
   // --- Mount ---
-  const { argsBuf, argv: _argv, encodedArgs: _ea } = createFuseArgs([
+  const { argsBuf, argv: _argv, encodedArgs: _ea } = platform.createFuseArgs([
     "fuse_ct",
   ]);
 
   const mountpointBuf = encoder.encode(mountpoint + "\0");
 
-  const chan = fuse.symbols.fuse_mount(
-    mountpointBuf,
-    Deno.UnsafePointer.of(new Uint8Array(argsBuf)),
-  );
-
-  if (!chan) {
-    console.error(
-      "fuse_mount failed. Is the mountpoint valid? Is macFUSE installed?",
+  let handle: ReturnType<typeof platform.mount>;
+  try {
+    handle = platform.mount(
+      fuse,
+      mountpointBuf,
+      argsBuf,
+      opsBuf,
+      BigInt(OPS_SIZE),
     );
+  } catch (e) {
+    console.error(String(e));
     Deno.exit(1);
   }
-
-  const session = fuse.symbols.fuse_lowlevel_new(
-    Deno.UnsafePointer.of(new Uint8Array(argsBuf)),
-    Deno.UnsafePointer.of(new Uint8Array(opsBuf)),
-    BigInt(OPS_SIZE),
-    null,
-  );
-
-  if (!session) {
-    console.error("fuse_lowlevel_new failed");
-    fuse.symbols.fuse_unmount(mountpointBuf, chan);
-    Deno.exit(1);
-  }
-
-  fuse.symbols.fuse_session_add_chan(session, chan);
+  // handle is guaranteed assigned — Deno.exit(1) never returns
 
   let unmounting = false;
 
@@ -1415,7 +1430,7 @@ async function main() {
       for (const name of names) {
         const nameBuf = encoder.encode(name + "\0");
         const rc = fuse.symbols.fuse_lowlevel_notify_inval_entry(
-          chan,
+          handle.notifyTarget,
           parentIno,
           nameBuf,
           BigInt(name.length),
@@ -1434,7 +1449,7 @@ async function main() {
       if (unmounting) return;
       // Invalidate all cached data for this inode (off=0, len=-1 means all)
       const ret = fuse.symbols.fuse_lowlevel_notify_inval_inode(
-        chan,
+        handle.notifyTarget,
         ino,
         0n,
         -1n,
@@ -1453,7 +1468,7 @@ async function main() {
     if (unmounting) return;
     unmounting = true;
     console.log("\nUnmounting...");
-    fuse.symbols.fuse_unmount(mountpointBuf, chan);
+    platform.unmount(fuse, handle, mountpointBuf);
   }
 
   Deno.addSignalListener("SIGINT", () => {
@@ -1464,15 +1479,11 @@ async function main() {
   });
 
   // Run FUSE event loop (nonblocking: true → returns Promise)
-  const result = await fuse.symbols.fuse_session_loop(session);
+  const result = await fuse.symbols.fuse_session_loop(handle.session);
   console.log(`FUSE loop exited (code ${result})`);
 
   // Final cleanup
-  fuse.symbols.fuse_session_remove_chan(chan);
-  fuse.symbols.fuse_session_destroy(session);
-  if (!unmounting) {
-    fuse.symbols.fuse_unmount(mountpointBuf, chan);
-  }
+  platform.cleanup(fuse, handle, mountpointBuf, unmounting);
   for (const cb of callbacks) cb.close();
   console.log("Cleaned up.");
 }
