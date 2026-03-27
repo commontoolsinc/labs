@@ -184,7 +184,7 @@ export default pattern<CatalogInput, CatalogOutput>(
                 <div style={styles.controlsHeading}>
                   Controls
                 </div>
-                {story.controls}
+                {story?.controls}
               </div>
             </main>
           </div>
