@@ -235,16 +235,14 @@ jobs:
         run: |
           API_URL=http://localhost:8000 ./integration/integration.sh
 
-      - name: 🔍 Debug FUSE daemon startup
-        run: |
-          # Test that the fuse-daemon subcommand exists and can start
-          timeout 5 ct fuse-daemon /tmp/fuse-debug --api-url=http://localhost:8000 2>&1 || true
-          echo "--- fuse-daemon test complete ---"
-
       - name: 🧪 Run FUSE exec integration tests
         working-directory: packages/cli
         run: |
           API_URL=http://localhost:8000 ./integration/fuse-exec.sh
+
+      - name: 📋 FUSE daemon log (on failure)
+        if: failure()
+        run: cat ~/.ct/fuse/fuse-daemon.log 2>/dev/null || echo "No daemon log found"
 
   pattern-integration-test:
     name: "Pattern Integration Tests"
