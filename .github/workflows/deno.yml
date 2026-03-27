@@ -205,19 +205,23 @@ jobs:
   cli-integration-test:
     name: "CLI Integration Tests (${{ matrix.suite_name }})"
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout_minutes }}
     needs: ["build-binaries"]
     environment: ci
     strategy:
+      fail-fast: false
       matrix:
         include:
           - suite_name: core
             script: integration.sh
             toolshed_port: 8000
             install_fuse_deps: false
+            timeout_minutes: 10
           - suite_name: fuse
             script: fuse-exec.sh
             toolshed_port: 8001
             install_fuse_deps: true
+            timeout_minutes: 15
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
