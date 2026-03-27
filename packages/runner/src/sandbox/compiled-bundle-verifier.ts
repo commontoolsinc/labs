@@ -223,7 +223,7 @@ function verifyAuthoredFactory(
             continue;
           }
           if (reexport.exportedName !== "default") {
-            const binding = classifyReferenceText(
+            const binding = classifyNormalizedReferenceText(
               source,
               filename,
               statement.start,
@@ -524,8 +524,7 @@ function classifyExpressionText(
   try {
     const trimmed = trimRange(source, start, end);
     const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
-    const text = source.slice(inner.start, inner.end);
-    const normalized = stripJsTrivia(text);
+    const normalized = stripJsTrivia(source, inner.start, inner.end);
 
     if (isPrimitiveLikeExpression(normalized) || normalized === "void0") {
       return { kind: "data" };
@@ -633,38 +632,47 @@ function classifyExpressionText(
       );
     }
 
-    if (SIMPLE_IDENTIFIER_RE.test(text)) {
-      if (text === "undefined" || text === "NaN" || text === "Infinity") {
+    if (isSimpleIdentifierText(normalized)) {
+      if (
+        normalized === "undefined" || normalized === "NaN" ||
+        normalized === "Infinity"
+      ) {
         return { kind: "data" };
       }
-      const binding = env.get(text);
+      const binding = env.get(normalized);
       if (!binding || binding.kind === "unknown") {
         throw verificationErrorAt(
           source,
           filename,
           inner.start,
-          `Unknown top-level identifier '${text}' in SES mode`,
+          `Unknown top-level identifier '${normalized}' in SES mode`,
         );
       }
       return cloneBindingInfo(binding);
     }
 
-    return classifyReferenceText(source, filename, inner.start, text, env);
+    return classifyNormalizedReferenceText(
+      source,
+      filename,
+      inner.start,
+      normalized,
+      env,
+    );
   } finally {
     logger.time(measureStart, "classifyExpressionText");
   }
 }
 
-function classifyReferenceText(
+function classifyNormalizedReferenceText(
   source: string,
   filename: string,
   offset: number,
-  text: string,
+  normalized: string,
   env: Map<string, BindingInfo>,
 ): BindingInfo {
   const measureStart = performance.now();
   try {
-    const ref = parseMemberReference(text);
+    const ref = parseNormalizedMemberReference(normalized);
     if (!ref) {
       throw verificationErrorAt(
         source,
@@ -822,8 +830,7 @@ function verifyTrustedValueExpression(
   try {
     const trimmed = trimRange(source, start, end);
     const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
-    const text = source.slice(inner.start, inner.end);
-    const normalized = stripJsTrivia(text);
+    const normalized = stripJsTrivia(source, inner.start, inner.end);
 
     if (
       isPrimitiveLikeExpression(normalized) ||
@@ -835,24 +842,30 @@ function verifyTrustedValueExpression(
       return;
     }
 
-    if (SIMPLE_IDENTIFIER_RE.test(text)) {
-      if (SAFE_GLOBAL_IDENTIFIERS.has(text)) {
+    if (isSimpleIdentifierText(normalized)) {
+      if (SAFE_GLOBAL_IDENTIFIERS.has(normalized)) {
         return;
       }
-      const binding = env.get(text);
+      const binding = env.get(normalized);
       if (!binding || binding.kind === "unknown") {
         throw verificationErrorAt(
           source,
           filename,
           inner.start,
-          `Unknown identifier '${text}' in SES-verified module scope`,
+          `Unknown identifier '${normalized}' in SES-verified module scope`,
         );
       }
       return;
     }
 
-    if (parseMemberReference(text)) {
-      classifyReferenceText(source, filename, inner.start, text, env);
+    if (parseNormalizedMemberReference(normalized)) {
+      classifyNormalizedReferenceText(
+        source,
+        filename,
+        inner.start,
+        normalized,
+        env,
+      );
       return;
     }
 
@@ -920,12 +933,12 @@ function resolveTrustedBuilderCallback(
     return { start: directFunction.start, end: directFunction.end };
   }
 
-  const text = source.slice(inner.start, inner.end);
-  if (!SIMPLE_IDENTIFIER_RE.test(text)) {
+  const normalized = stripJsTrivia(source, inner.start, inner.end);
+  if (!isSimpleIdentifierText(normalized)) {
     return undefined;
   }
 
-  const binding = env.get(text);
+  const binding = env.get(normalized);
   if (
     binding?.kind !== "function" || !binding.functionRange ||
     binding.hardeningHelper
@@ -1197,13 +1210,6 @@ function looksLikeDirectFunctionSyntax(
   return source.startsWith("function", inner.start) ||
     source.startsWith("async", inner.start) ||
     findTopLevelArrow(source, inner.start, inner.end) !== undefined;
-}
-
-function parseMemberReference(
-  source: string,
-): { root: string; property?: string } | undefined {
-  const normalized = stripJsTrivia(source);
-  return parseNormalizedMemberReference(normalized);
 }
 
 function getExportsPropertyName(
