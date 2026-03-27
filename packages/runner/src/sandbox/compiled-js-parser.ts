@@ -261,9 +261,8 @@ export function splitTopLevelCommaList(
   };
 
   while (cursor < end) {
-    const char = source[cursor];
     if (
-      char === "," &&
+      source.charCodeAt(cursor) === 44 &&
       state.parenDepth === 0 &&
       state.braceDepth === 0 &&
       state.bracketDepth === 0
@@ -301,26 +300,26 @@ export function findTopLevelEquals(
   };
 
   for (let cursor = start; cursor < end;) {
-    const char = source[cursor];
+    const charCode = source.charCodeAt(cursor);
     if (
-      char === "=" &&
+      charCode === 61 &&
       state.parenDepth === 0 &&
       state.braceDepth === 0 &&
       state.bracketDepth === 0 &&
-      source[cursor + 1] !== "=" &&
-      source[cursor + 1] !== ">" &&
-      source[cursor - 1] !== "+" &&
-      source[cursor - 1] !== "-" &&
-      source[cursor - 1] !== "*" &&
-      source[cursor - 1] !== "/" &&
-      source[cursor - 1] !== "%" &&
-      source[cursor - 1] !== "^" &&
-      source[cursor - 1] !== "&" &&
-      source[cursor - 1] !== "|" &&
-      source[cursor - 1] !== "?" &&
-      source[cursor - 1] !== "!" &&
-      source[cursor - 1] !== "<" &&
-      source[cursor - 1] !== ">"
+      source.charCodeAt(cursor + 1) !== 61 &&
+      source.charCodeAt(cursor + 1) !== 62 &&
+      source.charCodeAt(cursor - 1) !== 43 &&
+      source.charCodeAt(cursor - 1) !== 45 &&
+      source.charCodeAt(cursor - 1) !== 42 &&
+      source.charCodeAt(cursor - 1) !== 47 &&
+      source.charCodeAt(cursor - 1) !== 37 &&
+      source.charCodeAt(cursor - 1) !== 94 &&
+      source.charCodeAt(cursor - 1) !== 38 &&
+      source.charCodeAt(cursor - 1) !== 124 &&
+      source.charCodeAt(cursor - 1) !== 63 &&
+      source.charCodeAt(cursor - 1) !== 33 &&
+      source.charCodeAt(cursor - 1) !== 60 &&
+      source.charCodeAt(cursor - 1) !== 62
     ) {
       return cursor;
     }
@@ -480,11 +479,11 @@ function splitTopLevelStatements(
     while (cursor < end) {
       const beforeBraceDepth = state.braceDepth;
       const before = cursor;
-      const char = source[cursor];
+      const charCode = source.charCodeAt(cursor);
       cursor = advanceScanner(source, cursor, end, state);
 
       if (
-        char === ";" &&
+        charCode === 59 &&
         state.parenDepth === 0 &&
         state.braceDepth === 0 &&
         state.bracketDepth === 0
@@ -498,7 +497,7 @@ function splitTopLevelStatements(
 
       if (
         blockTerminated &&
-        char === "}" &&
+        charCode === 125 &&
         beforeBraceDepth === 1 &&
         state.parenDepth === 0 &&
         state.braceDepth === 0 &&
@@ -675,9 +674,9 @@ export function tryParseCallExpression(
     regexAllowed: true,
   };
   for (let cursor = trimmed.start; cursor < trimmed.end;) {
-    const char = source[cursor];
+    const charCode = source.charCodeAt(cursor);
     if (
-      char === "(" &&
+      charCode === 40 &&
       state.parenDepth === 0 &&
       state.braceDepth === 0 &&
       state.bracketDepth === 0
@@ -1182,8 +1181,8 @@ export function findTopLevelArrow(
 
   for (let cursor = start; cursor < end;) {
     if (
-      source[cursor] === "=" &&
-      source[cursor + 1] === ">" &&
+      source.charCodeAt(cursor) === 61 &&
+      source.charCodeAt(cursor + 1) === 62 &&
       state.parenDepth === 0 &&
       state.braceDepth === 0 &&
       state.bracketDepth === 0
