@@ -35,7 +35,7 @@ import { toDeepFrozenSchema } from "./schema-utils.ts";
 // Modern schema hash mode flag
 // ---------------------------------------------------------------------------
 
-let modernSchemaHashEnabled = false;
+let modernSchemaHashEnabled = true;
 
 /**
  * Activates or deactivates modern schema hash mode. Called by the `Runtime`

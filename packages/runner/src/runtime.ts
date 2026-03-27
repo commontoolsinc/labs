@@ -262,7 +262,7 @@ export class Runtime {
       modernDataModel: false,
       unifiedJsonEncoding: false,
       modernHash: false,
-      modernSchemaHash: true,
+      modernSchemaHash: false,
       ...options.experimental,
     };
 
