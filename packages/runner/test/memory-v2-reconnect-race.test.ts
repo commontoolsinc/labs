@@ -17,7 +17,7 @@ import {
   StorageManager as V2StorageManager,
 } from "../src/storage/v2.ts";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
-import { writeRemoteDocuments } from "./memory-v2-remote.ts";
+import { writeRemoteValues } from "./memory-v2-remote.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-reconnect-race");
 const space = signer.did();
@@ -595,13 +595,13 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
 
   try {
     await provider.sync(uri);
-    await writeRemoteDocuments(storageManager, space, [{
+    await writeRemoteValues(storageManager, space, [{
       id: uri,
       value: { version: 1 },
     }]);
     await waitFor(() => getObjectValue(provider, uri)?.version === 1);
 
-    await writeRemoteDocuments(storageManager, space, [{
+    await writeRemoteValues(storageManager, space, [{
       id: uri,
       value: { version: 3 },
     }]);

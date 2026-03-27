@@ -7,7 +7,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { Action } from "../src/scheduler.ts";
 import type { URI } from "@commontools/memory/interface";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
-import { writeRemoteDocuments } from "./memory-v2-remote.ts";
+import { writeRemoteValues } from "./memory-v2-remote.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-pull-reactivity");
 const space = signer.did();
@@ -103,7 +103,7 @@ describe("Memory v2 pull reactivity", () => {
     expect(computationRuns).toBe(1);
     expect(runtime.scheduler.isDirty(computation)).toBe(false);
 
-    await writeRemoteDocuments(storageManager, space, [{
+    await writeRemoteValues(storageManager, space, [{
       id: source.getAsNormalizedFullLink().id,
       value: 2,
     }]);
@@ -132,7 +132,7 @@ describe("Memory v2 pull reactivity", () => {
       ): Promise<{ ok?: Record<PropertyKey, never> }>;
     };
 
-    await writeRemoteDocuments(storageManager, space, fixture.docs);
+    await writeRemoteValues(storageManager, space, fixture.docs);
 
     if (!expandedChildValue) {
       throw new Error(`Missing graph fixture doc ${expandedChildId}`);
@@ -191,7 +191,7 @@ describe("Memory v2 pull reactivity", () => {
       fixture.initialReachableIds,
     );
 
-    await writeRemoteDocuments(storageManager, space, [{
+    await writeRemoteValues(storageManager, space, [{
       id: fixture.rootId,
       value: fixture.expandedRootValue,
     }]);
@@ -212,7 +212,7 @@ describe("Memory v2 pull reactivity", () => {
     );
 
     expandedChildValue.name = "Expanded Node 33";
-    await writeRemoteDocuments(storageManager, space, [{
+    await writeRemoteValues(storageManager, space, [{
       id: expandedChildId,
       value: expandedChildValue,
     }]);

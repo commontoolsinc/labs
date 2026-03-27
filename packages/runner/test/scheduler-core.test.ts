@@ -15,7 +15,7 @@ import {
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { Entity } from "@commonfabric/memory/interface";
-import { writeRemoteDocuments } from "./memory-v2-remote.ts";
+import { writeRemoteValues } from "./memory-v2-remote.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -1344,7 +1344,7 @@ describe("event handling", () => {
     async () => {
       // Prepare remote memory with existing fact to induce conflict on commit
       const entityId = `test:retry-conflict-${Date.now()}` as Entity;
-      await writeRemoteDocuments(storageManager, space, [{
+      await writeRemoteValues(storageManager, space, [{
         id: entityId,
         value: { version: 1 },
       }]);

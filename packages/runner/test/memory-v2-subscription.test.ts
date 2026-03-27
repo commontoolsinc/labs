@@ -11,7 +11,7 @@ import type {
 import type { MIME, URI } from "@commontools/memory/interface";
 import * as Fact from "@commontools/memory/fact";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
-import { writeRemoteDocuments } from "./memory-v2-remote.ts";
+import { writeRemoteValues } from "./memory-v2-remote.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-storage-subscription");
 const space = signer.did();
@@ -124,7 +124,7 @@ describe("Memory v2 storage notifications", () => {
     storageManager.subscribe(subscription);
 
     const uri = `of:memory-v2-conflict-${Date.now()}` as URI;
-    await writeRemoteDocuments(storageManager, space, [{
+    await writeRemoteValues(storageManager, space, [{
       id: uri,
       value: { version: 1 },
     }]);
@@ -132,7 +132,7 @@ describe("Memory v2 storage notifications", () => {
     const { replica } = storageManager.open(space);
     await storageManager.open(space).sync(uri);
 
-    await writeRemoteDocuments(storageManager, space, [{
+    await writeRemoteValues(storageManager, space, [{
       id: uri,
       value: { version: 3 },
     }]);
@@ -193,7 +193,7 @@ describe("Memory v2 storage notifications", () => {
     const { replica } = provider;
     await provider.sync(uri);
 
-    await writeRemoteDocuments(storageManager, space, [{
+    await writeRemoteValues(storageManager, space, [{
       id: uri,
       value: { version: 1 },
     }]);
@@ -204,7 +204,7 @@ describe("Memory v2 storage notifications", () => {
         JSON.stringify({ value: { version: 1 } })
     );
 
-    await writeRemoteDocuments(storageManager, space, [{
+    await writeRemoteValues(storageManager, space, [{
       id: uri,
       value: { version: 3 },
     }]);
@@ -248,7 +248,7 @@ describe("Memory v2 storage notifications", () => {
     storageManager.subscribe(subscription);
 
     const uri = `of:memory-v2-pull-dedupe-${Date.now()}` as URI;
-    await writeRemoteDocuments(storageManager, space, [{
+    await writeRemoteValues(storageManager, space, [{
       id: uri,
       value: {
         items: [
@@ -284,7 +284,7 @@ describe("Memory v2 storage notifications", () => {
       ): Promise<{ ok?: Record<PropertyKey, never> }>;
     };
 
-    await writeRemoteDocuments(storageManager, space, fixture.docs);
+    await writeRemoteValues(storageManager, space, fixture.docs);
 
     expect(
       await observer.sync(fixture.rootId, {
@@ -304,7 +304,7 @@ describe("Memory v2 storage notifications", () => {
     );
 
     subscription.clear();
-    await writeRemoteDocuments(storageManager, space, [{
+    await writeRemoteValues(storageManager, space, [{
       id: fixture.rootId,
       value: fixture.expandedRootValue,
     }]);

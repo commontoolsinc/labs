@@ -6,21 +6,22 @@ import type {
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import type { Server as MemoryV2Server } from "@commontools/memory/v2/server";
 
-const getServer = (storageManager: unknown): MemoryV2Server => {
-  const candidate = storageManager as { server?: () => MemoryV2Server };
-  if (typeof candidate.server !== "function") {
-    throw new Error("Expected a memory/v2 emulated storage manager");
-  }
-  return candidate.server();
+type EmulatedStorageManagerLike = {
+  server(): MemoryV2Server;
 };
 
-export const writeRemoteDocuments = async (
+export const writeRemoteValues = async (
   storageManager: unknown,
   space: MemorySpace,
   docs: readonly { id: URI; value: StorableValue }[],
 ): Promise<void> => {
+  const candidate = storageManager as { server?: () => MemoryV2Server };
+  if (typeof candidate.server !== "function") {
+    throw new Error("Expected a memory/v2 emulated storage manager");
+  }
+  const emulated = candidate as EmulatedStorageManagerLike;
   const client = await MemoryV2Client.connect({
-    transport: MemoryV2Client.loopback(getServer(storageManager)),
+    transport: MemoryV2Client.loopback(emulated.server()),
   });
 
   try {
