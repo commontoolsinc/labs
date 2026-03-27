@@ -34,8 +34,28 @@ assert_not_exists() {
   local path="$1"
   local message="$2"
 
-  if [ -e "$path" ]; then
+  if path_exists "$path"; then
     error "$message"
+  fi
+}
+
+path_exists() {
+  local path="$1"
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 2 bash -c 'test -e "$1"' _ "$path" >/dev/null 2>&1
+  else
+    test -e "$path"
+  fi
+}
+
+prime_path_lookup() {
+  local path="$1"
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 2 find "$path" -maxdepth 2 -print >/dev/null 2>&1 || true
+  else
+    find "$path" -maxdepth 2 -print >/dev/null 2>&1 || true
   fi
 }
 
@@ -59,14 +79,14 @@ wait_for_path() {
   local attempts=$((timeout_seconds * 10))
 
   for _ in $(seq 1 "$attempts"); do
-    if [ -e "$path" ]; then
+    if path_exists "$path"; then
       return 0
     fi
     local probe="$path"
     while [ "$probe" != "/" ]; do
       probe=$(dirname "$probe")
-      if [ -e "$probe" ]; then
-        find "$probe" -maxdepth 2 -print >/dev/null 2>&1 || true
+      if path_exists "$probe"; then
+        prime_path_lookup "$probe"
         break
       fi
     done
@@ -82,7 +102,7 @@ try_wait_for_path() {
   local attempts=$((timeout_seconds * 10))
 
   for _ in $(seq 1 "$attempts"); do
-    if [ -e "$path" ]; then
+    if path_exists "$path"; then
       return 0
     fi
     sleep 0.1
@@ -227,9 +247,9 @@ wait_for_path "$TOOL_FILE"
 wait_for_path "$ENTITY_HANDLER_FILE"
 wait_for_path "$ENTITY_TOOL_FILE"
 
-test -e "$HANDLER_FILE" || error "recordMessage.handler was not mounted."
-test -e "$LEGACY_HANDLER_FILE" || error "legacyWrite.handler was not mounted."
-test -e "$TOOL_FILE" || error "search.tool was not mounted."
+path_exists "$HANDLER_FILE" || error "recordMessage.handler was not mounted."
+path_exists "$LEGACY_HANDLER_FILE" || error "legacyWrite.handler was not mounted."
+path_exists "$TOOL_FILE" || error "search.tool was not mounted."
 success "Mounted callable entries exist"
 
 assert_not_exists "$RESULT_DIR/search" "Pattern tool internals should not be exposed as a directory."

@@ -235,13 +235,14 @@ jobs:
       - name: 🚀 Start Toolshed server for testing
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+          TOOLSHED_URL: http://localhost:${{ matrix.toolshed_port }}
         run: |
           chmod +x ./common-binaries/ct
           chmod +x ./common-binaries/toolshed
           # Set tools to path
           # Integration script needs `ct`
           echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
-          ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
+          MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
 
       - name: 📦 Install CLI integration dependencies
         env:
@@ -255,11 +256,27 @@ jobs:
           fi
 
       - name: 🧪 Run CLI integration suite
+        if: ${{ matrix.suite_name == 'core' }}
         working-directory: packages/cli
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
         run: |
           API_URL="http://localhost:${TOOLSHED_PORT}" ./integration/${{ matrix.script }}
+
+      - name: 🧪 Run CLI FUSE integration suite
+        if: ${{ matrix.suite_name == 'fuse' }}
+        working-directory: packages/cli
+        env:
+          TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+        run: |
+          set +e
+          API_URL="http://localhost:${TOOLSHED_PORT}" timeout 480 ./integration/${{ matrix.script }}
+          rc=$?
+          set -e
+          if [ "$rc" -eq 124 ]; then
+            echo "::error::FUSE integration timed out after 480 seconds"
+          fi
+          exit "$rc"
 
       - name: 📋 FUSE daemon log (on failure)
         if: ${{ failure() && matrix.suite_name == 'fuse' }}
