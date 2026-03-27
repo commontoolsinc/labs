@@ -82,7 +82,7 @@ export const main = new Command()
       .useRawArgs()
       .action(async (_options: unknown, ...rawArgs: unknown[]) => {
         const { main } = await import("@commontools/fuse");
-        const daemonArgs = rawArgs.slice(1).map((arg) => String(arg));
+        const daemonArgs = rawArgs.map((arg) => String(arg));
         await main(daemonArgs);
       }),
   )
