@@ -101,11 +101,7 @@ echo '10' | ct piece set $SPACE_ARGS --piece $PIECE_ID value
 
 # Verify the get returned what we expect
 RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID value)
-echo '10' | jq . > /tmp/expected.json
-echo "$RESULT" | jq . > /tmp/actual.json
-if ! diff -q /tmp/expected.json /tmp/actual.json > /dev/null; then
-  error "Get operation did not return expected value. Expected: {\"value\":10}, Got: $RESULT"
-fi
+assert_json_eq "$RESULT" '10' "Get operation did not return expected value. Expected: 10, Got: $RESULT"
 
 # Helper functions for testing
 test_value() {
@@ -132,11 +128,7 @@ test_json_value() {
   echo "$value" | ct piece set $SPACE_ARGS --piece $PIECE_ID "$path" $flags
   local result=$(ct piece get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
 
-  echo "$value" | jq . > /tmp/expected.json
-  echo "$result" | jq . > /tmp/actual.json
-  if ! diff -q /tmp/expected.json /tmp/actual.json > /dev/null; then
-    error "$test_name failed. Expected: $value, Got: $result"
-  fi
+  assert_json_eq "$result" "$value" "$test_name failed. Expected: $value, Got: $result"
 }
 
 test_get_only() {
