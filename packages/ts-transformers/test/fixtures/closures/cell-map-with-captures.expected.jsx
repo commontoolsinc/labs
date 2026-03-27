@@ -13,7 +13,12 @@ interface State {
 //   which must be threaded through as a mapWithPattern param and re-derived inside.
 export default pattern((state) => {
     // Explicitly type as Cell to ensure closure transformation
-    const typedValues: Cell<number[]> = cell(state.key("values"));
+    const typedValues: Cell<number[]> = cell(state.key("values"), {
+        type: "array",
+        items: {
+            type: "number"
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {typedValues.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {

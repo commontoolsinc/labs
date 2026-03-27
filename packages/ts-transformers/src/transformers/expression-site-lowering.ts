@@ -8,7 +8,6 @@ import {
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import {
-  classifyExpressionSiteCallRootPolicy,
   classifyExpressionSiteHandling,
   containsLogicalBinaryOperator,
   getExpressionContainerKind,
@@ -20,7 +19,6 @@ import {
   createReactiveWrapperForExpression,
   filterRelevantDataFlows,
 } from "./expression-rewrite/rewrite-helpers.ts";
-import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
 import type { AnalyzeFn } from "./expression-rewrite/types.ts";
 import type { ExpressionContainerKind } from "./expression-site-types.ts";
 
@@ -62,10 +60,7 @@ export function rewriteExpressionSite(
     context,
     analyze,
   );
-  if (
-    handling.kind !== "shared" &&
-    handling.kind !== "owned-pre-closure-jsx"
-  ) {
+  if (handling.kind !== "shared") {
     return undefined;
   }
 
@@ -189,21 +184,6 @@ export function rewriteOwnedPreClosureJsxExpressionSite(
   ) as ts.Expression;
 }
 
-export function rewriteOpaquePathTerminalJsxExpressionSite(
-  params: Omit<RewriteExpressionSiteParams, "containerKind">,
-): ts.Expression | undefined {
-  const { expression } = params;
-
-  if (
-    !ts.isCallExpression(expression) ||
-    !classifyOpaquePathTerminalCall(expression)
-  ) {
-    return undefined;
-  }
-
-  return rewriteOwnedPreClosureJsxExpressionSite(params);
-}
-
 export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
   root: T,
   context: TransformationContext,
@@ -222,7 +202,10 @@ export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
           context,
           analyze,
         );
-        if (handling.kind !== "helper-owned") {
+        if (
+          handling.kind !== "owned" ||
+          handling.owner !== "helper"
+        ) {
           return visited;
         }
         if (!handling.lowerable) {
@@ -337,14 +320,16 @@ export function rewriteArrayMethodCallbackExpressionSites(
       return undefined;
     }
 
-    const callRootPolicy = classifyExpressionSiteCallRootPolicy(
+    const handling = classifyExpressionSiteHandling(
       expression,
+      containerKind,
       context,
       analyze,
     );
     if (
-      callRootPolicy.kind !== "supported" ||
-      callRootPolicy.supportedKind !== "array-method-owned-receiver-method"
+      handling.kind !== "owned" ||
+      handling.owner !== "array-method-receiver-method" ||
+      !handling.lowerable
     ) {
       return undefined;
     }
@@ -394,8 +379,9 @@ export function rewriteArrayMethodCallbackExpressionSites(
         analyze,
       );
       if (
-        handling.kind === "skip" &&
-        handling.reason === "array-method-owned"
+        handling.kind === "owned" &&
+        handling.owner === "array-method-callback-jsx" &&
+        handling.lowerable
       ) {
         const rewritten = rewriteOwnedPreClosureJsxExpressionSite({
           expression: node.expression,

@@ -181,6 +181,28 @@ export function getPatternBuilderCallbackArgument(
   return undefined;
 }
 
+export function getPatternToolCallbackArgument(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  const callKind = detectCallKind(call, checker);
+  if (callKind?.kind !== "pattern-tool") {
+    const target = stripWrappers(call.expression);
+    if (
+      !ts.isPropertyAccessExpression(target) ||
+      target.name.text !== "patternTool"
+    ) {
+      return undefined;
+    }
+  }
+
+  const callbackArg = call.arguments[0];
+  if (callbackArg && isCallbackFunctionExpression(callbackArg)) {
+    return callbackArg;
+  }
+  return undefined;
+}
+
 export function getCapabilitySummaryCallbackArgument(
   call: ts.CallExpression,
   checker: ts.TypeChecker,

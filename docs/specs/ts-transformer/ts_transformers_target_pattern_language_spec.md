@@ -408,6 +408,9 @@ So the language should not be read as “receiver methods are unsupported.” Th
 real rule is that **receiver methods are supported in explicit local expression
 contexts, inside supported collection callbacks, and at lowerable top-level
 non-JSX pattern sites, but optional-call receiver forms remain unsupported**.
+Optional property / element access follows the ordinary lowerable
+expression-site rules; only optional-call forms remain outside the target
+language.
 
 ## 5.7 `.key(...)` And `.get()` Are Cell-Semantics-Split
 

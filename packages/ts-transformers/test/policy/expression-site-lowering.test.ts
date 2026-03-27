@@ -119,7 +119,7 @@ type JsxRoute =
   | { route: "shared-post-closure" }
   | {
     route: "owned-pre-closure";
-    owner: "opaque-path-terminal-root" | "generic-owned-root";
+    owner: "jsx-root";
   }
   | {
     route: "skip";
@@ -136,10 +136,19 @@ function toJsxRoute(decision: ExpressionSiteHandling): JsxRoute {
   switch (decision.kind) {
     case "shared":
       return { route: decision.jsxRoute ?? "shared-post-closure" };
-    case "owned-pre-closure-jsx":
-      return { route: "owned-pre-closure", owner: decision.owner };
-    case "helper-owned":
-      return { route: "skip", reason: "not-shared-jsx-root-kind" };
+    case "owned":
+      if (decision.owner === "jsx-root") {
+        return { route: "owned-pre-closure", owner: "jsx-root" };
+      }
+      if (decision.owner === "array-method-callback-jsx") {
+        return { route: "skip", reason: "array-method-owned" };
+      }
+      if (decision.owner === "helper") {
+        return { route: "skip", reason: "not-shared-jsx-root-kind" };
+      }
+      throw new Error(
+        `Non-JSX owned handling should not be projected as a JSX route: ${decision.owner}`,
+      );
     case "skip":
       return {
         route: "skip",
@@ -182,7 +191,7 @@ function canRewriteExpressionSite(
     analyze,
   );
   return (decision.kind === "shared" ||
-    decision.kind === "owned-pre-closure-jsx") &&
+    (decision.kind === "owned" && decision.owner === "jsx-root")) &&
     decision.lowerable;
 }
 
@@ -198,7 +207,8 @@ function canRewriteHelperOwnedExpressionSite(
     context,
     analyze,
   );
-  return decision.kind === "helper-owned" && decision.lowerable;
+  return decision.kind === "owned" && decision.owner === "helper" &&
+    decision.lowerable;
 }
 
 interface JsxRouteCase {
@@ -263,6 +273,45 @@ Deno.test(
 );
 
 Deno.test(
+  "Expression site policy: array-method-owned receiver-method roots classify distinctly from shared expression sites",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) =>
+        state.items.map((item: any) => item.name.toUpperCase())
+      );
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    context.markAsArrayMethodCallback(callback);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "toUpperCase",
+    );
+
+    const analyze = createDataFlowAnalyzer(checker);
+    assertEquals(
+      classifyExpressionSiteHandling(
+        call,
+        "return-expression",
+        context,
+        analyze,
+      ),
+      {
+        kind: "owned",
+        owner: "array-method-receiver-method",
+        lowerable: true,
+      },
+    );
+  },
+);
+
+Deno.test(
   "Expression site policy: reactive direct JSX array-method roots use the generic owned pre-closure route when enabled",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
@@ -298,7 +347,7 @@ Deno.test(
       }),
       {
         route: "owned-pre-closure",
-        owner: "generic-owned-root",
+        owner: "jsx-root",
       },
     );
   },
@@ -419,7 +468,7 @@ const ownedOrSkippedJsxRouteCases: JsxRouteCase[] = [
       ),
     expected: {
       route: "owned-pre-closure",
-      owner: "generic-owned-root",
+      owner: "jsx-root",
     },
   },
   {
@@ -546,7 +595,7 @@ Deno.test(
       classifyJsxExpressionSiteRoute(helperCall, context, analyze),
       {
         route: "owned-pre-closure",
-        owner: "generic-owned-root",
+        owner: "jsx-root",
       },
     );
   },
@@ -788,7 +837,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: JSX opaque path-terminal calls use the explicit opaque-path-terminal owner",
+  "Expression site policy: JSX opaque path-terminal calls use the owned pre-closure root path",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare namespace JSX {
@@ -819,7 +868,7 @@ Deno.test(
     const analyze = createDataFlowAnalyzer(checker);
     assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
       route: "owned-pre-closure",
-      owner: "opaque-path-terminal-root",
+      owner: "jsx-root",
     });
   },
 );

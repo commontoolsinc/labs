@@ -66,7 +66,6 @@ type JsxExpressionSiteSkipReason =
   | "no-authored-source-site"
   | "event-handler-jsx-attribute"
   | "non-pattern-context"
-  | "array-method-owned"
   | "deferred-jsx-array-method-root"
   | "not-shared-jsx-root-kind";
 
@@ -77,12 +76,12 @@ export type ExpressionSiteHandlingDecision =
     jsxRoute?: "shared-pre-closure" | "shared-post-closure";
   }
   | {
-    kind: "helper-owned";
-    lowerable: boolean;
-  }
-  | {
-    kind: "owned-pre-closure-jsx";
-    owner: "opaque-path-terminal-root" | "generic-owned-root";
+    kind: "owned";
+    owner:
+      | "helper"
+      | "array-method-callback-jsx"
+      | "array-method-receiver-method"
+      | "jsx-root";
     lowerable: boolean;
   }
   | {
@@ -727,7 +726,8 @@ function classifyHelperOwnedExpressionSiteHandling(
   }
 
   return {
-    kind: "helper-owned",
+    kind: "owned",
+    owner: "helper",
     lowerable: analysis.containsOpaqueRef && analysis.requiresRewrite,
   };
 }
@@ -774,8 +774,10 @@ export function classifyExpressionSiteHandling(
   if (containerKind === "jsx-expression") {
     if (siteInfo.arrayMethodOwned) {
       return {
-        kind: "skip",
-        reason: "array-method-owned",
+        kind: "owned",
+        owner: "array-method-callback-jsx",
+        lowerable: analysis.requiresRewrite ||
+          isLogicalBinaryExpression(expression),
       };
     }
 
@@ -785,8 +787,8 @@ export function classifyExpressionSiteHandling(
         isOwnedDeferredJsxArrayMethodRoot(expression, context, analyze)
       ) {
         return {
-          kind: "owned-pre-closure-jsx",
-          owner: "generic-owned-root",
+          kind: "owned",
+          owner: "jsx-root",
           lowerable: analysis.requiresRewrite ||
             isLogicalBinaryExpression(expression),
         };
@@ -800,8 +802,8 @@ export function classifyExpressionSiteHandling(
 
     if (isOwnedDynamicElementAccessRoot(expression, context, analyze)) {
       return {
-        kind: "owned-pre-closure-jsx",
-        owner: "generic-owned-root",
+        kind: "owned",
+        owner: "jsx-root",
         lowerable: analysis.requiresRewrite ||
           isLogicalBinaryExpression(expression),
       };
@@ -809,8 +811,8 @@ export function classifyExpressionSiteHandling(
 
     if (siteInfo.callRootKind === "conditional-helper") {
       return {
-        kind: "owned-pre-closure-jsx",
-        owner: "generic-owned-root",
+        kind: "owned",
+        owner: "jsx-root",
         lowerable: analysis.requiresRewrite ||
           isLogicalBinaryExpression(expression),
       };
@@ -867,8 +869,8 @@ export function classifyExpressionSiteHandling(
         classifyOpaquePathTerminalCall(expression)
       ) {
         return {
-          kind: "owned-pre-closure-jsx",
-          owner: "opaque-path-terminal-root",
+          kind: "owned",
+          owner: "jsx-root",
           lowerable: analysis.requiresRewrite ||
             isLogicalBinaryExpression(expression),
         };
@@ -906,6 +908,16 @@ export function classifyExpressionSiteHandling(
     return {
       kind: "skip",
       reason: "deferred-jsx-array-method-root",
+    };
+  }
+
+  if (
+    supportedCallRootKind === "array-method-owned-receiver-method"
+  ) {
+    return {
+      kind: "owned",
+      owner: "array-method-receiver-method",
+      lowerable: analysis.requiresRewrite,
     };
   }
 

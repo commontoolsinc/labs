@@ -1,116 +1,67 @@
-# Type Parameter Schema Generation Issue
+# Generic Helper Type-Parameter Schema Fallbacks
 
-## The Problem
+This note is historical context for the generic-helper schema seam. The behavior
+described below is the current intended fallback, not an open crash bug.
 
-When users write generic helper functions that use `derive`, our transformer
-can't generate schemas because the type parameters are uninstantiated at the
-function definition site.
+## Current rule
 
-**Example from `note.tsx`:**
+When CTS encounters an uninstantiated type parameter at a generic helper
+**definition site**, it does not try to invent structure that only exists at a
+later call site.
 
-```typescript
+Instead it degrades schema-bearing helper calls to `unknown`:
+
+- `wish<T>(...)` -> inject `{ type: "unknown" }`
+- `generateObject<T>(...)` -> inject `{ type: "unknown" }`
+- `cell(...)` / `Cell.of<T>(...)` / related cell-factory calls -> inject
+  `{ type: "unknown" }`
+- explicit-generic `lift<T, U>(...)` / `handler<E, S>(...)` schema injection ->
+  inject `{ type: "unknown" }` for unresolved type-parameter positions
+
+This is the principled fallback because:
+
+- `T` is unresolved at the helper definition site
+- emitting `{}` is misleadingly specific
+- omitting the schema changes the runtime call shape and weakens consistency
+- `unknown` preserves safety without pretending we know more than we do
+
+## Derive-specific nuance
+
+`derive(...)` has a separate but related behavior:
+
+- when a transformed derive callback result is an uninstantiated type parameter,
+  CTS skips explicit type arguments rather than serializing the type parameter
+  directly
+- standalone `derive(...)` inside generic helpers is still usually rejected
+  earlier by validation, so the old “generic helper derive schema issue” shape
+  overstated the live problem
+
+## What is not supported today
+
+CTS does **not** perform call-site specialization for generic helpers. For
+example, it does not rewrite:
+
+```ts
 function schemaifyWish<T>(path: string, def: T) {
   return derive(wish<T>(path), (i) => i ?? def);
 }
 
-// Called with concrete type
-const mentionable = schemaifyWish<MentionableCharm[]>("#mentionable", []);
+const mentionable = schemaifyWish<string[]>("#mentionable", []);
 ```
 
-## Current Behavior
+using the concrete `string[]` information from the call site.
 
-**Inside the generic function**, our ClosureTransformer tries to infer the
-return type of the callback `(i) => i ?? def`:
+Doing that would require a much larger design, such as:
 
-- `signature.getReturnType()` returns `T` (TypeParameter, not a concrete type)
-- We can't call `checker.typeToTypeNode()` on a TypeParameter - it crashes
-- The type `T` is only instantiated to `MentionableCharm[]` at the call site
+- call-site inlining
+- deferred second-pass generic instantiation
+- or runtime schema generation
 
-**Our current fix (two parts):**
+## Current recommendation
 
-1. **ClosureTransformer**: Detect TypeParameter, skip creating type arguments
-   entirely:
+Treat this as acceptable graceful degradation for now:
 
-```typescript
-if (isTypeParam) {
-  hasTypeParameter = true; // Omit all type args
-}
-```
-
-2. **Type Inference**: Filter out TypeParameters like we filter Any/Unknown:
-
-```typescript
-export function isAnyOrUnknownType(type: ts.Type | undefined): boolean {
-  return (type.flags &
-    (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.TypeParameter)) !==
-    0;
-}
-```
-
-**Result:**
-
-```typescript
-// No schemas - runtime-only type handling
-function schemaifyWish<T>(path: string, def: T) {
-  return __ctHelpers.derive({
-    input: wish<T>(path),
-    def: def,
-  }, ({ input: i, def }) => i ?? def);
-}
-```
-
-## The Question
-
-**Should we accept this limitation, or invest in call-site transformation?**
-
-### Option 1: Accept Current Behavior (Graceful Degradation)
-
-- ✅ No crashes
-- ✅ Patterns compile successfully
-- ✅ Works for non-generic code (99% of cases)
-- ❌ Generic helper functions lose compile-time schemas
-- ❌ Runtime `derive` must handle untyped form
-
-### Option 2: Implement Call-Site Transformation
-
-Transform at the **call site** where `T` is instantiated:
-
-```typescript
-// At call site, we know T = MentionableCharm[]
-const mentionable = schemaifyWish<MentionableCharm[]>("#mentionable", []);
-//                  ^^^^^^^^^^^^^ Could inline or transform here
-```
-
-**Approaches:**
-
-- **Function inlining**: Expand the function body at call sites (complex,
-  changes semantics)
-- **Deferred transformation**: Mark generic functions, transform their calls in
-  a later pass
-- **Runtime schema generation**: Generate schemas at runtime using reflection
-
-**Tradeoffs:**
-
-- ✅ Full schema support for generic functions
-- ❌ Significantly more complex transformer architecture
-- ❌ Potential performance impact
-- ❌ May require architectural changes to transformer pipeline
-
-## Recommendation Needed
-
-**Question for review:** Is the current graceful degradation acceptable, or is
-schema support for generic helper functions critical enough to warrant the
-additional complexity?
-
-**Impact assessment:**
-
-- Current usage of generic helpers with `derive` in codebase: [Unknown - would
-  need to audit]
-- Risk: Users may not realize schemas aren't being generated in these cases
-- Workaround: Users can avoid generic helpers, or add explicit type annotations
-
-## Code Locations
-
-- Fix Part 1: `packages/ts-transformers/src/closures/transformer.ts:2001-2038`
-- Fix Part 2: `packages/ts-transformers/src/ast/type-inference.ts:16-18`
-- Test case: `packages/patterns/note.tsx:102-112` (schemaifyWish function)
+- concrete call sites and non-generic helpers should still emit precise schemas
+- generic helper definition sites should degrade to `unknown`
+- if precise generic-helper schemas become product-critical later, that should
+  be a deliberate architecture project rather than ad hoc local inference

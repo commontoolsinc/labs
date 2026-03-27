@@ -103,7 +103,7 @@ works for scope detection.
 | `expr1 * expr2`       | `derive(schema, schema, inputs, fn)`      | Data flow boundary        |
 | `onClick={() => ...}` | `handler(eventSchema, stateSchema, fn)`   | Handler with dual schemas |
 | `Cell<T>`             | `{ type: "...", asCell: true }`           | Writable reactive ref     |
-| `OpaqueRef<T>`        | `{ type: "...", asOpaque: true }`         | Read-only reactive ref    |
+| `OpaqueRef<T>`        | structural schema without `asOpaque`      | Read-only reactive ref    |
 
 ## Documentation
 

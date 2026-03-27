@@ -117,7 +117,31 @@ export default pattern((__ct_pattern_input: InputSchema) => {
             })}
         </ul>),
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, {
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            "default": []
+        }
+    },
+    required: ["items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string",
+                    "default": ""
+                }
+            },
+            required: ["text"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {

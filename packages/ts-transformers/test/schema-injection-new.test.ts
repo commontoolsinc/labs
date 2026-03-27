@@ -16,6 +16,8 @@ export declare const Stream: CellTypeConstructor<any>;
 
 export declare function wish<T>(query: string): T;
 export declare function generateObject<T>(opts: any): T;
+export declare function lift<T, U>(fn: (value: T) => U): unknown;
+export declare function handler<E, S>(fn: (event: E, state: S) => void): unknown;
 `;
 
 const options = {
@@ -122,6 +124,108 @@ Deno.test("Schema Injection - generateObject", async () => {
   assert(
     !normalize(result).includes(
       'schema: { type: "string" }, schema: { type: "string" }',
+    ),
+  );
+});
+
+Deno.test("Schema Injection - generic helper type parameters degrade to unknown", async () => {
+  const code = `
+    /// <cts-enable />
+    import { Cell, wish, generateObject } from "commontools";
+
+    function buildWishExplicit<T>(path: string) {
+      return wish<T>(path);
+    }
+
+    function buildWishContextual<T>(path: string): T {
+      return wish(path);
+    }
+
+    function buildObjectExplicit<T>() {
+      return generateObject<T>({ model: "gpt-4" });
+    }
+
+    function buildObjectContextual<T>(): { object: T } {
+      return generateObject({ model: "gpt-4" });
+    }
+
+    function buildCellExplicit<T>(value: T) {
+      return Cell.of<T>(value);
+    }
+
+    function buildCellInferred<T>(value: T) {
+      return Cell.of(value);
+    }
+  `.trim();
+
+  const result = await transformSource(code, options);
+  const normalize = (s: string) => s.replace(/\s+/g, " ");
+
+  assert(
+    normalize(result).includes(
+      'wish<T>(path, { type: "unknown" } as const satisfies __ctHelpers.JSONSchema)',
+    ),
+  );
+  assert(
+    normalize(result).includes(
+      'return wish(path, { type: "unknown" } as const satisfies __ctHelpers.JSONSchema)',
+    ),
+  );
+  assert(
+    normalize(result).includes(
+      'generateObject<T>({ model: "gpt-4", schema: { type: "unknown" } as const satisfies __ctHelpers.JSONSchema })',
+    ),
+  );
+  assert(
+    normalize(result).includes(
+      'return generateObject({ model: "gpt-4", schema: { type: "unknown" } as const satisfies __ctHelpers.JSONSchema })',
+    ),
+  );
+  assert(
+    normalize(result).includes(
+      'Cell.of<T>(value, { type: "unknown" } as const satisfies __ctHelpers.JSONSchema)',
+    ),
+  );
+  assert(
+    normalize(result).includes(
+      'Cell.of(value, { type: "unknown" } as const satisfies __ctHelpers.JSONSchema)',
+    ),
+  );
+});
+
+Deno.test("Schema Injection - generic builder type parameters degrade to unknown", async () => {
+  const code = `
+    /// <cts-enable />
+    import { lift, handler } from "commontools";
+
+    function buildLift<T, U>() {
+      return lift<T, U>((value) => value as unknown as U);
+    }
+
+    function buildHandler<E, S>() {
+      return handler<E, S>((event, state) => {
+        void event;
+        void state;
+      });
+    }
+  `.trim();
+
+  const result = await transformSource(code, options);
+  const normalize = (s: string) => s.replace(/\s+/g, " ");
+
+  assert(
+    normalize(result).includes(
+      'lift({ type: "unknown" } as const satisfies __ctHelpers.JSONSchema, { type: "unknown" } as const satisfies __ctHelpers.JSONSchema',
+    ),
+  );
+  assert(
+    !normalize(result).includes(
+      "lift({} as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema",
+    ),
+  );
+  assert(
+    normalize(result).includes(
+      'handler({ type: "unknown" } as const satisfies __ctHelpers.JSONSchema, { type: "unknown" } as const satisfies __ctHelpers.JSONSchema',
     ),
   );
 });

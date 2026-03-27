@@ -8,15 +8,21 @@ import {
 
 export interface PatternCallbackPreScanResult {
   arrayMethodPatternCallNodes: Set<ts.Node>;
-  nonReactiveCapturesByMapPattern: Map<ts.Node, Set<string>>;
+  nonReactiveCapturesByPatternCall: Map<ts.Node, Set<string>>;
 }
+
+const ARRAY_METHOD_PATTERN_METHOD_NAMES = new Set([
+  "mapWithPattern",
+  "filterWithPattern",
+  "flatMapWithPattern",
+]);
 
 export function collectPatternCallbackPreScan(
   sourceFile: ts.SourceFile,
   context: TransformationContext,
 ): PatternCallbackPreScanResult {
   const arrayMethodPatternCallNodes = new Set<ts.Node>();
-  const nonReactiveCapturesByMapPattern = new Map<ts.Node, Set<string>>();
+  const nonReactiveCapturesByPatternCall = new Map<ts.Node, Set<string>>();
 
   interface ScopeInfo {
     opaqueNames: Set<string>;
@@ -49,27 +55,52 @@ export function collectPatternCallbackPreScan(
     scope: ScopeInfo,
   ): void => {
     if (!ts.isBlock(body)) return;
-    for (const stmt of body.statements) {
-      if (!ts.isVariableStatement(stmt)) continue;
-      for (const decl of stmt.declarationList.declarations) {
-        if (!decl.initializer) continue;
+
+    const visit = (node: ts.Node): void => {
+      if (node !== body && ts.isFunctionLike(node)) {
+        return;
+      }
+
+      if (ts.isVariableDeclaration(node) && node.initializer) {
         if (
           isOpaqueSourceExpression(
-            decl.initializer,
+            node.initializer,
             scope.opaqueNames,
             scope.opaqueSymbols,
             context,
           )
         ) {
-          collectBindingNames(decl.name, scope.opaqueNames);
+          collectBindingNames(node.name, scope.opaqueNames);
           addBindingTargetSymbols(
-            decl.name,
+            node.name,
             scope.opaqueSymbols,
             context.checker,
           );
         }
       }
+
+      ts.forEachChild(node, visit);
+    };
+
+    visit(body);
+  };
+
+  const getCaptureSourceSymbol = (
+    prop: ts.ObjectLiteralElementLike,
+  ): ts.Symbol | undefined => {
+    if (ts.isShorthandPropertyAssignment(prop)) {
+      return context.checker.getShorthandAssignmentValueSymbol(prop) ??
+        context.checker.getSymbolAtLocation(prop.name);
     }
+
+    if (
+      ts.isPropertyAssignment(prop) &&
+      ts.isIdentifier(prop.initializer)
+    ) {
+      return context.checker.getSymbolAtLocation(prop.initializer);
+    }
+
+    return undefined;
   };
 
   const preScan = (node: ts.Node): void => {
@@ -98,7 +129,7 @@ export function collectPatternCallbackPreScan(
     if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
-      node.expression.name.text === "mapWithPattern" &&
+      ARRAY_METHOD_PATTERN_METHOD_NAMES.has(node.expression.name.text) &&
       node.arguments[0] &&
       ts.isCallExpression(node.arguments[0])
     ) {
@@ -124,15 +155,19 @@ export function collectPatternCallbackPreScan(
                 ? prop.initializer.text
                 : prop.name.text;
             }
+            const originalSymbol = getCaptureSourceSymbol(prop);
+            const isReactiveCapture = originalSymbol
+              ? scope.opaqueSymbols.has(originalSymbol)
+              : !!originalName && scope.opaqueNames.has(originalName);
             if (
               originalName && captureName &&
-              !scope.opaqueNames.has(originalName)
+              !isReactiveCapture
             ) {
               nonReactive.add(captureName);
             }
           }
           if (nonReactive.size > 0) {
-            nonReactiveCapturesByMapPattern.set(innerPattern, nonReactive);
+            nonReactiveCapturesByPatternCall.set(innerPattern, nonReactive);
           }
         }
       }
@@ -147,6 +182,6 @@ export function collectPatternCallbackPreScan(
 
   return {
     arrayMethodPatternCallNodes,
-    nonReactiveCapturesByMapPattern,
+    nonReactiveCapturesByPatternCall,
   };
 }

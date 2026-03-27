@@ -45,7 +45,15 @@ export default pattern((__ct_pattern_input: {
         headers: { Authorization: `Bearer ${token}` },
     }));
     return { url, options };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, {
+    type: "object",
+    properties: {
+        token: {
+            type: "string"
+        }
+    },
+    required: ["token"]
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         url: {

@@ -8,7 +8,6 @@ export type ReactiveContextOwner =
   | "pattern"
   | "render"
   | "array-method"
-  | "unsupported-jsx-callback"
   | "computed"
   | "derive"
   | "action"
@@ -126,16 +125,6 @@ export function findEnclosingCallbackContext(
   return undefined;
 }
 
-function isInlineJsxEventHandler(
-  func: ts.ArrowFunction | ts.FunctionExpression,
-): boolean {
-  const parent = func.parent;
-  if (!ts.isJsxExpression(parent)) return false;
-  const jsxExprParent = parent.parent;
-  if (!ts.isJsxAttribute(jsxExprParent)) return false;
-  return jsxExprParent.name.getText().startsWith("on");
-}
-
 export function isStandaloneFunctionDefinition(
   func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
 ): boolean {
@@ -213,16 +202,6 @@ export function classifyReactiveContext(
       }
 
       if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-        // Transformed mapWithPattern callbacks are explicitly tracked and should
-        // always be treated as pattern callbacks, regardless of symbol lookup.
-        if (lookup?.isArrayMethodCallback(current)) {
-          return { kind: "pattern", owner: "array-method", inJsxExpression };
-        }
-
-        if (isInlineJsxEventHandler(current)) {
-          return { kind: "compute", owner: "handler", inJsxExpression };
-        }
-
         if (isStandaloneFunctionDefinition(current)) {
           return { kind: "compute", owner: "standalone", inJsxExpression };
         }

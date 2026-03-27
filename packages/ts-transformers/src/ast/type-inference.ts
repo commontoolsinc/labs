@@ -14,14 +14,37 @@ const TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation |
   ts.NodeBuilderFlags.UseStructuralFallback;
 
 /**
- * Check if a type is 'any', 'unknown', or an uninstantiated type parameter
- * These types cannot be used to generate schemas at compile time
+ * Check if a type is 'any', 'unknown', or an uninstantiated type parameter.
+ *
+ * This is a conservative predicate used at fallback seams where we do not want
+ * to trust the type for structural recovery. It is intentionally broader than
+ * "cannot emit a schema": `any` and `unknown` are both schemaable, but they
+ * are not structurally precise.
  */
 export function isAnyOrUnknownType(type: ts.Type | undefined): boolean {
   if (!type) return false;
   return (type.flags &
     (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.TypeParameter)) !==
     0;
+}
+
+export function isAnyType(type: ts.Type | undefined): boolean {
+  if (!type) return false;
+  return (type.flags & ts.TypeFlags.Any) !== 0;
+}
+
+export function isUnknownType(type: ts.Type | undefined): boolean {
+  if (!type) return false;
+  return (type.flags & ts.TypeFlags.Unknown) !== 0;
+}
+
+/**
+ * Type parameters without a concrete constraint/default are the main
+ * "truly unresolved" schema case that should stay conservative.
+ */
+export function isUnresolvedSchemaType(type: ts.Type | undefined): boolean {
+  if (!type) return false;
+  return (type.flags & ts.TypeFlags.TypeParameter) !== 0;
 }
 
 /**

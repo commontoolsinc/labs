@@ -4,7 +4,6 @@ import { createDataFlowAnalyzer, visitEachChildWithJsx } from "../ast/mod.ts";
 import { classifyExpressionSiteHandling } from "./expression-site-policy.ts";
 import {
   rewriteExpressionSite,
-  rewriteOpaquePathTerminalJsxExpressionSite,
   rewriteOwnedPreClosureJsxExpressionSite,
 } from "./expression-site-lowering.ts";
 
@@ -67,28 +66,8 @@ function transform(context: TransformationContext): ts.SourceFile {
       }
 
       if (
-        handling.kind === "owned-pre-closure-jsx" &&
-        handling.owner === "opaque-path-terminal-root"
-      ) {
-        const rewritten = rewriteOpaquePathTerminalJsxExpressionSite({
-          expression: node.expression,
-          context,
-          analyze,
-          visit,
-        });
-        if (rewritten) {
-          return context.factory.createJsxExpression(
-            node.dotDotDotToken,
-            rewritten,
-          );
-        }
-
-        return visitEachChildWithJsx(node, visit, context.tsContext);
-      }
-
-      if (
-        handling.kind === "owned-pre-closure-jsx" &&
-        handling.owner === "generic-owned-root"
+        handling.kind === "owned" &&
+        handling.owner === "jsx-root"
       ) {
         const rewritten = rewriteOwnedPreClosureJsxExpressionSite({
           expression: node.expression,

@@ -42,7 +42,7 @@ export class CapabilityLoweringTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     const {
       arrayMethodPatternCallNodes,
-      nonReactiveCapturesByMapPattern,
+      nonReactiveCapturesByPatternCall,
     } = collectPatternCallbackPreScan(
       context.sourceFile,
       context,
@@ -63,7 +63,7 @@ export class CapabilityLoweringTransformer extends Transformer {
       if (callbackArg) {
         const isArrayMethodCallback = arrayMethodPatternCallNodes.has(node);
         const nonReactiveCaptures = isArrayMethodCallback
-          ? nonReactiveCapturesByMapPattern.get(node)
+          ? nonReactiveCapturesByPatternCall.get(node)
           : undefined;
         const transformedCallback = transformPatternCallback(
           callbackArg,

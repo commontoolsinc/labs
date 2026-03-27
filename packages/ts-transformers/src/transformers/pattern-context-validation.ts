@@ -25,7 +25,10 @@
  *
  * Errors reported:
  * - Property access used in computation: ERROR (must wrap in computed())
- * - Optional chaining (?.): ERROR (not allowed in reactive context)
+ * - Optional chaining:
+ *   - optional property/element access is allowed in supported lowerable
+ *     expression sites
+ *   - optional calls and non-lowerable optional access still error
  * - Calling .get() on cells: ERROR (must wrap in computed())
  * - Function creation in pattern context: ERROR (move to module scope)
  * - lift()/handler() inside pattern: ERROR (move to module scope)

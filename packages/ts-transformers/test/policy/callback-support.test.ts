@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 import ts from "typescript";
 
 import { TransformationContext } from "../../src/core/mod.ts";
+import { classifyReactiveContext } from "../../src/ast/mod.ts";
 import {
   allowsRestrictedContextFunctionCallback,
   classifyCallbackSupport,
@@ -201,6 +202,23 @@ Deno.test(
 );
 
 Deno.test(
+  "Callback boundary policy: reactive context for transformed array callbacks comes from the shared boundary classifier",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      const items = [1, 2, 3];
+      const result = items.map((item) => item + 1);
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    context.markAsArrayMethodCallback(callback);
+    const info = classifyReactiveContext(callback.body, checker, context);
+
+    assertEquals(info.kind, "pattern");
+    assertEquals(info.owner, "array-method");
+  },
+);
+
+Deno.test(
   "Callback support policy: event handlers stay outside the generic safe-wrapper callback bucket",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
@@ -222,6 +240,27 @@ Deno.test(
     });
     assertEquals(allowsRestrictedContextFunctionCallback(decision), false);
     assertEquals(supportsPatternOwnedWrapperCallbackSite(decision), false);
+  },
+);
+
+Deno.test(
+  "Callback boundary policy: reactive context for event handlers comes from the shared boundary classifier",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          button: any;
+        }
+      }
+
+      const view = <button onClick={() => 1} />;
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const info = classifyReactiveContext(callback.body, checker, context);
+
+    assertEquals(info.kind, "compute");
+    assertEquals(info.owner, "handler");
   },
 );
 
@@ -248,7 +287,7 @@ Deno.test(
       bodyContext: {
         strategy: "explicit",
         kind: "compute",
-        owner: "unsupported-jsx-callback",
+        owner: "unknown",
       },
     });
   },
@@ -263,6 +302,116 @@ Deno.test(
     `);
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const decision = classifyCallbackBoundary(callback, checker, context);
+
+    assertEquals(decision, {
+      kind: "unsupported",
+      boundaryKind: "unsupported-container",
+      boundaryDiagnostic: "function-creation",
+      bodyContext: {
+        strategy: "inherit-parent",
+      },
+    });
+  },
+);
+
+Deno.test(
+  "Callback boundary policy: unresolved property-access pattern fallback stays pattern-owned",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      const builders = {} as any;
+      const value = builders.pattern((input: unknown) => input);
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const decision = classifyCallbackBoundary(callback, checker, context);
+
+    assertEquals(decision, {
+      kind: "supported",
+      boundaryKind: "pattern-builder",
+      bodyContext: {
+        strategy: "explicit",
+        kind: "pattern",
+        owner: "pattern",
+      },
+    });
+  },
+);
+
+Deno.test(
+  "Callback boundary policy: unresolved property-access patternTool fallback stays compute-owned",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      const helpers = {} as any;
+      const tool = helpers.patternTool((input: { value?: string }) => input?.value);
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const decision = classifyCallbackBoundary(callback, checker, context);
+
+    assertEquals(decision, {
+      kind: "supported",
+      boundaryKind: "pattern-tool",
+      bodyContext: {
+        strategy: "explicit",
+        kind: "compute",
+        owner: "unknown",
+      },
+    });
+  },
+);
+
+Deno.test(
+  "Callback boundary policy: shadowed local pattern helper does not use name-only fallback",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      const pattern = <T,>(fn: T) => fn;
+      const value = pattern((input: unknown) => input);
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "pattern",
+    );
+    const callback = call.arguments[0];
+    if (!callback || !ts.isArrowFunction(callback)) {
+      throw new Error("Expected inline pattern callback");
+    }
+    const decision = classifyCallbackBoundary(callback, checker, context);
+
+    assertEquals(decision, {
+      kind: "unsupported",
+      boundaryKind: "unsupported-container",
+      boundaryDiagnostic: "function-creation",
+      bodyContext: {
+        strategy: "inherit-parent",
+      },
+    });
+  },
+);
+
+Deno.test(
+  "Callback boundary policy: shadowed local patternTool helper does not use name-only fallback",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      const patternTool = <T,>(fn: T) => fn;
+      const tool = patternTool((input: { value?: string }) => input?.value);
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "patternTool",
+    );
+    const callback = call.arguments[0];
+    if (!callback || !ts.isArrowFunction(callback)) {
+      throw new Error("Expected inline patternTool callback");
+    }
     const decision = classifyCallbackBoundary(callback, checker, context);
 
     assertEquals(decision, {

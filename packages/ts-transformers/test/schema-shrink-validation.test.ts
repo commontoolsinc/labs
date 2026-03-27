@@ -5,7 +5,10 @@ import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
 
 /**
  * Extracts JSON schema literals from transformed output.
- * Schemas appear as `{ type: "object", ... } as const satisfies __ctHelpers.JSONSchema`
+ * Schemas appear as either:
+ * - `{ type: "object", ... } as const satisfies __ctHelpers.JSONSchema`
+ * - `true as const satisfies __ctHelpers.JSONSchema`
+ * - `false as const satisfies __ctHelpers.JSONSchema`
  * Returns them in order of appearance.
  */
 function extractSchemas(output: string): string[] {
@@ -15,25 +18,39 @@ function extractSchemas(output: string): string[] {
   while (true) {
     const markerIdx = output.indexOf(marker, searchFrom);
     if (markerIdx === -1) break;
-    // Walk backwards from marker to find matching opening brace
-    let depth = 0;
+    // Walk backwards from marker to find the schema literal.
     let start = markerIdx - 1;
     // Skip whitespace before marker
     while (start >= 0 && /\s/.test(output[start]!)) start--;
-    // Now we should be at a closing brace or end of object literal
-    if (output[start] !== "}") {
+
+    let schemaText: string | undefined;
+    if (output[start] === "}") {
+      let depth = 1;
+      start--;
+      while (start >= 0 && depth > 0) {
+        if (output[start] === "}") depth++;
+        else if (output[start] === "{") depth--;
+        start--;
+      }
+      start++; // back to the opening brace
+      schemaText = output.slice(start, markerIdx).trim();
+    } else {
+      let tokenStart = start;
+      while (tokenStart >= 0 && /[A-Za-z]/.test(output[tokenStart]!)) {
+        tokenStart--;
+      }
+      tokenStart++;
+      const token = output.slice(tokenStart, start + 1).trim();
+      if (token === "true" || token === "false") {
+        schemaText = token;
+      }
+    }
+
+    if (!schemaText) {
       searchFrom = markerIdx + marker.length;
       continue;
     }
-    depth = 1;
-    start--;
-    while (start >= 0 && depth > 0) {
-      if (output[start] === "}") depth++;
-      else if (output[start] === "{") depth--;
-      start--;
-    }
-    start++; // back to the opening brace
-    const schemaText = output.slice(start, markerIdx).trim();
+
     schemas.push(schemaText);
     searchFrom = markerIdx + marker.length;
   }
@@ -988,11 +1005,8 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
-    "pattern<T> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
+    "pattern<T> and inline destructured form produce identical schemas",
     async () => {
-      // Known divergence: pattern<T> produces both argument and result schemas
-      // (result schema has asOpaque on each property), while inline form produces
-      // only the argument schema. This needs more changes to reconcile.
       const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { pattern } from "commontools";',
@@ -1037,19 +1051,17 @@ Deno.test("Schema Shrink Validation", async (t) => {
         0,
         "inline form should produce schemas",
       );
-      // Argument schemas (first schema) should match
       assertEquals(
-        schemasTA[0],
-        schemasInline[0],
-        "pattern argument schemas should be identical between type-arg and inline forms",
+        schemasTA,
+        schemasInline,
+        "pattern schemas should be identical between type-arg and inline forms",
       );
     },
   );
 
   await t.step(
-    "pattern<TypeAlias> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
+    "pattern<TypeAlias> and inline destructured alias form produce identical schemas",
     async () => {
-      // Same divergence as above.
       const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { pattern } from "commontools";',
@@ -1100,11 +1112,45 @@ Deno.test("Schema Shrink Validation", async (t) => {
         0,
         "inline form should produce schemas",
       );
-      // Argument schemas (first schema) should match
       assertEquals(
-        schemasTA[0],
-        schemasInline[0],
-        "pattern argument schemas should be identical between type-arg and inline forms",
+        schemasTA,
+        schemasInline,
+        "pattern schemas should be identical between type-arg and inline forms",
+      );
+    },
+  );
+
+  await t.step(
+    "authored underscore-prefixed pattern parameters still emit never input schema",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { pattern } from "commontools";',
+        "",
+        "export default pattern((_state: { name: string; count: number }) => {",
+        "  return { ok: true as const };",
+        "});",
+      ].join("\n");
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(result.diagnostics).length,
+        0,
+        `pattern underscore param had shrink errors: ${
+          fmtErrors(result.diagnostics)
+        }`,
+      );
+      const schemas = extractSchemas(result.output);
+      assertGreater(
+        schemas.length,
+        1,
+        "underscore-param pattern should still emit both input and result schemas",
+      );
+      assertEquals(
+        schemas[0],
+        "false",
+        "underscore-prefixed authored params should still emit never/false input schema",
       );
     },
   );

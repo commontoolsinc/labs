@@ -3,6 +3,8 @@ import ts from "typescript";
 import {
   classifyArrayCallbackContainerCall,
   detectCallKind,
+  getPatternBuilderCallbackArgument,
+  getPatternToolCallbackArgument,
 } from "../ast/call-kind.ts";
 import { isEventHandlerJsxAttribute } from "../ast/event-handlers.ts";
 
@@ -41,8 +43,7 @@ type CallbackBoundaryBodyContext =
       | "action"
       | "lift"
       | "handler"
-      | "unknown"
-      | "unsupported-jsx-callback";
+      | "unknown";
   };
 
 export type CallbackBoundaryDecision =
@@ -66,20 +67,6 @@ function isWithinJsxExpression(node: ts.Node): boolean {
       return true;
     }
     current = current.parent;
-  }
-  return false;
-}
-
-function isNamedCallbackCall(
-  call: ts.CallExpression,
-  name: string,
-): boolean {
-  const expression = call.expression;
-  if (ts.isIdentifier(expression)) {
-    return expression.text === name;
-  }
-  if (ts.isPropertyAccessExpression(expression)) {
-    return expression.name.text === name;
   }
   return false;
 }
@@ -242,7 +229,7 @@ export function classifyCallbackBoundary(
           bodyContext: {
             strategy: "explicit",
             kind: "compute",
-            owner: "unsupported-jsx-callback",
+            owner: "unknown",
           },
         }
         : {
@@ -253,7 +240,7 @@ export function classifyCallbackBoundary(
         };
   }
 
-  if (isNamedCallbackCall(parent, "pattern")) {
+  if (getPatternBuilderCallbackArgument(parent, checker) === callback) {
     return {
       kind: "supported",
       boundaryKind: "pattern-builder",
@@ -265,7 +252,7 @@ export function classifyCallbackBoundary(
     };
   }
 
-  if (isNamedCallbackCall(parent, "patternTool")) {
+  if (getPatternToolCallbackArgument(parent, checker) === callback) {
     return {
       kind: "supported",
       boundaryKind: "pattern-tool",
@@ -285,7 +272,7 @@ export function classifyCallbackBoundary(
       bodyContext: {
         strategy: "explicit",
         kind: "compute",
-        owner: "unsupported-jsx-callback",
+        owner: "unknown",
       },
     };
   }

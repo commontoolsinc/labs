@@ -313,6 +313,49 @@ const p = pattern<{ items: string[] }>((state) => {
 );
 
 Deno.test(
+  "Capability-first: filterWithPattern and flatMapWithPattern keep plain captures as params",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+export default pattern<{ items: { label: string; tags: string[] }[] }>(({ items }) => {
+  const suffix = "!";
+  const prefix = "#";
+
+  return {
+    labels: items
+      .filter((item) => item.label.endsWith(suffix))
+      .flatMap((item) => item.tags.length ? [prefix + item.tags[0]] : []),
+  };
+});
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(output, ".filterWithPattern(");
+    assertStringIncludes(output, ".flatMapWithPattern(");
+    assertStringIncludes(
+      output,
+      "const suffix = __ct_pattern_input.params.suffix;",
+    );
+    assertStringIncludes(
+      output,
+      "const prefix = __ct_pattern_input.params.prefix;",
+    );
+    assert(
+      !output.includes(
+        'const suffix = __ct_pattern_input.key("params", "suffix");',
+      ),
+    );
+    assert(
+      !output.includes(
+        'const prefix = __ct_pattern_input.key("params", "prefix");',
+      ),
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: nested block shadowing does not leak opaque alias roots",
   async () => {
     const source = `/// <cts-enable />
@@ -1283,6 +1326,57 @@ const p = pattern<State>((state) => ({
     assert(
       !output.includes("const tasks = __ct_pattern_input.params.tasks;"),
       "destructured opaque locals captured by nested map callbacks should remain reactive, not plain params values",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: block-scoped opaque locals stay reactive when captured by nested map callbacks",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+interface State {
+  sections: { tasks: { label: string }[]; tags: { name: string }[] }[];
+}
+const p = pattern<State>((state) => ({
+  [UI]: (
+    <div>
+      {state.sections.map((section) => {
+        if (!section.tags.length) return <div />;
+        {
+          const tasks = section.tasks;
+          return (
+            <div>
+              {section.tags.map((tag) => (
+                <span>{tag.name}:{tasks.length}</span>
+              ))}
+            </div>
+          );
+        }
+      })}
+    </div>
+  ),
+}));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(
+      output,
+      'const tasks = __ct_pattern_input.key("params", "tasks");',
+    );
+    assert(
+      !output.includes("const tasks = __ct_pattern_input.params.tasks;"),
+      "block-scoped opaque locals captured by nested map callbacks should remain reactive, not plain params values",
     );
   },
 );

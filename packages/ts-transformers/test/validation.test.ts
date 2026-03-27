@@ -1,4 +1,4 @@
-import { assertEquals, assertGreater } from "@std/assert";
+import { assertEquals, assertGreater, assertStringIncludes } from "@std/assert";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
@@ -639,6 +639,24 @@ Deno.test(
       export default pattern<{ label?: string | null }>((state) => ({
         label: state.label ?? "Pending",
       }));
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
+
+    await t.step(
+      "allows top-level return-expression optional property access in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ user?: { name: string } }>((state) =>
+        state.user?.name
+      );
     `;
         const { diagnostics } = await validateSource(source, {
           types: COMMONTOOLS_TYPES,
@@ -2213,9 +2231,9 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
   );
 });
 
-Deno.test("Pattern Any Result Schema", async (t) => {
+Deno.test("Pattern Result Schema Inference", async (t) => {
   await t.step(
-    "errors when pattern return type infers as any (one type arg)",
+    "emits true when pattern return type infers as any (one type arg)",
     async () => {
       const source = `/// <cts-enable />
       import { pattern } from "commontools";
@@ -2226,19 +2244,21 @@ Deno.test("Pattern Any Result Schema", async (t) => {
         return fetchAny();
       });
     `;
-      const { diagnostics } = await validateSource(source, {
+      const { diagnostics, output } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) => e.type === "pattern:any-result-schema",
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0, "any result types should not error");
+      assertStringIncludes(
+        output,
+        "true as const satisfies __ctHelpers.JSONSchema",
+        "Direct any result inference should emit a permissive true schema",
       );
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertHasErrorType(errors, "pattern:any-result-schema");
     },
   );
 
   await t.step(
-    "errors when pattern return type infers as any (no type args)",
+    "emits true when pattern return type infers as any (no type args)",
     async () => {
       const source = `/// <cts-enable />
       import { pattern } from "commontools";
@@ -2249,14 +2269,41 @@ Deno.test("Pattern Any Result Schema", async (t) => {
         return fetchAny();
       });
     `;
-      const { diagnostics } = await validateSource(source, {
+      const { diagnostics, output } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) => e.type === "pattern:any-result-schema",
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0, "any result types should not error");
+      assertStringIncludes(
+        output,
+        "true as const satisfies __ctHelpers.JSONSchema",
+        "Direct any result inference should emit a permissive true schema",
       );
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertHasErrorType(errors, "pattern:any-result-schema");
+    },
+  );
+
+  await t.step(
+    'emits { type: "unknown" } when pattern return type infers as unknown',
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      declare function fetchUnknown(): unknown;
+
+      export default pattern<{ prompt: string }>(({ prompt }) => {
+        return fetchUnknown();
+      });
+    `;
+      const { diagnostics, output } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0, "unknown result types should not error");
+      assertStringIncludes(
+        output,
+        'type: "unknown"',
+        "Direct unknown result inference should emit an explicit unknown schema",
+      );
     },
   );
 
@@ -2276,9 +2323,7 @@ Deno.test("Pattern Any Result Schema", async (t) => {
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) => e.type === "pattern:any-result-schema",
-      );
+      const errors = getErrors(diagnostics);
       assertEquals(
         errors.length,
         0,
@@ -2300,13 +2345,187 @@ Deno.test("Pattern Any Result Schema", async (t) => {
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) => e.type === "pattern:any-result-schema",
-      );
+      const errors = getErrors(diagnostics);
       assertEquals(
         errors.length,
         0,
         "Concrete return type should not trigger error",
+      );
+    },
+  );
+
+  await t.step(
+    "no error when pattern returns a structurally recoverable object from any-typed values",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      declare function fetchAny(): any;
+
+      export default pattern<{ prompt: string }>(({ prompt }) => {
+        return { title: fetchAny().title, prompt };
+      });
+    `;
+      const { diagnostics, output } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Object-literal result recovery should preserve concrete result structure",
+      );
+      assertStringIncludes(
+        output,
+        "title: true",
+        "Recovered object-literal result schemas should still preserve permissive any-derived properties structurally",
+      );
+    },
+  );
+});
+
+Deno.test("Cell Value Schema Recovery", async (t) => {
+  await t.step("emits true when cell value infers as any", async () => {
+    const source = `/// <cts-enable />
+      import { cell } from "commontools";
+
+      declare function fetchAny(): any;
+
+      export const value = cell(fetchAny());
+    `;
+    const { diagnostics, output } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "any cell values should not error");
+    assertStringIncludes(
+      output,
+      "true as const satisfies __ctHelpers.JSONSchema",
+      "Direct any cell values should emit a permissive true schema",
+    );
+  });
+
+  await t.step(
+    'emits { type: "unknown" } when cell value infers as unknown',
+    async () => {
+      const source = `/// <cts-enable />
+      import { cell } from "commontools";
+
+      declare function fetchUnknown(): unknown;
+
+      export const value = cell(fetchUnknown());
+    `;
+      const { diagnostics, output } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0, "unknown cell values should not error");
+      assertStringIncludes(
+        output,
+        'type: "unknown"',
+        "Direct unknown cell values should emit an explicit unknown schema",
+      );
+    },
+  );
+
+  await t.step(
+    "preserves structural schema for transformed pattern-input cell values",
+    async () => {
+      const source = `/// <cts-enable />
+      import { cell, pattern } from "commontools";
+
+      export default pattern<{ values: number[] }>((state) => {
+        const typedValues = cell(state.values);
+        return { typedValues };
+      });
+    `;
+      const { diagnostics, output } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0, "cell schema recovery should not error");
+      assertStringIncludes(
+        output,
+        'type: "array"',
+        "Transformed cell values should preserve array structure",
+      );
+      assertStringIncludes(
+        output,
+        'type: "number"',
+        "Transformed cell values should preserve item structure",
+      );
+    },
+  );
+});
+
+Deno.test("Schema Precision Follow-Ups", async (t) => {
+  await t.step(
+    "reactive array element access preserves string | undefined result schema",
+    async () => {
+      const source = `/// <cts-enable />
+      import { cell, pattern, UI } from "commontools";
+
+      export default pattern((_state) => {
+        const items = cell(["apple", "banana", "cherry"]);
+        const index = cell(1);
+
+        return {
+          [UI]: <div>{items.get()[index.get()]}</div>,
+        };
+      });
+    `;
+      const { diagnostics, output } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "element access schema recovery should not error",
+      );
+      assertStringIncludes(
+        output,
+        'type: ["string", "undefined"]',
+        "Reactive array element access should preserve its string | undefined result schema",
+      );
+    },
+  );
+
+  await t.step(
+    "boolean result schemas stay normalized instead of expanding to true/false literal enums",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      export default pattern((state: { isPremium: boolean; score: number }) => {
+        return {
+          [UI]: <div>{state.isPremium || state.score > 100 ? "Premium" : "Regular"}</div>,
+        };
+      });
+    `;
+      const { diagnostics, output } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "boolean schema normalization should not error",
+      );
+      assertStringIncludes(
+        output,
+        'type: "boolean"',
+        "Boolean result schemas should stay normalized as plain boolean",
+      );
+      assertEquals(
+        output.includes("enum: [true]") || output.includes('"enum": [true]'),
+        false,
+        "Boolean result schemas should not expand to a true literal enum",
+      );
+      assertEquals(
+        output.includes("enum: [false]") || output.includes('"enum": [false]'),
+        false,
+        "Boolean result schemas should not expand to a false literal enum",
       );
     },
   );
@@ -2443,6 +2662,27 @@ Deno.test("Standalone Function Validation", async (t) => {
         0,
         "Callbacks passed to name-matched patternTool should not be treated as restricted pattern context",
       );
+    },
+  );
+
+  await t.step(
+    "does not treat shadowed local patternTool helpers as safe wrappers in pattern context",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const patternTool = <T,>(fn: T) => fn;
+
+      export default pattern<{ value?: string }>((state) => {
+        const tool = patternTool((input: { value?: string }) => input?.value);
+        return state.value ?? tool;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "pattern-context:function-creation");
     },
   );
 
