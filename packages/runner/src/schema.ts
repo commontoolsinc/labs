@@ -266,6 +266,7 @@ export function processDefaultValue(
     isRecord(resolvedSchema) && resolvedSchema.type === "array" &&
     Array.isArray(defaultValue) && resolvedSchema.items
   ) {
+    // TODO(@ubik2): Need to handle prefixItems
     // Handle boolean items values
     let itemSchema: JSONSchema;
     if (resolvedSchema.items === true) {

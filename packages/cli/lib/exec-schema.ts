@@ -784,6 +784,7 @@ function schemaShapeString(
   if (type === "null") return "null";
 
   if (type === "array") {
+    // We don't handle tuples here (prefixItems)
     const items = isSchemaObject(schema)
       ? schema.items as JSONSchema
       : undefined;

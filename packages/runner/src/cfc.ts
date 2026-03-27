@@ -227,6 +227,7 @@ export class ContextualFlowControl {
         cycleTracker,
       );
     } else if (schema.items && typeof schema.items === "object") {
+      // TODO(@ubik2): need to handle prefixItems -- also probably not else if here
       ContextualFlowControl.joinSchema(
         joined,
         schema.items,
