@@ -391,6 +391,9 @@ export function pushFrame(frame: Partial<Frame> = {}): Frame {
     ...(parent?.runtime && { runtime: parent.runtime }),
     ...(parent?.tx && { tx: parent.tx }),
     ...(parent?.space && { space: parent.space }),
+    ...(parent?.sourceLocationContext && {
+      sourceLocationContext: parent.sourceLocationContext,
+    }),
     ...frame,
   };
 
@@ -424,6 +427,9 @@ export function pushFrameFromCause(
     ...(frameRuntime && { runtime: frameRuntime }),
     ...(frameSpace && { space: frameSpace }),
     ...(frameTx && { tx: frameTx }),
+    ...(parent?.sourceLocationContext && {
+      sourceLocationContext: parent.sourceLocationContext,
+    }),
     ...(inHandler && { inHandler: true }),
     ...(unsafe_binding ? { unsafe_binding } : {}),
   };

@@ -231,6 +231,12 @@ export type UnsafeBinding = {
   parent?: UnsafeBinding;
 };
 
+export type SourceLocationContext = {
+  script: string;
+  filename: string;
+  nextSearchOffset: number;
+};
+
 export type Frame = {
   parent?: Frame;
   cause?: unknown;
@@ -241,6 +247,7 @@ export type Frame = {
   inHandler?: boolean;
   opaqueRefs: Set<OpaqueRef<any>>;
   unsafe_binding?: UnsafeBinding;
+  sourceLocationContext?: SourceLocationContext;
 };
 
 // Builder functions interface

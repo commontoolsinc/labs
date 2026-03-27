@@ -51,6 +51,32 @@ interface SourceLocationResult {
   sample?: Record<string, unknown>;
 }
 
+type PositionMapper = (
+  file: string,
+  line: number,
+  col: number,
+) =>
+  | {
+    source?: string;
+    line?: number;
+    column?: number;
+    name?: string;
+  }
+  | null
+  | undefined;
+
+const INTERNAL_SOURCE_LOCATION_FRAME_PATTERNS = [
+  /\bgetExternalSourceLocation\b/,
+  /\bannotateFunctionDebugMetadata\b/,
+  /\bcreateNodeFactory\b/,
+  /\bhandlerInternal\b/,
+  /\blift\b/,
+  /\bhandler\b/,
+  /\bderive\b/,
+];
+const SYNTHETIC_MAPPED_LINE = 1;
+const SYNTHETIC_MAPPED_COLUMN = 23;
+
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
 ): ModuleFactory<T, R> {
@@ -122,11 +148,27 @@ export function parseStackFrame(
  * If a source map is available, maps the position back to the original source.
  */
 function getExternalSourceLocation(): SourceLocationResult {
-  const stack = new Error().stack;
+  const topFrame = getTopFrame();
+  const mapPosition = (file: string, line: number, col: number) =>
+    topFrame?.runtime?.harness?.mapPosition(file, line, col);
+  const stackResult = resolveSourceLocationFromStack(
+    new Error().stack,
+    mapPosition,
+  );
+  if (stackResult.location) {
+    return stackResult;
+  }
+  return { location: null };
+}
+
+export function resolveSourceLocationFromStack(
+  stack: string | undefined,
+  mapPosition?: PositionMapper,
+): SourceLocationResult {
   if (!stack) return { location: null };
 
-  const lines = stack.split("\n");
-  const parsedFrames = lines
+  const parsedFrames = stack
+    .split("\n")
     .map((line, index) => ({
       index,
       raw: line.trim(),
@@ -134,14 +176,7 @@ function getExternalSourceLocation(): SourceLocationResult {
     }))
     .filter((entry) => !!entry.frame);
 
-  // Find this file from the first real stack frame
-  let thisFile: string | null = null;
-  for (const entry of parsedFrames) {
-    if (entry.frame) {
-      thisFile = entry.frame.file;
-      break;
-    }
-  }
+  const thisFile = parsedFrames[0]?.frame?.file ?? null;
   sourceLocationLogger.debug("sample-stack", () => [{
     thisFile,
     parsedFrames: parsedFrames.slice(0, 8).map((entry) => ({
@@ -150,66 +185,81 @@ function getExternalSourceLocation(): SourceLocationResult {
       frame: entry.frame,
     })),
   }]);
-  if (!thisFile) return { location: null };
 
-  // Find first frame not from this file
   for (const entry of parsedFrames) {
     const frame = entry.frame;
-    if (frame && frame.file !== thisFile) {
-      // Try to map via source maps if available
-      const harness = getTopFrame()?.runtime?.harness;
-      const mapped = harness?.mapPosition(frame.file, frame.line, frame.col);
-      const metadata = {
+    if (!frame) {
+      continue;
+    }
+    if (
+      INTERNAL_SOURCE_LOCATION_FRAME_PATTERNS.some((pattern) =>
+        pattern.test(entry.raw)
+      )
+    ) {
+      continue;
+    }
+
+    const mapped = mapPosition?.(frame.file, frame.line, frame.col) ?? null;
+    const metadata = {
+      raw: entry.raw,
+      frame,
+      mapped: mapped
+        ? {
+          source: mapped.source,
+          line: mapped.line,
+          column: mapped.column,
+          name: mapped.name,
+        }
+        : null,
+      parsedFrames: parsedFrames.slice(0, 8).map((entry) => ({
+        index: entry.index,
         raw: entry.raw,
-        frame,
-        mapped: mapped
-          ? {
-            source: mapped.source,
-            line: mapped.line,
-            column: mapped.column,
-            name: mapped.name,
-          }
-          : null,
-        parsedFrames: parsedFrames.slice(0, 8).map((entry) => ({
-          index: entry.index,
-          raw: entry.raw,
-          frame: entry.frame,
-        })),
-      };
-      recordSourceLocationSample(metadata);
-      sourceLocationLogger.debug("sample-candidate", () => [{
-        raw: entry.raw,
-        frame,
-        mapped: mapped
-          ? {
-            source: mapped.source,
-            line: mapped.line,
-            column: mapped.column,
-            name: mapped.name,
-          }
-          : null,
-      }]);
-      if (mapped?.source && mapped?.line != null) {
-        const mappedBase = `${mapped.source}:${mapped.line}:${
-          mapped.column ?? 0
-        }`;
-        const resolved = mapped.line === 1 && (mapped.column ?? 0) === 23
-          ? `${mappedBase} [via ${frame.file}:${frame.line}:${frame.col}]`
-          : mappedBase;
-        sourceLocationLogger.debug("sample-resolved", () => [{
-          resolution: "mapped",
-          resolved,
-        }]);
-        return { location: resolved, sample: metadata };
+        frame: entry.frame,
+      })),
+    };
+
+    sourceLocationLogger.debug("sample-candidate", () => [{
+      raw: entry.raw,
+      frame,
+      mapped: mapped
+        ? {
+          source: mapped.source,
+          line: mapped.line,
+          column: mapped.column,
+          name: mapped.name,
+        }
+        : null,
+    }]);
+
+    if (mapped?.source && mapped?.line != null) {
+      if (
+        mapped.line === SYNTHETIC_MAPPED_LINE &&
+        (mapped.column ?? 0) === SYNTHETIC_MAPPED_COLUMN
+      ) {
+        continue;
       }
-      const resolved = `${frame.file}:${frame.line}:${frame.col}`;
+      const resolved = `${mapped.source}:${mapped.line}:${mapped.column ?? 0}`;
+      recordSourceLocationSample(metadata);
       sourceLocationLogger.debug("sample-resolved", () => [{
-        resolution: "raw",
+        resolution: "mapped",
         resolved,
       }]);
       return { location: resolved, sample: metadata };
     }
+
+    if (frame.file === thisFile) {
+      continue;
+    }
+
+    const resolved = `${frame.file}:${frame.line}:${frame.col}`;
+    recordSourceLocationSample(metadata);
+    sourceLocationLogger.debug("sample-resolved", () => [{
+      resolution: "raw",
+      resolved,
+    }]);
+    return { location: resolved, sample: metadata };
   }
+
   sourceLocationLogger.debug("sample-miss", () => [{
     reason: "no-external-frame",
     thisFile,
@@ -468,16 +518,20 @@ function annotateFunctionDebugMetadata(
   }
 
   const { location, sample } = getExternalSourceLocation();
-  if (location) {
-    Object.defineProperty(fn, "name", {
-      value: location,
-      configurable: true,
-    });
+  const fallbackLocation = location ?? resolveLocationFromFunctionSource(fn);
+  const finalLocation = fallbackLocation;
+  if (finalLocation) {
+    if (location) {
+      Object.defineProperty(fn, "name", {
+        value: finalLocation,
+        configurable: true,
+      });
+    }
     // Also set .src as backup (name can be finicky)
     (fn as {
       src?: string;
       sourceLocationSample?: Record<string, unknown>;
-    }).src = location;
+    }).src = finalLocation;
     if (sample) {
       (fn as {
         sourceLocationSample?: Record<string, unknown>;
@@ -488,6 +542,84 @@ function annotateFunctionDebugMetadata(
   // Store function body preview for hover tooltips
   const fnStr = fn.toString();
   (fn as { preview?: string }).preview = fnStr.slice(0, 200);
+}
+
+function resolveLocationFromFunctionSource(
+  fn: (...args: any[]) => unknown,
+): string | null {
+  const frame = getTopFrame();
+  const context = frame?.sourceLocationContext;
+  const harness = frame?.runtime?.harness;
+  if (!context || !harness) {
+    return null;
+  }
+
+  const source = fn.toString();
+  if (!source) {
+    return null;
+  }
+
+  let index = context.script.indexOf(source, context.nextSearchOffset);
+  if (index === -1 && context.nextSearchOffset > 0) {
+    index = context.script.indexOf(source);
+  }
+  if (index === -1) {
+    return null;
+  }
+
+  context.nextSearchOffset = index + source.length;
+  const mapped = findMappedLocationInSourceRange(
+    context.filename,
+    context.script,
+    index,
+    index + source.length,
+    harness.mapPosition.bind(harness),
+  );
+  if (mapped) {
+    return mapped;
+  }
+  const { line, col } = getLineAndColumnAtOffset(context.script, index);
+  return `${context.filename}:${line}:${col}`;
+}
+
+function getLineAndColumnAtOffset(
+  source: string,
+  offset: number,
+): { line: number; col: number } {
+  const clampedOffset = Math.max(0, Math.min(offset, source.length));
+  const prefix = source.slice(0, clampedOffset);
+  const lines = prefix.split("\n");
+  const line = lines.length;
+  const col = lines.at(-1)?.length ?? 0;
+  return { line, col };
+}
+
+function findMappedLocationInSourceRange(
+  filename: string,
+  script: string,
+  startOffset: number,
+  endOffset: number,
+  mapPosition: PositionMapper,
+): string | null {
+  let { line, col } = getLineAndColumnAtOffset(script, startOffset);
+  const limit = Math.min(endOffset, script.length);
+
+  for (let offset = startOffset; offset < limit; offset++) {
+    const mapped = mapPosition(filename, line, col);
+    if (mapped?.source && mapped?.line != null) {
+      return `${mapped.source}:${mapped.line}:${mapped.column ?? 0}`;
+    }
+
+    const char = script[offset];
+    if (char === "\n") {
+      line += 1;
+      col = 0;
+    } else {
+      col += 1;
+    }
+  }
+
+  return null;
 }
 
 function ensureImplementationRef(

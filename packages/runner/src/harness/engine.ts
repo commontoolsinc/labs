@@ -25,6 +25,7 @@ import { Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
 import { pretransformProgram } from "./pretransform.ts";
+import { popFrame, pushFrame } from "../builder/pattern.ts";
 import {
   createModuleCompartmentGlobals,
   createSafeConsoleGlobal,
@@ -199,8 +200,20 @@ export class Engine extends EventTarget implements Harness {
       .getInternals();
     const loadId = this.getLoadId(id, jsScript);
     const runtimeDeps = this.createRuntimeDeps(runtimeExports ?? {});
-
-    const result = isolate.execute(jsScript).invoke(runtimeDeps).inner();
+    const sourceLocationFrame = pushFrame({
+      runtime: this.ctRuntime,
+      sourceLocationContext: {
+        script: jsScript.js,
+        filename: jsScript.filename ?? `${loadId}.js`,
+        nextSearchOffset: 0,
+      },
+    });
+    let result;
+    try {
+      result = isolate.execute(jsScript).invoke(runtimeDeps).inner();
+    } finally {
+      popFrame(sourceLocationFrame);
+    }
     if (
       result && typeof result === "object" && "main" in result &&
       "exportMap" in result
