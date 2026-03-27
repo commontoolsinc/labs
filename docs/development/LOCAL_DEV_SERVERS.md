@@ -28,6 +28,7 @@
 experiments on both servers:
 ```bash
 EXPERIMENTAL_MODERN_HASH=true \
+EXPERIMENTAL_MODERN_SCHEMA_HASH=true \
 EXPERIMENTAL_MODERN_DATA_MODEL=true \
 ./scripts/restart-local-dev.sh --force --dangerously-clear-all-spaces
 ```
