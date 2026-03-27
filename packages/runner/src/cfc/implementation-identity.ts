@@ -1,6 +1,11 @@
 import { canonicalHash } from "@commontools/memory/canonical-hash";
 import { storableFromNativeValue } from "@commontools/memory/storable-value";
 import type { JSONSchema, Module, Pattern } from "../builder/types.ts";
+import {
+  formatImplementationSourceOrigin,
+  getImplementationSourceOrigin,
+  type ImplementationSourceOrigin,
+} from "../builder/source-origin.ts";
 import { toHex } from "./shared.ts";
 import {
   type CfcAtom,
@@ -18,10 +23,12 @@ export type CfcImplementationIdentity =
   | {
     readonly kind: "builtin";
     readonly name: string;
+    readonly origin?: ImplementationSourceOrigin;
   }
   | {
     readonly kind: "codeHash";
     readonly hash: string;
+    readonly origin?: ImplementationSourceOrigin;
   }
   | {
     readonly kind: "unknown";
@@ -37,14 +44,16 @@ export function unknownImplementationIdentity(): CfcImplementationIdentity {
 
 export function builtinImplementationIdentity(
   name: string,
+  origin?: ImplementationSourceOrigin,
 ): CfcImplementationIdentity {
-  return { kind: "builtin", name };
+  return { kind: "builtin", name, ...(origin ? { origin } : {}) };
 }
 
 export function codeHashImplementationIdentity(
   hash: string,
+  origin?: ImplementationSourceOrigin,
 ): CfcImplementationIdentity {
-  return { kind: "codeHash", hash };
+  return { kind: "codeHash", hash, ...(origin ? { origin } : {}) };
 }
 
 export function encodeImplementationIdentity(
@@ -57,6 +66,27 @@ export function encodeImplementationIdentity(
     return `Builtin(${identity.name})`;
   }
   return `CodeHash(${identity.hash})`;
+}
+
+export function implementationIdentityOrigin(
+  identity: CfcImplementationIdentity | undefined,
+): ImplementationSourceOrigin | undefined {
+  if (!identity || identity.kind === "unknown") {
+    return undefined;
+  }
+  return identity.origin;
+}
+
+export function encodeImplementationOrigin(
+  identity: CfcImplementationIdentity | undefined,
+): string {
+  const encodedIdentity = encodeImplementationIdentity(identity);
+  const displayOrigin = formatImplementationSourceOrigin(
+    implementationIdentityOrigin(identity),
+  );
+  return displayOrigin
+    ? `${encodedIdentity} @ ${displayOrigin}`
+    : encodedIdentity;
 }
 
 export function implementationIdentityIntegrityAtom(
@@ -101,6 +131,14 @@ export function encodeAnnotatedImplementationIdentity(
   annotated: unknown,
 ): string {
   return encodeImplementationIdentity(
+    getAnnotatedImplementationIdentity(annotated),
+  );
+}
+
+export function encodeAnnotatedImplementationOrigin(
+  annotated: unknown,
+): string {
+  return encodeImplementationOrigin(
     getAnnotatedImplementationIdentity(annotated),
   );
 }
@@ -199,5 +237,8 @@ export function deriveImplementationIdentity(
     return builtinImplementationIdentity(builtinName);
   }
 
-  return codeHashImplementationIdentity(computeModuleCodeHash(module));
+  return codeHashImplementationIdentity(
+    computeModuleCodeHash(module),
+    getImplementationSourceOrigin(module.implementation),
+  );
 }

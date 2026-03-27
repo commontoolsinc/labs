@@ -324,6 +324,21 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 
 ### 4.4 UI-Origin Event Integrity (In Progress)
 
+- [x] Implementation identity now carries explicit developer-facing code origin
+  alongside `CodeHash(...)`, with:
+
+```ts
+type ImplementationSourceOrigin = {
+  bundleLocation?: string;
+  sourceLocation?: string;
+};
+```
+
+- [x] `CodeHash(...)` remains the concrete integrity atom; code origin is a
+  locator that maps authored source back to that hash for diagnostics, review,
+  and trust configuration
+- [ ] Add higher-level tooling that lets demos/tests configure trust from source
+  locations while resolving back to concrete `CodeHash(...)` before enforcement
 - [x] Runner can mint `CfcEventEnvelope` integrity from declared `[UI]` output
   labels for explicitly targeted UI nodes
 - [x] `ct test` supports synthetic `uiEvent` steps that traverse `[UI]`, find a

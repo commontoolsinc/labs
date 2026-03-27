@@ -24,20 +24,29 @@ import {
 import { moduleToJSON } from "./json-utils.ts";
 import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
+import {
+  attachImplementationSourceOrigin,
+  formatImplementationSourceOrigin,
+  type ImplementationSourceOrigin,
+} from "./source-origin.ts";
 
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
 ): ModuleFactory<T, R> {
   // Attach source location and preview to function implementations for debugging
   if (typeof moduleSpec.implementation === "function") {
-    const location = getExternalSourceLocation();
-    if (location) {
+    const origin = getExternalSourceOrigin();
+    const displayLocation = formatImplementationSourceOrigin(origin);
+    if (displayLocation) {
       Object.defineProperty(moduleSpec.implementation, "name", {
-        value: location,
+        value: displayLocation,
         configurable: true,
       });
       // Also set .src as backup (name can be finicky)
-      (moduleSpec.implementation as { src?: string }).src = location;
+      (moduleSpec.implementation as { src?: string }).src = displayLocation;
+    }
+    if (origin) {
+      attachImplementationSourceOrigin(moduleSpec.implementation, origin);
     }
     // Store function body preview for hover tooltips
     const fnStr = moduleSpec.implementation.toString();
@@ -99,11 +108,12 @@ export function parseStackFrame(
 }
 
 /** Extract the first source location from a stack trace that isn't from this file.
- * If a source map is available, maps the position back to the original source.
+ * If a source map is available, record both the raw bundle frame and the
+ * original source location.
  */
-function getExternalSourceLocation(): string | null {
+function getExternalSourceOrigin(): ImplementationSourceOrigin | undefined {
   const stack = new Error().stack;
-  if (!stack) return null;
+  if (!stack) return undefined;
 
   const lines = stack.split("\n");
 
@@ -116,22 +126,28 @@ function getExternalSourceLocation(): string | null {
       break;
     }
   }
-  if (!thisFile) return null;
+  if (!thisFile) return undefined;
 
   // Find first frame not from this file
   for (const line of lines) {
     const frame = parseStackFrame(line);
     if (frame && frame.file !== thisFile) {
+      const bundleLocation = `${frame.file}:${frame.line}:${frame.col}`;
       // Try to map via source maps if available
       const harness = getTopFrame()?.runtime?.harness;
       const mapped = harness?.mapPosition(frame.file, frame.line, frame.col);
       if (mapped?.source && mapped?.line != null) {
-        return `${mapped.source}:${mapped.line}:${mapped.column ?? 0}`;
+        return {
+          bundleLocation,
+          sourceLocation: `${mapped.source}:${mapped.line}:${
+            mapped.column ?? 0
+          }`,
+        };
       }
-      return `${frame.file}:${frame.line}:${frame.col}`;
+      return { bundleLocation };
     }
   }
-  return null;
+  return undefined;
 }
 
 /** Declare a module
@@ -209,14 +225,18 @@ function handlerInternal<E, T>(
 
   // Attach source location and preview to handler function for debugging
   if (typeof handler === "function") {
-    const location = getExternalSourceLocation();
-    if (location) {
+    const origin = getExternalSourceOrigin();
+    const displayLocation = formatImplementationSourceOrigin(origin);
+    if (displayLocation) {
       Object.defineProperty(handler, "name", {
-        value: location,
+        value: displayLocation,
         configurable: true,
       });
       // Also set .src as backup (name can be finicky)
-      (handler as { src?: string }).src = location;
+      (handler as { src?: string }).src = displayLocation;
+    }
+    if (origin) {
+      attachImplementationSourceOrigin(handler, origin);
     }
     // Store function body preview for hover tooltips
     const fnStr = handler.toString();

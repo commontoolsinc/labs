@@ -66,6 +66,40 @@ Pattern-produced UI output should carry concrete integrity such as:
 
 These are concrete atoms, not concepts.
 
+### 1a. Explicit Code Origin For Developer-Facing Trust Configuration
+
+`CodeHash(...)` should remain the concrete integrity atom on the lattice.
+
+However, developers need a practical way to refer back to authored `.tsx` code
+when reviewing or configuring trust. The runner now carries an explicit
+developer-facing code-origin sidecar alongside `CodeHash`:
+
+```ts
+type ImplementationSourceOrigin = {
+  bundleLocation?: string;
+  sourceLocation?: string;
+};
+```
+
+The intended meaning is:
+
+- `bundleLocation`: location inside the compiled / hashed bundle
+- `sourceLocation`: original authored location recovered through source maps when
+  available
+
+This makes the practical developer identity:
+
+> `CodeHash(H)` + "this specific subset / source location within H"
+
+Important constraint:
+
+- trust and authorization should still enforce on `CodeHash(...)`
+- source location is a developer-facing locator, not the final trust atom
+
+This avoids overloading `Function.name` or source-map-derived strings as the
+security primitive while still making trust statements traceable to real
+authored code.
+
 ### 2. UI Contracts on Paths
 
 UI semantics should be attached to specific output paths as integrity atoms.
@@ -348,3 +382,10 @@ derived projection, not an additional authored contract.
    - Unary rules are enough for the minimal model implemented here.
    - Richer parent-slot-child conjunction may eventually want a first-class
      derivation mechanism.
+
+4. Should the spec standardize developer-facing code origin as an explicit
+   sidecar to `CodeHash(...)`?
+   - Current implementation direction: yes, but only as metadata such as
+     `(bundleLocation, sourceLocation)`.
+   - Trust closure should still operate on the concrete `CodeHash(...)` atom,
+     with code origin used to map authored source back to that hash.

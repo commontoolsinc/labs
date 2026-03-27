@@ -197,6 +197,16 @@ Selectors can use:
 - `traceIncludesPaths`: composed UI traversal paths that must be present
 - `expectedNodePath`: exact resolved node path that must be targeted
 
+When tracing a trusted UI event back to authored code, treat the implementation
+identity as:
+
+- concrete `CodeHash(...)` for enforcement
+- explicit code-origin metadata (`bundleLocation`, `sourceLocation`) for
+  developer-facing diagnostics and trust configuration
+
+Do not rely on function `.name` alone as the trust primitive. It is only a
+display surface for the same underlying code origin.
+
 Use `schema` when the authored manual JSON schema carries UI IFC labels that are
 not recoverable from TypeScript-generated runtime schema metadata alone.
 
@@ -250,6 +260,11 @@ const guardedShare = requireEventIntegrity(
 
 If the current event is missing one of the required atoms, the handler body does
 not run and the runtime records a `CfcEventIntegrityViolationError`.
+
+If you need a reviewer-facing explanation of *which* handler or lift is being
+trusted, use the explicit code origin associated with the handler's
+implementation identity. Enforcement should still key on `CodeHash(...)`, with
+code origin acting as the bridge back to the authored `.tsx` source.
 
 ## Writing Assertions
 
