@@ -76,6 +76,21 @@ wait_for_path() {
   error "Timed out waiting for path: $path"
 }
 
+try_wait_for_path() {
+  local path="$1"
+  local timeout_seconds="${2:-5}"
+  local attempts=$((timeout_seconds * 10))
+
+  for _ in $(seq 1 "$attempts"); do
+    if [ -e "$path" ]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  return 1
+}
+
 wait_for_piece_value() {
   local path="$1"
   local expected="$2"
@@ -184,7 +199,18 @@ if [ -z "$ENTITY_ID" ] || [ "$ENTITY_ID" = "null" ]; then
   error "Mounted meta.json did not include an entityId."
 fi
 
-ENTITY_DIR="$MOUNTPOINT/$SPACE/entities/$ENTITY_ID"
+ENTITY_BARE_ID="${ENTITY_ID#of:}"
+ENTITY_DIR_PLAIN="$MOUNTPOINT/$SPACE/entities/$ENTITY_BARE_ID"
+ENTITY_DIR_CANONICAL="$MOUNTPOINT/$SPACE/entities/of:$ENTITY_BARE_ID"
+
+if try_wait_for_path "$ENTITY_DIR_PLAIN" 20; then
+  ENTITY_DIR="$ENTITY_DIR_PLAIN"
+elif try_wait_for_path "$ENTITY_DIR_CANONICAL" 20; then
+  ENTITY_DIR="$ENTITY_DIR_CANONICAL"
+else
+  error "Timed out waiting for entity directory (tried $ENTITY_DIR_PLAIN and $ENTITY_DIR_CANONICAL)."
+fi
+
 ENTITY_RESULT_DIR="$ENTITY_DIR/result"
 wait_for_path "$ENTITY_RESULT_DIR"
 
