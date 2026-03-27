@@ -2038,6 +2038,60 @@ const p = pattern(() => {
 );
 
 Deno.test(
+  "Capability-first: plain array callbacks inside computed stay plain",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern, UI } from "commontools";
+
+interface Habit {
+  name: string;
+}
+
+interface HabitLog {
+  habitName: string;
+  date: string;
+  completed: boolean;
+}
+
+interface Input {
+  habits: Habit[];
+  logs: HabitLog[];
+  todayDate: string;
+}
+
+export default pattern<Input>(({ habits, logs, todayDate }) => {
+  return {
+    [UI]: <div>{habits.map((habit) => {
+      const doneToday = computed(() =>
+        logs.get().some(
+          (log) =>
+            log.habitName === habit.name &&
+            log.date === todayDate &&
+            log.completed,
+        )
+      );
+      return <span>{doneToday ? "yes" : "no"}</span>;
+    })}</div>,
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(
+      output,
+      "logs.get().some((log) => log.habitName === habit.name &&",
+    );
+    assert(
+      !output.includes("logs.get().some((log) => __ctHelpers.when("),
+      "plain array some() callback should stay plain inside computed()/derive()",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first: rewrites map after computed fallback alias",
   async () => {
     const source = `/// <cts-enable />

@@ -325,6 +325,87 @@ function isEligiblePatternOwnedWrapperCallbackSite(
   return supportsPatternOwnedWrapperCallbackSite(callbackSupport);
 }
 
+function hasEnclosingComputeLikeCallback(
+  expression: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  const callbackContext = findEnclosingCallbackContext(expression);
+  if (!callbackContext) {
+    return false;
+  }
+
+  let current: ts.Node | undefined = callbackContext.call.parent;
+  while (current) {
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      const parent: ts.Node | undefined = current.parent;
+      if (
+        parent && ts.isCallExpression(parent) &&
+        parent.arguments.includes(current)
+      ) {
+        const callKind = detectCallKind(parent, context.checker);
+        if (callKind?.kind === "derive") {
+          return true;
+        }
+        if (
+          callKind?.kind === "builder" &&
+          (callKind.builderName === "computed" ||
+            callKind.builderName === "action" ||
+            callKind.builderName === "lift" ||
+            callKind.builderName === "handler")
+        ) {
+          return true;
+        }
+      }
+    }
+    current = current.parent;
+  }
+
+  return false;
+}
+
+function isWithinComputeLikePlainArrayValueCallback(
+  expression: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  const callbackContext = findEnclosingCallbackContext(expression);
+  if (!callbackContext) {
+    return false;
+  }
+
+  const callbackSupport = classifyCallbackSupport(
+    callbackContext.callback,
+    context.checker,
+    context,
+  );
+
+  return callbackSupport.kind === "supported" &&
+    callbackSupport.supportedKind === "plain-array-value" &&
+    hasEnclosingComputeLikeCallback(expression, context);
+}
+
+function isCallbackOverGetResult(
+  expression: ts.Expression,
+): boolean {
+  const callbackContext = findEnclosingCallbackContext(expression);
+  if (!callbackContext) {
+    return false;
+  }
+
+  const callTarget = unwrapExpression(callbackContext.call.expression);
+  if (!ts.isPropertyAccessExpression(callTarget)) {
+    return false;
+  }
+
+  const receiver = unwrapExpression(callTarget.expression);
+  if (!ts.isCallExpression(receiver)) {
+    return false;
+  }
+
+  const receiverTarget = unwrapExpression(receiver.expression);
+  return ts.isPropertyAccessExpression(receiverTarget) &&
+    receiverTarget.name.text === "get";
+}
+
 function isAtomicWholeBranchIife(
   branch: ts.Expression,
 ): boolean {
@@ -753,6 +834,14 @@ export function classifyExpressionSiteHandling(
   analyze: AnalyzeFn,
   options?: ExpressionSiteHandlingOptions,
 ): ExpressionSiteHandlingDecision {
+  if (
+    isWithinComputeLikePlainArrayValueCallback(expression, context) ||
+    (isCallbackOverGetResult(expression) &&
+      hasEnclosingComputeLikeCallback(expression, context))
+  ) {
+    return { kind: "skip", reason: "not-lowerable" };
+  }
+
   const siteInfo = getExpressionSitePolicyInfo(
     expression,
     containerKind,
