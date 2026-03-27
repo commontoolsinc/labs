@@ -11,6 +11,29 @@ function getWarnings(diagnostics: readonly TransformationDiagnostic[]) {
   return diagnostics.filter((d) => d.severity === "warning");
 }
 
+function getEmptyArrayErrors(diagnostics: readonly TransformationDiagnostic[]) {
+  return diagnostics.filter((d) => d.type === "cell-factory:empty-array");
+}
+
+async function getEmptyArrayErrorCount(
+  imports: string,
+  expression: string,
+): Promise<number> {
+  const source = `
+    import { ${imports}, pattern } from "commontools";
+    export default pattern(() => {
+      const value = ${expression};
+      return <div>{value}</div>;
+    });
+  `;
+
+  const { diagnostics } = await validateSource(source, {
+    types: COMMONTOOLS_TYPES,
+  });
+
+  return getEmptyArrayErrors(diagnostics).length;
+}
+
 function assertHasErrorType(
   errors: readonly TransformationDiagnostic[],
   expectedType: string,
@@ -112,6 +135,75 @@ Deno.test("Cast Validation", async (t) => {
     const errors = getErrors(diagnostics);
     assertEquals(errors.length, 0, "Should not produce any errors");
   });
+});
+
+Deno.test("Empty Array .of() Validation", async (t) => {
+  const errorCases = [
+    { name: "errors on Cell.of([])", imports: "Cell", expression: "Cell.of([])" },
+    {
+      name: "errors on Writable.of([])",
+      imports: "Writable",
+      expression: "Writable.of([])",
+    },
+    {
+      name: "errors on OpaqueCell.of([])",
+      imports: "OpaqueCell",
+      expression: "OpaqueCell.of([])",
+    },
+    {
+      name: "errors on Stream.of([])",
+      imports: "Stream",
+      expression: "Stream.of([])",
+    },
+    {
+      name: "errors on deprecated cell([])",
+      imports: "cell",
+      expression: "cell([])",
+    },
+  ] as const;
+
+  for (const testCase of errorCases) {
+    await t.step(testCase.name, async () => {
+      const count = await getEmptyArrayErrorCount(
+        testCase.imports,
+        testCase.expression,
+      );
+      assertGreater(count, 0, "Expected at least one empty-array error");
+    });
+  }
+
+  const okCases = [
+    {
+      name: "no error on Cell.of<string[]>([])",
+      imports: "Cell",
+      expression: "Cell.of<string[]>([])",
+    },
+    {
+      name: "no error on Cell.of([1, 2, 3])",
+      imports: "Cell",
+      expression: "Cell.of([1, 2, 3])",
+    },
+    {
+      name: "no error on Cell.of('hello')",
+      imports: "Cell",
+      expression: 'Cell.of("hello")',
+    },
+    {
+      name: "no error on Cell.of() with no arguments",
+      imports: "Cell",
+      expression: "Cell.of<string>()",
+    },
+  ] as const;
+
+  for (const testCase of okCases) {
+    await t.step(testCase.name, async () => {
+      const count = await getEmptyArrayErrorCount(
+        testCase.imports,
+        testCase.expression,
+      );
+      assertEquals(count, 0);
+    });
+  }
 });
 
 Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
@@ -825,6 +917,64 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
       export default pattern<{ items: string[] }>(({ items }) => {
         return items.map((item) => identity(item.toUpperCase()));
       });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "errors on opaque array receiver-method calls nested inside array-callback expressions",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Person {
+        name: string;
+        spotPreferences: string[];
+      }
+
+      export default pattern<{ people: Person[] }>(({ people }) => ({
+        [UI]: <ul>{people.map((person) => {
+          const { name, spotPreferences } = person;
+          return (
+            <li>
+              {spotPreferences.length > 0
+                ? name + ": " + spotPreferences.join(", ")
+                : name}
+            </li>
+          );
+        })}</ul>,
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+    },
+  );
+
+  await t.step(
+    "allows the same opaque array receiver-method call when wrapped in computed()",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern, UI } from "commontools";
+
+      interface Person {
+        spotPreferences: string[];
+      }
+
+      export default pattern<{ people: Person[] }>(({ people }) => ({
+        [UI]: <ul>{people.map((person) => {
+          const { spotPreferences } = person;
+          return <li><span>{computed(() => spotPreferences.join(", "))}</span></li>;
+        })}</ul>,
+      }));
     `;
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
@@ -2054,6 +2204,58 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "allows .map() after ?? [] fallback with cast-wrapped reactive left side",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Item {
+        id: string;
+      }
+
+      export default pattern<{ items?: Item[] }>(({ items }) => ({
+        [UI]: <div>{((items as Item[] | undefined) ?? []).map((item) => item.id)}</div>,
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+        diagnostic.type === "pattern-context:map-on-fallback"
+      );
+      assertEquals(fallbackDiagnostics.length, 0);
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "allows .map() after ?? [] fallback with satisfies-wrapped reactive left side",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Item {
+        id: string;
+      }
+
+      export default pattern<{ items?: Item[] }>(({ items }) => ({
+        [UI]: <div>{((items satisfies Item[] | undefined) ?? []).map((item) => item.id)}</div>,
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+        diagnostic.type === "pattern-context:map-on-fallback"
+      );
+      assertEquals(fallbackDiagnostics.length, 0);
       const errors = getErrors(diagnostics);
       assertEquals(errors.length, 0);
     },
