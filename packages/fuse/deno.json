@@ -2,6 +2,7 @@
   "name": "@commontools/fuse",
   "exports": { ".": "./mod.ts" },
   "tasks": {
-    "test": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run"
+    "test": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run",
+    "bench": "deno run -A ../../scripts/fuse-bench.ts"
   }
 }
