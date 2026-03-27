@@ -74,7 +74,7 @@ export function preflightCompiledBundle(
     } finally {
       logger.timeEnd("parseBundle");
     }
-    preflightParsedCompiledBundle(bundle, filename);
+    preflightParsedCompiledBundle(source, bundle, filename);
   } catch (error) {
     if (error instanceof BundlePreflightError) {
       throw error;
@@ -89,6 +89,7 @@ export function preflightCompiledBundle(
 }
 
 export function preflightParsedCompiledBundle(
+  source: string,
   bundle: ParsedBundle,
   filename = "<bundle>",
 ): void {
@@ -102,7 +103,7 @@ export function preflightParsedCompiledBundle(
     logger.timeStart("scanStatements");
     try {
       for (const statement of bundle.body.statements) {
-        if (isBootstrapStatement(statement.text)) {
+        if (isBootstrapStatement(source, statement.start, statement.end)) {
           if (phase !== "bootstrap") {
             throw new BundlePreflightError(
               "Bundle bootstrap helpers must appear before module definitions",
@@ -122,7 +123,7 @@ export function preflightParsedCompiledBundle(
           continue;
         }
 
-        if (isTailStatement(statement.text)) {
+        if (isTailStatement(source, statement.start, statement.end)) {
           phase = "tail";
           continue;
         }
@@ -153,8 +154,12 @@ export function preflightParsedCompiledBundle(
   }
 }
 
-function isBootstrapStatement(source: string): boolean {
-  const normalized = normalizeExact(source);
+function isBootstrapStatement(
+  source: string,
+  start: number,
+  end: number,
+): boolean {
+  const normalized = normalizeExact(source, start, end);
   return CANONICAL_AMD_HOOKS_BINDINGS.includes(normalized) ||
     CANONICAL_LOADER_BINDINGS.includes(normalized) ||
     CANONICAL_RUNTIME_DEPS_LOOPS.includes(normalized) ||
@@ -194,8 +199,12 @@ function isAllowedTsLibHelperDeclaration(normalized: string): boolean {
   }
 }
 
-function isTailStatement(source: string): boolean {
-  const normalized = normalizeExact(source);
+function isTailStatement(
+  source: string,
+  start: number,
+  end: number,
+): boolean {
+  const normalized = normalizeExact(source, start, end);
   return isReturnRequireStatement(normalized) ||
     isMainBindingStatement(normalized) ||
     normalized === CANONICAL_EXPORT_MAP_INIT ||
@@ -215,6 +224,10 @@ function isExportMapAssignment(normalized: string): boolean {
   return /^exportMap\[(["']).+\1\]=require\((['"]).+\2\);?$/.test(normalized);
 }
 
-function normalizeExact(source: string): string {
-  return stripJsTrivia(source.replace(/\n/g, "")).replace(/\s+/g, "");
+function normalizeExact(
+  source: string,
+  start = 0,
+  end = source.length,
+): string {
+  return stripJsTrivia(source, start, end).replace(/\s+/g, "");
 }

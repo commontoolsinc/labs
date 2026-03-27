@@ -76,7 +76,8 @@ describe("preflightCompiledBundle()", () => {
 `);
     const parsedBundle = parseCompiledBundleSource(bundle);
 
-    expect(() => preflightParsedCompiledBundle(parsedBundle)).not.toThrow();
+    expect(() => preflightParsedCompiledBundle(bundle, parsedBundle)).not
+      .toThrow();
   });
 
   it("accepts canonical tslib helper IIFE initializers", () => {

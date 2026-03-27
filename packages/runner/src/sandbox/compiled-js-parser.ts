@@ -3,9 +3,7 @@ export interface SourceRange {
   end: number;
 }
 
-export interface StatementChunk extends SourceRange {
-  text: string;
-}
+export interface StatementChunk extends SourceRange {}
 
 export interface IdentifierToken extends SourceRange {
   text: string;
@@ -16,7 +14,6 @@ export interface ParsedBlock extends SourceRange {
 }
 
 export interface ParsedFunction extends SourceRange {
-  text: string;
   params: string[];
   body: ParsedBlock;
 }
@@ -139,7 +136,6 @@ export function parseFunctionText(
   start: number,
   end: number,
 ): ParsedFunction {
-  const text = source.slice(start, end);
   const trimmed = trimRange(source, start, end);
   const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
   const functionStart = inner.start;
@@ -170,7 +166,6 @@ export function parseFunctionText(
     return {
       start: inner.start,
       end: inner.end,
-      text,
       params: parseParameterNames(
         source.slice(openParen + 1, closeParen),
         openParen + 1,
@@ -204,7 +199,6 @@ export function parseFunctionText(
   return {
     start: inner.start,
     end: inner.end,
-    text,
     params,
     body: parseBlock(source, openBrace + 1, closeBrace),
   };
@@ -491,7 +485,6 @@ function splitTopLevelStatements(
         statements.push({
           start: statementStart,
           end: cursor,
-          text: source.slice(statementStart, cursor),
         });
         break;
       }
@@ -509,7 +502,6 @@ function splitTopLevelStatements(
         statements.push({
           start: statementStart,
           end: cursor,
-          text: source.slice(statementStart, cursor),
         });
         break;
       }
@@ -528,7 +520,6 @@ function splitTopLevelStatements(
         statements.push({
           start: statementStart,
           end,
-          text: source.slice(statementStart, end),
         });
       }
       break;

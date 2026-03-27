@@ -400,7 +400,7 @@ export class Engine extends EventTarget implements Harness {
 
       logger.timeStart("verifyCompiledBundle", "preflight");
       try {
-        preflightParsedCompiledBundle(parsedBundle, filename);
+        preflightParsedCompiledBundle(jsScript.js, parsedBundle, filename);
       } finally {
         logger.timeEnd("verifyCompiledBundle", "preflight");
       }

@@ -203,13 +203,14 @@ function verifyAuthoredFactory(
     logger.timeStart("verifyAuthoredFactory", "statements");
     try {
       for (const statement of defineCall.factory.body.statements) {
-        if (isStringDirective(statement.text)) continue;
-        if (isCompiledEsModuleMarker(statement.text)) continue;
-        if (isCompiledImportNormalizationRebinding(statement.text, env)) {
+        const statementText = source.slice(statement.start, statement.end);
+        if (isStringDirective(statementText)) continue;
+        if (isCompiledEsModuleMarker(statementText)) continue;
+        if (isCompiledImportNormalizationRebinding(statementText, env)) {
           continue;
         }
 
-        const reexport = tryParseCompiledReexport(statement.text);
+        const reexport = tryParseCompiledReexport(statementText);
         if (reexport) {
           if (reexport.exportedName === "__esModule") {
             continue;
@@ -235,19 +236,19 @@ function verifyAuthoredFactory(
           continue;
         }
 
-        if (isCompiledExportStarStatement(statement.text)) continue;
+        if (isCompiledExportStarStatement(statementText)) continue;
 
-        if (isCompiledExportAssignment(statement.text)) {
+        if (isCompiledExportAssignment(statementText)) {
           verifyCompiledExportAssignment(source, filename, statement, env);
           continue;
         }
 
-        if (isFunctionDeclarationStatement(statement.text)) {
-          registerFunctionStatement(statement, env);
+        if (isFunctionDeclarationStatement(statementText)) {
+          registerFunctionStatement(source, statement, env);
           continue;
         }
 
-        if (isClassDeclarationStatement(statement.text)) {
+        if (isClassDeclarationStatement(statementText)) {
           throw verificationErrorAt(
             source,
             filename,
@@ -256,12 +257,12 @@ function verifyAuthoredFactory(
           );
         }
 
-        if (isVariableStatement(statement.text)) {
+        if (isVariableStatement(statementText)) {
           verifyVariableStatement(source, filename, statement, env);
           continue;
         }
 
-        if (isAllowedFunctionHardeningStatement(statement.text, env)) {
+        if (isAllowedFunctionHardeningStatement(statementText, env)) {
           continue;
         }
 
@@ -288,11 +289,12 @@ function verifyIndexFactory(
   const start = performance.now();
   try {
     for (const statement of defineCall.factory.body.statements) {
-      if (isStringDirective(statement.text)) continue;
-      if (isCompiledEsModuleMarker(statement.text)) continue;
-      if (isCompiledExportStarStatement(statement.text)) continue;
-      if (isCompiledExportAssignment(statement.text)) continue;
-      if (tryParseCompiledReexport(statement.text)) continue;
+      const statementText = source.slice(statement.start, statement.end);
+      if (isStringDirective(statementText)) continue;
+      if (isCompiledEsModuleMarker(statementText)) continue;
+      if (isCompiledExportStarStatement(statementText)) continue;
+      if (isCompiledExportAssignment(statementText)) continue;
+      if (tryParseCompiledReexport(statementText)) continue;
 
       throw verificationErrorAt(
         source,
@@ -343,13 +345,14 @@ function predeclareTopLevelBindings(
   const start = performance.now();
   try {
     for (const statement of defineCall.factory.body.statements) {
-      if (isFunctionDeclarationStatement(statement.text)) {
-        const name = getFunctionDeclarationName(statement.text);
+      const statementText = source.slice(statement.start, statement.end);
+      if (isFunctionDeclarationStatement(statementText)) {
+        const name = getFunctionDeclarationName(statementText);
         if (name) {
           env.set(name, {
             kind: "function",
             hardeningHelper: isFunctionHardeningHelperDeclaration(
-              statement.text,
+              statementText,
             ),
             functionRange: { start: statement.start, end: statement.end },
           });
@@ -357,7 +360,7 @@ function predeclareTopLevelBindings(
         continue;
       }
 
-      if (!isVariableStatement(statement.text)) continue;
+      if (!isVariableStatement(statementText)) continue;
       for (const declarator of parseVariableDeclarators(source, statement)) {
         const provisional = provisionalBindingForExpression(
           source,
@@ -386,7 +389,9 @@ function verifyVariableStatement(
 ): void {
   const start = performance.now();
   try {
-    const kind = getVariableStatementKind(statement.text);
+    const kind = getVariableStatementKind(
+      source.slice(statement.start, statement.end),
+    );
     if (kind !== "const") {
       throw verificationErrorAt(
         source,
@@ -990,10 +995,10 @@ function parseVariableDeclarators(
 ): Array<{ name: string; initializer: { start: number; end: number } }> {
   const measureStart = performance.now();
   try {
+    const statementText = source.slice(statement.start, statement.end);
     const trimmed = trimRange(source, statement.start, statement.end);
-    const keyword = getVariableStatementKind(statement.text);
-    const keywordStart = statement.text.indexOf(keyword);
-    const listStart = trimmed.start + keywordStart + keyword.length;
+    const keyword = getVariableStatementKind(statementText);
+    const listStart = trimmed.start + keyword.length;
     const listEnd =
       stripTrailingSemicolonRange(source, trimmed.start, trimmed.end)
         .end;
@@ -1066,7 +1071,6 @@ function parseExportAssignmentChain(
     const nested = parseExportAssignmentChain(source, {
       start: rhs.start,
       end: rhs.end,
-      text: source.slice(rhs.start, rhs.end),
     });
     return {
       exportedNames: [exportedName, ...nested.exportedNames],
@@ -1143,14 +1147,16 @@ function isFunctionHardeningHelperDeclaration(source: string): boolean {
 }
 
 function registerFunctionStatement(
+  source: string,
   statement: StatementChunk,
   env: Map<string, BindingInfo>,
 ): void {
-  const name = getFunctionDeclarationName(statement.text);
+  const statementText = source.slice(statement.start, statement.end);
+  const name = getFunctionDeclarationName(statementText);
   if (!name) return;
   env.set(name, {
     kind: "function",
-    hardeningHelper: isFunctionHardeningHelperDeclaration(statement.text),
+    hardeningHelper: isFunctionHardeningHelperDeclaration(statementText),
     functionRange: { start: statement.start, end: statement.end },
   });
 }
@@ -1176,7 +1182,6 @@ function tryParseDirectFunction(
     return {
       start,
       end,
-      text: source.slice(start, end),
       params: [],
       body: {
         start,
