@@ -3,6 +3,7 @@ import {
   findTopLevelEquals,
   locationFromOffset,
   parseCompiledBundleSource,
+  type ParsedBundle,
   type ParsedDefineCall,
   parseFunctionText,
   splitTopLevelCommaList,
@@ -56,31 +57,17 @@ export function verifyCompiledBundleModuleFactoriesWithParser(
 ): void {
   try {
     logger.timeStart("parseBundle");
-    let bundle: ReturnType<typeof parseCompiledBundleSource>;
+    let bundle: ParsedBundle;
     try {
       bundle = parseCompiledBundleSource(source);
     } finally {
       logger.timeEnd("parseBundle");
     }
-
-    logger.timeStart("collectModuleIds");
-    let compiledModuleIds: Set<string>;
-    try {
-      compiledModuleIds = new Set(
-        bundle.defineCalls.map(({ moduleId }) => moduleId),
-      );
-    } finally {
-      logger.timeEnd("collectModuleIds");
-    }
-
-    logger.timeStart("verifyDefineCalls");
-    try {
-      for (const defineCall of bundle.defineCalls) {
-        verifyDefineCall(source, filename, defineCall, compiledModuleIds);
-      }
-    } finally {
-      logger.timeEnd("verifyDefineCalls");
-    }
+    verifyParsedCompiledBundleModuleFactoriesWithParser(
+      source,
+      bundle,
+      filename,
+    );
   } catch (error) {
     if (error instanceof ModuleVerificationError) {
       throw error;
@@ -94,6 +81,31 @@ export function verifyCompiledBundleModuleFactoriesWithParser(
       );
     }
     throw error;
+  }
+}
+
+export function verifyParsedCompiledBundleModuleFactoriesWithParser(
+  source: string,
+  bundle: ParsedBundle,
+  filename = "<bundle>",
+): void {
+  logger.timeStart("collectModuleIds");
+  let compiledModuleIds: Set<string>;
+  try {
+    compiledModuleIds = new Set(
+      bundle.defineCalls.map(({ moduleId }) => moduleId),
+    );
+  } finally {
+    logger.timeEnd("collectModuleIds");
+  }
+
+  logger.timeStart("verifyDefineCalls");
+  try {
+    for (const defineCall of bundle.defineCalls) {
+      verifyDefineCall(source, filename, defineCall, compiledModuleIds);
+    }
+  } finally {
+    logger.timeEnd("verifyDefineCalls");
   }
 }
 

@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { getAMDLoader } from "../../js-compiler/typescript/bundler/amd-loader.ts";
-import { preflightCompiledBundle } from "../src/sandbox/mod.ts";
+import { parseCompiledBundleSource } from "../src/sandbox/compiled-js-parser.ts";
+import {
+  preflightCompiledBundle,
+  preflightParsedCompiledBundle,
+} from "../src/sandbox/bundle-preflight.ts";
 
 const LOADER_SOURCE = getAMDLoader.toString();
 
@@ -56,6 +60,23 @@ describe("preflightCompiledBundle()", () => {
 `);
 
     expect(() => preflightCompiledBundle(bundle)).not.toThrow();
+  });
+
+  it("accepts a previously parsed AMD bundle shell", () => {
+    const bundle = bundleWithCanonicalLoader(`
+  for (const [name, dep] of Object.entries(runtimeDeps)) {
+    define(name, ["exports"], exports => Object.assign(exports, dep));
+  }
+  const console = globalThis.console;
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.default = 42;
+  });
+  return require("main");
+`);
+    const parsedBundle = parseCompiledBundleSource(bundle);
+
+    expect(() => preflightParsedCompiledBundle(parsedBundle)).not.toThrow();
   });
 
   it("accepts canonical tslib helper IIFE initializers", () => {

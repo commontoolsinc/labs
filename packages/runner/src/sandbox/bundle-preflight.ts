@@ -3,8 +3,8 @@ import { getLogger } from "@commontools/utils/logger";
 import {
   CompiledJsParseError,
   parseCompiledBundleSource,
+  type ParsedBundle,
   stripJsTrivia,
-  tryParseDefineCall,
 } from "./compiled-js-parser.ts";
 
 const logger = getLogger("bundle-preflight");
@@ -68,15 +68,36 @@ export function preflightCompiledBundle(
 ): void {
   try {
     logger.timeStart("parseBundle");
-    let bundle: ReturnType<typeof parseCompiledBundleSource>;
+    let bundle: ParsedBundle;
     try {
       bundle = parseCompiledBundleSource(source);
     } finally {
       logger.timeEnd("parseBundle");
     }
+    preflightParsedCompiledBundle(bundle, filename);
+  } catch (error) {
+    if (error instanceof BundlePreflightError) {
+      throw error;
+    }
+    if (error instanceof CompiledJsParseError) {
+      throw new BundlePreflightError(
+        `${filename}: ${error.message}`,
+      );
+    }
+    throw error;
+  }
+}
 
+export function preflightParsedCompiledBundle(
+  bundle: ParsedBundle,
+  filename = "<bundle>",
+): void {
+  try {
     let phase: "bootstrap" | "define" | "tail" = "bootstrap";
     let sawDefine = false;
+    const defineStatementStarts = new Set(
+      bundle.defineCalls.map(({ statement }) => statement.start),
+    );
 
     logger.timeStart("scanStatements");
     try {
@@ -90,7 +111,7 @@ export function preflightCompiledBundle(
           continue;
         }
 
-        if (tryParseDefineCall(source, statement)) {
+        if (defineStatementStarts.has(statement.start)) {
           if (phase === "tail") {
             throw new BundlePreflightError(
               "AMD module definitions must appear before bundle return wiring",

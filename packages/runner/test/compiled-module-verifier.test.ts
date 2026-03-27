@@ -1,6 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { verifyCompiledBundleModuleFactories } from "../src/sandbox/mod.ts";
+import { parseCompiledBundleSource } from "../src/sandbox/compiled-js-parser.ts";
+import { verifyParsedCompiledBundleModuleFactoriesWithParser } from "../src/sandbox/compiled-bundle-verifier.ts";
+import { verifyCompiledBundleModuleFactories } from "../src/sandbox/module-verifier.ts";
 
 describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts compiled authored module factories", () => {
@@ -15,6 +17,23 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 `;
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts a previously parsed compiled bundle", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = (0, commontools_1.lift)(() => 42);
+  });
+});
+`;
+    const parsedBundle = parseCompiledBundleSource(bundle);
+
+    expect(() =>
+      verifyParsedCompiledBundleModuleFactoriesWithParser(bundle, parsedBundle)
+    ).not.toThrow();
   });
 
   it("accepts compiled dependencies from the shared runtime-module policy", () => {

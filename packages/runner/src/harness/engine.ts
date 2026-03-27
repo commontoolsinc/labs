@@ -35,12 +35,19 @@ import {
   getRuntimeModuleExports,
   getRuntimeModuleTypes,
   isRuntimeModuleIdentifier,
-  preflightCompiledBundle,
   RuntimeModuleIdentifiers,
   SESIsolate,
   SESRuntime,
-  verifyCompiledBundleModuleFactories,
 } from "../sandbox/mod.ts";
+import {
+  BundlePreflightError,
+  preflightParsedCompiledBundle,
+} from "../sandbox/bundle-preflight.ts";
+import {
+  CompiledJsParseError,
+  parseCompiledBundleSource,
+} from "../sandbox/compiled-js-parser.ts";
+import { verifyParsedCompiledBundleModuleFactoriesWithParser } from "../sandbox/compiled-bundle-verifier.ts";
 
 const INJECTED_SCRIPT = "const console = globalThis.console;";
 const logger = getLogger("engine");
@@ -377,16 +384,34 @@ export class Engine extends EventTarget implements Harness {
     const filename = jsScript.filename ?? fallbackFilename;
     logger.timeStart("verifyCompiledBundle");
     try {
+      logger.timeStart("verifyCompiledBundle", "parseBundle");
+      const parsedBundle = (() => {
+        try {
+          return parseCompiledBundleSource(jsScript.js);
+        } catch (error) {
+          if (error instanceof CompiledJsParseError) {
+            throw new BundlePreflightError(`${filename}: ${error.message}`);
+          }
+          throw error;
+        } finally {
+          logger.timeEnd("verifyCompiledBundle", "parseBundle");
+        }
+      })();
+
       logger.timeStart("verifyCompiledBundle", "preflight");
       try {
-        preflightCompiledBundle(jsScript.js, filename);
+        preflightParsedCompiledBundle(parsedBundle, filename);
       } finally {
         logger.timeEnd("verifyCompiledBundle", "preflight");
       }
 
       logger.timeStart("verifyCompiledBundle", "moduleFactories");
       try {
-        verifyCompiledBundleModuleFactories(jsScript.js, filename);
+        verifyParsedCompiledBundleModuleFactoriesWithParser(
+          jsScript.js,
+          parsedBundle,
+          filename,
+        );
       } finally {
         logger.timeEnd("verifyCompiledBundle", "moduleFactories");
       }
