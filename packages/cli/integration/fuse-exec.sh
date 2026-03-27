@@ -34,9 +34,20 @@ assert_not_exists() {
   local path="$1"
   local message="$2"
 
-  if [ -e "$path" ]; then
+  if path_exists "$path"; then
     error "$message"
   fi
+}
+
+path_exists() {
+  local path="$1"
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --signal=KILL 1 test -e "$path" >/dev/null 2>&1
+    return $?
+  fi
+
+  test -e "$path"
 }
 
 assert_json_eq() {
@@ -59,7 +70,7 @@ wait_for_path() {
   local attempts=$((timeout_seconds * 10))
 
   for _ in $(seq 1 "$attempts"); do
-    if [ -e "$path" ]; then
+    if path_exists "$path"; then
       return 0
     fi
     sleep 0.1
@@ -74,7 +85,7 @@ try_wait_for_path() {
   local attempts=$((timeout_seconds * 10))
 
   for _ in $(seq 1 "$attempts"); do
-    if [ -e "$path" ]; then
+    if path_exists "$path"; then
       return 0
     fi
     sleep 0.1
@@ -87,19 +98,18 @@ resolve_entity_dir() {
   local entities_dir="$1"
   local bare_id="$2"
   local timeout_seconds="${3:-20}"
-  local attempts=$((timeout_seconds * 10))
+  local canonical_entity_dir="$entities_dir/of:$bare_id"
+  local bare_entity_dir="$entities_dir/$bare_id"
 
-  for _ in $(seq 1 "$attempts"); do
-    for entry in "$entities_dir"/*; do
-      [ -e "$entry" ] || continue
-      local name="${entry##*/}"
-      if [ "$name" = "$bare_id" ] || [ "$name" = "of:$bare_id" ]; then
-        printf '%s\n' "$entry"
-        return 0
-      fi
-    done
-    sleep 0.1
-  done
+  if try_wait_for_path "$canonical_entity_dir" "$timeout_seconds"; then
+    printf '%s\n' "$canonical_entity_dir"
+    return 0
+  fi
+
+  if try_wait_for_path "$bare_entity_dir" "$timeout_seconds"; then
+    printf '%s\n' "$bare_entity_dir"
+    return 0
+  fi
 
   return 1
 }
@@ -256,9 +266,9 @@ wait_for_path "$HANDLER_FILE"
 wait_for_path "$LEGACY_HANDLER_FILE"
 wait_for_path "$TOOL_FILE"
 
-test -e "$HANDLER_FILE" || error "recordMessage.handler was not mounted."
-test -e "$LEGACY_HANDLER_FILE" || error "legacyWrite.handler was not mounted."
-test -e "$TOOL_FILE" || error "search.tool was not mounted."
+path_exists "$HANDLER_FILE" || error "recordMessage.handler was not mounted."
+path_exists "$LEGACY_HANDLER_FILE" || error "legacyWrite.handler was not mounted."
+path_exists "$TOOL_FILE" || error "search.tool was not mounted."
 success "Mounted callable entries exist"
 success "Entities namespace exposes matching entry for mounted piece"
 
