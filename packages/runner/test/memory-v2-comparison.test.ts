@@ -1,9 +1,10 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Identity } from "@commontools/identity";
-import type { URI } from "@commontools/memory/interface";
+import type { StorableValue, URI } from "@commontools/memory/interface";
 import * as Consumer from "@commontools/memory/consumer";
 import * as MemoryProvider from "@commontools/memory/provider";
+import type { EntityDocument } from "@commontools/memory/v2";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import * as MemoryV2Server from "@commontools/memory/v2/server";
 import { Provider, StorageManager } from "../src/storage/cache.deno.ts";
@@ -17,9 +18,9 @@ import {
 } from "../src/storage/v2.ts";
 
 type TestProvider = {
-  get(uri: URI): { value: unknown } | undefined;
+  get(uri: URI): EntityDocument | undefined;
   send(
-    batch: { uri: URI; value: { value: unknown } }[],
+    batch: { uri: URI; value: EntityDocument | undefined }[],
   ): Promise<
     {
       ok?: Record<PropertyKey, never>;
@@ -36,6 +37,17 @@ type TestProvider = {
     }
   >;
   destroy(): Promise<void>;
+};
+
+type LegacyComparisonProvider = {
+  send(
+    batch: { uri: URI; value: { value: StorableValue | undefined } }[],
+  ): Promise<
+    {
+      ok?: Record<PropertyKey, never>;
+      error?: { name?: string; message?: string };
+    }
+  >;
 };
 
 type PersistentProviders = {
@@ -213,7 +225,7 @@ const normalizedGraphNotifications = (
 
 const sendDocs = async (
   provider: TestProvider,
-  docs: Array<{ id: URI; value: unknown }>,
+  docs: Array<{ id: URI; value: StorableValue }>,
 ) => {
   for (const doc of docs) {
     assertEquals(
@@ -443,10 +455,17 @@ Deno.test("memory v2 matches v1 provider-visible behavior for a randomized basic
       const uri = uris[randomInt(random, uris.length)];
       const shouldDelete = random() < 0.25;
       const value = shouldDelete ? undefined : randomValue(random, step);
-      const batch = [{ uri, value: { value } }];
+      const v1Batch = [{ uri, value: { value } }];
+      const v2Batch = [{
+        uri,
+        value: shouldDelete ? undefined : { value },
+      }];
 
-      assertEquals(await v1Provider.send(batch), { ok: {} });
-      assertEquals(await v2Provider.send(batch), { ok: {} });
+      assertEquals(
+        await (v1Provider as unknown as LegacyComparisonProvider).send(v1Batch),
+        { ok: {} },
+      );
+      assertEquals(await v2Provider.send(v2Batch), { ok: {} });
 
       for (const currentUri of uris) {
         assertEquals(v2Provider.get(currentUri), v1Provider.get(currentUri));

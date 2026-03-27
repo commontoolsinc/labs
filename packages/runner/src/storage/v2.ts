@@ -18,10 +18,11 @@ import {
   type PatchOp,
   type SessionSync,
   toDocumentPath,
+  toEntityDocument,
 } from "@commontools/memory/v2";
 import type { AppliedCommit } from "@commontools/memory/v2/engine";
 import { getLogger } from "@commontools/utils/logger";
-import { isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -47,25 +48,18 @@ import type {
   IStorageTransaction,
   MemoryVersion,
   NativeStorageCommit,
-  OptStorageValue,
   PullError,
   PushError,
   Result,
   State,
   StorageNotification,
   StorageTransactionRejected,
-  StorageValue,
   Unit,
 } from "./interface.ts";
 import { SelectorTracker } from "./cache.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import { getDirectTransactionReadActivities } from "./transaction-inspection.ts";
-import {
-  fromEntityDocument,
-  toEntityDocumentFromTransactionValue,
-  toEntityDocumentFromValue,
-  toTransactionDocumentValue,
-} from "./v2-document.ts";
+import { toTransactionDocumentValue } from "./v2-document.ts";
 import * as V2Transaction from "./v2-transaction.ts";
 
 const logger = getLogger("storage.v2", {
@@ -77,6 +71,15 @@ const DATA_URI_SYNC_CACHE_MAX = 10_000;
 const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 const DOCUMENT_MIME = "application/json" as const;
 const UNCACHED_TRANSACTION_VALUE = Symbol("uncachedTransactionValue");
+
+const toExplicitDocument = (value: StorableDatum): EntityDocument => {
+  if (!isObject(value)) {
+    throw new Error(
+      "memory v2 transactions require explicit full-document roots",
+    );
+  }
+  return value as EntityDocument;
+};
 
 type CachedTransactionValue =
   | StorableDatum
@@ -635,14 +638,12 @@ class Provider implements IStorageProviderWithReplica {
     this.replica = new SpaceReplica(options);
   }
 
-  send<T extends StorableValue = StorableValue>(
-    batch: { uri: URI; value: StorageValue<T> }[],
+  send(
+    batch: { uri: URI; value: EntityDocument | undefined }[],
   ): Promise<Result<Unit, Error>> {
     return this.replica.send(batch.map(({ uri, value }) => ({
       uri,
-      document: value.value !== undefined
-        ? toEntityDocumentFromValue(value.value)
-        : undefined,
+      document: value,
     }))) as Promise<Result<Unit, Error>>;
   }
 
@@ -654,30 +655,15 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.synced();
   }
 
-  get<T extends StorableValue = StorableValue>(uri: URI): OptStorageValue<T> {
-    const document = this.replica.getDocument(uri);
-    return (
-      document === undefined
-        ? undefined
-        : toStorageValueFromStoredDocument(document)
-    ) as OptStorageValue<T>;
+  get(uri: URI): EntityDocument | undefined {
+    return this.replica.getDocument(uri);
   }
 
-  sink<T extends StorableValue = StorableValue>(
+  sink(
     uri: URI,
-    callback: (value: StorageValue<T> | undefined) => void,
+    callback: (value: EntityDocument | undefined) => void,
   ): Cancel {
-    return this.replica.sinkDocument(
-      uri,
-      (document) =>
-        callback(
-          (
-            document === undefined
-              ? undefined
-              : toStorageValueFromStoredDocument(document)
-          ) as StorageValue<T> | undefined,
-        ),
-    );
+    return this.replica.sinkDocument(uri, callback);
   }
 
   async destroy(): Promise<void> {
@@ -973,7 +959,7 @@ class SpaceReplica implements ISpaceReplica {
           : {
             op: "set" as const,
             id: fact.of as URI,
-            value: toEntityDocumentFromValue(fact.is as StorableValue),
+            value: toEntityDocument(fact.is as StorableValue),
           }
       );
 
@@ -998,12 +984,12 @@ class SpaceReplica implements ISpaceReplica {
             op: "patch" as const,
             id: operation.id,
             patches: operation.patches,
-            value: toEntityDocumentFromTransactionValue(operation.value),
+            value: toExplicitDocument(operation.value),
           }
           : {
             op: "set" as const,
             id: operation.id,
-            value: toEntityDocumentFromTransactionValue(operation.value),
+            value: toExplicitDocument(operation.value),
           }
       );
 
@@ -1461,10 +1447,6 @@ const snapshotState = (replica: SpaceReplica, id: URI): State => {
   return replica.get({ id, type: DOCUMENT_MIME, path: [] }) ??
     unclaimed({ of: id, the: DOCUMENT_MIME });
 };
-
-const toStorageValueFromStoredDocument = (
-  document: EntityDocument,
-): StorageValue | undefined => fromEntityDocument(document);
 
 const toConnectionError = (error: unknown): IConnectionError =>
   ({

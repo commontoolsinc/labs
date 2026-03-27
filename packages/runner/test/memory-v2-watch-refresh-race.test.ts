@@ -4,6 +4,7 @@ import { Identity } from "@commontools/identity";
 import type { URI } from "@commontools/memory/interface";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import {
+  type EntityDocument,
   getMemoryV2Flags,
   type SessionSync,
   type SessionSyncUpsert,
@@ -24,7 +25,7 @@ const HELLO_OK = {
 } as const;
 
 type TestProvider = IStorageProviderWithReplica & {
-  get(uri: URI): { value: unknown } | undefined;
+  get(uri: URI): EntityDocument | undefined;
   sync(
     uri: URI,
     selector?: { path: string[]; schema: unknown },

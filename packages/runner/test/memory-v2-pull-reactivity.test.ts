@@ -5,10 +5,9 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { Action } from "../src/scheduler.ts";
-import * as Fact from "@commontools/memory/fact";
-import * as Changes from "@commontools/memory/changes";
 import type { URI } from "@commontools/memory/interface";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
+import { writeRemoteDocuments } from "./memory-v2-remote.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-pull-reactivity");
 const space = signer.did();
@@ -27,7 +26,7 @@ const waitFor = async (
 };
 
 const visibleIds = (
-  provider: { get(uri: URI): { value: unknown } | undefined },
+  provider: { get(uri: URI): { value?: unknown } | undefined },
   ids: readonly URI[],
 ) => ids.filter((id) => provider.get(id)?.value !== undefined).sort();
 
@@ -104,13 +103,10 @@ describe("Memory v2 pull reactivity", () => {
     expect(computationRuns).toBe(1);
     expect(runtime.scheduler.isDirty(computation)).toBe(false);
 
-    await storageManager.session().mount(space).transact({
-      changes: Changes.from([Fact.assert({
-        the: "application/json",
-        of: source.getAsNormalizedFullLink().id,
-        is: 2,
-      })]),
-    });
+    await writeRemoteDocuments(storageManager, space, [{
+      id: source.getAsNormalizedFullLink().id,
+      value: 2,
+    }]);
 
     await waitFor(() => runtime.scheduler.isDirty(computation));
     expect(computationRuns).toBe(1);
@@ -136,17 +132,7 @@ describe("Memory v2 pull reactivity", () => {
       ): Promise<{ ok?: Record<PropertyKey, never> }>;
     };
 
-    expect(
-      await storageManager.session().mount(space).transact({
-        changes: Changes.from(fixture.docs.map((doc) =>
-          Fact.assert({
-            the: "application/json",
-            of: doc.id,
-            is: doc.value,
-          })
-        )),
-      }),
-    ).toEqual({ ok: {} });
+    await writeRemoteDocuments(storageManager, space, fixture.docs);
 
     if (!expandedChildValue) {
       throw new Error(`Missing graph fixture doc ${expandedChildId}`);
@@ -205,15 +191,10 @@ describe("Memory v2 pull reactivity", () => {
       fixture.initialReachableIds,
     );
 
-    expect(
-      await storageManager.session().mount(space).transact({
-        changes: Changes.from([Fact.assert({
-          the: "application/json",
-          of: fixture.rootId,
-          is: fixture.expandedRootValue,
-        })]),
-      }),
-    ).toEqual({ ok: {} });
+    await writeRemoteDocuments(storageManager, space, [{
+      id: fixture.rootId,
+      value: fixture.expandedRootValue,
+    }]);
 
     await waitFor(() => runtime.scheduler.isDirty(computation));
     await waitFor(() =>
@@ -231,15 +212,10 @@ describe("Memory v2 pull reactivity", () => {
     );
 
     expandedChildValue.name = "Expanded Node 33";
-    expect(
-      await storageManager.session().mount(space).transact({
-        changes: Changes.from([Fact.assert({
-          the: "application/json",
-          of: expandedChildId,
-          is: expandedChildValue,
-        })]),
-      }),
-    ).toEqual({ ok: {} });
+    await writeRemoteDocuments(storageManager, space, [{
+      id: expandedChildId,
+      value: expandedChildValue,
+    }]);
 
     await waitFor(() => runtime.scheduler.isDirty(computation));
     expect(computationRuns).toBe(2);

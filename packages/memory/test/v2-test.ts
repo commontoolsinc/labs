@@ -46,15 +46,15 @@ Deno.test("memory v2 builds explicit in-memory documents", () => {
 });
 
 Deno.test("memory v2 document paths are explicit full-document paths", () => {
-  assertEquals(toDocumentPath([]), toDocumentPath([]));
+  assertEquals([...toDocumentPath([])], []);
   assertEquals(
-    toDocumentPath(["value", "items", "0", "title"]),
-    toDocumentPath(["value", "items", "0", "title"]),
+    [...toDocumentPath(["value", "items", "0", "title"])],
+    ["value", "items", "0", "title"],
   );
 });
 
 Deno.test("memory v2 value-relative paths stay distinct from document paths", () => {
-  assertEquals(toValuePath([]), toValuePath([]));
+  assertEquals([...toValuePath([])], []);
   assertEquals(
     toDocumentSelector({
       path: toValuePath(["items", "0"]),

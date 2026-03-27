@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertExists } from "@std/assert";
+import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
 import { fromFileUrl } from "@std/path/from-file-url";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { Identity } from "@commontools/identity";
@@ -77,6 +77,39 @@ Deno.test("memory v2 transactions use the native commit hook when available", as
       path: ["value"],
     });
     assertEquals(readResult.ok?.value, { count: 1 });
+  } finally {
+    await storage.close();
+  }
+});
+
+Deno.test("memory v2 native commits require explicit full-document roots", async () => {
+  const storage = StorageManager.emulate({
+    as: signer,
+    memoryVersion: "v2",
+  });
+
+  try {
+    const provider = storage.open(space);
+    const replica = provider.replica as typeof provider.replica & {
+      commitNative(
+        transaction: NativeStorageCommit,
+        source?: unknown,
+      ): Promise<Result<Unit, StorageTransactionRejected>>;
+    };
+
+    await assertRejects(
+      () =>
+        replica.commitNative({
+          operations: [{
+            op: "set",
+            id: "of:memory-v2-invalid-root",
+            type,
+            value: "not-a-document",
+          }],
+        }),
+      Error,
+      "memory v2 transactions require explicit full-document roots",
+    );
   } finally {
     await storage.close();
   }

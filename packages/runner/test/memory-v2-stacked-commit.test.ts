@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import type { MIME, URI } from "@commontools/memory/interface";
-import { getMemoryV2Flags } from "@commontools/memory/v2";
+import { type EntityDocument, getMemoryV2Flags } from "@commontools/memory/v2";
 import type {
   ClientCommit,
   ConfirmedRead,
@@ -43,7 +43,7 @@ const DOCS = {
 type DocKey = keyof typeof DOCS;
 
 type TestProvider = IStorageProviderWithReplica & {
-  get(uri: URI): { value: unknown } | undefined;
+  get(uri: URI): EntityDocument | undefined;
 };
 
 type RootValue = Record<string, unknown> | undefined;

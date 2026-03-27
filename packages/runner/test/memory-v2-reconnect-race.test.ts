@@ -1,9 +1,8 @@
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import type { MIME, URI } from "@commontools/memory/interface";
-import * as Changes from "@commontools/memory/changes";
 import * as Fact from "@commontools/memory/fact";
-import { getMemoryV2Flags } from "@commontools/memory/v2";
+import { type EntityDocument, getMemoryV2Flags } from "@commontools/memory/v2";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import * as MemoryV2Server from "@commontools/memory/v2/server";
 import { StorageManager as CutoverStorageManager } from "../src/storage/cache.deno.ts";
@@ -18,6 +17,7 @@ import {
   StorageManager as V2StorageManager,
 } from "../src/storage/v2.ts";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
+import { writeRemoteDocuments } from "./memory-v2-remote.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-reconnect-race");
 const space = signer.did();
@@ -29,9 +29,9 @@ const HELLO_OK = {
 } as const;
 
 type TestProvider = IStorageProviderWithReplica & {
-  get(uri: URI): { value: unknown } | undefined;
+  get(uri: URI): EntityDocument | undefined;
   send(
-    batch: { uri: URI; value: { value: Record<string, unknown> } }[],
+    batch: { uri: URI; value: EntityDocument | undefined }[],
   ): Promise<
     {
       ok?: Record<PropertyKey, never>;
@@ -595,22 +595,16 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
 
   try {
     await provider.sync(uri);
-    await storageManager.session().mount(space).transact({
-      changes: Changes.from([Fact.assert({
-        the: DOCUMENT_MIME,
-        of: uri,
-        is: { version: 1 },
-      })]),
-    });
+    await writeRemoteDocuments(storageManager, space, [{
+      id: uri,
+      value: { version: 1 },
+    }]);
     await waitFor(() => getObjectValue(provider, uri)?.version === 1);
 
-    await storageManager.session().mount(space).transact({
-      changes: Changes.from([Fact.assert({
-        the: DOCUMENT_MIME,
-        of: uri,
-        is: { version: 3 },
-      })]),
-    });
+    await writeRemoteDocuments(storageManager, space, [{
+      id: uri,
+      value: { version: 3 },
+    }]);
     await waitFor(() => getObjectValue(provider, uri)?.version === 3);
     notifications.clear();
 

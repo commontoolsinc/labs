@@ -1,17 +1,18 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
+import type { EntityDocument } from "@commontools/memory/v2";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { Cell } from "../src/cell.ts";
 
 type TestProvider = {
-  get(uri: string): { value: unknown; source?: { "/": string } } | undefined;
+  get(uri: string): EntityDocument | undefined;
   send(
     batch: {
       uri: string;
-      value: { value: unknown; source?: { "/": string }; labels?: unknown };
+      value: EntityDocument | undefined;
     }[],
   ): Promise<
     {
@@ -66,7 +67,7 @@ describe("Memory v2 emulation", () => {
     expect(persisted?.value).toEqual({ hello: "world" });
   });
 
-  it("ignores legacy label side-writes on the v2 path", async () => {
+  it("preserves raw provider documents, including non-value metadata", async () => {
     const provider = storageManager.open(space) as unknown as TestProvider;
     const uri = `of:memory-v2-labels-${Date.now()}` as const;
 
@@ -81,6 +82,7 @@ describe("Memory v2 emulation", () => {
     expect(result).toEqual({ ok: {} });
     expect(provider.get(uri)).toEqual({
       value: { hello: "labels" },
+      labels: { classification: ["confidential"] },
     });
   });
 
@@ -128,9 +130,26 @@ describe("Memory v2 emulation", () => {
     });
   });
 
-  it("treats source-only provider sends as deletes", async () => {
+  it("stores source-only provider sends as source-only documents", async () => {
     const provider = storageManager.open(space) as unknown as TestProvider;
     const uri = `of:memory-v2-source-only-${Date.now()}` as const;
+
+    const result = await provider.send([{
+      uri,
+      value: {
+        source: { "/": "process:1" },
+      },
+    }]);
+
+    expect(result).toEqual({ ok: {} });
+    expect(provider.get(uri)).toEqual({
+      source: { "/": "process:1" },
+    });
+  });
+
+  it("deletes provider documents only when the batch value is undefined", async () => {
+    const provider = storageManager.open(space) as unknown as TestProvider;
+    const uri = `of:memory-v2-delete-${Date.now()}` as const;
 
     const seed = await provider.send([{
       uri,
@@ -145,10 +164,7 @@ describe("Memory v2 emulation", () => {
 
     const result = await provider.send([{
       uri,
-      value: {
-        value: undefined,
-        source: { "/": "process:1" },
-      },
+      value: undefined,
     }]);
 
     expect(result).toEqual({ ok: {} });

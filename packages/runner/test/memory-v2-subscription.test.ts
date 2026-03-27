@@ -10,8 +10,8 @@ import type {
 } from "../src/storage/interface.ts";
 import type { MIME, URI } from "@commontools/memory/interface";
 import * as Fact from "@commontools/memory/fact";
-import * as Changes from "@commontools/memory/changes";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
+import { writeRemoteDocuments } from "./memory-v2-remote.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-storage-subscription");
 const space = signer.did();
@@ -61,7 +61,7 @@ const waitFor = async (
 };
 
 const visibleIds = (
-  provider: { get(uri: URI): { value: unknown } | undefined },
+  provider: { get(uri: URI): { value?: unknown } | undefined },
   ids: readonly URI[],
 ) => ids.filter((id) => provider.get(id)?.value !== undefined).sort();
 
@@ -124,24 +124,18 @@ describe("Memory v2 storage notifications", () => {
     storageManager.subscribe(subscription);
 
     const uri = `of:memory-v2-conflict-${Date.now()}` as URI;
-    await storageManager.session().mount(space).transact({
-      changes: Changes.from([Fact.assert({
-        the: "application/json",
-        of: uri,
-        is: { version: 1 },
-      })]),
-    });
+    await writeRemoteDocuments(storageManager, space, [{
+      id: uri,
+      value: { version: 1 },
+    }]);
 
     const { replica } = storageManager.open(space);
     await storageManager.open(space).sync(uri);
 
-    await storageManager.session().mount(space).transact({
-      changes: Changes.from([Fact.assert({
-        the: "application/json",
-        of: uri,
-        is: { version: 3 },
-      })]),
-    });
+    await writeRemoteDocuments(storageManager, space, [{
+      id: uri,
+      value: { version: 3 },
+    }]);
     await waitFor(() =>
       JSON.stringify(
         replica.get({ id: uri, type: "application/json" as MIME })?.is,
@@ -199,13 +193,10 @@ describe("Memory v2 storage notifications", () => {
     const { replica } = provider;
     await provider.sync(uri);
 
-    await storageManager.session().mount(space).transact({
-      changes: Changes.from([Fact.assert({
-        the: "application/json",
-        of: uri,
-        is: { version: 1 },
-      })]),
-    });
+    await writeRemoteDocuments(storageManager, space, [{
+      id: uri,
+      value: { version: 1 },
+    }]);
     await waitFor(() =>
       JSON.stringify(
         replica.get({ id: uri, type: "application/json" as MIME })?.is,
@@ -213,13 +204,10 @@ describe("Memory v2 storage notifications", () => {
         JSON.stringify({ value: { version: 1 } })
     );
 
-    await storageManager.session().mount(space).transact({
-      changes: Changes.from([Fact.assert({
-        the: "application/json",
-        of: uri,
-        is: { version: 3 },
-      })]),
-    });
+    await writeRemoteDocuments(storageManager, space, [{
+      id: uri,
+      value: { version: 3 },
+    }]);
 
     const source = {
       getReadActivities() {
@@ -260,18 +248,15 @@ describe("Memory v2 storage notifications", () => {
     storageManager.subscribe(subscription);
 
     const uri = `of:memory-v2-pull-dedupe-${Date.now()}` as URI;
-    await storageManager.session().mount(space).transact({
-      changes: Changes.from([Fact.assert({
-        the: "application/json",
-        of: uri,
-        is: {
-          items: [
-            { count: 1, label: "one" },
-            { count: 2, label: "two" },
-          ],
-        },
-      })]),
-    });
+    await writeRemoteDocuments(storageManager, space, [{
+      id: uri,
+      value: {
+        items: [
+          { count: 1, label: "one" },
+          { count: 2, label: "two" },
+        ],
+      },
+    }]);
 
     const provider = storageManager.open(space);
     await provider.sync(uri, {
@@ -299,17 +284,7 @@ describe("Memory v2 storage notifications", () => {
       ): Promise<{ ok?: Record<PropertyKey, never> }>;
     };
 
-    expect(
-      await storageManager.session().mount(space).transact({
-        changes: Changes.from(fixture.docs.map((doc) =>
-          Fact.assert({
-            the: "application/json",
-            of: doc.id,
-            is: doc.value,
-          })
-        )),
-      }),
-    ).toEqual({ ok: {} });
+    await writeRemoteDocuments(storageManager, space, fixture.docs);
 
     expect(
       await observer.sync(fixture.rootId, {
@@ -329,15 +304,10 @@ describe("Memory v2 storage notifications", () => {
     );
 
     subscription.clear();
-    expect(
-      await storageManager.session().mount(space).transact({
-        changes: Changes.from([Fact.assert({
-          the: "application/json",
-          of: fixture.rootId,
-          is: fixture.expandedRootValue,
-        })]),
-      }),
-    ).toEqual({ ok: {} });
+    await writeRemoteDocuments(storageManager, space, [{
+      id: fixture.rootId,
+      value: fixture.expandedRootValue,
+    }]);
     await storageManager.synced();
     await waitFor(
       () =>

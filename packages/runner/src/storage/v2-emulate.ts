@@ -1,15 +1,7 @@
-import type {
-  MemorySpace,
-  StorableValue,
-  URI,
-} from "@commontools/memory/interface";
-import { iterate as iterateFacts } from "@commontools/memory/fact";
-import { toEntityDocument } from "@commontools/memory/v2";
+import type { MemorySpace } from "@commontools/memory/interface";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import * as MemoryV2Server from "@commontools/memory/v2/server";
 import { type Options, type SessionFactory, StorageManager } from "./v2.ts";
-
-const DOCUMENT_MIME = "application/json" as const;
 
 class EmulatedSessionFactory implements SessionFactory {
   constructor(private readonly getServer: () => MemoryV2Server.Server) {}
@@ -23,12 +15,9 @@ class EmulatedSessionFactory implements SessionFactory {
   }
 }
 
-const toStoredDocument = (value: StorableValue) => toEntityDocument(value);
-
 export class EmulatedStorageManager extends StorageManager {
   #serverFactory: () => MemoryV2Server.Server;
   #server?: MemoryV2Server.Server;
-  #seedLocalSeq = 1;
 
   static emulate(
     options: Omit<Options, "address">,
@@ -61,45 +50,6 @@ export class EmulatedStorageManager extends StorageManager {
     if (this.#server) {
       await this.#server.close();
     }
-  }
-
-  session() {
-    return {
-      mount: (space: MemorySpace) => ({
-        transact: async ({ changes }: { changes: unknown }) => {
-          const client = await MemoryV2Client.connect({
-            transport: MemoryV2Client.loopback(this.server()),
-          });
-          try {
-            const session = await client.mount(space);
-            const operations = [...iterateFacts(changes as any)]
-              .filter((fact) => fact.the === DOCUMENT_MIME)
-              .map((fact) =>
-                fact.is === undefined
-                  ? { op: "delete" as const, id: fact.of as URI }
-                  : {
-                    op: "set" as const,
-                    id: fact.of as URI,
-                    value: toStoredDocument(fact.is as StorableValue) as any,
-                  }
-              );
-
-            if (operations.length === 0) {
-              return { ok: {} };
-            }
-
-            await session.transact({
-              localSeq: this.#seedLocalSeq++,
-              reads: { confirmed: [], pending: [] },
-              operations,
-            });
-            return { ok: {} };
-          } finally {
-            await client.close();
-          }
-        },
-      }),
-    };
   }
 
   protected server(): MemoryV2Server.Server {

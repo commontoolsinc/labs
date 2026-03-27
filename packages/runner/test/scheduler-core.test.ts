@@ -15,8 +15,7 @@ import {
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { Entity } from "@commonfabric/memory/interface";
-import * as Fact from "@commonfabric/memory/fact";
-import * as Changes from "@commonfabric/memory/changes";
+import { writeRemoteDocuments } from "./memory-v2-remote.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -1344,14 +1343,11 @@ describe("event handling", () => {
     "should retry event handler when commit fails, up to retries count",
     async () => {
       // Prepare remote memory with existing fact to induce conflict on commit
-      const memory = storageManager.session().mount(space);
       const entityId = `test:retry-conflict-${Date.now()}` as Entity;
-      const existingFact = Fact.assert({
-        the: "application/json",
-        of: entityId,
-        is: { version: 1 },
-      });
-      await memory.transact({ changes: Changes.from([existingFact]) });
+      await writeRemoteDocuments(storageManager, space, [{
+        id: entityId,
+        value: { version: 1 },
+      }]);
 
       // Reset local replica so local writes will conflict with remote state
       const { replica } = storageManager.open(space);
