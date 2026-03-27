@@ -19,7 +19,6 @@ export {
 export {
   ModuleVerificationError,
   verifyCompiledBundleModuleFactories,
-  verifyProgramModuleScope,
 } from "./module-verifier.ts";
 export {
   assertPlainData,

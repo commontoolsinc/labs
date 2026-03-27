@@ -49,6 +49,24 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts compiled JSX intrinsic tags inside trusted builder callbacks", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = (0, commontools_1.pattern)(() => {
+      return {
+        ui: h("div", null, h("ct-screen", null, "Hello")),
+      };
+    });
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("accepts destructured compiled builder callbacks with injected schema args", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
@@ -289,6 +307,32 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts compiled __ct_data() with intrinsic collection helpers and local helpers", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    function buildYears() {
+      const currentYear = new Date((0, commontools_1.safeDateNow)()).getFullYear();
+      const years = [];
+      for (let year = currentYear; year >= currentYear - 2; year--) {
+        years.push(String(year));
+      }
+      return years;
+    }
+    const scopeMap = (0, commontools_1.__ct_data)({ gmail: "gmail.readonly" });
+    const years = (0, commontools_1.__ct_data)(buildYears());
+    const scopes = (0, commontools_1.__ct_data)(Object.fromEntries(Object.entries(scopeMap).map(([key, value]) => [key, { value }])));
+    const payload = (0, commontools_1.__ct_data)({ years, scopes });
+    exports.default = payload;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("accepts compiled __ct_data() references rewritten through exports", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
@@ -306,6 +350,30 @@ describe("verifyCompiledBundleModuleFactories()", () => {
         },
       },
     });
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts compiled __ct_data() helpers that use for...of iteration", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    function buildIndex() {
+      const index = new Map();
+      for (const [group, members] of Object.entries({ dairy: ["milk"] })) {
+        for (const member of members) {
+          index.set(member, [group]);
+        }
+      }
+      return index;
+    }
+    const parentIndex = (0, commontools_1.__ct_data)(buildIndex());
+    exports.default = parentIndex;
   });
 });
 `;
@@ -368,6 +436,47 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts compiled __ct_data() accessors with inert bodies", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const data = (0, commontools_1.__ct_data)({
+      get value() {
+        return 1;
+      },
+      set value(_next) {
+        "use strict";
+      },
+    });
+    exports.default = data;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts compiled __ct_data() accessors without inspecting captured bindings", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools", "./helper"], function (require, exports, commontools_1, helper_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const data = (0, commontools_1.__ct_data)({
+      get value() {
+        return helper_1.state;
+      },
+    });
+    exports.default = data;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("accepts compiled builder callbacks that capture top-level schema snapshots", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
@@ -418,6 +527,24 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("rejects raw mutable compiled top-level exports without __ct_data()", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = {
+      nested: { count: 1 },
+    };
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Mutable top-level data must be wrapped in __ct_data() in SES mode",
+    );
+  });
+
   it("rejects raw top-level helper calls without __ct_data()", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
@@ -434,6 +561,28 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
       "Top-level call results must be wrapped in __ct_data() in SES mode",
+    );
+  });
+
+  it("rejects compiled fragment mutation escape hatches at module scope", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    function counter() {
+      const self = counter;
+      self.fragment.count += 1;
+      return self.fragment.count;
+    }
+    counter.fragment = { count: 0 };
+    exports.default = counter;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Compiled AMD module contains unsupported top-level executable code",
     );
   });
 

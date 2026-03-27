@@ -21,6 +21,7 @@ import {
   CommonFabricTransformerPipeline,
   OpaqueRefErrorTransformer,
 } from "@commonfabric/ts-transformers";
+import { getLogger } from "@commonfabric/utils/logger";
 import { Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
@@ -42,6 +43,7 @@ import {
 } from "../sandbox/mod.ts";
 
 const INJECTED_SCRIPT = "const console = globalThis.console;";
+const logger = getLogger("engine");
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
@@ -138,9 +140,14 @@ export class Engine extends EventTarget implements Harness {
   // Resolve a `ProgramResolver` into a `Program`.
   async resolve(program: ProgramResolver): Promise<RuntimeProgram> {
     const { compiler } = await this.getInternals();
-    return await compiler.resolveProgram(program, {
-      runtimeModules: Engine.runtimeModuleNames(),
-    });
+    logger.timeStart("resolve");
+    try {
+      return await compiler.resolveProgram(program, {
+        runtimeModules: Engine.runtimeModuleNames(),
+      });
+    } finally {
+      logger.timeEnd("resolve");
+    }
   }
 
   // Compile source to JS without evaluation.
@@ -148,43 +155,54 @@ export class Engine extends EventTarget implements Harness {
     program: RuntimeProgram,
     options: TypeScriptHarnessProcessOptions = {},
   ): Promise<CompileResult> {
-    const id = options.identifier ?? computeId(program);
-    const filename = options.filename ?? `${id}.js`;
-    const mappedProgram = pretransformProgram(program, id);
-    const resolver = new EngineProgramResolver(
-      mappedProgram,
-      this.ctRuntime.staticCache,
-    );
+    logger.timeStart("compile");
+    try {
+      const id = options.identifier ?? computeId(program);
+      const filename = options.filename ?? `${id}.js`;
+      const mappedProgram = pretransformProgram(program, id);
+      const resolver = new EngineProgramResolver(
+        mappedProgram,
+        this.ctRuntime.staticCache,
+      );
 
-    const { compiler } = await this.getInternals();
-    const resolvedProgram = await this.resolve(resolver);
+      const { compiler } = await this.getInternals();
+      const resolvedProgram = await this.resolve(resolver);
 
-    const diagnosticMessageTransformer = new OpaqueRefErrorTransformer({
-      verbose: options.verboseErrors,
-    });
+      const diagnosticMessageTransformer = new OpaqueRefErrorTransformer({
+        verbose: options.verboseErrors,
+      });
 
-    const jsScript = await compiler.compile(resolvedProgram, {
-      filename,
-      noCheck: options.noCheck,
-      injectedScript: INJECTED_SCRIPT,
-      runtimeModules: Engine.runtimeModuleNames(),
-      bundleExportAll: true,
-      getTransformedProgram: (nextProgram) => {
-        options.getTransformedProgram?.(nextProgram);
-      },
-      diagnosticMessageTransformer,
-      beforeTransformers: (program) => {
-        const pipeline = new CommonFabricTransformerPipeline();
-        return {
-          factories: pipeline.toFactories(program),
-          getDiagnostics: () => pipeline.getDiagnostics(),
-        };
-      },
-    });
+      logger.timeStart("compile", "typescript");
+      let jsScript: JsScript;
+      try {
+        jsScript = await compiler.compile(resolvedProgram, {
+          filename,
+          noCheck: options.noCheck,
+          injectedScript: INJECTED_SCRIPT,
+          runtimeModules: Engine.runtimeModuleNames(),
+          bundleExportAll: true,
+          getTransformedProgram: (nextProgram) => {
+            options.getTransformedProgram?.(nextProgram);
+          },
+          diagnosticMessageTransformer,
+          beforeTransformers: (program) => {
+            const pipeline = new CommonFabricTransformerPipeline();
+            return {
+              factories: pipeline.toFactories(program),
+              getDiagnostics: () => pipeline.getDiagnostics(),
+            };
+          },
+        });
+      } finally {
+        logger.timeEnd("compile", "typescript");
+      }
 
-    this.verifyCompiledBundle(jsScript, filename);
+      this.verifyCompiledBundle(jsScript, filename);
 
-    return { id, jsScript };
+      return { id, jsScript };
+    } finally {
+      logger.timeEnd("compile");
+    }
   }
 
   // Evaluate pre-compiled JS, returning exports.
@@ -195,59 +213,64 @@ export class Engine extends EventTarget implements Harness {
     jsScript: JsScript,
     files: Source[],
   ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
-    this.verifyCompiledBundle(jsScript, `${id}.js`);
-    const { isolate, runtimeExports, exportsCallback } = await this
-      .getInternals();
-    const loadId = this.getLoadId(id, jsScript);
-    const runtimeDeps = this.createRuntimeDeps(runtimeExports ?? {});
-    const sourceLocationFrame = pushFrame({
-      runtime: this.ctRuntime,
-      sourceLocationContext: {
-        script: jsScript.js,
-        filename: jsScript.filename ?? `${loadId}.js`,
-        nextSearchOffset: 0,
-      },
-    });
-    let result;
+    logger.timeStart("evaluate");
     try {
-      result = isolate.execute(jsScript).invoke(runtimeDeps).inner();
-    } finally {
-      popFrame(sourceLocationFrame);
-    }
-    if (
-      result && typeof result === "object" && "main" in result &&
-      "exportMap" in result
-    ) {
-      const main = result.main as Exports;
-      const exportMap = result.exportMap as Record<string, Exports>;
-      this.resetVerifiedFunctions(loadId);
-      this.recordVerifiedFunctions(loadId, main);
-      this.recordVerifiedFunctions(loadId, exportMap);
-
-      // Create a map from exported values to `RuntimeProgram` that can
-      // generate them and pass to the callback from the exports.
-      const exportsByValue = new Map<any, RuntimeProgram>();
-      const prefix = `/${id}`;
-      for (let [fileName, exports] of Object.entries(exportMap)) {
-        if (fileName.startsWith(prefix)) {
-          fileName = fileName.substring(prefix.length);
-        }
-        for (const [exportName, exportValue] of Object.entries(exports)) {
-          exportsByValue.set(exportValue, {
-            main: fileName,
-            mainExport: exportName,
-            // TODO(seefeld): Sending all `files` is sub-optimal, as
-            // it is the super set of files actually needed by main. We should
-            // only send the files actually needed by main.
-            files,
-          });
-        }
+      this.verifyCompiledBundle(jsScript, `${id}.js`);
+      const { isolate, runtimeExports, exportsCallback } = await this
+        .getInternals();
+      const loadId = this.getLoadId(id, jsScript);
+      const runtimeDeps = this.createRuntimeDeps(runtimeExports ?? {});
+      const sourceLocationFrame = pushFrame({
+        runtime: this.ctRuntime,
+        sourceLocationContext: {
+          script: jsScript.js,
+          filename: jsScript.filename ?? `${loadId}.js`,
+          nextSearchOffset: 0,
+        },
+      });
+      let result;
+      try {
+        result = isolate.execute(jsScript).invoke(runtimeDeps).inner();
+      } finally {
+        popFrame(sourceLocationFrame);
       }
-      exportsCallback(exportsByValue);
+      if (
+        result && typeof result === "object" && "main" in result &&
+        "exportMap" in result
+      ) {
+        const main = result.main as Exports;
+        const exportMap = result.exportMap as Record<string, Exports>;
+        this.resetVerifiedFunctions(loadId);
+        this.recordVerifiedFunctions(loadId, main);
+        this.recordVerifiedFunctions(loadId, exportMap);
 
-      return { main, exportMap };
+        // Create a map from exported values to `RuntimeProgram` that can
+        // generate them and pass to the callback from the exports.
+        const exportsByValue = new Map<any, RuntimeProgram>();
+        const prefix = `/${id}`;
+        for (let [fileName, exports] of Object.entries(exportMap)) {
+          if (fileName.startsWith(prefix)) {
+            fileName = fileName.substring(prefix.length);
+          }
+          for (const [exportName, exportValue] of Object.entries(exports)) {
+            exportsByValue.set(exportValue, {
+              main: fileName,
+              mainExport: exportName,
+              // TODO(seefeld): Sending all `files` is sub-optimal, as
+              // it is the super set of files actually needed by main. We should
+              // only send the files actually needed by main.
+              files,
+            });
+          }
+        }
+        exportsCallback(exportsByValue);
+
+        return { main, exportMap };
+      }
+      return {};
+    } finally {
+      logger.timeEnd("evaluate");
     }
-    return {};
   }
 
   // Invokes a function that should've came from this isolate (unverifiable).
@@ -352,9 +375,26 @@ export class Engine extends EventTarget implements Harness {
     }
 
     const filename = jsScript.filename ?? fallbackFilename;
-    preflightCompiledBundle(jsScript.js, filename);
-    verifyCompiledBundleModuleFactories(jsScript.js, filename);
-    this.verifiedBundleHashes.add(bundleHash);
+    logger.timeStart("verifyCompiledBundle");
+    try {
+      logger.timeStart("verifyCompiledBundle", "preflight");
+      try {
+        preflightCompiledBundle(jsScript.js, filename);
+      } finally {
+        logger.timeEnd("verifyCompiledBundle", "preflight");
+      }
+
+      logger.timeStart("verifyCompiledBundle", "moduleFactories");
+      try {
+        verifyCompiledBundleModuleFactories(jsScript.js, filename);
+      } finally {
+        logger.timeEnd("verifyCompiledBundle", "moduleFactories");
+      }
+
+      this.verifiedBundleHashes.add(bundleHash);
+    } finally {
+      logger.timeEnd("verifyCompiledBundle");
+    }
   }
 
   private getLoadId(compileId: string, jsScript: JsScript): string {

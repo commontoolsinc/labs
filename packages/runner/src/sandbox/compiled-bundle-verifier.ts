@@ -12,6 +12,7 @@ import {
   trimRange,
   tryParseCallExpression,
 } from "./compiled-js-parser.ts";
+import { getLogger } from "@commontools/utils/logger";
 import { ModuleVerificationError } from "./module-verification-error.ts";
 import {
   isAllowedCompiledDependencySpecifier,
@@ -34,6 +35,8 @@ interface BindingInfo {
   functionRange?: { start: number; end: number };
 }
 
+const logger = getLogger("compiled-bundle-verifier");
+
 const CANONICAL_HARDENING_HELPER = stripJsTrivia(
   `function __ctHardenFn(fn) {
     Object.freeze(fn);
@@ -52,13 +55,31 @@ export function verifyCompiledBundleModuleFactoriesWithParser(
   filename = "<bundle>",
 ): void {
   try {
-    const bundle = parseCompiledBundleSource(source);
-    const compiledModuleIds = new Set(
-      bundle.defineCalls.map(({ moduleId }) => moduleId),
-    );
+    logger.timeStart("parseBundle");
+    let bundle: ReturnType<typeof parseCompiledBundleSource>;
+    try {
+      bundle = parseCompiledBundleSource(source);
+    } finally {
+      logger.timeEnd("parseBundle");
+    }
 
-    for (const defineCall of bundle.defineCalls) {
-      verifyDefineCall(source, filename, defineCall, compiledModuleIds);
+    logger.timeStart("collectModuleIds");
+    let compiledModuleIds: Set<string>;
+    try {
+      compiledModuleIds = new Set(
+        bundle.defineCalls.map(({ moduleId }) => moduleId),
+      );
+    } finally {
+      logger.timeEnd("collectModuleIds");
+    }
+
+    logger.timeStart("verifyDefineCalls");
+    try {
+      for (const defineCall of bundle.defineCalls) {
+        verifyDefineCall(source, filename, defineCall, compiledModuleIds);
+      }
+    } finally {
+      logger.timeEnd("verifyDefineCalls");
     }
   } catch (error) {
     if (error instanceof ModuleVerificationError) {
@@ -82,26 +103,46 @@ function verifyDefineCall(
   defineCall: ParsedDefineCall,
   compiledModuleIds: ReadonlySet<string>,
 ): void {
-  for (const dependency of defineCall.dependencies) {
-    if (
-      !isAllowedCompiledDependencySpecifier(dependency) &&
-      !compiledModuleIds.has(dependency)
-    ) {
-      throw verificationErrorAt(
-        source,
-        filename,
-        defineCall.statement.start,
-        `Compiled AMD dependency '${dependency}' is not allowed in SES mode`,
-      );
+  const start = performance.now();
+  try {
+    logger.timeStart("verifyDefineCall", "dependencies");
+    try {
+      for (const dependency of defineCall.dependencies) {
+        if (
+          !isAllowedCompiledDependencySpecifier(dependency) &&
+          !compiledModuleIds.has(dependency)
+        ) {
+          throw verificationErrorAt(
+            source,
+            filename,
+            defineCall.statement.start,
+            `Compiled AMD dependency '${dependency}' is not allowed in SES mode`,
+          );
+        }
+      }
+    } finally {
+      logger.timeEnd("verifyDefineCall", "dependencies");
     }
-  }
 
-  if (defineCall.moduleId === "index") {
-    verifyIndexFactory(source, filename, defineCall);
-    return;
-  }
+    if (defineCall.moduleId === "index") {
+      logger.timeStart("verifyDefineCall", "indexFactory");
+      try {
+        verifyIndexFactory(source, filename, defineCall);
+      } finally {
+        logger.timeEnd("verifyDefineCall", "indexFactory");
+      }
+      return;
+    }
 
-  verifyAuthoredFactory(source, filename, defineCall);
+    logger.timeStart("verifyDefineCall", "authoredFactory");
+    try {
+      verifyAuthoredFactory(source, filename, defineCall);
+    } finally {
+      logger.timeEnd("verifyDefineCall", "authoredFactory");
+    }
+  } finally {
+    logger.time(start, "verifyDefineCall");
+  }
 }
 
 function verifyAuthoredFactory(
@@ -109,77 +150,101 @@ function verifyAuthoredFactory(
   filename: string,
   defineCall: ParsedDefineCall,
 ): void {
-  const env = new Map<string, BindingInfo>();
-  predeclareFactoryDependencies(defineCall, env);
-  predeclareTopLevelBindings(source, defineCall, env);
+  const start = performance.now();
+  try {
+    const env = new Map<string, BindingInfo>();
 
-  for (const statement of defineCall.factory.body.statements) {
-    if (isStringDirective(statement.text)) continue;
-    if (isCompiledEsModuleMarker(statement.text)) continue;
-    if (isCompiledImportNormalizationRebinding(statement.text, env)) continue;
+    logger.timeStart("verifyAuthoredFactory", "predeclareDependencies");
+    try {
+      predeclareFactoryDependencies(defineCall, env);
+    } finally {
+      logger.timeEnd("verifyAuthoredFactory", "predeclareDependencies");
+    }
 
-    const reexport = tryParseCompiledReexport(statement.text);
-    if (reexport) {
-      if (reexport.exportedName === "__esModule") {
-        continue;
-      }
-      if (reexport.exportedName !== "default") {
-        const binding = classifyReferenceText(
-          source,
-          filename,
-          statement.start,
-          reexport.target,
-          env,
-        );
-        if (binding.kind !== "import") {
+    logger.timeStart("verifyAuthoredFactory", "predeclareTopLevelBindings");
+    try {
+      predeclareTopLevelBindings(source, defineCall, env);
+    } finally {
+      logger.timeEnd("verifyAuthoredFactory", "predeclareTopLevelBindings");
+    }
+
+    logger.timeStart("verifyAuthoredFactory", "statements");
+    try {
+      for (const statement of defineCall.factory.body.statements) {
+        if (isStringDirective(statement.text)) continue;
+        if (isCompiledEsModuleMarker(statement.text)) continue;
+        if (isCompiledImportNormalizationRebinding(statement.text, env)) {
+          continue;
+        }
+
+        const reexport = tryParseCompiledReexport(statement.text);
+        if (reexport) {
+          if (reexport.exportedName === "__esModule") {
+            continue;
+          }
+          if (reexport.exportedName !== "default") {
+            const binding = classifyReferenceText(
+              source,
+              filename,
+              statement.start,
+              reexport.target,
+              env,
+            );
+            if (binding.kind !== "import") {
+              throw verificationErrorAt(
+                source,
+                filename,
+                statement.start,
+                "Compiled reexport getters must return imported bindings",
+              );
+            }
+            env.set(reexport.exportedName, cloneBindingInfo(binding));
+          }
+          continue;
+        }
+
+        if (isCompiledExportStarStatement(statement.text)) continue;
+
+        if (isCompiledExportAssignment(statement.text)) {
+          verifyCompiledExportAssignment(source, filename, statement, env);
+          continue;
+        }
+
+        if (isFunctionDeclarationStatement(statement.text)) {
+          registerFunctionStatement(statement, env);
+          continue;
+        }
+
+        if (isClassDeclarationStatement(statement.text)) {
           throw verificationErrorAt(
             source,
             filename,
             statement.start,
-            "Compiled reexport getters must return imported bindings",
+            "Top-level class declarations are not allowed in SES mode",
           );
         }
-        env.set(reexport.exportedName, cloneBindingInfo(binding));
+
+        if (isVariableStatement(statement.text)) {
+          verifyVariableStatement(source, filename, statement, env);
+          continue;
+        }
+
+        if (isAllowedFunctionHardeningStatement(statement.text, env)) {
+          continue;
+        }
+
+        throw verificationErrorAt(
+          source,
+          filename,
+          statement.start,
+          "Compiled AMD module contains unsupported top-level executable code",
+        );
       }
-      continue;
+    } finally {
+      logger.timeEnd("verifyAuthoredFactory", "statements");
     }
-
-    if (isCompiledExportStarStatement(statement.text)) continue;
-
-    if (isCompiledExportAssignment(statement.text)) {
-      verifyCompiledExportAssignment(source, filename, statement, env);
-      continue;
-    }
-
-    if (isFunctionDeclarationStatement(statement.text)) {
-      registerFunctionStatement(statement, env);
-      continue;
-    }
-
-    if (isClassDeclarationStatement(statement.text)) {
-      throw verificationErrorAt(
-        source,
-        filename,
-        statement.start,
-        "Top-level class declarations are not allowed in SES mode",
-      );
-    }
-
-    if (isVariableStatement(statement.text)) {
-      verifyVariableStatement(source, filename, statement, env);
-      continue;
-    }
-
-    if (isAllowedFunctionHardeningStatement(statement.text, env)) {
-      continue;
-    }
-
-    throw verificationErrorAt(
-      source,
-      filename,
-      statement.start,
-      "Compiled AMD module contains unsupported top-level executable code",
-    );
+  } finally {
+    logger.time(start, "verifyAuthoredFactory");
   }
 }
 
@@ -188,19 +253,24 @@ function verifyIndexFactory(
   filename: string,
   defineCall: ParsedDefineCall,
 ): void {
-  for (const statement of defineCall.factory.body.statements) {
-    if (isStringDirective(statement.text)) continue;
-    if (isCompiledEsModuleMarker(statement.text)) continue;
-    if (isCompiledExportStarStatement(statement.text)) continue;
-    if (isCompiledExportAssignment(statement.text)) continue;
-    if (tryParseCompiledReexport(statement.text)) continue;
+  const start = performance.now();
+  try {
+    for (const statement of defineCall.factory.body.statements) {
+      if (isStringDirective(statement.text)) continue;
+      if (isCompiledEsModuleMarker(statement.text)) continue;
+      if (isCompiledExportStarStatement(statement.text)) continue;
+      if (isCompiledExportAssignment(statement.text)) continue;
+      if (tryParseCompiledReexport(statement.text)) continue;
 
-    throw verificationErrorAt(
-      source,
-      filename,
-      statement.start,
-      "Compiled index module contains unsupported top-level executable code",
-    );
+      throw verificationErrorAt(
+        source,
+        filename,
+        statement.start,
+        "Compiled index module contains unsupported top-level executable code",
+      );
+    }
+  } finally {
+    logger.time(start, "verifyIndexFactory");
   }
 }
 
@@ -208,23 +278,28 @@ function predeclareFactoryDependencies(
   defineCall: ParsedDefineCall,
   env: Map<string, BindingInfo>,
 ): void {
-  for (
-    let index = 0;
-    index < Math.min(
-      defineCall.factory.params.length,
-      defineCall.dependencies.length,
-    );
-    index++
-  ) {
-    const parameter = defineCall.factory.params[index];
-    const dependency = defineCall.dependencies[index];
-    env.set(parameter, {
-      kind: "import",
-      namespaceImport: true,
-      trustedRuntimeName: isRuntimeModuleIdentifier(dependency)
-        ? dependency
-        : undefined,
-    });
+  const start = performance.now();
+  try {
+    for (
+      let index = 0;
+      index < Math.min(
+        defineCall.factory.params.length,
+        defineCall.dependencies.length,
+      );
+      index++
+    ) {
+      const parameter = defineCall.factory.params[index];
+      const dependency = defineCall.dependencies[index];
+      env.set(parameter, {
+        kind: "import",
+        namespaceImport: true,
+        trustedRuntimeName: isRuntimeModuleIdentifier(dependency)
+          ? dependency
+          : undefined,
+      });
+    }
+  } finally {
+    logger.time(start, "predeclareFactoryDependencies");
   }
 }
 
@@ -233,34 +308,41 @@ function predeclareTopLevelBindings(
   defineCall: ParsedDefineCall,
   env: Map<string, BindingInfo>,
 ): void {
-  for (const statement of defineCall.factory.body.statements) {
-    if (isFunctionDeclarationStatement(statement.text)) {
-      const name = getFunctionDeclarationName(statement.text);
-      if (name) {
-        env.set(name, {
-          kind: "function",
-          hardeningHelper: isFunctionHardeningHelperDeclaration(statement.text),
-          functionRange: { start: statement.start, end: statement.end },
-        });
+  const start = performance.now();
+  try {
+    for (const statement of defineCall.factory.body.statements) {
+      if (isFunctionDeclarationStatement(statement.text)) {
+        const name = getFunctionDeclarationName(statement.text);
+        if (name) {
+          env.set(name, {
+            kind: "function",
+            hardeningHelper: isFunctionHardeningHelperDeclaration(
+              statement.text,
+            ),
+            functionRange: { start: statement.start, end: statement.end },
+          });
+        }
+        continue;
       }
-      continue;
-    }
 
-    if (!isVariableStatement(statement.text)) continue;
-    for (const declarator of parseVariableDeclarators(source, statement)) {
-      const provisional = provisionalBindingForExpression(
-        source,
-        declarator.initializer.start,
-        declarator.initializer.end,
-        env,
-      );
-      if (!env.has(declarator.name)) {
-        env.set(
-          declarator.name,
-          provisional ? cloneBindingInfo(provisional) : { kind: "unknown" },
+      if (!isVariableStatement(statement.text)) continue;
+      for (const declarator of parseVariableDeclarators(source, statement)) {
+        const provisional = provisionalBindingForExpression(
+          source,
+          declarator.initializer.start,
+          declarator.initializer.end,
+          env,
         );
+        if (!env.has(declarator.name)) {
+          env.set(
+            declarator.name,
+            provisional ? cloneBindingInfo(provisional) : { kind: "unknown" },
+          );
+        }
       }
     }
+  } finally {
+    logger.time(start, "predeclareTopLevelBindings");
   }
 }
 
@@ -270,35 +352,40 @@ function verifyVariableStatement(
   statement: StatementChunk,
   env: Map<string, BindingInfo>,
 ): void {
-  const kind = getVariableStatementKind(statement.text);
-  if (kind !== "const") {
-    throw verificationErrorAt(
-      source,
-      filename,
-      statement.start,
-      "Top-level mutable bindings are not allowed in SES mode",
-    );
-  }
-
-  for (const declarator of parseVariableDeclarators(source, statement)) {
-    const provisional = provisionalBindingForExpression(
-      source,
-      declarator.initializer.start,
-      declarator.initializer.end,
-      env,
-    );
-    if (provisional) {
-      env.set(declarator.name, cloneBindingInfo(provisional));
+  const start = performance.now();
+  try {
+    const kind = getVariableStatementKind(statement.text);
+    if (kind !== "const") {
+      throw verificationErrorAt(
+        source,
+        filename,
+        statement.start,
+        "Top-level mutable bindings are not allowed in SES mode",
+      );
     }
 
-    const binding = classifyExpressionText(
-      source,
-      filename,
-      declarator.initializer.start,
-      declarator.initializer.end,
-      env,
-    );
-    env.set(declarator.name, binding);
+    for (const declarator of parseVariableDeclarators(source, statement)) {
+      const provisional = provisionalBindingForExpression(
+        source,
+        declarator.initializer.start,
+        declarator.initializer.end,
+        env,
+      );
+      if (provisional) {
+        env.set(declarator.name, cloneBindingInfo(provisional));
+      }
+
+      const binding = classifyExpressionText(
+        source,
+        filename,
+        declarator.initializer.start,
+        declarator.initializer.end,
+        env,
+      );
+      env.set(declarator.name, binding);
+    }
+  } finally {
+    logger.time(start, "verifyVariableStatement");
   }
 }
 
@@ -389,139 +476,148 @@ function classifyExpressionText(
   end: number,
   env: Map<string, BindingInfo>,
 ): BindingInfo {
-  const trimmed = trimRange(source, start, end);
-  const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
-  const text = source.slice(inner.start, inner.end);
-  const normalized = stripJsTrivia(text);
+  const measureStart = performance.now();
+  try {
+    const trimmed = trimRange(source, start, end);
+    const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
+    const text = source.slice(inner.start, inner.end);
+    const normalized = stripJsTrivia(text);
 
-  if (isPrimitiveLikeExpression(normalized) || normalized === "void0") {
-    return { kind: "data" };
-  }
-
-  if (isRawMutableExpression(normalized)) {
-    throw verificationErrorAt(
-      source,
-      filename,
-      inner.start,
-      "Mutable top-level data must be wrapped in __ct_data() in SES mode",
-    );
-  }
-
-  if (isIifeExpression(normalized)) {
-    throw verificationErrorAt(
-      source,
-      filename,
-      inner.start,
-      "Only trusted builder calls, schema(), and canonical function hardening are allowed at module scope in SES mode",
-    );
-  }
-
-  const directFunction = tryParseDirectFunction(source, inner.start, inner.end);
-  if (directFunction) {
-    return {
-      kind: "function",
-      functionRange: { start: directFunction.start, end: directFunction.end },
-    };
-  }
-
-  const call = tryParseCallExpression(source, inner.start, inner.end);
-  if (call) {
-    const normalizedCallee = stripJsTrivia(call.callee);
-    if (normalizedCallee === "require") {
-      throw verificationErrorAt(
-        source,
-        filename,
-        call.start,
-        "Authored AMD require() is not allowed in SES mode",
-      );
-    }
-
-    const trustedCall = resolveTrustedCallName(normalizedCallee, env);
-    if (trustedCall) {
-      if (TRUSTED_BUILDERS.has(trustedCall)) {
-        verifyTrustedBuilderCall(
-          source,
-          filename,
-          trustedCall,
-          call.args,
-          env,
-        );
-        return { kind: "builder" };
-      }
-      verifyTrustedDataCall(
-        source,
-        filename,
-        call.start,
-        trustedCall,
-        call.args.length,
-      );
-      return {
-        kind: "data",
-      };
-    }
-
-    const hardeningBinding = env.get(normalizedCallee);
-    if (hardeningBinding?.hardeningHelper) {
-      if (call.args.length !== 1) {
-        throw verificationErrorAt(
-          source,
-          filename,
-          call.start,
-          "Function hardening helpers accept exactly one argument",
-        );
-      }
-      const argBinding = classifyExpressionText(
-        source,
-        filename,
-        call.args[0].start,
-        call.args[0].end,
-        env,
-      );
-      if (argBinding.kind !== "function") {
-        throw verificationErrorAt(
-          source,
-          filename,
-          call.args[0].start,
-          "Function hardening must target direct function values",
-        );
-      }
-      return cloneBindingInfo(argBinding);
-    }
-
-    if (isLocalCallableExpression(normalizedCallee, env)) {
-      throw verificationErrorAt(
-        source,
-        filename,
-        call.start,
-        TOP_LEVEL_CALL_RESULT_ERROR,
-      );
-    }
-
-    throw verificationErrorAt(
-      source,
-      filename,
-      call.start,
-      "Only trusted builder calls, schema(), and canonical function hardening are allowed at module scope in SES mode",
-    );
-  }
-
-  if (SIMPLE_IDENTIFIER_RE.test(text)) {
-    if (text === "undefined" || text === "NaN" || text === "Infinity") {
+    if (isPrimitiveLikeExpression(normalized) || normalized === "void0") {
       return { kind: "data" };
     }
-    const binding = env.get(text);
-    if (!binding || binding.kind === "unknown") {
+
+    if (isRawMutableExpression(normalized)) {
       throw verificationErrorAt(
         source,
         filename,
         inner.start,
-        `Unknown top-level identifier '${text}' in SES mode`,
+        "Mutable top-level data must be wrapped in __ct_data() in SES mode",
       );
     }
-    return cloneBindingInfo(binding);
-  }
 
-  return classifyReferenceText(source, filename, inner.start, text, env);
+    if (isIifeExpression(normalized)) {
+      throw verificationErrorAt(
+        source,
+        filename,
+        inner.start,
+        "Only trusted builder calls, schema(), and canonical function hardening are allowed at module scope in SES mode",
+      );
+    }
+
+    const directFunction = tryParseDirectFunction(
+      source,
+      inner.start,
+      inner.end,
+    );
+    if (directFunction) {
+      return {
+        kind: "function",
+        functionRange: { start: directFunction.start, end: directFunction.end },
+      };
+    }
+
+    const call = tryParseCallExpression(source, inner.start, inner.end);
+    if (call) {
+      const normalizedCallee = stripJsTrivia(call.callee);
+      if (normalizedCallee === "require") {
+        throw verificationErrorAt(
+          source,
+          filename,
+          call.start,
+          "Authored AMD require() is not allowed in SES mode",
+        );
+      }
+
+      const trustedCall = resolveTrustedCallName(normalizedCallee, env);
+      if (trustedCall) {
+        if (TRUSTED_BUILDERS.has(trustedCall)) {
+          verifyTrustedBuilderCall(
+            source,
+            filename,
+            trustedCall,
+            call.args,
+            env,
+          );
+          return { kind: "builder" };
+        }
+        verifyTrustedDataCall(
+          source,
+          filename,
+          call.start,
+          trustedCall,
+          call.args.length,
+        );
+        return {
+          kind: "data",
+        };
+      }
+
+      const hardeningBinding = env.get(normalizedCallee);
+      if (hardeningBinding?.hardeningHelper) {
+        if (call.args.length !== 1) {
+          throw verificationErrorAt(
+            source,
+            filename,
+            call.start,
+            "Function hardening helpers accept exactly one argument",
+          );
+        }
+        const argBinding = classifyExpressionText(
+          source,
+          filename,
+          call.args[0].start,
+          call.args[0].end,
+          env,
+        );
+        if (argBinding.kind !== "function") {
+          throw verificationErrorAt(
+            source,
+            filename,
+            call.args[0].start,
+            "Function hardening must target direct function values",
+          );
+        }
+        return cloneBindingInfo(argBinding);
+      }
+
+      if (isLocalCallableExpression(normalizedCallee, env)) {
+        throw verificationErrorAt(
+          source,
+          filename,
+          call.start,
+          TOP_LEVEL_CALL_RESULT_ERROR,
+        );
+      }
+
+      throw verificationErrorAt(
+        source,
+        filename,
+        call.start,
+        "Only trusted builder calls, schema(), and canonical function hardening are allowed at module scope in SES mode",
+      );
+    }
+
+    if (SIMPLE_IDENTIFIER_RE.test(text)) {
+      if (text === "undefined" || text === "NaN" || text === "Infinity") {
+        return { kind: "data" };
+      }
+      const binding = env.get(text);
+      if (!binding || binding.kind === "unknown") {
+        throw verificationErrorAt(
+          source,
+          filename,
+          inner.start,
+          `Unknown top-level identifier '${text}' in SES mode`,
+        );
+      }
+      return cloneBindingInfo(binding);
+    }
+
+    return classifyReferenceText(source, filename, inner.start, text, env);
+  } finally {
+    logger.time(measureStart, "classifyExpressionText");
+  }
 }
 
 function classifyReferenceText(
@@ -531,39 +627,44 @@ function classifyReferenceText(
   text: string,
   env: Map<string, BindingInfo>,
 ): BindingInfo {
-  const ref = parseMemberReference(text);
-  if (!ref) {
-    throw verificationErrorAt(
-      source,
-      filename,
-      offset,
-      "Top-level value is not allowed in SES mode",
-    );
-  }
+  const measureStart = performance.now();
+  try {
+    const ref = parseMemberReference(text);
+    if (!ref) {
+      throw verificationErrorAt(
+        source,
+        filename,
+        offset,
+        "Top-level value is not allowed in SES mode",
+      );
+    }
 
-  if (ref.root === "exports" && ref.property) {
-    const binding = env.get(ref.property);
+    if (ref.root === "exports" && ref.property) {
+      const binding = env.get(ref.property);
+      if (!binding || binding.kind === "unknown") {
+        throw verificationErrorAt(
+          source,
+          filename,
+          offset,
+          `Unknown exported binding '${ref.property}' in SES mode`,
+        );
+      }
+      return cloneBindingInfo(binding);
+    }
+
+    const binding = env.get(ref.root);
     if (!binding || binding.kind === "unknown") {
       throw verificationErrorAt(
         source,
         filename,
         offset,
-        `Unknown exported binding '${ref.property}' in SES mode`,
+        `Unknown top-level identifier '${ref.root}' in SES mode`,
       );
     }
     return cloneBindingInfo(binding);
+  } finally {
+    logger.time(measureStart, "classifyReferenceText");
   }
-
-  const binding = env.get(ref.root);
-  if (!binding || binding.kind === "unknown") {
-    throw verificationErrorAt(
-      source,
-      filename,
-      offset,
-      `Unknown top-level identifier '${ref.root}' in SES mode`,
-    );
-  }
-  return cloneBindingInfo(binding);
 }
 
 function verifyTrustedDataCall(
@@ -603,42 +704,47 @@ function verifyTrustedBuilderCall(
   args: Array<{ start: number; end: number }>,
   env: Map<string, BindingInfo>,
 ): void {
-  const callbackIndexes = callbackIndexesForBuilder(
-    source,
-    builderName,
-    args,
-    env,
-  );
-  if (callbackIndexes.length === 0) {
-    throw verificationErrorAt(
+  const measureStart = performance.now();
+  try {
+    const callbackIndexes = callbackIndexesForBuilder(
       source,
-      filename,
-      args[0]?.start ?? 0,
-      `Trusted builder '${builderName}' must receive a direct callback in SES mode`,
-    );
-  }
-
-  for (let index = 0; index < args.length; index++) {
-    const argument = args[index];
-    if (callbackIndexes.includes(index)) {
-      const callback = resolveTrustedBuilderCallback(source, argument, env);
-      if (!callback) {
-        throw verificationErrorAt(
-          source,
-          filename,
-          argument.start,
-          `Trusted builder '${builderName}' must receive a direct callback, not an indirect reference`,
-        );
-      }
-      continue;
-    }
-    verifyTrustedValueExpression(
-      source,
-      filename,
-      argument.start,
-      argument.end,
+      builderName,
+      args,
       env,
     );
+    if (callbackIndexes.length === 0) {
+      throw verificationErrorAt(
+        source,
+        filename,
+        args[0]?.start ?? 0,
+        `Trusted builder '${builderName}' must receive a direct callback in SES mode`,
+      );
+    }
+
+    for (let index = 0; index < args.length; index++) {
+      const argument = args[index];
+      if (callbackIndexes.includes(index)) {
+        const callback = resolveTrustedBuilderCallback(source, argument, env);
+        if (!callback) {
+          throw verificationErrorAt(
+            source,
+            filename,
+            argument.start,
+            `Trusted builder '${builderName}' must receive a direct callback, not an indirect reference`,
+          );
+        }
+        continue;
+      }
+      verifyTrustedValueExpression(
+        source,
+        filename,
+        argument.start,
+        argument.end,
+        env,
+      );
+    }
+  } finally {
+    logger.time(measureStart, "verifyTrustedBuilderCall");
   }
 }
 
@@ -677,63 +783,71 @@ function verifyTrustedValueExpression(
   end: number,
   env: Map<string, BindingInfo>,
 ): void {
-  const trimmed = trimRange(source, start, end);
-  const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
-  const text = source.slice(inner.start, inner.end);
-  const normalized = stripJsTrivia(text);
+  const measureStart = performance.now();
+  try {
+    const trimmed = trimRange(source, start, end);
+    const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
+    const text = source.slice(inner.start, inner.end);
+    const normalized = stripJsTrivia(text);
 
-  if (
-    isPrimitiveLikeExpression(normalized) ||
-    normalized === "void0" ||
-    isRegexLiteral(normalized) ||
-    normalized.startsWith("{") ||
-    normalized.startsWith("[")
-  ) {
-    return;
-  }
-
-  if (SIMPLE_IDENTIFIER_RE.test(text)) {
-    if (SAFE_GLOBAL_IDENTIFIERS.has(text)) {
+    if (
+      isPrimitiveLikeExpression(normalized) ||
+      normalized === "void0" ||
+      isRegexLiteral(normalized) ||
+      normalized.startsWith("{") ||
+      normalized.startsWith("[")
+    ) {
       return;
     }
-    const binding = env.get(text);
-    if (!binding || binding.kind === "unknown") {
-      throw verificationErrorAt(
-        source,
-        filename,
-        inner.start,
-        `Unknown identifier '${text}' in SES-verified module scope`,
-      );
-    }
-    return;
-  }
 
-  if (parseMemberReference(text)) {
-    classifyReferenceText(source, filename, inner.start, text, env);
-    return;
-  }
-
-  const call = tryParseCallExpression(source, inner.start, inner.end);
-  if (call) {
-    const trustedName = resolveTrustedCallName(stripJsTrivia(call.callee), env);
-    if (trustedName) {
-      verifyTrustedDataCall(
-        source,
-        filename,
-        call.start,
-        trustedName,
-        call.args.length,
-      );
+    if (SIMPLE_IDENTIFIER_RE.test(text)) {
+      if (SAFE_GLOBAL_IDENTIFIERS.has(text)) {
+        return;
+      }
+      const binding = env.get(text);
+      if (!binding || binding.kind === "unknown") {
+        throw verificationErrorAt(
+          source,
+          filename,
+          inner.start,
+          `Unknown identifier '${text}' in SES-verified module scope`,
+        );
+      }
       return;
     }
-  }
 
-  throw verificationErrorAt(
-    source,
-    filename,
-    inner.start,
-    "Only verified plain data and references to verified top-level bindings are allowed here in SES mode",
-  );
+    if (parseMemberReference(text)) {
+      classifyReferenceText(source, filename, inner.start, text, env);
+      return;
+    }
+
+    const call = tryParseCallExpression(source, inner.start, inner.end);
+    if (call) {
+      const trustedName = resolveTrustedCallName(
+        stripJsTrivia(call.callee),
+        env,
+      );
+      if (trustedName) {
+        verifyTrustedDataCall(
+          source,
+          filename,
+          call.start,
+          trustedName,
+          call.args.length,
+        );
+        return;
+      }
+    }
+
+    throw verificationErrorAt(
+      source,
+      filename,
+      inner.start,
+      "Only verified plain data and references to verified top-level bindings are allowed here in SES mode",
+    );
+  } finally {
+    logger.time(measureStart, "verifyTrustedValueExpression");
+  }
 }
 
 function isLocalCallableExpression(
@@ -851,35 +965,40 @@ function parseVariableDeclarators(
   source: string,
   statement: StatementChunk,
 ): Array<{ name: string; initializer: { start: number; end: number } }> {
-  const trimmed = trimRange(source, statement.start, statement.end);
-  const keyword = getVariableStatementKind(statement.text);
-  const keywordStart = statement.text.indexOf(keyword);
-  const listStart = trimmed.start + keywordStart + keyword.length;
-  const listEnd =
-    stripTrailingSemicolonRange(source, trimmed.start, trimmed.end)
-      .end;
-  return splitTopLevelCommaList(source, listStart, listEnd).map((range) => {
-    const equals = findTopLevelEquals(source, range.start, range.end);
-    if (equals === undefined) {
-      throw new CompiledJsParseError(
-        range.start,
-        "Top-level declarations must initialize their bindings",
-      );
-    }
-    const nameRange = trimRange(source, range.start, equals);
-    const name = source.slice(nameRange.start, nameRange.end);
-    if (!SIMPLE_IDENTIFIER_RE.test(name)) {
-      throw new CompiledJsParseError(
-        nameRange.start,
-        "Top-level declarations must bind simple identifiers",
-      );
-    }
-    const initializer = trimRange(source, equals + 1, range.end);
-    return {
-      name,
-      initializer,
-    };
-  });
+  const measureStart = performance.now();
+  try {
+    const trimmed = trimRange(source, statement.start, statement.end);
+    const keyword = getVariableStatementKind(statement.text);
+    const keywordStart = statement.text.indexOf(keyword);
+    const listStart = trimmed.start + keywordStart + keyword.length;
+    const listEnd =
+      stripTrailingSemicolonRange(source, trimmed.start, trimmed.end)
+        .end;
+    return splitTopLevelCommaList(source, listStart, listEnd).map((range) => {
+      const equals = findTopLevelEquals(source, range.start, range.end);
+      if (equals === undefined) {
+        throw new CompiledJsParseError(
+          range.start,
+          "Top-level declarations must initialize their bindings",
+        );
+      }
+      const nameRange = trimRange(source, range.start, equals);
+      const name = source.slice(nameRange.start, nameRange.end);
+      if (!SIMPLE_IDENTIFIER_RE.test(name)) {
+        throw new CompiledJsParseError(
+          nameRange.start,
+          "Top-level declarations must bind simple identifiers",
+        );
+      }
+      const initializer = trimRange(source, equals + 1, range.end);
+      return {
+        name,
+        initializer,
+      };
+    });
+  } finally {
+    logger.time(measureStart, "parseVariableDeclarators");
+  }
 }
 
 function parseExportAssignmentChain(

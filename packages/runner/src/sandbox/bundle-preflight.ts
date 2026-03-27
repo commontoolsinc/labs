@@ -1,10 +1,13 @@
 import { getAMDLoader } from "../../../js-compiler/typescript/bundler/amd-loader.ts";
+import { getLogger } from "@commontools/utils/logger";
 import {
   CompiledJsParseError,
   parseCompiledBundleSource,
   stripJsTrivia,
   tryParseDefineCall,
 } from "./compiled-js-parser.ts";
+
+const logger = getLogger("bundle-preflight");
 
 const ALLOWED_TSLIB_HELPERS = new Set([
   "__createBinding",
@@ -64,39 +67,51 @@ export function preflightCompiledBundle(
   filename = "<bundle>",
 ): void {
   try {
-    const bundle = parseCompiledBundleSource(source);
+    logger.timeStart("parseBundle");
+    let bundle: ReturnType<typeof parseCompiledBundleSource>;
+    try {
+      bundle = parseCompiledBundleSource(source);
+    } finally {
+      logger.timeEnd("parseBundle");
+    }
+
     let phase: "bootstrap" | "define" | "tail" = "bootstrap";
     let sawDefine = false;
 
-    for (const statement of bundle.body.statements) {
-      if (isBootstrapStatement(statement.text)) {
-        if (phase !== "bootstrap") {
-          throw new BundlePreflightError(
-            "Bundle bootstrap helpers must appear before module definitions",
-          );
+    logger.timeStart("scanStatements");
+    try {
+      for (const statement of bundle.body.statements) {
+        if (isBootstrapStatement(statement.text)) {
+          if (phase !== "bootstrap") {
+            throw new BundlePreflightError(
+              "Bundle bootstrap helpers must appear before module definitions",
+            );
+          }
+          continue;
         }
-        continue;
-      }
 
-      if (tryParseDefineCall(source, statement)) {
-        if (phase === "tail") {
-          throw new BundlePreflightError(
-            "AMD module definitions must appear before bundle return wiring",
-          );
+        if (tryParseDefineCall(source, statement)) {
+          if (phase === "tail") {
+            throw new BundlePreflightError(
+              "AMD module definitions must appear before bundle return wiring",
+            );
+          }
+          phase = "define";
+          sawDefine = true;
+          continue;
         }
-        phase = "define";
-        sawDefine = true;
-        continue;
-      }
 
-      if (isTailStatement(statement.text)) {
-        phase = "tail";
-        continue;
-      }
+        if (isTailStatement(statement.text)) {
+          phase = "tail";
+          continue;
+        }
 
-      throw new BundlePreflightError(
-        "Compiled bundle contains unsupported top-level executable code",
-      );
+        throw new BundlePreflightError(
+          "Compiled bundle contains unsupported top-level executable code",
+        );
+      }
+    } finally {
+      logger.timeEnd("scanStatements");
     }
 
     if (!sawDefine) {

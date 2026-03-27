@@ -4,9 +4,12 @@ import {
   SourceMap,
   SourceMapParser,
 } from "@commontools/js-compiler";
+import { getLogger } from "@commontools/utils/logger";
 import "ses";
 import { createCallbackCompartmentGlobals } from "./compartment-globals.ts";
 import { hardenVerifiedFunction } from "./function-hardening.ts";
+
+const logger = getLogger("ses-runtime");
 
 export interface SESRuntimeOptions {
   globals?: Record<string, unknown>;
@@ -132,17 +135,34 @@ export class SESIsolate {
   }
 
   execute(input: string | JsScript): SESJsValue {
-    const { js, filename, sourceMap } = typeof input === "string"
-      ? { js: input, filename: "NO-NAME.js" }
-      : input;
+    logger.timeStart("execute");
+    try {
+      const { js, filename, sourceMap } = typeof input === "string"
+        ? { js: input, filename: "NO-NAME.js" }
+        : input;
 
-    if (filename && sourceMap) {
-      this.internals.loadSourceMap(filename, sourceMap);
+      if (filename && sourceMap) {
+        this.internals.loadSourceMap(filename, sourceMap);
+      }
+
+      logger.timeStart("execute", "createCompartment");
+      let compartment;
+      try {
+        compartment = createCompartment(this.globals);
+      } finally {
+        logger.timeEnd("execute", "createCompartment");
+      }
+
+      logger.timeStart("execute", "compartmentEvaluate");
+      try {
+        const result = this.internals.exec(() => compartment.evaluate(js));
+        return new SESJsValue(this.internals, result);
+      } finally {
+        logger.timeEnd("execute", "compartmentEvaluate");
+      }
+    } finally {
+      logger.timeEnd("execute");
     }
-
-    const compartment = createCompartment(this.globals);
-    const result = this.internals.exec(() => compartment.evaluate(js));
-    return new SESJsValue(this.internals, result);
   }
 
   value<T>(value: T): SESJsValue {
