@@ -16,15 +16,17 @@ USAGE:
   deno run -A scripts/fuse-bench.ts [OPTIONS]
 
 OPTIONS:
-  --mount <path>      FUSE mount root (required)
-  --space <name>      Space name (required)
-  --piece <name>      Piece name to benchmark (required)
-  --n <count>         Iteration count (default: 20)
-  --timeout <ms>      Per-iteration timeout in ms (default: 5000)
-  --help              Print this help and exit
+  --mount <path>        FUSE mount root (required)
+  --space <name>        Space name (required)
+  --piece <name>        Piece name to benchmark (required)
+  --n <count>           Iteration count (default: 20)
+  --timeout <ms>        Per-iteration timeout in ms (default: 5000)
+  --input-path <rel>    Relative path to write (default: input/benchmark.json)
+  --result-path <rel>   Relative path to poll (default: result/benchmark.json)
+  --help                Print this help and exit
 
 EXAMPLE:
-  deno run -A scripts/fuse-bench.ts --mount /tmp/ct-spike9 --space agent-spike-9 --piece "Wishes" --n 20
+  deno run -A scripts/fuse-bench.ts --mount /tmp/ct-bench --space bench --piece "My Note" --input-path input/content --result-path result/content --n 10
 `);
 }
 
@@ -34,6 +36,8 @@ function parseArgs(args: string[]): {
   piece: string;
   n: number;
   timeout: number;
+  inputPath: string;
+  resultPath: string;
 } | null {
   const parsed: Record<string, string> = {};
 
@@ -60,6 +64,8 @@ function parseArgs(args: string[]): {
     piece: parsed.piece,
     n: parsed.n ? parseInt(parsed.n, 10) : 20,
     timeout: parsed.timeout ? parseInt(parsed.timeout, 10) : 5000,
+    inputPath: parsed["input-path"] ?? "input/benchmark.json",
+    resultPath: parsed["result-path"] ?? "result/benchmark.json",
   };
 }
 
@@ -84,11 +90,13 @@ async function runBenchmark(opts: {
   piece: string;
   n: number;
   timeout: number;
+  inputPath: string;
+  resultPath: string;
 }): Promise<void> {
   const { mount, space, piece, n, timeout } = opts;
 
-  const inputPath = `${mount}/${space}/pieces/${piece}/input/benchmark.json`;
-  const resultPath = `${mount}/${space}/pieces/${piece}/result/benchmark.json`;
+  const inputPath = `${mount}/${space}/pieces/${piece}/${opts.inputPath}`;
+  const resultPath = `${mount}/${space}/pieces/${piece}/${opts.resultPath}`;
 
   const samples: number[] = [];
   let errors = 0;
@@ -151,6 +159,8 @@ async function runBenchmark(opts: {
     mount,
     space,
     piece,
+    input_path: opts.inputPath,
+    result_path: opts.resultPath,
     n,
     elapsed_ms: elapsed,
     errors,
