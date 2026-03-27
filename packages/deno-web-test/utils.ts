@@ -5,6 +5,9 @@ import { Summary, TestFileResults } from "./interface.ts";
 
 export const tsToJs = (path: string): string => path.replace(/\.ts$/, ".js");
 
+const BUNDLE_RETRY_ATTEMPTS = 5;
+const BUNDLE_RETRYABLE_ETXTBSY = "Text file busy (os error 26)";
+
 // Given a `Manifest`, moves harness code and bundled
 // tests to the manifest's `serverDir`.
 export const buildTestDir = async (manifest: Manifest) => {
@@ -87,21 +90,30 @@ async function bundleTestFile(
 
   args.push(input);
 
-  const result = await new Deno.Command(Deno.execPath(), {
-    args,
-    cwd: manifest.projectDir,
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-  if (!result.success) {
-    throw new Error(
-      `Failed to bundle ${testPath}: ${
-        new TextDecoder().decode(result.stderr)
-      }`,
-    );
-  }
+  const decoder = new TextDecoder();
+  for (let attempt = 1; attempt <= BUNDLE_RETRY_ATTEMPTS; attempt++) {
+    const result = await new Deno.Command(Deno.execPath(), {
+      args,
+      cwd: manifest.projectDir,
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    if (result.success) {
+      await downlevelBundleIfNeeded(output, manifest);
+      return;
+    }
 
-  await downlevelBundleIfNeeded(output, manifest);
+    const stderr = decoder.decode(result.stderr);
+    if (
+      attempt === BUNDLE_RETRY_ATTEMPTS ||
+      !stderr.includes(BUNDLE_RETRYABLE_ETXTBSY)
+    ) {
+      throw new Error(`Failed to bundle ${testPath}: ${stderr}`);
+    }
+
+    // Deno can race while copying the esbuild helper binary in CI.
+    await sleepForRetry(attempt);
+  }
 }
 
 async function resolveBundleConfigPath(
@@ -223,6 +235,11 @@ async function resolveWorkspacePackageImports(
   }
 
   return imports;
+}
+
+async function sleepForRetry(attempt: number): Promise<void> {
+  const delayMs = 250 * 2 ** (attempt - 1);
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 async function findWorkspaceConfigPath(

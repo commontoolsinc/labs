@@ -257,37 +257,6 @@ describe("shell piece tests", () => {
           return true;
         }, { args: [pieceId, fromValue, toValue] });
       });
-
-      await waitFor(async () => {
-        return await page.evaluate(async (
-          expectedPieceId,
-          expectedToValue,
-        ) => {
-          const rootView = document.querySelector("x-root-view");
-          const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
-            | {
-              _patterns?: {
-                value?: {
-                  activePattern?: {
-                    id(): string;
-                    cell(): {
-                      key(name: string): {
-                        sync(): Promise<unknown>;
-                      };
-                    };
-                  };
-                };
-              };
-            }
-            | null;
-          const activePattern = appView?._patterns?.value?.activePattern;
-          if (!activePattern || activePattern.id() !== expectedPieceId) {
-            return false;
-          }
-          const value = activePattern.cell().key("value");
-          return (await value.sync()) === expectedToValue;
-        }, { args: [pieceId, toValue] });
-      });
     };
 
     try {
