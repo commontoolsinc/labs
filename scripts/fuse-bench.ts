@@ -109,11 +109,20 @@ async function runBenchmark(opts: {
     const t0 = Date.now();
     const payload = JSON.stringify({ ts: t0, iter: i });
 
-    // Write to input path
-    try {
-      await Deno.writeTextFile(inputPath, payload);
-    } catch (err) {
-      console.error(`[iter ${i}] Failed to write input: ${err}`);
+    // Write to input path — retry a few times since the FUSE tree briefly
+    // tears down input/ during reactive rebuilds, causing transient ENOENT.
+    let writeOk = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await Deno.writeTextFile(inputPath, payload);
+        writeOk = true;
+        break;
+      } catch {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+    if (!writeOk) {
+      console.error(`[iter ${i}] Failed to write input after retries`);
       errors++;
       continue;
     }
