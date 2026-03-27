@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
+import * as MemoryV2Client from "@commontools/memory/v2/client";
+import type { Server as MemoryV2Server } from "@commontools/memory/v2/server";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { Action } from "../src/scheduler.ts";
 import type { URI } from "@commontools/memory/interface";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
-import { writeRemoteValues } from "./memory-v2-remote.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-pull-reactivity");
 const space = signer.did();
@@ -34,8 +35,11 @@ describe("Memory v2 pull reactivity", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
+  let remoteClient: MemoryV2Client.Client;
+  let remoteSession: MemoryV2Client.SpaceSession;
+  let remoteLocalSeq: number;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     storageManager = StorageManager.emulate({
       as: signer,
       memoryVersion: "v2",
@@ -46,6 +50,18 @@ describe("Memory v2 pull reactivity", () => {
       memoryVersion: "v2",
     });
     tx = runtime.edit();
+
+    const candidate = storageManager as unknown as {
+      server?: () => MemoryV2Server;
+    };
+    if (typeof candidate.server !== "function") {
+      throw new Error("Expected a memory/v2 emulated storage manager");
+    }
+    remoteClient = await MemoryV2Client.connect({
+      transport: MemoryV2Client.loopback(candidate.server()),
+    });
+    remoteSession = await remoteClient.mount(space);
+    remoteLocalSeq = 1;
   });
 
   afterEach(async () => {
@@ -54,6 +70,7 @@ describe("Memory v2 pull reactivity", () => {
       await tx.commit();
     }
     await runtime.dispose();
+    await remoteClient.close();
     await storageManager.close();
     await new Promise((resolve) => setTimeout(resolve, 1));
   });
@@ -103,10 +120,15 @@ describe("Memory v2 pull reactivity", () => {
     expect(computationRuns).toBe(1);
     expect(runtime.scheduler.isDirty(computation)).toBe(false);
 
-    await writeRemoteValues(storageManager, space, [{
-      id: source.getAsNormalizedFullLink().id,
-      value: 2,
-    }]);
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: source.getAsNormalizedFullLink().id,
+        value: { value: 2 },
+      }],
+    });
 
     await waitFor(() => runtime.scheduler.isDirty(computation));
     expect(computationRuns).toBe(1);
@@ -132,7 +154,15 @@ describe("Memory v2 pull reactivity", () => {
       ): Promise<{ ok?: Record<PropertyKey, never> }>;
     };
 
-    await writeRemoteValues(storageManager, space, fixture.docs);
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: fixture.docs.map(({ id, value }) => ({
+        op: "set" as const,
+        id,
+        value: { value },
+      })),
+    });
 
     if (!expandedChildValue) {
       throw new Error(`Missing graph fixture doc ${expandedChildId}`);
@@ -191,10 +221,15 @@ describe("Memory v2 pull reactivity", () => {
       fixture.initialReachableIds,
     );
 
-    await writeRemoteValues(storageManager, space, [{
-      id: fixture.rootId,
-      value: fixture.expandedRootValue,
-    }]);
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: fixture.rootId,
+        value: { value: fixture.expandedRootValue },
+      }],
+    });
 
     await waitFor(() => runtime.scheduler.isDirty(computation));
     await waitFor(() =>
@@ -212,10 +247,15 @@ describe("Memory v2 pull reactivity", () => {
     );
 
     expandedChildValue.name = "Expanded Node 33";
-    await writeRemoteValues(storageManager, space, [{
-      id: expandedChildId,
-      value: expandedChildValue,
-    }]);
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: expandedChildId,
+        value: { value: expandedChildValue },
+      }],
+    });
 
     await waitFor(() => runtime.scheduler.isDirty(computation));
     expect(computationRuns).toBe(2);

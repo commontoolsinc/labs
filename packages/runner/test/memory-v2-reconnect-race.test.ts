@@ -17,7 +17,6 @@ import {
   StorageManager as V2StorageManager,
 } from "../src/storage/v2.ts";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
-import { writeRemoteValues } from "./memory-v2-remote.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-reconnect-race");
 const space = signer.did();
@@ -593,18 +592,41 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
       },
     });
 
+  let remoteClient: MemoryV2Client.Client | undefined;
   try {
+    const candidate = storageManager as unknown as {
+      server?: () => MemoryV2Server.Server;
+    };
+    if (typeof candidate.server !== "function") {
+      throw new Error("Expected a memory/v2 emulated storage manager");
+    }
+    remoteClient = await MemoryV2Client.connect({
+      transport: MemoryV2Client.loopback(candidate.server()),
+    });
+    const remoteSession = await remoteClient.mount(space);
+    let remoteLocalSeq = 1;
+
     await provider.sync(uri);
-    await writeRemoteValues(storageManager, space, [{
-      id: uri,
-      value: { version: 1 },
-    }]);
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { version: 1 } },
+      }],
+    });
     await waitFor(() => getObjectValue(provider, uri)?.version === 1);
 
-    await writeRemoteValues(storageManager, space, [{
-      id: uri,
-      value: { version: 3 },
-    }]);
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { version: 3 } },
+      }],
+    });
     await waitFor(() => getObjectValue(provider, uri)?.version === 3);
     notifications.clear();
 
@@ -631,6 +653,7 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
     assertEquals(revertNotifications.length, 1);
     assertEquals(commitNotifications.length >= 2, true);
   } finally {
+    await remoteClient?.close();
     await storageManager.close();
   }
 });

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
+import * as MemoryV2Client from "@commontools/memory/v2/client";
+import type { Server as MemoryV2Server } from "@commontools/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
@@ -11,7 +13,6 @@ import type {
 import type { MIME, URI } from "@commontools/memory/interface";
 import * as Fact from "@commontools/memory/fact";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
-import { writeRemoteValues } from "./memory-v2-remote.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-storage-subscription");
 const space = signer.did();
@@ -69,8 +70,11 @@ describe("Memory v2 storage notifications", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
+  let remoteClient: MemoryV2Client.Client;
+  let remoteSession: MemoryV2Client.SpaceSession;
+  let remoteLocalSeq: number;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     storageManager = StorageManager.emulate({
       as: signer,
       memoryVersion: "v2",
@@ -81,6 +85,18 @@ describe("Memory v2 storage notifications", () => {
       memoryVersion: "v2",
     });
     tx = runtime.edit();
+
+    const candidate = storageManager as unknown as {
+      server?: () => MemoryV2Server;
+    };
+    if (typeof candidate.server !== "function") {
+      throw new Error("Expected a memory/v2 emulated storage manager");
+    }
+    remoteClient = await MemoryV2Client.connect({
+      transport: MemoryV2Client.loopback(candidate.server()),
+    });
+    remoteSession = await remoteClient.mount(space);
+    remoteLocalSeq = 1;
   });
 
   afterEach(async () => {
@@ -89,6 +105,7 @@ describe("Memory v2 storage notifications", () => {
       await tx.commit();
     }
     await runtime.dispose();
+    await remoteClient.close();
     await storageManager.close();
     await new Promise((resolve) => setTimeout(resolve, 1));
   });
@@ -124,18 +141,28 @@ describe("Memory v2 storage notifications", () => {
     storageManager.subscribe(subscription);
 
     const uri = `of:memory-v2-conflict-${Date.now()}` as URI;
-    await writeRemoteValues(storageManager, space, [{
-      id: uri,
-      value: { version: 1 },
-    }]);
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { version: 1 } },
+      }],
+    });
 
     const { replica } = storageManager.open(space);
     await storageManager.open(space).sync(uri);
 
-    await writeRemoteValues(storageManager, space, [{
-      id: uri,
-      value: { version: 3 },
-    }]);
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { version: 3 } },
+      }],
+    });
     await waitFor(() =>
       JSON.stringify(
         replica.get({ id: uri, type: "application/json" as MIME })?.is,
@@ -193,10 +220,15 @@ describe("Memory v2 storage notifications", () => {
     const { replica } = provider;
     await provider.sync(uri);
 
-    await writeRemoteValues(storageManager, space, [{
-      id: uri,
-      value: { version: 1 },
-    }]);
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { version: 1 } },
+      }],
+    });
     await waitFor(() =>
       JSON.stringify(
         replica.get({ id: uri, type: "application/json" as MIME })?.is,
@@ -204,10 +236,15 @@ describe("Memory v2 storage notifications", () => {
         JSON.stringify({ value: { version: 1 } })
     );
 
-    await writeRemoteValues(storageManager, space, [{
-      id: uri,
-      value: { version: 3 },
-    }]);
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { version: 3 } },
+      }],
+    });
 
     const source = {
       getReadActivities() {
@@ -248,15 +285,22 @@ describe("Memory v2 storage notifications", () => {
     storageManager.subscribe(subscription);
 
     const uri = `of:memory-v2-pull-dedupe-${Date.now()}` as URI;
-    await writeRemoteValues(storageManager, space, [{
-      id: uri,
-      value: {
-        items: [
-          { count: 1, label: "one" },
-          { count: 2, label: "two" },
-        ],
-      },
-    }]);
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: {
+          value: {
+            items: [
+              { count: 1, label: "one" },
+              { count: 2, label: "two" },
+            ],
+          },
+        },
+      }],
+    });
 
     const provider = storageManager.open(space);
     await provider.sync(uri, {
@@ -284,7 +328,15 @@ describe("Memory v2 storage notifications", () => {
       ): Promise<{ ok?: Record<PropertyKey, never> }>;
     };
 
-    await writeRemoteValues(storageManager, space, fixture.docs);
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: fixture.docs.map(({ id, value }) => ({
+        op: "set" as const,
+        id,
+        value: { value },
+      })),
+    });
 
     expect(
       await observer.sync(fixture.rootId, {
@@ -304,10 +356,15 @@ describe("Memory v2 storage notifications", () => {
     );
 
     subscription.clear();
-    await writeRemoteValues(storageManager, space, [{
-      id: fixture.rootId,
-      value: fixture.expandedRootValue,
-    }]);
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: fixture.rootId,
+        value: { value: fixture.expandedRootValue },
+      }],
+    });
     await storageManager.synced();
     await waitFor(
       () =>
