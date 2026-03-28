@@ -1,7 +1,10 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import {
+  StorageManager,
+  StorageManagerEmulator,
+} from "@commontools/runner/storage/cache.deno";
 import { StorageManager as RemoteStorageManager } from "../src/storage/cache.ts";
 import * as V2Storage from "../src/storage/v2.ts";
 import * as V2Emulate from "../src/storage/v2-emulate.ts";
@@ -93,7 +96,7 @@ describe("memoryVersion cutover seam", () => {
     }
   });
 
-  it("uses the v2 storage manager implementations when the default is v2", async () => {
+  it("uses storage manager implementations that match the current default", async () => {
     const previous = Deno.env.get(INTEGRATION_MEMORY_VERSION_ENV);
     Deno.env.delete(INTEGRATION_MEMORY_VERSION_ENV);
 
@@ -104,13 +107,22 @@ describe("memoryVersion cutover seam", () => {
         address: new URL("http://example.com/api/storage/memory"),
       });
 
-      expect(DEFAULT_MEMORY_VERSION).toBe("v2");
-      expect(Object.getPrototypeOf(emulated).constructor).toBe(
-        V2Emulate.EmulatedStorageManager,
-      );
-      expect(Object.getPrototypeOf(remote).constructor).toBe(
-        V2Storage.StorageManager,
-      );
+      if (DEFAULT_MEMORY_VERSION === "v2") {
+        expect(Object.getPrototypeOf(emulated).constructor).toBe(
+          V2Emulate.EmulatedStorageManager,
+        );
+        expect(Object.getPrototypeOf(remote).constructor).toBe(
+          V2Storage.StorageManager,
+        );
+      } else {
+        expect(DEFAULT_MEMORY_VERSION).toBe("v1");
+        expect(Object.getPrototypeOf(emulated).constructor).toBe(
+          StorageManagerEmulator,
+        );
+        expect(Object.getPrototypeOf(remote).constructor).toBe(
+          RemoteStorageManager,
+        );
+      }
 
       await emulated.close();
       await remote.close();
