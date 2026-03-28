@@ -39,14 +39,13 @@ const setupStorageManager = () =>
 
 const cleanup = async (
   runtime: Runtime,
-  storageManager: ReturnType<typeof StorageManager.emulate>,
+  _storageManager: ReturnType<typeof StorageManager.emulate>,
   tx?: IExtendedStorageTransaction,
 ) => {
   if (tx) {
     await tx.commit();
   }
   await runtime.dispose();
-  await storageManager.close();
 };
 
 Deno.bench("Immutable cell - create data URI only (100x)", () => {

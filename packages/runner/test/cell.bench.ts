@@ -26,12 +26,11 @@ function setup() {
 // Cleanup helper
 async function cleanup(
   runtime: Runtime,
-  storageManager: ReturnType<typeof StorageManager.emulate>,
+  _storageManager: ReturnType<typeof StorageManager.emulate>,
   tx?: IExtendedStorageTransaction,
 ) {
   await tx?.commit();
   await runtime.dispose();
-  await storageManager.close();
 }
 
 // Benchmark: Cell creation

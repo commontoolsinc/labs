@@ -65,12 +65,11 @@ function setup() {
 
 async function cleanup(
   runtime: Runtime,
-  storageManager: ReturnType<typeof StorageManager.emulate>,
+  _storageManager: ReturnType<typeof StorageManager.emulate>,
   tx?: IExtendedStorageTransaction,
 ) {
   await tx?.commit();
   await runtime.dispose();
-  await storageManager.close();
 }
 
 Deno.bench({
@@ -88,7 +87,7 @@ Deno.bench({
   name: "Cell set shape - normalizeAndDiff only, schemaless (100x)",
   group: "shape",
   async fn() {
-    const { runtime, storageManager, tx } = setup();
+    const { runtime, tx } = setup();
     const cell = runtime.getCell<any>(
       space,
       "bench-shape-normalize",
@@ -108,7 +107,6 @@ Deno.bench({
 
     tx.abort();
     await runtime.dispose();
-    await storageManager.close();
   },
 });
 
