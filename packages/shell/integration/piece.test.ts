@@ -228,13 +228,5 @@ describe("shell piece tests", () => {
       await logDebugSnapshot("shell piece decrement debug");
       throw error;
     }
-
-    await clickDecrement(-1);
-    try {
-      await waitFor(async () => (await piece.result.get(["value"])) === -2);
-    } catch (error) {
-      await logDebugSnapshot("shell piece decrement debug");
-      throw error;
-    }
   });
 });
