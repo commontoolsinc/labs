@@ -1,4 +1,5 @@
 import type {
+  CfcTrustContext,
   JSONSchema,
   JSONValue,
   NormalizedFullLink,
@@ -113,6 +114,8 @@ export interface InitializationData {
   // invalidation. If absent, the compilation cache is disabled.
   // See docs/specs/compilation-cache.md Phase 3.
   buildHash?: string;
+  // Optional CFC trust context snapshot for the worker runtime.
+  cfcTrustContext?: CfcTrustContext;
 }
 
 export interface InitializeRequest extends BaseRequest {

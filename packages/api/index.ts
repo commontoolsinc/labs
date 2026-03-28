@@ -1095,15 +1095,26 @@ export interface EventIntegrityGuardOptions {
   readonly label?: string;
 }
 
-export type EventIntegrityAtomPattern = Readonly<Record<string, unknown>>;
+export type EventIntegrityRequirement =
+  | string
+  | JSONObject;
+
+export interface ImplementationIdentityAtomFunction {
+  (target: Module | ModuleFactory<any, any> | HandlerFactory<any, any>):
+    | JSONObject
+    | undefined;
+}
 
 export interface RequireEventIntegrityFunction {
   <T, E>(
     handlerFactory: HandlerFactory<T, E>,
-    patterns: readonly EventIntegrityAtomPattern[],
+    patterns: readonly EventIntegrityRequirement[],
     options?: EventIntegrityGuardOptions,
   ): HandlerFactory<T, E>;
 }
+
+export declare const implementationIdentityAtom:
+  ImplementationIdentityAtomFunction;
 
 // JSON types
 

@@ -267,11 +267,6 @@ export class WorkerReconciler {
             },
           },
         );
-        console.log("[worker-ui-event-debug]", {
-          eventType,
-          provenance,
-          integrity: envelope.integrity,
-        });
         stream.send(envelope);
       }).catch((error) => {
         this.onError?.(

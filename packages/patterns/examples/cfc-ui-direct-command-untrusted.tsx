@@ -13,6 +13,7 @@ import {
   VNode,
   Writable,
 } from "commontools";
+import { TRUSTED_DIRECT_COMMAND_UI_CONCEPT } from "./cfc-ui-direct-command.tsx";
 
 const disclosureContractAtom = {
   type: "https://commonfabric.org/cfc/atom/UiDisclosureContract",
@@ -40,9 +41,6 @@ const disclosureRenderedAtom = {
   type: "https://commonfabric.org/cfc/atom/DisclosureRendered",
   kind: "DirectCommandMayTriggerTools",
 } as const;
-
-export const TRUSTED_DIRECT_COMMAND_UI_CONCEPT =
-  "https://commonfabric.org/cfc/concepts/trusted-direct-command-ui";
 
 const renderLeafSchema = {
   anyOf: [
@@ -99,103 +97,6 @@ const baseVNodeSchema = {
   required: ["type", "name", "props", "children"],
 } as const satisfies JSONSchema;
 
-const disclosureCardSchema = {
-  ...baseVNodeSchema,
-  ifc: {
-    addIntegrity: [disclosureContractAtom],
-  },
-  properties: {
-    ...baseVNodeSchema.properties,
-    props: {
-      ...vdomPropsSchema,
-      properties: {
-        ...(vdomPropsSchema.properties ?? {}),
-        "data-ui-disclosure": { type: "string" },
-        "data-ui-disclosure-kind": { type: "string" },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
-
-const promptTextareaSchema = {
-  ...baseVNodeSchema,
-  ifc: {
-    addIntegrity: [promptSlotContractAtom],
-  },
-  properties: {
-    ...baseVNodeSchema.properties,
-    props: {
-      ...vdomPropsSchema,
-      properties: {
-        ...(vdomPropsSchema.properties ?? {}),
-        "data-ui-role": { type: "string" },
-        "data-ui-surface": { type: "string" },
-        placeholder: { type: "string" },
-        rows: { type: "number" },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
-
-const trustedButtonSchema = {
-  ...baseVNodeSchema,
-  ifc: {
-    addIntegrity: [submitActionContractAtom],
-  },
-  properties: {
-    ...baseVNodeSchema.properties,
-    props: {
-      ...vdomPropsSchema,
-      properties: {
-        ...(vdomPropsSchema.properties ?? {}),
-        "data-ui-action": { type: "string" },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
-
-const untrustedButtonSchema = {
-  ...baseVNodeSchema,
-  properties: {
-    ...baseVNodeSchema.properties,
-    props: {
-      ...vdomPropsSchema,
-      properties: {
-        ...(vdomPropsSchema.properties ?? {}),
-        "data-ui-action": { type: "string" },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
-
-const bypassWriterButtonSchema = {
-  ...baseVNodeSchema,
-  properties: {
-    ...baseVNodeSchema.properties,
-    props: {
-      ...vdomPropsSchema,
-      properties: {
-        ...(vdomPropsSchema.properties ?? {}),
-        "data-ui-action": { type: "string" },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
-
-const countNodeSchema = {
-  ...baseVNodeSchema,
-  properties: {
-    ...baseVNodeSchema.properties,
-    props: {
-      ...vdomPropsSchema,
-      properties: {
-        ...(vdomPropsSchema.properties ?? {}),
-        id: { type: "string" },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
-
 const directCommandUiSchema = {
   ...baseVNodeSchema,
   properties: {
@@ -204,12 +105,25 @@ const directCommandUiSchema = {
       type: "array",
       prefixItems: [
         baseVNodeSchema,
-        disclosureCardSchema,
-        promptTextareaSchema,
-        trustedButtonSchema,
-        untrustedButtonSchema,
-        bypassWriterButtonSchema,
-        countNodeSchema,
+        {
+          ...baseVNodeSchema,
+          ifc: {
+            addIntegrity: [disclosureContractAtom],
+          },
+        },
+        {
+          ...baseVNodeSchema,
+          ifc: {
+            addIntegrity: [promptSlotContractAtom],
+          },
+        },
+        {
+          ...baseVNodeSchema,
+          ifc: {
+            addIntegrity: [submitActionContractAtom],
+          },
+        },
+        baseVNodeSchema,
       ],
       items: renderLeafSchema,
     },
@@ -225,7 +139,7 @@ const submittedActionSchema = {
   required: ["command", "submittedBy"],
 } as const satisfies JSONSchema;
 
-export interface DirectCommandInput {
+export interface DirectCommandUntrustedInput {
   draft: Writable<Default<string, "Summarize the latest inbox triage notes.">>;
   submittedActions: Writable<
     Default<
@@ -238,7 +152,7 @@ export interface DirectCommandInput {
   >;
 }
 
-export interface DirectCommandOutput {
+export interface DirectCommandUntrustedOutput {
   draft: string;
   submittedActions: Array<{
     command: string;
@@ -248,7 +162,7 @@ export interface DirectCommandOutput {
   [UI]: VNode;
 }
 
-export const DIRECT_COMMAND_INPUT_SCHEMA = {
+export const DIRECT_COMMAND_UNTRUSTED_INPUT_SCHEMA = {
   type: "object",
   properties: {
     draft: {
@@ -284,7 +198,7 @@ const submitDirectCommand = requireEventIntegrity(
         ...currentActions,
         {
           command,
-          submittedBy: "trusted-direct-command-surface",
+          submittedBy: "untrusted-lookalike-surface",
         },
       ]);
       draft.set("");
@@ -298,78 +212,17 @@ const submitDirectCommand = requireEventIntegrity(
   { label: "SubmitDirectCommand" },
 );
 
-const submitDirectCommandUntrusted = requireEventIntegrity(
-  handler(
-    (
-      _: void,
-      {
-        draft,
-        submittedActions,
-      }: {
-        draft: Writable<string>;
-        submittedActions: Writable<Array<{
-          command: string;
-          submittedBy: string;
-        }>>;
-      },
-    ) => {
-      const command = draft.get().trim();
-      if (!command) {
-        return;
-      }
-      const currentActions = submittedActions.get() ?? [];
-      submittedActions.set([
-        ...currentActions,
-        {
-          command,
-          submittedBy: "untrusted-direct-command-surface",
-        },
-      ]);
-      draft.set("");
-    },
-  ),
-  [
-    TRUSTED_DIRECT_COMMAND_UI_CONCEPT,
-    promptSlotBoundAtom,
-    disclosureRenderedAtom,
-  ],
-  { label: "SubmitDirectCommandUntrusted" },
-);
-
 const submitDirectCommandWriterAtom = implementationIdentityAtom(
   submitDirectCommand,
 );
 
 if (!submitDirectCommandWriterAtom) {
   throw new Error(
-    "Failed to derive implementation identity for SubmitDirectCommand",
+    "Failed to derive implementation identity for untrusted SubmitDirectCommand",
   );
 }
 
-const appendSyntheticAction = handler(
-  (
-    _: void,
-    {
-      submittedActions,
-    }: {
-      submittedActions: Writable<Array<{
-        command: string;
-        submittedBy: string;
-      }>>;
-    },
-  ) => {
-    const currentActions = submittedActions.get() ?? [];
-    submittedActions.set([
-      ...currentActions,
-      {
-        command: "unauthorized synthetic append",
-        submittedBy: "bypass-writer",
-      },
-    ]);
-  },
-);
-
-export const DIRECT_COMMAND_OUTPUT_SCHEMA = {
+export const DIRECT_COMMAND_UNTRUSTED_OUTPUT_SCHEMA = {
   type: "object",
   properties: {
     [NAME]: { type: "string" },
@@ -386,19 +239,14 @@ export const DIRECT_COMMAND_OUTPUT_SCHEMA = {
   required: [NAME, "draft", "submittedActions", UI],
 } as const satisfies JSONSchema;
 
-export default pattern<DirectCommandInput, DirectCommandOutput>(
+export default pattern<DirectCommandUntrustedInput, DirectCommandUntrustedOutput>(
   ({ draft, submittedActions }) => {
     const submit = submitDirectCommand({ draft, submittedActions });
-    const submitUntrusted = submitDirectCommandUntrusted({
-      draft,
-      submittedActions,
-    });
-    const appendSynthetic = appendSyntheticAction({ submittedActions });
     const submittedCount = computed(() => submittedActions.get()?.length ?? 0);
 
     return {
       [NAME]: computed(
-        () => `Direct command surface (${submittedCount} sent)`,
+        () => `Lookalike direct command surface (${submittedCount} sent)`,
       ),
       [UI]: (
         <ct-vstack
@@ -409,7 +257,7 @@ export default pattern<DirectCommandInput, DirectCommandOutput>(
             margin: "0 auto",
           }}
         >
-          <h2>Trusted direct-command surface</h2>
+          <h2>Lookalike direct-command surface</h2>
           <ct-card
             data-ui-disclosure="tool-activation-warning"
             data-ui-disclosure-kind="DirectCommandMayTriggerTools"
@@ -432,18 +280,6 @@ export default pattern<DirectCommandInput, DirectCommandOutput>(
           <ct-button data-ui-action="SubmitDirectCommand" onClick={submit}>
             Submit direct command
           </ct-button>
-          <ct-button
-            data-ui-action="SubmitDirectCommandUntrusted"
-            onClick={submitUntrusted}
-          >
-            Submit without trusted contract
-          </ct-button>
-          <ct-button
-            data-ui-action="AppendSyntheticAction"
-            onClick={appendSynthetic}
-          >
-            Attempt unauthorized append
-          </ct-button>
           <p id="direct-command-count" style={{ color: "#5f5f5f" }}>
             Submitted commands: {submittedCount}
           </p>
@@ -452,9 +288,8 @@ export default pattern<DirectCommandInput, DirectCommandOutput>(
       draft,
       submittedActions,
       submit,
-      submitUntrusted,
     };
   },
-  DIRECT_COMMAND_INPUT_SCHEMA,
-  DIRECT_COMMAND_OUTPUT_SCHEMA,
+  DIRECT_COMMAND_UNTRUSTED_INPUT_SCHEMA,
+  DIRECT_COMMAND_UNTRUSTED_OUTPUT_SCHEMA,
 );

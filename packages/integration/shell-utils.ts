@@ -19,6 +19,7 @@ import {
   deserialize,
   isAppViewEqual,
 } from "@commontools/shell/shared";
+import type { CfcTrustContext } from "@commontools/runner";
 import { waitFor } from "./utils.ts";
 import { ConsoleEvent, PageErrorEvent } from "@astral/astral";
 
@@ -151,10 +152,11 @@ export class ShellIntegration {
   // If `identity` provided, logs in with the identity
   // after navigation.
   async goto(
-    { frontendUrl, view, identity }: {
+    { frontendUrl, view, identity, cfcTrustContext }: {
       frontendUrl: string;
       view: AppView;
       identity?: Identity;
+      cfcTrustContext?: CfcTrustContext;
     },
   ): Promise<void> {
     this.checkIsOk();
@@ -164,6 +166,22 @@ export class ShellIntegration {
 
     const url = `${frontendUrl}${path}`;
     const page = this.page();
+    await page.goto(url);
+    await page.evaluate((trustContext) => {
+      if (trustContext === undefined) {
+        globalThis.sessionStorage.removeItem("__COMMTOOLS_CFC_TRUST_CONTEXT");
+      } else {
+        globalThis.sessionStorage.setItem(
+          "__COMMTOOLS_CFC_TRUST_CONTEXT",
+          JSON.stringify(trustContext),
+        );
+      }
+      (globalThis as typeof globalThis & {
+        __COMMTOOLS_CFC_TRUST_CONTEXT?: CfcTrustContext;
+      }).__COMMTOOLS_CFC_TRUST_CONTEXT = trustContext ?? undefined;
+    }, {
+      args: [cfcTrustContext],
+    });
     await page.goto(url);
     await page.applyConsoleFormatter();
     await this.waitForState({ view });

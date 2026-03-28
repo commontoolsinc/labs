@@ -350,13 +350,17 @@ type ImplementationSourceOrigin = {
   dispatched event path
 - [x] Traversal/minting follows fully composed mapped child UI reached through
   parent render containers, not just directly targeted UI outputs
+- [x] Browser / piece execution now accepts `cfcTrustContext` end to end:
+  `ShellIntegration` -> session bootstrap -> shell runtime ->
+  `RuntimeClient.initialize(...)` -> worker runtime -> `PiecesController` /
+  `Runtime`
 - [~] Parent-targeted `uiEvent` minting currently recovers parent slot / placement
   integrity across composed mapped children, but inline child-local contracts are
   not yet re-derived unless they are also present on the targeted output tree
 - [x] Design direction for the remaining gap is now explicit: preserve
   per-node provenance as contributing `(doc link, path)` frames instead of
   duplicating child-local contracts onto the parent tree
-- [ ] Define and thread `UiProvenanceFrame[]` through worker reconciliation:
+- [x] Define and thread `UiProvenanceFrame[]` through worker reconciliation:
 
 ```ts
 type UiProvenanceFrame = {
@@ -369,30 +373,41 @@ type UiProvenanceFrame = {
 };
 ```
 
-- [ ] Extend `packages/html/src/worker/reconciler.ts` render paths to carry the
+- [x] Extend `packages/html/src/worker/reconciler.ts` render paths to carry the
   active provenance stack:
   - `renderNode(...)`
   - `renderChild(...)`
   - `renderCellChild(...)`
   - `renderChildContent(...)`
-- [ ] Push a new provenance frame whenever reconciliation enters a different
+- [x] Push a new provenance frame whenever reconciliation enters a different
   cell-backed output document or follows a `[UI]` chain rooted in a different
   document
-- [ ] Store provenance by registered `handlerId`, for example with
+- [x] Store provenance by registered `handlerId`, for example with
   `Map<number, readonly UiProvenanceFrame[]>`, so event dispatch can recover the
   exact contributing document paths
-- [ ] Wrap stream event handlers in the worker reconciler so they mint
+- [x] Wrap stream event handlers in the worker reconciler so they mint
   `CfcEventEnvelope` integrity from stored provenance frames instead of sending
   the raw DOM/browser event directly
-- [ ] Keep `ct test uiEvent` on the same interpretation by sharing the
+- [x] Keep `ct test uiEvent` on the same interpretation by sharing the
   provenance-to-integrity resolution logic between the HTML renderer and
   `packages/runner/src/cfc/ui-event.ts`
-- [ ] Add renderer/provenance tests that prove:
+- [~] Add renderer/provenance tests that prove:
   - parent placement + child-local action contract both mint onto the same event
     without duplicating the child contract on the parent tree
   - trusted parent slot + untrusted child does not mint the child-local contract
   - plain child VNodes returned from cell-backed documents still recover child
     provenance even when no explicit `[UI]` wrapper survives in the final tree
+- [x] Browser-backed direct-command integration now demonstrates:
+  - verifier-derived trust from an authored handler `CodeHash(...)`
+  - contextual `PromptSlotBound` and `DisclosureRendered` atoms
+  - `writeAuthorizedBy` on `submittedActions[]`
+  - positive trusted submission and negative untrusted / unauthorized flows
+- [~] Remaining browser gap:
+  - the trusted direct-command browser flow currently relies on verifier-derived
+    handler trust plus contextual prompt/disclosure atoms
+  - the raw node-local `UiActionContract` on the clicked button is still not
+    surfaced end-to-end through the piece-wrapper browser path, even though the
+    lower-level runner/html provenance tests cover that contract
 
 **Files to modify / maintain:**
 

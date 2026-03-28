@@ -3,6 +3,7 @@ import {
   type JSONSchema,
   Runtime,
   RuntimeProgram,
+  type RuntimeOptions,
   type Schema,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
@@ -116,10 +117,11 @@ export class PiecesController<T = unknown> {
     }
   }
 
-  static async initialize({ apiUrl, identity, spaceName }: {
+  static async initialize({ apiUrl, identity, spaceName, cfcTrustContext }: {
     apiUrl: URL;
     identity: Identity;
     spaceName: string;
+    cfcTrustContext?: RuntimeOptions["cfcTrustContext"];
   }): Promise<PiecesController> {
     const session = await createSession({ identity, spaceName });
     const runtime = new Runtime({
@@ -129,6 +131,7 @@ export class PiecesController<T = unknown> {
         address: new URL("/api/storage/memory", apiUrl),
         spaceIdentity: session.spaceIdentity,
       }),
+      cfcTrustContext,
     });
 
     const manager = new PieceManager(session, runtime);

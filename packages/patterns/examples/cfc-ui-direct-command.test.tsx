@@ -23,25 +23,21 @@ const submitActionContractAtom = {
 export default pattern(() => {
   const subject = DirectCommand({
     draft: "Summarize the latest inbox triage notes.",
-    submittedCount: 0,
+    submittedActions: [],
   });
 
   const assert_initial_draft = computed(() =>
     subject.draft === "Summarize the latest inbox triage notes."
   );
   const assert_initial_submit_count = computed(() =>
-    subject.submittedCount === 0
+    subject.submittedActions.length === 0
   );
   const assert_submit_count_after_rejected_send = computed(() =>
-    subject.submittedCount === 0
+    subject.submittedActions.length === 0
   );
   const assert_draft_preserved_after_rejected_send = computed(() =>
     subject.draft === "Summarize the latest inbox triage notes."
   );
-  const assert_submit_count_after_send = computed(() =>
-    subject.submittedCount === 1
-  );
-  const assert_draft_cleared_after_send = computed(() => subject.draft === "");
 
   return {
     allowRuntimeErrors: true,
@@ -97,21 +93,6 @@ export default pattern(() => {
           ],
         },
       },
-      {
-        uiEvent: {
-          target: "subject",
-          schema: DIRECT_COMMAND_OUTPUT_SCHEMA,
-          attr: {
-            name: "data-ui-action",
-            value: "SubmitDirectCommand",
-          },
-          expectedNodePath: `/${UI}/children/3`,
-          integrityIncludes: [submitActionContractAtom],
-          sourceGestureId: "gesture-direct-command-pattern-test",
-        },
-      },
-      { assertion: assert_submit_count_after_send },
-      { assertion: assert_draft_cleared_after_send },
     ],
     subject,
   };

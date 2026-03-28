@@ -363,6 +363,52 @@ The intended split is:
 If a final rendered tree later caches the combined result, that cache is a
 derived projection, not an additional authored contract.
 
+## Current End-To-End State
+
+The implementation now has an end-to-end browser-backed direct-command example
+that demonstrates the intended layering:
+
+- the trusted UI-producing handler is identified by a real authored
+  `CodeHash(...)`, with explicit code-origin metadata as the developer-facing
+  bridge back to the `.tsx` source
+- verifier policy grants that concrete `CodeHash(...)` a higher-level trusted
+  direct-command concept
+- the browser/runtime path carries `cfcTrustContext` from shell bootstrap into
+  the worker runtime and piece execution
+- the handler requires that verifier-derived concept together with contextual
+  `PromptSlotBound` and `DisclosureRendered` atoms
+- the resulting `submittedActions[]` log is additionally protected by
+  `writeAuthorizedBy`, so unauthorized handlers cannot append even if they try
+  to call the same mutation path directly
+
+This is enough to demonstrate:
+
+- trusted code may claim and use a specific UI role only when the verifier says
+  that code hash is approved
+- untrusted code with the same-looking UI contract atoms is still rejected
+- authorized mutation and trusted UI submission are separate checks that both
+  have to pass
+
+## Current Browser Gap
+
+One gap remains in the browser / piece-wrapper path.
+
+The clicked direct-command button's local `UiActionContract(...)` is authored on
+the correct UI schema path, and lower-level runner/html provenance tests can
+recover that node-local contract. However, the full browser-backed piece path
+does not yet surface that raw button-local atom end to end.
+
+So the current browser demo enforces on:
+
+- verifier-derived trusted handler concept from `CodeHash(...)`
+- contextual prompt-slot and disclosure atoms
+
+rather than directly requiring the raw clicked-node `UiActionContract(...)`.
+
+This should be treated as a remaining implementation gap in provenance recovery
+through the piece-wrapper browser path, not as a reason to duplicate the action
+contract onto both parent and child trees.
+
 ## Open Spec Questions
 
 1. How should semantic UI addresses be represented for nested / mapped child
@@ -389,3 +435,14 @@ derived projection, not an additional authored contract.
      `(bundleLocation, sourceLocation)`.
    - Trust closure should still operate on the concrete `CodeHash(...)` atom,
      with code origin used to map authored source back to that hash.
+5. Should the spec explicitly distinguish:
+   - raw node-local UI contract atoms such as `UiActionContract(...)`
+   - verifier-derived trusted UI concepts such as
+     `trusted-direct-command-ui`
+   - contextual event atoms such as `PromptSlotBound` and
+     `DisclosureRendered`
+   ?
+   - The current browser-backed implementation uses all three layers.
+   - The spec should likely describe how they compose into a stronger
+     submission-level integrity requirement without collapsing them into a
+     single atom family.

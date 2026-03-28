@@ -31,6 +31,7 @@ import {
   computed,
   derive,
   handler,
+  implementationIdentityAtom,
   lift,
   requireEventIntegrity,
 } from "./module.ts";
@@ -99,6 +100,7 @@ export const createBuilder = (): {
       requireEventIntegrity,
       derive,
       computed,
+      implementationIdentityAtom,
 
       // Built-in modules
       str,

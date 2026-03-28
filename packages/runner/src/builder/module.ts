@@ -1,9 +1,10 @@
 import type {
-  EventIntegrityAtomPattern,
+  EventIntegrityRequirement,
   EventIntegrityGuardOptions,
   Handler,
   HandlerFactory,
   JSONSchema,
+  JSONObject,
   Module,
   ModuleFactory,
   NodeRef,
@@ -29,6 +30,10 @@ import {
   formatImplementationSourceOrigin,
   type ImplementationSourceOrigin,
 } from "./source-origin.ts";
+import {
+  deriveImplementationIdentity,
+  implementationIdentityIntegrityAtom,
+} from "../cfc/implementation-identity.ts";
 
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
@@ -322,7 +327,7 @@ export function handler<E, T>(
 
 export function requireEventIntegrity<T, E>(
   handlerFactory: HandlerFactory<T, E>,
-  patterns: readonly EventIntegrityAtomPattern[],
+  patterns: readonly EventIntegrityRequirement[],
   options?: EventIntegrityGuardOptions,
 ): HandlerFactory<T, E> {
   if (
@@ -335,9 +340,9 @@ export function requireEventIntegrity<T, E>(
     );
   }
 
-  const normalizedPatterns = patterns.map((pattern) => ({
-    ...pattern,
-  }));
+  const normalizedPatterns = patterns.map((pattern) =>
+    typeof pattern === "string" ? pattern : { ...pattern }
+  );
   const internalModule = (
     handlerFactory as { __module?: Handler<T, E> & toJSON }
   ).__module;
@@ -349,6 +354,26 @@ export function requireEventIntegrity<T, E>(
     internalModule.cfcRequiredEventIntegrityLabel = options?.label;
   }
   return handlerFactory;
+}
+
+export function implementationIdentityAtom(
+  target:
+    | Module
+    | ModuleFactory<unknown, unknown>
+    | HandlerFactory<unknown, unknown>,
+): JSONObject | undefined {
+  const module = (
+    typeof target === "function" || typeof target === "object"
+  )
+    ? (target as { __module?: Module }).__module ??
+      ("implementation" in target ? target : undefined)
+    : undefined;
+  const atom = implementationIdentityIntegrityAtom(
+    deriveImplementationIdentity(module),
+  );
+  return atom && typeof atom === "object" && !Array.isArray(atom)
+    ? { ...(atom as JSONObject) }
+    : undefined;
 }
 
 export function derive<

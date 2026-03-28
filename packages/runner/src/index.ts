@@ -123,9 +123,14 @@ export {
   type VNode,
   WebhookConfigSchema,
 } from "./builder/types.ts";
-export { createNodeFactory, requireEventIntegrity } from "./builder/module.ts";
+export {
+  createNodeFactory,
+  implementationIdentityAtom,
+  requireEventIntegrity,
+} from "./builder/module.ts";
 export { opaqueRef as cell } from "./builder/opaque-ref.ts";
 export { ContextualFlowControl } from "./cfc.ts";
+export type { CfcTrustContext } from "./cfc/integrity-trust.ts";
 export {
   dispatchUiEvent,
   frameFromLink,

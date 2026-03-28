@@ -11,6 +11,8 @@
  * - { action: Stream<void> } from action(() => sideEffect)
  * - { uiEvent: UiEventSpec } to mint and dispatch an event via declared [UI]
  * - { labelAssertion: LabelAssertionSpec } to assert resolved CFC labels
+ * - { trustGrant: TrustGrantSpec } to derive trust statements from resolved
+ *   labels and install them into the runtime trust context
  * - { runtimeErrorAssertion: RuntimeErrorAssertionSpec } to assert captured
  *   runtime errors since the last action
  *
@@ -45,6 +47,7 @@ import type {
 import { resolveUiEventTarget } from "@commontools/runner";
 import type { OpaqueRef } from "@commontools/api";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
+import type { CfcTrustContext } from "@commontools/runner/shared";
 import { basename } from "@std/path";
 import { timeout } from "@commontools/utils/sleep";
 import { experimentalOptionsFromEnv } from "./utils.ts";
@@ -85,6 +88,7 @@ export type TestStep =
   | { assertion: OpaqueRef<boolean>; skip?: boolean }
   | { action: Stream<void>; skip?: boolean }
   | { labelAssertion: LabelAssertionSpec; skip?: boolean }
+  | { trustGrant: TrustGrantSpec; skip?: boolean }
   | { uiEvent: UiEventSpec; skip?: boolean }
   | { runtimeErrorAssertion: RuntimeErrorAssertionSpec; skip?: boolean };
 
@@ -136,6 +140,40 @@ export interface UiEventSpec extends ResolveUiEventOptions {
    * Exact resolved node path that must be targeted before dispatch.
    */
   expectedNodePath?: string;
+}
+
+export interface TrustGrantSpec {
+  /**
+   * Top-level key on the test pattern output that resolves to the target cell.
+   * Omit to resolve against the root test-pattern result.
+   */
+  target?: string;
+  /**
+   * Optional schema override to resolve labels from when runtime metadata does
+   * not retain the authored output schema.
+   */
+  schema?: unknown;
+  /**
+   * Relative path inside the target output. Defaults to "/".
+   */
+  path?: string;
+  /**
+   * Observation class to resolve. Defaults to "shape".
+   */
+  op?: ReadObservationOp;
+  /**
+   * Concepts to grant from the selected concrete atoms.
+   */
+  concepts: readonly string[];
+  /**
+   * Optional verifier DID for the derived trust statements.
+   */
+  verifier?: string;
+  /**
+   * Optional atom patterns that select which resolved integrity atoms become
+   * concrete trust statements. Defaults to every resolved integrity atom.
+   */
+  concreteIncludes?: readonly CfcAtom[];
 }
 
 export interface RuntimeErrorAssertionSpec {
@@ -407,6 +445,127 @@ async function runLabelAssertion(
     }
 
     return { passed: true };
+  } catch (error) {
+    return {
+      passed: false,
+      error: error instanceof Error
+        ? (error.stack ?? error.message)
+        : String(error),
+    };
+  }
+}
+
+async function runTrustGrant(
+  runtime: Runtime,
+  patternResult: Cell<Record<string, unknown>>,
+  rootResultCell: Cell<Record<string, unknown>>,
+  spec: TrustGrantSpec,
+  rootPatternSchema: unknown,
+  actingPrincipal: string,
+  currentTrustContext: CfcTrustContext | undefined,
+): Promise<{
+  passed: boolean;
+  error?: string;
+  nextTrustContext?: CfcTrustContext;
+}> {
+  try {
+    const { targetLink, targetSchema } = resolveTargetCell(
+      runtime,
+      patternResult,
+      rootResultCell,
+      spec.target,
+      spec.schema ?? rootPatternSchema,
+    );
+    const observationPath = joinRelativePath(targetLink.path, spec.path);
+    const op = spec.op ?? "shape";
+
+    const tx = runtime.edit();
+    let labelsValue: unknown;
+    try {
+      labelsValue = tx.readOrThrow(cfcLabelsAddress({
+        space: targetLink.space,
+        id: targetLink.id,
+        type: targetLink.type,
+      }));
+    } catch (error) {
+      return {
+        passed: false,
+        error: `Error loading trust-grant labels: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    }
+
+    const { error: commitError } = await tx.commit();
+    if (commitError) {
+      return {
+        passed: false,
+        error:
+          `Error committing trust-grant label read transaction: ${commitError.message}`,
+      };
+    }
+
+    const labelsByPath = normalizePersistedPathLabels(labelsValue);
+    const resolved =
+      resolveObservationLabel(labelsByPath, observationPath, op) ??
+        resolveLocalSchemaLabel(runtime, targetSchema, observationPath);
+    if (!resolved?.integrity || resolved.integrity.length === 0) {
+      return {
+        passed: false,
+        error: `No integrity atoms resolved for trust grant at ${
+          spec.target ?? "$self"
+        }:${observationPath} (${op})`,
+      };
+    }
+
+    const selectedConcrete = (spec.concreteIncludes?.length
+      ? resolved.integrity.filter((atom) =>
+        spec.concreteIncludes!.some((pattern) =>
+          matchesCfcAtomPattern(atom, pattern)
+        )
+      )
+      : [...resolved.integrity]);
+
+    if (selectedConcrete.length === 0) {
+      return {
+        passed: false,
+        error: `No concrete integrity atoms matched trust grant selector at ${
+          spec.target ?? "$self"
+        }:${observationPath} (${op}); actual=${JSON.stringify(resolved.integrity)}`,
+      };
+    }
+
+    const verifier = spec.verifier ?? "did:key:pattern-test-ui-verifier";
+    const previous = currentTrustContext ?? {};
+    const delegations = [
+      ...(previous.delegations ?? []),
+      {
+        delegator: actingPrincipal,
+        verifier,
+        scope: {
+          concepts: [...spec.concepts],
+        },
+      },
+    ];
+    const statements = [
+      ...(previous.statements ?? []),
+      ...selectedConcrete.flatMap((concrete) =>
+        spec.concepts.map((concept) => ({
+          verifier,
+          concrete,
+          concept,
+        }))
+      ),
+    ];
+
+    return {
+      passed: true,
+      nextTrustContext: {
+        ...previous,
+        delegations,
+        statements,
+      },
+    };
   } catch (error) {
     return {
       passed: false,
@@ -915,11 +1074,13 @@ export async function runTestPattern(
   // Track navigation events for assertions and verbose output
   const navigations: NavigationEvent[] = [];
   let currentActionIndex = -1;
+  let currentCfcTrustContext: CfcTrustContext | undefined;
 
   const runtime = new Runtime({
     storageManager,
     experimental: experimentalOptionsFromEnv(),
     apiUrl: new URL(import.meta.url),
+    cfcTrustContext: () => currentCfcTrustContext,
     errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
     navigateCallback: (target) => {
       const name = (target.key("$NAME") as Cell<string | undefined>).get();
@@ -1065,6 +1226,7 @@ export async function runTestPattern(
         action?: unknown;
         assertion?: unknown;
         labelAssertion?: unknown;
+        trustGrant?: unknown;
         uiEvent?: unknown;
         runtimeErrorAssertion?: unknown;
         skip?: boolean;
@@ -1074,15 +1236,17 @@ export async function runTestPattern(
       const isAction = "action" in stepValue;
       const isAssertion = "assertion" in stepValue;
       const isLabelAssertion = "labelAssertion" in stepValue;
+      const isTrustGrant = "trustGrant" in stepValue;
       const isUiEvent = "uiEvent" in stepValue;
       const isRuntimeErrorAssertion = "runtimeErrorAssertion" in stepValue;
 
       if (
-        !isAction && !isAssertion && !isLabelAssertion && !isUiEvent &&
+        !isAction && !isAssertion && !isLabelAssertion && !isTrustGrant &&
+        !isUiEvent &&
         !isRuntimeErrorAssertion
       ) {
         throw new Error(
-          `Test step at index ${i} must have either 'action', 'assertion', 'labelAssertion', 'runtimeErrorAssertion', or 'uiEvent' key. Got: ${
+          `Test step at index ${i} must have either 'action', 'assertion', 'labelAssertion', 'trustGrant', 'runtimeErrorAssertion', or 'uiEvent' key. Got: ${
             JSON.stringify(Object.keys(stepValue))
           }`,
         );
@@ -1100,6 +1264,8 @@ export async function runTestPattern(
           assertionCount++;
           const assertionName = isLabelAssertion
             ? `label_assertion_${assertionCount}`
+            : isTrustGrant
+            ? `trust_grant_${assertionCount}`
             : isRuntimeErrorAssertion
             ? `runtime_error_assertion_${assertionCount}`
             : `assertion_${assertionCount}`;
@@ -1417,6 +1583,45 @@ export async function runTestPattern(
             : "";
           console.log(`  ${status} ${assertionName}${suffix}`);
         }
+      } else if (isTrustGrant) {
+        assertionCount++;
+        const assertionName = `trust_grant_${assertionCount}`;
+
+        const trustGrantSpec = stepValue.trustGrant as TrustGrantSpec;
+        const {
+          passed,
+          error,
+          nextTrustContext,
+        } = await runTrustGrant(
+          runtime,
+          patternResult,
+          resultCell,
+          trustGrantSpec,
+          testPatternFactory.resultSchema,
+          space,
+          currentCfcTrustContext,
+        );
+        if (nextTrustContext) {
+          currentCfcTrustContext = nextTrustContext;
+        }
+
+        results.push({
+          name: assertionName,
+          passed,
+          afterAction: lastActionIndex !== null
+            ? `action_${actionCount}`
+            : null,
+          error,
+          durationMs: performance.now() - itemStart,
+        });
+
+        if (options.verbose) {
+          const status = passed ? "✓" : "✗";
+          const suffix = lastActionIndex !== null
+            ? ` (after action_${actionCount})`
+            : "";
+          console.log(`  ${status} ${assertionName}${suffix}`);
+        }
       } else {
         assertionCount++;
         const assertionName = `runtime_error_assertion_${assertionCount}`;
@@ -1469,6 +1674,8 @@ export async function runTestPattern(
             ? `action_${actionCount}`
             : isLabelAssertion
             ? `label_assertion_${assertionCount}`
+            : isTrustGrant
+            ? `trust_grant_${assertionCount}`
             : isRuntimeErrorAssertion
             ? `runtime_error_assertion_${assertionCount}`
             : `assertion_${assertionCount}`;

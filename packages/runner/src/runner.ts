@@ -64,7 +64,10 @@ import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
 import { assertRequiredEventIntegrity } from "./cfc/event-integrity-guard.ts";
-import { deriveImplementationIdentity } from "./cfc/implementation-identity.ts";
+import {
+  deriveImplementationIdentity,
+  implementationIdentityIntegrityAtom,
+} from "./cfc/implementation-identity.ts";
 import { withInternalVerifierRead } from "./cfc/read-observation-logging.ts";
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
@@ -1407,10 +1410,25 @@ export class Runner {
           }
 
           if (isValidArgument && module.cfcRequiredEventIntegrity) {
+            const handlerIdentityAtom = implementationIdentityIntegrityAtom(
+              cfcImplementationIdentity,
+            );
             assertRequiredEventIntegrity(
-              tx.currentCfcEvent,
+              handlerIdentityAtom
+                ? {
+                  ...(tx.currentCfcEvent ?? {}),
+                  integrity: [
+                    ...(tx.currentCfcEvent?.integrity ?? []),
+                    handlerIdentityAtom,
+                  ],
+                }
+                : tx.currentCfcEvent,
               module.cfcRequiredEventIntegrity,
               module.cfcRequiredEventIntegrityLabel ?? name,
+              {
+                actingPrincipal: this.runtime.userIdentityDID,
+                trustContext: this.runtime.getCfcTrustContextSnapshot(),
+              },
             );
           }
 

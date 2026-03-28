@@ -16,7 +16,7 @@ import type {
   ComputedFunction,
   DeriveFunction,
   EqualsFunction,
-  EventIntegrityAtomPattern,
+  EventIntegrityRequirement,
   FetchDataFunction,
   FetchProgramFunction,
   GenerateObjectFunction,
@@ -31,6 +31,7 @@ import type {
   JSONSchema,
   JSONSchemaObj,
   JSONValue,
+  ImplementationIdentityAtomFunction,
   LiftFunction,
   LLMDialogFunction,
   LLMFunction,
@@ -94,7 +95,7 @@ export type {
   Cell,
   CellKind,
   CellTypeConstructor,
-  EventIntegrityAtomPattern,
+  EventIntegrityRequirement,
   EventIntegrityGuardOptions,
   Handler,
   HandlerFactory,
@@ -111,6 +112,7 @@ export type {
   JSONSchema,
   JSONSchemaTypes,
   JSONValue,
+  ImplementationIdentityAtomFunction,
   KeyResultType,
   Module,
   ModuleFactory,
@@ -171,7 +173,7 @@ declare module "@commontools/api" {
     resultSchema?: JSONSchema;
     /** If true, this module is an effect (side-effectful) rather than a computation */
     isEffect?: boolean;
-    cfcRequiredEventIntegrity?: readonly EventIntegrityAtomPattern[];
+    cfcRequiredEventIntegrity?: readonly EventIntegrityRequirement[];
     cfcRequiredEventIntegrityLabel?: string;
   }
 }
@@ -254,6 +256,7 @@ export interface BuilderFunctionsAndConstants {
   requireEventIntegrity: RequireEventIntegrityFunction;
   derive: DeriveFunction;
   computed: ComputedFunction;
+  implementationIdentityAtom: ImplementationIdentityAtomFunction;
 
   // Built-in modules
   str: StrFunction;

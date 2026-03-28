@@ -23,6 +23,28 @@ const submitActionContractAtom = {
   action: "SubmitDirectCommand",
 } as const;
 
+const disclosureContractAtom = {
+  type: "https://commonfabric.org/cfc/atom/UiDisclosureContract",
+  kind: "DirectCommandMayTriggerTools",
+} as const;
+
+const promptSlotContractAtom = {
+  type: "https://commonfabric.org/cfc/atom/UiPromptSlotContract",
+  surface: "AssistantComposer",
+  role: "direct-command",
+} as const;
+
+const disclosureRenderedAtom = {
+  type: "https://commonfabric.org/cfc/atom/DisclosureRendered",
+  kind: "DirectCommandMayTriggerTools",
+} as const;
+
+const promptSlotBoundAtom = {
+  type: "https://commonfabric.org/cfc/atom/PromptSlotBound",
+  surface: "AssistantComposer",
+  role: "direct-command",
+} as const;
+
 const messageRowPlacementAtom = {
   type: "https://commonfabric.org/cfc/atom/UiPlacement",
   surface: "InboxList",
@@ -44,6 +66,50 @@ const uiSchema = {
         children: {
           type: "array",
           prefixItems: [
+            {
+              type: "object",
+              ifc: {
+                addIntegrity: [submitActionContractAtom],
+              },
+              properties: {
+                props: {
+                  type: "object",
+                  properties: {
+                    "data-ui-action": { type: "string" },
+                    onClick: true,
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    },
+  },
+  required: [UI],
+} as const satisfies JSONSchema;
+
+const directCommandContextUiSchema = {
+  type: "object",
+  properties: {
+    [UI]: {
+      type: "object",
+      properties: {
+        children: {
+          type: "array",
+          prefixItems: [
+            {
+              type: "object",
+              ifc: {
+                addIntegrity: [disclosureContractAtom],
+              },
+            },
+            {
+              type: "object",
+              ifc: {
+                addIntegrity: [promptSlotContractAtom],
+              },
+            },
             {
               type: "object",
               ifc: {
@@ -188,6 +254,60 @@ describe("CFC UI event minting", () => {
     const { error } = await tx.commit();
     expect(error).toBeUndefined();
     return runtime.getCell<unknown>(space, id, uiSchema);
+  }
+
+  async function seedDirectCommandContextUiOutput(
+    id: string,
+    clickStream: unknown,
+  ) {
+    const tx = runtime.edit();
+    const cell = runtime.getCell<unknown>(
+      space,
+      id,
+      directCommandContextUiSchema,
+      tx,
+    );
+    cell.set({
+      [UI]: {
+        type: "vnode",
+        name: "ct-vstack",
+        props: {},
+        children: [
+          {
+            type: "vnode",
+            name: "ct-card",
+            props: {
+              "data-ui-disclosure-kind": "DirectCommandMayTriggerTools",
+            },
+            children: ["Disclosure"],
+          },
+          {
+            type: "vnode",
+            name: "ct-textarea",
+            props: {
+              "data-ui-role": "direct-command",
+              "data-ui-surface": "AssistantComposer",
+            },
+            children: [],
+          },
+          {
+            type: "vnode",
+            name: "ct-button",
+            props: {
+              "data-ui-action": "SubmitDirectCommand",
+              onClick: clickStream,
+            },
+            children: ["Submit direct command"],
+          },
+        ],
+      },
+    });
+    await prepareCfcCommitIfNeeded(tx, {
+      implementationIdentity: codeHashImplementationIdentity(uiPatternHash),
+    });
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+    return runtime.getCell<unknown>(space, id, directCommandContextUiSchema);
   }
 
   async function seedNestedChildUiOutput(id: string, clickStream: unknown) {
@@ -370,6 +490,52 @@ describe("CFC UI event minting", () => {
       messageRowPlacementAtom,
       nestedChildCodeHashAtom,
       shareActionContractAtom,
+    ]));
+  });
+
+  it("derives prompt-slot and disclosure event integrity from the surrounding trusted UI surface", async () => {
+    const clickStream = await createClickStream("ui-direct-command-context-stream");
+    const targetCell = await seedDirectCommandContextUiOutput(
+      "ui-direct-command-context-target",
+      clickStream,
+    );
+
+    const resolved = await resolveUiEventTarget(runtime, targetCell, {
+      attr: {
+        name: "data-ui-action",
+        value: "SubmitDirectCommand",
+      },
+    });
+
+    expect(resolved.integrity).toEqual(expect.arrayContaining([
+      uiCodeHashAtom,
+      submitActionContractAtom,
+      promptSlotBoundAtom,
+      disclosureRenderedAtom,
+    ]));
+
+    let deliveredEvent: CfcEventEnvelope<unknown> | undefined;
+    runtime.scheduler.addEventHandler(
+      (tx) => {
+        deliveredEvent = tx.currentCfcEvent;
+      },
+      clickStream.getAsNormalizedFullLink(),
+    );
+
+    await dispatchUiEvent(runtime, targetCell, {
+      attr: {
+        name: "data-ui-action",
+        value: "SubmitDirectCommand",
+      },
+      sourceGestureId: "gesture-direct-command-context-test",
+    });
+    await runtime.scheduler.idle();
+
+    expect(deliveredEvent?.integrity).toEqual(expect.arrayContaining([
+      uiCodeHashAtom,
+      submitActionContractAtom,
+      promptSlotBoundAtom,
+      disclosureRenderedAtom,
     ]));
   });
 });

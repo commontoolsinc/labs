@@ -280,6 +280,7 @@ export class RuntimeProcessor {
       patternEnvironment: { apiUrl: apiUrlObj },
       telemetry,
       experimental: data.experimental,
+      cfcTrustContext: data.cfcTrustContext,
       cachedCompiler,
       consoleHandler: ({ metadata, method, args }) => {
         // Deep-walk args to convert uncloneable objects (Cells, Proxies,

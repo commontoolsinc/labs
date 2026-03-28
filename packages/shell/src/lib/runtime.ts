@@ -1,6 +1,7 @@
 import { createSession, DID, Identity, Session } from "@commontools/identity";
 import { NameSchema } from "@commontools/runner/schemas";
 import {
+  type CfcTrustContext,
   CellHandle,
   FavoritesManager,
   JSONValue,
@@ -50,6 +51,27 @@ function fetchBuildHash(): Promise<string | undefined> {
     })();
   }
   return buildHashPromise;
+}
+
+function browserCfcTrustContext(): CfcTrustContext | undefined {
+  const trustContextFromGlobal = (globalThis as typeof globalThis & {
+    __COMMTOOLS_CFC_TRUST_CONTEXT?: CfcTrustContext;
+  }).__COMMTOOLS_CFC_TRUST_CONTEXT;
+  if (trustContextFromGlobal) {
+    return trustContextFromGlobal;
+  }
+
+  try {
+    const raw = globalThis.sessionStorage.getItem(
+      "__COMMTOOLS_CFC_TRUST_CONTEXT",
+    );
+    if (!raw) {
+      return undefined;
+    }
+    return JSON.parse(raw) as CfcTrustContext;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -319,6 +341,7 @@ export class RuntimeInternals extends EventTarget {
       spaceName: session.spaceName,
       experimental: EXPERIMENTAL,
       buildHash,
+      cfcTrustContext: browserCfcTrustContext(),
     });
 
     // Wait for PieceManager to sync

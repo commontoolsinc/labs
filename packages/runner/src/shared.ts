@@ -32,3 +32,4 @@ export type {
   SchedulerGraphNode,
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
+export type { CfcTrustContext } from "./cfc/integrity-trust.ts";

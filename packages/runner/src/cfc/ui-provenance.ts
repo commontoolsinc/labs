@@ -1,4 +1,5 @@
 import type { Runtime } from "../runtime.ts";
+import { UI } from "../builder/types.ts";
 import type { Labels } from "../storage/interface.ts";
 import {
   type CfcEventEnvelope,
@@ -40,6 +41,13 @@ type PersistedLabelsCache = Map<
 >;
 type RootSchemaCache = Map<string, unknown>;
 
+type UiContractLikeAtom = CfcAtom & {
+  readonly type?: string;
+  readonly surface?: string;
+  readonly role?: string;
+  readonly kind?: string;
+};
+
 function normalizeFramePath(path: readonly string[]): readonly string[] {
   return path.map((segment) => String(segment));
 }
@@ -51,6 +59,62 @@ function frameKey(frame: UiProvenanceFrame): string {
     frame.link.type,
     [...frame.path],
   ]);
+}
+
+function uiRootPathForFrame(frame: UiProvenanceFrame): string | undefined {
+  const uiIndex = frame.path.findIndex((segment) => segment === UI);
+  if (uiIndex === -1) {
+    return undefined;
+  }
+  const rootPath = frame.path.slice(0, uiIndex + 1);
+  return rootPath.length === 0 ? "/" : `/${rootPath.join("/")}`;
+}
+
+function pathWithinUiRoot(path: string, uiRootPath: string): boolean {
+  return path === uiRootPath || path.startsWith(`${uiRootPath}/`);
+}
+
+function deriveUiContextEventAtoms(
+  integrity: readonly CfcAtom[] | undefined,
+): readonly CfcAtom[] {
+  if (!integrity || integrity.length === 0) {
+    return [];
+  }
+
+  const derived = new Map<string, CfcAtom>();
+  for (const atom of integrity) {
+    if (!atom || typeof atom !== "object" || Array.isArray(atom)) {
+      continue;
+    }
+    const contract = atom as UiContractLikeAtom;
+    if (
+      contract.type ===
+        "https://commonfabric.org/cfc/atom/UiPromptSlotContract" &&
+      typeof contract.surface === "string" &&
+      typeof contract.role === "string"
+    ) {
+      const derivedAtom: CfcAtom = {
+        type: "https://commonfabric.org/cfc/atom/PromptSlotBound",
+        surface: contract.surface,
+        role: contract.role,
+      };
+      derived.set(JSON.stringify(derivedAtom), derivedAtom);
+      continue;
+    }
+    if (
+      contract.type ===
+          "https://commonfabric.org/cfc/atom/UiDisclosureContract" &&
+      typeof contract.kind === "string"
+    ) {
+      const derivedAtom: CfcAtom = {
+        type: "https://commonfabric.org/cfc/atom/DisclosureRendered",
+        kind: contract.kind,
+      };
+      derived.set(JSON.stringify(derivedAtom), derivedAtom);
+    }
+  }
+
+  return [...derived.values()];
 }
 
 function normalizeSchemaLabels(schema: unknown): Labels | undefined {
@@ -112,6 +176,35 @@ function schemaAtPath(
     return undefined;
   }
   return current;
+}
+
+function walkSchemaTree(
+  schema: unknown,
+  visitor: (node: unknown) => void,
+): void {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return;
+  }
+  visitor(schema);
+
+  const properties = (schema as { properties?: Record<string, unknown> }).properties;
+  if (properties && typeof properties === "object") {
+    for (const child of Object.values(properties)) {
+      walkSchemaTree(child, visitor);
+    }
+  }
+
+  const prefixItems = (schema as { prefixItems?: unknown[] }).prefixItems;
+  if (Array.isArray(prefixItems)) {
+    for (const child of prefixItems) {
+      walkSchemaTree(child, visitor);
+    }
+  }
+
+  const items = (schema as { items?: unknown }).items;
+  if (items !== undefined) {
+    walkSchemaTree(items, visitor);
+  }
 }
 
 async function loadPersistedLabels(
@@ -229,12 +322,74 @@ export async function resolveUiProvenanceIntegrity(
   return joined ?? [];
 }
 
+async function resolveUiContextEventIntegrity(
+  runtime: Runtime,
+  frames: readonly UiProvenanceFrame[],
+): Promise<readonly CfcAtom[]> {
+  const persistedCache: PersistedLabelsCache = new Map();
+  const rootSchemaCache: RootSchemaCache = new Map();
+  const seenRoots = new Set<string>();
+  const derived = new Map<string, CfcAtom>();
+
+  for (const frame of frames) {
+    const uiRootPath = uiRootPathForFrame(frame);
+    if (!uiRootPath) {
+      continue;
+    }
+    const rootKey = `${cfcEntityKey(frame.link)}:${uiRootPath}`;
+    if (seenRoots.has(rootKey)) {
+      continue;
+    }
+    seenRoots.add(rootKey);
+
+    const persisted = await loadPersistedLabels(runtime, frame.link, persistedCache);
+    if (persisted) {
+      for (const path of Object.keys(persisted)) {
+        if (!pathWithinUiRoot(path, uiRootPath)) {
+          continue;
+        }
+        const integrity = resolveObservationLabel(persisted, path, "shape")?.integrity;
+        for (const atom of deriveUiContextEventAtoms(integrity)) {
+          derived.set(JSON.stringify(atom), atom);
+        }
+      }
+    }
+
+    const runtimeRootSchema = loadRootSchemaFromRuntime(
+      runtime,
+      frame.link,
+      rootSchemaCache,
+    );
+    const schemaSource = runtimeRootSchema ?? frame.link.schema;
+    if (!schemaSource) {
+      continue;
+    }
+    const uiRootSegments = uiRootPath === "/"
+      ? []
+      : uiRootPath.slice(1).split("/").filter(Boolean);
+    const uiSchemaRoot = schemaAtPath(schemaSource, uiRootSegments);
+    walkSchemaTree(uiSchemaRoot, (node) => {
+      const integrity = normalizeSchemaLabels(node)?.integrity;
+      for (const atom of deriveUiContextEventAtoms(integrity)) {
+        derived.set(JSON.stringify(atom), atom);
+      }
+    });
+  }
+
+  return [...derived.values()];
+}
+
 export async function mintUiEventEnvelopeFromProvenance<T>(
   runtime: Runtime,
   frames: readonly UiProvenanceFrame[],
   options: MintUiEventEnvelopeOptions<T>,
 ): Promise<CfcEventEnvelope<T>> {
-  const integrity = await resolveUiProvenanceIntegrity(runtime, frames);
+  const provenanceIntegrity = await resolveUiProvenanceIntegrity(runtime, frames);
+  const contextualIntegrity = await resolveUiContextEventIntegrity(runtime, frames);
+  const integrity = joinIntegrityLabels(
+    provenanceIntegrity,
+    contextualIntegrity,
+  ) ?? [];
   return createCfcEventEnvelope({
     id: options.id ?? crypto.randomUUID(),
     payload: options.payload,

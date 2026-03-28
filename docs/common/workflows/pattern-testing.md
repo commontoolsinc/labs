@@ -266,6 +266,32 @@ trusted, use the explicit code origin associated with the handler's
 implementation identity. Enforcement should still key on `CodeHash(...)`, with
 code origin acting as the bridge back to the authored `.tsx` source.
 
+For full end-to-end UI trust checks, prefer a browser-backed integration test in
+`packages/patterns/integration` over `ct test` alone. `ct test` is the right
+tool for:
+
+- authored UI label assertions
+- synthetic `uiEvent` minting from declared VDOM
+- negative tests that inspect runtime error logs
+
+Browser-backed integration is the right place to verify the actual shell +
+renderer + worker + piece path, including injected `cfcTrustContext`.
+
+The current direct-command examples demonstrate the split:
+
+- `ct test` proves authored labels and synthetic UI-event minting
+- browser integration proves verifier-derived trust from the actual handler
+  `CodeHash(...)`, contextual prompt/disclosure atoms, and `writeAuthorizedBy`
+  on the collected action log
+
+Known limitation:
+
+- the browser-backed piece path does not yet surface the raw clicked-node
+  `UiActionContract(...)` end to end
+- the direct-command browser demo therefore enforces on trusted handler concept
+  + contextual atoms, while lower-level runner/html tests still cover the raw
+  node-local action contract
+
 ## Writing Assertions
 
 Use `computed()` to create reactive boolean assertions:

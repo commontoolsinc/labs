@@ -187,8 +187,6 @@ function normalizeImplementationDescriptor(
     return {
       kind: "function",
       source: implementation.toString(),
-      name: implementation.name ?? "",
-      src: (implementation as { src?: unknown }).src ?? null,
     };
   }
   if (typeof implementation === "string") {

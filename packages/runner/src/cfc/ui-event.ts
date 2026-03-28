@@ -5,10 +5,7 @@ import type { Runtime } from "../runtime.ts";
 import { UI, type VNode } from "../builder/types.ts";
 import { debugVDOMSchema } from "../schemas.ts";
 import { type CfcAtom } from "./label-algebra.ts";
-import {
-  type CfcEventEnvelope,
-  createCfcEventEnvelope,
-} from "./event-envelope.ts";
+import { type CfcEventEnvelope } from "./event-envelope.ts";
 export { isCfcEventEnvelope } from "./event-envelope.ts";
 export type {
   UiProvenanceFrame,
@@ -21,7 +18,7 @@ export {
 } from "./ui-provenance.ts";
 import {
   frameFromLink,
-  resolveUiProvenanceIntegrity,
+  mintUiEventEnvelopeFromProvenance,
   type UiProvenanceFrame,
 } from "./ui-provenance.ts";
 
@@ -503,24 +500,17 @@ export async function resolveUiEventTarget(
   const eventStream = match.nodeCell.key("props").key(eventProp)
     .resolveAsCell();
 
-  const integrity = await resolveUiProvenanceIntegrity(
-    runtime,
-    provenanceFramesFromTrace(match.trace, rootCell, options.schema),
+  const provenance = provenanceFramesFromTrace(
+    match.trace,
+    rootCell,
+    options.schema,
   );
-
-  return {
-    eventStream,
-    eventProp,
-    nodePath: match.path,
-    integrity,
-    trace: match.trace.map((frame) => ({
-      id: frame.rootCell.getAsNormalizedFullLink().id,
-      path: frame.path,
-    })),
-    envelope: createCfcEventEnvelope({
+  const envelope = await mintUiEventEnvelopeFromProvenance(
+    runtime,
+    provenance,
+    {
       id: crypto.randomUUID(),
       payload: buildPayload(options, eventName),
-      integrity,
       sourceGestureId: options.sourceGestureId,
       evidence: {
         uiEvent: eventName,
@@ -528,7 +518,19 @@ export async function resolveUiEventTarget(
         ...selectorDescription(options),
         ...(options.evidence ?? {}),
       },
-    }),
+    },
+  );
+
+  return {
+    eventStream,
+    eventProp,
+    nodePath: match.path,
+    integrity: envelope.integrity as readonly CfcAtom[],
+    trace: match.trace.map((frame) => ({
+      id: frame.rootCell.getAsNormalizedFullLink().id,
+      path: frame.path,
+    })),
+    envelope,
   };
 }
 
