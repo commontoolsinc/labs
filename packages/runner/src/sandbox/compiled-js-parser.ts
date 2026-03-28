@@ -377,11 +377,12 @@ function parseWrappedFunction(source: string): ParsedFunction {
   }
 
   const candidates: SourceRange[] = [];
-  const seen = new Set<string>();
   const pushCandidate = (range: SourceRange) => {
-    const key = `${range.start}:${range.end}`;
-    if (seen.has(key)) return;
-    seen.add(key);
+    for (const candidate of candidates) {
+      if (candidate.start === range.start && candidate.end === range.end) {
+        return;
+      }
+    }
     candidates.push(range);
   };
 
