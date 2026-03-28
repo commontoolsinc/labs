@@ -40,17 +40,6 @@ export class CompiledJsParseError extends Error {
   }
 }
 
-const BLOCK_TERMINATED_KEYWORDS = new Set([
-  "class",
-  "do",
-  "for",
-  "function",
-  "if",
-  "switch",
-  "try",
-  "while",
-]);
-
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
 
 interface ScanState {
@@ -465,10 +454,8 @@ function splitTopLevelStatements(
 
   while (cursor < end) {
     const statementStart = cursor;
-    const firstWord = tryReadIdentifier(source, cursor, end)?.text;
-    const blockTerminated = firstWord
-      ? BLOCK_TERMINATED_KEYWORDS.has(firstWord)
-      : false;
+    const blockKeyword = readLeadingBlockTerminatedKeyword(source, cursor, end);
+    const blockTerminated = blockKeyword !== undefined;
     const state: ScanState = {
       parenDepth: 0,
       braceDepth: 0,
@@ -502,8 +489,8 @@ function splitTopLevelStatements(
         state.parenDepth === 0 &&
         state.braceDepth === 0 &&
         state.bracketDepth === 0 &&
-        firstWord !== undefined &&
-        shouldTerminateAfterBlock(source, cursor, end, firstWord)
+        blockKeyword !== undefined &&
+        shouldTerminateAfterBlock(source, cursor, end, blockKeyword)
       ) {
         statements.push({
           start: statementStart,
@@ -535,6 +522,62 @@ function splitTopLevelStatements(
   }
 
   return statements;
+}
+
+function readLeadingBlockTerminatedKeyword(
+  source: string,
+  start: number,
+  end: number,
+): string | undefined {
+  switch (source.charCodeAt(start)) {
+    case 99: // c
+      return startsWithStatementWord(source, start, end, "class")
+        ? "class"
+        : undefined;
+    case 100: // d
+      return startsWithStatementWord(source, start, end, "do")
+        ? "do"
+        : undefined;
+    case 102: // f
+      if (startsWithStatementWord(source, start, end, "for")) {
+        return "for";
+      }
+      return startsWithStatementWord(source, start, end, "function")
+        ? "function"
+        : undefined;
+    case 105: // i
+      return startsWithStatementWord(source, start, end, "if")
+        ? "if"
+        : undefined;
+    case 115: // s
+      return startsWithStatementWord(source, start, end, "switch")
+        ? "switch"
+        : undefined;
+    case 116: // t
+      return startsWithStatementWord(source, start, end, "try")
+        ? "try"
+        : undefined;
+    case 119: // w
+      return startsWithStatementWord(source, start, end, "while")
+        ? "while"
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function startsWithStatementWord(
+  source: string,
+  start: number,
+  end: number,
+  word: string,
+): boolean {
+  if (!source.startsWith(word, start)) {
+    return false;
+  }
+
+  const next = source.charCodeAt(start + word.length);
+  return start + word.length >= end || !isIdentifierPartCode(next);
 }
 
 function shouldTerminateAfterBlock(
