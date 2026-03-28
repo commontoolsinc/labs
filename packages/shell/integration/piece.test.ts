@@ -188,16 +188,13 @@ describe("shell piece tests", () => {
       });
     };
 
-    const clickDecrement = async (
-      fromValue: number,
-      toValue: number,
-    ) => {
+    const clickDecrement = async (fromValue: number) => {
+      await waitFor(async () =>
+        (await piece.result.get(["value"])) === fromValue
+      );
+
       await waitFor(async () => {
-        return await page.evaluate(async (
-          expectedPieceId,
-          expectedFromValue,
-          expectedToValue,
-        ) => {
+        return await page.evaluate((expectedPieceId) => {
           const findElementById = (
             root: Document | ShadowRoot,
             id: string,
@@ -238,14 +235,6 @@ describe("shell piece tests", () => {
           if (!activePattern || activePattern.id() !== expectedPieceId) {
             return false;
           }
-          const value = activePattern.cell().key("value");
-          const currentValue = await value.sync();
-          if (currentValue === expectedToValue) {
-            return true;
-          }
-          if (currentValue !== expectedFromValue) {
-            return false;
-          }
           const decrementButton = findElementById(
             document,
             "counter-decrement",
@@ -255,7 +244,7 @@ describe("shell piece tests", () => {
           }
           decrementButton.click();
           return true;
-        }, { args: [pieceId, fromValue, toValue] });
+        }, { args: [pieceId] });
       });
     };
 
@@ -267,7 +256,7 @@ describe("shell piece tests", () => {
     }
     await waitFor(async () => (await piece.result.get(["value"])) === 0);
 
-    await clickDecrement(0, -1);
+    await clickDecrement(0);
     try {
       await waitFor(async () => (await piece.result.get(["value"])) === -1);
     } catch (error) {
@@ -275,7 +264,7 @@ describe("shell piece tests", () => {
       throw error;
     }
 
-    await clickDecrement(-1, -2);
+    await clickDecrement(-1);
     try {
       await waitFor(async () => (await piece.result.get(["value"])) === -2);
     } catch (error) {
