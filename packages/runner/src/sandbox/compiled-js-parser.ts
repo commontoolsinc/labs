@@ -147,8 +147,8 @@ export function parseFunctionText(
     const closeParen = findMatchingDelimiter(source, openParen, "(", ")");
     const bodyStart = skipTrivia(source, closeParen + 1, inner.end);
     const openBrace = expectChar(source, bodyStart, inner.end, "{");
-    const closeBrace = findMatchingDelimiter(source, openBrace, "{", "}");
-    const afterBody = skipTrivia(source, closeBrace + 1, inner.end);
+    const parsedBody = parseBraceDelimitedBlock(source, openBrace, inner.end);
+    const afterBody = skipTrivia(source, parsedBody.closeBrace + 1, inner.end);
     if (afterBody !== inner.end) {
       throw new CompiledJsParseError(
         afterBody,
@@ -162,7 +162,7 @@ export function parseFunctionText(
         source.slice(openParen + 1, closeParen),
         openParen + 1,
       ),
-      body: parseBlock(source, openBrace + 1, closeBrace),
+      body: parsedBody.block,
     };
   }
 
@@ -180,8 +180,8 @@ export function parseFunctionText(
   );
   const bodyStart = skipTrivia(source, arrowIndex + 2, inner.end);
   const openBrace = expectChar(source, bodyStart, inner.end, "{");
-  const closeBrace = findMatchingDelimiter(source, openBrace, "{", "}");
-  const afterBody = skipTrivia(source, closeBrace + 1, inner.end);
+  const parsedBody = parseBraceDelimitedBlock(source, openBrace, inner.end);
+  const afterBody = skipTrivia(source, parsedBody.closeBrace + 1, inner.end);
   if (afterBody !== inner.end) {
     throw new CompiledJsParseError(
       afterBody,
@@ -192,7 +192,7 @@ export function parseFunctionText(
     start: inner.start,
     end: inner.end,
     params,
-    body: parseBlock(source, openBrace + 1, closeBrace),
+    body: parsedBody.block,
   };
 }
 
@@ -370,15 +370,15 @@ function parseDefineFactoryFunctionAt(
   const closeParen = findMatchingDelimiter(source, openParen, "(", ")");
   const bodyStart = skipTrivia(source, closeParen + 1, end);
   const openBrace = expectChar(source, bodyStart, end, "{");
-  const closeBrace = findMatchingDelimiter(source, openBrace, "{", "}");
+  const parsedBody = parseBraceDelimitedBlock(source, openBrace, end);
   return {
     start: functionStart,
-    end: closeBrace + 1,
+    end: parsedBody.closeBrace + 1,
     params: parseParameterNames(
       source.slice(openParen + 1, closeParen),
       openParen + 1,
     ),
-    body: parseBlock(source, openBrace + 1, closeBrace),
+    body: parsedBody.block,
   };
 }
 
@@ -629,6 +629,108 @@ function splitTopLevelStatements(
   }
 
   return statements;
+}
+
+function parseBraceDelimitedBlock(
+  source: string,
+  openBrace: number,
+  end: number,
+): { closeBrace: number; block: ParsedBlock } {
+  const statements: StatementChunk[] = [];
+  const state: ScanState = {
+    parenDepth: 0,
+    braceDepth: 1,
+    bracketDepth: 0,
+    regexAllowed: true,
+  };
+  let cursor = skipTrivia(source, openBrace + 1, end);
+  let statementStart = cursor;
+  let blockKeyword = cursor < end
+    ? readLeadingBlockTerminatedKeyword(source, cursor, end)
+    : undefined;
+  let blockTerminated = blockKeyword !== undefined;
+
+  while (cursor < end) {
+    const beforeBraceDepth = state.braceDepth;
+    const before = cursor;
+    const charCode = source.charCodeAt(cursor);
+    cursor = advanceScanner(source, cursor, end, state);
+
+    if (
+      charCode === 125 &&
+      beforeBraceDepth === 1 &&
+      state.parenDepth === 0 &&
+      state.bracketDepth === 0 &&
+      state.braceDepth === 0
+    ) {
+      const tail = trimRange(source, statementStart, before);
+      if (tail.start < tail.end) {
+        statements.push({
+          start: statementStart,
+          end: tail.end,
+        });
+      }
+      return {
+        closeBrace: before,
+        block: {
+          start: openBrace + 1,
+          end: before,
+          statements,
+        },
+      };
+    }
+
+    if (
+      charCode === 59 &&
+      state.parenDepth === 0 &&
+      state.braceDepth === 1 &&
+      state.bracketDepth === 0
+    ) {
+      statements.push({
+        start: statementStart,
+        end: cursor,
+      });
+      cursor = skipTrivia(source, cursor, end);
+      statementStart = cursor;
+      blockKeyword = cursor < end
+        ? readLeadingBlockTerminatedKeyword(source, cursor, end)
+        : undefined;
+      blockTerminated = blockKeyword !== undefined;
+      continue;
+    }
+
+    if (
+      blockTerminated &&
+      charCode === 125 &&
+      beforeBraceDepth === 2 &&
+      state.parenDepth === 0 &&
+      state.braceDepth === 1 &&
+      state.bracketDepth === 0 &&
+      blockKeyword !== undefined &&
+      shouldTerminateAfterBlock(source, cursor, end, blockKeyword)
+    ) {
+      statements.push({
+        start: statementStart,
+        end: cursor,
+      });
+      cursor = skipTrivia(source, cursor, end);
+      statementStart = cursor;
+      blockKeyword = cursor < end
+        ? readLeadingBlockTerminatedKeyword(source, cursor, end)
+        : undefined;
+      blockTerminated = blockKeyword !== undefined;
+      continue;
+    }
+
+    if (cursor === before) {
+      throw new CompiledJsParseError(
+        cursor,
+        "Parser did not make progress",
+      );
+    }
+  }
+
+  throw new CompiledJsParseError(openBrace, "Unterminated '{}' pair");
 }
 
 function readLeadingBlockTerminatedKeyword(
