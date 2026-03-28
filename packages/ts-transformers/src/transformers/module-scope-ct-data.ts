@@ -13,7 +13,6 @@ const TRUSTED_BUILDER_NAMES = new Set([
   "handler",
   "lift",
   "pattern",
-  "patternTool",
 ]);
 const TRUSTED_DATA_HELPER_NAMES = new Set([
   "schema",
@@ -21,7 +20,7 @@ const TRUSTED_DATA_HELPER_NAMES = new Set([
   "nonPrivateRandom",
   "safeDateNow",
 ]);
-const CT_DATA_CONSTRUCTOR_NAMES = new Set(["Map", "Set", "Proxy"]);
+const CT_DATA_CONSTRUCTOR_NAMES = new Set(["Map", "Set"]);
 
 export class ModuleScopeCtDataTransformer extends Transformer {
   override filter(_context: TransformationContext): boolean {

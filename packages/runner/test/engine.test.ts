@@ -826,7 +826,7 @@ describe("Engine in SES mode", () => {
     expect(main?.default).toBeDefined();
   });
 
-  it("rejects CTS-wrapped proxy-backed data snapshots when Proxy is unavailable", async () => {
+  it("rejects proxy-backed top-level snapshots while Proxy stays disabled", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -846,11 +846,8 @@ describe("Engine in SES mode", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__ct_data");
-
-    await expect(engine.evaluate(id, jsScript, program.files)).rejects.toThrow(
-      "Proxy is not a constructor",
+    await expect(engine.compile(program)).rejects.toThrow(
+      /Mutable top-level data must be wrapped in __ct_data|Only verified plain data|Only trusted builder calls/,
     );
   });
 
@@ -1097,6 +1094,25 @@ describe("Engine in SES mode", () => {
           contents: [
             "const state = (() => ({ count: 0 }))();",
             "export default 42;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    await expect(engine.compile(program)).rejects.toThrow(
+      "Only trusted builder calls",
+    );
+  });
+
+  it("rejects top-level patternTool() bindings in SES mode", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { patternTool } from "commontools";',
+            "export default patternTool(() => ({ ok: true }));",
           ].join("\n"),
         },
       ],

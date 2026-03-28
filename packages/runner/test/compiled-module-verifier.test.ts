@@ -124,19 +124,6 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     );
   });
 
-  it("defers dynamic import() inside compiled callbacks to SES", () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
-    "use strict";
-    exports.default = (0, commontools_1.lift)(async () => await import("./helper"));
-  });
-});
-`;
-
-    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
-  });
-
   it("rejects compiled dependencies outside the shared import policy", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
@@ -661,6 +648,22 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     Object.defineProperty(exports, "__esModule", { value: true });
     const state = (() => ({ count: 0 }))();
     exports.default = 42;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Only trusted builder calls, schema(), and canonical function hardening are allowed at module scope in SES mode",
+    );
+  });
+
+  it("rejects top-level patternTool() calls in compiled factories", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.default = (0, commontools_1.patternTool)(() => ({ ok: true }));
   });
 });
 `;

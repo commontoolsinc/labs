@@ -338,10 +338,12 @@ and confirm the call shape. The runtime helper then evaluates the initializer,
 validates the value that survives module load, and freezes the surviving inert
 snapshot.
 
-Proxy-backed values and accessor-backed values are also allowed as transient
-snapshot sources. Their traps/getters may run during one-time snapshot
-materialization, but the surviving exported value must be a copied inert graph
-with no live proxy or accessor behavior remaining.
+Accessor-backed values are allowed as transient snapshot sources. Their getters
+may run during one-time snapshot materialization, but the surviving exported
+value must be a copied inert graph with no live accessor behavior remaining.
+Proxy-backed snapshotting is deferred for now: authored SES compartments
+explicitly disable `Proxy`, so proxy-backed values are not accepted in v1 even
+if they could theoretically be materialized into inert data later.
 
 Direct ambient `Date.now()` and `Math.random()` are not relied upon as the
 stable SES contract. Pattern authors should call `safeDateNow()` and
@@ -834,8 +836,11 @@ In v1, the trusted runtime module identifiers are:
 
 These runtime modules may export:
 
-- builder entrypoints: `pattern`, `patternTool`, `lift`, `handler`,
+- module-scope trusted builder entrypoints: `pattern`, `lift`, `handler`,
   `action`, `derive`, `computed`
+- callback-scope helper entrypoints such as `patternTool(...)`, which remain
+  valid inside verified pattern callbacks but are not part of the module-scope
+  trusted-builder allowlist
 - cell constructors and helpers: `Cell`, `Writable`, `OpaqueCell`, `Stream`,
   `ComparableCell`, `ReadonlyCell`, `WriteonlyCell`, `cell`, `equals`
 - graph-construction built-ins: `str`, `ifElse`, `when`, `unless`, `llm`,
@@ -847,8 +852,11 @@ The important distinction is that these are graph-building or deferred runtime
 constructors. They may be used during module load to build the frozen reactive
 graph, but they do not directly perform host effects merely by being present as
 imports. Host-visible effects happen later, under the runtime's node execution
-model, not during authored module evaluation. These imports are not valid from
-within `__ct_data(...)` initializers.
+model, not during authored module evaluation. `patternTool(...)` is the main
+exception to the "usable during module load" shorthand here: it may be exported
+by trusted runtime modules, but it is only allowed inside verified pattern
+callbacks after the earlier pattern transforms. These imports are not valid
+from within `__ct_data(...)` initializers.
 
 ### 5.4 Smaller-Compartment String Rehydration
 
@@ -860,15 +868,15 @@ exist only as function strings when first invoked.
 That path must use SES, but not the full pattern-load authority surface. It
 must execute inside a smaller Compartment with:
 
-- only the minimal globals required to call the function
-- only direct function source: a single function declaration, function
-  expression, or arrow function expression. IIFEs and arbitrary expressions are
-  rejected
+- the same compatibility globals as authored module SES compartments:
+  `fetch`, `Headers`, `Request`, `Response`, `structuredClone`,
+  `TextDecoder`, `TextEncoder`, `URL`, `URLSearchParams`, `atob`, `btoa`,
+  and an explicit `Proxy = undefined`
+- function-producing source only: the normalized source may be a direct
+  function declaration/expression or a function-producing expression such as an
+  IIFE, but evaluating it must yield a function before invocation proceeds
 - no AMD loader state
 - no runtime-module dependency injection
-- the same temporary compatibility web globals (`fetch`, `Headers`, `Request`,
-  `Response`, `URL`, `URLSearchParams`) currently exposed in authored SES
-  compartments
 - a direct `console` global only; internal runtime hook globals such as
   `RUNTIME_ENGINE_CONSOLE_HOOK` are not part of the authored surface
 - no shared mutable state other than explicit trusted runtime objects passed in
@@ -1038,8 +1046,10 @@ mutators remain callable. The freezer MAY preserve sparse arrays, symbol-keyed
 properties, cyclic graphs, non-finite numbers, reserved property names, and
 extra own data properties; those are semantic/storage concerns, not sandboxing
 concerns, so long as the resulting graph is inert. Accessor properties may be
-materialized into data properties, and proxy-backed values may be accepted if
-their one-time snapshot satisfies the same inert-data rules.
+materialized into data properties. Proxy-backed values remain deferred in v1
+because authored SES compartments keep `Proxy` unavailable; if proxy-backed
+snapshotting is reintroduced later, the one-time snapshot would need to satisfy
+the same inert-data rules.
 
 The verifier may allow a top-level expression to compute data via an IIFE, but
 only if the value that escapes module load passes `assertPlainData()` and is
@@ -1054,11 +1064,13 @@ the point they are first called.
 
 That secondary path is allowed only under all of the following constraints:
 
-- it evaluates only a single direct function declaration/expression, not
-  arbitrary module/program strings or IIFE-produced callables
+- it evaluates only function-producing source, not arbitrary module/program
+  strings; direct functions and IIFE-produced callables are allowed so long as
+  the evaluation result is a function
 - it runs inside a smaller SES Compartment than the main pattern-load path
-- that smaller Compartment receives a narrower authority surface than the main
-  verified module Compartment
+- that smaller Compartment intentionally reuses the same compatibility-global
+  surface as the main authored module Compartment while still omitting AMD
+  loader state and runtime-module injection
 - it must not expose AMD loader hooks, runtime-module injection, or host
   capabilities beyond the minimal callback invocation surface
 - it exposes `console` only as an approved global and does not expose internal
@@ -1869,7 +1881,8 @@ private instantiateJavaScriptNode(
 
   if (typeof module.implementation === "string") {
     // String-backed implementations may be rehydrated lazily, but only inside
-    // the narrow SES callback compartment.
+    // the dedicated SES callback compartment with the approved compatibility
+    // globals and no runtime-module injection.
     fn = evaluateInCallbackCompartment(module.implementation);
   } else {
     fn = assertVerifiedFunctionObject(module.implementation);

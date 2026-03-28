@@ -92,9 +92,9 @@ export { model, lookup, days, matcher, scopes, years, tags, proxied, passthrough
       main,
       'const tags = __ctHelpers.__ct_data(new Set(["a", "b"]));',
     );
-    assertStringIncludes(
-      main,
-      'const proxied = __ctHelpers.__ct_data(new Proxy({ open: "Open" }, {}));',
+    assert(
+      !main.includes('__ctHelpers.__ct_data(new Proxy({ open: "Open" }, {}));'),
+      "Proxy snapshots stay unsupported until Proxy is re-enabled in SES compartments",
     );
     assert(
       !main.includes("__ctHelpers.__ct_data(lift("),

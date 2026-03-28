@@ -5,7 +5,11 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { evaluateFunctionSourceInSES } from "../src/sandbox/mod.ts";
+import {
+  createCallbackCompartmentGlobals,
+  createModuleCompartmentGlobals,
+  evaluateFunctionSourceInSES,
+} from "../src/sandbox/mod.ts";
 import { getAMDLoader } from "../../js-compiler/typescript/bundler/amd-loader.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -83,6 +87,12 @@ describe("SES security regressions", () => {
       hasProxy: false,
       hasProxyKey: true,
     });
+  });
+
+  it("keeps module and callback compartments on the same compatibility-global surface", () => {
+    expect(
+      Object.keys(createCallbackCompartmentGlobals()).sort(),
+    ).toEqual(Object.keys(createModuleCompartmentGlobals()).sort());
   });
 
   it("blocks dynamic import attempts during compile", async () => {
