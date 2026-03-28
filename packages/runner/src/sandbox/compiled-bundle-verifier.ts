@@ -564,6 +564,111 @@ function classifyExpressionText(
   try {
     const trimmed = trimRange(source, start, end);
     const inner = stripWholeParentheses(source, trimmed.start, trimmed.end);
+    const firstCode = source.charCodeAt(inner.start);
+    const lastCode = source.charCodeAt(inner.end - 1);
+
+    if (
+      lastCode === 125 &&
+      (
+        firstCode === 40 ||
+        firstCode === 97 ||
+        firstCode === 102
+      )
+    ) {
+      const directFunction = tryParseDirectFunction(
+        source,
+        inner.start,
+        inner.end,
+      );
+      if (directFunction) {
+        return {
+          kind: "function",
+          functionRange: {
+            start: directFunction.start,
+            end: directFunction.end,
+          },
+        };
+      }
+    }
+
+    if (
+      lastCode === 41 &&
+      isIdentifierStartCode(firstCode) &&
+      !startsWithStatementWord(source, inner.start, inner.end, "new")
+    ) {
+      const call = tryParseCallExpression(source, inner.start, inner.end);
+      if (call) {
+        const normalizedCallee = stripJsTrivia(call.callee);
+        const trustedCall = resolveTrustedCallName(normalizedCallee, env);
+        if (trustedCall) {
+          if (TRUSTED_BUILDERS.has(trustedCall)) {
+            verifyTrustedBuilderCall(
+              source,
+              filename,
+              trustedCall,
+              call.args,
+              env,
+            );
+            return { kind: "builder" };
+          }
+          verifyTrustedDataCall(
+            source,
+            filename,
+            call.start,
+            trustedCall,
+            call.args.length,
+          );
+          return {
+            kind: "data",
+          };
+        }
+
+        const hardeningBinding = env.get(normalizedCallee);
+        if (hardeningBinding?.hardeningHelper) {
+          if (call.args.length !== 1) {
+            throw verificationErrorAt(
+              source,
+              filename,
+              call.start,
+              "Function hardening helpers accept exactly one argument",
+            );
+          }
+          const argBinding = classifyExpressionText(
+            source,
+            filename,
+            call.args[0].start,
+            call.args[0].end,
+            env,
+          );
+          if (argBinding.kind !== "function") {
+            throw verificationErrorAt(
+              source,
+              filename,
+              call.args[0].start,
+              "Function hardening must target direct function values",
+            );
+          }
+          return cloneBindingInfo(argBinding);
+        }
+
+        if (isLocalCallableExpression(normalizedCallee, env)) {
+          throw verificationErrorAt(
+            source,
+            filename,
+            call.start,
+            TOP_LEVEL_CALL_RESULT_ERROR,
+          );
+        }
+
+        throw verificationErrorAt(
+          source,
+          filename,
+          call.start,
+          "Only trusted builder calls, schema(), and canonical function hardening are allowed at module scope in SES mode",
+        );
+      }
+    }
+
     const normalized = stripJsTrivia(source, inner.start, inner.end);
 
     if (isPrimitiveLikeExpression(normalized) || normalized === "void0") {
@@ -1492,6 +1597,12 @@ function parseNormalizedMemberReference(
 
 function isSimpleIdentifierText(source: string): boolean {
   return readSimpleIdentifierEnd(source, 0) === source.length;
+}
+
+function isIdentifierStartCode(charCode: number): boolean {
+  return charCode === 36 || charCode === 95 ||
+    (charCode >= 65 && charCode <= 90) ||
+    (charCode >= 97 && charCode <= 122);
 }
 
 function readSimpleIdentifierEnd(
