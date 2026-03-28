@@ -6,6 +6,7 @@ import { Summary, TestFileResults } from "./interface.ts";
 export const tsToJs = (path: string): string => path.replace(/\.ts$/, ".js");
 
 const BUNDLE_RETRY_ATTEMPTS = 5;
+const BUNDLE_RETRYABLE_ESBUILD_COPY = "failed to copy esbuild binary";
 const BUNDLE_RETRYABLE_ETXTBSY = "Text file busy (os error 26)";
 
 // Given a `Manifest`, moves harness code and bundled
@@ -105,8 +106,7 @@ async function bundleTestFile(
 
     const stderr = decoder.decode(result.stderr);
     if (
-      attempt === BUNDLE_RETRY_ATTEMPTS ||
-      !stderr.includes(BUNDLE_RETRYABLE_ETXTBSY)
+      attempt === BUNDLE_RETRY_ATTEMPTS || !isRetryableBundleFailure(stderr)
     ) {
       throw new Error(`Failed to bundle ${testPath}: ${stderr}`);
     }
@@ -240,6 +240,11 @@ async function resolveWorkspacePackageImports(
 async function sleepForRetry(attempt: number): Promise<void> {
   const delayMs = 250 * 2 ** (attempt - 1);
   await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function isRetryableBundleFailure(stderr: string): boolean {
+  return stderr.includes(BUNDLE_RETRYABLE_ETXTBSY) ||
+    stderr.includes(BUNDLE_RETRYABLE_ESBUILD_COPY);
 }
 
 async function findWorkspaceConfigPath(

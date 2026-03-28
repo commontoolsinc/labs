@@ -1,4 +1,4 @@
-import { env, waitFor } from "@commonfabric/integration";
+import { env, type Page, waitFor } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -8,6 +8,13 @@ import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
+
+function pierce(page: Page, selector: string, timeout?: number) {
+  return page.waitForSelector(selector, {
+    strategy: "pierce",
+    ...(timeout != null ? { timeout } : {}),
+  });
+}
 
 describe("shell piece tests", () => {
   const shell = new ShellIntegration();
@@ -194,58 +201,16 @@ describe("shell piece tests", () => {
       );
 
       await waitFor(async () => {
-        return await page.evaluate((expectedPieceId) => {
-          const findElementById = (
-            root: Document | ShadowRoot,
-            id: string,
-          ): HTMLElement | null => {
-            for (const element of root.querySelectorAll<HTMLElement>("*")) {
-              if (element.id === id) {
-                return element;
-              }
-              if (element.shadowRoot) {
-                const nested = findElementById(element.shadowRoot, id);
-                if (nested) {
-                  return nested;
-                }
-              }
-            }
-            return null;
-          };
-
-          const rootView = document.querySelector("x-root-view");
-          const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
-            | {
-              _patterns?: {
-                value?: {
-                  activePattern?: {
-                    id(): string;
-                    cell(): {
-                      key(name: string): {
-                        sync(): Promise<unknown>;
-                        send(value: unknown): Promise<void>;
-                      };
-                    };
-                  };
-                };
-              };
-            }
-            | null;
-          const activePattern = appView?._patterns?.value?.activePattern;
-          if (!activePattern || activePattern.id() !== expectedPieceId) {
-            return false;
-          }
-          const decrementButton = findElementById(
-            document,
-            "counter-decrement",
-          );
-          if (!decrementButton) {
-            return false;
-          }
-          decrementButton.click();
+        try {
+          await pierce(page, "#counter-decrement", 500);
           return true;
-        }, { args: [pieceId] });
+        } catch {
+          return false;
+        }
       });
+
+      const decrementButton = await pierce(page, "#counter-decrement");
+      await decrementButton.click();
     };
 
     try {
