@@ -932,35 +932,15 @@ export function trimRange(
     return { start, end };
   }
 
-  const state: ScanState = {
-    parenDepth: 0,
-    braceDepth: 0,
-    bracketDepth: 0,
-    regexAllowed: true,
-  };
-
-  let cursor = skipTrivia(source, start, end);
-  let firstTokenStart: number | undefined;
-  let lastTokenEnd = cursor;
-
-  while (cursor < end) {
-    const tokenStart = skipTrivia(source, cursor, end);
-    if (tokenStart >= end) {
-      break;
-    }
-    if (firstTokenStart === undefined) {
-      firstTokenStart = tokenStart;
-    }
-    const tokenEnd = advanceScanner(source, tokenStart, end, state);
-    lastTokenEnd = tokenEnd;
-    cursor = tokenEnd;
-  }
-
-  if (firstTokenStart === undefined) {
+  const trimmedStart = skipTrivia(source, start, end);
+  if (trimmedStart >= end) {
     return { start: end, end };
   }
 
-  return { start: firstTokenStart, end: lastTokenEnd };
+  return {
+    start: trimmedStart,
+    end: skipTrailingTrivia(source, trimmedStart, end),
+  };
 }
 
 function skipTrivia(
@@ -1000,6 +980,64 @@ function skipTrivia(
     }
     break;
   }
+  return cursor;
+}
+
+function skipTrailingTrivia(
+  source: string,
+  start: number,
+  end: number,
+): number {
+  let cursor = end;
+
+  outer:
+  while (cursor > start) {
+    const charCode = source.charCodeAt(cursor - 1);
+    if (isWhitespaceCode(charCode)) {
+      cursor--;
+      continue;
+    }
+
+    if (
+      charCode === 47 &&
+      cursor - 2 >= start &&
+      source.charCodeAt(cursor - 2) === 42
+    ) {
+      for (let open = cursor - 3; open > start; open--) {
+        if (
+          source.charCodeAt(open - 1) === 47 &&
+          source.charCodeAt(open) === 42
+        ) {
+          cursor = open - 1;
+          continue outer;
+        }
+      }
+      throw new CompiledJsParseError(
+        cursor - 2,
+        "Unterminated block comment",
+      );
+    }
+
+    let lineStart = cursor - 1;
+    while (
+      lineStart > start &&
+      source.charCodeAt(lineStart - 1) !== 10 &&
+      source.charCodeAt(lineStart - 1) !== 13
+    ) {
+      lineStart--;
+    }
+    if (
+      lineStart + 1 < cursor &&
+      source.charCodeAt(lineStart) === 47 &&
+      source.charCodeAt(lineStart + 1) === 47
+    ) {
+      cursor = lineStart;
+      continue;
+    }
+
+    break;
+  }
+
   return cursor;
 }
 

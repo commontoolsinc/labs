@@ -30,6 +30,16 @@ describe("trimRange()", () => {
     });
   });
 
+  it("trims trailing line comments", () => {
+    const source =
+      "value\n//# sourceMappingURL=data:foo\n//# sourceURL=bar.js\n";
+
+    expect(trimRange(source, 0, source.length)).toEqual({
+      start: 0,
+      end: 5,
+    });
+  });
+
   it("leaves already-trimmed plain expressions unchanged", () => {
     const source = "exports.default";
 
