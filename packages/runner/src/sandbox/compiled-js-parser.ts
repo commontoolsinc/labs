@@ -667,6 +667,7 @@ export function tryParseCallExpression(
     trimmed = trimRange(source, trimmed.start, trimmed.end - 1);
   }
   let openParen: number | undefined;
+  let closeParen: number | undefined;
   const state: ScanState = {
     parenDepth: 0,
     braceDepth: 0,
@@ -681,21 +682,23 @@ export function tryParseCallExpression(
       state.braceDepth === 0 &&
       state.bracketDepth === 0
     ) {
-      const closeParen = findMatchingDelimiter(source, cursor, "(", ")");
-      if (skipTrivia(source, closeParen + 1, trimmed.end) === trimmed.end) {
+      const matchedCloseParen = findMatchingDelimiter(source, cursor, "(", ")");
+      if (
+        skipTrivia(source, matchedCloseParen + 1, trimmed.end) === trimmed.end
+      ) {
         openParen = cursor;
+        closeParen = matchedCloseParen;
         break;
       }
-      cursor = closeParen + 1;
+      cursor = matchedCloseParen + 1;
       state.regexAllowed = false;
       continue;
     }
     cursor = advanceScanner(source, cursor, trimmed.end, state);
   }
-  if (openParen === undefined) {
+  if (openParen === undefined || closeParen === undefined) {
     return undefined;
   }
-  const closeParen = findMatchingDelimiter(source, openParen, "(", ")");
   const callee = source.slice(trimmed.start, openParen).trim();
   return {
     start: trimmed.start,
