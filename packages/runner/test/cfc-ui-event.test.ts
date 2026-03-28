@@ -45,6 +45,18 @@ const promptSlotBoundAtom = {
   role: "direct-command",
 } as const;
 
+const userSurfaceInputAtom = {
+  type: "https://commonfabric.org/cfc/atom/UserSurfaceInput",
+  user: space,
+  surface: "AssistantComposer",
+  role: "direct-command",
+} as const;
+
+const gestureProvenanceAtom = {
+  type: "https://commonfabric.org/cfc/atom/GestureProvenance",
+  targetPath: `/${UI}/children/2`,
+} as const;
+
 const messageRowPlacementAtom = {
   type: "https://commonfabric.org/cfc/atom/UiPlacement",
   surface: "InboxList",
@@ -494,7 +506,9 @@ describe("CFC UI event minting", () => {
   });
 
   it("derives prompt-slot and disclosure event integrity from the surrounding trusted UI surface", async () => {
-    const clickStream = await createClickStream("ui-direct-command-context-stream");
+    const clickStream = await createClickStream(
+      "ui-direct-command-context-stream",
+    );
     const targetCell = await seedDirectCommandContextUiOutput(
       "ui-direct-command-context-target",
       clickStream,
@@ -534,6 +548,8 @@ describe("CFC UI event minting", () => {
     expect(deliveredEvent?.integrity).toEqual(expect.arrayContaining([
       uiCodeHashAtom,
       submitActionContractAtom,
+      userSurfaceInputAtom,
+      gestureProvenanceAtom,
       promptSlotBoundAtom,
       disclosureRenderedAtom,
     ]));

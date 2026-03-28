@@ -375,7 +375,9 @@ that demonstrates the intended layering:
   direct-command concept
 - the browser/runtime path carries `cfcTrustContext` from shell bootstrap into
   the worker runtime and piece execution
-- the handler requires that verifier-derived concept together with contextual
+- UI-event minting now contributes the generic interaction atoms
+  `GestureProvenance` and `UserSurfaceInput`, and the handler requires those
+  together with the verifier-derived concept plus contextual
   `PromptSlotBound` and `DisclosureRendered` atoms
 - the resulting `submittedActions[]` log is additionally protected by
   `writeAuthorizedBy`, so unauthorized handlers cannot append even if they try
@@ -408,6 +410,17 @@ rather than directly requiring the raw clicked-node `UiActionContract(...)`.
 This should be treated as a remaining implementation gap in provenance recovery
 through the piece-wrapper browser path, not as a reason to duplicate the action
 contract onto both parent and child trees.
+
+The current bundled direct-command requirement is therefore:
+
+- `GestureProvenance`
+- `UserSurfaceInput`
+- `PromptSlotBound`
+- `DisclosureRendered`
+- verifier-derived trusted direct-command concept from `CodeHash(...)`
+
+That is already enough to demonstrate the intended layering without pretending
+the raw node-local action contract is recovered in the browser path today.
 
 ## Open Spec Questions
 

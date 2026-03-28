@@ -41,6 +41,16 @@ const disclosureRenderedAtom = {
   kind: "DirectCommandMayTriggerTools",
 } as const;
 
+const userSurfaceInputAtom = {
+  type: "https://commonfabric.org/cfc/atom/UserSurfaceInput",
+  surface: "AssistantComposer",
+  role: "direct-command",
+} as const;
+
+const gestureProvenanceAtom = {
+  type: "https://commonfabric.org/cfc/atom/GestureProvenance",
+} as const;
+
 export const TRUSTED_DIRECT_COMMAND_UI_CONCEPT =
   "https://commonfabric.org/cfc/concepts/trusted-direct-command-ui";
 
@@ -255,7 +265,11 @@ export const DIRECT_COMMAND_INPUT_SCHEMA = {
       type: "string",
       default: "Summarize the latest inbox triage notes.",
     },
-    submittedActions: { type: "array", default: [], items: submittedActionSchema },
+    submittedActions: {
+      type: "array",
+      default: [],
+      items: submittedActionSchema,
+    },
   },
   required: ["draft", "submittedActions"],
 } as const satisfies JSONSchema;
@@ -269,10 +283,12 @@ const submitDirectCommand = requireEventIntegrity(
         submittedActions,
       }: {
         draft: Writable<string>;
-        submittedActions: Writable<Array<{
-          command: string;
-          submittedBy: string;
-        }>>;
+        submittedActions: Writable<
+          Array<{
+            command: string;
+            submittedBy: string;
+          }>
+        >;
       },
     ) => {
       const command = draft.get().trim();
@@ -292,6 +308,8 @@ const submitDirectCommand = requireEventIntegrity(
   ),
   [
     TRUSTED_DIRECT_COMMAND_UI_CONCEPT,
+    gestureProvenanceAtom,
+    userSurfaceInputAtom,
     promptSlotBoundAtom,
     disclosureRenderedAtom,
   ],
@@ -307,10 +325,12 @@ const submitDirectCommandUntrusted = requireEventIntegrity(
         submittedActions,
       }: {
         draft: Writable<string>;
-        submittedActions: Writable<Array<{
-          command: string;
-          submittedBy: string;
-        }>>;
+        submittedActions: Writable<
+          Array<{
+            command: string;
+            submittedBy: string;
+          }>
+        >;
       },
     ) => {
       const command = draft.get().trim();
@@ -330,6 +350,8 @@ const submitDirectCommandUntrusted = requireEventIntegrity(
   ),
   [
     TRUSTED_DIRECT_COMMAND_UI_CONCEPT,
+    gestureProvenanceAtom,
+    userSurfaceInputAtom,
     promptSlotBoundAtom,
     disclosureRenderedAtom,
   ],
@@ -352,10 +374,12 @@ const appendSyntheticAction = handler(
     {
       submittedActions,
     }: {
-      submittedActions: Writable<Array<{
-        command: string;
-        submittedBy: string;
-      }>>;
+      submittedActions: Writable<
+        Array<{
+          command: string;
+          submittedBy: string;
+        }>
+      >;
     },
   ) => {
     const currentActions = submittedActions.get() ?? [];

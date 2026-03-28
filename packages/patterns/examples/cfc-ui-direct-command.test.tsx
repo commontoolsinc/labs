@@ -20,6 +20,16 @@ const submitActionContractAtom = {
   action: "SubmitDirectCommand",
 } as const;
 
+const userSurfaceInputAtom = {
+  type: "https://commonfabric.org/cfc/atom/UserSurfaceInput",
+  surface: "AssistantComposer",
+  role: "direct-command",
+} as const;
+
+const gestureProvenanceAtom = {
+  type: "https://commonfabric.org/cfc/atom/GestureProvenance",
+} as const;
+
 export default pattern(() => {
   const subject = DirectCommand({
     draft: "Summarize the latest inbox triage notes.",
@@ -80,6 +90,7 @@ export default pattern(() => {
             value: "SubmitDirectCommandUntrusted",
           },
           expectedNodePath: `/${UI}/children/4`,
+          integrityIncludes: [userSurfaceInputAtom, gestureProvenanceAtom],
           sourceGestureId: "gesture-direct-command-untrusted-pattern-test",
         },
       },

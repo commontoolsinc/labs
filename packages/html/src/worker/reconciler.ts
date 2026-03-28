@@ -249,6 +249,7 @@ export class WorkerReconciler {
       }
 
       pending = pending.then(async () => {
+        const sourceGestureId = crypto.randomUUID();
         const envelope = await mintUiEventEnvelopeFromProvenance(
           eventRuntime as Parameters<
             typeof mintUiEventEnvelopeFromProvenance
@@ -256,6 +257,7 @@ export class WorkerReconciler {
           provenance ?? [],
           {
             payload: event,
+            sourceGestureId,
             evidence: {
               uiEvent: eventType,
               uiProvenance: (provenance ?? []).map((frame) => ({

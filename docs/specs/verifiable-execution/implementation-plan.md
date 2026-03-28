@@ -399,6 +399,7 @@ type UiProvenanceFrame = {
     provenance even when no explicit `[UI]` wrapper survives in the final tree
 - [x] Browser-backed direct-command integration now demonstrates:
   - verifier-derived trust from an authored handler `CodeHash(...)`
+  - interaction atoms `GestureProvenance` and `UserSurfaceInput`
   - contextual `PromptSlotBound` and `DisclosureRendered` atoms
   - `writeAuthorizedBy` on `submittedActions[]`
   - positive trusted submission and negative untrusted / unauthorized flows

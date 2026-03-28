@@ -48,6 +48,18 @@ type UiContractLikeAtom = CfcAtom & {
   readonly kind?: string;
 };
 
+type PromptSlotBoundLikeAtom = CfcAtom & {
+  readonly type?: string;
+  readonly surface?: string;
+  readonly role?: string;
+};
+
+type MintedGestureEvidence = {
+  readonly uiNodePath?: string;
+  readonly targetPath?: string;
+  readonly snapshotDigest?: string;
+};
+
 function normalizeFramePath(path: readonly string[]): readonly string[] {
   return path.map((segment) => String(segment));
 }
@@ -103,7 +115,7 @@ function deriveUiContextEventAtoms(
     }
     if (
       contract.type ===
-          "https://commonfabric.org/cfc/atom/UiDisclosureContract" &&
+        "https://commonfabric.org/cfc/atom/UiDisclosureContract" &&
       typeof contract.kind === "string"
     ) {
       const derivedAtom: CfcAtom = {
@@ -112,6 +124,53 @@ function deriveUiContextEventAtoms(
       };
       derived.set(JSON.stringify(derivedAtom), derivedAtom);
     }
+  }
+
+  return [...derived.values()];
+}
+
+function deriveUiInteractionEventAtoms(
+  runtime: Runtime,
+  contextualIntegrity: readonly CfcAtom[],
+  options: MintUiEventEnvelopeOptions<unknown>,
+): readonly CfcAtom[] {
+  const derived = new Map<string, CfcAtom>();
+
+  for (const atom of contextualIntegrity) {
+    if (!atom || typeof atom !== "object" || Array.isArray(atom)) {
+      continue;
+    }
+    const promptSlot = atom as PromptSlotBoundLikeAtom;
+    if (
+      promptSlot.type !== "https://commonfabric.org/cfc/atom/PromptSlotBound" ||
+      typeof promptSlot.surface !== "string"
+    ) {
+      continue;
+    }
+
+    const userSurfaceInput: CfcAtom = {
+      type: "https://commonfabric.org/cfc/atom/UserSurfaceInput",
+      user: runtime.userIdentityDID,
+      surface: promptSlot.surface,
+      ...(typeof promptSlot.role === "string" ? { role: promptSlot.role } : {}),
+    };
+    derived.set(JSON.stringify(userSurfaceInput), userSurfaceInput);
+  }
+
+  if (options.sourceGestureId) {
+    const evidence = (options.evidence ?? {}) as MintedGestureEvidence;
+    const gestureProvenance: CfcAtom = {
+      type: "https://commonfabric.org/cfc/atom/GestureProvenance",
+      ...(typeof evidence.uiNodePath === "string"
+        ? { targetPath: evidence.uiNodePath }
+        : typeof evidence.targetPath === "string"
+        ? { targetPath: evidence.targetPath }
+        : {}),
+      ...(typeof evidence.snapshotDigest === "string"
+        ? { snapshot: evidence.snapshotDigest }
+        : {}),
+    };
+    derived.set(JSON.stringify(gestureProvenance), gestureProvenance);
   }
 
   return [...derived.values()];
@@ -187,7 +246,8 @@ function walkSchemaTree(
   }
   visitor(schema);
 
-  const properties = (schema as { properties?: Record<string, unknown> }).properties;
+  const properties =
+    (schema as { properties?: Record<string, unknown> }).properties;
   if (properties && typeof properties === "object") {
     for (const child of Object.values(properties)) {
       walkSchemaTree(child, visitor);
@@ -342,13 +402,18 @@ async function resolveUiContextEventIntegrity(
     }
     seenRoots.add(rootKey);
 
-    const persisted = await loadPersistedLabels(runtime, frame.link, persistedCache);
+    const persisted = await loadPersistedLabels(
+      runtime,
+      frame.link,
+      persistedCache,
+    );
     if (persisted) {
       for (const path of Object.keys(persisted)) {
         if (!pathWithinUiRoot(path, uiRootPath)) {
           continue;
         }
-        const integrity = resolveObservationLabel(persisted, path, "shape")?.integrity;
+        const integrity = resolveObservationLabel(persisted, path, "shape")
+          ?.integrity;
         for (const atom of deriveUiContextEventAtoms(integrity)) {
           derived.set(JSON.stringify(atom), atom);
         }
@@ -384,11 +449,25 @@ export async function mintUiEventEnvelopeFromProvenance<T>(
   frames: readonly UiProvenanceFrame[],
   options: MintUiEventEnvelopeOptions<T>,
 ): Promise<CfcEventEnvelope<T>> {
-  const provenanceIntegrity = await resolveUiProvenanceIntegrity(runtime, frames);
-  const contextualIntegrity = await resolveUiContextEventIntegrity(runtime, frames);
-  const integrity = joinIntegrityLabels(
-    provenanceIntegrity,
+  const provenanceIntegrity = await resolveUiProvenanceIntegrity(
+    runtime,
+    frames,
+  );
+  const contextualIntegrity = await resolveUiContextEventIntegrity(
+    runtime,
+    frames,
+  );
+  const interactionIntegrity = deriveUiInteractionEventAtoms(
+    runtime,
     contextualIntegrity,
+    options as MintUiEventEnvelopeOptions<unknown>,
+  );
+  const integrity = joinIntegrityLabels(
+    joinIntegrityLabels(
+      provenanceIntegrity,
+      contextualIntegrity,
+    ),
+    interactionIntegrity,
   ) ?? [];
   return createCfcEventEnvelope({
     id: options.id ?? crypto.randomUUID(),

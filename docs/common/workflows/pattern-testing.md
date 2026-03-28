@@ -281,8 +281,9 @@ The current direct-command examples demonstrate the split:
 
 - `ct test` proves authored labels and synthetic UI-event minting
 - browser integration proves verifier-derived trust from the actual handler
-  `CodeHash(...)`, contextual prompt/disclosure atoms, and `writeAuthorizedBy`
-  on the collected action log
+  `CodeHash(...)`, interaction atoms such as `GestureProvenance` /
+  `UserSurfaceInput`, contextual prompt/disclosure atoms, and
+  `writeAuthorizedBy` on the collected action log
 
 Known limitation:
 
