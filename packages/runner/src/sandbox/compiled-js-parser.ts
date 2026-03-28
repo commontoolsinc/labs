@@ -482,6 +482,16 @@ function parseWrappedFunction(source: string): ParsedFunction {
     throw new CompiledJsParseError(0, "Compiled bundle cannot be empty");
   }
 
+  let fastRange = trimmed;
+  if (source[fastRange.end - 1] === ";") {
+    fastRange = trimRange(source, fastRange.start, fastRange.end - 1);
+  }
+  try {
+    return parseFunctionText(source, fastRange.start, fastRange.end);
+  } catch {
+    // Fall back to the more defensive unwrapping logic below.
+  }
+
   const candidates: SourceRange[] = [];
   const pushCandidate = (range: SourceRange) => {
     for (const candidate of candidates) {
