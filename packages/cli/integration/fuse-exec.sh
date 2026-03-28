@@ -79,37 +79,27 @@ wait_for_path() {
   error "Timed out waiting for path: $path"
 }
 
-try_wait_for_path() {
-  local path="$1"
-  local timeout_seconds="${2:-5}"
-  local attempts=$((timeout_seconds * 10))
-
-  for _ in $(seq 1 "$attempts"); do
-    if path_exists "$path"; then
-      return 0
-    fi
-    sleep 0.1
-  done
-
-  return 1
-}
-
 resolve_entity_dir() {
   local entities_dir="$1"
   local bare_id="$2"
   local timeout_seconds="${3:-20}"
+  local attempts=$((timeout_seconds * 10))
   local canonical_entity_dir="$entities_dir/of:$bare_id"
   local bare_entity_dir="$entities_dir/$bare_id"
 
-  if try_wait_for_path "$canonical_entity_dir" "$timeout_seconds"; then
-    printf '%s\n' "$canonical_entity_dir"
-    return 0
-  fi
+  for _ in $(seq 1 "$attempts"); do
+    if path_exists "$canonical_entity_dir"; then
+      printf '%s\n' "$canonical_entity_dir"
+      return 0
+    fi
 
-  if try_wait_for_path "$bare_entity_dir" "$timeout_seconds"; then
-    printf '%s\n' "$bare_entity_dir"
-    return 0
-  fi
+    if path_exists "$bare_entity_dir"; then
+      printf '%s\n' "$bare_entity_dir"
+      return 0
+    fi
+
+    sleep 0.1
+  done
 
   return 1
 }
