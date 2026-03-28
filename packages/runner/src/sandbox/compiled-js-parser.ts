@@ -636,20 +636,25 @@ export function parseStringLiteralValue(
     );
   }
 
-  let value = "";
   for (let i = trimmed.start + 1; i < trimmed.end - 1; i++) {
-    const char = source[i];
-    if (char === "\\") {
-      i++;
-      if (i >= trimmed.end - 1) {
-        throw new CompiledJsParseError(i, "Unterminated string escape");
+    if (source.charCodeAt(i) === 92) {
+      let value = "";
+      for (let j = trimmed.start + 1; j < trimmed.end - 1; j++) {
+        const char = source[j];
+        if (char === "\\") {
+          j++;
+          if (j >= trimmed.end - 1) {
+            throw new CompiledJsParseError(j, "Unterminated string escape");
+          }
+          value += source[j];
+          continue;
+        }
+        value += char;
       }
-      value += source[i];
-      continue;
+      return value;
     }
-    value += char;
   }
-  return value;
+  return source.slice(trimmed.start + 1, trimmed.end - 1);
 }
 
 export function tryParseCallExpression(
