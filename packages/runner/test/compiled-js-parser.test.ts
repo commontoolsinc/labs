@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import {
   findTopLevelEquals,
   trimRange,
+  tryParseDefineCall,
 } from "../src/sandbox/compiled-js-parser.ts";
 
 describe("findTopLevelEquals()", () => {
@@ -36,5 +37,26 @@ describe("trimRange()", () => {
       start: 0,
       end: source.length,
     });
+  });
+});
+
+describe("tryParseDefineCall()", () => {
+  it("parses a canonical AMD define statement", () => {
+    const source =
+      `define("index", ["require", "exports"], function (require, exports) {
+        "use strict";
+        exports.default = 1;
+      });`;
+
+    const defineCall = tryParseDefineCall(source, {
+      start: 0,
+      end: source.length,
+    });
+
+    expect(defineCall).toBeDefined();
+    expect(defineCall?.moduleId).toBe("index");
+    expect(defineCall?.dependencies).toEqual(["require", "exports"]);
+    expect(defineCall?.factory.params).toEqual(["require", "exports"]);
+    expect(defineCall?.factory.body.statements).toHaveLength(2);
   });
 });

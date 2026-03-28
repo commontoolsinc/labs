@@ -201,30 +201,34 @@ export function tryParseDefineCall(
   statement: StatementChunk,
 ): ParsedDefineCall | undefined {
   const trimmed = trimRange(source, statement.start, statement.end);
-  const call = tryParseCallExpression(source, trimmed.start, trimmed.end);
-  if (!call || call.callee !== "define") {
+  if (!startsWithStatementWord(source, trimmed.start, trimmed.end, "define")) {
     return undefined;
   }
-  if (call.args.length !== 3) {
+  const openParen = skipTrivia(source, trimmed.start + 6, trimmed.end);
+  if (source.charCodeAt(openParen) !== 40) {
+    return undefined;
+  }
+  const args = parseCallArgumentsAt(source, openParen, trimmed.end);
+  if (args.length !== 3) {
     throw new CompiledJsParseError(
-      call.start,
+      trimmed.start,
       "AMD define() calls must include id, dependencies, and factory",
     );
   }
   const moduleId = parseStringLiteralValue(
     source,
-    call.args[0].start,
-    call.args[0].end,
+    args[0].start,
+    args[0].end,
   );
   const dependencies = parseStringArrayLiteral(
     source,
-    call.args[1].start,
-    call.args[1].end,
+    args[1].start,
+    args[1].end,
   );
   const factory = parseFunctionText(
     source,
-    call.args[2].start,
-    call.args[2].end,
+    args[2].start,
+    args[2].end,
   );
   return {
     statement,
@@ -274,6 +278,70 @@ export function splitTopLevelCommaList(
     parts.push(tail);
   }
   return parts;
+}
+
+function parseCallArgumentsAt(
+  source: string,
+  openParen: number,
+  end: number,
+): SourceRange[] {
+  const args: SourceRange[] = [];
+  const state: ScanState = {
+    parenDepth: 1,
+    braceDepth: 0,
+    bracketDepth: 0,
+    regexAllowed: true,
+  };
+  let cursor = skipTrivia(source, openParen + 1, end);
+  let segmentStart = cursor;
+
+  while (cursor < end) {
+    const charCode = source.charCodeAt(cursor);
+    if (
+      charCode === 44 &&
+      state.parenDepth === 1 &&
+      state.braceDepth === 0 &&
+      state.bracketDepth === 0
+    ) {
+      const part = trimRange(source, segmentStart, cursor);
+      if (part.start < part.end) {
+        args.push(part);
+      }
+      cursor++;
+      cursor = skipTrivia(source, cursor, end);
+      segmentStart = cursor;
+      state.regexAllowed = true;
+      continue;
+    }
+    if (
+      charCode === 41 &&
+      state.parenDepth === 1 &&
+      state.braceDepth === 0 &&
+      state.bracketDepth === 0
+    ) {
+      const tail = trimRange(source, segmentStart, cursor);
+      if (tail.start < tail.end) {
+        args.push(tail);
+      }
+      let afterCall = skipTrivia(source, cursor + 1, end);
+      if (source.charCodeAt(afterCall) === 59) {
+        afterCall = skipTrivia(source, afterCall + 1, end);
+      }
+      if (afterCall !== end) {
+        throw new CompiledJsParseError(
+          cursor + 1,
+          "Call expression contains trailing tokens",
+        );
+      }
+      return args;
+    }
+    cursor = advanceScanner(source, cursor, end, state);
+  }
+
+  throw new CompiledJsParseError(
+    openParen,
+    "Unterminated '()' pair",
+  );
 }
 
 export function findTopLevelEquals(
