@@ -50,6 +50,12 @@ describe("plain-data sandbox helper", () => {
     expect(() => (nested as Set<number>).add(3)).toThrow(
       "Cannot mutate a FrozenSet",
     );
+    expect(() =>
+      Map.prototype.set.call(result as Map<unknown, unknown>, "next", true)
+    ).toThrow();
+    expect(() => Set.prototype.add.call(nested as Set<number>, 3)).toThrow();
+    expect(result.has("next")).toBe(false);
+    expect((nested as ReadonlySet<number>).has(3)).toBe(false);
   });
 
   it("reuses previously frozen object keys when collections are wrapped", () => {

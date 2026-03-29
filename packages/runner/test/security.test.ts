@@ -13,6 +13,40 @@ import {
 import { getAMDLoader } from "../../js-compiler/typescript/bundler/amd-loader.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
+const FACTORY_SHADOW_GUARD = [
+  "    const define = undefined;",
+  "    const runtimeDeps = undefined;",
+  "    const __ctAmdHooks = undefined;",
+].join("\n");
+
+function withFactoryGuards(bundle: string): string {
+  return bundle.replaceAll(
+    /(define\([^]*?function\s*\([^)]*\)\s*\{\n\s*"use strict";\n)(?!\s*const define = undefined;)/g,
+    `$1${FACTORY_SHADOW_GUARD}\n`,
+  );
+}
+
+function bundleWithGuardedFactory(body: string): string {
+  return `
+((runtimeDeps = {}) => {
+  const __ctAmdHooks = runtimeDeps.__ctAmdHooks ?? {};
+  const { define, require } = (${getAMDLoader.toString()})(__ctAmdHooks);
+  for (const [name, dep] of Object.entries(runtimeDeps)) {
+    if (name === "__ctAmdHooks") continue;
+    define(name, ["exports"], exports => Object.assign(exports, dep));
+  }
+  const console = globalThis.console;
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+${FACTORY_SHADOW_GUARD}
+${body}
+  });
+  const main = require("main");
+  const exportMap = Object.create(null);
+  return { main, exportMap };
+});
+`;
+}
 
 describe("SES security regressions", () => {
   let runtime: Runtime;
@@ -417,6 +451,62 @@ describe("SES security regressions", () => {
     expect(probeResult.main?.default()).toBe(0);
   });
 
+  it("shadows wrapper-local loader bindings inside compiled callbacks", async () => {
+    const { main } = await engine.evaluate(
+      "guarded-loader-bindings",
+      {
+        js: bundleWithGuardedFactory(
+          "    function probe() {\n" +
+            "      return {\n" +
+            "        defineType: typeof define,\n" +
+            "        runtimeDepsType: typeof runtimeDeps,\n" +
+            "        hooksType: typeof __ctAmdHooks,\n" +
+            "      };\n" +
+            "    }\n" +
+            "    exports.default = (0, commontools_1.lift)(probe);",
+        ),
+        filename: "guarded-loader-bindings.js",
+      },
+      [],
+    );
+    const implementation = (main?.default as {
+      implementation: () => {
+        defineType: string;
+        runtimeDepsType: string;
+        hooksType: string;
+      };
+    }).implementation;
+
+    expect(implementation()).toEqual({
+      defineType: "undefined",
+      runtimeDepsType: "undefined",
+      hooksType: "undefined",
+    });
+  });
+
+  it("prevents loader-backed state from surviving across callback invocations", async () => {
+    const { main } = await engine.evaluate(
+      "guarded-loader-state",
+      {
+        js: bundleWithGuardedFactory(
+          "    function hiddenState() {\n" +
+            '      try { define("__ct_hidden_state", ["exports"], function () { return { value: 1 }; }); return 1; }\n' +
+            "      catch { return 2; }\n" +
+            "    }\n" +
+            "    exports.default = (0, commontools_1.lift)(hiddenState);",
+        ),
+        filename: "guarded-loader-state.js",
+      },
+      [],
+    );
+    const implementation = (main?.default as {
+      implementation: () => number;
+    }).implementation;
+
+    expect(implementation()).toBe(2);
+    expect(implementation()).toBe(2);
+  });
+
   it("makes authored AMD require inert even when called indirectly", async () => {
     const bundle = `
 ((runtimeDeps = {}) => {
@@ -447,7 +537,10 @@ describe("SES security regressions", () => {
 
     const { main } = await engine.evaluate(
       "authored-require-probe",
-      { js: bundle, filename: "authored-require-probe.js" },
+      {
+        js: withFactoryGuards(bundle),
+        filename: "authored-require-probe.js",
+      },
       [],
     );
 

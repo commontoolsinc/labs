@@ -145,11 +145,7 @@ function validateMap(
   visited: WeakSet<object>,
 ): void {
   let index = 0;
-  for (
-    const [key, entryValue] of Map.prototype.entries.call(
-      value as Map<unknown, unknown>,
-    )
-  ) {
+  for (const [key, entryValue] of value.entries()) {
     validateModuleSafeValue(
       key,
       `${path}<map-key:${index}>`,
@@ -170,7 +166,7 @@ function validateSet(
   visited: WeakSet<object>,
 ): void {
   let index = 0;
-  for (const entryValue of Set.prototype.values.call(value as Set<unknown>)) {
+  for (const entryValue of value.values()) {
     validateModuleSafeValue(
       entryValue,
       `${path}<set:${index}>`,
@@ -284,18 +280,13 @@ function freezeMap(
   path: string,
   converted: WeakMap<object, ModuleSafeValue>,
 ): ReadonlyMap<ModuleSafeValue, ModuleSafeValue> {
-  const result = new Map<ModuleSafeValue, ModuleSafeValue>();
-  Object.setPrototypeOf(result, FrozenMap.prototype);
+  const builder = FrozenMap.createBuilder<ModuleSafeValue, ModuleSafeValue>();
+  const result = builder.wrapper;
   converted.set(value as object, result as unknown as ModuleSafeValue);
 
   let index = 0;
-  for (
-    const [key, entryValue] of Map.prototype.entries.call(
-      value as Map<unknown, unknown>,
-    )
-  ) {
-    Map.prototype.set.call(
-      result,
+  for (const [key, entryValue] of value.entries()) {
+    builder.set(
       freezeModuleSafeValue(
         key,
         `${path}<map-key:${index}>`,
@@ -312,7 +303,7 @@ function freezeMap(
 
   copyOwnProperties(value as object, result, path, converted);
 
-  Object.freeze(result);
+  builder.finish();
   verifiedPlainData.add(result);
   return result;
 }
@@ -322,14 +313,13 @@ function freezeSet(
   path: string,
   converted: WeakMap<object, ModuleSafeValue>,
 ): ReadonlySet<ModuleSafeValue> {
-  const result = new Set<ModuleSafeValue>();
-  Object.setPrototypeOf(result, FrozenSet.prototype);
+  const builder = FrozenSet.createBuilder<ModuleSafeValue>();
+  const result = builder.wrapper;
   converted.set(value as object, result as unknown as ModuleSafeValue);
 
   let index = 0;
-  for (const entryValue of Set.prototype.values.call(value as Set<unknown>)) {
-    Set.prototype.add.call(
-      result,
+  for (const entryValue of value.values()) {
+    builder.add(
       freezeModuleSafeValue(
         entryValue,
         `${path}<set:${index}>`,
@@ -341,7 +331,7 @@ function freezeSet(
 
   copyOwnProperties(value as object, result, path, converted);
 
-  Object.freeze(result);
+  builder.finish();
   verifiedPlainData.add(result);
   return result;
 }

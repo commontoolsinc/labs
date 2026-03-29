@@ -51,6 +51,12 @@ describe("frozen-builtins", () => {
       expect(() => fm.clear()).toThrow("Cannot mutate a FrozenMap");
     });
 
+    it("rejects intrinsic Map mutators", () => {
+      const fm = new FrozenMap<string, number>([["a", 1]]);
+      expect(() => Map.prototype.set.call(fm, "b", 2)).toThrow();
+      expect(fm.has("b")).toBe(false);
+    });
+
     it("supports forEach iteration", () => {
       const fm = new FrozenMap([["x", 10], ["y", 20]]);
       const entries: [string, number][] = [];
@@ -106,6 +112,12 @@ describe("frozen-builtins", () => {
     it("throws on clear()", () => {
       const fs = new FrozenSet<number>([1]);
       expect(() => fs.clear()).toThrow("Cannot mutate a FrozenSet");
+    });
+
+    it("rejects intrinsic Set mutators", () => {
+      const fs = new FrozenSet<number>([1]);
+      expect(() => Set.prototype.add.call(fs, 2)).toThrow();
+      expect(fs.has(2)).toBe(false);
     });
 
     it("supports forEach iteration", () => {

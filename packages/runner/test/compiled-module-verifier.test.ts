@@ -1,8 +1,45 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { parseCompiledBundleSource } from "../src/sandbox/compiled-js-parser.ts";
-import { verifyParsedCompiledBundleModuleFactoriesWithParser } from "../src/sandbox/compiled-bundle-verifier.ts";
-import { verifyCompiledBundleModuleFactories } from "../src/sandbox/module-verifier.ts";
+import { createFactoryShadowGuardSource } from "@commontools/utils/sandbox-contract";
+import {
+  parseCompiledBundleSource as parseCompiledBundleSourceRaw,
+} from "../src/sandbox/compiled-js-parser.ts";
+import {
+  verifyParsedCompiledBundleModuleFactoriesWithParser
+    as verifyParsedCompiledBundleModuleFactoriesWithParserRaw,
+} from "../src/sandbox/compiled-bundle-verifier.ts";
+import {
+  verifyCompiledBundleModuleFactories as verifyCompiledBundleModuleFactoriesRaw,
+} from "../src/sandbox/module-verifier.ts";
+
+const FACTORY_SHADOW_GUARD = createFactoryShadowGuardSource().map((statement) =>
+  `    ${statement}`
+).join("\n");
+
+function withFactoryGuards(bundle: string): string {
+  return bundle.replaceAll(
+    /(define\([^]*?function\s*\([^)]*\)\s*\{\n\s*"use strict";\n)(?!\s*const define = undefined;)/g,
+    `$1${FACTORY_SHADOW_GUARD}\n`,
+  );
+}
+
+function parseCompiledBundleSource(bundle: string) {
+  return parseCompiledBundleSourceRaw(withFactoryGuards(bundle));
+}
+
+function verifyParsedCompiledBundleModuleFactoriesWithParser(
+  bundle: string,
+  parsedBundle: ReturnType<typeof parseCompiledBundleSourceRaw>,
+) {
+  return verifyParsedCompiledBundleModuleFactoriesWithParserRaw(
+    withFactoryGuards(bundle),
+    parsedBundle,
+  );
+}
+
+function verifyCompiledBundleModuleFactories(bundle: string) {
+  return verifyCompiledBundleModuleFactoriesRaw(withFactoryGuards(bundle));
+}
 
 describe("verifyCompiledBundleModuleFactories()", () => {
   it("accepts compiled authored module factories", () => {
@@ -121,6 +158,22 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 
     expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
       "Top-level mutable bindings are not allowed in SES mode",
+    );
+  });
+
+  it("rejects authored factories that bind reserved wrapper-local names", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    const define = 42;
+    exports.default = define;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "Reserved wrapper binding",
     );
   });
 

@@ -5,6 +5,7 @@ export { HelperOwnedExpressionSiteLoweringTransformer } from "./helper-owned-exp
 export { JsxExpressionSiteRouterTransformer } from "./jsx-expression-site-router.ts";
 export { ModuleScopeCtDataTransformer } from "./module-scope-ct-data.ts";
 export { ModuleScopeFunctionHardeningTransformer } from "./module-scope-function-hardening.ts";
+export { ModuleScopeShadowingTransformer } from "./module-scope-shadowing.ts";
 export { OpaqueGetValidationTransformer } from "./opaque-get-validation.ts";
 export { PatternContextValidationTransformer } from "./pattern-context-validation.ts";
 export { PatternOwnedExpressionSiteLoweringTransformer } from "./pattern-owned-expression-site-lowering.ts";

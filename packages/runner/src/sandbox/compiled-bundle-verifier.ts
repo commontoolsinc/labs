@@ -26,6 +26,10 @@ import {
   TRUSTED_BUILDERS,
   TRUSTED_DATA_HELPERS,
 } from "./policy.ts";
+import {
+  createFactoryShadowGuardSource,
+  RESERVED_FACTORY_BINDINGS,
+} from "@commontools/utils/sandbox-contract";
 
 type BindingKind = "builder" | "data" | "function" | "import" | "unknown";
 
@@ -51,6 +55,10 @@ const CANONICAL_HARDENING_HELPER = stripJsTrivia(
 );
 
 const SIMPLE_IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
+const RESERVED_FACTORY_BINDING_SET = new Set<string>(RESERVED_FACTORY_BINDINGS);
+const CANONICAL_FACTORY_GUARD_STATEMENTS = createFactoryShadowGuardSource().map(
+  (statement) => stripJsTrivia(statement),
+);
 
 interface ParsedNormalizedCallReference {
   kind: "identifier" | "member" | "commaMember";
@@ -145,16 +153,6 @@ function verifyDefineCall(
 
     verifyCanonicalRequireCapture(source, filename, defineCall);
 
-    if (defineCall.moduleId === "index") {
-      logger.timeStart("verifyDefineCall", "indexFactory");
-      try {
-        verifyIndexFactory(source, filename, defineCall);
-      } finally {
-        logger.timeEnd("verifyDefineCall", "indexFactory");
-      }
-      return;
-    }
-
     logger.timeStart("verifyDefineCall", "authoredFactory");
     try {
       verifyAuthoredFactory(source, filename, defineCall);
@@ -195,7 +193,7 @@ function verifyAuthoredFactory(
 
     logger.timeStart("verifyAuthoredFactory", "predeclareDependencies");
     try {
-      predeclareFactoryDependencies(defineCall, env);
+      predeclareFactoryDependencies(source, filename, defineCall, env);
     } finally {
       logger.timeEnd("verifyAuthoredFactory", "predeclareDependencies");
     }
@@ -209,11 +207,28 @@ function verifyAuthoredFactory(
 
     logger.timeStart("verifyAuthoredFactory", "statements");
     try {
+      const missingRequiredGuards = new Set(CANONICAL_FACTORY_GUARD_STATEMENTS);
       for (const statement of defineCall.factory.body.statements) {
         const trimmed = trimRange(source, statement.start, statement.end);
         if (trimmed.start >= trimmed.end) continue;
 
         if (isStringDirectiveRange(source, trimmed.start, trimmed.end)) {
+          continue;
+        }
+
+        const normalized = stripJsTrivia(
+          source,
+          statement.start,
+          statement.end,
+        );
+        if (isCompiledEsModuleMarkerNormalized(normalized)) continue;
+        if (isCompiledImportNormalizationRebindingNormalized(normalized, env)) {
+          continue;
+        }
+        if (
+          missingRequiredGuards.has(normalized)
+        ) {
+          missingRequiredGuards.delete(normalized);
           continue;
         }
 
@@ -223,6 +238,12 @@ function verifyAuthoredFactory(
           trimmed.end,
         );
         if (functionName) {
+          assertFactoryBindingIsNotReserved(
+            source,
+            filename,
+            statement.start,
+            functionName,
+          );
           registerFunctionStatement(source, statement, env, functionName);
           continue;
         }
@@ -258,13 +279,6 @@ function verifyAuthoredFactory(
           verifyCompiledExportAssignment(source, filename, statement, env);
           continue;
         }
-
-        const normalized = stripJsTrivia(
-          source,
-          statement.start,
-          statement.end,
-        );
-        if (isCompiledEsModuleMarkerNormalized(normalized)) continue;
         if (isCompiledImportNormalizationRebindingNormalized(normalized, env)) {
           continue;
         }
@@ -308,6 +322,15 @@ function verifyAuthoredFactory(
           "Compiled AMD module contains unsupported top-level executable code",
         );
       }
+
+      if (missingRequiredGuards.size > 0) {
+        throw verificationErrorAt(
+          source,
+          filename,
+          defineCall.statement.start,
+          "Compiled AMD factory is missing required wrapper shadow guards",
+        );
+      }
     } finally {
       logger.timeEnd("verifyAuthoredFactory", "statements");
     }
@@ -316,42 +339,9 @@ function verifyAuthoredFactory(
   }
 }
 
-function verifyIndexFactory(
+function predeclareFactoryDependencies(
   source: string,
   filename: string,
-  defineCall: ParsedDefineCall,
-): void {
-  const start = performance.now();
-  try {
-    for (const statement of defineCall.factory.body.statements) {
-      const trimmed = trimRange(source, statement.start, statement.end);
-      if (trimmed.start >= trimmed.end) continue;
-      if (isStringDirectiveRange(source, trimmed.start, trimmed.end)) continue;
-
-      if (
-        startsWithStatementWord(source, trimmed.start, trimmed.end, "exports")
-      ) {
-        continue;
-      }
-
-      const normalized = stripJsTrivia(source, statement.start, statement.end);
-      if (isCompiledEsModuleMarkerNormalized(normalized)) continue;
-      if (isCompiledExportStarStatementNormalized(normalized)) continue;
-      if (tryParseCompiledReexportNormalized(normalized)) continue;
-
-      throw verificationErrorAt(
-        source,
-        filename,
-        statement.start,
-        "Compiled index module contains unsupported top-level executable code",
-      );
-    }
-  } finally {
-    logger.time(start, "verifyIndexFactory");
-  }
-}
-
-function predeclareFactoryDependencies(
   defineCall: ParsedDefineCall,
   env: Map<string, BindingInfo>,
 ): void {
@@ -367,6 +357,12 @@ function predeclareFactoryDependencies(
     ) {
       const parameter = defineCall.factory.params[index];
       const dependency = defineCall.dependencies[index];
+      assertFactoryBindingIsNotReserved(
+        source,
+        filename,
+        defineCall.statement.start,
+        parameter,
+      );
       env.set(parameter, {
         kind: "import",
         namespaceImport: true,
@@ -390,6 +386,15 @@ function predeclareTopLevelBindings(
     for (const statement of defineCall.factory.body.statements) {
       const trimmed = trimRange(source, statement.start, statement.end);
       if (trimmed.start >= trimmed.end) continue;
+      const normalized = stripJsTrivia(source, statement.start, statement.end);
+      if (
+        CANONICAL_FACTORY_GUARD_STATEMENTS.includes(normalized) ||
+        isStringDirectiveRange(source, trimmed.start, trimmed.end) ||
+        isCompiledEsModuleMarkerNormalized(normalized) ||
+        isCompiledImportNormalizationRebindingNormalized(normalized, env)
+      ) {
+        continue;
+      }
 
       const functionName = getFunctionDeclarationNameFromRange(
         source,
@@ -397,6 +402,9 @@ function predeclareTopLevelBindings(
         trimmed.end,
       );
       if (functionName) {
+        if (RESERVED_FACTORY_BINDING_SET.has(functionName)) {
+          continue;
+        }
         registerFunctionStatement(source, statement, env, functionName);
         continue;
       }
@@ -407,6 +415,9 @@ function predeclareTopLevelBindings(
         continue;
       }
       for (const declarator of parseVariableDeclarators(source, statement)) {
+        if (RESERVED_FACTORY_BINDING_SET.has(declarator.name)) {
+          continue;
+        }
         const provisional = provisionalBindingForExpression(
           source,
           declarator.initializer.start,
@@ -449,6 +460,12 @@ function verifyVariableStatement(
     }
 
     for (const declarator of parseVariableDeclarators(source, statement)) {
+      assertFactoryBindingIsNotReserved(
+        source,
+        filename,
+        declarator.initializer.start,
+        declarator.name,
+      );
       const provisional = provisionalBindingForExpression(
         source,
         declarator.initializer.start,
@@ -1703,4 +1720,21 @@ function verificationErrorAt(
 ): ModuleVerificationError {
   const { line, column } = locationFromOffset(source, offset);
   return new ModuleVerificationError(file, line, column, message);
+}
+
+function assertFactoryBindingIsNotReserved(
+  source: string,
+  filename: string,
+  offset: number,
+  name: string,
+): void {
+  if (!RESERVED_FACTORY_BINDING_SET.has(name)) {
+    return;
+  }
+  throw verificationErrorAt(
+    source,
+    filename,
+    offset,
+    `Reserved wrapper binding '${name}' is not allowed in SES mode`,
+  );
 }

@@ -220,6 +220,24 @@ describe("preflightCompiledBundle()", () => {
     );
   });
 
+  it("rejects tslib helper declarations with side effects in the helper body", () => {
+    const bundle = bundleWithCanonicalLoader(`
+  var __importStar = (this && this.__importStar) || function (mod) {
+    breakOut();
+    return mod;
+  };
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.default = 42;
+  });
+  return require("main");
+`);
+
+    expect(() => preflightCompiledBundle(bundle)).toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
   it("rejects arbitrary return expressions in the bundle tail", () => {
     const bundle = bundleWithCanonicalLoader(`
   define("main", ["require", "exports"], function (require, exports) {

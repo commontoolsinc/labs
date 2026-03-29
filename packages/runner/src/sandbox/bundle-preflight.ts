@@ -178,10 +178,8 @@ function isAllowedTsLibHelperDeclaration(normalized: string): boolean {
       return /^var__importDefault=\(this&&this\.__importDefault\)\|\|function\(\w+\)\{return\(\w+&&\w+\.__esModule\)\?\w+:\{"default":\w+\};\};?$/
         .test(normalized);
     case "__importStar":
-      return /^var__importStar=\(this&&this\.__importStar\)\|\|function\(\w+\)\{.*return\w+;\};?$/
+      return /^var__importStar=\(function\(\)\{.*returnfunction\(\w+\)\{.*return\w+;\};\}\)\(\);?$/
         .test(normalized) ||
-        /^var__importStar=\(function\(\)\{.*returnfunction\(\w+\)\{.*return\w+;\};\}\)\(\);?$/
-          .test(normalized) ||
         /^var__importStar=\(this&&this\.__importStar\)\|\|\(function\(\)\{.*returnfunction\(\w+\)\{.*return\w+;\};\}\)\(\);?$/
           .test(normalized);
     case "__createBinding":
