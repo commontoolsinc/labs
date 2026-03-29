@@ -7,7 +7,7 @@ import {
   MEMORY_V2_PROTOCOL,
 } from "@commontools/memory/v2";
 import { hashOf } from "@commontools/data-model/value-hash";
-import { Identity } from "@commontools/identity";
+import { createSession, Identity } from "@commontools/identity";
 import { type JSONSchema, Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
@@ -114,6 +114,57 @@ const serialTest = (
       current.resolve();
     }
   });
+
+serialTest(
+  "memory websocket authorizes v2 session opens with a workspace spaceIdentity",
+  async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: `memory-v2-space-identity-${Date.now()}`,
+    });
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+    const storageManager = StorageManager.open({
+      as: session.as,
+      address: new URL("/api/storage/memory", base),
+      spaceIdentity: session.spaceIdentity,
+      memoryVersion: "v2",
+    });
+    const runtime = new Runtime({
+      apiUrl: base,
+      storageManager,
+      memoryVersion: "v2",
+    });
+
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        session.space,
+        `memory-v2-space-identity-cell-${Date.now()}`,
+        undefined,
+        tx,
+      );
+      cell.set({ hello: "workspace" });
+
+      const result = await tx.commit();
+      assert("ok" in result);
+
+      await runtime.storageManager.synced();
+      const provider = runtime.storageManager.open(session.space);
+      assertEquals(
+        provider.replica.get({
+          id: cell.getAsNormalizedFullLink().id,
+          type: "application/json",
+        })?.is,
+        { value: { hello: "workspace" } },
+      );
+    } finally {
+      await runtime.dispose();
+      await server.shutdown();
+    }
+  },
+);
 
 serialTest(
   "memory websocket supports a runtime using the v2 cutover path",

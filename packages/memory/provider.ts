@@ -1600,6 +1600,72 @@ class MemoryProviderSession<
 
 export const close = ({ memory }: Session) => memory.close();
 
+type HttpResult<Ok, Err extends { name: string }> =
+  | { ok: Ok }
+  | { error: Err };
+
+export type JsonResponseSpec<Body = unknown, Status extends number = number> = {
+  body: Body;
+  status: Status;
+};
+
+const jsonResponseHeaders = {
+  "Content-Type": "application/json",
+} as const;
+
+export const jsonErrorBody = (
+  cause: unknown,
+  fallbackMessage = "Unable to parse request body",
+) => {
+  const error = cause as Partial<Error>;
+  return {
+    error: {
+      name: error?.name ?? "Error",
+      message: error?.message ?? fallbackMessage,
+      stack: error?.stack ?? "",
+    },
+  };
+};
+
+export const jsonResponseSpecFor = <
+  Ok,
+  Err extends { name: string },
+  OkBody,
+  ErrorBody,
+  OkStatus extends number,
+  ErrorStatus extends number,
+>(
+  result: HttpResult<Ok, Err>,
+  options: {
+    okStatus: OkStatus;
+    okBody: (ok: Ok) => OkBody;
+    errorStatus: (error: Err) => ErrorStatus;
+    errorBody: (error: Err) => ErrorBody;
+  },
+):
+  | JsonResponseSpec<OkBody, OkStatus>
+  | JsonResponseSpec<ErrorBody, ErrorStatus> => {
+  if ("ok" in result) {
+    return {
+      body: options.okBody(result.ok),
+      status: options.okStatus,
+    };
+  }
+  return {
+    body: options.errorBody(result.error),
+    status: options.errorStatus(result.error),
+  };
+};
+
+export const jsonResponse = (
+  body: unknown,
+  status: number,
+): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: jsonResponseHeaders,
+  });
+
 export const fetch = async (session: Session, request: Request) => {
   if (request.method === "PATCH") {
     return await patch(session, request);
@@ -1614,36 +1680,15 @@ export const patch = async (session: Session, request: Request) => {
   try {
     const transaction = await request.json() as Transaction;
     const result = await session.memory.transact(transaction);
-    const body = JSON.stringify(result);
-    const status = result.ok
-      ? 200
-      : result.error.name === "ConflictError"
-      ? 409
-      : 503;
-
-    return new Response(body, {
-      status,
-      headers: {
-        "Content-Type": "application/json",
-      },
+    const response = jsonResponseSpecFor(result, {
+      okStatus: 200,
+      okBody: (ok) => ({ ok }),
+      errorBody: (error) => ({ error }),
+      errorStatus: (error) => error.name === "ConflictError" ? 409 : 503,
     });
+    return jsonResponse(response.body, response.status);
   } catch (cause) {
-    const error = cause as Partial<Error>;
-    return new Response(
-      JSON.stringify({
-        error: {
-          name: error?.name ?? "Error",
-          message: error?.message ?? "Unable to parse request body",
-          stack: error?.stack ?? "",
-        },
-      }),
-      {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    );
+    return jsonResponse(jsonErrorBody(cause), 400);
   }
 };
 
@@ -1651,31 +1696,14 @@ export const post = async (session: Session, request: Request) => {
   try {
     const selector = await request.json() as Query;
     const result = await session.memory.query(selector);
-    const body = JSON.stringify(result);
-    const status = result.ok ? 200 : 404;
-
-    return new Response(body, {
-      status,
-      headers: {
-        "Content-Type": "application/json",
-      },
+    const response = jsonResponseSpecFor(result, {
+      okStatus: 200,
+      okBody: (ok) => ({ ok }),
+      errorBody: (error) => ({ error }),
+      errorStatus: () => 404,
     });
+    return jsonResponse(response.body, response.status);
   } catch (cause) {
-    const error = cause as Partial<Error>;
-    return new Response(
-      JSON.stringify({
-        error: {
-          name: error?.name ?? "Error",
-          message: error?.message ?? "Unable to parse request body",
-          stack: error?.stack ?? "",
-        },
-      }),
-      {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    );
+    return jsonResponse(jsonErrorBody(cause), 400);
   }
 };

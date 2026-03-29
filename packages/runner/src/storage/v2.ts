@@ -150,6 +150,7 @@ export interface Options {
   id?: string;
   settings?: IRemoteStorageProviderSettings;
   memoryVersion?: MemoryVersion;
+  spaceIdentity?: Signer;
 }
 
 export const defaultSettings: IRemoteStorageProviderSettings = {
@@ -158,7 +159,7 @@ export const defaultSettings: IRemoteStorageProviderSettings = {
 };
 
 export interface SessionFactory {
-  create(space: MemorySpace): Promise<{
+  create(space: MemorySpace, signer?: Signer): Promise<{
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }>;
@@ -360,14 +361,18 @@ class WebSocketTransport implements MemoryV2Client.Transport {
 }
 
 class RemoteSessionFactory implements SessionFactory {
-  constructor(private readonly address: URL, private readonly as: Signer) {}
+  constructor(
+    private readonly address: URL,
+    private readonly defaultSigner: Signer,
+  ) {}
 
   async #createSessionOpenAuth(
+    signer: Signer,
     space: MemorySpace,
     session: MemoryV2Client.MountOptions,
   ): Promise<MemoryV2Client.SessionOpenAuth> {
     const invocation = {
-      iss: this.as.did(),
+      iss: signer.did(),
       cmd: "session.open",
       sub: space,
       args: {
@@ -375,7 +380,7 @@ class RemoteSessionFactory implements SessionFactory {
         session,
       },
     };
-    const signature = await this.as.sign(hashOf(invocation).bytes);
+    const signature = await signer.sign(hashOf(invocation).bytes);
     if (signature.error) {
       throw signature.error;
     }
@@ -387,7 +392,7 @@ class RemoteSessionFactory implements SessionFactory {
     };
   }
 
-  async create(space: MemorySpace) {
+  async create(space: MemorySpace, signer = this.defaultSigner) {
     const client = await MemoryV2Client.connect({
       transport: new WebSocketTransport(this.address),
     });
@@ -395,7 +400,11 @@ class RemoteSessionFactory implements SessionFactory {
       space,
       {},
       (targetSpace, descriptor) =>
-        this.#createSessionOpenAuth(targetSpace as MemorySpace, descriptor),
+        this.#createSessionOpenAuth(
+          signer,
+          targetSpace as MemorySpace,
+          descriptor,
+        ),
     );
     return { client, session };
   }
@@ -411,6 +420,7 @@ export class StorageManager implements IStorageManager {
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
   #sessionFactory: SessionFactory;
+  #spaceIdentity?: Signer;
 
   static open(options: Options) {
     return new this(
@@ -427,17 +437,21 @@ export class StorageManager implements IStorageManager {
     this.as = options.as;
     this.#settings = options.settings ?? defaultSettings;
     this.#sessionFactory = sessionFactory;
+    this.#spaceIdentity = options.spaceIdentity;
   }
 
   open(space: MemorySpace): IStorageProviderWithReplica {
     let provider = this.#providers.get(space);
     if (!provider) {
+      const signer = this.#spaceIdentity?.did() === space
+        ? this.#spaceIdentity
+        : this.as;
       provider = new Provider({
-        as: this.as,
+        as: signer,
         space,
         settings: this.#settings,
         subscription: this.#subscription,
-        createSession: () => this.#sessionFactory.create(space),
+        createSession: () => this.#sessionFactory.create(space, signer),
       });
       this.#providers.set(space, provider);
     }

@@ -151,6 +151,29 @@ describe("memoryVersion cutover seam", () => {
     await storageManager.close();
   });
 
+  it("routes explicit remote v2 opens to the dedicated v2 storage manager", async () => {
+    const remoteV1 = RemoteStorageManager.open({
+      as: signer,
+      address: new URL("http://example.com/api/storage/memory"),
+      memoryVersion: "v1",
+    });
+    const remoteV2 = RemoteStorageManager.open({
+      as: signer,
+      address: new URL("http://example.com/api/storage/memory"),
+      memoryVersion: "v2",
+    });
+
+    expect(Object.getPrototypeOf(remoteV1).constructor).toBe(
+      RemoteStorageManager,
+    );
+    expect(Object.getPrototypeOf(remoteV2).constructor).toBe(
+      V2Storage.StorageManager,
+    );
+
+    await remoteV1.close();
+    await remoteV2.close();
+  });
+
   it("rejects a runtime/storage manager memoryVersion mismatch", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,

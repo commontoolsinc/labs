@@ -270,7 +270,6 @@ export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
         const { error } = result;
         span.setAttribute("memory.status", "error");
         span.setAttribute("memory.error_type", error.name);
-
         if (error.name === "ConflictError") {
           return c.json({ error }, 409);
         } else if (error.name === "AuthorizationError") {
@@ -280,11 +279,11 @@ export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
         }
       }
     } catch (cause) {
-      const { message, stack, name } = (cause ?? new Error()) as Error;
+      const { message, name } = (cause ?? new Error()) as Error;
       span.setAttribute("memory.status", "exception");
       span.setAttribute("error.message", message);
       span.setAttribute("error.type", name);
-      return c.json({ error: { message, name, stack } }, 500);
+      return c.json(Memory.Provider.jsonErrorBody(cause), 500);
     }
   });
 };
@@ -309,7 +308,6 @@ export const query: AppRouteHandler<typeof Routes.query> = async (c) => {
       } else {
         span.setAttribute("memory.status", "error");
         span.setAttribute("memory.error_type", result.error.name);
-
         if (result.error.name === "AuthorizationError") {
           return c.json({ error: result.error }, 401);
         } else {
@@ -317,11 +315,11 @@ export const query: AppRouteHandler<typeof Routes.query> = async (c) => {
         }
       }
     } catch (cause) {
-      const { message, stack, name } = (cause ?? new Error()) as Error;
+      const { message, name } = (cause ?? new Error()) as Error;
       span.setAttribute("memory.status", "exception");
       span.setAttribute("error.message", message);
       span.setAttribute("error.type", name);
-      return c.json({ error: { message, name, stack } }, 500);
+      return c.json(Memory.Provider.jsonErrorBody(cause), 500);
     }
   });
 };
