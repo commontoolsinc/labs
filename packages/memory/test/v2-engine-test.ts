@@ -1103,6 +1103,42 @@ Deno.test("memory v2 engine supports branch inheritance, divergence, and deletio
   }
 });
 
+Deno.test("memory v2 engine rejects branch reads before createdSeq", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:branch-bounds",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:branch-bounds-doc",
+          value: toEntityDocument({ count: 1 }),
+        }],
+      },
+    });
+    createBranch(engine, "feature");
+
+    assertThrows(
+      () =>
+        read(engine, {
+          id: "entity:branch-bounds-doc",
+          branch: "feature",
+          seq: 0,
+        }),
+      Error,
+      "seq 0 is out of range for branch feature",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine persists rich patch values at the storage boundary", async () => {
   setStorableValueConfig({ richStorableValues: true });
   setJsonEncodingConfig(true);

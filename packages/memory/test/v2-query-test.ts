@@ -421,6 +421,22 @@ Deno.test("memory v2 queryGraph honors atSeq and since", async () => {
       combined.entities.map((entity) => entity.id),
       [fixture.rootId],
     );
+
+    const historicalIncremental = queryGraph(space, engine, {
+      roots: [{
+        id: fixture.rootId,
+        selector: {
+          path: [],
+          schema: fixture.schema,
+        },
+      }],
+      atSeq: 1,
+      since: 1,
+    });
+    assertEquals(
+      historicalIncremental.entities.map((entity) => entity.id),
+      [fixture.rootId],
+    );
   } finally {
     close(engine);
     await Deno.remove(path);

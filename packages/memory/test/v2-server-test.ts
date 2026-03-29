@@ -1,4 +1,4 @@
-import { assertEquals, assertExists, assertThrows } from "@std/assert";
+import { assertEquals, assertExists } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { Server, SessionRegistry } from "../v2/server.ts";
 import {
@@ -55,24 +55,31 @@ const createServer = (store: string, refreshDelayMs = 0) =>
     subscriptionRefreshDelayMs: refreshDelayMs,
   });
 
-Deno.test("memory v2 session registry rejects reopening a session id on a different space", () => {
+Deno.test("memory v2 session registry scopes session ids by space", () => {
   const sessions = new SessionRegistry();
-  sessions.open("did:key:z6Mk-space-one", { sessionId: "session:fixed" }, 0);
-
-  assertThrows(
-    () =>
-      sessions.open(
-        "did:key:z6Mk-space-two",
-        { sessionId: "session:fixed" },
-        0,
-      ),
-    Error,
-    "session session:fixed is already bound to did:key:z6Mk-space-one",
+  const first = sessions.open(
+    "did:key:z6Mk-space-one",
+    { sessionId: "session:fixed" },
+    0,
   );
+  const second = sessions.open(
+    "did:key:z6Mk-space-two",
+    { sessionId: "session:fixed" },
+    0,
+  );
+
+  assertEquals(first, {
+    sessionId: "session:fixed",
+    serverSeq: 0,
+  });
+  assertEquals(second, {
+    sessionId: "session:fixed",
+    serverSeq: 0,
+  });
 });
 
-Deno.test("memory v2 server reports cross-space session id conflicts as protocol errors", async () => {
-  const server = createServer("memory://memory-v2-server-session-conflict");
+Deno.test("memory v2 server allows the same session id in different spaces", async () => {
+  const server = createServer("memory://memory-v2-server-session-scope");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
 
@@ -104,10 +111,72 @@ Deno.test("memory v2 server reports cross-space session id conflicts as protocol
     assertEquals(shiftMessage(messages), {
       type: "response",
       requestId: "open-2",
+      ok: {
+        sessionId: "session:fixed",
+        serverSeq: 0,
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server binds resumed sessions to the original principal", async () => {
+  const server = new Server({
+    store: new URL("memory://memory-v2-server-session-principal"),
+    authorizeSessionOpen(message) {
+      return typeof (message.authorization as { principal?: unknown })
+          ?.principal ===
+          "string"
+        ? (message.authorization as { principal: string }).principal
+        : undefined;
+    },
+  });
+  const firstMessages: ServerMessage[] = [];
+  const secondMessages: ServerMessage[] = [];
+  const firstConnection = server.connect((message) =>
+    firstMessages.push(message)
+  );
+  const secondConnection = server.connect((message) =>
+    secondMessages.push(message)
+  );
+
+  try {
+    await firstConnection.receive(encodeMemoryV2Boundary(HELLO));
+    assertEquals(shiftMessage(firstMessages), HELLO_OK);
+
+    await firstConnection.receive(encodeMemoryV2Boundary({
+      type: "session.open",
+      requestId: "open-1",
+      space: "did:key:z6Mk-space-one",
+      session: { sessionId: "session:fixed" },
+      authorization: { principal: "did:key:z6Mk-alice" },
+    }));
+    assertEquals(shiftMessage(firstMessages), {
+      type: "response",
+      requestId: "open-1",
+      ok: {
+        sessionId: "session:fixed",
+        serverSeq: 0,
+      },
+    });
+
+    await secondConnection.receive(encodeMemoryV2Boundary(HELLO));
+    assertEquals(shiftMessage(secondMessages), HELLO_OK);
+
+    await secondConnection.receive(encodeMemoryV2Boundary({
+      type: "session.open",
+      requestId: "open-2",
+      space: "did:key:z6Mk-space-one",
+      session: { sessionId: "session:fixed" },
+      authorization: { principal: "did:key:z6Mk-bob" },
+    }));
+    assertEquals(shiftMessage(secondMessages), {
+      type: "response",
+      requestId: "open-2",
       error: {
-        name: "ProtocolError",
-        message:
-          "session session:fixed is already bound to did:key:z6Mk-space-one",
+        name: "AuthorizationError",
+        message: "session session:fixed is already bound to did:key:z6Mk-alice",
       },
     });
   } finally {

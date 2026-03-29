@@ -637,9 +637,11 @@ const confirmPendingInModel = (
   seq: number,
   operations: RootOp[],
 ) => {
-  for (const operation of operations) {
-    const record = model.get(operation.id)!;
-    const pending = record.pending.find((entry) => entry.localSeq === localSeq);
+  for (const id of new Set(operations.map((operation) => operation.id))) {
+    const record = model.get(id)!;
+    const pending = [...record.pending].findLast((entry) =>
+      entry.localSeq === localSeq
+    );
     if (!pending) {
       continue;
     }
@@ -1476,6 +1478,24 @@ Deno.test("memory v2 stacked commits: C1->C2->C3 where C2 fails and C3 error is 
 
     await assertConflict(c2.promise);
     await assertConflict(c3.promise, "pending dependency");
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits confirm the last write for duplicate ids in one batch", async () => {
+  const harness = await createHarness();
+  try {
+    const commit = beginBatch(harness, [
+      { op: "set", id: DOCS.A, value: valueFor("first") },
+      { op: "set", id: DOCS.A, value: valueFor("second") },
+    ]);
+    harness.model.setOutcome(commit.localSeq, { kind: "accept" });
+
+    await assertResultOk(commit.promise);
+
+    assertEquals(visibleValue(harness.provider, DOCS.A), valueFor("second"));
+    assertEquals(currentSeq(harness, DOCS.A), 1);
   } finally {
     await harness.close();
   }

@@ -6,6 +6,7 @@ import {
   getMemoryV2Flags,
   MEMORY_V2_PROTOCOL,
 } from "@commontools/memory/v2";
+import { hashOf } from "@commontools/data-model/value-hash";
 import { Identity } from "@commontools/identity";
 import { type JSONSchema, Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -23,6 +24,32 @@ const openSocket = async (url: URL): Promise<WebSocket> => {
     socket.addEventListener("error", (event) => reject(event), { once: true });
   });
   return socket;
+};
+
+const createSessionOpenAuth = async (
+  identity: Identity,
+  space: string,
+  session: { sessionId?: string; seenSeq?: number } = {},
+) => {
+  const invocation = {
+    iss: identity.did(),
+    cmd: "session.open",
+    sub: space,
+    args: {
+      protocol: MEMORY_V2_PROTOCOL,
+      session,
+    },
+  };
+  const signature = await identity.sign(hashOf(invocation).bytes);
+  if (signature.error) {
+    throw signature.error;
+  }
+  return {
+    invocation,
+    authorization: {
+      signature: signature.ok,
+    },
+  };
 };
 
 const readJsonMessage = async <Message>(
@@ -199,10 +226,12 @@ serialTest(
 );
 
 serialTest("memory websocket negotiates a v2 session", async () => {
+  const identity = await Identity.fromPassphrase("memory-v2-route-open-auth");
   const server = Deno.serve({ port: 0 }, app.fetch);
   const address = new URL(
     `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
   );
+  const space = identity.did();
 
   try {
     const socket = await openSocket(address);
@@ -218,11 +247,13 @@ serialTest("memory websocket negotiates a v2 session", async () => {
     assertEquals(message.protocol, MEMORY_V2_PROTOCOL);
     assertEquals(message.flags, getMemoryV2Flags());
 
+    const auth = await createSessionOpenAuth(identity, space);
     socket.send(encodeMemoryV2Boundary({
       type: "session.open",
       requestId: "open-1",
-      space: "did:key:z6Mk-toolshed-open",
+      space,
       session: {},
+      ...auth,
     }));
 
     const opened = await readJsonMessage<{
@@ -242,11 +273,48 @@ serialTest("memory websocket negotiates a v2 session", async () => {
   }
 });
 
-serialTest("memory websocket resumes a requested v2 session id", async () => {
+serialTest("memory websocket rejects an unsigned v2 session open", async () => {
+  const identity = await Identity.fromPassphrase("memory-v2-route-open-reject");
   const server = Deno.serve({ port: 0 }, app.fetch);
   const address = new URL(
     `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
   );
+  let socket: WebSocket | undefined;
+
+  try {
+    socket = await openSocket(address);
+    socket.send(encodeMemoryV2Boundary(HELLO));
+    await readJsonMessage(socket);
+
+    socket.send(encodeMemoryV2Boundary({
+      type: "session.open",
+      requestId: "open-1",
+      space: identity.did(),
+      session: {},
+    }));
+
+    const message = await readJsonMessage<{
+      type: "response";
+      requestId: string;
+      error: { name: string; message: string };
+    }>(socket);
+
+    assertEquals(message.type, "response");
+    assertEquals(message.requestId, "open-1");
+    assertEquals(message.error.name, "AuthorizationError");
+  } finally {
+    socket?.close();
+    await server.shutdown();
+  }
+});
+
+serialTest("memory websocket resumes a requested v2 session id", async () => {
+  const identity = await Identity.fromPassphrase("memory-v2-route-resume-auth");
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+  const space = identity.did();
 
   try {
     const socket = await openSocket(address);
@@ -254,14 +322,19 @@ serialTest("memory websocket resumes a requested v2 session id", async () => {
 
     await readJsonMessage(socket);
 
+    const auth = await createSessionOpenAuth(identity, space, {
+      sessionId: "session:test-resume",
+      seenSeq: 7,
+    });
     socket.send(encodeMemoryV2Boundary({
       type: "session.open",
       requestId: "open-1",
-      space: "did:key:z6Mk-toolshed-resume",
+      space,
       session: {
         sessionId: "session:test-resume",
         seenSeq: 7,
       },
+      ...auth,
     }));
 
     const message = await readJsonMessage<{

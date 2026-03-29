@@ -37,6 +37,16 @@ export interface MountOptions {
   seenSeq?: number;
 }
 
+export interface SessionOpenAuth {
+  invocation: Record<string, unknown>;
+  authorization: unknown;
+}
+
+export type SessionOpenAuthFactory = (
+  space: string,
+  session: MountOptions,
+) => Promise<SessionOpenAuth | undefined> | SessionOpenAuth | undefined;
+
 export interface WatchMutationResult {
   view: WatchView;
   sync: SessionSync;
@@ -94,13 +104,16 @@ export class Client {
   async mount(
     space: string,
     options: MountOptions = {},
+    openAuthFactory?: SessionOpenAuthFactory,
   ): Promise<SpaceSession> {
-    const result = await this.openSession(space, options);
+    const auth = await openAuthFactory?.(space, options);
+    const result = await this.openSession(space, options, auth);
     const session = new SpaceSession(
       this,
       space,
       result.sessionId,
       result.serverSeq,
+      openAuthFactory,
     );
     this.#spaces.add(session);
     return session;
@@ -128,12 +141,14 @@ export class Client {
   async openSession(
     space: string,
     session: MountOptions,
+    auth?: SessionOpenAuth,
   ): Promise<SessionOpenResult> {
     return await this.request<SessionOpenResult>({
       type: "session.open",
       requestId: this.nextRequestId(),
       space,
       session,
+      ...(auth ? auth : {}),
     });
   }
 
@@ -334,6 +349,7 @@ export class SpaceSession {
     readonly space: string,
     sessionId: string,
     serverSeq: number,
+    private readonly openAuthFactory?: SessionOpenAuthFactory,
   ) {
     this.#sessionId = sessionId;
     this.#serverSeq = serverSeq;
@@ -616,10 +632,15 @@ export class SpaceSession {
   }
 
   private async reopen(): Promise<SessionOpenResult> {
+    const session = {
+      sessionId: this.#sessionId,
+      seenSeq: this.#serverSeq,
+    };
+    const auth = await this.openAuthFactory?.(this.space, session);
     const restored = await this.client.openSession(this.space, {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
-    });
+    }, auth);
     this.#sessionId = restored.sessionId;
     this.noteResult(restored.serverSeq);
     return restored;
@@ -642,8 +663,9 @@ export class SpaceSession {
 
     const flush = (async () => {
       while (this.client.isConnected() && this.#outstandingCommits.size > 0) {
-        const next = [...this.#outstandingCommits.entries()]
-          .sort(([left], [right]) => left - right)[0];
+        // localSeq values are monotonic, so Map insertion order already matches
+        // replay order for retained commits.
+        const next = this.#outstandingCommits.entries().next().value;
         if (!next) {
           return;
         }

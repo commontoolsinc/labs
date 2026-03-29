@@ -168,6 +168,8 @@ export interface SessionOpenRequest {
   requestId: string;
   space: string;
   session: SessionDescriptor;
+  invocation?: Record<string, unknown>;
+  authorization?: StorableDatum;
 }
 
 export interface GraphQueryRoot {

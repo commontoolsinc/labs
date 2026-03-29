@@ -9,11 +9,13 @@ import {
   type TransactionError,
   type URI,
 } from "@commontools/memory/interface";
+import { hashOf } from "@commontools/data-model/value-hash";
 import { assert, unclaimed } from "@commontools/memory/fact";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import {
   type DocumentPath,
   type EntityDocument,
+  MEMORY_V2_PROTOCOL,
   type PatchOp,
   type SessionSync,
   toDocumentPath,
@@ -358,13 +360,43 @@ class WebSocketTransport implements MemoryV2Client.Transport {
 }
 
 class RemoteSessionFactory implements SessionFactory {
-  constructor(private readonly address: URL) {}
+  constructor(private readonly address: URL, private readonly as: Signer) {}
+
+  async #createSessionOpenAuth(
+    space: MemorySpace,
+    session: MemoryV2Client.MountOptions,
+  ): Promise<MemoryV2Client.SessionOpenAuth> {
+    const invocation = {
+      iss: this.as.did(),
+      cmd: "session.open",
+      sub: space,
+      args: {
+        protocol: MEMORY_V2_PROTOCOL,
+        session,
+      },
+    };
+    const signature = await this.as.sign(hashOf(invocation).bytes);
+    if (signature.error) {
+      throw signature.error;
+    }
+    return {
+      invocation,
+      authorization: {
+        signature: signature.ok,
+      },
+    };
+  }
 
   async create(space: MemorySpace) {
     const client = await MemoryV2Client.connect({
       transport: new WebSocketTransport(this.address),
     });
-    const session = await client.mount(space);
+    const session = await client.mount(
+      space,
+      {},
+      (targetSpace, descriptor) =>
+        this.#createSessionOpenAuth(targetSpace as MemorySpace, descriptor),
+    );
     return { client, session };
   }
 }
@@ -381,7 +413,10 @@ export class StorageManager implements IStorageManager {
   #sessionFactory: SessionFactory;
 
   static open(options: Options) {
-    return new this(options, new RemoteSessionFactory(options.address));
+    return new this(
+      options,
+      new RemoteSessionFactory(options.address, options.as),
+    );
   }
 
   protected constructor(
@@ -1318,9 +1353,9 @@ class SpaceReplica implements ISpaceReplica {
     >,
     applied: AppliedCommit,
   ): void {
-    for (const operation of operations) {
-      const record = this.record(operation.id);
-      const pending = record.pending.find((entry) =>
+    for (const id of new Set(operations.map((operation) => operation.id))) {
+      const record = this.record(id);
+      const pending = [...record.pending].findLast((entry) =>
         entry.localSeq === localSeq
       );
       if (!pending) {

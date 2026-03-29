@@ -12,6 +12,7 @@ import {
 import * as Codec from "@commonfabric/memory/codec";
 import * as Commit from "@commonfabric/memory/commit";
 import { Identity } from "@commonfabric/identity";
+import { bufferTextMessagesUntilNegotiated } from "./memory.handlers.ts";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
@@ -27,6 +28,48 @@ export const alice = await Identity.fromString(
 export const space = await Identity.fromString(
   "MCl6B1cu1ZOP0I3BBovjAqo57VImrMVyfLiSmNKoddXs=",
 );
+
+class FakeSocket extends EventTarget {
+  readyState: number = WebSocket.OPEN;
+
+  send(_data: string): void {
+  }
+
+  close(): void {
+    this.readyState = WebSocket.CLOSED;
+    this.dispatchEvent(new CloseEvent("close"));
+  }
+
+  emitMessage(data: unknown): void {
+    this.dispatchEvent(new MessageEvent("message", { data }));
+  }
+}
+
+Deno.test("memory websocket negotiation handoff preserves buffered and live frames", async () => {
+  const socket = new FakeSocket();
+  const negotiation = bufferTextMessagesUntilNegotiated(
+    socket as unknown as WebSocket,
+  );
+
+  socket.emitMessage("first");
+  assertEquals(await negotiation.firstMessage, "first");
+
+  socket.emitMessage("buffered-before-handoff");
+
+  const received: string[] = [];
+  negotiation.handoff({
+    onMessage(message) {
+      received.push(message);
+    },
+  });
+
+  socket.emitMessage("after-handoff");
+
+  assertEquals(received, [
+    "buffered-before-handoff",
+    "after-handoff",
+  ]);
+});
 
 Deno.test("test transaction", async () => {
   const server = Deno.serve({ port: 9000 }, app.fetch);

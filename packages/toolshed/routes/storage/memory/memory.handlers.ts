@@ -6,16 +6,31 @@ import { Memory, memory, memoryV2Server } from "../memory.ts";
 import * as Codec from "@commonfabric/memory/codec";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
 
-const bufferTextMessagesUntilNegotiated = (
+type NegotiatedSocketHandlers = {
+  onMessage: (message: string) => void;
+  onClose?: () => void;
+  onError?: (error: Error) => void;
+};
+
+export const bufferTextMessagesUntilNegotiated = (
   socket: WebSocket,
 ): {
   firstMessage: Promise<string | undefined>;
-  snapshotBufferedMessages: () => string[];
+  handoff: (handlers: NegotiatedSocketHandlers) => void;
   dispose: () => void;
 } => {
   let settled = false;
-  const bufferedMessages: string[] = [];
+  let bufferedMessages: string[] = [];
   let cleanup = () => {};
+  let handlers: NegotiatedSocketHandlers | null = null;
+
+  const forwardMessage = (message: string) => {
+    if (handlers === null) {
+      bufferedMessages.push(message);
+      return;
+    }
+    handlers.onMessage(message);
+  };
 
   const firstMessage = new Promise<string | undefined>((resolve, reject) => {
     const onMessage = (event: MessageEvent) => {
@@ -23,6 +38,10 @@ const bufferTextMessagesUntilNegotiated = (
         if (!settled) {
           cleanup();
           reject(new Error("Memory websocket expects text frames"));
+        } else {
+          handlers?.onError?.(
+            new Error("Memory websocket expects text frames"),
+          );
         }
         return;
       }
@@ -33,7 +52,7 @@ const bufferTextMessagesUntilNegotiated = (
         return;
       }
 
-      bufferedMessages.push(event.data);
+      forwardMessage(event.data);
     };
 
     const onClose = () => {
@@ -41,14 +60,18 @@ const bufferTextMessagesUntilNegotiated = (
       if (!settled) {
         settled = true;
         resolve(undefined);
+        return;
       }
+      handlers?.onClose?.();
     };
 
     const onError = () => {
       cleanup();
       if (!settled) {
         reject(new Error("Memory websocket failed before negotiation"));
+        return;
       }
+      handlers?.onError?.(new Error("Memory websocket receive failure"));
     };
 
     cleanup = () => {
@@ -64,7 +87,14 @@ const bufferTextMessagesUntilNegotiated = (
 
   return {
     firstMessage,
-    snapshotBufferedMessages: () => [...bufferedMessages],
+    handoff(nextHandlers) {
+      handlers = nextHandlers;
+      const queued = bufferedMessages;
+      bufferedMessages = [];
+      for (const message of queued) {
+        nextHandlers.onMessage(message);
+      }
+    },
     dispose: cleanup,
   };
 };
@@ -81,13 +111,19 @@ const attachSocketPipeline = (
 };
 
 const attachV1SocketPipeline = (
-  channel: TransformStream<string, string>,
-) => attachSocketPipeline(channel, memory.session());
+  socket: WebSocket,
+  negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
+  firstMessage: string,
+) =>
+  attachSocketPipeline(
+    createTextSocketChannel(socket, negotiation, [firstMessage]),
+    memory.session(),
+  );
 
 const attachV2SocketPipeline = (
   socket: WebSocket,
+  negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
   firstMessage: string,
-  bufferedMessages: readonly string[],
 ): boolean => {
   if (MemoryV2Server.parseClientMessage(firstMessage) === null) {
     return false;
@@ -112,36 +148,104 @@ const attachV2SocketPipeline = (
     }
     socket.send(encodeMemoryV2Boundary(message));
   });
-  const onClose = () => {
-    socket.removeEventListener("message", onMessage);
+  const closeConnection = () => {
     connection.close();
   };
-  const onMessage = (event: MessageEvent) => {
-    if (typeof event.data !== "string") {
-      safeSocketClose(1003, "Memory websocket expects text frames");
-      return;
-    }
-    void connection.receive(event.data).catch(() => {
-      safeSocketClose(1011, "Memory websocket receive failure");
-    });
-  };
-  socket.addEventListener("message", onMessage);
-  socket.addEventListener("close", onClose, { once: true });
-  socket.addEventListener("error", onClose, { once: true });
   void (async () => {
     try {
       await connection.receive(firstMessage);
-      for (const message of bufferedMessages) {
-        await connection.receive(message);
-      }
+      negotiation.handoff({
+        onMessage(message) {
+          void connection.receive(message).catch(() => {
+            safeSocketClose(1011, "Memory websocket receive failure");
+            closeConnection();
+          });
+        },
+        onClose: closeConnection,
+        onError(error) {
+          safeSocketClose(
+            error.message === "Memory websocket expects text frames"
+              ? 1003
+              : 1011,
+            error.message,
+          );
+          closeConnection();
+        },
+      });
     } catch {
       safeSocketClose(1011, "Memory websocket setup failure");
-      onClose();
+      closeConnection();
     }
   })();
 
   return true;
 };
+
+const waitForSocketOpen = async (socket: WebSocket): Promise<void> => {
+  if (socket.readyState === WebSocket.OPEN) {
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    socket.addEventListener("open", () => resolve(), { once: true });
+    socket.addEventListener(
+      "error",
+      () => reject(new Error("Memory websocket failed to open")),
+      { once: true },
+    );
+  });
+};
+
+const createTextSocketChannel = (
+  socket: WebSocket,
+  negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
+  prefix: readonly string[],
+): TransformStream<string, string> => ({
+  readable: new ReadableStream({
+    start(controller) {
+      for (const item of prefix) {
+        controller.enqueue(item);
+      }
+      negotiation.handoff({
+        onMessage(message) {
+          controller.enqueue(message);
+        },
+        onClose() {
+          controller.close();
+        },
+        onError(error) {
+          controller.error(error);
+        },
+      });
+    },
+    cancel() {
+      try {
+        socket.close();
+      } catch {
+        // Ignore close races with the peer.
+      }
+    },
+  }),
+  writable: new WritableStream({
+    async write(data) {
+      await waitForSocketOpen(socket);
+      socket.send(data);
+    },
+    close() {
+      try {
+        socket.close();
+      } catch {
+        // Ignore close races with the peer.
+      }
+    },
+    abort() {
+      try {
+        socket.close();
+      } catch {
+        // Ignore close races with the peer.
+      }
+    },
+  }),
+});
 
 export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
   return await createSpan("memory.transact", async (span) => {
@@ -234,24 +338,17 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
         const negotiation = bufferTextMessagesUntilNegotiated(socket);
         const firstMessage = await negotiation.firstMessage;
         if (firstMessage === undefined) {
+          negotiation.dispose();
           setupSpan.setAttribute("socket.setup", "closed-before-message");
           return;
         }
 
-        const bufferedMessages = negotiation.snapshotBufferedMessages();
-
-        if (attachV2SocketPipeline(socket, firstMessage, bufferedMessages)) {
-          negotiation.dispose();
+        if (attachV2SocketPipeline(socket, negotiation, firstMessage)) {
           setupSpan.setAttribute("socket.setup", "memory-v2");
           return;
         }
 
-        const channel = Memory.Socket.fromWithPrefix<string, string>(socket, [
-          firstMessage,
-          ...bufferedMessages,
-        ]);
-        negotiation.dispose();
-        attachV1SocketPipeline(channel);
+        attachV1SocketPipeline(socket, negotiation, firstMessage);
         setupSpan.setAttribute("socket.setup", "memory-v1");
       }).catch(() => {
         if (socket.readyState === WebSocket.OPEN) {

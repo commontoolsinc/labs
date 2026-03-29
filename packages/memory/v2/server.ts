@@ -60,6 +60,8 @@ type SessionState = {
   entities: Map<string, SessionCacheEntry>;
   trackedIds: Set<string>;
   expiresAt: number | null;
+  attachedConnections: number;
+  principal?: string;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -97,6 +99,12 @@ const sameSnapshot = (
 
 const isEmptySync = (sync: SessionSync): boolean =>
   sync.upserts.length === 0 && sync.removes.length === 0;
+
+const sessionKey = (space: string, sessionId: string): string =>
+  `${space}\0${sessionId}`;
+
+const authorizationError = (message: string): Error =>
+  Object.assign(new Error(message), { name: "AuthorizationError" });
 
 const toCacheEntry = (
   entity: EntitySnapshot,
@@ -233,9 +241,9 @@ export class SessionRegistry {
   }
 
   #prune(now = Date.now()): void {
-    for (const [sessionId, session] of this.#sessions) {
+    for (const [key, session] of this.#sessions) {
       if (session.expiresAt !== null && session.expiresAt <= now) {
-        this.#sessions.delete(sessionId);
+        this.#sessions.delete(key);
       }
     }
   }
@@ -244,20 +252,25 @@ export class SessionRegistry {
     space: string,
     session: SessionDescriptor,
     serverSeq: number,
+    principal?: string,
   ): SessionOpenResult {
     this.#prune();
     const sessionId = session.sessionId ?? crypto.randomUUID();
-    const existing = this.#sessions.get(sessionId);
-    if (existing !== undefined && existing.space !== space) {
-      throw new Error(
-        `session ${sessionId} is already bound to ${existing.space}`,
+    const key = sessionKey(space, sessionId);
+    const existing = this.#sessions.get(key);
+    if (
+      existing?.principal !== undefined &&
+      principal !== existing.principal
+    ) {
+      throw authorizationError(
+        `session ${sessionId} is already bound to ${existing.principal}`,
       );
     }
     const seenSeq = Math.max(
       existing?.seenSeq ?? 0,
       session.seenSeq ?? 0,
     );
-    this.#sessions.set(sessionId, {
+    this.#sessions.set(key, {
       id: sessionId,
       space,
       seenSeq,
@@ -267,7 +280,11 @@ export class SessionRegistry {
       entities: existing?.entities ?? new Map(),
       trackedIds: existing?.trackedIds ??
         trackedIdsFromEntries(existing?.entities?.values() ?? []),
-      expiresAt: null,
+      expiresAt: existing?.attachedConnections === 0
+        ? existing.expiresAt
+        : null,
+      attachedConnections: existing?.attachedConnections ?? 0,
+      principal: existing?.principal ?? principal,
     });
     return {
       sessionId,
@@ -278,11 +295,7 @@ export class SessionRegistry {
 
   get(space: string, sessionId: string): SessionState | null {
     this.#prune();
-    const session = this.#sessions.get(sessionId);
-    if (session === undefined || session.space !== space) {
-      return null;
-    }
-    return session;
+    return this.#sessions.get(sessionKey(space, sessionId)) ?? null;
   }
 
   updateSeenSeq(
@@ -298,26 +311,54 @@ export class SessionRegistry {
     return session;
   }
 
-  detach(sessionId: string): void {
-    const session = this.#sessions.get(sessionId);
+  attach(space: string, sessionId: string): void {
+    const session = this.#sessions.get(sessionKey(space, sessionId));
     if (session !== undefined) {
-      session.expiresAt = Date.now() + this.#ttlMs;
+      session.attachedConnections += 1;
+      session.expiresAt = null;
+    }
+  }
+
+  detach(space: string, sessionId: string): void {
+    const session = this.#sessions.get(sessionKey(space, sessionId));
+    if (session !== undefined) {
+      session.attachedConnections = Math.max(
+        session.attachedConnections - 1,
+        0,
+      );
+      if (session.attachedConnections === 0) {
+        session.expiresAt = Date.now() + this.#ttlMs;
+      }
     }
   }
 }
 
 type Send = (message: ServerMessage) => void;
 
+type SessionHandle = {
+  space: string;
+  sessionId: string;
+};
+
 class Connection {
   #ready = false;
   #closed = false;
-  #sessionIds = new Set<string>();
+  #sessions = new Map<string, SessionHandle>();
   #receiving: Promise<void> = Promise.resolve();
 
   constructor(private readonly server: Server, private readonly send: Send) {}
 
-  hasSession(sessionId: string): boolean {
-    return this.#sessionIds.has(sessionId);
+  hasSession(space: string, sessionId: string): boolean {
+    return this.#sessions.has(sessionKey(space, sessionId));
+  }
+
+  addSession(space: string, sessionId: string): void {
+    const key = sessionKey(space, sessionId);
+    if (this.#sessions.has(key)) {
+      return;
+    }
+    this.#sessions.set(key, { space, sessionId });
+    this.server.attachSession(space, sessionId);
   }
 
   async receive(payload: string): Promise<void> {
@@ -401,7 +442,7 @@ class Connection {
       case "session.open": {
         const response = await this.server.openSession(parsed);
         if (response.ok?.sessionId) {
-          this.#sessionIds.add(response.ok.sessionId);
+          this.addSession(parsed.space, response.ok.sessionId);
         }
         this.send(response);
         return;
@@ -432,7 +473,7 @@ class Connection {
       return;
     }
 
-    for (const sessionId of this.#sessionIds) {
+    for (const { sessionId } of this.#sessions.values()) {
       if (this.#closed) {
         return;
       }
@@ -455,8 +496,8 @@ class Connection {
       return;
     }
     this.#closed = true;
-    for (const sessionId of this.#sessionIds) {
-      this.server.detachSession(sessionId);
+    for (const { space, sessionId } of this.#sessions.values()) {
+      this.server.detachSession(space, sessionId);
     }
     this.server.disconnect(this);
   }
@@ -478,6 +519,9 @@ export class Server {
       sessions?: SessionRegistry;
       store?: URL;
       subscriptionRefreshDelayMs?: number;
+      authorizeSessionOpen?: (
+        message: SessionOpenRequest,
+      ) => Promise<string | undefined> | string | undefined;
     } = {},
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
@@ -497,8 +541,12 @@ export class Server {
     }
   }
 
-  detachSession(sessionId: string): void {
-    this.#sessions.detach(sessionId);
+  attachSession(space: string, sessionId: string): void {
+    this.#sessions.attach(space, sessionId);
+  }
+
+  detachSession(space: string, sessionId: string): void {
+    this.#sessions.detach(space, sessionId);
   }
 
   async close(): Promise<void> {
@@ -516,10 +564,12 @@ export class Server {
   ): Promise<ResponseMessage<SessionOpenResult>> {
     try {
       const engine = await this.openEngine(message.space);
+      const principal = await this.options.authorizeSessionOpen?.(message);
       const opened = this.#sessions.open(
         message.space,
         message.session,
         Engine.serverSeq(engine),
+        principal,
       );
       const catchup = opened.resumed === true
         ? await this.syncSessionForConnection(
@@ -539,7 +589,9 @@ export class Server {
       return respondTypedError<SessionOpenResult>(
         message.requestId,
         toError(
-          "ProtocolError",
+          error instanceof Error && error.name === "AuthorizationError"
+            ? "AuthorizationError"
+            : "ProtocolError",
           error instanceof Error ? error.message : String(error),
         ),
       );
@@ -1263,6 +1315,9 @@ export const parseClientMessage = (
           ? parsed.session.seenSeq
           : undefined,
       },
+      invocation: isRecord(parsed.invocation) ? parsed.invocation : undefined,
+      authorization: parsed
+        .authorization as SessionOpenRequest["authorization"],
     };
   }
 

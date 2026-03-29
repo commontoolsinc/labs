@@ -1304,6 +1304,7 @@ const readRowForBranch = (
   },
 ): { row: ReadRow; branch: BranchName } | null => {
   ensureReadableBranch(engine, options.branch);
+  assertReadableSeq(engine, options.branch, options.seq);
 
   const currentRow =
     (options.seq === headSeq(engine, options.branch)
@@ -1347,6 +1348,21 @@ const toBranchState = (row: BranchRow): BranchState => ({
   headSeq: row.head_seq,
   status: row.status,
 });
+
+const assertReadableSeq = (
+  engine: Engine,
+  branch: BranchName,
+  seq: number,
+): void => {
+  const state = getBranch(engine, branch);
+  if (state === null) {
+    throw new Error(`unknown branch: ${branch}`);
+  }
+  const minSeq = branch === DEFAULT_BRANCH ? 0 : state.createdSeq;
+  if (seq < minSeq || seq > state.headSeq) {
+    throw new Error(`seq ${seq} is out of range for branch ${branch}`);
+  }
+};
 
 const ensureReadableBranch = (engine: Engine, branch: BranchName): void => {
   const row = engine.statements.selectBranchStatus.get({
