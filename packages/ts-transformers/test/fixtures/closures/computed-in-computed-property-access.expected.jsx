@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { computed, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: computed-in-computed-property-access
 // Verifies: property access on a computed() result declared INSIDE another computed()
 //   gets transformed to .key() access

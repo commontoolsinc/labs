@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { cell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: literal-widen-number
 // Verifies: numeric literals (int, negative, float, scientific, zero) are all widened to { type: "number" }
 //   cell(10) → cell(10, { type: "number" })

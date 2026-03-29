@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { cell, ComparableCell, ReadonlyCell, WriteonlyCell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: cell-like-classes
 // Verifies: schema injection works for cell(), ComparableCell.of(), ReadonlyCell.of(), and WriteonlyCell.of()
 //   cell(100) → cell(100, { type: "number" })

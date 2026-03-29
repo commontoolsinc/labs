@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { computed, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: computed-no-captures
 // Verifies: computed(() => expr) with no external captures is transformed to derive() with empty captures
 //   computed(() => 42) → derive({ type: "object", properties: {} }, resultSchema, {}, () => 42)

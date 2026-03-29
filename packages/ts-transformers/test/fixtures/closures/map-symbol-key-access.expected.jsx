@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { NAME, UI, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Entry {
     [NAME]: string;
     [UI]: string;

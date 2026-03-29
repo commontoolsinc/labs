@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { cell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: collections-array-of-objects
 // Verifies: schema injection generates array-of-objects schema with typed items and required keys
 //   cell([{id: 1, name: "Alice", ...}]) → cell([...], { type: "array", items: { type: "object", properties: {...}, required: [...] } })

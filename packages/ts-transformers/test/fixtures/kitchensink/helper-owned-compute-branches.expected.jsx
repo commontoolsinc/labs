@@ -19,6 +19,9 @@ import * as __cfHelpers from "commonfabric";
  * - authored ifElse branches still lower safely around the mixed map behavior
  */
 import { computed, ifElse, pattern, UI, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Badge {
     text: string;
     active: boolean;

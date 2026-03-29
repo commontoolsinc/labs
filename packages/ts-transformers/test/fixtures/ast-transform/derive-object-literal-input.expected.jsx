@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { cell, derive, lift } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 const stage = cell<string>("initial", {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);

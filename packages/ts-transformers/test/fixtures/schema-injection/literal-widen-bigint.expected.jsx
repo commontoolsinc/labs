@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { cell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: literal-widen-bigint
 // Verifies: bigint literals are widened to { type: "integer" } schema
 //   cell(123n) → cell(123n, { type: "integer" })

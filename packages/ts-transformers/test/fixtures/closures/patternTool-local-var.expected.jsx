@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { computed, generateText, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 const content = __cfHelpers.__ct_data(Writable.of("Hello world", {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema));

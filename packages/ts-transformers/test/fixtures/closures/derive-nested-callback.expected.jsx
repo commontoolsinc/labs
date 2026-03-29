@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Writable, derive, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: derive-nested-callback
 // Verifies: capture extraction works with nested .map() which is itself transformed to mapWithPattern
 //   derive(numbers, fn) → derive(schema, schema, { numbers, multiplier }, fn)

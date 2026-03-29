@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { NAME, OpaqueRef, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 const count: OpaqueRef<number> = {} as any;
 const _element = <div>{count}</div>;
 // FIXTURE: no-transform-simple-ref

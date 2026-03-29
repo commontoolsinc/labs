@@ -16,6 +16,9 @@ import * as __cfHelpers from "commonfabric";
  * captured in the derive wrapper created for the computed.
  */
 import { Cell, computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Card {
     title: string;
     description: string;

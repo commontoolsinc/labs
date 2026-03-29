@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Writable, derive, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: derive-multiple-captures
 // Verifies: two captured cells are both extracted into the derive capture object
 //   derive(value, fn) → derive(schema, schema, { value, multiplier, offset }, fn)

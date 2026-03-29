@@ -15,6 +15,9 @@ import * as __cfHelpers from "commonfabric";
  * so destructured `tasks` is a plain array.
  */
 import { computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Item {
     name: string;
     done: boolean;

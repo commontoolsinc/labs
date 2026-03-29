@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { createFactoryShadowGuardSource } from "@commontools/utils/sandbox-contract";
 import {
   FileSystemProgramResolver,
   InMemoryProgram,
@@ -12,6 +13,9 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getAMDLoader } from "../../js-compiler/typescript/bundler/amd-loader.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
+const FACTORY_SHADOW_GUARDS = createFactoryShadowGuardSource().map((
+  statement,
+) => `    ${statement}`).join("\n");
 
 describe("Engine.compile()", () => {
   let runtime: Runtime;
@@ -382,10 +386,12 @@ describe("Engine.evaluate()", () => {
         "  const console = globalThis.console;",
         '  define("main", ["require", "exports"], function (require, exports) {',
         '    "use strict";',
+        FACTORY_SHADOW_GUARDS,
         "    exports.default = 1;",
         "  });",
         '  define("main", ["require", "exports"], function (require, exports) {',
         '    "use strict";',
+        FACTORY_SHADOW_GUARDS,
         "    exports.default = 2;",
         "  });",
         '  const main = require("main");',

@@ -8,7 +8,10 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Cell, Default, handler, NAME, pattern, toSchema, UI, } from "commonfabric";
-import "commonfabric/schema";
+import "commontools/schema";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Item {
     text: Default<string, "">;
 }

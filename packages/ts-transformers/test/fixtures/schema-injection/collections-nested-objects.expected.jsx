@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { cell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: collections-nested-objects
 // Verifies: deeply nested object literals produce recursively nested object schemas
 //   cell({ user: { address: { street, city } }, timestamp }) → cell(..., { type: "object", properties: { user: { type: "object", properties: { address: { type: "object", ... } } } } })

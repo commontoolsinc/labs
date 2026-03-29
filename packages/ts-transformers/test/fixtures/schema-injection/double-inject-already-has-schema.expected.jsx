@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { cell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 const existingSchema = __cfHelpers.__ct_data({ type: "number" } as const);
 // FIXTURE: double-inject-already-has-schema
 // Verifies: cell() calls that already have a schema argument are NOT double-injected

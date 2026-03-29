@@ -14,6 +14,9 @@ import * as __cfHelpers from "commonfabric";
  * summary.key("length").
  */
 import { computed, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface State {
     items: string[];
 }

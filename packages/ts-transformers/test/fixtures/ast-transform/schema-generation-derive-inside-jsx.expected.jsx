@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { derive } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 declare const value: number;
 // FIXTURE: schema-generation-derive-inside-jsx
 // Verifies: derive() inside a JSX expression still gets schemas injected

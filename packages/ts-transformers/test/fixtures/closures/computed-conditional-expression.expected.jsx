@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Writable, computed, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: computed-conditional-expression
 // Verifies: computed(() => expr) with four cell captures in a ternary expression
 //   computed(() => value.get() > threshold.get() ? a.get() : b.get()) → derive(captureSchema, resultSchema, { value, threshold, a, b }, ({ value, threshold, a, b }) => ...)

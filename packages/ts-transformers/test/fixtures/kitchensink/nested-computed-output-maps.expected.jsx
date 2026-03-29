@@ -24,6 +24,9 @@ import * as __cfHelpers from "commonfabric";
  * - closures preserve thread/comment indices, state.lane, and local Writables
  */
 import { computed, handler, ifElse, lift, pattern, UI, Writable, } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Comment {
     id: string;
     text: string;

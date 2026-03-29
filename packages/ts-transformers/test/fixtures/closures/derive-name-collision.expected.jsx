@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Writable, derive, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: derive-name-collision
 // Verifies: when the input variable and a capture share the same name, the capture is renamed with a suffix
 //   derive(multiplier, fn) → derive(schema, schema, { multiplier, multiplier_1 }, fn)

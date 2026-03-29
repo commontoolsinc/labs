@@ -18,6 +18,9 @@ import * as __cfHelpers from "commonfabric";
  * rather than { type: "object", properties: { length: { type: "number" } } }
  */
 import { computed, NAME, pattern, UI, wish } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Charm {
     id: string;
     name: string;

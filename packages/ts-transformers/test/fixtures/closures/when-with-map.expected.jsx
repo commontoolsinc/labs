@@ -15,6 +15,9 @@ import * as __cfHelpers from "commonfabric";
  * Schema injection needs to know the type of the mapWithPattern result.
  */
 import { Cell, Default, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Item {
     label: string;
 }

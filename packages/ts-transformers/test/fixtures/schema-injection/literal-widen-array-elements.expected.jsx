@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { cell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: literal-widen-array-elements
 // Verifies: array literals produce { type: "array", items: { type: T } } with widened element types
 //   cell([1, 2, 3]) → cell([...], { type: "array", items: { type: "number" } })

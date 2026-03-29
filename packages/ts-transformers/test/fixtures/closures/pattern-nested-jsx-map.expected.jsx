@@ -19,6 +19,9 @@ import * as __cfHelpers from "commonfabric";
  * NOT from the derive's captures.
  */
 import { Cell, computed, Default, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Tag {
     name: string;
 }

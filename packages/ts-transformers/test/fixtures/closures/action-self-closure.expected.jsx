@@ -12,6 +12,9 @@ import * as __cfHelpers from "commonfabric";
  * piece data always satisfies the output schema's required properties.
  */
 import { action, type Default, NAME, pattern, SELF, UI, type VNode, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface TestOutput {
     [NAME]: string;
     [UI]: VNode;

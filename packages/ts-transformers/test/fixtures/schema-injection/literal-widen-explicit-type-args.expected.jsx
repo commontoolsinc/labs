@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Cell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: literal-widen-explicit-type-args
 // Verifies: Cell.of with explicit type arguments injects schema matching the type arg
 //   Cell.of<number>(10) → Cell.of<number>(10, { type: "number" })

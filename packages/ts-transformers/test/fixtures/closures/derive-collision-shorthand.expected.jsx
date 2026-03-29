@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Writable, derive, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: derive-collision-shorthand
 // Verifies: shorthand property `{ multiplier }` expands correctly when the capture is renamed
 //   derive(multiplier, fn) → derive(schema, schema, { multiplier, multiplier_1 }, fn)

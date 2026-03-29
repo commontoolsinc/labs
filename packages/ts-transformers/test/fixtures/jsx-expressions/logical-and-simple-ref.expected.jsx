@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: logical-and-simple-ref
 // Verifies: simple opaque ref && <JSX> is transformed to when() for short-circuit rendering
 //   showPanel && <div>Panel content</div> → when(showPanel, <div>Panel content</div>)

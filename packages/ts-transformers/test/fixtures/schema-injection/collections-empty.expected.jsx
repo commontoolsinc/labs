@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Writable, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: collections-empty
 // Verifies: empty arrays and objects produce valid degenerate schemas
 //   cell([]) → cell([], { type: "array", items: false })

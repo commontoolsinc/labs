@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Writable, derive, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: derive-computed-property
 // Verifies: computed property access with a dynamic key captures both the object and the key
 //   derive(value, fn) → derive(schema, schema, { value, config, key }, fn)

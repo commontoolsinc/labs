@@ -13,6 +13,9 @@ import * as __cfHelpers from "commonfabric";
  * (no property access), so opaque classification doesn't affect them.
  */
 import { action, pattern, UI, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface State {
     label: string;
 }

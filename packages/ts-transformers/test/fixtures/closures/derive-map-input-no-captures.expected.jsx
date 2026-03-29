@@ -21,6 +21,9 @@ import * as __cfHelpers from "commonfabric";
  * because checker.getTypeAtLocation() doesn't know about synthetic nodes.
  */
 import { Cell, derive, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Item {
     id: number;
     value: string;

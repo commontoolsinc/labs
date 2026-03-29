@@ -13,6 +13,9 @@ import * as __cfHelpers from "commonfabric";
  * OpaqueRef, so rewritePatternBody correctly treats it as opaque.
  */
 import { computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface State {
     items: Array<{
         name: string;

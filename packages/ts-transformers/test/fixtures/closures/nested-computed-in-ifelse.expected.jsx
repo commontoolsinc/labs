@@ -19,6 +19,9 @@ import * as __cfHelpers from "commonfabric";
  * Fix: Added isInsideSafeCallbackWrapper check in rewriteChildExpressions
  */
 import { computed, ifElse, pattern, UI, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: nested-computed-in-ifelse
 // Verifies: computed() inside ifElse branches transforms to derive() without double-wrapping .get()
 //   computed(() => { secondToggle.get(); ... }) → derive({ secondToggle }, ({ secondToggle }) => { secondToggle.get(); ... })

@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { cell, NAME, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: conditional-empty-check
 // Verifies: !cell.get().length && <JSX> is transformed to when() with derive() predicate
 //   !items.get().length && <span> → when(derive({items}, ({items}) => !items.get().length), <span>)

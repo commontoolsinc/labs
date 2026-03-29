@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Writable, derive, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // Test that all literal types are widened in closure captures
 // FIXTURE: derive-all-literal-types
 // Verifies: literal values (number, string, boolean, float) are captured and their types widened in schemas

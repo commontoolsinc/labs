@@ -9,6 +9,9 @@ function __ctHardenFn(fn: Function) {
 import * as __cfHelpers from "commonfabric";
 // deno-lint-ignore-file no-unused-vars
 import { handler, computed } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: safe-context-and-jsx
 // Verifies: && and || with JSX inside handler callbacks are transformed to when()/unless()
 //   computed(() => show) && <span> → when(computed(() => show), <span>)

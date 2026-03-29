@@ -15,6 +15,9 @@ import * as __cfHelpers from "commonfabric";
  * the whole JSX branch through an extra derive wrapper.
  */
 import { action, Cell, computed, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Card {
     title: string;
     description: string;

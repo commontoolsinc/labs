@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Writable, derive, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: derive-empty-input-no-params
 // Verifies: zero-parameter callback with empty `{}` input still captures closed-over cells
 //   derive({}, () => ...) → derive(schema, schema, { a, b }, ({ a, b }) => ...)

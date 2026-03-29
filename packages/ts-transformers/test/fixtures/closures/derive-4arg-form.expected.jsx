@@ -8,7 +8,10 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Writable, derive, pattern, type JSONSchema } from "commonfabric";
-import "commonfabric/schema";
+import "commontools/schema";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: derive-4arg-form
 // Verifies: closure extraction works with explicit 4-arg derive(inputSchema, outputSchema, input, fn)
 //   derive(schema, schema, value, fn) → derive(mergedSchema, schema, { value, multiplier }, fn)

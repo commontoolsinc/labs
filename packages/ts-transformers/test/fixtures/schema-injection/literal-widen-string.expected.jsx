@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { cell } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: literal-widen-string
 // Verifies: string literals (normal, empty, multiline, with spaces) are all widened to { type: "string" }
 //   cell("hello") → cell("hello", { type: "string" })

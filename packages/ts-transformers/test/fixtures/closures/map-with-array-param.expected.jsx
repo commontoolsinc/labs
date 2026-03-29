@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: map-with-array-param
 // Verifies: .map() on reactive array is transformed when the third parameter (array) is used
 //   .map((item, index, array) => ...) → .mapWithPattern(pattern(...), {})

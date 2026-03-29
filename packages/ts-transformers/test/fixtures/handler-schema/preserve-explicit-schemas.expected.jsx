@@ -8,7 +8,10 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { handler } from "commonfabric";
-import "commonfabric/schema";
+import "commontools/schema";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 const eventSchema = __cfHelpers.__ct_data({
     type: "object",
     properties: {

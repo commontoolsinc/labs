@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { derive, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 const multiplier = __cfHelpers.__ct_data(Writable.of(2, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema));

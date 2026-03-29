@@ -8,7 +8,10 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { computed, pattern, type JSONSchema } from "commonfabric";
-import "commonfabric/schema";
+import "commontools/schema";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // Test that pattern with both schemas already present is not transformed
 interface Input {
     count: number;

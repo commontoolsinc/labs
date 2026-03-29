@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { derive, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: pattern-derive-opaque-ref-map
 // Verifies: .map() on an OpaqueRef inside derive() is NOT transformed to mapWithPattern
 //   derive({}, () => items.map((n) => n * 2)) → derive({ items }, ({ items }) => items.map((n) => n * 2))

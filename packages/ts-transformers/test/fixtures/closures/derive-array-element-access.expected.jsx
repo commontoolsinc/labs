@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Writable, derive, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: derive-array-element-access
 // Verifies: an array variable accessed by index inside derive is captured as a whole array
 //   derive(value, fn) → derive(schema, schema, { value, factors }, fn)

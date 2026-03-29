@@ -18,6 +18,9 @@ import * as __cfHelpers from "commonfabric";
  * causing ifElse → derive, then inner ternary is inside nested .map callback.
  */
 import { Cell, computed, Default, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Tag {
     name: string;
     active: boolean;

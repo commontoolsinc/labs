@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { computed, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // CT-1334: computed() with template literal capturing pattern parameter.
 // The `token` from pattern destructuring must be captured as an explicit
 // input to the derived derive() call, so the callback receives the

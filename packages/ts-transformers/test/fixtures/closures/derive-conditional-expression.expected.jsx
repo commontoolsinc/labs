@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Writable, derive, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: derive-conditional-expression
 // Verifies: captures used in both branches of a ternary are extracted
 //   derive(value, fn) → derive(schema, schema, { value, threshold, multiplier }, fn)

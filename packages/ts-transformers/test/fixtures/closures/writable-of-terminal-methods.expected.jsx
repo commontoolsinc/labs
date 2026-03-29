@@ -14,6 +14,9 @@ import * as __cfHelpers from "commonfabric";
  * .get()/.set() are terminal methods.
  */
 import { action, pattern, UI, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface State {
     title: string;
 }

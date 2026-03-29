@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { Cell, handler, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // Updated 2025-09-03: String literal unions now generate correct JSON Schema
 // (enum instead of array) due to schema-generator UnionFormatter improvements
 interface UserEvent {

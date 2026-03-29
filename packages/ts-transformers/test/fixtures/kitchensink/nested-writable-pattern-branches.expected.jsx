@@ -19,6 +19,9 @@ import * as __cfHelpers from "commonfabric";
  * - handler captures preserve section/task/index/local Writable references
  */
 import { computed, handler, ifElse, pattern, UI, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Task {
     id: string;
     label: string;

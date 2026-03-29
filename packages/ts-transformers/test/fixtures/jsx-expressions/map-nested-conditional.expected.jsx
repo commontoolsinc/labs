@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { cell, pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: map-nested-conditional
 // Verifies: when() guard around mapWithPattern() with nested when() inside the map body
 //   showList && <div>{items.map(item => <div>{item.name && <span>}</div>)}</div>

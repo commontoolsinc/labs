@@ -8,6 +8,9 @@ function __ctHardenFn(fn: Function) {
 }
 import * as __cfHelpers from "commonfabric";
 import { computed, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 const config = __cfHelpers.__ct_data({ bar: "module-level" });
 // FIXTURE: computed-in-computed-scoped-no-false-rewrite
 // Verifies: a block-scoped computed() result named `config` does NOT cause
