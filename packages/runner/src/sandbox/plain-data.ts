@@ -77,6 +77,10 @@ function validateModuleSafeValue(
       return;
     }
 
+    // Authored SES code cannot construct new proxies because Proxy is removed
+    // from the compartment globals, but host/runtime values may still be
+    // proxy-backed. We intentionally validate the one-time inert snapshot that
+    // survives module load rather than rejecting those inputs outright.
     const proto = Object.getPrototypeOf(objectValue);
     if (proto === Object.prototype || proto === null) {
       validateOwnProperties(objectValue, path, visited);
@@ -378,6 +382,8 @@ function validatePlainRegExp(
   value: RegExp,
   path: string,
 ): void {
+  // `global` and `sticky` regexes expose mutable `lastIndex` state, so they do
+  // not belong in the verified inert-data subset.
   if (value.global || value.sticky) {
     throw validationError(
       path,

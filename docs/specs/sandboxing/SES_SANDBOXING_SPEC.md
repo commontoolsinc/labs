@@ -341,9 +341,12 @@ snapshot.
 Accessor-backed values are allowed as transient snapshot sources. Their getters
 may run during one-time snapshot materialization, but the surviving exported
 value must be a copied inert graph with no live accessor behavior remaining.
-Proxy-backed snapshotting is deferred for now: authored SES compartments
-explicitly disable `Proxy`, so proxy-backed values are not accepted in v1 even
-if they could theoretically be materialized into inert data later.
+Proxy-backed snapshotting is intentionally narrower than normal plain-data
+usage: authored SES compartments explicitly disable `Proxy`, so authored code
+cannot construct new proxies in v1. However, the runtime snapshotter may still
+accept proxy-backed host/runtime values that already exist and materialize them
+once into inert data. That is a compatibility boundary, not an authored escape
+hatch.
 
 Direct ambient `Date.now()` and `Math.random()` are not relied upon as the
 stable SES contract. Pattern authors should call `safeDateNow()` and
@@ -362,7 +365,8 @@ Version 1 of the allowed domain is a deliberate subset of
 - arrays of allowed values
 - plain object records whose string-keyed or symbol-keyed own data properties
   are allowed values
-- exact intrinsic `RegExp` instances
+- exact intrinsic non-stateful `RegExp` instances (`global === false` and
+  `sticky === false`)
 - exact intrinsic `Map` instances whose keys and values are allowed values
 - exact intrinsic `Set` instances whose elements are allowed values
 
@@ -1034,6 +1038,8 @@ must:
 - reject any object whose runtime kind is neither a plain object, an array, an
   exact intrinsic `Map`, nor an exact intrinsic `Set`
 - recursively validate `Map` keys and values and `Set` values
+- reject intrinsic `RegExp` instances whose `global` or `sticky` flags make
+  `lastIndex` observable mutable state
 - reject any `StorableValue` members outside the approved v1 subset
 - allow shape-level cases such as sparse arrays, symbol keys, cycles, reserved
   property names, non-finite numbers, and extra own data properties if the
@@ -1046,10 +1052,11 @@ mutators remain callable. The freezer MAY preserve sparse arrays, symbol-keyed
 properties, cyclic graphs, non-finite numbers, reserved property names, and
 extra own data properties; those are semantic/storage concerns, not sandboxing
 concerns, so long as the resulting graph is inert. Accessor properties may be
-materialized into data properties. Proxy-backed values remain deferred in v1
-because authored SES compartments keep `Proxy` unavailable; if proxy-backed
-snapshotting is reintroduced later, the one-time snapshot would need to satisfy
-the same inert-data rules.
+materialized into data properties. Proxy-backed values may be accepted only as
+one-time host/runtime snapshot sources; authored SES compartments still keep
+`Proxy` unavailable, so patterns do not gain a general proxy capability. Any
+proxy-backed snapshot that survives module load must satisfy the same inert-data
+rules as ordinary plain objects.
 
 The verifier may allow a top-level expression to compute data via an IIFE, but
 only if the value that escapes module load passes `assertPlainData()` and is
