@@ -341,7 +341,7 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
   }
 });
 
-Deno.test("memory v2 queryGraph honors atSeq and since", async () => {
+Deno.test("memory v2 queryGraph honors atSeq", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-history";
   const fixture = createGraphFixture(space);
@@ -391,7 +391,7 @@ Deno.test("memory v2 queryGraph honors atSeq and since", async () => {
       fixture.initialReachableIds,
     );
 
-    const incremental = queryGraph(space, engine, {
+    const current = queryGraph(space, engine, {
       roots: [{
         id: fixture.rootId,
         selector: {
@@ -399,43 +399,10 @@ Deno.test("memory v2 queryGraph honors atSeq and since", async () => {
           schema: fixture.schema,
         },
       }],
-      since: 1,
     });
     assertEquals(
-      incremental.entities.map((entity) => entity.id),
-      [fixture.rootId],
-    );
-
-    const combined = queryGraph(space, engine, {
-      roots: [{
-        id: fixture.rootId,
-        selector: {
-          path: [],
-          schema: fixture.schema,
-        },
-      }],
-      atSeq: 2,
-      since: 1,
-    });
-    assertEquals(
-      combined.entities.map((entity) => entity.id),
-      [fixture.rootId],
-    );
-
-    const historicalIncremental = queryGraph(space, engine, {
-      roots: [{
-        id: fixture.rootId,
-        selector: {
-          path: [],
-          schema: fixture.schema,
-        },
-      }],
-      atSeq: 1,
-      since: 1,
-    });
-    assertEquals(
-      historicalIncremental.entities.map((entity) => entity.id),
-      [fixture.rootId],
+      current.entities.map((entity) => entity.id),
+      fixture.expandedReachableIds,
     );
   } finally {
     close(engine);

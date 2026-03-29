@@ -289,7 +289,6 @@ interface GraphQueryRequest {
   query: {
     roots: GraphQueryRoot[];
     branch?: BranchId;
-    since?: number;
     atSeq?: number;
   };
 }

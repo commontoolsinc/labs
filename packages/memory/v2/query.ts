@@ -353,16 +353,6 @@ export const queryGraph = (
   return {
     serverSeq: tracked.serverSeq,
     entities: [...tracked.state.entities.values()]
-      .filter((entity) => {
-        if (query.since === undefined) {
-          return true;
-        }
-        const head = Engine.readState(engine, {
-          id: entity.id,
-          branch: query.branch ?? "",
-        });
-        return head !== null && head.seq > query.since;
-      })
       .toSorted((left, right) => left.id.localeCompare(right.id)),
   };
 };

@@ -28,7 +28,7 @@ Implemented on the current branch:
   `response`, and `session/effect`
 - session-scoped watch-union sync with catch-up frames, `removes`, and
   conflict-time sync flushing
-- one-shot `graph.query` support for `branch`, `since`, and `atSeq`
+- one-shot `graph.query` support for `branch` and `atSeq`
 - `session.watch.add` duplicate-id handling: identical definitions are no-ops,
   changed definitions are rejected
 - unsafe store-subject rejection before engine-root path construction
@@ -212,7 +212,7 @@ Deferred:
 - `session.ack` advances server-side `seenSeq`
 - reconnect restores watch set and replays outstanding commits
 - old live `graph.query subscribe` is rejected
-- one-shot `graph.query` honors `branch`, `since`, and `atSeq`
+- one-shot `graph.query` honors `branch` and `atSeq`
 
 ### Runner / Provider
 

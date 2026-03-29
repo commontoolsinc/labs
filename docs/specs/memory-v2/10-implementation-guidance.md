@@ -24,7 +24,7 @@ target. In particular:
   remains deferred; treat the current endpoint as trusted-only for now
 - session resume still uses caller-provided `sessionId` values; principal
   binding and server-issued session ids remain deferred
-- one-shot `graph.query` now honors `branch`, `since`, and `atSeq`
+- one-shot `graph.query` now honors `branch` and `atSeq`
 - the public one-shot read surface in this pass is `graph.query`; the older
   simple `query` / wildcard selector shape remains future protocol design
 - watch installation remains current-state only in this pass; do not treat
@@ -246,9 +246,8 @@ For one-shot reads, `graph.query` must honor:
 
 - `branch` for branch-scoped traversal
 - `atSeq` for point-in-time reconstruction on that branch
-- `since` as a post-traversal filter on entity head seq
 
-Do not silently drop `since` / `atSeq` from one-shot query semantics.
+Do not silently drop `atSeq` from one-shot query semantics.
 
 Keep shared JSON-pointer and path-overlap helpers in one module under
 `packages/memory/v2` so patch application, conflict detection, and runner-side
@@ -290,7 +289,7 @@ Required test areas:
 - idempotent `(sessionId, localSeq)` replay
 - session watch installation and catch-up sync
 - duplicate-id handling for `session.watch.add`
-- one-shot `graph.query` coverage for `branch`, `since`, and `atSeq`
+- one-shot `graph.query` coverage for `branch` and `atSeq`
 - reconnect with outstanding commits
 - runner notification ordering
 - toolshed end-to-end sync on the new protocol

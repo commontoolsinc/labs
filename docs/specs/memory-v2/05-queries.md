@@ -9,8 +9,7 @@ reads, session watch sets, and branch-aware retrieval.
 The current implementation only exposes the schema-guided `graph.query` shape on
 the v2 wire:
 
-- one-shot reads use `roots: [{ id, selector }]` plus `branch`, `since`, and
-  `atSeq`
+- one-shot reads use `roots: [{ id, selector }]` plus `branch` and `atSeq`
 - watch specs also reuse that graph-shaped query payload in the current pass
 - the older simple `query` / wildcard selector surface remains documented design
   but is not yet shipped on the wire
@@ -23,7 +22,7 @@ the v2 wire:
 
 There are two query types, each with increasing expressiveness:
 
-1. **Simple queries** -- match entities by id and filter by seq range.
+1. **Simple queries** -- match entities by id.
 2. **Schema queries** -- follow references between entities guided by a JSON
    Schema, reusing the traversal patterns from `traverse.ts`.
 
@@ -42,8 +41,8 @@ interface QueryOptions {
 
 ## 5.2 Simple Queries
 
-A simple query matches entities by id and optionally filters by seq range. This
-is the lightweight path for clients that know exactly which entities they need.
+A simple query matches entities by id. This is the lightweight path for clients
+that know exactly which entities they need.
 
 ### 5.2.1 Query Structure
 
@@ -73,22 +72,7 @@ When using the wildcard `"*"` selector, the server MAY impose a fan-out limit
 exceeded, the server returns a paginated result (see section 5.8) rather than an
 error.
 
-### 5.2.2 Seq Filtering
-
-The `since` parameter enables incremental synchronization. When provided, the
-server returns only facts with `seq > since`.
-
-```typescript
-interface IncrementalQuery extends Query {
-  since?: number; // Only return facts newer than this seq
-}
-```
-
-This is the primary incremental read mechanism for one-shot calls. Live sync is
-handled by session-scoped catch-up frames rather than by repeatedly invoking the
-same query.
-
-### 5.2.3 Simple Query Execution
+### 5.2.2 Simple Query Execution
 
 Given a `Query`, the server:
 
@@ -97,10 +81,9 @@ Given a `Query`, the server:
    - If the key is `"*"`, iterate all entities on the branch.
    - If the key is a specific id, look up that entity's head on the branch.
 3. For each matched entity, read its current head state.
-4. If `since` is provided, skip entities whose head seq is <= `since`.
-5. If `atSeq` is provided, reconstruct the entity state at that seq (see section
+4. If `atSeq` is provided, reconstruct the entity state at that seq (see section
    5.5).
-6. Assemble and return a `FactSet`.
+5. Assemble and return a `FactSet`.
 
 ---
 
@@ -123,7 +106,6 @@ this shared-code property.
 ```typescript
 interface SchemaQuery extends QueryOptions {
   selectSchema: SchemaSelector;
-  since?: number;
   limits?: SchemaQueryLimits;
 }
 
@@ -402,9 +384,7 @@ Given a `SchemaQuery`, the server:
    lineage documents (5.3.2 Source / Provenance Resolution). d. Records all
    visited entities in the schema tracker.
 4. Collects all visited entities and their values into the result `FactSet`.
-5. If `since` is provided, filters the result to only include entities whose seq
-   exceeds `since`.
-6. Returns the `FactSet` along with the schema tracker (for watch setup).
+5. Returns the `FactSet` along with the schema tracker (for watch setup).
 
 The initial execution and every later schema-watch refresh MUST use the same
 traversal semantics as `packages/runner/src/traverse.ts`. The server MAY cache

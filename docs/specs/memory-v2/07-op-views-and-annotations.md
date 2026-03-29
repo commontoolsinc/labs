@@ -292,9 +292,9 @@ Subscriptions need the same projection distinction:
 - a submitted-op subscription is mainly for audit/debug tooling and may be less
   common in product paths
 
-The current `since: seq` mechanism is not sufficient on its own for op-view
-subscriptions. Collaborative fields need a path-local resume cursor or version
-in addition to the entity-level `seq`.
+The current entity-level seq cursor mechanism is not sufficient on its own for
+op-view subscriptions. Collaborative fields need a path-local resume cursor or
+version in addition to the entity-level `seq`.
 
 ### 7.8.2 Graph Queries
 

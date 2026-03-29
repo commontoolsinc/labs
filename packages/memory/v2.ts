@@ -179,7 +179,6 @@ export interface GraphQueryRoot {
 
 export interface GraphQuery {
   roots: GraphQueryRoot[];
-  since?: number;
   atSeq?: number;
   branch?: BranchName;
   excludeSent?: boolean;
