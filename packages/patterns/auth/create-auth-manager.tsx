@@ -334,8 +334,10 @@ export function createAuthManager<T, R>(
       const now = Writable.of(Date.now());
       startReactiveClock(now);
 
-      // Picker UI - NOT inside computed (wishResult[UI] crashes reactive graph)
-      const pickerUI = wishResult[UI];
+      // Normalize the wish-provided UI into a local render-node contract so
+      // consumers see a stable UI field even when the underlying wish result
+      // has not materialized content yet.
+      const pickerUI = <>{wishResult[UI]}</>;
       const authState = deriveAuthState({
         piece: wishResult.result,
         requiredScopes,
