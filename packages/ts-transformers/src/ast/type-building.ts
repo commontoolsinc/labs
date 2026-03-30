@@ -2,7 +2,10 @@ import ts from "typescript";
 import type { TransformationContext } from "../core/mod.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
-import { inferWidenedTypeFromExpression } from "./type-inference.ts";
+import {
+  ensureTypeNodeRegistered,
+  inferWidenedTypeFromExpression,
+} from "./type-inference.ts";
 import {
   isOptionalMemberSymbol,
   isOptionalSymbol,
@@ -53,7 +56,11 @@ export function expressionToTypeNode(
 ): ts.TypeNode {
   // Use inferWidenedTypeFromExpression to widen literal types
   // This ensures `const x = 5` produces `number`, not `5`
-  const type = inferWidenedTypeFromExpression(expr, context.checker);
+  const type = inferWidenedTypeFromExpression(
+    expr,
+    context.checker,
+    context.options.typeRegistry,
+  );
   return typeToTypeNodeWithRegistry(
     type,
     context,
@@ -161,6 +168,11 @@ export function buildTypeElementsFromCaptureTree(
         currentType,
       );
       typeNode = factory.createTypeLiteralNode(nested);
+      ensureTypeNodeRegistered(
+        typeNode,
+        checker,
+        context.options.typeRegistry,
+      );
     } else {
       // Fallback to unknown
       typeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);

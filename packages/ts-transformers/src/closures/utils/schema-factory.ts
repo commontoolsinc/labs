@@ -6,6 +6,7 @@ import {
   expressionToTypeNode,
 } from "../../ast/type-building.ts";
 import {
+  ensureTypeNodeRegistered,
   inferArrayElementType,
   registerTypeForNode,
   tryExplicitParameterType,
@@ -109,7 +110,15 @@ export class SchemaFactory {
       );
     }
 
-    return this.factory.createTypeLiteralNode(callbackParamProperties);
+    const typeNode = this.factory.createTypeLiteralNode(
+      callbackParamProperties,
+    );
+    ensureTypeNodeRegistered(
+      typeNode,
+      checker,
+      typeRegistry,
+    );
+    return typeNode;
   }
 
   /**
@@ -135,7 +144,13 @@ export class SchemaFactory {
       captureTree,
       this.context,
     );
-    return this.factory.createTypeLiteralNode(paramsProperties);
+    const typeNode = this.factory.createTypeLiteralNode(paramsProperties);
+    ensureTypeNodeRegistered(
+      typeNode,
+      this.context.checker,
+      this.context.options.typeRegistry,
+    );
+    return typeNode;
   }
 
   /**
@@ -214,7 +229,13 @@ export class SchemaFactory {
     }
 
     // Create object type literal
-    return factory.createTypeLiteralNode(typeElements);
+    const typeNode = factory.createTypeLiteralNode(typeElements);
+    ensureTypeNodeRegistered(
+      typeNode,
+      this.context.checker,
+      this.context.options.typeRegistry,
+    );
+    return typeNode;
   }
 
   /**

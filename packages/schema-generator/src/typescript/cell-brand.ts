@@ -17,9 +17,16 @@ export interface CellWrapperInfo {
   typeRef: ts.TypeReference;
 }
 
+export function isCellInternalMarkerName(name: string): boolean {
+  return name === "CELL_BRAND" ||
+    name === "CELL_INNER_TYPE" ||
+    name.startsWith("__@CELL_BRAND") ||
+    name.startsWith("__@CELL_INNER_TYPE");
+}
+
 function isCellBrandSymbol(symbol: ts.Symbol): boolean {
   const name = symbol.getName();
-  if (name === "CELL_BRAND" || name.startsWith("__@CELL_BRAND")) {
+  if (isCellInternalMarkerName(name)) {
     return true;
   }
 

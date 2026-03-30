@@ -52,14 +52,10 @@ export default pattern((__ct_pattern_input) => {
                         type: "object",
                         properties: {
                             tags: {
-                                anyOf: [{
-                                        type: "undefined"
-                                    }, {
-                                        type: "array",
-                                        items: {
-                                            type: "string"
-                                        }
-                                    }]
+                                type: "array",
+                                items: {
+                                    type: "string"
+                                }
                             }
                         }
                     }

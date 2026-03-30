@@ -52,6 +52,9 @@ export default pattern((state) => {
                 state: {
                     type: "object",
                     properties: {
+                        factor: {
+                            type: "number"
+                        },
                         items: {
                             type: "array",
                             items: {
@@ -60,12 +63,9 @@ export default pattern((state) => {
                         },
                         threshold: {
                             type: "number"
-                        },
-                        factor: {
-                            type: "number"
                         }
                     },
-                    required: ["items", "threshold", "factor"]
+                    required: ["factor", "items", "threshold"]
                 }
             },
             required: ["state"]

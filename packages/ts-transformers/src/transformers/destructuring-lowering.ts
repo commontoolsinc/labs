@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { getPropertyNameText } from "@commontools/schema-generator/property-name";
+import { ensureTypeNodeRegistered } from "../ast/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import {
   cloneKeyExpression,
@@ -138,7 +139,13 @@ export function getStaticDefaultTypeNode(
         ),
       );
     }
-    return factory.createTypeLiteralNode(members);
+    const typeLiteral = factory.createTypeLiteralNode(members);
+    ensureTypeNodeRegistered(
+      typeLiteral,
+      context.checker,
+      context.options.typeRegistry,
+    );
+    return typeLiteral;
   }
 
   return undefined;

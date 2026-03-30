@@ -167,6 +167,132 @@ Deno.test("Capability analysis tracks object destructure aliases", () => {
   assert(input.readPaths.includes("user.name"));
 });
 
+Deno.test("Capability analysis does not descend into nested callbacks", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      const local = () => input.hidden;
+      return input.visible;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "readonly");
+  assert(input.readPaths.includes("visible"));
+  assert(!input.readPaths.includes("hidden"));
+});
+
+Deno.test(
+  "Capability analysis counts outer captures used inside inline array callbacks",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        filter(predicate: (value: T) => boolean): Array<T>;
+        map<U>(mapper: (value: T) => U): Array<U>;
+      }
+
+      const fn = (input: {
+        items: number[];
+        threshold: number;
+        factor: number;
+      }) => input.items
+        .filter((value) => value > input.threshold)
+        .map((value) => value * input.factor);
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "readonly");
+    assert(input.readPaths.includes("items"));
+    assert(input.readPaths.includes("threshold"));
+    assert(input.readPaths.includes("factor"));
+  },
+);
+
+Deno.test(
+  "Capability analysis counts outer captures used inside other eager array callbacks",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        find(
+          predicate: (value: T) => boolean,
+        ): T | undefined;
+        findIndex(
+          predicate: (value: T) => boolean,
+        ): number;
+        reduce<U>(
+          reducer: (accumulator: U, value: T) => U,
+          initialValue: U,
+        ): U;
+      }
+
+      const fn = (input: {
+        names: string[];
+        searchTerm: string;
+        prices: number[];
+        discount: number;
+        items: { id: string }[];
+        selectedId: string;
+      }) => ({
+        match: input.names.find((name) => name.includes(input.searchTerm)),
+        total: input.prices.reduce(
+          (sum, price) => sum + price * (1 - input.discount),
+          0,
+        ),
+        index: input.items.findIndex((item) => item.id === input.selectedId),
+      });
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "readonly");
+    assert(input.readPaths.includes("names"));
+    assert(input.readPaths.includes("searchTerm"));
+    assert(input.readPaths.includes("prices"));
+    assert(input.readPaths.includes("discount"));
+    assert(input.readPaths.includes("items"));
+    assert(input.readPaths.includes("selectedId"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps opaque helper callbacks out of outer summaries",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare function later(callback: () => void): void;
+
+      const fn = (input: {
+        visible: number;
+        hidden: number;
+      }) => {
+        later(() => input.hidden);
+        return input.visible;
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "readonly");
+    assert(input.readPaths.includes("visible"));
+    assert(!input.readPaths.includes("hidden"));
+  },
+);
+
 Deno.test(
   "Capability analysis keeps dotted literal keys distinct from nested member paths",
   () => {

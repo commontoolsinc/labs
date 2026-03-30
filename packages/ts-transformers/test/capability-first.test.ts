@@ -1518,6 +1518,440 @@ const p = pattern((input) => input.get());
 );
 
 Deno.test(
+  "Capability-first: compute context rewrites map on Cell receiver",
+  async () => {
+    const source = `/// <cts-enable />
+import { Cell, lift } from "commontools";
+const items = Cell.of<string[]>([]);
+const fn = lift(() => items.map((item) => item));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, ".mapWithPattern(");
+  },
+);
+
+Deno.test(
+  "Capability-first: mapWithPattern callback schema omits params when unused",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  id: string;
+}
+
+interface State {
+  items: Item[];
+}
+
+export default pattern<State>((state) => {
+  return {
+    [UI]: <div>{state.items.map((item) => <span>{item.id}</span>)}</div>,
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, 'required: ["element"]');
+    assert(!output.includes('required: ["element", "params"]'));
+  },
+);
+
+Deno.test(
+  "Capability-first: mapWithPattern callback schema includes params when captures are used",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  price: number;
+}
+
+interface State {
+  items: Item[];
+  discount: number;
+}
+
+export default pattern<State>((state) => {
+  return {
+    [UI]: <div>{state.items.map((item) => <span>{item.price * state.discount}</span>)}</div>,
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, 'required: ["element", "params"]');
+  },
+);
+
+Deno.test(
+  "Capability-first: pattern context does not rewrite plain array map",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern(() => {
+  const local = ["a", "b"];
+  return local.map((item) => item);
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "local.map((item) => item)");
+    assert(!output.includes(".mapWithPattern("));
+  },
+);
+
+Deno.test(
+  "Capability-first: plain array callbacks inside computed stay plain",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern, UI } from "commontools";
+
+interface Habit {
+  name: string;
+}
+
+interface HabitLog {
+  habitName: string;
+  date: string;
+  completed: boolean;
+}
+
+interface Input {
+  habits: Habit[];
+  logs: HabitLog[];
+  todayDate: string;
+}
+
+export default pattern<Input>(({ habits, logs, todayDate }) => {
+  return {
+    [UI]: <div>{habits.map((habit) => {
+      const doneToday = computed(() =>
+        logs.get().some(
+          (log) =>
+            log.habitName === habit.name &&
+            log.date === todayDate &&
+            log.completed,
+        )
+      );
+      return <span>{doneToday ? "yes" : "no"}</span>;
+    })}</div>,
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(
+      output,
+      "logs.get().some((log) => log.habitName === habit.name &&",
+    );
+    assert(
+      !output.includes("logs.get().some((log) => __ctHelpers.when("),
+      "plain array some() callback should stay plain inside computed()/derive()",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: aliased get-result callbacks inside computed stay plain",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern, UI } from "commontools";
+
+interface Habit {
+  name: string;
+}
+
+interface HabitLog {
+  habitName: string;
+  date: string;
+  completed: boolean;
+}
+
+interface Input {
+  habits: Habit[];
+  logs: HabitLog[];
+  todayDate: string;
+}
+
+export default pattern<Input>(({ habits, logs, todayDate }) => {
+  return {
+    [UI]: <div>{habits.map((habit) => {
+      const doneToday = computed(() => {
+        const logList = logs.get();
+        return logList.some(
+          (log) =>
+            log.habitName === habit.name &&
+            log.date === todayDate &&
+            log.completed,
+        );
+      });
+      return <span>{doneToday ? "yes" : "no"}</span>;
+    })}</div>,
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(
+      output,
+      "const logList = logs.get();",
+    );
+    assertStringIncludes(
+      output,
+      "return logList.some((log) => log.habitName === habit.name &&",
+    );
+    assert(
+      !output.includes("return logList.some((log) => __ctHelpers.when("),
+      "aliased plain array some() callback should stay plain inside computed()/derive()",
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: rewrites map after computed fallback alias",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern, UI } from "commontools";
+
+interface Reaction {
+  emoji: string;
+}
+
+interface Message {
+  id: string;
+  reactions?: Reaction[];
+}
+
+interface Input {
+  messages: Message[];
+}
+
+export default pattern<Input>(({ messages }) => {
+  return {
+    [UI]: (
+      <div>
+        {messages.map((msg) => {
+          const messageReactions = computed(() => (msg.reactions) || []);
+          return (
+            <div>
+              {messageReactions.map((reaction) => (
+                <button data-msg-id={msg.id}>{reaction.emoji}</button>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    ),
+  };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:map-on-fallback"
+    );
+
+    assertEquals(fallbackDiagnostics.length, 0);
+    assertStringIncludes(output, "messageReactions.mapWithPattern(");
+    assertStringIncludes(output, 'data-msg-id={msg.key("id")}');
+    assertStringIncludes(output, "reactions: {");
+    assertStringIncludes(output, '$ref: "#/$defs/Reaction"');
+    assert(!output.includes("reactions: true"));
+    assert(!output.includes("element: true"));
+  },
+);
+
+Deno.test(
+  "Capability-first: rewrites inline reactive fallback map",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  id: string;
+}
+
+export default pattern<{ items?: Item[] }>(({ items }) => {
+  return {
+    [UI]: (
+      <div>
+        {(items ?? []).map((item) => <span data-id={item.id}>{item.id}</span>)}
+      </div>
+    ),
+  };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:map-on-fallback"
+    );
+
+    assertEquals(fallbackDiagnostics.length, 0);
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, 'data-id={item.key("id")}');
+  },
+);
+
+Deno.test(
+  "Capability-first: rewrites cast-wrapped reactive fallback map",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  id: string;
+}
+
+export default pattern<{ items?: Item[] }>(({ items }) => {
+  return {
+    [UI]: (
+      <div>
+        {((items as Item[] | undefined) ?? []).map((item) => (
+          <span data-id={item.id}>{item.id}</span>
+        ))}
+      </div>
+    ),
+  };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:map-on-fallback"
+    );
+
+    assertEquals(fallbackDiagnostics.length, 0);
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, 'data-id={item.key("id")}');
+  },
+);
+
+Deno.test(
+  "Capability-first: rewrites satisfies-wrapped reactive fallback map",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  id: string;
+}
+
+export default pattern<{ items?: Item[] }>(({ items }) => {
+  return {
+    [UI]: (
+      <div>
+        {((items satisfies Item[] | undefined) ?? []).map((item) => (
+          <span data-id={item.id}>{item.id}</span>
+        ))}
+      </div>
+    ),
+  };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:map-on-fallback"
+    );
+
+    assertEquals(fallbackDiagnostics.length, 0);
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, 'data-id={item.key("id")}');
+  },
+);
+
+Deno.test(
+  "Capability-first: rewrites fallback filter and flatMap chains",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  id: string;
+  tags?: string[];
+}
+
+export default pattern<{ items?: Item[] }>(({ items }) => {
+  return {
+    [UI]: (
+      <div>
+        {(items ?? [])
+          .filter((item) => item.id)
+          .flatMap((item) => item.tags ?? [])
+          .map((tag) => <span>{tag}</span>)}
+      </div>
+    ),
+  };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:map-on-fallback"
+    );
+
+    assertEquals(fallbackDiagnostics.length, 0);
+    assertStringIncludes(output, ".filterWithPattern(");
+    assertStringIncludes(output, ".flatMapWithPattern(");
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, "({ item }) => item.tags ?? []");
+  },
+);
+
+Deno.test(
   "Capability-first: ternary lowered from key(...) keeps typed ifElse predicate schema",
   async () => {
     const source = `/// <cts-enable />
@@ -2455,7 +2889,7 @@ export default pattern<{ count: number; show: boolean }>(({ count, show }) => ({
     assertStringIncludes(output, "ifElse(");
     assertStringIncludes(
       output,
-      "__ctHelpers.computed((): number => count + 1)",
+      "__ctHelpers.derive(",
     );
     assert(
       !output.includes("ifElse(show, count + 1, 0)"),
@@ -2533,7 +2967,7 @@ export default pattern<{ count: Writable<number>; show: boolean }>(({ count, sho
     assertStringIncludes(output, "ifElse(");
     assertStringIncludes(
       output,
-      "__ctHelpers.computed((): number => count.get())",
+      "__ctHelpers.derive(",
     );
     assert(
       !output.includes("show, count.get(), 0"),
@@ -2560,7 +2994,7 @@ export default pattern<{ name: string; show: boolean }>(({ name, show }) => ({
     assertStringIncludes(output, "ifElse(");
     assertStringIncludes(
       output,
-      "__ctHelpers.computed((): string => name.trim())",
+      "__ctHelpers.derive(",
     );
     assert(
       !output.includes('ifElse(show, name.trim(), "fallback")'),

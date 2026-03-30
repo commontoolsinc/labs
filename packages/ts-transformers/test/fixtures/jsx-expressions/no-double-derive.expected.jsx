@@ -34,11 +34,7 @@ export default pattern((__ct_pattern_input) => {
             type: "object",
             properties: {
                 name: {
-                    anyOf: [{
-                            type: "string"
-                        }, {
-                            type: "undefined"
-                        }]
+                    type: "string"
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, {

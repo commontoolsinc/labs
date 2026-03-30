@@ -2,6 +2,7 @@ import ts from "typescript";
 
 import {
   detectCallKind,
+  ensureTypeNodeRegistered,
   getTypeAtLocationWithFallback,
   getTypeFromTypeNodeWithFallback,
   getTypeReferenceArgument,
@@ -282,12 +283,11 @@ function applyCapabilitySummaryToArgument(
     : argumentType;
 
   if (!baseType) {
-    try {
-      baseType = checker.getTypeFromTypeNode(baseTypeNode);
-    } catch (_e: unknown) {
-      // Synthetic nodes may not be resolvable by the checker.
-      baseType = undefined;
-    }
+    baseType = getTypeFromTypeNodeWithFallback(
+      baseTypeNode,
+      checker,
+      context?.options.typeRegistry,
+    );
   }
 
   if (mode === "defaults_only") {
@@ -376,12 +376,11 @@ function applyCapabilitySummaryToParameter(
     : parameterType;
 
   if (!baseType) {
-    try {
-      baseType = checker.getTypeFromTypeNode(baseTypeNode);
-    } catch (_e: unknown) {
-      // Synthetic nodes may not be resolvable by the checker.
-      baseType = undefined;
-    }
+    baseType = getTypeFromTypeNodeWithFallback(
+      baseTypeNode,
+      checker,
+      context?.options.typeRegistry,
+    );
   }
 
   return applyShrinkAndWrap(
@@ -1123,7 +1122,9 @@ function buildObjectLiteralReturnTypeNode(
     );
   }
 
-  return factory.createTypeLiteralNode(members);
+  const typeLiteral = factory.createTypeLiteralNode(members);
+  ensureTypeNodeRegistered(typeLiteral, checker, typeRegistry);
+  return typeLiteral;
 }
 
 /**
@@ -1905,6 +1906,7 @@ export class SchemaInjectionTransformer extends Transformer {
             // Empty object literal - create a specific type for it
             // This should generate {type: "unknown"}
             argNode = factory.createTypeLiteralNode([]);
+            ensureTypeNodeRegistered(argNode, checker, typeRegistry);
             // Don't set argType - let schema generator handle the synthetic node
           } else {
             // Normal case - infer from the argument type

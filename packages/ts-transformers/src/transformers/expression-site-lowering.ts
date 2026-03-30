@@ -220,6 +220,7 @@ export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
           reactiveContextKind: "pattern",
           inSafeContext: false,
           containerKind,
+          preferDeriveWrappers: true,
         });
         if (result) {
           return result;

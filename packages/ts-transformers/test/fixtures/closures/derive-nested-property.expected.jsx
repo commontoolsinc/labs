@@ -43,7 +43,7 @@ export default pattern((state: State) => {
         value,
         state: {
             config: {
-                multiplier: state.key("config").multiplier
+                multiplier: state.key("config", "multiplier")
             }
         }
     }, ({ value: v, state }) => v.get() * state.config.multiplier);

@@ -1,7 +1,11 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
-import { detectCallKind, isFunctionLikeExpression } from "../../ast/mod.ts";
+import {
+  detectCallKind,
+  ensureTypeNodeRegistered,
+  isFunctionLikeExpression,
+} from "../../ast/mod.ts";
 import {
   buildHierarchicalParamsValue,
   type CaptureTreeNode,
@@ -275,12 +279,19 @@ function buildCallbackWithCaptures(
       );
     });
 
+    const captureTypeNode = factory.createTypeLiteralNode(typeElements);
+    ensureTypeNodeRegistered(
+      captureTypeNode,
+      context.checker,
+      context.options.typeRegistry,
+    );
+
     newParam = factory.createParameterDeclaration(
       undefined,
       undefined,
       bindingPattern,
       undefined,
-      factory.createTypeLiteralNode(typeElements),
+      captureTypeNode,
       undefined,
     );
   }
@@ -347,7 +358,13 @@ function addCapturesToTypeLiteral(
     }
   }
 
-  return factory.createTypeLiteralNode(existingMembers);
+  const typeNode = factory.createTypeLiteralNode(existingMembers);
+  ensureTypeNodeRegistered(
+    typeNode,
+    context.checker,
+    context.options.typeRegistry,
+  );
+  return typeNode;
 }
 
 /**

@@ -61,6 +61,7 @@ export {
   visitEachChildWithJsx,
 } from "./utils.ts";
 export {
+  ensureTypeNodeRegistered,
   getTypeFromTypeNodeWithFallback,
   getTypeReferenceArgument,
   hasArrayTypeArgument,

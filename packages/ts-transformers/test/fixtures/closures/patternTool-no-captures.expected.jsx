@@ -18,14 +18,14 @@ export default pattern(() => {
         return derive({
             type: "object",
             properties: {
-                content: {
+                query: {
                     type: "string"
                 },
-                query: {
+                content: {
                     type: "string"
                 }
             },
-            required: ["content", "query"]
+            required: ["query", "content"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "array",
             items: {

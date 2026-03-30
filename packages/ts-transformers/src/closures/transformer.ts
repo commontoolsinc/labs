@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
-import { visitEachChildWithJsx } from "../ast/mod.ts";
+import { setParentPointers, visitEachChildWithJsx } from "../ast/mod.ts";
 import { ActionStrategy } from "./strategies/action-strategy.ts";
 import { ArrayMethodStrategy } from "./strategies/array-method-strategy.ts";
 import { DeriveStrategy } from "./strategies/derive-strategy.ts";
@@ -35,6 +35,9 @@ function createClosureTransformVisitor(
       if (strategy.canTransform(node, context)) {
         const transformed = strategy.transform(node, context, visit);
         if (transformed) {
+          if (transformed !== node) {
+            setParentPointers(transformed, node.parent);
+          }
           return transformed;
         }
       }

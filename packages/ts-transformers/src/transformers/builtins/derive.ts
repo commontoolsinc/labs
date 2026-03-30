@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { CTHelpers } from "../../core/ct-helpers.ts";
 import {
+  ensureTypeNodeRegistered,
   getExpressionText,
   getTypeAtLocationWithFallback,
   setParentPointers,
@@ -304,6 +305,11 @@ function buildInputTypeNode(
   }
 
   const typeLiteral = factory.createTypeLiteralNode(typeElements);
+  ensureTypeNodeRegistered(
+    typeLiteral,
+    context.checker,
+    context.options.typeRegistry,
+  );
 
   return typeLiteral;
 }

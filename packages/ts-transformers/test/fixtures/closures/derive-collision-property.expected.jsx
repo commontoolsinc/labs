@@ -15,16 +15,16 @@ export default pattern(() => {
     const result = __ctHelpers.derive({
         type: "object",
         properties: {
-            multiplier: {
+            multiplier_1: {
                 type: "number",
                 asCell: true
             },
-            multiplier_1: {
+            multiplier: {
                 type: "number",
                 asCell: true
             }
         },
-        required: ["multiplier", "multiplier_1"]
+        required: ["multiplier_1", "multiplier"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {

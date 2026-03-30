@@ -18,12 +18,8 @@ export default pattern((__ct_pattern_input) => {
             type: "object",
             properties: {
                 a: {
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "string",
-                            asCell: true
-                        }]
+                    type: "string",
+                    asCell: true
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, (_, { a }) => console.log(a))({
@@ -33,12 +29,8 @@ export default pattern((__ct_pattern_input) => {
             type: "object",
             properties: {
                 b: {
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "number",
-                            asCell: true
-                        }]
+                    type: "number",
+                    asCell: true
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, (_, { b }) => console.log(b))({

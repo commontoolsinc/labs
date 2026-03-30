@@ -1,5 +1,8 @@
 import ts from "typescript";
-import { isWildcardTraversalCall } from "../ast/mod.ts";
+import {
+  classifyArrayCallbackContainerCall,
+  isWildcardTraversalCall,
+} from "../ast/mod.ts";
 import type {
   CapabilityParamSummary,
   FunctionCapabilitySummary,
@@ -766,7 +769,68 @@ export function analyzeFunctionCapabilities(
       });
     };
 
+    const visitScopedFunctionBody = (
+      callback: CapabilityAnalyzableFunction,
+    ): void => {
+      const savedAliases = new Map(aliases);
+      const savedSpecificPaths = new Set(aliasesWithSpecificPaths);
+
+      try {
+        if (callback.name && ts.isIdentifier(callback.name)) {
+          aliases.delete(callback.name.text);
+        }
+        for (const parameter of callback.parameters) {
+          clearBindingAliases(parameter.name, aliases);
+        }
+
+        const body = callback.body;
+        if (!body) return;
+
+        if (ts.isBlock(body)) {
+          for (const statement of body.statements) {
+            visit(statement);
+          }
+        } else {
+          visit(body);
+        }
+      } finally {
+        aliases.clear();
+        for (const [name, source] of savedAliases) {
+          aliases.set(name, source);
+        }
+        aliasesWithSpecificPaths.clear();
+        for (const name of savedSpecificPaths) {
+          aliasesWithSpecificPaths.add(name);
+        }
+      }
+    };
+
+    const visitInlineEagerCallbackArguments = (
+      call: ts.CallExpression,
+    ): void => {
+      if (!checker) return;
+
+      const callbackContainerKind = classifyArrayCallbackContainerCall(
+        call,
+        checker,
+      );
+      if (!callbackContainerKind) {
+        return;
+      }
+
+      const callbackArg = call.arguments[0];
+      if (!callbackArg || !isCapabilityAnalyzableFunction(callbackArg)) {
+        return;
+      }
+
+      visitScopedFunctionBody(callbackArg);
+    };
+
     const visit = (node: ts.Node): void => {
+      if (node !== fn && isCapabilityAnalyzableFunction(node)) {
+        return;
+      }
+
       if (
         ts.isBinaryExpression(node) &&
         isAssignmentOperator(node.operatorToken.kind)
@@ -1009,6 +1073,8 @@ export function analyzeFunctionCapabilities(
             markWildcardFromExpression(firstArg);
           }
         }
+
+        visitInlineEagerCallbackArguments(node);
       }
 
       if (ts.isVariableDeclaration(node)) {

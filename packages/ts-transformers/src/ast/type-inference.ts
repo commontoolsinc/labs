@@ -150,8 +150,10 @@ export function widenLiteralType(
 export function inferWidenedTypeFromExpression(
   expr: ts.Expression,
   checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
 ): ts.Type {
-  const type = checker.getTypeAtLocation(expr);
+  const type = getTypeAtLocationWithFallback(expr, checker, typeRegistry) ??
+    checker.getTypeAtLocation(expr);
   return widenLiteralType(type, checker);
 }
 
@@ -376,6 +378,272 @@ export function registerTypeForNode(
   return typeNode;
 }
 
+type InternalSymbolWithLinks = ts.Symbol & {
+  links?: {
+    type?: ts.Type;
+  };
+};
+
+// Intentionally quarantined TypeScript-internal entry points.
+// We use these only to materialize composite synthetic TypeNodes that the
+// public checker APIs resolve as unresolved any/unknown. Do not spread this
+// pattern elsewhere in the pipeline.
+type InternalTypeChecker = ts.TypeChecker & {
+  createAnonymousType?: (
+    symbol: ts.Symbol | undefined,
+    members: ts.SymbolTable,
+    callSignatures: readonly ts.Signature[],
+    constructSignatures: readonly ts.Signature[],
+    indexInfos: readonly ts.IndexInfo[],
+  ) => ts.Type;
+  createArrayType?: (elementType: ts.Type, readonly?: boolean) => ts.Type;
+  createSymbol?: (
+    flags: ts.SymbolFlags,
+    name: string,
+    checkFlags?: number,
+  ) => InternalSymbolWithLinks;
+  getUnionType?: (types: readonly ts.Type[]) => ts.Type;
+};
+
+function createInternalSymbolName(name: string): string {
+  const escapeLeadingUnderscores = (ts as typeof ts & {
+    escapeLeadingUnderscores?: (text: string) => string;
+  }).escapeLeadingUnderscores;
+  return escapeLeadingUnderscores?.(name) ?? name;
+}
+
+function createInternalSymbolTable(
+  symbols: readonly ts.Symbol[],
+): ts.SymbolTable {
+  const createSymbolTable = (ts as typeof ts & {
+    createSymbolTable?: (symbols: readonly ts.Symbol[]) => ts.SymbolTable;
+  }).createSymbolTable;
+  if (createSymbolTable) {
+    return createSymbolTable(symbols);
+  }
+
+  // Fallback for environments where the helper is not exposed at runtime.
+  const table = new Map<ts.__String, ts.Symbol>();
+  for (const symbol of symbols) {
+    table.set(symbol.escapedName as ts.__String, symbol);
+  }
+  return table as ts.SymbolTable;
+}
+
+function tryGetSyntheticPropertyName(
+  name: ts.PropertyName,
+): string | undefined {
+  if (ts.isIdentifier(name) || ts.isPrivateIdentifier(name)) {
+    return name.text;
+  }
+  if (
+    ts.isStringLiteralLike(name) || ts.isNumericLiteral(name) ||
+    ts.isNoSubstitutionTemplateLiteral(name)
+  ) {
+    return name.text;
+  }
+  if (
+    ts.isComputedPropertyName(name) &&
+    (ts.isStringLiteralLike(name.expression) ||
+      ts.isNumericLiteral(name.expression) ||
+      ts.isNoSubstitutionTemplateLiteral(name.expression))
+  ) {
+    return name.expression.text;
+  }
+  return undefined;
+}
+
+function tryGetTypeFromTypeNodeDirect(
+  typeNode: ts.TypeNode,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  try {
+    return checker.getTypeFromTypeNode(typeNode);
+  } catch {
+    return undefined;
+  }
+}
+
+function ensureCompositeChildTypesRegistered(
+  typeNode: ts.TypeNode,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): void {
+  if (!typeRegistry) return;
+
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    ensureTypeNodeRegistered(typeNode.type, checker, typeRegistry);
+    return;
+  }
+
+  if (ts.isArrayTypeNode(typeNode)) {
+    ensureTypeNodeRegistered(typeNode.elementType, checker, typeRegistry);
+    return;
+  }
+
+  if (ts.isTypeReferenceNode(typeNode)) {
+    for (const arg of typeNode.typeArguments ?? []) {
+      ensureTypeNodeRegistered(arg, checker, typeRegistry);
+    }
+    return;
+  }
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    for (const member of typeNode.types) {
+      ensureTypeNodeRegistered(member, checker, typeRegistry);
+    }
+    return;
+  }
+
+  if (ts.isTypeLiteralNode(typeNode)) {
+    for (const member of typeNode.members) {
+      if (ts.isPropertySignature(member) && member.type) {
+        ensureTypeNodeRegistered(member.type, checker, typeRegistry);
+      }
+    }
+  }
+}
+
+function tryRegisterCompositeSyntheticType(
+  typeNode: ts.TypeNode,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.Type | undefined {
+  if (!typeRegistry) return undefined;
+
+  const existing = typeRegistry.get(typeNode);
+  if (existing) return existing;
+
+  ensureCompositeChildTypesRegistered(typeNode, checker, typeRegistry);
+
+  const retried = tryGetTypeFromTypeNodeDirect(typeNode, checker);
+  if (retried && !isAnyOrUnknownType(retried)) {
+    typeRegistry.set(typeNode, retried);
+    return retried;
+  }
+
+  const internalChecker = checker as InternalTypeChecker;
+
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    const inner = ensureTypeNodeRegistered(
+      typeNode.type,
+      checker,
+      typeRegistry,
+    );
+    if (inner) {
+      typeRegistry.set(typeNode, inner);
+      return inner;
+    }
+    return retried;
+  }
+
+  if (ts.isArrayTypeNode(typeNode) && internalChecker.createArrayType) {
+    const elementType = ensureTypeNodeRegistered(
+      typeNode.elementType,
+      checker,
+      typeRegistry,
+    );
+    if (elementType && !isAnyOrUnknownType(elementType)) {
+      const arrayType = internalChecker.createArrayType(elementType);
+      typeRegistry.set(typeNode, arrayType);
+      return arrayType;
+    }
+    return retried;
+  }
+
+  if (ts.isUnionTypeNode(typeNode) && internalChecker.getUnionType) {
+    const memberTypes = typeNode.types.map((member) =>
+      ensureTypeNodeRegistered(member, checker, typeRegistry)
+    ).filter((member): member is ts.Type => !!member);
+    if (
+      memberTypes.length === typeNode.types.length &&
+      memberTypes.every((member) => !isAnyOrUnknownType(member))
+    ) {
+      const unionType = internalChecker.getUnionType(memberTypes);
+      typeRegistry.set(typeNode, unionType);
+      return unionType;
+    }
+    return retried;
+  }
+
+  if (
+    ts.isTypeLiteralNode(typeNode) &&
+    typeNode.members.length > 0 &&
+    internalChecker.createAnonymousType &&
+    internalChecker.createSymbol
+  ) {
+    const membersList: ts.Symbol[] = [];
+    for (const member of typeNode.members) {
+      if (!ts.isPropertySignature(member) || !member.type || !member.name) {
+        return retried;
+      }
+
+      const propertyName = tryGetSyntheticPropertyName(member.name);
+      if (!propertyName) {
+        return retried;
+      }
+
+      const propertyType = ensureTypeNodeRegistered(
+        member.type,
+        checker,
+        typeRegistry,
+      ) ?? tryGetTypeFromTypeNodeDirect(member.type, checker);
+      if (!propertyType || isAnyOrUnknownType(propertyType)) {
+        return retried;
+      }
+
+      const symbol = internalChecker.createSymbol(
+        ts.SymbolFlags.Property |
+          (member.questionToken ? ts.SymbolFlags.Optional : 0),
+        createInternalSymbolName(propertyName),
+      );
+      symbol.links ??= {};
+      symbol.links.type = propertyType;
+      membersList.push(symbol);
+    }
+
+    const symbol = internalChecker.createSymbol(
+      ts.SymbolFlags.TypeLiteral,
+      createInternalSymbolName("__type"),
+    );
+    const members = createInternalSymbolTable(membersList);
+    const anonymousType = internalChecker.createAnonymousType(
+      symbol,
+      members,
+      [],
+      [],
+      [],
+    );
+    typeRegistry.set(typeNode, anonymousType);
+    return anonymousType;
+  }
+
+  return retried;
+}
+
+export function ensureTypeNodeRegistered(
+  typeNode: ts.TypeNode,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.Type | undefined {
+  if (typeRegistry?.has(typeNode)) {
+    return typeRegistry.get(typeNode);
+  }
+
+  const direct = tryGetTypeFromTypeNodeDirect(typeNode, checker);
+  if (!typeRegistry || !direct) {
+    return direct;
+  }
+
+  if (!isAnyOrUnknownType(direct)) {
+    typeRegistry.set(typeNode, direct);
+    return direct;
+  }
+
+  return tryRegisterCompositeSyntheticType(typeNode, checker, typeRegistry) ??
+    direct;
+}
+
 /**
  * Get the Type from a TypeNode, checking typeRegistry first.
  *
@@ -401,8 +669,8 @@ export function getTypeFromTypeNodeWithFallback(
     }
   }
 
-  // Fall back to TypeChecker
-  return checker.getTypeFromTypeNode(typeNode);
+  return ensureTypeNodeRegistered(typeNode, checker, typeRegistry) ??
+    checker.getTypeFromTypeNode(typeNode);
 }
 
 /**

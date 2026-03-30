@@ -6,10 +6,14 @@
  * transformers are applied in sequence via ts.transform().
  *
  * TypeRegistry (WeakMap<ts.Node, ts.Type>)
- *   Preserves original Type when schema-injection creates synthetic TypeNodes
- *   that may not survive round-tripping through checker.getTypeFromTypeNode().
- *   Writers: derive-strategy, array-method-utils, builtins/derive, expression-rewrite/rewrite-helpers
- *   Readers: computed transformer, schema-generator, type-inference, ast/utils
+ *   Preserves and recovers synthetic typing across the pipeline:
+ *   - replacement expression nodes keep their original authored types
+ *   - synthetic TypeNodes keep faithful schema/codegen types
+ *   - synthetic call expressions keep their result types
+ *   Writers: closure strategies, builtins/derive, expression rewrites,
+ *            type-building/schema-factory/type-shrinking, schema-injection
+ *   Readers: computed transformer, schema-generator, type-inference,
+ *            ast/utils, schema-injection, capability/type-shrinking logic
  *
  * mapCallbackRegistry (WeakSet<ts.Node>)
  *   Marks arrow functions created by ClosureTransformer as array method callbacks.

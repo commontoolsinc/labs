@@ -383,29 +383,6 @@ function isWithinComputeLikePlainArrayValueCallback(
     hasEnclosingComputeLikeCallback(expression, context);
 }
 
-function isCallbackOverGetResult(
-  expression: ts.Expression,
-): boolean {
-  const callbackContext = findEnclosingCallbackContext(expression);
-  if (!callbackContext) {
-    return false;
-  }
-
-  const callTarget = unwrapExpression(callbackContext.call.expression);
-  if (!ts.isPropertyAccessExpression(callTarget)) {
-    return false;
-  }
-
-  const receiver = unwrapExpression(callTarget.expression);
-  if (!ts.isCallExpression(receiver)) {
-    return false;
-  }
-
-  const receiverTarget = unwrapExpression(receiver.expression);
-  return ts.isPropertyAccessExpression(receiverTarget) &&
-    receiverTarget.name.text === "get";
-}
-
 function isAtomicWholeBranchIife(
   branch: ts.Expression,
 ): boolean {
@@ -834,11 +811,7 @@ export function classifyExpressionSiteHandling(
   analyze: AnalyzeFn,
   options?: ExpressionSiteHandlingOptions,
 ): ExpressionSiteHandlingDecision {
-  if (
-    isWithinComputeLikePlainArrayValueCallback(expression, context) ||
-    (isCallbackOverGetResult(expression) &&
-      hasEnclosingComputeLikeCallback(expression, context))
-  ) {
+  if (isWithinComputeLikePlainArrayValueCallback(expression, context)) {
     return { kind: "skip", reason: "not-lowerable" };
   }
 

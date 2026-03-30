@@ -196,7 +196,7 @@ export default pattern((state) => {
                                             type: "object",
                                             properties: {
                                                 note: {
-                                                    type: ["string", "undefined"]
+                                                    type: "string"
                                                 }
                                             }
                                         }

@@ -29,17 +29,13 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 maybe: {
-                                    anyOf: [{
-                                            type: "object",
-                                            properties: {
-                                                value: {
-                                                    type: "number"
-                                                }
-                                            },
-                                            required: ["value"]
-                                        }, {
-                                            type: "undefined"
-                                        }]
+                                    type: "object",
+                                    properties: {
+                                        value: {
+                                            type: "number"
+                                        }
+                                    },
+                                    required: ["value"]
                                 }
                             }
                         }
