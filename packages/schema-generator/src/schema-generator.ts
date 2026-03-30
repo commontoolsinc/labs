@@ -1,7 +1,10 @@
 import ts from "typescript";
 import { isRecord } from "@commonfabric/utils/types";
 
-import type { JSONSchemaMutable, JSONSchemaObjMutable } from "@commonfabric/api";
+import type {
+  JSONSchemaMutable,
+  JSONSchemaObjMutable,
+} from "@commonfabric/api";
 import type {
   GenerationContext,
   SchemaGenerator as ISchemaGenerator,

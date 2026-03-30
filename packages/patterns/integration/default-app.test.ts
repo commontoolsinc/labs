@@ -495,9 +495,7 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
           decision: action.decision,
           scheduledEffects: action.scheduledEffects.map((effect: {
             actionId: string;
-          }) =>
-            effect.actionId
-          ),
+          }) => effect.actionId),
         });
         for (const effect of action.scheduledEffects) {
           pushSample(effect.actionId, {

@@ -6,7 +6,10 @@ import {
   isCellBrand,
 } from "../typescript/cell-brand.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
-import type { JSONSchemaMutable, JSONSchemaObjMutable } from "@commonfabric/api";
+import type {
+  JSONSchemaMutable,
+  JSONSchemaObjMutable,
+} from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
