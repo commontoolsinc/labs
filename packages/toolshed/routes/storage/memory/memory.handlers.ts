@@ -12,20 +12,50 @@ type NegotiatedSocketHandlers = {
   onError?: (error: Error) => void;
 };
 
+type NegotiationOptions = {
+  maxBufferedBytes?: number;
+};
+
+const NEGOTIATION_BUFFER_MAX_BYTES = 1_048_576;
+const TEXT_ENCODER = new TextEncoder();
+
 export const bufferTextMessagesUntilNegotiated = (
   socket: WebSocket,
+  options: NegotiationOptions = {},
 ): {
   firstMessage: Promise<string | undefined>;
   handoff: (handlers: NegotiatedSocketHandlers) => void;
   dispose: () => void;
 } => {
+  const maxBufferedBytes = options.maxBufferedBytes ??
+    NEGOTIATION_BUFFER_MAX_BYTES;
   let settled = false;
   let bufferedMessages: string[] = [];
+  let bufferedBytes = 0;
   let cleanup = () => {};
   let handlers: NegotiatedSocketHandlers | null = null;
+  let negotiationError: Error | null = null;
 
   const forwardMessage = (message: string) => {
     if (handlers === null) {
+      if (negotiationError !== null) {
+        return;
+      }
+      const messageBytes = TEXT_ENCODER.encode(message).byteLength;
+      if (bufferedBytes + messageBytes > maxBufferedBytes) {
+        negotiationError = new Error(
+          "Memory websocket negotiation buffer exceeded",
+        );
+        bufferedMessages = [];
+        bufferedBytes = 0;
+        try {
+          socket.close(1009, negotiationError.message);
+        } catch {
+          // Ignore close races with the peer.
+        }
+        return;
+      }
+      bufferedBytes += messageBytes;
       bufferedMessages.push(message);
       return;
     }
@@ -89,8 +119,13 @@ export const bufferTextMessagesUntilNegotiated = (
     firstMessage,
     handoff(nextHandlers) {
       handlers = nextHandlers;
+      if (negotiationError !== null) {
+        nextHandlers.onError?.(negotiationError);
+        return;
+      }
       const queued = bufferedMessages;
       bufferedMessages = [];
+      bufferedBytes = 0;
       for (const message of queued) {
         nextHandlers.onMessage(message);
       }

@@ -19,8 +19,11 @@ rewrite. In particular:
   declaration
 - request messages are plain JSON envelopes; transport-level UCAN framing
   remains deferred for this pass
-- route-level auth / ACL / `Origin` enforcement is also deferred on the current
-  toolshed v2 websocket route, so the endpoint should be treated as trusted-only
+- the toolshed v2 websocket route currently requires a signed `session.open`
+  payload whose invocation issuer / subject match the requested space DID and
+  requested session descriptor
+- broader route-level ACL / `Origin` enforcement remains deferred, so the
+  endpoint should still be treated as trusted-only
 - session resume remains keyed by caller-supplied `(space, sessionId)` rather
   than a server-issued, principal-bound identifier
 - the public one-shot read surface is currently `graph.query`
@@ -392,11 +395,26 @@ model for delivering live updates.
 
 ### 4.5.1 Current Pass
 
-Transport-level authentication remains deferred in this pass. Write-class
-requests may carry `invocation` / `authorization` payloads so they can be
-persisted alongside accepted commits, but the current wire protocol does not
-require signed UCAN envelopes and the toolshed websocket route does not yet
-enforce UCAN / ACL / `Origin` checks.
+Transport-level authentication is only partially implemented in this pass.
+Write-class requests may carry `invocation` / `authorization` payloads so they
+can be persisted alongside accepted commits, but the current wire protocol
+still uses plain JSON envelopes rather than full UCAN message framing.
+
+On the current toolshed websocket route, `session.open` itself is
+authenticated:
+
+- the request must carry `invocation` and `authorization`
+- `invocation.cmd` must be `"session.open"`
+- `invocation.iss` and `invocation.sub` must match the requested `space`
+- `invocation.args.session` must match the requested session descriptor
+- the signature must verify against the requested space DID
+
+Opening a previously unused space may initialize empty backing storage, but
+`session.open` is not itself a logical write or claim.
+
+Broader ACL-based read opens, non-owner session opens, and `Origin` checks are
+still future work on the v2 websocket route, so the endpoint remains
+trusted-only for now.
 
 ### 4.5.2 Future Target
 

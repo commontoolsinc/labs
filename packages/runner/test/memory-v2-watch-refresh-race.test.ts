@@ -348,6 +348,50 @@ Deno.test("memory v2 runner compacts redundant selectors for the same doc", asyn
   }
 });
 
+Deno.test("memory v2 runner deduplicates semantically identical selectors with reordered schema keys", async () => {
+  const docA = `of:watch-compact-order-${crypto.randomUUID()}` as URI;
+  const transport = new CountingWatchSetTransport();
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    address: new URL("memory://runner-v2-watch-refresh-order"),
+    memoryVersion: "v2",
+  }, sessionFactory);
+  const provider = storageManager.open(space) as TestProvider;
+
+  try {
+    await Promise.all([
+      provider.sync(docA, {
+        path: [],
+        schema: {
+          type: "object",
+          properties: {
+            child: {
+              type: "string",
+            },
+          },
+        },
+      }),
+      provider.sync(docA, {
+        schema: {
+          properties: {
+            child: {
+              type: "string",
+            },
+          },
+          type: "object",
+        },
+        path: [],
+      }),
+    ]);
+
+    assertEquals(transport.watchAddCount, 1);
+    assertEquals(transport.rootCounts, [1]);
+  } finally {
+    await storageManager.close();
+  }
+});
+
 Deno.test("memory v2 runner incrementally adds later watches after the initial set", async () => {
   const docA = `of:watch-add-a-${crypto.randomUUID()}` as URI;
   const docB = `of:watch-add-b-${crypto.randomUUID()}` as URI;

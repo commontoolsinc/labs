@@ -15,9 +15,10 @@ class ReconnectableTransport implements Transport {
   #closeReceiver: (error?: Error) => void = () => {};
   #connection: ReturnType<Server["connect"]> | null = null;
   #delayTransacts = false;
-  #delayedTransacts: Array<{
+  #transactRequestLocalSeqById = new Map<string, number>();
+  #delayedTransactResponses: Array<{
     payload: string;
-    resolve: () => void;
+    localSeq: number;
   }> = [];
   #deliveredTransactLocalSeqs: number[] = [];
 
@@ -26,12 +27,18 @@ class ReconnectableTransport implements Transport {
   async send(payload: string): Promise<void> {
     const message = JSON.parse(payload) as {
       type?: string;
+      requestId?: string;
       commit?: { localSeq?: number };
     };
-    if (this.#delayTransacts && message.type === "transact") {
-      return new Promise<void>((resolve) => {
-        this.#delayedTransacts.push({ payload, resolve });
-      });
+    if (
+      message.type === "transact" &&
+      typeof message.requestId === "string" &&
+      typeof message.commit?.localSeq === "number"
+    ) {
+      this.#transactRequestLocalSeqById.set(
+        message.requestId,
+        message.commit.localSeq,
+      );
     }
     await this.#deliver(payload);
   }
@@ -60,28 +67,23 @@ class ReconnectableTransport implements Transport {
   }
 
   get pendingTransactCount(): number {
-    return this.#delayedTransacts.length;
+    return this.#delayedTransactResponses.length;
   }
 
   get delayedTransactLocalSeqs(): number[] {
-    return this.#delayedTransacts.flatMap(({ payload }) => {
-      const message = JSON.parse(payload) as { commit?: { localSeq?: number } };
-      return typeof message.commit?.localSeq === "number"
-        ? [message.commit.localSeq]
-        : [];
-    });
+    return this.#delayedTransactResponses.map(({ localSeq }) => localSeq);
   }
 
   get deliveredTransactLocalSeqs(): number[] {
     return [...this.#deliveredTransactLocalSeqs];
   }
 
-  async releaseTransacts(): Promise<void> {
-    const delayed = this.#delayedTransacts.splice(0);
-    for (const { payload, resolve } of delayed) {
-      await this.#deliver(payload);
-      resolve();
+  releaseTransacts(): Promise<void> {
+    const delayed = this.#delayedTransactResponses.splice(0);
+    for (const { payload } of delayed) {
+      this.#receiver(payload);
     }
+    return Promise.resolve();
   }
 
   async #deliver(payload: string): Promise<void> {
@@ -96,7 +98,25 @@ class ReconnectableTransport implements Transport {
     if (this.#connection === null) {
       this.connectionCount++;
       this.#connection = this.server.connect((message) => {
-        this.#receiver(JSON.stringify(message));
+        const response = message as { requestId?: string };
+        const requestId = response.requestId;
+        const localSeq = typeof requestId === "string"
+          ? this.#transactRequestLocalSeqById.get(requestId)
+          : undefined;
+        const payload = JSON.stringify(message);
+        if (
+          this.#delayTransacts &&
+          typeof requestId === "string" &&
+          typeof localSeq === "number"
+        ) {
+          this.#transactRequestLocalSeqById.delete(requestId);
+          this.#delayedTransactResponses.push({ payload, localSeq });
+          return;
+        }
+        if (typeof requestId === "string") {
+          this.#transactRequestLocalSeqById.delete(requestId);
+        }
+        this.#receiver(payload);
       });
     }
     return this.#connection;
@@ -166,14 +186,23 @@ Deno.test(
       // outstanding and will be replayed during restore.
       transport.disconnect();
 
-      // While the replay transact is held (and #restoring is true),
-      // enqueue commit C.
+      // Wait for reconnect replay of commit B to reach the transport so we know
+      // restore is actively replaying while commit C is enqueued.
+      await waitFor(
+        () =>
+          transport.delayedTransactLocalSeqs.filter((localSeq) =>
+            localSeq === 2
+          ).length >= 2,
+      );
+
+      // While the replay transact is held (and #restoring is true), enqueue
+      // commit C.
       const commitCPromise = session.transact({
         localSeq: 3,
         reads: { confirmed: [], pending: [] },
         operations: [{ op: "set", id: "doc:c", value: { value: { v: 3 } } }],
       });
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await Promise.resolve();
       assert(
         !transport.delayedTransactLocalSeqs.includes(3),
         "commit C should wait for restore to finish instead of sending during replay",
@@ -226,6 +255,108 @@ Deno.test(
       );
       assertEquals(transport.deliveredTransactLocalSeqs.at(-1), 3);
       assertEquals(transport.connectionCount, 2);
+    } finally {
+      globalThis.removeEventListener(
+        "unhandledrejection",
+        suppressDisconnectRejection,
+      );
+      await client.close();
+      await server.flushSessions();
+      await server.close();
+    }
+  },
+);
+
+Deno.test(
+  "closing a session during restore does not replay queued commits after close begins",
+  async () => {
+    const server = new Server({
+      store: new URL("memory://restore-flush-close-test"),
+    });
+
+    const transport = new ReconnectableTransport(server);
+    const client = await connect({ transport });
+    const session = await client.mount(SPACE);
+    const suppressDisconnectRejection = (event: PromiseRejectionEvent) => {
+      if (
+        event.reason instanceof Error &&
+        event.reason.name === "ConnectionError" &&
+        event.reason.message === "disconnect"
+      ) {
+        event.preventDefault();
+      }
+    };
+    globalThis.addEventListener(
+      "unhandledrejection",
+      suppressDisconnectRejection,
+    );
+
+    try {
+      await session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "doc:a", value: { value: { v: 1 } } }],
+      });
+
+      transport.delayTransacts = true;
+
+      const commitBPromise = session.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "doc:b", value: { value: { v: 2 } } }],
+      });
+
+      await waitFor(() => transport.pendingTransactCount >= 1);
+      transport.disconnect();
+
+      await waitFor(
+        () =>
+          transport.delayedTransactLocalSeqs.filter((localSeq) =>
+            localSeq === 2
+          ).length >= 2,
+      );
+
+      const commitCPromise = session.transact({
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "doc:c", value: { value: { v: 3 } } }],
+      });
+      await Promise.resolve();
+      assertEquals(transport.delayedTransactLocalSeqs.includes(3), false);
+
+      const closePromise = session.close();
+      await Promise.resolve();
+
+      transport.delayTransacts = false;
+      await transport.releaseTransacts();
+
+      const [commitBResult, commitCResult, closeResult] = await Promise
+        .allSettled([
+          commitBPromise,
+          commitCPromise,
+          closePromise,
+        ]);
+
+      assertEquals(commitBResult.status, "fulfilled");
+      assertEquals(closeResult.status, "fulfilled");
+      assertEquals(commitCResult.status, "rejected");
+      if (commitCResult.status !== "rejected") {
+        throw new Error("Expected commit C to be rejected after close()");
+      }
+      assertEquals(
+        commitCResult.reason instanceof Error,
+        true,
+      );
+      assertEquals(
+        (commitCResult.reason as Error).message,
+        "memory/v2 session closed",
+      );
+      assertEquals(
+        transport.deliveredTransactLocalSeqs.filter((localSeq) =>
+          localSeq === 3
+        ).length,
+        0,
+      );
     } finally {
       globalThis.removeEventListener(
         "unhandledrejection",

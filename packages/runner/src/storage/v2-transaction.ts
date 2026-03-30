@@ -547,6 +547,55 @@ const applyMutablePathWrite = (
   return { ok: { root, previousValue: undefined, changed: false } };
 };
 
+const findMaterializedParentPath = (
+  currentRoot: StorableDatum | undefined,
+  path: readonly string[],
+  value: StorableDatum | undefined,
+): readonly string[] | undefined => {
+  if (value === undefined || path.length <= 1) {
+    return undefined;
+  }
+
+  if (currentRoot === undefined) {
+    return [];
+  }
+
+  if (!isContainerValue(currentRoot)) {
+    return undefined;
+  }
+
+  let current = currentRoot as Record<string, StorableDatum> | StorableDatum[];
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const key = path[index]!;
+
+    if (Array.isArray(current)) {
+      if (key === "length" || !isArrayIndexPropertyName(key)) {
+        return undefined;
+      }
+      const next = current[Number(key)];
+      if (next === undefined) {
+        return path.slice(0, index);
+      }
+      if (!isContainerValue(next)) {
+        return undefined;
+      }
+      current = next;
+      continue;
+    }
+
+    const next = current[key];
+    if (next === undefined) {
+      return path.slice(0, index);
+    }
+    if (!isContainerValue(next)) {
+      return undefined;
+    }
+    current = next;
+  }
+
+  return undefined;
+};
+
 const resolveArrayPatchPath = (
   before: StorableDatum | undefined,
   after: StorableDatum | undefined,
@@ -1086,13 +1135,17 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { ok: collapsedNext };
     }
 
+    const previousActivityValue = isolateTransactionValue(
+      readPathValue(doc.current.value, lastExistingPath),
+    ) as StorableDatum | undefined;
+
     doc.current = collapsedNext;
     doc.frozenReads.clear();
     this.recordWriteActivity(
       space,
-      address,
-      isolatedValue,
-      undefined,
+      { ...address, path: lastExistingPath },
+      readPathValue(collapsedNext.value, lastExistingPath),
+      previousActivityValue,
       doc,
     );
 
@@ -1136,6 +1189,14 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (deepEqual(previousValue, isolatedValue)) {
         continue;
       }
+      const activityPath = findMaterializedParentPath(
+        nextRoot,
+        address.path,
+        isolatedValue,
+      ) ?? address.path;
+      const previousActivityValue = isolateTransactionValue(
+        readPathValue(nextRoot, activityPath),
+      ) as StorableDatum | undefined;
       if (
         !hasMutableRoot && address.path.length > 0 && nextRoot !== undefined
       ) {
@@ -1163,9 +1224,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       changed = true;
       this.recordWriteActivity(
         space,
-        address,
-        isolatedValue,
-        result.ok.previousValue ?? previousValue,
+        { ...address, path: activityPath },
+        readPathValue(result.ok.root, activityPath),
+        previousActivityValue,
         doc,
       );
       if (address.path.length === 0 || !hasMutableRoot) {

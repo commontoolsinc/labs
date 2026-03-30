@@ -551,6 +551,7 @@ export class SpaceSession {
       // The flushOutstandingCommits .finally() guard skips re-flush when
       // #restoring is true, so we must drain any remaining commits now.
       if (
+        !this.#closed &&
         this.client.isConnected() &&
         this.#outstandingCommits.size > 0 &&
         this.#flushing === null
@@ -690,12 +691,16 @@ export class SpaceSession {
     if (this.#flushing) {
       return await this.#flushing;
     }
-    if (!this.client.isConnected()) {
+    if (this.#closed || !this.client.isConnected()) {
       return;
     }
 
     const flush = (async () => {
-      while (this.client.isConnected() && this.#outstandingCommits.size > 0) {
+      while (
+        !this.#closed &&
+        this.client.isConnected() &&
+        this.#outstandingCommits.size > 0
+      ) {
         // localSeq values are monotonic, so Map insertion order already matches
         // replay order for retained commits.
         const next = this.#outstandingCommits.entries().next().value;
@@ -737,6 +742,7 @@ export class SpaceSession {
         this.#flushing = null;
       }
       if (
+        !this.#closed &&
         this.client.isConnected() &&
         this.#outstandingCommits.size > 0 &&
         this.#flushing === null &&

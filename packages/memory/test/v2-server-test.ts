@@ -184,6 +184,128 @@ Deno.test("memory v2 server binds resumed sessions to the original principal", a
   }
 });
 
+Deno.test("memory v2 server requires sessions to be opened on the current connection", async () => {
+  const server = createServer("memory://memory-v2-server-connection-sessions");
+  const firstMessages: ServerMessage[] = [];
+  const secondMessages: ServerMessage[] = [];
+  const firstConnection = server.connect((message) =>
+    firstMessages.push(message)
+  );
+  const secondConnection = server.connect((message) =>
+    secondMessages.push(message)
+  );
+  const space = "did:key:z6Mk-space-current-connection";
+
+  try {
+    await firstConnection.receive(encodeMemoryV2Boundary(HELLO));
+    assertEquals(shiftMessage(firstMessages), HELLO_OK);
+
+    await firstConnection.receive(encodeMemoryV2Boundary({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: { sessionId: "session:fixed" },
+    }));
+    const opened = assertResponse<{ sessionId: string }>(
+      shiftMessage(firstMessages),
+    );
+    const sessionId = opened.ok!.sessionId;
+
+    await secondConnection.receive(encodeMemoryV2Boundary(HELLO));
+    assertEquals(shiftMessage(secondMessages), HELLO_OK);
+
+    await secondConnection.receive(encodeMemoryV2Boundary({
+      type: "graph.query",
+      requestId: "query-1",
+      space,
+      sessionId,
+      query: { roots: [] },
+    }));
+    assertEquals(shiftMessage(secondMessages), {
+      type: "response",
+      requestId: "query-1",
+      error: {
+        name: "SessionError",
+        message: "Session is not open on this connection",
+      },
+    });
+
+    await secondConnection.receive(encodeMemoryV2Boundary({
+      type: "transact",
+      requestId: "tx-1",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:foreign",
+          value: { value: { hello: "world" } },
+        }],
+      },
+    }));
+    assertEquals(shiftMessage(secondMessages), {
+      type: "response",
+      requestId: "tx-1",
+      error: {
+        name: "SessionError",
+        message: "Session is not open on this connection",
+      },
+    });
+
+    await secondConnection.receive(encodeMemoryV2Boundary({
+      type: "session.watch.set",
+      requestId: "watch-set-1",
+      space,
+      sessionId,
+      watches: [],
+    }));
+    assertEquals(shiftMessage(secondMessages), {
+      type: "response",
+      requestId: "watch-set-1",
+      error: {
+        name: "SessionError",
+        message: "Session is not open on this connection",
+      },
+    });
+
+    await secondConnection.receive(encodeMemoryV2Boundary({
+      type: "session.watch.add",
+      requestId: "watch-add-1",
+      space,
+      sessionId,
+      watches: [],
+    }));
+    assertEquals(shiftMessage(secondMessages), {
+      type: "response",
+      requestId: "watch-add-1",
+      error: {
+        name: "SessionError",
+        message: "Session is not open on this connection",
+      },
+    });
+
+    await secondConnection.receive(encodeMemoryV2Boundary({
+      type: "session.ack",
+      requestId: "ack-1",
+      space,
+      sessionId,
+      seenSeq: 0,
+    }));
+    assertEquals(shiftMessage(secondMessages), {
+      type: "response",
+      requestId: "ack-1",
+      error: {
+        name: "SessionError",
+        message: "Session is not open on this connection",
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 server rejects handshakes when flags disagree", async () => {
   const server = createServer("memory://memory-v2-server-handshake-flags");
   const messages: ServerMessage[] = [];
@@ -1078,6 +1200,29 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
     const unchanged = assertResponse<any>(shiftMessage(messages));
     assertEquals(unchanged.ok?.sync.upserts, []);
     assertEquals(unchanged.ok?.sync.removes, []);
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "session.watch.add",
+      requestId: "watch-3b",
+      space,
+      sessionId,
+      watches: [{
+        id: "shared",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: {
+              schema: false,
+              path: [],
+            },
+          }],
+        },
+      }],
+    }));
+    const reorderedEquivalent = assertResponse<any>(shiftMessage(messages));
+    assertEquals(reorderedEquivalent.ok?.sync.upserts, []);
+    assertEquals(reorderedEquivalent.ok?.sync.removes, []);
 
     await connection.receive(encodeMemoryV2Boundary({
       type: "session.watch.add",

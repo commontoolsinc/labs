@@ -20,8 +20,11 @@ target. In particular:
 - persisted `invocation` / `authorization` blobs in this pass are unverified
   caller-supplied audit data; do not treat them as verified authorization
   evidence
-- route-level UCAN / ACL / `Origin` enforcement for the toolshed v2 websocket
-  remains deferred; treat the current endpoint as trusted-only for now
+- the toolshed v2 websocket currently authenticates `session.open` by
+  verifying a signature from the requested space DID against the requested
+  session descriptor
+- broader ACL / `Origin` enforcement, including non-owner read opens, remains
+  deferred; treat the current endpoint as trusted-only for now
 - session resume still uses caller-provided `sessionId` values; principal
   binding and server-issued session ids remain deferred
 - one-shot `graph.query` now honors `branch` and `atSeq`

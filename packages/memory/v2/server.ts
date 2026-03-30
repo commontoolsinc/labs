@@ -1,5 +1,6 @@
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
+import { hashSchema } from "@commontools/data-model/schema-hash";
 import { resolveSpaceStoreUrl } from "../memory.ts";
 import type { Protocol, Provider } from "../provider.ts";
 import {
@@ -165,10 +166,22 @@ const mergeWatchesById = (
   return [...merged.values()];
 };
 
-const normalizeWatchQuery = (watch: WatchSpec): GraphQuery => ({
-  ...watch.query,
-  ...(watch.query.branch === undefined ? { branch: "" } : {}),
-});
+const watchRootIdentity = (root: GraphQuery["roots"][number]): string =>
+  JSON.stringify([
+    root.id,
+    root.selector.path,
+    root.selector.schema === undefined
+      ? ""
+      : hashSchema(root.selector.schema).toString(),
+  ]);
+
+const watchQueryIdentity = (watch: WatchSpec): string =>
+  JSON.stringify({
+    branch: watch.query.branch ?? "",
+    atSeq: watch.query.atSeq ?? null,
+    excludeSent: watch.query.excludeSent === true,
+    roots: watch.query.roots.map(watchRootIdentity).toSorted(),
+  });
 
 const sameWatchSpec = (
   left: WatchSpec,
@@ -176,8 +189,7 @@ const sameWatchSpec = (
 ): boolean =>
   left.id === right.id &&
   left.kind === right.kind &&
-  JSON.stringify(normalizeWatchQuery(left)) ===
-    JSON.stringify(normalizeWatchQuery(right));
+  watchQueryIdentity(left) === watchQueryIdentity(right);
 
 const buildFullSync = (
   previous: ReadonlyMap<string, SessionCacheEntry>,
@@ -370,6 +382,25 @@ class Connection {
     return await current;
   }
 
+  private requireSession(
+    requestId: string,
+    space: string,
+    sessionId: string,
+  ): boolean {
+    if (this.hasSession(space, sessionId)) {
+      return true;
+    }
+    this.send({
+      type: "response",
+      requestId,
+      error: toError(
+        "SessionError",
+        "Session is not open on this connection",
+      ),
+    });
+    return false;
+  }
+
   private async receiveOrdered(payload: string): Promise<void> {
     if (this.#closed) {
       return;
@@ -448,18 +479,63 @@ class Connection {
         return;
       }
       case "transact":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
         this.send(await this.server.transact(parsed));
         return;
       case "graph.query":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
         this.send(await this.server.graphQuery(parsed));
         return;
       case "session.watch.set":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
         this.send(await this.server.watchSet(parsed));
         return;
       case "session.watch.add":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
         this.send(await this.server.watchAdd(parsed));
         return;
       case "session.ack":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
         this.send(await this.server.ackSession(parsed));
         return;
     }

@@ -1,3 +1,4 @@
+import { hashSchema } from "@commontools/data-model/schema-hash";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -782,6 +783,14 @@ const compactWatchEntries = (
   return compacted;
 };
 
+const selectorIdentity = (selector: SchemaPathSelector): string =>
+  stableHash({
+    path: selector.path,
+    schemaHash: selector.schema === undefined
+      ? ""
+      : hashSchema(selector.schema).toString(),
+  });
+
 export const watchIdForEntry = (
   address: { id: URI; type: MIME },
   selector: SchemaPathSelector,
@@ -792,7 +801,7 @@ export const watchIdForEntry = (
       branch,
       id: address.id,
       type: address.type,
-      selector,
+      selector: selectorIdentity(selector),
     })
   }`;
 
@@ -1046,7 +1055,8 @@ class SpaceReplica implements ISpaceReplica {
       >();
       for (const task of this.#syncTasks.values()) {
         for (const entry of task.entries) {
-          pendingEntries.set(JSON.stringify(entry), entry);
+          const [address, selector] = entry;
+          pendingEntries.set(watchIdForEntry(address, selector, ""), entry);
         }
       }
       const rawEntries = [...pendingEntries.values()];

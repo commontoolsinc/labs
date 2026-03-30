@@ -454,4 +454,135 @@ describe("transaction inspection", () => {
       await storageManager.close();
     }
   });
+
+  it("records the rewritten parent path when a single native v2 batch write materializes missing parents", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+
+    try {
+      const id = "test:transaction-inspection-batch-parent-write-v2" as const;
+      const seed = storageManager.edit();
+      seed.write({
+        space,
+        id,
+        type: "application/json",
+        path: [],
+      }, { value: { count: 1 } });
+      await seed.commit();
+
+      const tx = storageManager.edit();
+      const extended = new ExtendedStorageTransaction(tx);
+      extended.writeValuesOrThrow([{
+        address: {
+          space,
+          id,
+          type: "application/json",
+          path: ["profile", "name"],
+        },
+        value: "Ada",
+      }]);
+
+      assertEquals(extended.getReactivityLog(), {
+        reads: [],
+        shallowReads: [],
+        writes: [{
+          space,
+          id,
+          type: "application/json",
+          path: [],
+        }],
+      });
+
+      assertEquals(
+        [...getTransactionWriteDetails(extended, space)].map((detail) =>
+          detail.address
+        ),
+        [{
+          space,
+          id,
+          type: "application/json",
+          path: ["value"],
+        }],
+      );
+    } finally {
+      await storageManager.close();
+    }
+  });
+
+  it("records the rewritten parent path during native v2 batch materialization before later leaf writes", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+
+    try {
+      const id =
+        "test:transaction-inspection-batch-parent-write-run-v2" as const;
+      const seed = storageManager.edit();
+      seed.write({
+        space,
+        id,
+        type: "application/json",
+        path: [],
+      }, { value: { count: 1 } });
+      await seed.commit();
+
+      const tx = storageManager.edit();
+      const extended = new ExtendedStorageTransaction(tx);
+      extended.writeValuesOrThrow([{
+        address: {
+          space,
+          id,
+          type: "application/json",
+          path: ["profile", "name"],
+        },
+        value: "Ada",
+      }, {
+        address: {
+          space,
+          id,
+          type: "application/json",
+          path: ["profile", "age"],
+        },
+        value: 42,
+      }]);
+
+      assertEquals(extended.getReactivityLog(), {
+        reads: [],
+        shallowReads: [],
+        writes: [{
+          space,
+          id,
+          type: "application/json",
+          path: [],
+        }, {
+          space,
+          id,
+          type: "application/json",
+          path: ["profile", "age"],
+        }],
+      });
+
+      assertEquals(
+        [...getTransactionWriteDetails(extended, space)].map((detail) =>
+          detail.address
+        ),
+        [{
+          space,
+          id,
+          type: "application/json",
+          path: ["value"],
+        }, {
+          space,
+          id,
+          type: "application/json",
+          path: ["value", "profile", "age"],
+        }],
+      );
+    } finally {
+      await storageManager.close();
+    }
+  });
 });

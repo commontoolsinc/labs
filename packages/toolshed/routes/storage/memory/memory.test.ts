@@ -31,11 +31,15 @@ export const space = await Identity.fromString(
 
 class FakeSocket extends EventTarget {
   readyState: number = WebSocket.OPEN;
+  closeCode?: number;
+  closeReason?: string;
 
   send(_data: string): void {
   }
 
-  close(): void {
+  close(code?: number, reason?: string): void {
+    this.closeCode = code;
+    this.closeReason = reason;
     this.readyState = WebSocket.CLOSED;
     this.dispatchEvent(new CloseEvent("close"));
   }
@@ -69,6 +73,40 @@ Deno.test("memory websocket negotiation handoff preserves buffered and live fram
     "buffered-before-handoff",
     "after-handoff",
   ]);
+});
+
+Deno.test("memory websocket negotiation closes when the buffered byte budget is exceeded", async () => {
+  const socket = new FakeSocket();
+  const negotiation = bufferTextMessagesUntilNegotiated(
+    socket as unknown as WebSocket,
+    { maxBufferedBytes: 4 },
+  );
+
+  socket.emitMessage("first");
+  assertEquals(await negotiation.firstMessage, "first");
+
+  socket.emitMessage("12345");
+
+  assertEquals(socket.readyState, WebSocket.CLOSED);
+  assertEquals(socket.closeCode, 1009);
+  assertEquals(
+    socket.closeReason,
+    "Memory websocket negotiation buffer exceeded",
+  );
+
+  const errors: string[] = [];
+  negotiation.handoff({
+    onMessage() {
+      throw new Error(
+        "overflowed negotiation should not deliver buffered data",
+      );
+    },
+    onError(error) {
+      errors.push(error.message);
+    },
+  });
+
+  assertEquals(errors, ["Memory websocket negotiation buffer exceeded"]);
 });
 
 Deno.test("test transaction", async () => {
