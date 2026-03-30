@@ -7,7 +7,11 @@ import {
 import { hashOfModern as modernHashRaw } from "../value-hash-modern.ts";
 import { FabricHash } from "../fabric-hash.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
-import { FabricError, FabricUint8Array } from "../fabric-native-instances.ts";
+import {
+  FabricError,
+  FabricRegExp,
+  FabricUint8Array,
+} from "../fabric-native-instances.ts";
 
 // Dynamic import to satisfy the no-external-import lint rule.
 const nodeCrypto = await import("node:crypto");
@@ -1091,6 +1095,16 @@ Deno.test("modernHash native instances", async (t) => {
     const hash = modernHash(re);
     assertEquals(hash.length, 32);
   });
+
+  await t.step(
+    "native RegExp produces same hash as equivalent FabricRegExp",
+    () => {
+      const re = /hello/gi;
+      const nativeHash = hex(modernHash(re));
+      const fabricHash = hex(modernHash(new FabricRegExp(re)));
+      assertEquals(nativeHash, fabricHash);
+    },
+  );
 
   await t.step("different RegExps produce different hashes", () => {
     const r1 = /foo/;
