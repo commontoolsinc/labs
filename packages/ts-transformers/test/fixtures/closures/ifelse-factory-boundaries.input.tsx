@@ -43,7 +43,10 @@ export default pattern<{ entries: Entry[]; messages: Message[] }>(
             ifElse(
               msg.type === "system",
               <span>{msg.id}</span>,
-              <button onClick={selectMessage({ selectedId, msgId: msg.id })}>
+              <button
+                type="button"
+                onClick={selectMessage({ selectedId, msgId: msg.id })}
+              >
                 open
               </button>,
             )

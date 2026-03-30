@@ -48,15 +48,7 @@ const deriveExplicit = derive({
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __ctHelpers.JSONSchema, deriveInput, (value) => value.key("foo").get());
-const handlerObserved = handler({
-    type: "object",
-    properties: {
-        id: {
-            type: "string"
-        }
-    },
-    required: ["id"]
-} as const satisfies __ctHelpers.JSONSchema, {
+const handlerObserved = handler(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         foo: {
@@ -65,7 +57,7 @@ const handlerObserved = handler({
     },
     required: ["foo"],
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema, (event: {
+} as const satisfies __ctHelpers.JSONSchema, (_event: {
     id: string;
 }, state: Writable<{
     foo: string;

@@ -21,7 +21,7 @@ const deriveExplicit = derive<Writable<{ foo: string; bar: string }>, string>(
 );
 
 const handlerObserved = handler(
-  (event: { id: string }, state: Writable<{ foo: string; bar: string }>) => {
+  (_event: { id: string }, state: Writable<{ foo: string; bar: string }>) => {
     state.key("foo").get();
   },
 );

@@ -151,7 +151,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "boolean"
                 } as const satisfies __ctHelpers.JSONSchema, { msg: {
                         type: msg.key("type")
-                    } }, ({ msg }) => msg.type === "system"), <span>{msg.key("id")}</span>, <button onClick={selectMessage({ selectedId, msgId: msg.key("id") })}>
+                    } }, ({ msg }) => msg.type === "system"), <span>{msg.key("id")}</span>, <button type="button" onClick={selectMessage({ selectedId, msgId: msg.key("id") })}>
                 open
               </button>);
             }, {
