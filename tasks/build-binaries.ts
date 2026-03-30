@@ -104,6 +104,10 @@ class BuildConfig {
     return this.path("packages", "cli", "mod.ts");
   }
 
+  fusePackagePath() {
+    return this.path("packages", "fuse");
+  }
+
   distDir() {
     return this.path("dist");
   }
@@ -291,12 +295,15 @@ async function buildCli(config: BuildConfig): Promise<void> {
       "--allow-write",
       "--allow-read",
       "--allow-env",
+      "--allow-run",
       "--allow-ffi", // for @db/sqlite
       "--allow-net", // for @db/sqlite lazy download
       "--include",
       config.staticTypesPath(),
       "--include",
       config.docsCommonPath(),
+      "--include",
+      config.fusePackagePath(),
       config.cliEntryPath(),
     ],
     cwd: config.root,

@@ -171,7 +171,7 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
     return {
       [NAME]: "StoryRenderer",
       [UI]: <>{story}</>,
-      controls: <>{story.controls}</>,
+      controls: <>{story?.controls}</>,
     };
   },
 );

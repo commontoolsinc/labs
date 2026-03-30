@@ -35,6 +35,7 @@ const runtime = new Runtime({
     modernDataModel: env.EXPERIMENTAL_MODERN_DATA_MODEL,
     unifiedJsonEncoding: env.EXPERIMENTAL_UNIFIED_JSON_ENCODING,
     modernHash: env.EXPERIMENTAL_MODERN_HASH,
+    modernSchemaHash: env.EXPERIMENTAL_MODERN_SCHEMA_HASH,
   },
 });
 const service = new BackgroundCharmService({

@@ -52,8 +52,10 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         run: deno install --frozen=true
 
-      - name: 📦 Install libfuse3-dev for FUSE package
-        run: sudo apt-get update && sudo apt-get install -y libfuse3-dev fuse3
+      - name: 📦 Install Linux FUSE test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config gcc libfuse3-dev fuse3
 
       - name: 📥 Download Deno dependency binaries
         run: deno task initialize-db
@@ -201,10 +203,25 @@ jobs:
           if-no-files-found: ignore
 
   cli-integration-test:
-    name: "CLI Integration Tests"
+    name: "CLI Integration Tests (${{ matrix.suite_name }})"
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout_minutes }}
     needs: ["build-binaries"]
     environment: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite_name: core
+            script: integration.sh
+            toolshed_port: 8000
+            install_fuse_deps: false
+            timeout_minutes: 10
+          - suite_name: fuse
+            script: fuse-exec.sh
+            toolshed_port: 8001
+            install_fuse_deps: true
+            timeout_minutes: 15
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -216,18 +233,55 @@ jobs:
         uses: actions/download-artifact@v4
 
       - name: 🚀 Start Toolshed server for testing
+        env:
+          TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+          TOOLSHED_URL: http://localhost:${{ matrix.toolshed_port }}
         run: |
           chmod +x ./common-binaries/ct
           chmod +x ./common-binaries/toolshed
           # Set tools to path
           # Integration script needs `ct`
           echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
-          ./common-binaries/toolshed &
+          MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
 
-      - name: 🧪 Run CLI integration tests
-        working-directory: packages/cli
+      - name: 📦 Install CLI integration dependencies
+        env:
+          INSTALL_FUSE_DEPS: ${{ matrix.install_fuse_deps }}
         run: |
-          API_URL=http://localhost:8000 ./integration/integration.sh
+          sudo apt-get update
+          sudo apt-get install -y jq
+          if [ "$INSTALL_FUSE_DEPS" = "true" ]; then
+            sudo apt-get install -y fuse3 libfuse3-dev
+            sudo chmod 666 /dev/fuse
+          fi
+
+      - name: 🧪 Run CLI integration suite
+        if: ${{ matrix.suite_name == 'core' }}
+        working-directory: packages/cli
+        env:
+          TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+        run: |
+          API_URL="http://localhost:${TOOLSHED_PORT}" ./integration/${{ matrix.script }}
+
+      - name: 🧪 Run CLI FUSE integration suite
+        if: ${{ matrix.suite_name == 'fuse' }}
+        working-directory: packages/cli
+        env:
+          TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+          FUSE_DEEP_ENTITY_PROBE: "0"
+        run: |
+          set +e
+          API_URL="http://localhost:${TOOLSHED_PORT}" timeout 480 ./integration/${{ matrix.script }}
+          rc=$?
+          set -e
+          if [ "$rc" -eq 124 ]; then
+            echo "::error::FUSE integration timed out after 480 seconds"
+          fi
+          exit "$rc"
+
+      - name: 📋 FUSE daemon log (on failure)
+        if: ${{ failure() && matrix.suite_name == 'fuse' }}
+        run: cat ~/.ct/fuse/fuse-daemon.log 2>/dev/null || echo "No daemon log found"
 
   pattern-integration-test:
     name: "Pattern Integration Tests"

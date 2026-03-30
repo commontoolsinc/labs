@@ -12,6 +12,7 @@ affecting users who haven't opted in.
 | `modernDataModel` | `EXPERIMENTAL_MODERN_DATA_MODEL` | Enables the new fabric value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `FabricInstance`). |
 | `unifiedJsonEncoding` | `EXPERIMENTAL_UNIFIED_JSON_ENCODING` | Enables a unified JSON encoding scheme for all fabric values. |
 | `modernHash` | `EXPERIMENTAL_MODERN_HASH` | Enables canonical hashing, replacing merkle-reference CID-based hashing (see Section 6 of the formal spec). |
+| `modernSchemaHash` | `EXPERIMENTAL_MODERN_SCHEMA_HASH` | Enables modern schema hashing, replacing stableStringify-based schema hashing. |
 
 All flags default to `false`. Setting any flag to `true` activates the
 corresponding experimental behavior.
@@ -63,6 +64,7 @@ Server Process (Deno)
   +-- toolshed/index.ts      --> new Runtime({ experimental: { ... } })
                                     +-- setDataModelConfig(...)
                                     +-- setModernHashConfig(...)
+                                    +-- setSchemaHashConfig(...)
 ```
 
 ### Browser-side (build-time injection)
@@ -96,8 +98,11 @@ Browser Web Worker
               |    +-- modernDataModelEnabled = true
               |         +-- fabricFromNativeValue() checks modernDataModelEnabled
               +-- setModernHashConfig(...)
-                   +-- modernHashEnabled = true
-                        +-- hashOf() dispatches to hashOfModern()
+              |    +-- modernHashEnabled = true
+              |         +-- hashOf() dispatches to hashOfModern()
+              +-- setSchemaHashConfig(...)
+                   +-- modernSchemaHashEnabled = true
+                        +-- schemaHashOf() dispatches to modern path
 ```
 
 Key points:
@@ -136,7 +141,7 @@ When any experimental flags are enabled, the `Runtime` constructor logs them on
 startup. Look for a line like:
 
 ```
-Experimental flags enabled: modernDataModel, unifiedJsonEncoding, modernHash
+Experimental flags enabled: modernDataModel, unifiedJsonEncoding, modernHash, modernSchemaHash
 ```
 
 - **Server-side (toolshed):** Check `packages/toolshed/local-dev-toolshed.log`.
@@ -168,8 +173,10 @@ with defaults (all `false`) and stores the resolved result as
 
 The memory layer uses module-level ambient config variables:
 `modernDataModelEnabled` in `packages/data-model/fabric-value.ts` (set by
-`setDataModelConfig()`) and `modernHashEnabled` in
-`packages/data-model/value-hash.ts` (set by `setModernHashConfig()`). This means:
+`setDataModelConfig()`), `modernHashEnabled` in
+`packages/data-model/value-hash.ts` (set by `setModernHashConfig()`), and
+`modernSchemaHashEnabled` in `packages/data-model/schema-hash.ts` (set by
+`setSchemaHashConfig()`). This means:
 
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser, the Web Worker is a separate JS context, so its flags are

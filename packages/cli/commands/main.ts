@@ -72,6 +72,20 @@ export const main = new Command()
   .command("exec", exec)
   // @ts-ignore for the above type issue
   .command("fuse", fuse)
+  .command(
+    "fuse-daemon",
+    new Command()
+      .description(
+        "Internal: run the FUSE daemon directly (used by compiled binary).",
+      )
+      .hidden()
+      .useRawArgs()
+      .action(async (_options: unknown, ...rawArgs: unknown[]) => {
+        const { main } = await import("@commontools/fuse");
+        const daemonArgs = rawArgs.map((arg) => String(arg));
+        await main(daemonArgs);
+      }),
+  )
   .command("id", identity)
   .command("init", init)
   .command("test", test)

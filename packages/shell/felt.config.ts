@@ -50,6 +50,9 @@ const config: Config = {
       "$EXPERIMENTAL_MODERN_HASH": Deno.env.get(
         "EXPERIMENTAL_MODERN_HASH",
       ),
+      "$EXPERIMENTAL_MODERN_SCHEMA_HASH": Deno.env.get(
+        "EXPERIMENTAL_MODERN_SCHEMA_HASH",
+      ),
       "$COMPILATION_CACHE_CLIENT": Deno.env.get(
         "COMPILATION_CACHE_CLIENT",
       ) ?? "true",

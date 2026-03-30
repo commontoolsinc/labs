@@ -1,5 +1,5 @@
 import { Command } from "@cliffy/command";
-import { resolve } from "@std/path";
+import { basename, resolve } from "@std/path";
 import ports from "@commontools/ports" with { type: "json" };
 import {
   buildDenoArgs,
@@ -151,21 +151,36 @@ export const fuse = new Command()
       await Deno.mkdir(absMountpoint, { recursive: true });
     }
 
-    const modPath = fuseMod(import.meta.url);
     const stateDir = defaultStateDir();
     const execCli = await ensureExecShim(stateDir, import.meta.url);
-    const denoArgs = buildDenoArgs({
-      modPath,
-      mountpoint: absMountpoint,
-      apiUrl,
-      identity,
-      execCli,
-    });
+    const execPath = Deno.execPath();
+    const execBase = basename(execPath);
+    const isCompiledBinary = execBase !== "deno" && execBase !== "deno.exe";
+
+    let spawnCmd: string;
+    let spawnArgs: string[];
+    if (isCompiledBinary) {
+      spawnCmd = execPath;
+      spawnArgs = ["fuse-daemon", absMountpoint];
+      if (apiUrl) spawnArgs.push("--api-url", apiUrl);
+      if (identity) spawnArgs.push("--identity", identity);
+      if (execCli) spawnArgs.push("--exec-cli", execCli);
+    } else {
+      const modPath = fuseMod(import.meta.url);
+      spawnCmd = "deno";
+      spawnArgs = buildDenoArgs({
+        modPath,
+        mountpoint: absMountpoint,
+        apiUrl,
+        identity,
+        execCli,
+      });
+    }
 
     if (options.background) {
       // Detached background process
-      const cmd = new Deno.Command("deno", {
-        args: denoArgs,
+      const cmd = new Deno.Command(spawnCmd, {
+        args: spawnArgs,
         stdin: "null",
         stdout: "null",
         stderr: "null",
@@ -200,8 +215,8 @@ export const fuse = new Command()
       );
     } else {
       // Foreground — inherit stdio, propagate exit code
-      const cmd = new Deno.Command("deno", {
-        args: denoArgs,
+      const cmd = new Deno.Command(spawnCmd, {
+        args: spawnArgs,
         stdin: "inherit",
         stdout: "inherit",
         stderr: "inherit",

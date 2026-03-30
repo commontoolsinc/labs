@@ -196,6 +196,9 @@ const EnvSchema = z.object({
   EXPERIMENTAL_MODERN_HASH: z.string().default("false").transform((
     v,
   ) => v === "true"),
+  EXPERIMENTAL_MODERN_SCHEMA_HASH: z.string().default("false").transform((
+    v,
+  ) => v === "true"),
 
   // ===========================================================================
   // Compilation cache flags (see docs/specs/compilation-cache.md)

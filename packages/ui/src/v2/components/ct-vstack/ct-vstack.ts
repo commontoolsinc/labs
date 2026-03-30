@@ -58,6 +58,8 @@ export class CTVStack extends BaseElement {
       display: flex;
       flex-direction: column;
       box-sizing: border-box;
+      height: 100%;
+      width: 100%;
     }
 
     /* Gap utilities */

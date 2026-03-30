@@ -7,6 +7,8 @@ Deno.test({
   name: "Linux struct offsets match C headers",
   ignore: Deno.build.os !== "linux",
   async fn() {
+    const decoder = new TextDecoder();
+    const isCi = Deno.env.get("CI") === "true";
     const dir = new URL(".", import.meta.url).pathname;
     const src = `${dir}verify-structs.c`;
     const bin = `${dir}verify-structs`;
@@ -17,13 +19,33 @@ Deno.test({
       stdout: "piped",
       stderr: "piped",
     });
-    const pkgOut = await pkgConfig.output();
+    let pkgOut: Deno.CommandOutput;
+    try {
+      pkgOut = await pkgConfig.output();
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound && !isCi) {
+        console.warn(
+          "Skipping Linux FUSE struct verification: pkg-config is missing. " +
+            "Install pkg-config, gcc, and libfuse3-dev to run this check.",
+        );
+        return;
+      }
+      throw error;
+    }
     if (!pkgOut.success) {
+      const stderr = decoder.decode(pkgOut.stderr);
+      if (!isCi && stderr.includes("Package 'fuse3'")) {
+        console.warn(
+          "Skipping Linux FUSE struct verification: fuse3 headers were not found by pkg-config. " +
+            "Install libfuse3-dev, pkg-config, and gcc to run this check.",
+        );
+        return;
+      }
       throw new Error(
-        `pkg-config failed: ${new TextDecoder().decode(pkgOut.stderr)}`,
+        `pkg-config failed: ${stderr}`,
       );
     }
-    const cflags = new TextDecoder()
+    const cflags = decoder
       .decode(pkgOut.stdout)
       .trim()
       .split(/\s+/);
@@ -33,10 +55,22 @@ Deno.test({
       args: ["-o", bin, src, ...cflags],
       stderr: "piped",
     });
-    const compileResult = await compile.output();
+    let compileResult: Deno.CommandOutput;
+    try {
+      compileResult = await compile.output();
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound && !isCi) {
+        console.warn(
+          "Skipping Linux FUSE struct verification: gcc is missing. " +
+            "Install gcc, pkg-config, and libfuse3-dev to run this check.",
+        );
+        return;
+      }
+      throw error;
+    }
     if (!compileResult.success) {
       throw new Error(
-        `gcc failed: ${new TextDecoder().decode(compileResult.stderr)}`,
+        `gcc failed: ${decoder.decode(compileResult.stderr)}`,
       );
     }
 
@@ -46,11 +80,11 @@ Deno.test({
     if (!runResult.success) {
       throw new Error(
         `verify-structs exited with code ${runResult.code}: ${
-          new TextDecoder().decode(runResult.stderr)
+          decoder.decode(runResult.stderr)
         }`,
       );
     }
-    const output = new TextDecoder().decode(runResult.stdout);
+    const output = decoder.decode(runResult.stdout);
 
     // Parse key=value pairs
     const values = new Map<string, number>();
@@ -136,6 +170,10 @@ Deno.test({
     // Clean up binary
     try {
       Deno.removeSync(bin);
-    } catch { /* ignore */ }
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    }
   },
 });

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { join, resolve, toFileUrl } from "@std/path";
+import { basename, join, resolve, toFileUrl } from "@std/path";
 import {
   awaitBackgroundMountStartup,
   awaitForegroundMountExit,
@@ -340,6 +340,30 @@ describe("mount state operations", () => {
     expect(shim).toContain('" run --allow-net');
     expect(shim).toContain(join(repoRoot, "packages/cli/mod.ts"));
     expect(shim).toContain('"$@"');
+  });
+
+  it("ensureExecShim falls back to stateDir when repo root is not writable", async () => {
+    const stateDir = join(tmpDir, "state");
+    const repoRoot = join(tmpDir, "readonly-repo");
+    await Deno.mkdir(join(repoRoot, "packages/cli/lib"), { recursive: true });
+    await Deno.chmod(repoRoot, 0o555);
+
+    try {
+      const importMetaUrl =
+        toFileUrl(join(repoRoot, "packages/cli/lib/fuse.ts"))
+          .href;
+      const shimPath = await ensureExecShim(stateDir, importMetaUrl);
+      const shim = await Deno.readTextFile(shimPath);
+
+      expect(shimPath.startsWith(join(stateDir, "ct-exec-"))).toBe(true);
+      expect(shimPath).not.toBe(join(stateDir, "ct-exec"));
+      expect(basename(shimPath)).toMatch(/^ct-exec-[0-9a-f]{16}$/);
+      expect(shim).toContain("#!/usr/bin/env bash");
+      expect(shim).toContain("export CT_EXEC_SHEBANG=1");
+      expect(shim).toContain(join(repoRoot, "packages/cli/mod.ts"));
+    } finally {
+      await Deno.chmod(repoRoot, 0o755);
+    }
   });
 
   it("always removes foreground mount state files before exiting", async () => {

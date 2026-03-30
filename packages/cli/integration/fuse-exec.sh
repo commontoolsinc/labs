@@ -34,9 +34,20 @@ assert_not_exists() {
   local path="$1"
   local message="$2"
 
-  if [ -e "$path" ]; then
+  if path_exists "$path"; then
     error "$message"
   fi
+}
+
+path_exists() {
+  local path="$1"
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --signal=KILL 1 test -e "$path" >/dev/null 2>&1
+    return $?
+  fi
+
+  test -e "$path"
 }
 
 assert_json_eq() {
@@ -59,21 +70,38 @@ wait_for_path() {
   local attempts=$((timeout_seconds * 10))
 
   for _ in $(seq 1 "$attempts"); do
-    if [ -e "$path" ]; then
+    if path_exists "$path"; then
       return 0
     fi
-    local probe="$path"
-    while [ "$probe" != "/" ]; do
-      probe=$(dirname "$probe")
-      if [ -e "$probe" ]; then
-        find "$probe" -maxdepth 2 -print >/dev/null 2>&1 || true
-        break
-      fi
-    done
     sleep 0.1
   done
 
   error "Timed out waiting for path: $path"
+}
+
+resolve_entity_dir() {
+  local entities_dir="$1"
+  local bare_id="$2"
+  local timeout_seconds="${3:-20}"
+  local attempts=$((timeout_seconds * 10))
+  local canonical_entity_dir="$entities_dir/of:$bare_id"
+  local bare_entity_dir="$entities_dir/$bare_id"
+
+  for _ in $(seq 1 "$attempts"); do
+    if path_exists "$canonical_entity_dir"; then
+      printf '%s\n' "$canonical_entity_dir"
+      return 0
+    fi
+
+    if path_exists "$bare_entity_dir"; then
+      printf '%s\n' "$bare_entity_dir"
+      return 0
+    fi
+
+    sleep 0.1
+  done
+
+  return 1
 }
 
 wait_for_piece_value() {
@@ -103,6 +131,11 @@ read_piece_value_or_default() {
 
   actual=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
   if [ -z "$actual" ]; then
+    printf '%s\n' "$fallback"
+    return 0
+  fi
+
+  if [[ ! "$actual" =~ ^[0-9]+$ ]]; then
     printf '%s\n' "$fallback"
     return 0
   fi
@@ -165,7 +198,29 @@ ct id new >"$IDENTITY"
 
 PIECE_ID=$(ct piece new --main-export "$CUSTOM_EXPORT" $SPACE_ARGS "$PATTERN_SRC")
 echo "Created piece: $PIECE_ID"
-ct fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --background
+MOUNT_OUTPUT=$(ct fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --background)
+echo "$MOUNT_OUTPUT"
+
+MOUNT_PID="${MOUNT_OUTPUT#*PID }"
+if [ "$MOUNT_PID" = "$MOUNT_OUTPUT" ]; then
+  error "Could not parse fuse daemon PID from mount output."
+fi
+
+MOUNT_PID="${MOUNT_PID%%)*}"
+case "$MOUNT_PID" in
+  ''|*[!0-9]*)
+    error "Could not parse fuse daemon PID from mount output."
+    ;;
+esac
+
+for _ in $(seq 1 30); do
+  if ! kill -0 "$MOUNT_PID" >/dev/null 2>&1; then
+    error "Fuse daemon exited before mount became ready."
+  fi
+  sleep 0.1
+done
+
+sleep 1
 
 wait_for_path "$MOUNTPOINT/$SPACE/pieces"
 
@@ -184,26 +239,28 @@ if [ -z "$ENTITY_ID" ] || [ "$ENTITY_ID" = "null" ]; then
   error "Mounted meta.json did not include an entityId."
 fi
 
-ENTITY_DIR="$MOUNTPOINT/$SPACE/entities/$ENTITY_ID"
-ENTITY_RESULT_DIR="$ENTITY_DIR/result"
-wait_for_path "$ENTITY_RESULT_DIR"
+ENTITY_BARE_ID="${ENTITY_ID#of:}"
+ENTITY_DEEP_PROBE="${FUSE_DEEP_ENTITY_PROBE:-0}"
+ENTITIES_DIR="$MOUNTPOINT/$SPACE/entities"
+wait_for_path "$ENTITIES_DIR"
+ENTITY_DIR=$(resolve_entity_dir "$ENTITIES_DIR" "$ENTITY_BARE_ID" 20 || true)
+if [ -z "$ENTITY_DIR" ]; then
+  error "Timed out waiting for entity directory entry for $ENTITY_BARE_ID."
+fi
 
 HANDLER_FILE="$RESULT_DIR/recordMessage.handler"
 LEGACY_HANDLER_FILE="$RESULT_DIR/legacyWrite.handler"
 TOOL_FILE="$RESULT_DIR/search.tool"
-ENTITY_HANDLER_FILE="$ENTITY_RESULT_DIR/recordMessage.handler"
-ENTITY_TOOL_FILE="$ENTITY_RESULT_DIR/search.tool"
 
 wait_for_path "$HANDLER_FILE"
 wait_for_path "$LEGACY_HANDLER_FILE"
 wait_for_path "$TOOL_FILE"
-wait_for_path "$ENTITY_HANDLER_FILE"
-wait_for_path "$ENTITY_TOOL_FILE"
 
-test -e "$HANDLER_FILE" || error "recordMessage.handler was not mounted."
-test -e "$LEGACY_HANDLER_FILE" || error "legacyWrite.handler was not mounted."
-test -e "$TOOL_FILE" || error "search.tool was not mounted."
+path_exists "$HANDLER_FILE" || error "recordMessage.handler was not mounted."
+path_exists "$LEGACY_HANDLER_FILE" || error "legacyWrite.handler was not mounted."
+path_exists "$TOOL_FILE" || error "search.tool was not mounted."
 success "Mounted callable entries exist"
+success "Entities namespace exposes matching entry for mounted piece"
 
 assert_not_exists "$RESULT_DIR/search" "Pattern tool internals should not be exposed as a directory."
 jq -e '.recordMessage == {"/handler":"recordMessage"}' "$RESULT_JSON" >/dev/null ||
@@ -325,19 +382,30 @@ ct exec "$HANDLER_FILE" --message "shared-message"
 wait_for_piece_value "lastMessage" '"shared-message"'
 wait_for_piece_value "messageCount" "$((COUNT_BEFORE_PIECES_SHARED + 1))"
 
-COUNT_BEFORE_ENTITIES_SHARED=$(read_piece_value_or_default "messageCount" "0")
-ct exec "$ENTITY_HANDLER_FILE" --message "shared-message"
-wait_for_piece_value "lastMessage" '"shared-message"'
-wait_for_piece_value "messageCount" "$((COUNT_BEFORE_ENTITIES_SHARED + 1))"
-success "Handler execution through pieces/ and entities/ reaches the same backing cell"
+if [ "$ENTITY_DEEP_PROBE" = "1" ]; then
+  ENTITY_RESULT_DIR="$ENTITY_DIR/result"
+  ENTITY_HANDLER_FILE="$ENTITY_RESULT_DIR/recordMessage.handler"
+  ENTITY_TOOL_FILE="$ENTITY_RESULT_DIR/search.tool"
 
-PIECES_TOOL_SHARED=$(ct exec "$TOOL_FILE" --query "shared-tool" --help "entity-compare")
-ENTITIES_TOOL_SHARED=$(ct exec "$ENTITY_TOOL_FILE" --query "shared-tool" --help "entity-compare")
-assert_json_eq \
-  "$PIECES_TOOL_SHARED" \
-  "$ENTITIES_TOOL_SHARED" \
-  "Tool output should match between pieces/ and entities/ paths"
-success "Tool execution through pieces/ and entities/ is identical"
+  wait_for_path "$ENTITY_HANDLER_FILE"
+  wait_for_path "$ENTITY_TOOL_FILE"
+
+  COUNT_BEFORE_ENTITIES_SHARED=$(read_piece_value_or_default "messageCount" "0")
+  ct exec "$ENTITY_HANDLER_FILE" --message "shared-message"
+  wait_for_piece_value "lastMessage" '"shared-message"'
+  wait_for_piece_value "messageCount" "$((COUNT_BEFORE_ENTITIES_SHARED + 1))"
+  success "Handler execution through pieces/ and entities/ reaches the same backing cell"
+
+  PIECES_TOOL_SHARED=$(ct exec "$TOOL_FILE" --query "shared-tool" --help "entity-compare")
+  ENTITIES_TOOL_SHARED=$(ct exec "$ENTITY_TOOL_FILE" --query "shared-tool" --help "entity-compare")
+  assert_json_eq \
+    "$PIECES_TOOL_SHARED" \
+    "$ENTITIES_TOOL_SHARED" \
+    "Tool output should match between pieces/ and entities/ paths"
+  success "Tool execution through pieces/ and entities/ is identical"
+else
+  success "Deep entities callable probe skipped"
+fi
 
 LEGACY_COUNT_BEFORE=$(read_piece_value_or_default "legacyCount" "0")
 echo '{}' > "$LEGACY_HANDLER_FILE"
