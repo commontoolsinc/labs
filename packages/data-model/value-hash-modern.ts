@@ -14,6 +14,7 @@ import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "./fabric-hash.ts";
 import { FabricUint8Array } from "./fabric-native-instances.ts";
 import { DECONSTRUCT, type FabricInstance } from "./interface.ts";
+import { shallowFabricFromNativeValueModern } from "./fabric-value-modern.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { encodeULEB128 } from "@commontools/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
@@ -227,8 +228,16 @@ function feedObjectValue(
       return;
     }
 
-      // Error, Map, Set, Date, HasToJSON: not valid FabricValue types for
-      // hashing -- they should have been converted before reaching here.
+    case NATIVE_TAGS.Date:
+    case NATIVE_TAGS.RegExp: {
+      // Native instances that have a well-defined FabricValue conversion.
+      // Convert on-the-fly and hash the converted value.
+      const converted = shallowFabricFromNativeValueModern(value, false);
+      feedValue(hasher, converted);
+      return;
+    }
+
+      // Map, Set, Error, HasToJSON, Uint8Array: not yet handled here.
       // Fall through to the error path below.
   }
 
