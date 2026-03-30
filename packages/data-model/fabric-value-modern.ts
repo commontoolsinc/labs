@@ -91,9 +91,8 @@ export function shallowFabricFromNativeValueModern(
 
     case NATIVE_TAGS.Uint8Array: {
       // Native Uint8Array instances are wrapped in FabricBytes.
-      const wrapped = new FabricBytes(value as Uint8Array);
-      if (freeze) Object.freeze(wrapped);
-      return wrapped;
+      // FabricBytes self-freezes in its constructor (FabricPrimitive contract).
+      return new FabricBytes(value as Uint8Array);
     }
 
     case NATIVE_TAGS.Array:
