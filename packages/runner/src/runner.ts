@@ -1238,9 +1238,7 @@ export class Runner {
     // Check if $event is a stream alias
     let streamLink: NormalizedFullLink | undefined = undefined;
     if (isRecord(inputs) && "$event" in inputs) {
-      let value: FabricValue | undefined = inputs.$event as
-        | FabricValue
-        | undefined;
+      let value: FabricValue = inputs.$event as FabricValue;
       while (isWriteRedirectLink(value)) {
         const maybeStreamLink = resolveLink(
           this.runtime,

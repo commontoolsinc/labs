@@ -493,7 +493,7 @@ class StandardObjectCreator implements IObjectCreator<FabricValue> {
   mergeMatches(
     matches: FabricValue[],
     _schema?: JSONSchema,
-  ): FabricValue | undefined {
+  ): FabricValue {
     // These value objects should be merged. While this isn't JSONSchema
     // spec, when we have an anyOf with branches where name is set in one
     // schema, but the address is ignored, and a second option where
@@ -513,8 +513,8 @@ class StandardObjectCreator implements IObjectCreator<FabricValue> {
   }
   applyDefault(
     _link: NormalizedFullLink,
-    defaultValue: FabricValue | undefined,
-  ): FabricValue | undefined {
+    defaultValue: FabricValue,
+  ): FabricValue {
     return defaultValue;
   }
   /**
@@ -526,7 +526,7 @@ class StandardObjectCreator implements IObjectCreator<FabricValue> {
    */
   createObject(
     _link: NormalizedFullLink,
-    value: FabricValue | undefined,
+    value: FabricValue,
   ): FabricValue {
     return value;
   }
@@ -884,7 +884,7 @@ export abstract class BaseObjectTraverser {
   protected traverseLinkedDoc(
     doc: IMemorySpaceValueAttestation,
     _linkSchema: JSONSchema | undefined,
-    defaultValue: FabricValue | undefined,
+    defaultValue: FabricValue,
     itemLink: NormalizedFullLink | undefined,
   ): Immutable<FabricValue> {
     return this.traverseDAG(doc, defaultValue, itemLink);
@@ -1805,7 +1805,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   protected override traverseLinkedDoc(
     doc: IMemorySpaceValueAttestation,
     linkSchema: JSONSchema | undefined,
-    defaultValue: FabricValue | undefined,
+    defaultValue: FabricValue,
     itemLink: NormalizedFullLink | undefined,
   ): Immutable<FabricValue> {
     if (
@@ -2929,7 +2929,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   private applyDefault(
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
-  ): FabricValue | undefined {
+  ): FabricValue {
     if (isRecord(schema) && schema.default !== undefined) {
       const link = getNormalizedLink(doc.address, schema);
       return this.objectCreator.applyDefault(link, schema.default);
