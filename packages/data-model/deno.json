@@ -25,6 +25,7 @@
     "./fabric-value": "./fabric-value.ts",
     "./interface": "./interface.ts",
     "./fabric-epoch": "./fabric-epoch.ts",
+    "./base64url": "./base64url.ts",
     "./bigint-encoding": "./bigint-encoding.ts",
     "./fabric-hash": "./fabric-hash.ts",
     "./fabric-type-tags": "./fabric-type-tags.ts",
