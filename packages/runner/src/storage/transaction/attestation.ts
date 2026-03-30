@@ -1,8 +1,8 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
 import {
-  type FabricValue,
   type FabricObject,
+  type FabricValue,
   isArrayIndexPropertyName,
 } from "@commontools/data-model/fabric-value";
 import type {

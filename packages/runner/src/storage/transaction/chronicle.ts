@@ -1,8 +1,8 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { normalizeFact, unclaimed } from "@commontools/memory/fact";
 import {
-  type FabricValue,
   fabricFromNativeValue,
+  type FabricValue,
 } from "@commontools/data-model/fabric-value";
 import type {
   Assertion,

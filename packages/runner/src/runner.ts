@@ -2,9 +2,7 @@ import { hashOf } from "@commontools/data-model/value-hash";
 import { getLogger } from "@commontools/utils/logger";
 import { isRecord, type Mutable } from "@commontools/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
-import type {
-  FabricValue,
-} from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import {
   type Frame,
   isModule,

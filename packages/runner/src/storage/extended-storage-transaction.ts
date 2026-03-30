@@ -2,8 +2,8 @@ import { Immutable, isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import {
   cloneIfNecessary,
-  type FabricValue,
   type FabricObject,
+  type FabricValue,
   isArrayIndexPropertyName,
 } from "@commontools/data-model/fabric-value";
 import type {

@@ -20,9 +20,7 @@ import type {
   URI,
   Variant,
 } from "@commontools/memory/interface";
-import type {
-  FabricValue,
-} from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import { BaseMemoryAddress } from "@commontools/runner/traverse";
 import { Cell } from "../cell.ts";
 
