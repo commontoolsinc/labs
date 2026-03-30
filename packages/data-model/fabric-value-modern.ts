@@ -2,6 +2,7 @@ import { isInstance, isRecord } from "@commontools/utils/types";
 import {
   FabricInstance,
   type FabricNativeObject,
+  FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
@@ -249,8 +250,7 @@ export function fabricFromNativeValueModern(
  * whose children are all also deep-frozen FabricValues.
  */
 function isDeepFrozenFabricValue(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  if (typeof value !== "object") return true; // primitives
+  if (value === null || (typeof value !== "object")) return true; // primitives
   if (!Object.isFrozen(value)) return false;
 
   if (Array.isArray(value)) {
@@ -260,8 +260,17 @@ function isDeepFrozenFabricValue(value: unknown): boolean {
     return true;
   }
 
-  // FabricSpecialObject -- don't recurse into their properties.
+  // `FabricPrimitive`s are by definition frozen and have no outbound
+  // references.
   if (value instanceof FabricSpecialObject) return true;
+
+  // `FabricInstance`s might have references, but -- TODO(@danfuzz) -- we have
+  // no way of handling them yet.
+  if (value instanceof FabricInstance) {
+    throw new Error(
+      `Cannot yet handle instance of class ${value.constructor.name}`,
+    );
+  }
 
   for (const v of Object.values(value)) {
     if (!isDeepFrozenFabricValue(v)) return false;
@@ -503,7 +512,7 @@ export function isFabricValueModern(
 }
 
 // ---------------------------------------------------------------------------
-// canBeStored: deep check for fabric compatibility (FabricValue | FabricNativeObject)
+// canBeStored: deep check for fabric compatibility
 // ---------------------------------------------------------------------------
 
 /**
