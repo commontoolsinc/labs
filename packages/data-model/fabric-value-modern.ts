@@ -262,7 +262,7 @@ function isDeepFrozenFabricValue(value: unknown): boolean {
 
   // `FabricPrimitive`s are by definition frozen and have no outbound
   // references.
-  if (value instanceof FabricSpecialObject) return true;
+  if (value instanceof FabricPrimitive) return true;
 
   // `FabricInstance`s might have references, but -- TODO(@danfuzz) -- we have
   // no way of handling them yet.
