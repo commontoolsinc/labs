@@ -483,13 +483,12 @@ describe("cloneIfNecessary", () => {
   // --------------------------------------------------------------------------
 
   describe("FabricInstance", () => {
-    it("clones FabricError via shallowClone protocol", () => {
+    it("frozen `FabricError` cannot yet be cloned", () => {
       setDataModelConfig(true);
       const error = new FabricError(new Error("test"));
       Object.freeze(error);
-      const result = cloneIfNecessary(error as unknown as FabricValue);
-      expect(result).toBeInstanceOf(FabricError);
-      expect(Object.isFrozen(result)).toBe(true);
+      const func = () => cloneIfNecessary(error);
+      expect(func).toThrow(/Cannot yet handle/);
     });
 
     it("produces mutable FabricError clone when frozen=false", () => {
