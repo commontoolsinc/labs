@@ -811,5 +811,18 @@ describe("Cell Static Methods", () => {
         expect(cell.get()).toEqual(mixed);
       });
     });
+
+    it("should handle creating cell with mixed type array from set", () => {
+      // Using Cell.of, like the other tests, means that we can't use a proxy
+      // since the value isn't set. Using cell.set, we can use a query result
+      // proxy. I don't have a good way of verifying that in a unit test, but
+      // I can at least verify that it returns the correct value.
+      withinHandlerContext(runtime, space, tx, () => {
+        const mixed = [1, "two", { three: 3 }, [4], true, null];
+        const cell = Cell.of(mixed);
+        cell.set(mixed);
+        expect(cell.get()).toEqual(mixed);
+      });
+    });
   });
 });

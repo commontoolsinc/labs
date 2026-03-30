@@ -2203,9 +2203,25 @@ export class SchemaObjectTraverser<V extends FabricDatum>
       !SchemaObjectTraverser.asCellOrStream(resolved)
     ) {
       const defaultValue = isRecord(resolved) ? resolved["default"] : undefined;
-      // A value of true or {} means we match anything
+      // A value of true or {} means we match anything.
       // Resolve the rest of the doc, and return
       this.tx.read(doc.address, READ_FOR_SCHEDULING); // recursively read this doc
+      if (!this.traverseCells && doc.value !== undefined) {
+        // When not walking cells for scheduling, create a QueryResultProxy
+        // directly instead of pre-traversing the DAG. TransformObjectCreator
+        // ignores the pre-built value for true schemas anyway, so traversal
+        // is wasted work. The proxy reads lazily from the tx on its own.
+        // We don't do this when doc.value is undefined, so we can support
+        // Cell.of, which essentially makes the initial value the default
+        // value. Since the proxy system doesn't interact with the default
+        // value system, we need to bypass that here.
+        const effectiveLink = link ?? getNormalizedLink(doc.address, true);
+        const proxy = this.objectCreator.createObject(
+          { ...effectiveLink, schema: true },
+          doc.value,
+        );
+        return { ok: proxy };
+      }
       return { ok: this.traverseDAG(doc, defaultValue, link) };
     } else if (
       ContextualFlowControl.isFalseSchema(resolved) &&
