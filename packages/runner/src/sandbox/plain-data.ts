@@ -1,5 +1,31 @@
 import { FrozenMap, FrozenSet } from "@commontools/data-model/frozen-builtins";
 
+// Resolve `entries`/`values` from the prototype chain so own-property shadows
+// on Map/Set instances cannot interfere, while still working correctly for
+// FrozenMap/FrozenSet (which lack native internal slots and provide their own
+// prototype methods).
+function protoEntries(
+  value: ReadonlyMap<unknown, unknown>,
+): Iterable<[unknown, unknown]> {
+  const entries = Object.getPrototypeOf(value)?.entries;
+  if (typeof entries !== "function") {
+    throw new TypeError(
+      "Map-like value has no entries method on its prototype",
+    );
+  }
+  return entries.call(value);
+}
+
+function protoValues(
+  value: ReadonlySet<unknown>,
+): Iterable<unknown> {
+  const values = Object.getPrototypeOf(value)?.values;
+  if (typeof values !== "function") {
+    throw new TypeError("Set-like value has no values method on its prototype");
+  }
+  return values.call(value);
+}
+
 export interface ModuleSafeRecord {
   readonly [key: string]: ModuleSafeValue;
   readonly [key: symbol]: ModuleSafeValue;
@@ -149,11 +175,7 @@ function validateMap(
   visited: WeakSet<object>,
 ): void {
   let index = 0;
-  for (
-    const [key, entryValue] of Map.prototype.entries.call(
-      value as Map<unknown, unknown>,
-    )
-  ) {
+  for (const [key, entryValue] of protoEntries(value)) {
     validateModuleSafeValue(
       key,
       `${path}<map-key:${index}>`,
@@ -174,7 +196,7 @@ function validateSet(
   visited: WeakSet<object>,
 ): void {
   let index = 0;
-  for (const entryValue of Set.prototype.values.call(value as Set<unknown>)) {
+  for (const entryValue of protoValues(value)) {
     validateModuleSafeValue(
       entryValue,
       `${path}<set:${index}>`,
@@ -293,11 +315,7 @@ function freezeMap(
   converted.set(value as object, result as unknown as ModuleSafeValue);
 
   let index = 0;
-  for (
-    const [key, entryValue] of Map.prototype.entries.call(
-      value as Map<unknown, unknown>,
-    )
-  ) {
+  for (const [key, entryValue] of protoEntries(value)) {
     builder.set(
       freezeModuleSafeValue(
         key,
@@ -330,7 +348,7 @@ function freezeSet(
   converted.set(value as object, result as unknown as ModuleSafeValue);
 
   let index = 0;
-  for (const entryValue of Set.prototype.values.call(value as Set<unknown>)) {
+  for (const entryValue of protoValues(value)) {
     builder.add(
       freezeModuleSafeValue(
         entryValue,
