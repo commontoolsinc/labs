@@ -810,6 +810,9 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#readActivities.push(readActivity);
     this.invalidateReactivityLog();
     if (options?.trackReadWithoutLoad === true) {
+      if (!address.id.startsWith("data:")) {
+        doc.validated = true;
+      }
       return { ok: { address, value: undefined } };
     }
     if (!getExperimentalStorableConfig().richStorableValues) {
@@ -1215,6 +1218,9 @@ export class V2StorageTransaction implements IStorageTransaction {
     const key = encodePointer(address.path);
     const existing = doc.writeDetails.get(key);
     if (existing) {
+      // Only update the latest value — previousValue intentionally stays as the
+      // pre-transaction state so that journal.history() reports the correct
+      // before-snapshot for reverts and conflict detection.
       existing.value = value;
       this.invalidateReactivityLog();
       return;

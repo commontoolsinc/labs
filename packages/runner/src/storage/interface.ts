@@ -593,9 +593,9 @@ export interface IStorageTransaction {
    * MAY also fail due to insufficient authorization level or due to various IO
    * problems.
    *
-   * Commit is idempotent, meaning calling it over and over will return same
-   * exact value as on first call and no execution will take place on subsequent
-   * calls.
+   * Calling commit on a transaction that has already completed (committed or
+   * failed) returns the prior error or a {@link IStorageTransactionComplete}
+   * error. Commit is NOT idempotent — it does not replay the original result.
    */
   commit(): Promise<Result<Unit, CommitError>>;
 

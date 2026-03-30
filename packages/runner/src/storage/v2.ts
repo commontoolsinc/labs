@@ -1373,6 +1373,9 @@ class SpaceReplica implements ISpaceReplica {
         entry.localSeq === localSeq
       );
       if (!pending) {
+        logger.warn?.(
+          `confirmPending: no pending entry for localSeq=${localSeq} on ${id}`,
+        );
         continue;
       }
       record.confirmed = confirmedVersion(

@@ -1,3 +1,4 @@
+import { getLogger } from "@commontools/utils/logger";
 import {
   IStorageNotification,
   IStorageNotificationCapability,
@@ -37,7 +38,9 @@ export class StorageNotificationRelay
           this.#subscribers.delete(subscriber);
         }
       } catch (error) {
-        console.error(`Storage subscription throw an error: ${error}`);
+        getLogger("storage.subscription").error(
+          `Storage subscription threw an error: ${error}`,
+        );
       }
     }
     return { done: false };
