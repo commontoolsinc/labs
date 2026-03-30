@@ -1,4 +1,4 @@
-import { assertEquals, assertGreater } from "@std/assert";
+import { assertEquals, assertGreater, assertMatch } from "@std/assert";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
@@ -1116,6 +1116,53 @@ Deno.test("Schema Shrink Validation", async (t) => {
         schemasTA,
         schemasInline,
         "pattern schemas should be identical between type-arg and inline forms",
+      );
+    },
+  );
+
+  await t.step(
+    "ternary lowered from key(...) keeps boolean ifElse predicate schema",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { pattern, UI } from "commontools";',
+        "",
+        "type State = {",
+        "  user: {",
+        "    settings: {",
+        "      notifications: boolean;",
+        "    };",
+        "  };",
+        "};",
+        "",
+        "export default pattern<State>((state) => ({",
+        "  [UI]: (",
+        "    <div>",
+        '      {state.user.settings.notifications ? "enabled" : "disabled"}',
+        "    </div>",
+        "  ),",
+        "}));",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      assertMatch(
+        result.output,
+        /__ctHelpers\.ifElse\(\{\s*type:\s*"boolean"/m,
+      );
+      assertEquals(
+        result.output.includes("__ctHelpers.ifElse(true as const"),
+        false,
       );
     },
   );
