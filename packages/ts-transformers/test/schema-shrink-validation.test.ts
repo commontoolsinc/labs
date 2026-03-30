@@ -1,4 +1,9 @@
-import { assertEquals, assertGreater, assertMatch } from "@std/assert";
+import {
+  assertEquals,
+  assertGreater,
+  assertMatch,
+  assertStringIncludes,
+} from "@std/assert";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
@@ -1164,6 +1169,122 @@ Deno.test("Schema Shrink Validation", async (t) => {
         result.output.includes("__ctHelpers.ifElse(true as const"),
         false,
       );
+    },
+  );
+
+  await t.step(
+    "derive object-literal input preserves property schemas",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { cell, derive, lift } from "commontools";',
+        "",
+        'const stage = cell<string>("initial");',
+        "const attemptCount = cell<number>(0);",
+        "const acceptedCount = cell<number>(0);",
+        "const rejectedCount = cell<number>(0);",
+        "",
+        "const normalizedStage = lift((value: string) => value)(stage);",
+        "const attempts = lift((count: number) => count)(attemptCount);",
+        "const accepted = lift((count: number) => count)(acceptedCount);",
+        "const rejected = lift((count: number) => count)(rejectedCount);",
+        "",
+        "const _summary = derive(",
+        "  {",
+        "    stage: normalizedStage,",
+        "    attempts: attempts,",
+        "    accepted: accepted,",
+        "    rejected: rejected,",
+        "  },",
+        "  (snapshot) =>",
+        "    `stage:${snapshot.stage} attempts:${snapshot.attempts}` +",
+        "    ` accepted:${snapshot.accepted} rejected:${snapshot.rejected}`,",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      assertStringIncludes(result.output, "stage: {");
+      assertStringIncludes(result.output, "attempts: {");
+      assertStringIncludes(result.output, "accepted: {");
+      assertStringIncludes(result.output, "rejected: {");
+      assertEquals(result.output.includes("stage: true"), false);
+      assertEquals(result.output.includes("attempts: true"), false);
+      assertEquals(result.output.includes("accepted: true"), false);
+      assertEquals(result.output.includes("rejected: true"), false);
+    },
+  );
+
+  await t.step(
+    "derive wildcard usage keeps conservative full-shape input schema",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive, type Writable } from "commontools";',
+        "const input = {} as Writable<{ foo: string; bar: string }>;",
+        "const d = derive(input, (v: Writable<{ foo: string; bar: string }>) => {",
+        '  const foo = v.key("foo").get();',
+        "  Object.keys(v.get());",
+        "  return foo;",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      assertStringIncludes(result.output, "asCell: true");
+      assertStringIncludes(result.output, '"foo"');
+      assertStringIncludes(result.output, '"bar"');
+    },
+  );
+
+  await t.step(
+    "handler wildcard usage keeps conservative full-shape state schema",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { handler, type Writable } from "commontools";',
+        "const h = handler((event: { id: string }, state: Writable<{ foo: string; bar: string }>) => {",
+        '  const foo = state.key("foo").get();',
+        "  Object.keys(state.get());",
+        "  return foo + event.id;",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      assertStringIncludes(result.output, "asCell: true");
+      assertStringIncludes(result.output, '"foo"');
+      assertStringIncludes(result.output, '"bar"');
     },
   );
 
