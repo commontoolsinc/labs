@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { getCellKind } from "@commontools/schema-generator/cell-brand";
 
 import { normalizeDataFlows } from "../../../ast/mod.ts";
 import { classifyOpaquePathTerminalCall } from "../../opaque-roots.ts";
@@ -24,9 +25,30 @@ function isHelperOwnedComputationExpression(
 
 function isHelperOwnedCellGetExpression(
   expression: ts.Expression,
+  context: Parameters<Emitter>[0]["context"],
 ): expression is ts.CallExpression {
-  return ts.isCallExpression(expression) &&
-    classifyOpaquePathTerminalCall(expression) === "get";
+  if (
+    !ts.isCallExpression(expression) ||
+    classifyOpaquePathTerminalCall(expression) !== "get"
+  ) {
+    return false;
+  }
+
+  const callee = expression.expression;
+  if (
+    !ts.isPropertyAccessExpression(callee) &&
+    !ts.isElementAccessExpression(callee)
+  ) {
+    return false;
+  }
+
+  try {
+    const receiverType = context.checker.getTypeAtLocation(callee.expression);
+    const cellKind = getCellKind(receiverType, context.checker);
+    return cellKind === "cell" || cellKind === "stream";
+  } catch {
+    return false;
+  }
 }
 
 interface RewriteHelperOwnedExpressionParams {
@@ -93,7 +115,7 @@ export function rewriteHelperOwnedExpression(
     relevantDataFlows.length > 0 &&
     (
       isHelperOwnedComputationExpression(expression) ||
-      isHelperOwnedCellGetExpression(expression)
+      isHelperOwnedCellGetExpression(expression, context)
     )
   ) {
     const forced = createReactiveWrapperForExpression(

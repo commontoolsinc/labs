@@ -114,6 +114,28 @@ function findFirstNode<T extends ts.Node>(
   return found;
 }
 
+function findAllNodes<T extends ts.Node>(
+  sourceFile: ts.SourceFile,
+  predicate: (node: ts.Node) => node is T,
+): T[] {
+  const found: T[] = [];
+
+  const visit = (node: ts.Node): void => {
+    if (predicate(node)) {
+      found.push(node);
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+
+  if (found.length === 0) {
+    throw new Error("Expected matching nodes");
+  }
+
+  return found;
+}
+
 type ExpressionSiteHandling = ReturnType<typeof classifyExpressionSiteHandling>;
 type JsxRoute =
   | { route: "shared-pre-closure" }
@@ -215,7 +237,8 @@ function canRewriteHelperOwnedExpressionSite(
 interface JsxRouteCase {
   name: string;
   source: string;
-  find: (sourceFile: ts.SourceFile) => ts.Expression;
+  find?: (sourceFile: ts.SourceFile) => ts.Expression;
+  findAll?: (sourceFile: ts.SourceFile) => ts.Expression[];
   expected: JsxRoute;
 }
 
@@ -224,11 +247,22 @@ function assertJsxRouteCase(testCase: JsxRouteCase): void {
     testCase.source,
   );
   const analyze = createDataFlowAnalyzer(checker);
+  const expressions = testCase.findAll
+    ? testCase.findAll(sourceFile)
+    : testCase.find
+    ? [testCase.find(sourceFile)]
+    : [];
 
-  assertEquals(
-    classifyJsxRoute(testCase.find(sourceFile), context, analyze),
-    testCase.expected,
-  );
+  if (expressions.length === 0) {
+    throw new Error(`No route expressions found for ${testCase.name}`);
+  }
+
+  for (const expression of expressions) {
+    assertEquals(
+      classifyJsxRoute(expression, context, analyze),
+      testCase.expected,
+    );
+  }
 }
 
 Deno.test(
@@ -1436,8 +1470,8 @@ const sharedPostClosureJsxRouteCases: JsxRouteCase[] = [
         );
       });
     `,
-    find: (sourceFile) =>
-      findFirstNode(
+    findAll: (sourceFile) =>
+      findAllNodes(
         sourceFile,
         (node): node is ts.BinaryExpression =>
           ts.isBinaryExpression(node) &&
@@ -1467,7 +1501,8 @@ const sharedPostClosureJsxRouteCases: JsxRouteCase[] = [
         </div>
       ));
     `,
-    find: (sourceFile) => findFirstNode(sourceFile, ts.isConditionalExpression),
+    findAll: (sourceFile) =>
+      findAllNodes(sourceFile, ts.isConditionalExpression),
     expected: { route: "shared-post-closure" },
   },
   {

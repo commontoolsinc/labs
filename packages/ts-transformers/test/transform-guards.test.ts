@@ -249,6 +249,45 @@ export default pattern<{ fields: Field[] }>((state) => ({
 );
 
 Deno.test(
+  "Transform guards: helper-owned non-cell get() calls are not force-wrapped",
+  async () => {
+    const source = `/// <cts-enable />
+import { ifElse, pattern, UI } from "commontools";
+
+interface State {
+  show: boolean;
+  selected: string;
+}
+
+class Lookup {
+  get(key: string): string | undefined {
+    return key.toUpperCase();
+  }
+}
+
+export default pattern<State>((state) => {
+  const lookup = new Lookup();
+  return {
+    [UI]: <div>{ifElse(state.show, lookup.get(state.selected), "missing")}</div>,
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "lookup.get(");
+    assert(
+      !/__ctHelpers\.(?:computed|derive)\([\s\S]{0,160}lookup\.get\(/.test(
+        output,
+      ),
+      "expected non-cell helper-owned get() calls to remain plain method calls",
+    );
+  },
+);
+
+Deno.test(
   "Transform guards: helper-owned child key references stay structural",
   async () => {
     const source = `/// <cts-enable />

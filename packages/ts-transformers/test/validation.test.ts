@@ -12,7 +12,9 @@ function getWarnings(diagnostics: readonly TransformationDiagnostic[]) {
 }
 
 function getEmptyArrayErrors(diagnostics: readonly TransformationDiagnostic[]) {
-  return diagnostics.filter((d) => d.type === "cell-factory:empty-array");
+  return diagnostics.filter((d) =>
+    d.type === "cell-factory:empty-array" && d.severity === "error"
+  );
 }
 
 async function getEmptyArrayErrorCount(
