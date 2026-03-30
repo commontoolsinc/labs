@@ -6,7 +6,6 @@ import { type JSONSchema } from "./builder/types.ts";
 import type { JSONValue } from "@commontools/api";
 import {
   cloneIfNecessary,
-  type FabricDatum,
   type FabricValue,
 } from "@commontools/data-model/fabric-value";
 import {
@@ -307,7 +306,7 @@ export function processDefaultValue(
 /** @internal Exported for testing only. */
 export function mergeDefaults(
   schema: JSONSchema | undefined,
-  defaultValue: Readonly<FabricDatum>,
+  defaultValue: Readonly<FabricValue>,
 ): JSONSchema {
   const base = isNontrivialSchema(schema) ? schema : {};
 
@@ -496,7 +495,7 @@ export function validateAndTransform(
 }
 
 class TransformObjectCreator
-  implements IObjectCreator<AnyCellWrapping<FabricDatum>> {
+  implements IObjectCreator<AnyCellWrapping<FabricValue>> {
   constructor(
     private runtime: Runtime,
     private tx: IExtendedStorageTransaction,
@@ -532,9 +531,9 @@ class TransformObjectCreator
   // This controls the behavior when properties is specified, but
   // additonalProperties is not.
   addOptionalProperty(
-    _obj: Record<string, Immutable<FabricDatum>>,
+    _obj: Record<string, Immutable<FabricValue>>,
     _key: string,
-    _value: FabricDatum,
+    _value: FabricValue,
   ) {
     // We want to exclude properties when we have a properties map provided
     // in the schema, but it doesn't include our property, and we don't have
@@ -551,8 +550,8 @@ class TransformObjectCreator
   // If not, we will actually resolve our links to get to our values.
   createObject(
     link: NormalizedFullLink,
-    value: AnyCellWrapping<FabricDatum> | undefined,
-  ): AnyCellWrapping<FabricDatum> {
+    value: AnyCellWrapping<FabricValue> | undefined,
+  ): AnyCellWrapping<FabricValue> {
     // If we have a schema with an asCell or asStream (or if our anyOf values
     // do), we should create a cell here.
     // If we don't have a schema, or a true schema, we should create a query result proxy.
@@ -570,7 +569,7 @@ class TransformObjectCreator
           { ...link, schema: restSchema },
           getTransactionForChildCells(this.tx),
           this.synced,
-        ) as AnyCellWrapping<FabricDatum>;
+        ) as AnyCellWrapping<FabricValue>;
       }
       // If it's not a cell/stream, but the schema is true-ish, use a
       // QueryResultProxy

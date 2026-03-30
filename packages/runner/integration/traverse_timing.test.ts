@@ -1,6 +1,6 @@
 import type { JSONObject } from "@commontools/api";
 import type { MemorySpace, MIME } from "@commontools/memory/interface";
-import type { FabricDatum } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import type { SchemaPathSelector, URI } from "../src/storage/interface.ts";
 import {
   type BaseMemoryAddress,
@@ -41,7 +41,7 @@ const selector: SchemaPathSelector = {
   },
 };
 
-type SimpleRevision<Is extends FabricDatum = FabricDatum> = {
+type SimpleRevision<Is extends FabricValue = FabricValue> = {
   of: URI;
   the: string;
   cause: string;

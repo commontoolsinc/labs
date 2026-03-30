@@ -1,9 +1,8 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { normalizeFact, unclaimed } from "@commontools/memory/fact";
 import {
-  type FabricDatum,
-  fabricFromNativeValue,
   type FabricValue,
+  fabricFromNativeValue,
 } from "@commontools/data-model/fabric-value";
 import type {
   Assertion,
@@ -124,7 +123,7 @@ export class Chronicle {
    */
   write(
     address: IMemoryAddress,
-    value?: FabricDatum,
+    value?: FabricValue,
   ): Result<
     IAttestation,
     | IStorageTransactionInconsistent
@@ -285,7 +284,7 @@ export class Chronicle {
 
           edit.assert({
             ...loaded,
-            is: normalizedMerged as FabricDatum,
+            is: normalizedMerged as FabricValue,
             cause: causeRef,
           });
         }

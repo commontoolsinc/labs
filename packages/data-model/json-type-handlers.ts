@@ -229,7 +229,7 @@ export const BigIntHandler: TypeHandler = {
  * Handler for `FabricEpochNsec`. Serializes to a flat base64 string encoding
  * the underlying bigint's two's-complement big-endian byte representation.
  * Wire format: `{ "/EpochNsec@1": "<base64>" }`. FabricEpochNsec is a direct
- * member of FabricDatum (not a FabricInstance), so this handler uses
+ * member of FabricValue (not a FabricInstance), so this handler uses
  * `instanceof` directly.
  * See Section 5.3 of the formal spec.
  */
@@ -281,7 +281,7 @@ export const EpochNsecHandler: TypeHandler = {
  * Handler for `FabricEpochDays`. Serializes to a flat base64 string encoding
  * the underlying bigint's two's-complement big-endian byte representation.
  * Wire format: `{ "/EpochDays@1": "<base64>" }`. FabricEpochDays is a direct
- * member of FabricDatum (not a FabricInstance), so this handler uses
+ * member of FabricValue (not a FabricInstance), so this handler uses
  * `instanceof` directly. Same flat encoding approach as `EpochNsecHandler`.
  * See Section 5.3 of the formal spec.
  */
@@ -332,7 +332,7 @@ export const EpochDaysHandler: TypeHandler = {
 /**
  * Handler for `FabricBytes`. Serializes to a flat base64url string
  * encoding the raw bytes. Wire format: `{ "/Bytes@1": "<base64>" }`.
- * `FabricBytes` is a direct member of `FabricDatum` (via
+ * `FabricBytes` is a direct member of `FabricValue` (via
  * `FabricPrimitive`), so this handler uses `instanceof` directly.
  * Same flat encoding approach as the epoch handlers.
  */
@@ -431,14 +431,14 @@ export const StorableInstanceHandler: TypeHandler = {
 /**
  * Create a registry with the built-in type handlers. The order matters for
  * serialization: `FabricPrimitive` subclasses are checked first (direct
- * `FabricDatum` members matched by `instanceof`), then `FabricInstance`
+ * `FabricValue` members matched by `instanceof`), then `FabricInstance`
  * (generic protocol types), then `bigint` and `undefined`. Primitives
  * (null, boolean, number, string), arrays, and plain objects are handled
  * as fallthrough in the serializer after no handler matches.
  */
 export function createDefaultRegistry(): TypeHandlerRegistry {
   const registry = new TypeHandlerRegistry();
-  // FabricPrimitive subclasses first -- they are direct FabricDatum members
+  // FabricPrimitive subclasses first -- they are direct FabricValue members
   // matched by instanceof, and must be checked before the generic
   // StorableInstanceHandler.
   registry.register(EpochNsecHandler);

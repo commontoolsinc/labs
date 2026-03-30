@@ -54,7 +54,7 @@ export function shallowFabricFromNativeValueModern(
   const tag = tagFromNativeValue(value);
 
   switch (tag) {
-    // Special primitives are direct FabricDatum members -- always frozen,
+    // Special primitives are direct FabricValue members -- always frozen,
     // pass through as-is regardless of the `freeze` argument.
     case NATIVE_TAGS.EpochNsec:
     case NATIVE_TAGS.EpochDays:

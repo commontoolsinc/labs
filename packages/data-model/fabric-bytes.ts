@@ -3,7 +3,7 @@ import { FabricPrimitive } from "./interface.ts";
 /**
  * Immutable byte sequence in the fabric type system. Extends `FabricPrimitive`
  * -- treated like a primitive (always frozen, passes through conversion
- * unchanged). Direct member of `FabricDatum` via the `FabricPrimitive` arm.
+ * unchanged). Direct member of `FabricValue` via the `FabricPrimitive` arm.
  *
  * The underlying bytes are private. Callers access them through:
  * - `length` -- the byte count.

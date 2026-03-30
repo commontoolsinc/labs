@@ -21,7 +21,7 @@ import type {
   State,
   URI,
 } from "@commontools/memory/interface";
-import type { FabricDatum } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import {
   combineSchema,
   IMemorySpaceValueAttestation,
@@ -42,7 +42,7 @@ import type { JSONSchemaObj } from "@commontools/api";
 function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
-): SchemaObjectTraverser<FabricDatum> {
+): SchemaObjectTraverser<FabricValue> {
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
@@ -52,7 +52,7 @@ function getTraverser(
 function makeDoc(
   store: Map<string, Revision<State>>,
   uri: string,
-  value: FabricDatum,
+  value: FabricValue,
 ): IMemorySpaceValueAttestation {
   const type = "application/json" as const;
   const entity = uri as Entity;

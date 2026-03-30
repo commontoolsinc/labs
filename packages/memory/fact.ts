@@ -1,5 +1,5 @@
 import type { URI } from "./interface.ts";
-import type { FabricDatum } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import {
   Assertion,
   Fact,
@@ -55,7 +55,7 @@ export const unclaimedRef = (
 };
 
 export const assert = <
-  Is extends FabricDatum,
+  Is extends FabricValue,
   T extends MIME,
   Of extends URI,
 >({
@@ -129,7 +129,7 @@ export const iterate = function* (
 export function normalizeFact<
   T extends MIME,
   Of extends URI,
-  Is extends FabricDatum,
+  Is extends FabricValue,
 >(
   arg: {
     the: T;
@@ -147,7 +147,7 @@ export function normalizeFact<
 export function normalizeFact<
   T extends MIME,
   Of extends URI,
-  Is extends FabricDatum,
+  Is extends FabricValue,
 >(
   arg: {
     the: T;
@@ -164,7 +164,7 @@ export function normalizeFact<
 export function normalizeFact<
   T extends MIME,
   Of extends URI,
-  Is extends FabricDatum,
+  Is extends FabricValue,
 >(
   arg: {
     the: T;

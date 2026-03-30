@@ -2,14 +2,14 @@
 import { ChangeSet, compactChangeSet } from "../src/data-updating.ts";
 import * as Attestation from "../src/storage/transaction/attestation.ts";
 import type { IAttestation } from "../src/storage/interface.ts";
-import type { FabricDatum } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 
 const space = "did:test:space" as `did:${string}:${string}`;
 const docId = "test:doc" as `${string}:${string}`;
 
 // Create a source document to write to
 function makeSource(size: number): IAttestation {
-  const value: Record<string, FabricDatum> = {};
+  const value: Record<string, FabricValue> = {};
   for (let i = 0; i < size; i++) {
     value["item" + i] = { a: 1, b: 2, c: 3 };
   }

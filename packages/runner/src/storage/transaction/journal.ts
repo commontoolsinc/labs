@@ -1,4 +1,4 @@
-import type { FabricDatum } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import type {
   Activity,
   IAttestation,
@@ -141,7 +141,7 @@ export const write = (
   journal: IJournal,
   space: MemorySpace,
   address: IMemoryAddress,
-  value?: FabricDatum,
+  value?: FabricValue,
 ): Result<IAttestation, WriteError> => {
   const { ok: branch, error } = checkout(journal, space);
   if (error) {
@@ -352,7 +352,7 @@ export class TransactionWriter implements ITransactionWriter {
    */
   write(
     address: IMemoryAddress,
-    value?: FabricDatum,
+    value?: FabricValue,
   ) {
     return write(this.#journal, this.#space, address, value);
   }

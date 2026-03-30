@@ -2,9 +2,8 @@ import { Immutable, isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import {
   cloneIfNecessary,
-  type FabricDatum,
-  type FabricObject,
   type FabricValue,
+  type FabricObject,
   isArrayIndexPropertyName,
 } from "@commontools/data-model/fabric-value";
 import type {
@@ -167,7 +166,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           nextValue[key] =
             (isNextKeyArrayIndex ? [] : {}) as FabricObject;
       }
-      nextValue[lastKey] = value as FabricDatum;
+      nextValue[lastKey] = value as FabricValue;
       const parentAddress = { ...address, path: lastExistingPath };
       const writeResultRetry = this.tx.write(parentAddress, valueObj);
       if (writeResultRetry.error) {

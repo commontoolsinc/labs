@@ -1,10 +1,7 @@
 import type { HashObject } from "@commontools/data-model/value-hash";
 import type { JSONValue } from "@commontools/api";
 
-import type {
-  FabricDatum,
-  FabricValue,
-} from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import type { SchemaPathSelector } from "@commontools/api";
 export type { SchemaPathSelector };
 
@@ -565,7 +562,7 @@ export interface Unclaimed<T extends string = MIME, Of extends string = URI> {
 
 /**
  * `Assertion` is just like a {@link Statement} except the value MUST be inline
- * {@link FabricDatum} as opposed to reference to one. {@link Assertion}s are
+ * {@link FabricValue} as opposed to reference to one. {@link Assertion}s are
  * used to assert facts, while {@link Statement}s are used to retract them. This
  * allows retracting over the wire without having to send JSON values back and
  * forth.
@@ -573,7 +570,7 @@ export interface Unclaimed<T extends string = MIME, Of extends string = URI> {
 export interface Assertion<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends FabricDatum = FabricDatum,
+  Is extends FabricValue = FabricValue,
 > {
   the: T;
   of: Of;
@@ -591,7 +588,7 @@ export interface Assertion<
 export interface Retraction<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends FabricDatum = FabricDatum,
+  Is extends FabricValue = FabricValue,
 > {
   the: T;
   of: Of;
@@ -602,7 +599,7 @@ export interface Retraction<
 export interface Invariant<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends FabricDatum = FabricDatum,
+  Is extends FabricValue = FabricValue,
 > {
   the: T;
   of: Of;
@@ -620,13 +617,13 @@ export interface Invariant<
 export type Fact<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends FabricDatum = FabricDatum,
+  Is extends FabricValue = FabricValue,
 > = Assertion<T, Of, Is> | Retraction<T, Of, Is>;
 
 export type Statement<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends FabricDatum = FabricDatum,
+  Is extends FabricValue = FabricValue,
 > = Assertion<T, Of, Is> | Retraction<T, Of, Is> | Invariant<T, Of, Is>;
 
 export type State = Fact | Unclaimed;
@@ -683,10 +680,10 @@ export type CommitFact<Subject extends MemorySpace = MemorySpace> = Assertion<
 export type ClaimFact = true;
 
 // ⚠️ Note we use `void` as opposed to `undefined` because the latter makes it
-// incompatible with the `Is` type parameter (which defaults to `FabricDatum`
+// incompatible with the `Is` type parameter (which defaults to `FabricValue`
 // and previously defaulted to `JSONValue`).
 export type RetractFact = { is?: void };
-export type AssertFact<Is extends FabricDatum = FabricDatum> = { is: Is };
+export type AssertFact<Is extends FabricValue = FabricValue> = { is: Is };
 // This is the structure of a bunch of our objects
 export type OfTheCause<T> = {
   [of in URI]: {
@@ -699,7 +696,7 @@ export type OfTheCause<T> = {
 export type Changes<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends FabricDatum = FabricDatum,
+  Is extends FabricValue = FabricValue,
 > = {
   [of in Of]: {
     [the in T]: {
@@ -711,7 +708,7 @@ export type Changes<
 export type FactSelection<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends FabricDatum = FabricDatum,
+  Is extends FabricValue = FabricValue,
 > = {
   [of in Of]: {
     [the in T]: {

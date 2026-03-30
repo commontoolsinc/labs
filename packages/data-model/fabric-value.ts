@@ -5,7 +5,6 @@ export {
   DECONSTRUCT,
   type FabricArray,
   type FabricClass,
-  type FabricDatum,
   FabricInstance,
   type FabricNativeObject,
   type FabricObject,

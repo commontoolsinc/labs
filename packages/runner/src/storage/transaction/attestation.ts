@@ -1,9 +1,8 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
 import {
-  type FabricDatum,
-  type FabricObject,
   type FabricValue,
+  type FabricObject,
   isArrayIndexPropertyName,
 } from "@commontools/data-model/fabric-value";
 import type {
@@ -158,7 +157,7 @@ const setAtPath = (
     }
     if (result.ok === nested) return { ok: root }; // noop propagation
     const newArray = sparseArrayCopy(root);
-    newArray[index] = result.ok as FabricDatum;
+    newArray[index] = result.ok as FabricValue;
     return { ok: newArray };
   }
 
@@ -171,7 +170,7 @@ const setAtPath = (
     if (value === undefined) {
       if (!(key in obj)) return { ok: root }; // delete non-existent = noop
       const { [key]: _, ...without } = obj;
-      return { ok: without as FabricDatum };
+      return { ok: without as FabricValue };
     }
     return { ok: { ...obj, [key]: value } };
   }
@@ -189,7 +188,7 @@ const setAtPath = (
     };
   }
   if (result.ok === nested) return { ok: root }; // noop propagation
-  return { ok: { ...obj, [key]: result.ok as FabricDatum } };
+  return { ok: { ...obj, [key]: result.ok as FabricValue } };
 };
 
 /**
@@ -465,7 +464,7 @@ export const load = (
           };
         } else if (mediaType === "application/json") {
           // Handle JSON media type
-          let value: FabricDatum;
+          let value: FabricValue;
           try {
             value = JSON.parse(content);
             result = { ok: { address: { ...address, path: [] }, value } };
@@ -565,8 +564,8 @@ export const TypeMismatchError = (
 
 export const StateInconsistency = (source: {
   address: IMemoryAddress;
-  expected?: FabricDatum;
-  actual?: FabricDatum;
+  expected?: FabricValue;
+  actual?: FabricValue;
   space?: MemorySpace;
 }): IStorageTransactionInconsistent => {
   const { address, space, expected, actual } = source;

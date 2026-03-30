@@ -3,7 +3,7 @@ import {
   type JSONObject,
   type JSONSchema,
 } from "@commontools/runner";
-import type { FabricDatum } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import {
   type BaseMemoryAddress,
   CompoundCycleTracker,
@@ -211,7 +211,7 @@ export const selectSchema = <Space extends MemorySpace>(
     new ServerObjectManager(session, providedClassifications);
   // while loading dependent docs, we want to avoid cycles
   const tracker = new CompoundCycleTracker<
-    Immutable<FabricDatum>,
+    Immutable<FabricValue>,
     JSONSchema | undefined
   >();
   const cfc = new ContextualFlowControl();
@@ -400,7 +400,7 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
       new Set<string>(classification),
     );
   const tracker = new CompoundCycleTracker<
-    Immutable<FabricDatum>,
+    Immutable<FabricValue>,
     JSONSchema | undefined
   >();
   const cfc = new ContextualFlowControl();

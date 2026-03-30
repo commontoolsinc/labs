@@ -120,26 +120,14 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
 // ===========================================================================
 
 /**
- * A value that can be stored in the storage layer. This is similar to
- * `JSONValue` but is specifically intended for use at storage boundaries
- * (values going into or coming out of the database).
- *
- * Note: Once the `modernDataModel` experiment graduates and the rich path
- * becomes the default, `FabricValue = FabricDatum | undefined` will be a
- * redundant union (since `FabricDatum` includes `undefined`). The alias is
- * retained for compatibility and readability at call sites.
- */
-export type FabricValue = FabricDatum | undefined;
-
-/**
- * The full set of values that the storage layer can represent. This is the
- * strongly-typed "middle layer" of the three-layer architecture:
+ * The full set of values that the fabric storage layer can represent. This
+ * is the strongly-typed "middle layer" of the three-layer architecture:
  *
  *   JavaScript "wild west" (unknown) <-> FabricValue <-> Serialized (Uint8Array)
  *
  * Most native JS object types enter the fabric layer via wrapper classes
  * that implement `FabricInstance`. However, `FabricPrimitive` subclasses
- * and `bigint` are direct members of `FabricDatum` without implementing
+ * and `bigint` are direct members of `FabricValue` without implementing
  * `FabricInstance`. Some native types are converted to fabric primitives
  * during conversion.
  *
@@ -147,7 +135,7 @@ export type FabricValue = FabricDatum | undefined;
  * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
  * object properties are omitted -- matching legacy behavior.
  */
-export type FabricDatum =
+export type FabricValue =
   // -- Primitives --
   | null
   | boolean
@@ -159,21 +147,21 @@ export type FabricDatum =
   // -- Containers --
   | FabricArray
   | FabricObject
-  // -- Extended primitives (experimental: modernDataModel) --
+  // -- undefined --
   | undefined;
 
-/** An array of fabric data. */
-export interface FabricArray extends ArrayLike<FabricDatum> {}
+/** An array of fabric values. */
+export interface FabricArray extends ArrayLike<FabricValue> {}
 
 /**
- * An object/record of fabric data.
+ * An object/record of fabric values.
  *
  * Note: `__proto__` and `constructor` properties are not currently guarded
  * against at the type level or at runtime in clone/conversion internals.
  * If prototype pollution becomes a concern, add boundary validation where
  * values enter the fabric system (e.g., `fabricFromNativeValue`).
  */
-export interface FabricObject extends Record<string, FabricDatum> {}
+export interface FabricObject extends Record<string, FabricValue> {}
 
 /**
  * A single "layer" of fabric conversion -- the result of shallow conversion
@@ -193,8 +181,7 @@ export type FabricValueLayer =
  * accepts `FabricValue | FabricNativeObject`, meaning callers can pass in
  * either already-fabric data or raw native JS objects. The conversion
  * produces `FabricInstance` wrappers or `FabricPrimitive` values that live
- * inside
- * `FabricValue` via the corresponding arms of `FabricDatum`.
+ * inside `FabricValue`.
  *
  * The `{ toJSON(): unknown }` arm covers objects (and functions) that are
  * convertible to fabric form via their `toJSON()` method. This is a legacy
@@ -202,7 +189,7 @@ export type FabricValueLayer =
  * (`value is FabricValue | FabricNativeObject`) remains sound.
  *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
- * and belongs directly in `FabricDatum` without wrapping.
+ * and belongs directly in `FabricValue` without wrapping.
  */
 export type FabricNativeObject =
   | Error

@@ -114,15 +114,9 @@ export interface FabricHashConstructor {
 export declare const FabricHash: FabricHashConstructor;
 
 /**
- * A value that can be stored in the storage layer. Similar to `JSONValue` but
- * intended for use at storage boundaries.
+ * The full set of values that the fabric storage layer can represent.
  */
-export type FabricValue = FabricDatum | undefined;
-
-/**
- * The full set of values that the storage layer can represent.
- */
-export type FabricDatum =
+export type FabricValue =
   | null
   | boolean
   | number
@@ -133,11 +127,11 @@ export type FabricDatum =
   | FabricObject
   | undefined;
 
-/** An array of fabric data. */
-export interface FabricArray extends ArrayLike<FabricDatum> {}
+/** An array of fabric values. */
+export interface FabricArray extends ArrayLike<FabricValue> {}
 
-/** An object/record of fabric data. */
-export interface FabricObject extends Record<string, FabricDatum> {}
+/** An object/record of fabric values. */
+export interface FabricObject extends Record<string, FabricValue> {}
 
 // ============================================================================
 // Runtime Constants

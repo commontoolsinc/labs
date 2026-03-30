@@ -9,18 +9,18 @@ import type {
   SelectAll,
   URI,
 } from "./interface.ts";
-import type { FabricDatum } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 export const SelectAllString = "_";
 
 export const from = (
   source: Iterable<[fact: Fact, since: number]>,
-): OfTheCause<{ is?: FabricDatum; since: number }> => {
+): OfTheCause<{ is?: FabricValue; since: number }> => {
   const selection = {} as FactSelection;
   for (const [fact, since] of source) {
     const { cause, is } = fact;
     set<
-      { is?: FabricDatum; since: number },
-      OfTheCause<{ is?: FabricDatum; since: number }>
+      { is?: FabricValue; since: number },
+      OfTheCause<{ is?: FabricValue; since: number }>
     >(
       selection,
       fact.of,

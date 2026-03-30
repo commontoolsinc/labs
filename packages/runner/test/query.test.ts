@@ -13,7 +13,7 @@ import {
   setModernHashConfig,
 } from "@commontools/data-model/value-hash";
 import { JSONObject, type JSONSchema } from "../src/index.ts";
-import type { FabricDatum } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commontools/data-model/fabric-value";
 import {
   CompoundCycleTracker,
   ManagedStorageTransaction,
@@ -53,7 +53,7 @@ for (const modernHash of [false, true]) {
         Revision<State>
       >();
       let emulatedStorageTx: IExtendedStorageTransaction;
-      let tracker: CompoundCycleTracker<FabricDatum, JSONSchema | undefined>;
+      let tracker: CompoundCycleTracker<FabricValue, JSONSchema | undefined>;
 
       beforeEach(() => {
         storageManager = StorageManager.emulate({ as: signer });
@@ -68,7 +68,7 @@ for (const modernHash of [false, true]) {
         const managerTx = new ManagedStorageTransaction(manager);
         emulatedStorageTx = new ExtendedStorageTransaction(managerTx);
         tracker = new CompoundCycleTracker<
-          FabricDatum,
+          FabricValue,
           JSONSchema | undefined
         >();
       });
