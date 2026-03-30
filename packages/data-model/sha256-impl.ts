@@ -18,7 +18,7 @@ import { sha256 as nobleSha256 } from "merkle-reference";
  */
 export interface IncrementalHasher {
   update(data: Uint8Array): void;
-  digest(): Uint8Array;
+  digest(encoding?: string): Uint8Array;
 }
 
 /**
