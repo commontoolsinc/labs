@@ -228,7 +228,8 @@ function feedObjectValue(
     }
 
     case NATIVE_TAGS.Date:
-    case NATIVE_TAGS.RegExp: {
+    case NATIVE_TAGS.RegExp:
+    case NATIVE_TAGS.Uint8Array: {
       // Native instances that have a well-defined FabricValue conversion.
       // Convert on-the-fly and hash the converted value.
       const converted = shallowFabricFromNativeValueModern(value, false);
@@ -236,7 +237,7 @@ function feedObjectValue(
       return;
     }
 
-      // Map, Set, Error, HasToJSON, Uint8Array: not yet handled here.
+      // Map, Set, Error, HasToJSON: not yet handled here.
       // Fall through to the error path below.
   }
 

@@ -11,6 +11,7 @@ import {
   FabricError,
   FabricNativeWrapper,
   FabricRegExp,
+  FabricUint8Array,
   isConvertibleNativeInstance,
   UNSAFE_KEYS,
 } from "./fabric-native-instances.ts";
@@ -85,6 +86,13 @@ export function shallowFabricFromNativeValueModern(
       const wrappedRegExp = new FabricRegExp(value as RegExp);
       if (freeze) Object.freeze(wrappedRegExp);
       return wrappedRegExp;
+    }
+
+    case NATIVE_TAGS.Uint8Array: {
+      // Native Uint8Array instances are wrapped in FabricUint8Array.
+      const wrapped = new FabricUint8Array(value as Uint8Array);
+      if (freeze) Object.freeze(wrapped);
+      return wrapped;
     }
 
     case NATIVE_TAGS.Array:
