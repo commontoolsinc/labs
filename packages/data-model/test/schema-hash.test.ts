@@ -331,16 +331,16 @@ describe("schema-hash dispatch", () => {
   // Reset behavior
   // -------------------------------------------------------------------------
 
-  describe("reset restores legacy path", () => {
-    it("hashSchema returns legacy result after reset", () => {
-      setSchemaHashConfig(false);
-      const legacy = hashSchema({ type: "boolean" });
-
+  describe("reset restores modern path (default)", () => {
+    it("hashSchema returns modern result after reset", () => {
       setSchemaHashConfig(true);
+      const modern = hashSchema({ type: "boolean" });
+
+      setSchemaHashConfig(false);
       resetSchemaHashConfig();
       const afterReset = hashSchema({ type: "boolean" });
 
-      assertStrictEquals(legacy, afterReset);
+      assertStrictEquals(modern, afterReset);
     });
   });
 });
