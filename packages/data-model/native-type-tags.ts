@@ -1,5 +1,6 @@
 import { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
 import { FabricHash } from "./fabric-hash.ts";
+import { FabricBytes } from "./fabric-bytes.ts";
 import { FabricInstance } from "./interface.ts";
 
 /**
@@ -10,9 +11,9 @@ import { FabricInstance } from "./interface.ts";
  * Covers two categories:
  * - **Native JS builtins**: Array, Object, Error, Map, Set, Date, Uint8Array.
  * - **System-defined value types**: FabricEpochNsec, FabricEpochDays,
- *   FabricHash -- classes defined by this system that behave like
- *   primitives (always frozen, pass through conversion unchanged) but aren't
- *   under the open-ended `FabricInstance` umbrella.
+ *   FabricHash, FabricBytes -- classes defined by this system that
+ *   behave like primitives (always frozen, pass through conversion
+ *   unchanged) but aren't under the open-ended `FabricInstance` umbrella.
  *
  * Additionally, `HasToJSON` is a synthetic tag for values whose class provides
  * a `toJSON()` method but isn't otherwise recognized.
@@ -31,6 +32,7 @@ export const NATIVE_TAGS = Object.freeze(
     EpochDays: "EpochDays",
     ContentHash: "ContentHash",
     HasToJSON: "HasToJSON",
+    FabricBytes: "FabricBytes",
     FabricInstance: "FabricInstance",
     Primitive: "Primitive",
   } as const,
@@ -85,6 +87,8 @@ export function tagFromNativeClass(
       return NATIVE_TAGS.EpochDays;
     case FabricHash:
       return NATIVE_TAGS.ContentHash;
+    case FabricBytes:
+      return NATIVE_TAGS.FabricBytes;
 
     default:
       // Catch exotic Error subclasses (e.g. custom subclasses with

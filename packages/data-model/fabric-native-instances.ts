@@ -16,9 +16,10 @@ import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
 
 /**
  * Returns `true` if the value is a native JS object type that the fabric
- * system knows how to wrap (Error, Map, Set, Date, Uint8Array). These are
- * the "wild-west" instances that get converted into `FabricNativeWrapper`
- * subclasses or `FabricInstance` types by the conversion layer.
+ * system knows how to wrap (Error, Map, Set, Date, RegExp, Uint8Array).
+ * These are the "wild-west" instances that get converted into
+ * `FabricNativeWrapper` subclasses, `FabricPrimitive` types, or
+ * `FabricInstance` types by the conversion layer.
  *
  * Arrays, plain objects, objects with `toJSON()`, and system-defined special
  * primitives (EpochNsec, EpochDays, ContentHash) are recognized by
@@ -112,7 +113,7 @@ function errorClassFromType(type: string): ErrorConstructor {
 
 /**
  * Abstract base class for `FabricInstance` wrappers that bridge native JS
- * objects (Error, Map, Set, Uint8Array) into the `FabricValue` layer.
+ * objects (Error, Map, Set) into the `FabricValue` layer.
  * Provides a common `toNativeValue()` method used by both the shallow and
  * deep unwrap functions, replacing their `instanceof` cascades with a single
  * `instanceof FabricNativeWrapper` check.
@@ -421,50 +422,5 @@ function rejectExtraRegExpProperties(regex: RegExp): void {
     throw new Error(
       "Cannot store RegExp with extra enumerable properties",
     );
-  }
-}
-
-/**
- * Wrapper for `Uint8Array` instances. Stub -- `[DECONSTRUCT]` and
- * `[RECONSTRUCT]` throw until Uint8Array support is fully implemented.
- * Extra properties beyond the wrapped value are not supported on non-Error
- * wrappers.
- */
-export class FabricUint8Array extends FabricNativeWrapper<Blob | Uint8Array> {
-  readonly typeTag = TAGS.Bytes;
-  constructor(readonly bytes: Uint8Array) {
-    super();
-  }
-
-  [DECONSTRUCT](): FabricValue {
-    throw new Error("FabricUint8Array: not yet implemented");
-  }
-
-  protected shallowUnfrozenClone(): FabricUint8Array {
-    return new FabricUint8Array(this.bytes);
-  }
-
-  protected get wrappedValue(): Uint8Array {
-    return this.bytes;
-  }
-
-  /**
-   * Returns a `Blob` (immutable by nature). `Uint8Array` cannot be frozen
-   * per the JS spec, so the base class freeze-state check always delegates
-   * here when `frozen=true`.
-   */
-  protected toNativeFrozen(): Blob {
-    return new Blob([this.bytes as BlobPart]);
-  }
-
-  protected toNativeThawed(): Uint8Array {
-    return this.bytes;
-  }
-
-  static [RECONSTRUCT](
-    _state: FabricValue,
-    _context: ReconstructionContext,
-  ): FabricUint8Array {
-    throw new Error("FabricUint8Array: not yet implemented");
   }
 }

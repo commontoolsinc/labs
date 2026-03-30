@@ -122,11 +122,12 @@ export type FabricValue = FabricDatum | undefined;
  *
  *   JavaScript "wild west" (unknown) <-> FabricValue <-> Serialized (Uint8Array)
  *
- * Most native JS object types (`Error`, `Map`, `Set`, `Uint8Array`) enter the
- * fabric layer via wrapper classes that implement `FabricInstance`. However,
- * fabric primitives (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`) and
- * `bigint` are direct members of `FabricDatum` without implementing
- * `FabricInstance`. Native `Date` is converted to `FabricEpochNsec` during
+ * Most native JS object types (`Error`, `Map`, `Set`) enter the fabric
+ * layer via wrapper classes that implement `FabricInstance`. However,
+ * fabric primitives (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`,
+ * `FabricBytes`) and `bigint` are direct members of `FabricDatum`
+ * without implementing `FabricInstance`. Native `Date` is converted to
+ * `FabricEpochNsec` and native `Uint8Array` to `FabricBytes` during
  * conversion.
  *
  * `undefined` is preserved when the `modernDataModel` flag is ON. When the
@@ -140,7 +141,8 @@ export type FabricDatum =
   | number
   | string
   | bigint
-  // -- Fabric primitives (FabricEpochNsec, FabricEpochDays, FabricHash) --
+  // -- Fabric primitives (FabricEpochNsec, FabricEpochDays, FabricHash,
+  //    FabricBytes) --
   | FabricPrimitive
   // -- Containers --
   | FabricArray
@@ -177,16 +179,13 @@ export type FabricValueLayer =
 
 /**
  * Union of raw native JS **object** types that the fabric type system can
- * convert into `FabricInstance` wrappers. These are the inputs to the
- * "sausage grinder" -- `shallowFabricFromNativeValue()` accepts
- * `FabricValue | FabricNativeObject`, meaning callers can pass in either
- * already-fabric data or raw native JS objects. The conversion produces
- * `FabricInstance` wrappers (FabricError, FabricMap, etc.) that live
- * inside `FabricValue` via the `FabricInstance` arm of `FabricDatum`.
- *
- * `Blob` is included because `FabricUint8Array.toNativeValue(true)` returns
- * a `Blob` (immutable by nature) instead of a `Uint8Array`. The synchronous
- * serialization path throws on `Blob` since its data access methods are async.
+ * convert into `FabricInstance` wrappers or `FabricPrimitive` values. These
+ * are the inputs to the "sausage grinder" -- `shallowFabricFromNativeValue()`
+ * accepts `FabricValue | FabricNativeObject`, meaning callers can pass in
+ * either already-fabric data or raw native JS objects. The conversion
+ * produces `FabricInstance` wrappers (FabricError, FabricMap, etc.) or
+ * `FabricPrimitive` values (FabricBytes) that live inside
+ * `FabricValue` via the corresponding arms of `FabricDatum`.
  *
  * The `{ toJSON(): unknown }` arm covers objects (and functions) that are
  * convertible to fabric form via their `toJSON()` method. This is a legacy
@@ -203,7 +202,6 @@ export type FabricNativeObject =
   | Date
   | RegExp
   | Uint8Array
-  | Blob
   | { toJSON(): unknown };
 
 // ===========================================================================

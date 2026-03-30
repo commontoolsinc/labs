@@ -35,6 +35,7 @@
     "./sha256-impl": "./sha256-impl.ts",
     "./value-hash-modern": "./value-hash-modern.ts",
     "./frozen-builtins": "./frozen-builtins.ts",
+    "./fabric-bytes": "./fabric-bytes.ts",
     "./fabric-native-instances": "./fabric-native-instances.ts",
     "./json-encoding-modern": "./json-encoding-modern.ts",
     "./json-encoding": "./json-encoding.ts",

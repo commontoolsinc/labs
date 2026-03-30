@@ -20,6 +20,7 @@ export type JsonWireValue =
   | JsonWireValue[]
   | { [key: string]: JsonWireValue };
 import { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
+import { FabricBytes } from "./fabric-bytes.ts";
 import { TAGS } from "./fabric-type-tags.ts";
 import {
   bigintFromMinimalTwosComplement,
@@ -329,6 +330,55 @@ export const EpochDaysHandler: TypeHandler = {
 };
 
 /**
+ * Handler for `FabricBytes`. Serializes to a flat base64url string
+ * encoding the raw bytes. Wire format: `{ "/Bytes@1": "<base64>" }`.
+ * `FabricBytes` is a direct member of `FabricDatum` (via
+ * `FabricPrimitive`), so this handler uses `instanceof` directly.
+ * Same flat encoding approach as the epoch handlers.
+ */
+export const BytesHandler: TypeHandler = {
+  tag: TAGS.Bytes,
+
+  canSerialize(value: FabricValue): boolean {
+    return value instanceof FabricBytes;
+  },
+
+  serialize(
+    value: FabricValue,
+    codec: TypeHandlerCodec,
+    _recurse: (v: FabricValue) => JsonWireValue,
+  ): JsonWireValue {
+    const fab = value as FabricBytes;
+    const b64 = toUnpaddedBase64url(fab.slice());
+    return codec.wrapTag(TAGS.Bytes, b64 as JsonWireValue);
+  },
+
+  deserialize(
+    state: JsonWireValue,
+    _runtime: ReconstructionContext,
+    _recurse: (v: JsonWireValue) => FabricValue,
+  ): FabricValue {
+    if (typeof state !== "string") {
+      return makeProblematic(
+        TAGS.Bytes,
+        state,
+        `Bytes: expected string state, got ${typeof state}`,
+      );
+    }
+    try {
+      const bytes = fromBase64url(state);
+      return new FabricBytes(bytes) as unknown as FabricValue;
+    } catch {
+      return makeProblematic(
+        TAGS.Bytes,
+        state,
+        `Bytes: invalid base64: ${state}`,
+      );
+    }
+  },
+};
+
+/**
  * Handler for `FabricInstance` values (custom protocol types, including
  * `FabricError` and `ExplicitTagValue` subtypes). Serializes via
  * `[DECONSTRUCT]` and the codec's tag methods. Deserialization is not
@@ -380,18 +430,21 @@ export const StorableInstanceHandler: TypeHandler = {
 
 /**
  * Create a registry with the built-in type handlers. The order matters for
- * serialization: `EpochNsec` and `EpochDays` are checked first (direct
- * FabricDatum members that need `instanceof`-based matching), then
- * `FabricInstance` (generic protocol types), then `bigint` and `undefined`.
- * Primitives (null, boolean, number, string), arrays, and plain objects are
- * handled as fallthrough in the serializer after no handler matches.
+ * serialization: `FabricPrimitive` subclasses (`EpochNsec`, `EpochDays`,
+ * `Bytes`) are checked first (direct `FabricDatum` members matched by
+ * `instanceof`), then `FabricInstance` (generic protocol types), then
+ * `bigint` and `undefined`. Primitives (null, boolean, number, string),
+ * arrays, and plain objects are handled as fallthrough in the serializer
+ * after no handler matches.
  */
 export function createDefaultRegistry(): TypeHandlerRegistry {
   const registry = new TypeHandlerRegistry();
-  // EpochNsec/EpochDays first -- they are direct FabricDatum members matched
-  // by instanceof, and must be checked before the generic StorableInstanceHandler.
+  // FabricPrimitive subclasses first -- they are direct FabricDatum members
+  // matched by instanceof, and must be checked before the generic
+  // StorableInstanceHandler.
   registry.register(EpochNsecHandler);
   registry.register(EpochDaysHandler);
+  registry.register(BytesHandler);
   // FabricInstance (generic -- checked via instanceof).
   // Covers FabricError, UnknownValue, ProblematicValue, etc.
   registry.register(StorableInstanceHandler);

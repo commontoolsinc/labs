@@ -8,7 +8,8 @@ import {
   setDataModelConfig,
   shallowFabricFromNativeValue,
 } from "../fabric-value.ts";
-import { FabricError, FabricUint8Array } from "../fabric-native-instances.ts";
+import { FabricError } from "../fabric-native-instances.ts";
+import { FabricBytes } from "../fabric-bytes.ts";
 
 describe("fabric-value", () => {
   // Explicitly pin modernDataModel off so the legacy-path tests (below the
@@ -1122,24 +1123,25 @@ describe("fabric-value", () => {
         expect(result.b).toBe(2);
       });
 
-      it("converts native Uint8Array to FabricUint8Array", () => {
+      it("converts native Uint8Array to FabricBytes", () => {
         const bytes = new Uint8Array([1, 2, 3]);
         const result = shallowFabricFromNativeValue(bytes);
-        expect(result).toBeInstanceOf(FabricUint8Array);
-        expect((result as FabricUint8Array).bytes).toEqual(bytes);
+        expect(result).toBeInstanceOf(FabricBytes);
+        expect((result as FabricBytes).slice()).toEqual(bytes);
       });
 
-      it("converts native Uint8Array to frozen FabricUint8Array by default", () => {
+      it("converts native Uint8Array to frozen FabricBytes by default", () => {
         const bytes = new Uint8Array([10, 20]);
         const result = shallowFabricFromNativeValue(bytes);
         expect(Object.isFrozen(result)).toBe(true);
       });
 
-      it("converts native Uint8Array to unfrozen FabricUint8Array when freeze=false", () => {
+      it("FabricBytes is always frozen (freeze parameter ignored)", () => {
         const bytes = new Uint8Array([10, 20]);
         const result = shallowFabricFromNativeValue(bytes, false);
-        expect(result).toBeInstanceOf(FabricUint8Array);
-        expect(Object.isFrozen(result)).toBe(false);
+        expect(result).toBeInstanceOf(FabricBytes);
+        // FabricBytes extends FabricPrimitive -- always frozen.
+        expect(Object.isFrozen(result)).toBe(true);
       });
     });
 

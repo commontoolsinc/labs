@@ -21,7 +21,6 @@ import {
   FabricMap,
   FabricRegExp,
   FabricSet,
-  FabricUint8Array,
 } from "./fabric-native-instances.ts";
 import { TAGS } from "./fabric-type-tags.ts";
 
@@ -69,7 +68,6 @@ export class JsonEncodingContext implements SerializationContext<string> {
     this.registry.set(TAGS.Error, FabricError);
     this.registry.set(TAGS.Map, FabricMap);
     this.registry.set(TAGS.Set, FabricSet);
-    this.registry.set(TAGS.Bytes, FabricUint8Array);
     this.registry.set(TAGS.RegExp, FabricRegExp);
   }
 

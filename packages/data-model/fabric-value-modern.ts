@@ -11,10 +11,10 @@ import {
   FabricError,
   FabricNativeWrapper,
   FabricRegExp,
-  FabricUint8Array,
   isConvertibleNativeInstance,
   UNSAFE_KEYS,
 } from "./fabric-native-instances.ts";
+import { FabricBytes } from "./fabric-bytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
 
@@ -58,6 +58,7 @@ export function shallowFabricFromNativeValueModern(
     case NATIVE_TAGS.EpochNsec:
     case NATIVE_TAGS.EpochDays:
     case NATIVE_TAGS.ContentHash:
+    case NATIVE_TAGS.FabricBytes:
       return value as FabricValueLayer;
 
     case NATIVE_TAGS.Error: {
@@ -89,8 +90,8 @@ export function shallowFabricFromNativeValueModern(
     }
 
     case NATIVE_TAGS.Uint8Array: {
-      // Native Uint8Array instances are wrapped in FabricUint8Array.
-      const wrapped = new FabricUint8Array(value as Uint8Array);
+      // Native Uint8Array instances are wrapped in FabricBytes.
+      const wrapped = new FabricBytes(value as Uint8Array);
       if (freeze) Object.freeze(wrapped);
       return wrapped;
     }
@@ -539,7 +540,7 @@ export function isFabricValueModern(
  *   `fabricFromNativeValue()`?"
  *
  * `canBeStored` additionally accepts `FabricNativeObject` types (Error, Map,
- * Set, Date, Uint8Array, Blob) and objects/functions with `toJSON()` methods
+ * Set, Date, Uint8Array, RegExp) and objects/functions with `toJSON()` methods
  * that return fabric values. It checks recursively, so all nested values in
  * arrays and objects must also be fabric-compatible or convertible.
  */
@@ -663,6 +664,7 @@ function cloneHelper(
     case NATIVE_TAGS.EpochNsec:
     case NATIVE_TAGS.EpochDays:
     case NATIVE_TAGS.ContentHash:
+    case NATIVE_TAGS.FabricBytes:
       return value;
 
     case NATIVE_TAGS.FabricInstance:
@@ -747,6 +749,10 @@ function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
     }
 
     case "object": {
+      // FabricPrimitive values (FabricEpochNsec, FabricEpochDays,
+      // FabricHash, FabricBytes) are already FabricValue.
+      if (value instanceof FabricPrimitive) return true;
+
       // FabricInstance values are already FabricValue.
       if (value instanceof FabricInstance) return true;
 

@@ -12,7 +12,7 @@
 import { createHasher, type IncrementalHasher } from "./sha256-impl.ts";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "./fabric-hash.ts";
-import { FabricUint8Array } from "./fabric-native-instances.ts";
+import { FabricBytes } from "./fabric-bytes.ts";
 import { DECONSTRUCT, type FabricInstance } from "./interface.ts";
 import { shallowFabricFromNativeValueModern } from "./fabric-value-modern.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
@@ -200,17 +200,15 @@ function feedObjectValue(
       feedPlainObject(hasher, value as Record<string, unknown>);
       return;
 
-    case NATIVE_TAGS.FabricInstance: {
-      // FabricUint8Array has a dedicated hash encoding (TAG_BYTES) rather
-      // than the generic FabricInstance DECONSTRUCT path.
-      if (value instanceof FabricUint8Array) {
-        hasher.update(TAG_BYTES_BYTES);
-        const bytes = value.bytes;
-        feedLength(hasher, bytes.length);
-        hasher.update(bytes);
-        return;
-      }
+    case NATIVE_TAGS.FabricBytes: {
+      hasher.update(TAG_BYTES_BYTES);
+      const fab = value as FabricBytes;
+      feedLength(hasher, fab.length);
+      hasher.update(fab.slice());
+      return;
+    }
 
+    case NATIVE_TAGS.FabricInstance: {
       // Generic FabricInstance (protocol path via DECONSTRUCT).
       hasher.update(TAG_INSTANCE_BYTES);
       const typeTag = (value as { typeTag?: unknown }).typeTag;

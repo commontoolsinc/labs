@@ -7,11 +7,8 @@ import {
 import { hashOfModern as modernHashRaw } from "../value-hash-modern.ts";
 import { FabricHash } from "../fabric-hash.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
-import {
-  FabricError,
-  FabricRegExp,
-  FabricUint8Array,
-} from "../fabric-native-instances.ts";
+import { FabricError, FabricRegExp } from "../fabric-native-instances.ts";
+import { FabricBytes } from "../fabric-bytes.ts";
 
 // Dynamic import to satisfy the no-external-import lint rule.
 const nodeCrypto = await import("node:crypto");
@@ -342,13 +339,13 @@ Deno.test("modernHash", async (t) => {
   });
 
   // =========================================================================
-  // FabricUint8Array
+  // FabricBytes
   // =========================================================================
 
   await t.step(
-    "FabricUint8Array produces TAG_BYTES + LEB128 length + raw bytes",
+    "FabricBytes produces TAG_BYTES + LEB128 length + raw bytes",
     () => {
-      const bytes = new FabricUint8Array(new Uint8Array([1, 2, 3]));
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
       // LEB128(3) = [0x03]
       const expected = sha256([
         0x25,
@@ -362,9 +359,9 @@ Deno.test("modernHash", async (t) => {
   );
 
   await t.step(
-    "empty FabricUint8Array produces TAG_BYTES + zero length",
+    "empty FabricBytes produces TAG_BYTES + zero length",
     () => {
-      const bytes = new FabricUint8Array(new Uint8Array([]));
+      const bytes = new FabricBytes(new Uint8Array([]));
       const expected = sha256([0x25, 0x00]);
       assertEquals(modernHash(bytes), expected);
     },
@@ -735,7 +732,7 @@ Deno.test("modernHash", async (t) => {
       { a: 1 },
       new FabricEpochNsec(0n),
       new FabricEpochDays(0n),
-      new FabricUint8Array(new Uint8Array([1])),
+      new FabricBytes(new Uint8Array([1])),
       new FabricError(new Error("x")),
     ];
     for (const v of values) {
@@ -1121,11 +1118,11 @@ Deno.test("modernHash native instances", async (t) => {
   });
 
   await t.step(
-    "native Uint8Array produces same hash as FabricUint8Array with same bytes",
+    "native Uint8Array produces same hash as FabricBytes with same bytes",
     () => {
       const bytes = new Uint8Array([10, 20, 30]);
       const nativeHash = hex(modernHash(bytes));
-      const fabricHash = hex(modernHash(new FabricUint8Array(bytes)));
+      const fabricHash = hex(modernHash(new FabricBytes(bytes)));
       assertEquals(nativeHash, fabricHash);
     },
   );

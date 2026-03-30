@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import {
   DECONSTRUCT,
   FabricInstance,
+  FabricPrimitive,
   type FabricValue,
   RECONSTRUCT,
   type ReconstructionContext,
@@ -12,9 +13,9 @@ import {
   FabricMap,
   FabricNativeWrapper,
   FabricSet,
-  FabricUint8Array,
   isConvertibleNativeInstance,
 } from "../fabric-native-instances.ts";
+import { FabricBytes } from "../fabric-bytes.ts";
 import { nativeFromFabricValueModern } from "../fabric-value-modern.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
 import {
@@ -287,7 +288,7 @@ describe("fabric-native-instances", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Stub wrappers (FabricMap, FabricSet, FabricUint8Array)
+  // Stub wrappers (FabricMap, FabricSet, FabricBytes)
   // --------------------------------------------------------------------------
 
   describe("stub wrappers", () => {
@@ -392,40 +393,60 @@ describe("fabric-native-instances", () => {
       expect(result.has(1 as FabricValue)).toBe(true);
     });
 
-    it("FabricUint8Array implements FabricInstance", () => {
-      const su = new FabricUint8Array(new Uint8Array([1, 2, 3]));
-      expect(su instanceof FabricInstance).toBe(true);
+    it("FabricBytes extends FabricPrimitive (not FabricInstance)", () => {
+      const su = new FabricBytes(new Uint8Array([1, 2, 3]));
+      expect(su instanceof FabricPrimitive).toBe(true);
+      expect(su instanceof FabricInstance).toBe(false);
       expect(su.typeTag).toBe("Bytes@1");
     });
 
-    it("FabricUint8Array [DECONSTRUCT] throws (stub)", () => {
-      const su = new FabricUint8Array(new Uint8Array());
-      expect(() => su[DECONSTRUCT]()).toThrow("not yet implemented");
+    it("FabricBytes is always frozen", () => {
+      const su = new FabricBytes(new Uint8Array([1, 2, 3]));
+      expect(Object.isFrozen(su)).toBe(true);
     });
 
-    it("FabricUint8Array.toNativeValue(true) returns Blob", () => {
-      const bytes = new Uint8Array([1, 2, 3]);
-      const su = new FabricUint8Array(bytes);
-      const result = su.toNativeValue(true);
-      expect(result).toBeInstanceOf(Blob);
-      expect((result as Blob).size).toBe(3);
-      expect((result as Blob).type).toBe("");
+    it("FabricBytes.length returns byte count", () => {
+      expect(new FabricBytes(new Uint8Array([1, 2, 3])).length).toBe(3);
+      expect(new FabricBytes(new Uint8Array()).length).toBe(0);
     });
 
-    it("FabricUint8Array.toNativeValue(true) Blob contains correct data", async () => {
-      const bytes = new Uint8Array([10, 20, 30]);
-      const su = new FabricUint8Array(bytes);
-      const blob = su.toNativeValue(true) as Blob;
-      const buf = await blob.arrayBuffer();
-      expect(new Uint8Array(buf)).toEqual(new Uint8Array([10, 20, 30]));
+    it("FabricBytes.slice() returns a copy of the bytes", () => {
+      const original = new Uint8Array([10, 20, 30]);
+      const su = new FabricBytes(original);
+      const sliced = su.slice();
+      expect(sliced).toEqual(new Uint8Array([10, 20, 30]));
+      // Must be a copy, not the same reference.
+      sliced[0] = 99;
+      expect(su.slice()[0]).toBe(10);
     });
 
-    it("FabricUint8Array.toNativeValue(false) returns the original", () => {
-      const bytes = new Uint8Array([1, 2, 3]);
-      const su = new FabricUint8Array(bytes);
-      const result = su.toNativeValue(false);
-      expect(result).toBe(bytes); // same reference
-      expect(result).toBeInstanceOf(Uint8Array);
+    it("FabricBytes.slice(start, end) returns a sub-range", () => {
+      const su = new FabricBytes(new Uint8Array([1, 2, 3, 4, 5]));
+      expect(su.slice(1, 3)).toEqual(new Uint8Array([2, 3]));
+      expect(su.slice(3)).toEqual(new Uint8Array([4, 5]));
+    });
+
+    it("FabricBytes.copyInto copies bytes into target", () => {
+      const su = new FabricBytes(new Uint8Array([10, 20, 30, 40]));
+      const target = new Uint8Array(4);
+      const copied = su.copyInto(target);
+      expect(copied).toBe(4);
+      expect(target).toEqual(new Uint8Array([10, 20, 30, 40]));
+    });
+
+    it("FabricBytes.copyInto respects offset and length", () => {
+      const su = new FabricBytes(new Uint8Array([10, 20, 30, 40, 50]));
+      const target = new Uint8Array(2);
+      const copied = su.copyInto(target, 1, 2);
+      expect(copied).toBe(2);
+      expect(target).toEqual(new Uint8Array([20, 30]));
+    });
+
+    it("FabricBytes constructor copies input bytes", () => {
+      const original = new Uint8Array([1, 2, 3]);
+      const su = new FabricBytes(original);
+      original[0] = 99; // mutate original
+      expect(su.slice()[0]).toBe(1); // unaffected
     });
   });
 
