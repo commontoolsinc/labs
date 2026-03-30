@@ -131,6 +131,14 @@ export class FrozenMap<K, V> implements Map<K, V> {
     throwFrozenMutation("FrozenMap");
   }
 
+  getOrInsert(_key: K, _defaultValue: V): V {
+    throwFrozenMutation("FrozenMap");
+  }
+
+  getOrInsertComputed(_key: K, _callback: (key: K) => V): V {
+    throwFrozenMutation("FrozenMap");
+  }
+
   delete(_key: K): boolean {
     throwFrozenMutation("FrozenMap");
   }
