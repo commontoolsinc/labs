@@ -4,7 +4,12 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
-import { hashOfModern as modernHashRaw } from "../value-hash-modern.ts";
+import {
+  hashOfModern as modernHashRaw,
+  hashOfModernAsString,
+} from "../value-hash-modern.ts";
+import { createHasher } from "../sha256-impl.ts";
+import { toUnpaddedBase64url } from "../base64url.ts";
 import { FabricHash } from "../fabric-hash.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import { FabricError, FabricRegExp } from "../fabric-native-instances.ts";
@@ -1170,4 +1175,119 @@ Deno.test("modernHash native instances", async (t) => {
       );
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// hashOfModernAsString
+// ---------------------------------------------------------------------------
+
+Deno.test("hashOfModernAsString", async (t) => {
+  await t.step("returns a string", () => {
+    const result = hashOfModernAsString(42);
+    assertEquals(typeof result, "string");
+  });
+
+  await t.step("matches FabricHash.hashString for primitives", () => {
+    const values: unknown[] = [
+      null,
+      true,
+      false,
+      0,
+      42,
+      "",
+      "hello",
+      0n,
+      127n,
+      undefined,
+    ];
+    for (const v of values) {
+      assertEquals(
+        hashOfModernAsString(v),
+        modernHashRaw(v).hashString,
+      );
+    }
+  });
+
+  await t.step("matches FabricHash.hashString for frozen objects", () => {
+    const obj = Object.freeze({ a: 1, b: Object.freeze({ c: 2 }) });
+    assertEquals(
+      hashOfModernAsString(obj),
+      modernHashRaw(obj).hashString,
+    );
+  });
+
+  await t.step("matches FabricHash.hashString for mutable objects", () => {
+    const obj = { x: [1, 2, 3] };
+    assertEquals(
+      hashOfModernAsString(obj),
+      modernHashRaw(obj).hashString,
+    );
+  });
+
+  await t.step("returns consistent results", () => {
+    assertEquals(hashOfModernAsString("test"), hashOfModernAsString("test"));
+  });
+
+  await t.step("different values produce different strings", () => {
+    const a = hashOfModernAsString(1);
+    const b = hashOfModernAsString(2);
+    assertNotEquals(a, b);
+  });
+
+  await t.step("result does not contain algorithm tag or colon", () => {
+    const result = hashOfModernAsString({ hello: "world" });
+    assertEquals(result.includes("fid1"), false);
+    assertEquals(result.includes(":"), false);
+  });
+
+  await t.step("result is valid unpadded base64url", () => {
+    const result = hashOfModernAsString(42);
+    // No padding characters.
+    assertEquals(result.includes("="), false);
+    // Only base64url characters.
+    assertEquals(/^[A-Za-z0-9_-]+$/.test(result), true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IncrementalHasher.digest("base64url")
+// ---------------------------------------------------------------------------
+
+Deno.test("IncrementalHasher digest base64url", async (t) => {
+  await t.step("returns a string", () => {
+    const hasher = createHasher();
+    hasher.update(new Uint8Array([1, 2, 3]));
+    const result = hasher.digest("base64url");
+    assertEquals(typeof result, "string");
+  });
+
+  await t.step("matches manual base64url encoding of raw digest", () => {
+    const data = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+
+    const hasher1 = createHasher();
+    hasher1.update(data);
+    const rawDigest = hasher1.digest();
+
+    const hasher2 = createHasher();
+    hasher2.update(data);
+    const b64Digest = hasher2.digest("base64url");
+
+    assertEquals(b64Digest, toUnpaddedBase64url(rawDigest));
+  });
+
+  await t.step("result is valid unpadded base64url", () => {
+    const hasher = createHasher();
+    hasher.update(new Uint8Array([42]));
+    const result = hasher.digest("base64url");
+    assertEquals(result.includes("="), false);
+    assertEquals(/^[A-Za-z0-9_-]+$/.test(result), true);
+  });
+
+  await t.step("different inputs produce different base64url digests", () => {
+    const h1 = createHasher();
+    h1.update(new Uint8Array([1]));
+    const h2 = createHasher();
+    h2.update(new Uint8Array([2]));
+    assertNotEquals(h1.digest("base64url"), h2.digest("base64url"));
+  });
 });

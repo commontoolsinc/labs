@@ -81,6 +81,30 @@ Deno.test("FabricHash", async (t) => {
     },
   );
 
+  await t.step(".hashString returns base64url without algorithm tag", () => {
+    const cid = new FabricHash(SAMPLE_HASH, "fid1");
+    const hs = cid.hashString;
+    // Must be a string, not contain the algorithm tag prefix.
+    assertEquals(typeof hs, "string");
+    assertEquals(hs.includes("fid1"), false);
+    assertEquals(hs.includes(":"), false);
+    // toString() should be algorithmTag + ":" + hashString.
+    assertEquals(cid.toString(), `fid1:${hs}`);
+  });
+
+  await t.step(".hashString is stable across calls", () => {
+    const cid = new FabricHash(SAMPLE_HASH, "fid1");
+    assertEquals(cid.hashString, cid.hashString);
+  });
+
+  await t.step(".hashString differs for different hashes", () => {
+    const hash2 = new Uint8Array(32);
+    hash2.fill(0xff);
+    const cid1 = new FabricHash(SAMPLE_HASH, "fid1");
+    const cid2 = new FabricHash(hash2, "fid1");
+    assert(cid1.hashString !== cid2.hashString);
+  });
+
   // -----------------------------------------------------------------
   // Part B: flag-conditional dispatch
   // -----------------------------------------------------------------
