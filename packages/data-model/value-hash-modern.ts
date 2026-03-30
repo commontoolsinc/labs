@@ -237,8 +237,8 @@ function feedObjectValue(
       return;
     }
 
-      // Map, Set, Error, HasToJSON: not yet handled here.
-      // Fall through to the error path below.
+    // Map, Set, Error, HasToJSON: not yet handled here. Fall through to the
+    // error path below.
   }
 
   throw new Error(
