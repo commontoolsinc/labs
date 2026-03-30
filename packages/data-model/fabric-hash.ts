@@ -1,5 +1,5 @@
 import { FabricPrimitive } from "./interface.ts";
-import { fromBase64url, toUnpaddedBase64url } from "./bigint-encoding.ts";
+import { fromBase64url, toUnpaddedBase64url } from "./base64url.ts";
 
 /**
  * A content-addressed identifier: a hash digest paired with an algorithm tag.
@@ -34,7 +34,7 @@ export class FabricHash extends FabricPrimitive {
    * @param algorithmTag - Algorithm identifier (e.g., `"fid1"` for fabric ID v1).
    */
   constructor(
-    readonly hash: Uint8Array,
+    readonly hash: Uint8Array, // TODO(@danfuzz): Should not be exposed.
     readonly algorithmTag: string,
   ) {
     super();
