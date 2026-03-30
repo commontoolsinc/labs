@@ -286,7 +286,7 @@ describe("fabric-native-instances", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Stub wrappers (FabricMap, FabricSet)
+  // Stub wrappers
   // --------------------------------------------------------------------------
 
   describe("stub wrappers", () => {
