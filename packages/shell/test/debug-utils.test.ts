@@ -4,7 +4,7 @@ import {
   summarizeDebugValue,
   summarizeTriggerTraceEntries,
 } from "../src/lib/debug-utils.ts";
-import type { TriggerTraceEntry } from "@commontools/runtime-client";
+import type { TriggerTraceEntry } from "@commonfabric/runtime-client";
 
 describe("debug utils", () => {
   it("summarizeDebugValue classifies common process/result shapes", () => {

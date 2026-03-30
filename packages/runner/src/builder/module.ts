@@ -22,7 +22,7 @@ import {
 import { moduleToJSON } from "./json-utils.ts";
 import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 
 const sourceLocationLogger = getLogger("builder.source-location", {
   enabled: false,

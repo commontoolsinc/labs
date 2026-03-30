@@ -14,7 +14,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { NAME, type Pattern, UI } from "../builder/types.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { getPatternEnvironment } from "../env.ts";
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 
 const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";

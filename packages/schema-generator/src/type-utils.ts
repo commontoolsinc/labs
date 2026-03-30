@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { JSONSchemaMutable } from "@commontools/api";
+import type { JSONSchemaMutable } from "@commonfabric/api";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { getPropertyNameText } from "./typescript/property-name.ts";
 

@@ -1,5 +1,5 @@
 import ts from "typescript";
-import type { JSONSchemaMutable } from "@commontools/api";
+import type { JSONSchemaMutable } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 
 const NATIVE_TYPE_SCHEMAS: Record<string, JSONSchemaMutable> = {

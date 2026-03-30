@@ -384,7 +384,7 @@ describe("default-app flow test", () => {
 
 async function armTriggerTrace(page: Page): Promise<boolean> {
   return await page.evaluate(async () => {
-    const rt = globalThis.commontools?.rt;
+    const rt = globalThis.commonfabric?.rt;
     if (!rt) return false;
     await rt.setTriggerTraceEnabled(false);
     await rt.setTriggerTraceEnabled(true);
@@ -394,7 +394,7 @@ async function armTriggerTrace(page: Page): Promise<boolean> {
 
 async function armWriteTrace(page: Page): Promise<boolean> {
   return await page.evaluate(async () => {
-    const api = globalThis.commontools as {
+    const api = globalThis.commonfabric as {
       watchWrites?: (options: {
         space?: string;
         path?: string[];
@@ -417,7 +417,7 @@ async function armWriteTrace(page: Page): Promise<boolean> {
 async function armRunnerTriggerLogger(page: Page): Promise<boolean> {
   await ensureCapturedConsole(page);
   return await page.evaluate(async () => {
-    const api = globalThis.commontools?.rt;
+    const api = globalThis.commonfabric?.rt;
     if (!api) return false;
 
     await api.setLoggerEnabled(true, "runner.trigger-flow");
@@ -429,7 +429,7 @@ async function armRunnerTriggerLogger(page: Page): Promise<boolean> {
 async function armWishFlowLogger(page: Page): Promise<boolean> {
   await ensureCapturedConsole(page);
   return await page.evaluate(async () => {
-    const api = globalThis.commontools?.rt;
+    const api = globalThis.commonfabric?.rt;
     if (!api) return false;
 
     await api.setLoggerEnabled(true, "runner.wish-flow");
@@ -441,7 +441,7 @@ async function armWishFlowLogger(page: Page): Promise<boolean> {
 async function armSourceLocationLogger(page: Page): Promise<boolean> {
   await ensureCapturedConsole(page);
   return await page.evaluate(async () => {
-    const api = globalThis.commontools?.rt;
+    const api = globalThis.commonfabric?.rt;
     if (!api) return false;
 
     await api.setLoggerEnabled(true, "builder.source-location");
@@ -454,7 +454,7 @@ async function armSourceLocationLogger(page: Page): Promise<boolean> {
 
 async function resetLoggerBaselines(page: Page): Promise<boolean> {
   return await page.evaluate(async () => {
-    const api = globalThis.commontools?.rt;
+    const api = globalThis.commonfabric?.rt;
     if (!api) return false;
     await api.resetLoggerBaselines();
     return true;
@@ -463,7 +463,7 @@ async function resetLoggerBaselines(page: Page): Promise<boolean> {
 
 async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
-    const rt = globalThis.commontools?.rt;
+    const rt = globalThis.commonfabric?.rt;
     if (!rt) return null;
 
     const trace = await rt.getTriggerTrace();
@@ -493,7 +493,9 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
           writerActionId: entry.writerActionId,
           change,
           decision: action.decision,
-          scheduledEffects: action.scheduledEffects.map((effect) =>
+          scheduledEffects: action.scheduledEffects.map((effect: {
+            actionId: string;
+          }) =>
             effect.actionId
           ),
         });
@@ -525,7 +527,7 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
 
 async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
-    const api = globalThis.commontools as {
+    const api = globalThis.commonfabric as {
       getWriteStackTrace?: () => Promise<BrowserWriteTraceEntry[]>;
       readCell?: (options: { id: string }) => Promise<unknown>;
     } | undefined;
@@ -667,7 +669,7 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
 
 async function armActionRunTrace(page: Page): Promise<boolean> {
   return await page.evaluate(async () => {
-    const rt = globalThis.commontools?.rt;
+    const rt = globalThis.commonfabric?.rt;
     if (!rt) return false;
     await rt.setActionRunTraceEnabled(false);
     await rt.setActionRunTraceEnabled(true);
@@ -677,7 +679,7 @@ async function armActionRunTrace(page: Page): Promise<boolean> {
 
 async function waitForRuntimeIdle(page: Page): Promise<boolean> {
   return await page.evaluate(async () => {
-    const rt = globalThis.commontools?.rt;
+    const rt = globalThis.commonfabric?.rt;
     if (!rt?.idle) return false;
     await rt.idle();
     return true;
@@ -691,7 +693,7 @@ async function waitForHomePageReady(
   await waitFor(async () => {
     return await page.evaluate((spaceName: string) => {
       const app = globalThis.app;
-      const rt = globalThis.commontools?.rt;
+      const rt = globalThis.commonfabric?.rt;
       const state = app?.serialize?.();
       const view = state?.view;
       return !!(
@@ -748,7 +750,7 @@ async function collectHomeLoadSummaryFromFreshPage(
 
 async function collectActionRunSummary(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
-    const rt = globalThis.commontools?.rt;
+    const rt = globalThis.commonfabric?.rt;
     if (!rt?.getActionRunTrace || !rt?.idle) return null;
     await rt.idle();
     const trace = await rt.getActionRunTrace() as BrowserActionRunTraceEntry[];
@@ -1010,7 +1012,7 @@ function compareActionRunSeries(series: unknown[]): unknown {
 
 async function collectHomeLoadSummary(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
-    const rt = globalThis.commontools?.rt;
+    const rt = globalThis.commonfabric?.rt;
     if (!rt?.getLoggerCounts || !rt?.getGraphSnapshot || !rt?.idle) return null;
     await rt.idle();
 
@@ -1270,7 +1272,7 @@ async function collectCapturedConsoleLogs(
 
 async function collectRunnerTriggerFlowCounts(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
-    const api = globalThis.commontools?.rt;
+    const api = globalThis.commonfabric?.rt;
     if (!api) return null;
 
     const { counts } = await api.getLoggerCounts();
@@ -1309,7 +1311,7 @@ async function collectRunnerTriggerFlowCounts(page: Page): Promise<unknown> {
 
 async function collectWishFlowCounts(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
-    const api = globalThis.commontools?.rt;
+    const api = globalThis.commonfabric?.rt;
     if (!api) return null;
 
     const { counts, timing } = await api.getLoggerCounts();
@@ -1392,7 +1394,7 @@ async function collectWishFlowCounts(page: Page): Promise<unknown> {
 
 async function collectSourceLocationSamples(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
-    const api = globalThis.commontools?.rt;
+    const api = globalThis.commonfabric?.rt;
     if (!api) return null;
 
     const { flags } = await api.getLoggerCounts();

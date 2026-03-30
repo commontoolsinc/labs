@@ -118,7 +118,7 @@ describe("shell piece tests", () => {
             | null;
           return {
             href: globalThis.location.href,
-            hasRuntime: !!globalThis.commontools?.rt,
+            hasRuntime: !!globalThis.commonfabric?.rt,
             hasRootView: !!rootView,
             rootRuntimeStatus: typedRootView?._rt?.status,
             hasRootRuntimeValue: !!typedRootView?._rt?.value,
@@ -140,7 +140,7 @@ describe("shell piece tests", () => {
 
     try {
       await waitFor(async () => {
-        return await page.evaluate(() => !!globalThis.commontools?.rt);
+        return await page.evaluate(() => !!globalThis.commonfabric?.rt);
       });
     } catch (error) {
       await logDebugSnapshot("shell piece runtime debug");

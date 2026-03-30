@@ -1,5 +1,5 @@
 import ts from "typescript";
-import type { JSONSchemaMutable, JSONSchemaObjMutable } from "@commontools/api";
+import type { JSONSchemaMutable, JSONSchemaObjMutable } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import {
   cloneSchemaDefinition,
