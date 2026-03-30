@@ -48,3 +48,20 @@ Deno.test("memory provider http helpers shape exception bodies", () => {
   assertEquals(body.error.name, "Error");
   assertEquals(body.error.message, "boom");
 });
+
+Deno.test("jsonErrorBody uses explicit fallback instead of default for non-Error causes", () => {
+  // Without explicit fallback, null/undefined/non-Error causes would get
+  // "Unable to parse request body" which is misleading in non-parsing contexts.
+  const fromNull = jsonErrorBody(null, "Transaction failed");
+  assertEquals(fromNull.error.message, "Transaction failed");
+
+  const fromUndefined = jsonErrorBody(undefined, "Query failed");
+  assertEquals(fromUndefined.error.message, "Query failed");
+
+  const fromString = jsonErrorBody("some string");
+  assertEquals(fromString.error.message, "Unable to parse request body");
+
+  // An actual Error should still use its own message regardless of fallback.
+  const fromError = jsonErrorBody(new Error("real message"), "fallback");
+  assertEquals(fromError.error.message, "real message");
+});

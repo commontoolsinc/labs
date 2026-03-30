@@ -283,7 +283,10 @@ export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
       span.setAttribute("memory.status", "exception");
       span.setAttribute("error.message", message);
       span.setAttribute("error.type", name);
-      return c.json(Memory.Provider.jsonErrorBody(cause), 500);
+      return c.json(
+        Memory.Provider.jsonErrorBody(cause, "Transaction failed"),
+        500,
+      );
     }
   });
 };
@@ -319,7 +322,10 @@ export const query: AppRouteHandler<typeof Routes.query> = async (c) => {
       span.setAttribute("memory.status", "exception");
       span.setAttribute("error.message", message);
       span.setAttribute("error.type", name);
-      return c.json(Memory.Provider.jsonErrorBody(cause), 500);
+      return c.json(
+        Memory.Provider.jsonErrorBody(cause, "Query failed"),
+        500,
+      );
     }
   });
 };
