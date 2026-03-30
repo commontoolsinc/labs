@@ -1053,3 +1053,48 @@ Deno.test("modernHash caching", async (t) => {
     },
   );
 });
+
+// ---------------------------------------------------------------------------
+// Native instance hashing (on-the-fly conversion)
+// ---------------------------------------------------------------------------
+
+Deno.test("modernHash native instances", async (t) => {
+  // --- Date ---
+
+  await t.step("native Date hashes without throwing", () => {
+    const date = new Date("2024-01-01T00:00:00Z");
+    const hash = modernHash(date);
+    assertEquals(hash.length, 32);
+  });
+
+  await t.step(
+    "native Date produces same hash as equivalent FabricEpochNsec",
+    () => {
+      const date = new Date("2024-01-01T00:00:00Z");
+      const nsec = BigInt(date.getTime()) * 1_000_000n;
+      const dateHash = hex(modernHash(date));
+      const epochHash = hex(modernHash(new FabricEpochNsec(nsec)));
+      assertEquals(dateHash, epochHash);
+    },
+  );
+
+  await t.step("different Dates produce different hashes", () => {
+    const d1 = new Date("2024-01-01T00:00:00Z");
+    const d2 = new Date("2025-06-15T12:00:00Z");
+    assertNotEquals(hex(modernHash(d1)), hex(modernHash(d2)));
+  });
+
+  // --- RegExp ---
+
+  await t.step("native RegExp hashes without throwing", () => {
+    const re = /hello/gi;
+    const hash = modernHash(re);
+    assertEquals(hash.length, 32);
+  });
+
+  await t.step("different RegExps produce different hashes", () => {
+    const r1 = /foo/;
+    const r2 = /bar/;
+    assertNotEquals(hex(modernHash(r1)), hex(modernHash(r2)));
+  });
+});
