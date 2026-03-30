@@ -2,7 +2,7 @@ import { isInstance, isRecord } from "@commontools/utils/types";
 import {
   FabricInstance,
   type FabricNativeObject,
-  FabricPrimitive,
+  FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
@@ -260,14 +260,9 @@ function isDeepFrozenFabricValue(value: unknown): boolean {
     return true;
   }
 
-  // Special primitives are simple frozen value wrappers.
-  if (value instanceof FabricPrimitive) {
-    return true;
-  }
-
-  // FabricInstance -- check if frozen; don't recurse into its properties
-  // (it's a protocol type, not a plain data container).
-  if (value instanceof FabricInstance) return true;
+  // FabricSpecialObject covers both FabricPrimitive and FabricInstance --
+  // don't recurse into their properties.
+  if (value instanceof FabricSpecialObject) return true;
 
   for (const v of Object.values(value)) {
     if (!isDeepFrozenFabricValue(v)) return false;
@@ -346,20 +341,10 @@ function fabricFromNativeValueRichInternal(
     return result as FabricValue;
   }
 
-  // Special primitives are direct FabricDatum members -- always frozen,
-  // pass through as-is regardless of the `freeze` argument.
-  if (value instanceof FabricPrimitive) {
-    if (isOriginalRecord) {
-      converted.set(original, value);
-    }
-    return value as FabricValue;
-  }
-
-  // Other FabricInstance values (Cell, Stream, UnknownValue, etc.)
-  // don't need recursion -- their [DECONSTRUCT] implementations return
-  // proper FabricValue. We do not freeze protocol objects; they are
-  // managed by the caller.
-  if (value instanceof FabricInstance) {
+  // FabricSpecialObject (primitives and protocol types) -- pass through
+  // as-is. Primitives are always frozen; protocol types are managed by
+  // the caller.
+  if (value instanceof FabricSpecialObject) {
     if (isOriginalRecord) {
       converted.set(original, value);
     }
@@ -491,14 +476,8 @@ export function isFabricValueModern(
       if (value === null) {
         return true;
       }
-      // Special primitives are direct FabricDatum members.
-      if (value instanceof FabricPrimitive) {
-        return true;
-      }
-      // FabricInstance values (including FabricError, UnknownValue,
-      // etc.) are accepted -- they are valid FabricValue members via the
-      // FabricInstance arm of FabricDatum.
-      if (value instanceof FabricInstance) {
+      // FabricSpecialObject covers both FabricPrimitive and FabricInstance.
+      if (value instanceof FabricSpecialObject) {
         return true;
       }
       if (Array.isArray(value)) {
@@ -748,11 +727,8 @@ function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
     }
 
     case "object": {
-      // FabricPrimitive values are already FabricValue.
-      if (value instanceof FabricPrimitive) return true;
-
-      // FabricInstance values are already FabricValue.
-      if (value instanceof FabricInstance) return true;
+      // FabricSpecialObject covers both FabricPrimitive and FabricInstance.
+      if (value instanceof FabricSpecialObject) return true;
 
       // FabricNativeObject types would be wrapped by fabricFromNativeValue().
       if (isConvertibleNativeInstance(value)) {
@@ -838,11 +814,9 @@ export function nativeFromFabricValueModern(
     return value.toNativeValue(frozen);
   }
 
-  if (value instanceof FabricPrimitive) {
-    return value;
-  }
-
-  if (value instanceof FabricInstance) return value;
+  // Remaining FabricSpecialObject values (not FabricNativeWrapper) pass
+  // through unchanged.
+  if (value instanceof FabricSpecialObject) return value;
 
   if (value === null || value === undefined || typeof value !== "object") {
     return value;

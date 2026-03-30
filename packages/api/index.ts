@@ -23,11 +23,24 @@
 // declaration here (interface + constructor + declare-const with `new`).
 
 /**
- * Abstract base class for values that participate in the fabric protocol.
- * Subclasses include Cell, Stream, and native-object wrappers (FabricError,
- * FabricMap, etc.).
+ * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
+ * single `instanceof` check for any fabric-system value type.
  */
-export interface FabricInstance {
+// deno-lint-ignore no-empty-interface
+export interface FabricSpecialObject {}
+
+export interface FabricSpecialObjectConstructor {
+  prototype: FabricSpecialObject;
+}
+
+export declare const FabricSpecialObject:
+  & FabricSpecialObjectConstructor
+  & (abstract new (...args: any) => FabricSpecialObject);
+
+/**
+ * Abstract base class for values that participate in the fabric protocol.
+ */
+export interface FabricInstance extends FabricSpecialObject {
   shallowClone(frozen: boolean): FabricInstance;
 }
 
@@ -40,8 +53,7 @@ export declare const FabricInstance:
   & (abstract new (...args: any) => FabricInstance);
 
 /** Abstract base class for fabric primitive types. */
-// deno-lint-ignore no-empty-interface
-export interface FabricPrimitive {}
+export interface FabricPrimitive extends FabricSpecialObject {}
 
 export interface FabricPrimitiveConstructor {
   prototype: FabricPrimitive;

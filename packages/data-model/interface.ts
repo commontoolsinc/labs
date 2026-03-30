@@ -10,6 +10,20 @@
  */
 
 // ===========================================================================
+// FabricSpecialObject -- common base for FabricInstance and FabricPrimitive
+// ===========================================================================
+
+/**
+ * Abstract base class for all fabric-system value types. This is the common
+ * superclass of `FabricInstance` (protocol types with DECONSTRUCT/RECONSTRUCT)
+ * and `FabricPrimitive` (immutable special primitives). It enables a single
+ * `instanceof FabricSpecialObject` check wherever code needs to recognize any
+ * fabric-system value without caring which branch of the hierarchy it
+ * belongs to.
+ */
+export abstract class FabricSpecialObject {}
+
+// ===========================================================================
 // Fabric instance protocol (DECONSTRUCT / RECONSTRUCT / FabricInstance)
 // ===========================================================================
 
@@ -43,7 +57,7 @@ export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
  * - `shallowClone(false)` always returns a new unfrozen clone -- even if the
  *   instance is already unfrozen. The caller gets a distinct, mutable object.
  */
-export abstract class FabricInstance {
+export abstract class FabricInstance extends FabricSpecialObject {
   /**
    * Returns the essential state of this instance as a `FabricValue`.
    * Implementations must NOT recursively deconstruct nested values -- the
@@ -95,8 +109,10 @@ export abstract class FabricInstance {
  *
  * See Section 1.4.5 and 1.4.6 of the formal spec.
  */
-export abstract class FabricPrimitive {
-  constructor() {}
+export abstract class FabricPrimitive extends FabricSpecialObject {
+  constructor() {
+    super();
+  }
 }
 
 // ===========================================================================
