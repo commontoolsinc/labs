@@ -1097,4 +1097,28 @@ Deno.test("modernHash native instances", async (t) => {
     const r2 = /bar/;
     assertNotEquals(hex(modernHash(r1)), hex(modernHash(r2)));
   });
+
+  // --- Uint8Array ---
+
+  await t.step("native Uint8Array hashes without throwing", () => {
+    const buf = new Uint8Array([1, 2, 3]);
+    const hash = modernHash(buf);
+    assertEquals(hash.length, 32);
+  });
+
+  await t.step(
+    "native Uint8Array produces same hash as FabricUint8Array with same bytes",
+    () => {
+      const bytes = new Uint8Array([10, 20, 30]);
+      const nativeHash = hex(modernHash(bytes));
+      const fabricHash = hex(modernHash(new FabricUint8Array(bytes)));
+      assertEquals(nativeHash, fabricHash);
+    },
+  );
+
+  await t.step("different Uint8Arrays produce different hashes", () => {
+    const b1 = new Uint8Array([1, 2, 3]);
+    const b2 = new Uint8Array([4, 5, 6]);
+    assertNotEquals(hex(modernHash(b1)), hex(modernHash(b2)));
+  });
 });
