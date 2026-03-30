@@ -35,7 +35,7 @@ Deno.bench({
   name: "Runtime readTx fallback - direct scalar read (100x)",
   group: "fallback-read",
   baseline: true,
-  async fn() {
+  async fn(b) {
     const { runtime, storageManager, tx } = setup();
 
     const cell = runtime.getCell<number>(
@@ -48,10 +48,12 @@ Deno.bench({
     await tx.commit();
     const link = cell.getAsNormalizedFullLink();
 
+    b.start();
     for (let i = 0; i < 100; i++) {
       const readTx = runtime.readTx();
       readTx.readValueOrThrow(link);
     }
+    b.end();
 
     await cleanup(runtime, storageManager, tx);
   },
@@ -60,7 +62,7 @@ Deno.bench({
 Deno.bench({
   name: "Runtime readTx fallback - cell.get schema number (100x)",
   group: "fallback-read",
-  async fn() {
+  async fn(b) {
     const { runtime, storageManager, tx } = setup();
 
     const schema = { type: "number", minimum: 0 } as const satisfies JSONSchema;
@@ -73,9 +75,11 @@ Deno.bench({
     cell.set(42);
     await tx.commit();
 
+    b.start();
     for (let i = 0; i < 100; i++) {
       cell.get();
     }
+    b.end();
 
     await cleanup(runtime, storageManager, tx);
   },
@@ -84,7 +88,7 @@ Deno.bench({
 Deno.bench({
   name: "Runtime readTx fallback - query result proxy schemaless (100x)",
   group: "fallback-read",
-  async fn() {
+  async fn(b) {
     const { runtime, storageManager, tx } = setup();
 
     const cell = runtime.getCell<{
@@ -100,11 +104,13 @@ Deno.bench({
     });
     await tx.commit();
 
+    b.start();
     for (let i = 0; i < 100; i++) {
       const proxy = cell.getAsQueryResult();
       proxy.name;
       proxy.nested.value;
     }
+    b.end();
 
     await cleanup(runtime, storageManager, tx);
   },

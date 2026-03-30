@@ -320,7 +320,7 @@ Deno.bench({
 Deno.bench({
   name: "Cell.set() - change: nested field modification",
   group: "change",
-  async fn() {
+  async fn(b) {
     const { runtime, storageManager, tx } = setup();
 
     const cell = runtime.getCell<any>(
@@ -338,6 +338,7 @@ Deno.bench({
     cell.set(baseObj);
 
     // Change only deeply nested field
+    b.start();
     for (let i = 0; i < 100; i++) {
       cell.set({
         ...baseObj,
@@ -347,6 +348,7 @@ Deno.bench({
         },
       });
     }
+    b.end();
 
     await cleanup(runtime, storageManager, tx);
   },
@@ -877,14 +879,16 @@ Deno.bench({
   name: "Cell.set() - single transaction, many sets",
   group: "transaction",
   baseline: true,
-  async fn() {
+  async fn(b) {
     const { runtime, storageManager, tx } = setup();
 
     const cell = runtime.getCell<any>(space, "bench-single-tx", undefined, tx);
 
+    b.start();
     for (let i = 0; i < 100; i++) {
       cell.set({ value: i, data: `test-${i}` });
     }
+    b.end();
 
     await cleanup(runtime, storageManager, tx);
   },
