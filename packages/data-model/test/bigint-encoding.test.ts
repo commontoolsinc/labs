@@ -3,9 +3,8 @@ import { expect } from "@std/expect";
 import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
-  fromBase64url,
-  toUnpaddedBase64url,
 } from "../bigint-encoding.ts";
+import { fromBase64url, toUnpaddedBase64url } from "../base64url.ts";
 
 // ============================================================================
 // bigintToMinimalTwosComplement

@@ -1,9 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  fromBase64url,
-  toUnpaddedBase64url,
-} from "../base64url.ts";
+import { fromBase64url, toUnpaddedBase64url } from "../base64url.ts";
 
 // ============================================================================
 // toUnpaddedBase64url
@@ -57,12 +54,12 @@ describe("fromBase64url", () => {
     expect(fromBase64url("_w")).toEqual(new Uint8Array([0xff]));
   });
 
-  it("rejects padded input ('AA==')", () => {
-    expect(() => fromBase64url("AA==")).toThrow("invalid character");
+  it("accepts padded input ('AA==')", () => {
+    expect(fromBase64url("AA==")).toEqual(new Uint8Array([0x00]));
   });
 
-  it("rejects padded input ('_w==')", () => {
-    expect(() => fromBase64url("_w==")).toThrow("invalid character");
+  it("accepts padded input ('_w==')", () => {
+    expect(fromBase64url("_w==")).toEqual(new Uint8Array([0xff]));
   });
 });
 

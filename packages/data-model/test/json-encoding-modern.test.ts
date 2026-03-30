@@ -365,13 +365,12 @@ describe("json encoding", () => {
       expect(serializedNum).not.toEqual(serializedBig);
     });
 
-    it("rejects padded base64 input (ProblematicValue)", () => {
-      // "Kg==" is the padded form of "Kg" (42n) -- padding is now rejected.
+    it("accepts padded base64 input", () => {
+      // "Kg==" is the padded form of "Kg" (42n) -- padding is accepted by the
+      // web-standard Uint8Array.fromBase64.
       const data = { "/BigInt@1": "Kg==" } as JsonWireValue;
       const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(ProblematicValue);
-      const prob = result as unknown as ProblematicValue;
-      expect(prob.typeTag).toBe("BigInt@1");
+      expect(result).toBe(42n);
     });
 
     it("deserializes non-string state to ProblematicValue", () => {
