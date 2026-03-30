@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import {
   fromBase64url,
   toUnpaddedBase64url,
-} from "../bigint-encoding.ts";
+} from "../base64url.ts";
 
 // ============================================================================
 // toUnpaddedBase64url
