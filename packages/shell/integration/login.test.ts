@@ -1,10 +1,65 @@
-import { env } from "@commontools/integration";
+import { env, waitFor } from "@commontools/integration";
 import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
 import { ShellIntegration } from "../../integration/shell-utils.ts";
-import { sleep } from "@commontools/utils/sleep";
+import type { Page } from "@commontools/integration";
 
 const { FRONTEND_URL } = env;
+
+function pierce(page: Page, selector: string, timeout?: number) {
+  return page.waitForSelector(selector, {
+    strategy: "pierce",
+    ...(timeout != null ? { timeout } : {}),
+  });
+}
+
+async function clickPierce(page: Page, selector: string): Promise<void> {
+  await waitFor(async () => {
+    try {
+      const handle = await pierce(page, selector, 500);
+      return await handle.evaluate((el: Element) => {
+        const button = el.shadowRoot?.querySelector("button");
+        if (button instanceof HTMLButtonElement) {
+          return !button.disabled;
+        }
+        return el instanceof HTMLElement;
+      });
+    } catch {
+      return false;
+    }
+  });
+
+  await page.evaluate((targetSelector: string) => {
+    function findInShadow(
+      root: Document | ShadowRoot,
+      selector: string,
+    ): Element | null {
+      const direct = root.querySelector(selector);
+      if (direct) return direct;
+
+      for (const el of root.querySelectorAll("*")) {
+        if (el.shadowRoot) {
+          const nested = findInShadow(el.shadowRoot, selector);
+          if (nested) return nested;
+        }
+      }
+
+      return null;
+    }
+
+    const host = findInShadow(document, targetSelector);
+    if (!(host instanceof HTMLElement)) {
+      throw new Error(`Could not find clickable element for ${targetSelector}`);
+    }
+
+    const target = host.shadowRoot?.querySelector("button") ?? host;
+    if (!(target instanceof HTMLElement)) {
+      throw new Error(`Could not resolve click target for ${targetSelector}`);
+    }
+
+    target.click();
+  }, { args: [selector] });
+}
 
 // Tests the manual logging in via passphrase.
 // Other tests should use the `shell.login(identity)`
@@ -28,35 +83,22 @@ describe("shell login tests", () => {
       (state.view as { spaceName: string }).spaceName === "common-knowledge",
     );
 
-    let handle = await page.waitForSelector(
-      '[test-id="register-new-key"]',
-      { strategy: "pierce" },
-    );
-    handle.click();
-    // TODO(js): If we don't sleep, we get box model errors
-    // when trying to click the handles. Not sure why we need
-    // to sleep at all, but at least not "duration" dependent
-    await sleep(1);
-    handle = await page.waitForSelector(
-      '[test-id="generate-passphrase"]',
-      { strategy: "pierce" },
-    );
-    handle.click();
-    await sleep(1);
-    handle = await page.waitForSelector(
-      '[test-id="passphrase-continue"]',
-      { strategy: "pierce" },
-    );
-    handle.click();
+    await clickPierce(page, '[test-id="register-new-key"]');
+    await pierce(page, '[test-id="generate-passphrase"]');
 
-    await sleep(1);
-    handle = await page.waitForSelector(".header-space", {
-      strategy: "pierce",
+    await clickPierce(page, '[test-id="generate-passphrase"]');
+    await pierce(page, '[test-id="passphrase-continue"]');
+
+    await clickPierce(page, '[test-id="passphrase-continue"]');
+
+    await waitFor(async () => {
+      try {
+        const handle = await pierce(page, ".header-space", 500);
+        const title = await handle.evaluate((el: Element) => el.textContent);
+        return title?.trim() === spaceName;
+      } catch {
+        return false;
+      }
     });
-    const title = await handle.evaluate((el: Element) => el.textContent);
-    assert(
-      title?.trim() === spaceName,
-      `Expect "${title?.trim()}" to be "${spaceName}"`,
-    );
   });
 });
