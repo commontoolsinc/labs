@@ -643,6 +643,45 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       assertHasErrorType(errors, "pattern-context:var-declaration");
     },
   );
+
+  await t.step(
+    "errors on block-scoped early return inside pattern-owned nested map callback",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface State {
+        sections: { tasks: { label: string }[]; tags: { name: string }[] }[];
+      }
+
+      export default pattern<State>((state) => ({
+        [UI]: (
+          <div>
+            {state.sections.map((section) => {
+              if (!section.tags.length) return <div />;
+              {
+                const tasks = section.tasks;
+                return (
+                  <div>
+                    {section.tags.map((tag) => (
+                      <span>{tag.name}:{tasks.length}</span>
+                    ))}
+                  </div>
+                );
+              }
+            })}
+          </div>
+        ),
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:early-return");
+    },
+  );
 });
 
 Deno.test(
@@ -802,6 +841,71 @@ Deno.test(
     );
   },
 );
+
+Deno.test("Pattern Context Validation - Destructuring Defaults", async (t) => {
+  await t.step(
+    "errors on non-static default initializer destructuring",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const fallback = "fallback";
+
+      export default pattern(({ foo = fallback }) => <div>{foo}</div>);
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const computationErrors = errors.filter((error) =>
+        error.type === "pattern-context:computation"
+      );
+
+      assertEquals(computationErrors.length, 1);
+      assertStringIncludes(
+        computationErrors[0]!.message,
+        "Non-static destructuring initializers",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on opaque local default destructuring",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, generateObject, pattern } from "commontools";
+
+      export default pattern<{ messages: string[] }>(({ messages }) => {
+        const preview = computed(() => messages[0] ?? "");
+        const { result = { title: "fallback" } } = generateObject({
+          prompt: preview,
+          schema: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+          },
+        });
+        return <div>{result.title}</div>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const computationErrors = errors.filter((error) =>
+        error.type === "pattern-context:computation"
+      );
+
+      assertEquals(computationErrors.length, 1);
+      assertStringIncludes(
+        computationErrors[0]!.message,
+        "opaque local bindings",
+      );
+    },
+  );
+});
 
 Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   await t.step(
