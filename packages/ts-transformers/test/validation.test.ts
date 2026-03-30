@@ -931,6 +931,30 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   );
 
   await t.step(
+    "allows receiver-method roots through aliased reactive array-method chains",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern<{ items: string[] }>((state) => {
+        const inner = computed(() => state.items);
+        const value = computed(() => {
+          const foo = computed(() => inner);
+          const filtered = foo.filter((item) => item.length > 1);
+          return filtered.map((item) => item.toUpperCase());
+        });
+        return { value };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
     "errors on opaque array receiver-method calls nested inside array-callback expressions",
     async () => {
       const source = `/// <cts-enable />

@@ -121,6 +121,39 @@ Deno.test("classifyArrayMethodCallSite reports reactive ownership for reactive r
   );
 });
 
+Deno.test("classifyArrayCallbackContainerCall downgrades reactive array callbacks consumed by terminal chains", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare function derive<T>(value: T): T;
+
+    const value = derive(["a", "b", "c"])
+      .map((n: string) => n.toUpperCase())
+      .join(", ");
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (
+    !ts.isCallExpression(expression) ||
+    !ts.isPropertyAccessExpression(expression.expression)
+  ) {
+    throw new Error("Expected join call expression initializer");
+  }
+
+  const receiver = expression.expression.expression;
+  if (!ts.isCallExpression(receiver)) {
+    throw new Error("Expected join receiver to be a call expression");
+  }
+
+  assertEquals(classifyArrayMethodCallSite(receiver, checker), {
+    family: "map",
+    lowered: false,
+    ownership: "reactive",
+  });
+  assertEquals(
+    classifyArrayCallbackContainerCall(receiver, checker),
+    "plain-array-value",
+  );
+});
+
 Deno.test("classifyArrayMethodCallSite treats lowered *WithPattern methods as reactive when the receiver is reactive", () => {
   const { sourceFile, checker } = createProgram(`
     interface OpaqueRefMethods<T> {

@@ -313,6 +313,61 @@ Deno.test(
 );
 
 Deno.test(
+  "Expression site policy: aliased reactive array callbacks keep receiver-method ownership",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare function computed<T>(fn: () => T): T;
+      declare function pattern<T>(fn: (state: { items: string[] }) => T): T;
+
+      const view = pattern((state) => {
+        const inner = computed(() => state.items);
+        return computed(() => {
+          const foo = computed(() => inner);
+          const filtered = foo.filter((item) => item.length > 1);
+          return filtered.map((item) => item.toUpperCase());
+        });
+      });
+    `);
+
+    const mapCall = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "map",
+    );
+    const callback = mapCall.arguments[0];
+    if (!callback || !ts.isArrowFunction(callback)) {
+      throw new Error("Expected map callback arrow function");
+    }
+    context.markAsArrayMethodCallback(callback);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "toUpperCase",
+    );
+
+    const analyze = createDataFlowAnalyzer(checker);
+    assertEquals(
+      classifyExpressionSiteHandling(
+        call,
+        "return-expression",
+        context,
+        analyze,
+      ),
+      {
+        kind: "owned",
+        owner: "array-method-receiver-method",
+        lowerable: true,
+      },
+    );
+  },
+);
+
+Deno.test(
   "Expression site policy: reactive direct JSX array-method roots use the generic owned pre-closure route when enabled",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`

@@ -11,6 +11,8 @@ const passthrough = lift((items: string[]) => items);
 //   const foo = passthrough(inner); foo.map(fn)           -> foo.mapWithPattern(...)
 //   const foo = wish<Default<T[], []>>(...).result!; map  -> foo.mapWithPattern(...)
 //   const filtered = foo.filter(fn); filtered.map(fn)     -> filterWithPattern(...).mapWithPattern(...)
+//   const filtered = foo.filter(fn); filtered.map(item => item.toUpperCase())
+//                                                   -> receiver-method body still lowers via derive(...)
 // Context: contrasts with the existing plain-array compute fixtures where the
 // callback receiver really is compute-owned plain JS data.
 export default pattern<{ items: string[] }>((state) => {
@@ -37,5 +39,17 @@ export default pattern<{ items: string[] }>((state) => {
     return filtered.map((item) => item + "!");
   });
 
-  return { fromComputed, fromLift, fromWish, fromFiltered };
+  const fromFilteredReceiverMethod = computed(() => {
+    const foo = computed(() => inner);
+    const filtered = foo.filter((item) => item.length > 1);
+    return filtered.map((item) => item.toUpperCase());
+  });
+
+  return {
+    fromComputed,
+    fromLift,
+    fromWish,
+    fromFiltered,
+    fromFilteredReceiverMethod,
+  };
 });

@@ -18,6 +18,8 @@ export {
   detectDirectBuilderCall,
   getCapabilitySummaryCallbackArgument,
   getPatternBuilderCallbackArgument,
+  hasReactiveCollectionProvenance,
+  isConsumedByTerminalChainCall,
   isPatternBuilderCall,
   isReactiveOriginCall,
   isReactiveValueExpression,
