@@ -17,14 +17,10 @@ export default pattern((__ct_pattern_input) => {
             type: "object",
             properties: {
                 items: {
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            }
-                        }]
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    }
                 }
             },
             $defs: {
@@ -101,14 +97,10 @@ export default pattern((__ct_pattern_input) => {
             type: "object",
             properties: {
                 items: {
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            }
-                        }]
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    }
                 }
             },
             $defs: {
@@ -185,14 +177,10 @@ export default pattern((__ct_pattern_input) => {
             type: "object",
             properties: {
                 items: {
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            }
-                        }]
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    }
                 }
             },
             $defs: {
