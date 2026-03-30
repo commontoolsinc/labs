@@ -251,7 +251,7 @@ Deno.test("mapWithPattern synthetic pattern callsite keeps authored source lines
   const THROW_LINE = 7;
   const source = [
     "/// <cts-enable />",
-    'import { pattern, UI } from "commontools";',
+    'import { pattern, UI } from "commonfabric";',
     "interface Item { id: string; }",
     "interface State { items: Item[]; }",
     "export default pattern<State>((state) => ({",

@@ -81,7 +81,7 @@ export const main = new Command()
       .hidden()
       .useRawArgs()
       .action(async (_options: unknown, ...rawArgs: unknown[]) => {
-        const { main } = await import("@commontools/fuse");
+        const { main } = await import("@commonfabric/fuse");
         const daemonArgs = rawArgs.map((arg) => String(arg));
         await main(daemonArgs);
       }),
