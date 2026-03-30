@@ -1628,6 +1628,14 @@ Deno.test("memory v2 client rejects outstanding commits when session ID changes 
           JSON.stringify(transport.transactSessionIds)
         }`,
     );
+    assertEquals(session.sessionId, "session-B");
+    assertEquals(transport.sessionOpenCount, 2);
+    assertEquals(
+      transport.transactCount,
+      1,
+      "the client must reject the orphaned commit instead of replaying it on the replacement session",
+    );
+    assertEquals(transport.transactSessionIds, ["session-A"]);
   } finally {
     await client.close();
   }

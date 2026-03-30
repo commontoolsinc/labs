@@ -19,17 +19,21 @@ class ReconnectableTransport implements Transport {
     payload: string;
     resolve: () => void;
   }> = [];
+  #deliveredTransactLocalSeqs: number[] = [];
 
   constructor(private readonly server: Server) {}
 
   async send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as { type?: string };
+    const message = JSON.parse(payload) as {
+      type?: string;
+      commit?: { localSeq?: number };
+    };
     if (this.#delayTransacts && message.type === "transact") {
       return new Promise<void>((resolve) => {
         this.#delayedTransacts.push({ payload, resolve });
       });
     }
-    await this.connection().receive(payload);
+    await this.#deliver(payload);
   }
 
   close(): Promise<void> {
@@ -48,7 +52,7 @@ class ReconnectableTransport implements Transport {
   disconnect(): void {
     this.#connection?.close();
     this.#connection = null;
-    this.#closeReceiver(new Error("disconnect"));
+    queueMicrotask(() => this.#closeReceiver(new Error("disconnect")));
   }
 
   set delayTransacts(value: boolean) {
@@ -59,12 +63,33 @@ class ReconnectableTransport implements Transport {
     return this.#delayedTransacts.length;
   }
 
+  get delayedTransactLocalSeqs(): number[] {
+    return this.#delayedTransacts.flatMap(({ payload }) => {
+      const message = JSON.parse(payload) as { commit?: { localSeq?: number } };
+      return typeof message.commit?.localSeq === "number"
+        ? [message.commit.localSeq]
+        : [];
+    });
+  }
+
+  get deliveredTransactLocalSeqs(): number[] {
+    return [...this.#deliveredTransactLocalSeqs];
+  }
+
   async releaseTransacts(): Promise<void> {
     const delayed = this.#delayedTransacts.splice(0);
     for (const { payload, resolve } of delayed) {
-      await this.connection().receive(payload);
+      await this.#deliver(payload);
       resolve();
     }
+  }
+
+  async #deliver(payload: string): Promise<void> {
+    const message = JSON.parse(payload) as { commit?: { localSeq?: number } };
+    if (typeof message.commit?.localSeq === "number") {
+      this.#deliveredTransactLocalSeqs.push(message.commit.localSeq);
+    }
+    await this.connection().receive(payload);
   }
 
   private connection(): ReturnType<Server["connect"]> {
@@ -101,6 +126,19 @@ Deno.test(
     const transport = new ReconnectableTransport(server);
     const client = await connect({ transport });
     const session = await client.mount(SPACE);
+    const suppressDisconnectRejection = (event: PromiseRejectionEvent) => {
+      if (
+        event.reason instanceof Error &&
+        event.reason.name === "ConnectionError" &&
+        event.reason.message === "disconnect"
+      ) {
+        event.preventDefault();
+      }
+    };
+    globalThis.addEventListener(
+      "unhandledrejection",
+      suppressDisconnectRejection,
+    );
 
     try {
       // Seed doc:a.
@@ -122,13 +160,11 @@ Deno.test(
 
       // Wait for the transact to reach the transport.
       await waitFor(() => transport.pendingTransactCount >= 1);
+      assertEquals(transport.delayedTransactLocalSeqs, [2]);
 
       // Disconnect while commit B's transact is held — commit B becomes
       // outstanding and will be replayed during restore.
       transport.disconnect();
-
-      // Wait for reconnect to start and the replay transact to arrive.
-      await waitFor(() => transport.pendingTransactCount >= 1);
 
       // While the replay transact is held (and #restoring is true),
       // enqueue commit C.
@@ -137,6 +173,11 @@ Deno.test(
         reads: { confirmed: [], pending: [] },
         operations: [{ op: "set", id: "doc:c", value: { value: { v: 3 } } }],
       });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert(
+        !transport.delayedTransactLocalSeqs.includes(3),
+        "commit C should wait for restore to finish instead of sending during replay",
+      );
 
       // Release all delayed transacts.
       transport.delayTransacts = false;
@@ -161,9 +202,35 @@ Deno.test(
         `Commits enqueued during restore should flush, but got: ${result}`,
       );
 
-      // Verify both docs were written.
+      const queried = await session.queryGraph({
+        roots: [
+          { id: "doc:b", selector: { path: [], schema: false } },
+          { id: "doc:c", selector: { path: [], schema: false } },
+        ],
+      });
+      assertEquals(
+        Object.fromEntries(
+          queried.entities.map((entity) => [entity.id, entity.document?.value]),
+        ),
+        {
+          "doc:b": { v: 2 },
+          "doc:c": { v: 3 },
+        },
+      );
+      assertEquals(
+        transport.deliveredTransactLocalSeqs.filter((localSeq) =>
+          localSeq === 3
+        )
+          .length,
+        1,
+      );
+      assertEquals(transport.deliveredTransactLocalSeqs.at(-1), 3);
       assertEquals(transport.connectionCount, 2);
     } finally {
+      globalThis.removeEventListener(
+        "unhandledrejection",
+        suppressDisconnectRejection,
+      );
       await client.close();
       await server.flushSessions();
       await server.close();
