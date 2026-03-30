@@ -1135,4 +1135,42 @@ Deno.test("modernHash native instances", async (t) => {
     const b2 = new Uint8Array([4, 5, 6]);
     assertNotEquals(hex(modernHash(b1)), hex(modernHash(b2)));
   });
+
+  // --- Deferred types (not yet handled — these document known gaps) ---
+
+  await t.step("Map throws (deferred — needs recursive translation)", () => {
+    assertThrows(
+      () => modernHashRaw(new Map([["a", 1]])),
+      Error,
+      "unsupported object type",
+    );
+  });
+
+  await t.step("Set throws (deferred — needs recursive translation)", () => {
+    assertThrows(
+      () => modernHashRaw(new Set([1, 2, 3])),
+      Error,
+      "unsupported object type",
+    );
+  });
+
+  await t.step("Error throws (deferred — needs recursive translation)", () => {
+    assertThrows(
+      () => modernHashRaw(new Error("test")),
+      Error,
+      "unsupported object type",
+    );
+  });
+
+  await t.step(
+    "HasToJSON throws (deferred — needs recursive translation)",
+    () => {
+      const obj = { toJSON: () => "hello" };
+      assertThrows(
+        () => modernHashRaw(obj),
+        Error,
+        "unsupported object type",
+      );
+    },
+  );
 });
