@@ -49,13 +49,13 @@ export function setSchemaHashConfig(enabled: boolean): void {
 }
 
 /**
- * Restores modern schema hash mode to its default (disabled). Called by
+ * Restores modern schema hash mode to its default (enabled). Called by
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or
  * test runs. Wipes the intern cache since cached hashes are
  * flag-dependent.
  */
 export function resetSchemaHashConfig(): void {
-  modernSchemaHashEnabled = false;
+  modernSchemaHashEnabled = true;
   resetInternCache();
 }
 
