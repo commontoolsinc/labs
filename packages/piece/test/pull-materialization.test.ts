@@ -165,9 +165,9 @@ describe("piece pull materialization", () => {
       });
     }) as typeof manager.runtime.setup;
 
-    manager.syncPattern = (async () => {
+    manager.syncPattern = (() => {
       expect(setupResolved).toBe(true);
-      return pattern;
+      return Promise.resolve(pattern);
     }) as typeof manager.syncPattern;
 
     try {
