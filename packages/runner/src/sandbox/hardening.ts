@@ -1,12 +1,39 @@
-const BUILTIN_MUTABLE_PROTOTYPES = new Set<object>([
-  Object.prototype,
-  Function.prototype,
-  Array.prototype,
-  Map.prototype,
-  Set.prototype,
-  RegExp.prototype,
-  Promise.prototype,
-]);
+// Prototypes that must NOT be frozen because they are shared with the host
+// realm.  Freezing them would break host code that creates or mutates
+// instances of these classes.
+const BUILTIN_MUTABLE_PROTOTYPES: Set<object> = (() => {
+  const set = new Set<object>([
+    Object.prototype,
+    Function.prototype,
+    Array.prototype,
+    Map.prototype,
+    Set.prototype,
+    RegExp.prototype,
+    Promise.prototype,
+  ]);
+
+  // Web API constructors whose prototypes are exposed to compartment code via
+  // compartment-globals.ts.  We must not freeze these host-realm prototypes.
+  const hostGlobals = globalThis as Record<string, unknown>;
+  for (
+    const name of [
+      "Headers",
+      "Request",
+      "Response",
+      "TextDecoder",
+      "TextEncoder",
+      "URL",
+      "URLSearchParams",
+    ]
+  ) {
+    const ctor = hostGlobals[name];
+    if (typeof ctor === "function" && ctor.prototype) {
+      set.add(ctor.prototype as object);
+    }
+  }
+
+  return set;
+})();
 
 export function freezeSandboxValue<T>(
   value: T,

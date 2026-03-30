@@ -149,7 +149,11 @@ function validateMap(
   visited: WeakSet<object>,
 ): void {
   let index = 0;
-  for (const [key, entryValue] of value.entries()) {
+  for (
+    const [key, entryValue] of Map.prototype.entries.call(
+      value as Map<unknown, unknown>,
+    )
+  ) {
     validateModuleSafeValue(
       key,
       `${path}<map-key:${index}>`,
@@ -170,7 +174,7 @@ function validateSet(
   visited: WeakSet<object>,
 ): void {
   let index = 0;
-  for (const entryValue of value.values()) {
+  for (const entryValue of Set.prototype.values.call(value as Set<unknown>)) {
     validateModuleSafeValue(
       entryValue,
       `${path}<set:${index}>`,
@@ -289,7 +293,11 @@ function freezeMap(
   converted.set(value as object, result as unknown as ModuleSafeValue);
 
   let index = 0;
-  for (const [key, entryValue] of value.entries()) {
+  for (
+    const [key, entryValue] of Map.prototype.entries.call(
+      value as Map<unknown, unknown>,
+    )
+  ) {
     builder.set(
       freezeModuleSafeValue(
         key,
@@ -322,7 +330,7 @@ function freezeSet(
   converted.set(value as object, result as unknown as ModuleSafeValue);
 
   let index = 0;
-  for (const entryValue of value.values()) {
+  for (const entryValue of Set.prototype.values.call(value as Set<unknown>)) {
     builder.add(
       freezeModuleSafeValue(
         entryValue,
