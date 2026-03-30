@@ -123,6 +123,20 @@ describe("SES security regressions", () => {
     });
   });
 
+  it("exposes frozen host constructors and prototypes to module compartments", () => {
+    const globals = createModuleCompartmentGlobals();
+    const headersCtor = globals.Headers as typeof Headers;
+    const urlCtor = globals.URL as typeof URL;
+
+    expect(typeof headersCtor).toBe("function");
+    expect(Object.isFrozen(headersCtor)).toBe(true);
+    expect(Object.isFrozen(headersCtor.prototype)).toBe(true);
+
+    expect(typeof urlCtor).toBe("function");
+    expect(Object.isFrozen(urlCtor)).toBe(true);
+    expect(Object.isFrozen(urlCtor.prototype)).toBe(true);
+  });
+
   it("keeps module and callback compartments on the same compatibility-global surface", () => {
     expect(
       Object.keys(createCallbackCompartmentGlobals()).sort(),
