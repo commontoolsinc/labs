@@ -337,9 +337,39 @@ The intended rule is:
 
 This distinction is part of the language, not an incidental optimizer detail.
 
-## 5.4 Callback-Container Pass-Through Is Not A Language Goal
+## 5.4 Callback / Container Boundary Is Four-Way Split
 
-If a construct is only supportable by compatibility behavior such as:
+The callback/container boundary should be read in four distinct buckets:
+
+1. **supported reactive collection callbacks**
+   - examples:
+     - `items.map((item) => item.name)`
+     - `items.map((item) => item.toUpperCase())`
+   - why:
+     - the callback belongs to a supported language operator over a supported
+       receiver family
+2. **supported terminal sink chains over structural array values**
+   - examples:
+     - `<div>{items.filter((item) => item.visible).join(", ")}</div>`
+     - `<div>{items.map((item) => item.name).join(", ")}</div>`
+   - why:
+     - these are still value expressions over structural array results, not
+       foreign callback-container roots
+3. **unsupported foreign callback / imperative container roots**
+   - examples:
+     - `<div>{[0, 1].forEach(() => list.map((item) => item))}</div>`
+     - `<div>{somePromise.then(() => list.map((item) => item))}</div>`
+   - why:
+     - the outer wrapper is not a target-language operator or local value
+       expression context; it is a foreign imperative container
+4. **compatibility-only residual pass-through for invalid programs**
+   - meaning:
+     - if a shape from bucket 3 still survives as plain JS in current emitted
+       output, that is residual implementation behavior rather than language
+       policy
+
+This is why callback-container pass-through is not a language goal. If a
+construct is only supportable by compatibility behavior such as:
 
 1. leaving the foreign container authored as plain JS
 2. or, in older/rarer cases, wrapping the whole foreign container as one
@@ -348,10 +378,10 @@ If a construct is only supportable by compatibility behavior such as:
 that is strong evidence it should be rejected from the target language rather
 than elevated into the core language.
 
-That is the current stance for callback-container roots and similar imperative
-foreign wrappers. They are not a target-language abstraction; they are
-unsupported. If current invalid programs still pass through as plain JS, that
-is residual implementation behavior, not target-language policy.
+One important nuance: an explicit wrapper like `computed(() => list.map(...))`
+is supported because `computed` creates a supported computation boundary around
+an inner value expression. That does **not** make foreign containers like
+`forEach(...)` or `then(...)` themselves part of the language.
 
 ## 5.5 Dynamic Key Access Is Context-Split
 
