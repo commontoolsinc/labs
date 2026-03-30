@@ -9,9 +9,8 @@ import { FabricInstance } from "./interface.ts";
  * is*, not what fabric type it becomes after conversion.
  *
  * Covers two categories:
- * - **Native JS builtins**: Array, Object, Error, Map, Set, Date, Uint8Array.
- * - **System-defined value types**: FabricEpochNsec, FabricEpochDays,
- *   FabricHash, FabricBytes -- classes defined by this system that
+ * - **Native JS builtins**: standard JS types that the fabric system converts.
+ * - **System-defined value types**: classes defined by this system that
  *   behave like primitives (always frozen, pass through conversion
  *   unchanged) but aren't under the open-ended `FabricInstance` umbrella.
  *

@@ -81,13 +81,12 @@ export abstract class FabricInstance {
 /**
  * Abstract base class for "special primitive" fabric types -- values that
  * behave like primitives in the fabric type system but are represented as
- * class instances for type safety and dispatch. Currently covers temporal
- * types (`FabricEpochNsec`, `FabricEpochDays`) and content IDs
- * (`FabricHash`).
+ * class instances for type safety and dispatch. Covers temporal types,
+ * content IDs, byte sequences, and similar.
  *
- * Analogous to `ExplicitTagValue` (which unifies `UnknownValue` and
- * `ProblematicValue`), this class enables a single `instanceof` check
- * where code needs to handle any special primitive uniformly.
+ * Analogous to `ExplicitTagValue`, this class enables a single
+ * `instanceof` check where code needs to handle any special primitive
+ * uniformly.
  *
  * Instances are always frozen (like true primitives, they are immutable).
  * Each leaf subclass must call `Object.freeze(this)` at the end of its
@@ -122,13 +121,11 @@ export type FabricValue = FabricDatum | undefined;
  *
  *   JavaScript "wild west" (unknown) <-> FabricValue <-> Serialized (Uint8Array)
  *
- * Most native JS object types (`Error`, `Map`, `Set`) enter the fabric
- * layer via wrapper classes that implement `FabricInstance`. However,
- * fabric primitives (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`,
- * `FabricBytes`) and `bigint` are direct members of `FabricDatum`
- * without implementing `FabricInstance`. Native `Date` is converted to
- * `FabricEpochNsec` and native `Uint8Array` to `FabricBytes` during
- * conversion.
+ * Most native JS object types enter the fabric layer via wrapper classes
+ * that implement `FabricInstance`. However, `FabricPrimitive` subclasses
+ * and `bigint` are direct members of `FabricDatum` without implementing
+ * `FabricInstance`. Some native types are converted to fabric primitives
+ * during conversion.
  *
  * `undefined` is preserved when the `modernDataModel` flag is ON. When the
  * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
@@ -141,14 +138,12 @@ export type FabricDatum =
   | number
   | string
   | bigint
-  // -- Fabric primitives (FabricEpochNsec, FabricEpochDays, FabricHash,
-  //    FabricBytes) --
+  // -- Fabric primitives --
   | FabricPrimitive
   // -- Containers --
   | FabricArray
   | FabricObject
-  // -- Protocol types (Cell, Stream, UnknownValue, ProblematicValue,
-  //    and native wrappers like FabricError at runtime) --
+  // -- Protocol types (FabricInstance subclasses) --
   | FabricInstance
   // -- Extended primitives (experimental: modernDataModel) --
   | undefined;
@@ -183,8 +178,8 @@ export type FabricValueLayer =
  * are the inputs to the "sausage grinder" -- `shallowFabricFromNativeValue()`
  * accepts `FabricValue | FabricNativeObject`, meaning callers can pass in
  * either already-fabric data or raw native JS objects. The conversion
- * produces `FabricInstance` wrappers (FabricError, FabricMap, etc.) or
- * `FabricPrimitive` values (FabricBytes) that live inside
+ * produces `FabricInstance` wrappers or `FabricPrimitive` values that live
+ * inside
  * `FabricValue` via the corresponding arms of `FabricDatum`.
  *
  * The `{ toJSON(): unknown }` arm covers objects (and functions) that are

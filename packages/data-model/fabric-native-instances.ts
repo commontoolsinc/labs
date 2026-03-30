@@ -16,15 +16,14 @@ import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
 
 /**
  * Returns `true` if the value is a native JS object type that the fabric
- * system knows how to wrap (Error, Map, Set, Date, RegExp, Uint8Array).
- * These are the "wild-west" instances that get converted into
- * `FabricNativeWrapper` subclasses, `FabricPrimitive` types, or
- * `FabricInstance` types by the conversion layer.
+ * system knows how to wrap. These are the "wild-west" instances that get
+ * converted into `FabricNativeWrapper` subclasses, `FabricPrimitive` types,
+ * or `FabricInstance` types by the conversion layer.
  *
  * Arrays, plain objects, objects with `toJSON()`, and system-defined special
- * primitives (EpochNsec, EpochDays, ContentHash) are recognized by
- * `tagFromNativeValue()` but are NOT convertible native instances -- they
- * have their own handling paths in the conversion layer.
+ * primitives are recognized by `tagFromNativeValue()` but are NOT convertible
+ * native instances -- they have their own handling paths in the conversion
+ * layer.
  */
 export function isConvertibleNativeInstance(value: object): boolean {
   switch (tagFromNativeValue(value)) {
@@ -113,7 +112,7 @@ function errorClassFromType(type: string): ErrorConstructor {
 
 /**
  * Abstract base class for `FabricInstance` wrappers that bridge native JS
- * objects (Error, Map, Set) into the `FabricValue` layer.
+ * objects into the `FabricValue` layer.
  * Provides a common `toNativeValue()` method used by both the shallow and
  * deep unwrap functions, replacing their `instanceof` cascades with a single
  * `instanceof FabricNativeWrapper` check.

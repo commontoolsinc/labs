@@ -1,5 +1,4 @@
 import { FabricPrimitive } from "./interface.ts";
-import { TAGS } from "./fabric-type-tags.ts";
 
 /**
  * Immutable byte sequence in the fabric type system. Extends `FabricPrimitive`
@@ -17,9 +16,6 @@ import { TAGS } from "./fabric-type-tags.ts";
  * copy is the defense.)
  */
 export class FabricBytes extends FabricPrimitive {
-  /** The type tag used in the wire format (`TAGS.Bytes`). */
-  readonly typeTag = TAGS.Bytes;
-
   /** Private byte storage. Callers use `slice()` or `copyInto()`. */
   readonly #bytes: Uint8Array;
 
@@ -60,6 +56,16 @@ export class FabricBytes extends FabricPrimitive {
    * @returns The number of bytes actually copied.
    */
   copyInto(target: Uint8Array, offset = 0, length?: number): number {
+    if (offset < 0) {
+      throw new RangeError(
+        `copyInto: offset must be non-negative, got ${offset}`,
+      );
+    }
+    if (length !== undefined && length < 0) {
+      throw new RangeError(
+        `copyInto: length must be non-negative, got ${length}`,
+      );
+    }
     const available = this.#bytes.length - offset;
     if (available <= 0) return 0;
     const toCopy = Math.min(length ?? available, available, target.length);

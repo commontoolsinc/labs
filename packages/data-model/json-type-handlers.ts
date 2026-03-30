@@ -430,12 +430,11 @@ export const StorableInstanceHandler: TypeHandler = {
 
 /**
  * Create a registry with the built-in type handlers. The order matters for
- * serialization: `FabricPrimitive` subclasses (`EpochNsec`, `EpochDays`,
- * `Bytes`) are checked first (direct `FabricDatum` members matched by
- * `instanceof`), then `FabricInstance` (generic protocol types), then
- * `bigint` and `undefined`. Primitives (null, boolean, number, string),
- * arrays, and plain objects are handled as fallthrough in the serializer
- * after no handler matches.
+ * serialization: `FabricPrimitive` subclasses are checked first (direct
+ * `FabricDatum` members matched by `instanceof`), then `FabricInstance`
+ * (generic protocol types), then `bigint` and `undefined`. Primitives
+ * (null, boolean, number, string), arrays, and plain objects are handled
+ * as fallthrough in the serializer after no handler matches.
  */
 export function createDefaultRegistry(): TypeHandlerRegistry {
   const registry = new TypeHandlerRegistry();
@@ -446,7 +445,6 @@ export function createDefaultRegistry(): TypeHandlerRegistry {
   registry.register(EpochDaysHandler);
   registry.register(BytesHandler);
   // FabricInstance (generic -- checked via instanceof).
-  // Covers FabricError, UnknownValue, ProblematicValue, etc.
   registry.register(StorableInstanceHandler);
   // Primitives that need tagged encoding (can't be expressed in JSON natively).
   registry.register(BigIntHandler);
