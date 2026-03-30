@@ -154,13 +154,11 @@ export type FabricDatum =
   | number
   | string
   | bigint
-  // -- Fabric primitives --
-  | FabricPrimitive
+  // -- Fabric special objects (FabricInstance and FabricPrimitive) --
+  | FabricSpecialObject
   // -- Containers --
   | FabricArray
   | FabricObject
-  // -- Protocol types (FabricInstance subclasses) --
-  | FabricInstance
   // -- Extended primitives (experimental: modernDataModel) --
   | undefined;
 

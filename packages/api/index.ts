@@ -128,10 +128,9 @@ export type FabricDatum =
   | number
   | string
   | bigint
-  | FabricPrimitive
+  | FabricSpecialObject
   | FabricArray
   | FabricObject
-  | FabricInstance
   | undefined;
 
 /** An array of fabric data. */
