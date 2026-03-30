@@ -379,6 +379,175 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
   });
 });
 
+Deno.test(
+  "Pattern Context Validation - Destructuring and Structural Traversal",
+  async (t) => {
+    await t.step(
+      "errors on rest destructuring in pattern params",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const p = pattern(({ foo, ...rest }) => <div>{foo}</div>);
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        const computationErrors = errors.filter((error) =>
+          error.type === "pattern-context:computation"
+        );
+
+        assertEquals(computationErrors.length, 1);
+        assertStringIncludes(
+          computationErrors[0]!.message,
+          "Rest destructuring",
+        );
+      },
+    );
+
+    await t.step(
+      "allows array destructuring in pattern params",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const p = pattern(([first]) => <div>{first}</div>);
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        const computationErrors = errors.filter((error) =>
+          error.type === "pattern-context:computation"
+        );
+
+        assertEquals(computationErrors.length, 0);
+      },
+    );
+
+    await t.step(
+      "errors on Object.keys/values/entries over pattern input",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const p = pattern((input) => {
+        Object.keys(input);
+        Object.values(input);
+        Object.entries(input);
+        return input;
+      });
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        const computationErrors = errors.filter((error) =>
+          error.type === "pattern-context:computation"
+        );
+
+        assertGreater(computationErrors.length, 2);
+      },
+    );
+
+    await t.step(
+      "errors on dynamic key access over pattern input",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const p = pattern((input, key: string) => input[key]);
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        const computationErrors = errors.filter((error) =>
+          error.type === "pattern-context:computation"
+        );
+
+        assertGreater(computationErrors.length, 0);
+      },
+    );
+
+    await t.step("allows known symbol key access", async () => {
+      const source = `/// <cts-enable />
+      import { NAME, UI, pattern } from "commontools";
+
+      const p = pattern(({ items }) =>
+        items.map((item) => ({ n: item[NAME], u: item[UI] }))
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const computationErrors = errors.filter((error) =>
+        error.type === "pattern-context:computation"
+      );
+
+      assertEquals(computationErrors.length, 0);
+    });
+
+    await t.step("allows SELF destructuring key", async () => {
+      const source = `/// <cts-enable />
+      import { SELF, pattern } from "commontools";
+
+      const p = pattern(({ [SELF]: self, value }) => self);
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const computationErrors = errors.filter((error) =>
+        error.type === "pattern-context:computation"
+      );
+
+      assertEquals(computationErrors.length, 0);
+    });
+
+    await t.step("errors on for..in over pattern input", async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const p = pattern((input) => {
+        for (const key in input) {
+          key;
+        }
+        return input;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const computationErrors = errors.filter((error) =>
+        error.type === "pattern-context:computation"
+      );
+
+      assertGreater(computationErrors.length, 0);
+    });
+
+    await t.step("errors on JSON.stringify over pattern input", async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const p = pattern((input) => JSON.stringify(input));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const computationErrors = errors.filter((error) =>
+        error.type === "pattern-context:computation"
+      );
+
+      assertGreater(computationErrors.length, 0);
+    });
+  },
+);
+
 Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
   await t.step(
     "errors on let declaration in top-level pattern body",
