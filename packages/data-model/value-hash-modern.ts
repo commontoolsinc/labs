@@ -158,17 +158,6 @@ function feedObjectValue(
   hasher: IncrementalHasher,
   value: object,
 ): void {
-  // FabricUint8Array has a dedicated hash encoding (TAG_BYTES) but is a
-  // FabricInstance wrapper, not a native Uint8Array. Handle before the
-  // tagFromNativeValue switch.
-  if (value instanceof FabricUint8Array) {
-    hasher.update(TAG_BYTES_BYTES);
-    const bytes = value.bytes;
-    feedLength(hasher, bytes.length);
-    hasher.update(bytes);
-    return;
-  }
-
   const nativeTag = tagFromNativeValue(value);
 
   switch (nativeTag) {
@@ -212,7 +201,17 @@ function feedObjectValue(
       return;
 
     case NATIVE_TAGS.FabricInstance: {
-      // FabricInstance (generic protocol path via DECONSTRUCT).
+      // FabricUint8Array has a dedicated hash encoding (TAG_BYTES) rather
+      // than the generic FabricInstance DECONSTRUCT path.
+      if (value instanceof FabricUint8Array) {
+        hasher.update(TAG_BYTES_BYTES);
+        const bytes = value.bytes;
+        feedLength(hasher, bytes.length);
+        hasher.update(bytes);
+        return;
+      }
+
+      // Generic FabricInstance (protocol path via DECONSTRUCT).
       hasher.update(TAG_INSTANCE_BYTES);
       const typeTag = (value as { typeTag?: unknown }).typeTag;
       if (typeof typeTag !== "string") {
