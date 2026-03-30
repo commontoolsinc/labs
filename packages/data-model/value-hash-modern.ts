@@ -308,11 +308,23 @@ function feedPlainObject(
 // Uncached hash computation
 // ---------------------------------------------------------------------------
 
-/** Compute the hash of a value without consulting or populating any cache. */
+/**
+ * Computes the hash of a value without consulting or populating any cache.
+ */
 function computeHash(value: unknown): FabricHash {
   const hasher = createHasher();
   feedValue(hasher, value);
   return new FabricHash(hasher.digest(), "fid1");
+}
+
+/**
+ * Like `computeHash()`, except it returns a simple string hash value, encoded
+ * as `base64url`, rather than a hash object.
+ */
+function computeHashAsString(value: unknown): string {
+  const hasher = createHasher();
+  feedValue(hasher, value);
+  return hasher.digest("base64url");
 }
 
 // ---------------------------------------------------------------------------
@@ -350,14 +362,18 @@ const frozenObjectHashCache = new WeakMap<object, FabricHash>();
 // ---------------------------------------------------------------------------
 
 /**
- * Compute the canonical SHA-256 hash of a `FabricValue`. Returns a
- * `FabricHash` with algorithm tag `fid1` (fabric ID, v1).
- * The caller (`hashOf()`) extracts the raw digest via `.hash` for
- * `Reference.fromDigest()`.
- *
- * Caches results for primitives (LRU) and deep-frozen objects (WeakMap).
+ * Common helper for the two exported hash functions, which _might_ return a
+ * plain `string` when passed `stringOkay = true`.
  */
-export function hashOfModern(value: unknown): FabricHash {
+function hashOfModernInternal(value: unknown, stringOkay: false): FabricHash;
+function hashOfModernInternal(
+  value: unknown,
+  stringOkay: true
+): FabricHash | string;
+function hashOfModernInternal(
+  value: unknown,
+  stringOkay: boolean,
+): FabricHash | string {
   switch (typeof value) {
     case "boolean":
       return value ? TRUE_HASH : FALSE_HASH;
@@ -385,10 +401,36 @@ export function hashOfModern(value: unknown): FabricHash {
         frozenObjectHashCache.set(obj, result);
         return result;
       }
-      return computeHash(value);
+      return stringOkay
+        ? computeHashAsString(value)
+        : computeHash(value);
     }
 
-    default:
-      return computeHash(value);
+    default: {
+      throw new Error(`Cannot hash value of type ${typeof value}`);
+    }
   }
 }
+
+/**
+ * Compute the canonical SHA-256 hash of a `FabricValue`. Returns a
+ * `FabricHash` with algorithm tag `fid1` (fabric ID, v1).
+ * The caller (`hashOf()`) extracts the raw digest via `.hash` for
+ * `Reference.fromDigest()`.
+ *
+ * Caches results for primitives (LRU) and deep-frozen objects (WeakMap).
+ */
+export function hashOfModern(value: unknown): FabricHash {
+  return hashOfModernInternal(value, false);
+}
+
+/**
+ * Like `hashOfModern()`, except always returns a plain string of the hash,
+ * encoded as base64url.
+ */
+ export function hashOfModernAsString(value: unknown): string {
+   const result = hashOfModernInternal(value, true);
+   return (typeof result === "string")
+     ? result
+     : result.hashString;
+ }
