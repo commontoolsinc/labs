@@ -2084,6 +2084,25 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   );
 
   await t.step(
+    "errors on top-level .get() on Writable path in pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, Writable } from "commontools";
+
+      export default pattern((input: Writable<{ count: number; label: string }>) =>
+        input.key("count").get()
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:get-call");
+    },
+  );
+
+  await t.step(
     "allows .get() on Cell pattern input",
     async () => {
       const source = `/// <cts-enable />
