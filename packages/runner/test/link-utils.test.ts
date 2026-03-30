@@ -43,9 +43,9 @@ describe("link-utils", () => {
   });
 
   afterEach(async () => {
+    tx.abort();
     await runtime?.dispose();
     await storageManager?.close();
-    await tx.commit();
   });
 
   describe("isSigilValue", () => {
