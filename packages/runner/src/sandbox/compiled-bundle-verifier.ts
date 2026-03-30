@@ -28,6 +28,7 @@ import {
 } from "./policy.ts";
 import {
   createFactoryShadowGuardSource,
+  createFunctionHardeningHelperSource,
   RESERVED_FACTORY_BINDINGS,
 } from "@commontools/utils/sandbox-contract";
 
@@ -44,14 +45,7 @@ interface BindingInfo {
 const logger = getLogger("compiled-bundle-verifier");
 
 const CANONICAL_HARDENING_HELPER = stripJsTrivia(
-  `function __ctHardenFn(fn) {
-    Object.freeze(fn);
-    const prototype = fn.prototype;
-    if (prototype && typeof prototype === "object") {
-      Object.freeze(prototype);
-    }
-    return fn;
-  }`,
+  createFunctionHardeningHelperSource(),
 );
 
 const SIMPLE_IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;

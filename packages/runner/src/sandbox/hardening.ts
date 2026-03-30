@@ -1,3 +1,5 @@
+import { hardenVerifiedFunction } from "./function-hardening.ts";
+
 // Ordinary objects that inherit from these built-in prototypes stop recursive
 // hardening at the prototype boundary. Exposed constructors are still hardened
 // directly, which freezes their own `.prototype` objects before the constructor
@@ -51,6 +53,11 @@ export function freezeSandboxValue<T>(
     !BUILTIN_PROTOTYPE_TERMINALS.has(prototype)
   ) {
     freezeSandboxValue(prototype, seen);
+  }
+
+  if (typeof value === "function") {
+    hardenVerifiedFunction(value as (...args: any[]) => unknown);
+    return value;
   }
 
   Object.freeze(objectValue);

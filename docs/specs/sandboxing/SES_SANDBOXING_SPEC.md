@@ -802,9 +802,11 @@ Ambient Compartment globals for authored modules must stay intentionally narrow:
 - sandboxed `console`
 - `harden`
 - verifier/runtime helper bindings needed to realize canonical wrappers
-- temporary compatibility forwarding for `fetch` and adjacent web request
-  globals (`URL`, `URLSearchParams`, `Headers`, `Request`, `Response`) used by
-  legacy importer/auth code paths
+- temporary compatibility forwarding for the current compatibility-global
+  surface used by legacy importer/auth code paths:
+  `fetch`, `Headers`, `Request`, `Response`, `structuredClone`,
+  `TextDecoder`, `TextEncoder`, `URL`, `URLSearchParams`, `atob`, `btoa`,
+  and an explicit `Proxy = undefined`
 - a frozen compartment `globalThis`, so authored code cannot rebind or extend
   installed global bindings
 
@@ -816,12 +818,20 @@ Ambient globals available to authored module code in v1 MUST NOT include:
 - any host object that performs network, time, randomness, navigation, storage,
   or compilation effects immediately when called
 
-The current implementation still forwards ambient `fetch` plus the adjacent web
-request globals needed to use it as a migration shim. That shim is transitional
-and should be removed once importer/auth flows are fully routed through
-runtime-managed capabilities. While the shim exists, direct `fetch()` may still
-run during authored module assembly or `__ct_data(...)` snapshotting, in
-addition to deferred callback execution.
+When host constructors or functions from that compatibility surface are
+forwarded into a Compartment, the runtime MUST freeze the actual forwarded
+outer-realm value before installation. In particular, forwarded constructor
+objects and their `.prototype` objects must be frozen before authored code can
+observe them. This explicit host-realm hardening is part of the prototype
+pollution defense for forwarded web APIs; it is not provided by SES
+automatically.
+
+The current implementation still forwards ambient `fetch` and its adjacent web
+request globals as a migration shim. That shim is transitional and should be
+removed once importer/auth flows are fully routed through runtime-managed
+capabilities. While the shim exists, direct `fetch()` may still run during
+authored module assembly or `__ct_data(...)` snapshotting, in addition to
+deferred callback execution.
 
 #### 5.3.2 Trusted Runtime Modules via `runtimeDeps`
 
@@ -862,6 +872,14 @@ by trusted runtime modules, but it is only allowed inside verified pattern
 callbacks after the earlier pattern transforms. These imports are not valid
 from within `__ct_data(...)` initializers.
 
+Any shared value installed through `runtimeDeps` MUST be transitively hardened
+before Compartment evaluation begins. The shared export graph exposed by a
+trusted runtime module is reused across authored evaluations, so function
+objects, namespace objects, and reachable shared helper objects must be
+immutable at installation time. Mutable state may only be introduced through
+explicit runtime-managed authorities returned later, not by mutating the shared
+`runtimeDeps` export graph itself.
+
 ### 5.4 Smaller-Compartment String Rehydration
 
 Untrusted authored pattern code normally reaches execution through the compiled
@@ -872,10 +890,8 @@ exist only as function strings when first invoked.
 That path must use SES, but not the full pattern-load authority surface. It
 must execute inside a smaller Compartment with:
 
-- the same compatibility globals as authored module SES compartments:
-  `fetch`, `Headers`, `Request`, `Response`, `structuredClone`,
-  `TextDecoder`, `TextEncoder`, `URL`, `URLSearchParams`, `atob`, `btoa`,
-  and an explicit `Proxy = undefined`
+- the same compatibility globals listed in Section 5.3.1, including the
+  explicit `Proxy = undefined`
 - function-producing source only: the normalized source may be a direct
   function declaration/expression or a function-producing expression such as an
   IIFE, but evaluating it must yield a function before invocation proceeds
@@ -2162,9 +2178,9 @@ await runner.start(resultCell);
 | AMD loader hook abuse | Authored `require` is inert at runtime; verifier rejection is defense in depth |
 | Global pollution | Frozen intrinsics, controlled globals |
 | Internal runtime-global exposure | Only approved globals are installed; implementation hooks like `RUNTIME_ENGINE_CONSOLE_HOOK` stay hidden |
-| Prototype pollution | Frozen prototypes (SES default) |
+| Prototype pollution | SES-frozen intrinsics plus explicit freezing of forwarded host constructor/prototype pairs before installation |
 | Closure-based data leakage | No surviving mutable module bindings; direct-function-only top-level forms plus function hardening |
-| State leakage via modules | Verified immutable top-level bindings; dynamic imports rejected in v1 |
+| State leakage via modules | Verified immutable top-level bindings, hardened shared `runtimeDeps` exports, and dynamic imports rejected in v1 |
 | Resource exhaustion | Future: Add CPU/memory limits (not in this spec) |
 | Ambient network/time/random authority at module load | Narrow Compartment globals; temporary compatibility web-fetch shim only, no `Temporal`, `secureRandom`, or `randomUUID` |
 
@@ -2210,7 +2226,7 @@ Potential escape routes and their status:
 | `Function()` | Allowed inside SES compartments | Same `safe-eval` policy as `eval()` |
 | `import()` | Rejected in v1 | Dynamic imports are deferred and verifier-rejected |
 | authored AMD `require` | Inert | Authored factories receive a throwing stub; trusted tail wiring keeps its own loader state |
-| Prototype access | Blocked | Frozen prototypes |
+| Prototype access | Blocked | SES freezes intrinsics, and the runtime explicitly freezes forwarded host constructors and `.prototype` objects before installation |
 | ambient web-fetch globals | Temporarily allowed | Compatibility shim in authored SES compartments; planned deprecation |
 | `globalThis` | Controlled | Custom minimal Compartment globals; runtime freezes the compartment global object after installing bindings and does not expose internal console-hook globals |
 

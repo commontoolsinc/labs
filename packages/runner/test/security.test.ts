@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { getPatternEnvironment } from "../src/env.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
@@ -463,6 +464,56 @@ describe("SES security regressions", () => {
       probeProgram.files,
     );
     expect(probeResult.main?.default()).toBe(0);
+  });
+
+  it("returns fresh pattern environment snapshots across evaluations", async () => {
+    const expectedApiUrl = getPatternEnvironment().apiUrl.href;
+    const poisonProgram: RuntimeProgram = {
+      main: "/poison-env.ts",
+      files: [
+        {
+          name: "/poison-env.ts",
+          contents: [
+            'import { getPatternEnvironment } from "commontools";',
+            "export default function poison() {",
+            "  const env = getPatternEnvironment();",
+            '  env.apiUrl.href = "https://evil.example/";',
+            "  return env.apiUrl.href;",
+            "}",
+          ].join("\n"),
+        },
+      ],
+    };
+    const probeProgram: RuntimeProgram = {
+      main: "/probe-env.ts",
+      files: [
+        {
+          name: "/probe-env.ts",
+          contents: [
+            'import { getPatternEnvironment } from "commontools";',
+            "export default function probe() {",
+            "  return getPatternEnvironment().apiUrl.href;",
+            "}",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const poisoned = await engine.compile(poisonProgram);
+    const poisonResult = await engine.evaluate(
+      poisoned.id,
+      poisoned.jsScript,
+      poisonProgram.files,
+    );
+    expect(poisonResult.main?.default()).toBe("https://evil.example/");
+
+    const probed = await engine.compile(probeProgram);
+    const probeResult = await engine.evaluate(
+      probed.id,
+      probed.jsScript,
+      probeProgram.files,
+    );
+    expect(probeResult.main?.default()).toBe(expectedApiUrl);
   });
 
   it("shadows wrapper-local loader bindings inside compiled callbacks", async () => {

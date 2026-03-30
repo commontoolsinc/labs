@@ -12,16 +12,24 @@ export interface PatternEnvironment {
   readonly apiUrl: URL;
 }
 
-let globalEnv = {
+function clonePatternEnvironment(env: PatternEnvironment): PatternEnvironment {
+  // Keep this clone explicit so future environment fields are reviewed for
+  // mutability before they are exposed to authored code.
+  return Object.freeze({
+    apiUrl: new URL(env.apiUrl.href),
+  });
+}
+
+let globalEnv = clonePatternEnvironment({
   apiUrl: isDeno()
     ? new URL(`http://localhost:${ports.toolshed}`)
     : new URL(new URL(globalThis.location.href).origin),
-};
+});
 
 // Sets the `PatternEnvironment` for all patterns executed
 // within this JavaScript context.
 export function setPatternEnvironment(env: PatternEnvironment) {
-  globalEnv = env;
+  globalEnv = clonePatternEnvironment(env);
 }
 
 // Gets the `PatternEnvironment` for all patterns executed
@@ -29,5 +37,5 @@ export function setPatternEnvironment(env: PatternEnvironment) {
 //
 // User-visible.
 export function getPatternEnvironment(): PatternEnvironment {
-  return globalEnv;
+  return clonePatternEnvironment(globalEnv);
 }

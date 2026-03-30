@@ -1,11 +1,12 @@
 import ts from "typescript";
+import { FUNCTION_HARDENING_HELPER_NAME } from "@commontools/utils/sandbox-contract";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 
 export class ModuleScopeFunctionHardeningTransformer extends Transformer {
   override transform(context: TransformationContext): ts.SourceFile {
     const { factory, sourceFile } = context;
-    const helperName = factory.createUniqueName("__ctHardenFn");
+    const helperName = factory.createUniqueName(FUNCTION_HARDENING_HELPER_NAME);
     let helperNeeded = false;
 
     const statements = sourceFile.statements.flatMap((statement) =>
@@ -21,7 +22,7 @@ export class ModuleScopeFunctionHardeningTransformer extends Transformer {
       sourceFile,
       helperNeeded
         ? [
-          createFunctionHardeningHelper(factory, helperName.text),
+          createFunctionHardeningHelper(helperName.text),
           ...statements,
         ]
         : statements,
@@ -192,9 +193,9 @@ function wrapWithFunctionHardener(
 }
 
 function createFunctionHardeningHelper(
-  factory: ts.NodeFactory,
   helperName: string,
 ): ts.FunctionDeclaration {
+  const factory = ts.factory;
   return factory.createFunctionDeclaration(
     undefined,
     undefined,
