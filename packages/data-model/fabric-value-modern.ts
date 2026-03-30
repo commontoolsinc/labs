@@ -260,8 +260,7 @@ function isDeepFrozenFabricValue(value: unknown): boolean {
     return true;
   }
 
-  // FabricSpecialObject covers both FabricPrimitive and FabricInstance --
-  // don't recurse into their properties.
+  // FabricSpecialObject -- don't recurse into their properties.
   if (value instanceof FabricSpecialObject) return true;
 
   for (const v of Object.values(value)) {
@@ -476,7 +475,7 @@ export function isFabricValueModern(
       if (value === null) {
         return true;
       }
-      // FabricSpecialObject covers both FabricPrimitive and FabricInstance.
+      // FabricSpecialObject -- already a valid FabricValue.
       if (value instanceof FabricSpecialObject) {
         return true;
       }
@@ -727,7 +726,7 @@ function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
     }
 
     case "object": {
-      // FabricSpecialObject covers both FabricPrimitive and FabricInstance.
+      // FabricSpecialObject -- already a valid FabricValue.
       if (value instanceof FabricSpecialObject) return true;
 
       // FabricNativeObject types would be wrapped by fabricFromNativeValue().

@@ -10,7 +10,7 @@
  */
 
 // ===========================================================================
-// FabricSpecialObject -- common base for FabricInstance and FabricPrimitive
+// FabricSpecialObject
 // ===========================================================================
 
 /**
@@ -154,7 +154,7 @@ export type FabricDatum =
   | number
   | string
   | bigint
-  // -- Fabric special objects (FabricInstance and FabricPrimitive) --
+  // -- Fabric special objects --
   | FabricSpecialObject
   // -- Containers --
   | FabricArray
