@@ -17,7 +17,8 @@ import { fromBase64url, toUnpaddedBase64url } from "./base64url.ts";
  * that repeated `toString()` calls are O(1).
  */
 export class FabricHash extends FabricPrimitive {
-  readonly #stringForm: string;
+  readonly #justHashString: string;
+  readonly #fullStringForm: string;
 
   /**
    * Constructs a `FabricHash` from raw hash bytes and an algorithm tag.
@@ -38,7 +39,8 @@ export class FabricHash extends FabricPrimitive {
     readonly algorithmTag: string,
   ) {
     super();
-    this.#stringForm = `${algorithmTag}:${toUnpaddedBase64url(hash)}`;
+    this.#justHashString = toUnpaddedBase64url(hash);
+    this.#fullStringForm = `${algorithmTag}:${this.#justHashString}`;
     Object.freeze(this);
   }
 
@@ -48,12 +50,17 @@ export class FabricHash extends FabricPrimitive {
    * TODO(danfuzz): Remove after canonical hashing flag graduates.
    */
   get "/"(): Uint8Array {
-    return this.hash;
+    return this.hash; // TODO(@danfuzz): `hash` should not be exposed.
   }
 
   /** Defensive copy of the raw hash bytes. */
   get bytes(): Uint8Array {
     return new Uint8Array(this.hash);
+  }
+
+  /** String form of the hash _without_ an algorithm tag. */
+  get hashString(): string {
+    return this.#justHashString;
   }
 
   /** Copy the hash bytes into `target` starting at offset 0. Returns `target`. */
@@ -64,7 +71,7 @@ export class FabricHash extends FabricPrimitive {
 
   /** Returns `<algorithmTag>:<base64urlHash>` (unpadded base64url). */
   override toString(): string {
-    return this.#stringForm;
+    return this.#fullStringForm;
   }
 
   /**
@@ -72,7 +79,7 @@ export class FabricHash extends FabricPrimitive {
    * Preserves the `{"/": string}` shape used by `Reference.View.toJSON()`.
    */
   toJSON(): { "/": string } {
-    return { "/": this.toString() };
+    return { "/": this.#fullStringForm };
   }
 
   /**
