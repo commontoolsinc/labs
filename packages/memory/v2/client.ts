@@ -343,6 +343,7 @@ export class SpaceSession {
   #background = new Set<Promise<void>>();
   #watchMutation: Promise<void> = Promise.resolve();
   #closed = false;
+  #restoring = false;
 
   constructor(
     private readonly client: Client,
@@ -518,29 +519,34 @@ export class SpaceSession {
     if (this.#closed) {
       return;
     }
-    const restored = await this.reopen();
-    if (this.#closed) {
-      return;
-    }
-    await this.replayOutstandingCommits();
-    if (restored.sync) {
-      if (this.#watchView === null) {
-        this.#watchView = WatchView.fromSync(restored.sync);
-      } else {
-        this.#watchView.applySync(restored.sync, false);
+    this.#restoring = true;
+    try {
+      const restored = await this.reopen();
+      if (this.#closed) {
+        return;
       }
-      if (!isEmptySync(restored.sync)) {
-        this.#watchView.emit(restored.sync);
+      await this.replayOutstandingCommits();
+      if (restored.sync) {
+        if (this.#watchView === null) {
+          this.#watchView = WatchView.fromSync(restored.sync);
+        } else {
+          this.#watchView.applySync(restored.sync, false);
+        }
+        if (!isEmptySync(restored.sync)) {
+          this.#watchView.emit(restored.sync);
+        }
+        this.scheduleAck(restored.serverSeq);
+      } else if (restored.resumed === true && this.#watchSpecs.length > 0) {
+        this.scheduleAck(restored.serverSeq);
       }
-      this.scheduleAck(restored.serverSeq);
-    } else if (restored.resumed === true && this.#watchSpecs.length > 0) {
-      this.scheduleAck(restored.serverSeq);
-    }
-    if (restored.resumed !== true && this.#watchSpecs.length > 0) {
-      const { view, sync } = await this.watchSetSync(this.#watchSpecs);
-      if (!isEmptySync(sync)) {
-        view.emit(sync);
+      if (restored.resumed !== true && this.#watchSpecs.length > 0) {
+        const { view, sync } = await this.watchSetSync(this.#watchSpecs);
+        if (!isEmptySync(sync)) {
+          view.emit(sync);
+        }
       }
+    } finally {
+      this.#restoring = false;
     }
   }
 
@@ -588,7 +594,11 @@ export class SpaceSession {
           await this.flushScheduledAcks();
         } finally {
           this.#ackFlushing = false;
-          if (this.#pendingAckSeq > this.#ackedSeq) {
+          if (
+            this.#pendingAckSeq > this.#ackedSeq &&
+            !this.#closed &&
+            this.client.isConnected()
+          ) {
             this.scheduleAck(this.#pendingAckSeq);
           }
         }
@@ -632,6 +642,7 @@ export class SpaceSession {
   }
 
   private async reopen(): Promise<SessionOpenResult> {
+    const oldSessionId = this.#sessionId;
     const session = {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
@@ -643,6 +654,18 @@ export class SpaceSession {
     }, auth);
     this.#sessionId = restored.sessionId;
     this.noteResult(restored.serverSeq);
+
+    if (restored.sessionId !== oldSessionId) {
+      for (const pending of this.#outstandingCommits.values()) {
+        pending.pending.reject(
+          new Error(
+            `session changed: ${oldSessionId} -> ${restored.sessionId}`,
+          ),
+        );
+      }
+      this.#outstandingCommits.clear();
+    }
+
     return restored;
   }
 
@@ -706,7 +729,8 @@ export class SpaceSession {
       if (
         this.client.isConnected() &&
         this.#outstandingCommits.size > 0 &&
-        this.#flushing === null
+        this.#flushing === null &&
+        !this.#restoring
       ) {
         void this.flushOutstandingCommits();
       }

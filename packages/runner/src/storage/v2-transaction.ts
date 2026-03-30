@@ -1278,9 +1278,25 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
     const promise = replica.commitNative(native!, this);
     this.#state = { status: "pending", promise };
-    const result = await promise;
-    this.#state = { status: "done", result };
-    return result;
+    try {
+      const result = await promise;
+      this.#state = { status: "done", result };
+      return result;
+    } catch (error) {
+      const storeError: StorageTransactionRejected = {
+        name: "StoreError" as const,
+        message: error instanceof Error ? error.message : String(error),
+        cause: {
+          name: "StoreError",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      };
+      const result: Result<Unit, StorageTransactionRejected> = {
+        error: storeError,
+      };
+      this.#state = { status: "done", result };
+      return result;
+    }
   }
 
   private editable(): Result<Unit, InactiveTransactionError> {

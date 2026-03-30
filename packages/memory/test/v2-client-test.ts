@@ -1361,3 +1361,274 @@ Deno.test("memory v2 client returns an applied commit even if it closes right af
     await (closePromise ?? client.close());
   }
 });
+
+class DisconnectableAckTransport implements Transport {
+  ackCount = 0;
+  #watchSeq = 0;
+  #sessionOpenCount = 0;
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+  #connected = true;
+  #blockReconnect = false;
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  blockReconnect(): void {
+    this.#blockReconnect = true;
+  }
+
+  disconnect(): void {
+    this.#connected = false;
+    this.#closeReceiver(new Error("disconnect"));
+  }
+
+  send(payload: string): Promise<void> {
+    const message = JSON.parse(payload) as {
+      type: string;
+      requestId?: string;
+    };
+
+    switch (message.type) {
+      case "hello":
+        if (this.#blockReconnect && !this.#connected) {
+          queueMicrotask(() => this.#closeReceiver(new Error("offline")));
+          return Promise.resolve();
+        }
+        this.#connected = true;
+        this.#respond(HELLO_OK);
+        return Promise.resolve();
+      case "session.open":
+        this.#sessionOpenCount++;
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: `session:ack-disconnect-${this.#sessionOpenCount}`,
+            serverSeq: this.#watchSeq,
+          },
+        });
+        return Promise.resolve();
+      case "session.watch.add":
+        this.#watchSeq += 1;
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: this.#watchSeq,
+            sync: {
+              type: "sync",
+              fromSeq: this.#watchSeq - 1,
+              toSeq: this.#watchSeq,
+              upserts: [],
+              removes: [],
+            },
+          },
+        });
+        return Promise.resolve();
+      case "session.ack":
+        this.ackCount += 1;
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: { serverSeq: this.#watchSeq },
+        });
+        return Promise.resolve();
+      default:
+        throw new Error(`Unhandled message ${message.type}`);
+    }
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  #respond(message: unknown): void {
+    this.#receiver(JSON.stringify(message));
+  }
+}
+
+Deno.test("memory v2 client ack scheduler does not retry while disconnected", async () => {
+  const time = new FakeTime();
+  const transport = new DisconnectableAckTransport();
+  const client = await connect({ transport });
+  const session = await client.mount(
+    "did:key:z6Mk-memory-v2-ack-no-spin",
+  );
+
+  try {
+    // Trigger a watchAdd which will schedule an ack
+    await session.watchAdd([{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:doc:1",
+          selector: { path: [], schema: false },
+        }],
+      },
+    }]);
+
+    // Let the initial ack flush
+    await time.tickAsync(0);
+    await time.runMicrotasks();
+    const acksBeforeDisconnect = transport.ackCount;
+
+    // Disconnect and block reconnection
+    transport.blockReconnect();
+    transport.disconnect();
+
+    // Advance time many times — no new acks should be attempted
+    for (let i = 0; i < 50; i++) {
+      await time.tickAsync(0);
+      await time.runMicrotasks();
+    }
+
+    assertEquals(
+      transport.ackCount,
+      acksBeforeDisconnect,
+      "no ack sends should occur while disconnected",
+    );
+  } finally {
+    const closePromise = client.close();
+    await time.runMicrotasks();
+    await time.tickAsync(30_000);
+    await time.runMicrotasks();
+    await closePromise;
+    time.restore();
+  }
+});
+
+class SessionChangingTransport implements Transport {
+  sessionOpenCount = 0;
+  transactCount = 0;
+  transactSessionIds: string[] = [];
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  disconnect(): void {
+    this.#closeReceiver(new Error("disconnect"));
+  }
+
+  send(payload: string): Promise<void> {
+    const message = JSON.parse(payload) as {
+      type: string;
+      requestId?: string;
+      sessionId?: string;
+      commit?: { localSeq?: number };
+    };
+
+    switch (message.type) {
+      case "hello":
+        this.#receiver(JSON.stringify(HELLO_OK));
+        return Promise.resolve();
+      case "session.open": {
+        this.sessionOpenCount++;
+        // First open: session-A, subsequent: session-B (simulating TTL expiry)
+        const sessionId = this.sessionOpenCount === 1
+          ? "session-A"
+          : "session-B";
+        this.#receiver(JSON.stringify({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId,
+            serverSeq: 0,
+          },
+        }));
+        return Promise.resolve();
+      }
+      case "transact": {
+        this.transactCount++;
+        this.transactSessionIds.push(message.sessionId ?? "");
+        if (this.transactCount === 1) {
+          // First transact: disconnect before responding (commit becomes outstanding)
+          queueMicrotask(() => this.disconnect());
+          return Promise.resolve();
+        }
+        // If we get here, a transact was sent with new session — this is the bug
+        this.#receiver(JSON.stringify({
+          type: "response",
+          requestId: message.requestId!,
+          ok: { seq: this.transactCount },
+        }));
+        return Promise.resolve();
+      }
+      case "session.ack":
+        this.#receiver(JSON.stringify({
+          type: "response",
+          requestId: message.requestId!,
+          ok: { serverSeq: 0 },
+        }));
+        return Promise.resolve();
+      default:
+        throw new Error(`Unhandled message: ${message.type}`);
+    }
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+Deno.test("memory v2 client rejects outstanding commits when session ID changes on reopen", async () => {
+  const transport = new SessionChangingTransport();
+
+  const client = await connect({ transport });
+  const session = await client.mount(
+    "did:key:z6Mk-memory-v2-session-id-change",
+  );
+
+  try {
+    // Send a transact — will be disconnected before response
+    const commitPromise = session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:orphan",
+        value: { value: { data: "test" } },
+      }],
+    });
+
+    // The commit should be rejected because the session ID changed
+    let rejected = false;
+    let resolvedValue: unknown = undefined;
+    try {
+      resolvedValue = await commitPromise;
+    } catch (e) {
+      rejected = true;
+      const err = e as Error;
+      assertEquals(
+        err.message.includes("session changed"),
+        true,
+        `Expected "session changed" but got: ${err.message}`,
+      );
+    }
+    assertEquals(
+      rejected,
+      true,
+      `Expected rejection but got resolved value: ${
+        JSON.stringify(resolvedValue)
+      }, ` +
+        `transactCount=${transport.transactCount}, sessionIds=${
+          JSON.stringify(transport.transactSessionIds)
+        }`,
+    );
+  } finally {
+    await client.close();
+  }
+});
