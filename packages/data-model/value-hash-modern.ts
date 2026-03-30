@@ -237,15 +237,16 @@ function feedObjectValue(
       return;
     }
 
-    // Map, Set, Error, HasToJSON: not yet handled here. Fall through to the
-    // error path below.
+    default: {
+      // Nothing else is handled. As of this writing, specifically missing are
+      // `Map`, `Set`, `Error`, and `HasToJSON`.
+      throw new Error(
+        `hashOfModern: unsupported object type: ${
+          value?.constructor?.name ?? typeof value
+        }`,
+      );
+    }
   }
-
-  throw new Error(
-    `hashOfModern: unsupported object type: ${
-      value?.constructor?.name ?? typeof value
-    }`,
-  );
 }
 
 /**
