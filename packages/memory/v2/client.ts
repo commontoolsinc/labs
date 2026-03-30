@@ -547,6 +547,16 @@ export class SpaceSession {
       }
     } finally {
       this.#restoring = false;
+      // Commits may have been enqueued by transact() while restoring.
+      // The flushOutstandingCommits .finally() guard skips re-flush when
+      // #restoring is true, so we must drain any remaining commits now.
+      if (
+        this.client.isConnected() &&
+        this.#outstandingCommits.size > 0 &&
+        this.#flushing === null
+      ) {
+        void this.flushOutstandingCommits();
+      }
     }
   }
 
