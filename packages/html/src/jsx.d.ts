@@ -3285,6 +3285,7 @@ interface CTOutlinerAttributes<T> extends CTHTMLAttributes<T> {
 interface CTCellLinkAttributes<T> extends CTHTMLAttributes<T> {
   "link"?: string;
   "$cell": CellLike<any>;
+  "spaceName"?: string;
 }
 
 interface CTSpaceLinkAttributes<T> extends CTHTMLAttributes<T> {

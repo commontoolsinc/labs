@@ -49,7 +49,7 @@ export default pattern<Record<string, never>>((_) => {
           <ct-cell-context $cell={item.cell}>
             <ct-vstack gap="2">
               <ct-hstack gap="2" align="center">
-                <ct-cell-link $cell={item.cell} />
+                <ct-cell-link $cell={item.cell} spaceName={item.spaceName} />
                 <ct-button
                   variant="destructive"
                   size="sm"
