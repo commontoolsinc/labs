@@ -538,8 +538,8 @@ export function isFabricValueModern(
  * - `canBeStored(x)` -- "could x be converted to a `FabricValue` via
  *   `fabricFromNativeValue()`?"
  *
- * `canBeStored` additionally accepts `FabricNativeObject` types (Error, Map,
- * Set, Date, Uint8Array, RegExp) and objects/functions with `toJSON()` methods
+ * `canBeStored` additionally accepts `FabricNativeObject` types and
+ * objects/functions with `toJSON()` methods
  * that return fabric values. It checks recursively, so all nested values in
  * arrays and objects must also be fabric-compatible or convertible.
  */
@@ -748,15 +748,13 @@ function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
     }
 
     case "object": {
-      // FabricPrimitive values (FabricEpochNsec, FabricEpochDays,
-      // FabricHash, FabricBytes) are already FabricValue.
+      // FabricPrimitive values are already FabricValue.
       if (value instanceof FabricPrimitive) return true;
 
       // FabricInstance values are already FabricValue.
       if (value instanceof FabricInstance) return true;
 
-      // FabricNativeObject types: Error, Map, Set, Date, Uint8Array.
-      // These would be wrapped by fabricFromNativeValue().
+      // FabricNativeObject types would be wrapped by fabricFromNativeValue().
       if (isConvertibleNativeInstance(value)) {
         return true;
       }
