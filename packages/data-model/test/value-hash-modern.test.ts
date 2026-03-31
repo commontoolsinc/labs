@@ -894,7 +894,7 @@ describe("modernHash", () => {
   it("modernHash returns FabricHash with fid1 tag", () => {
     const result = modernHashRaw(42);
     expect(result).toBeInstanceOf(FabricHash);
-    expect(result.algorithmTag).toBe("fid1");
+    expect(result.tag).toBe("fid1");
     expect(result.length).toBe(32);
   });
 

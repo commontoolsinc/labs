@@ -66,7 +66,7 @@ describe("FabricHash", () => {
     // Returns the same target buffer.
     expect(returned).toBe(target);
     expect(target).toEqual(cid.bytes);
-    expect(cid.algorithmTag).toBe("sha3");
+    expect(cid.tag).toBe("sha3");
   });
 
   it('["/"] getter returns the raw hash bytes (not a copy)', () => {
@@ -76,7 +76,7 @@ describe("FabricHash", () => {
     expect(slash).toEqual(SAMPLE_HASH);
     // Calling twice returns the same reference.
     expect(slash).toBe(cid["/"]);
-    expect(cid.algorithmTag).toBe("test2");
+    expect(cid.tag).toBe("test2");
   });
 
   it(".hashString returns base64url without algorithm tag", () => {
@@ -86,7 +86,7 @@ describe("FabricHash", () => {
     expect(typeof hs).toBe("string");
     expect(hs.includes("fid1")).toBe(false);
     expect(hs.includes(":")).toBe(false);
-    // toString() should be algorithmTag + ":" + hashString.
+    // toString() should be tag + ":" + hashString.
     expect(cid.toString()).toBe(`fid1:${hs}`);
   });
 
@@ -137,7 +137,7 @@ describe("FabricHash flag dispatch", () => {
       const cid = reconstructed as unknown as FabricHash;
       expect(cid.toString()).toBe(original.toString());
       expect(cid.bytes).toEqual(original.bytes);
-      expect(cid.algorithmTag).toBe("sha3");
+      expect(cid.tag).toBe("sha3");
     } finally {
       resetModernHashConfig();
     }

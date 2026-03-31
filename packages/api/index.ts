@@ -99,15 +99,16 @@ export declare const FabricEpochDays: FabricEpochDaysConstructor;
  * system (always frozen, passes through conversion unchanged).
  */
 export interface FabricHash extends FabricPrimitive {
-  readonly hash: Uint8Array;
-  readonly algorithmTag: string;
+  readonly tag: string;
   readonly bytes: Uint8Array;
+  readonly length: number;
+  readonly hashString: string;
   toString(): string;
   toJSON(): { "/": string };
 }
 
 export interface FabricHashConstructor {
-  new (hash: Uint8Array, algorithmTag: string): FabricHash;
+  new (hash: Uint8Array, tag: string): FabricHash;
   prototype: FabricHash;
 }
 

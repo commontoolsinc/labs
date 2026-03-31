@@ -184,7 +184,7 @@ function feedObjectValue(
     case NATIVE_TAGS.ContentHash: {
       const cid = value as FabricHash;
       hasher.update(TAG_CONTENT_HASH_BYTES);
-      const algTagUtf8 = encoder.encode(cid.algorithmTag);
+      const algTagUtf8 = encoder.encode(cid.tag);
       feedLength(hasher, algTagUtf8.length);
       hasher.update(algTagUtf8);
       const cidBytes = cid.bytes;
