@@ -72,7 +72,7 @@ if (nodeCrypto) {
     #hasher = nodeCrypto.createHash("sha256");
     update(data: Uint8Array) {
       this.#hasher.update(data);
-    };
+    }
     digest(): Uint8Array;
     digest(encoding: "base64url"): string;
     digest(encoding?: string): Uint8Array | string {
@@ -111,7 +111,7 @@ if (nodeCrypto) {
     update(data: Uint8Array) {
       // Copy to avoid aliasing shared scratch buffers.
       this.#chunks.push(new Uint8Array(data));
-    };
+    }
     digest(): Uint8Array;
     digest(encoding: "base64url"): string;
     digest(encoding?: string): Uint8Array | string {
@@ -145,7 +145,7 @@ if (nodeCrypto) {
     update(data: Uint8Array) {
       // Copy to avoid aliasing shared scratch buffers.
       this.#chunks.push(new Uint8Array(data));
-    };
+    }
     digest(): Uint8Array;
     digest(encoding: "base64url"): string;
     digest(encoding?: string): Uint8Array | string {

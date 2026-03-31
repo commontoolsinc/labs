@@ -368,7 +368,7 @@ const frozenObjectHashCache = new WeakMap<object, FabricHash>();
 function hashOfModernInternal(value: unknown, stringOkay: false): FabricHash;
 function hashOfModernInternal(
   value: unknown,
-  stringOkay: true
+  stringOkay: true,
 ): FabricHash | string;
 function hashOfModernInternal(
   value: unknown,
@@ -401,9 +401,7 @@ function hashOfModernInternal(
         frozenObjectHashCache.set(obj, result);
         return result;
       }
-      return stringOkay
-        ? computeHashAsString(value)
-        : computeHash(value);
+      return stringOkay ? computeHashAsString(value) : computeHash(value);
     }
 
     default: {
@@ -428,9 +426,7 @@ export function hashOfModern(value: unknown): FabricHash {
  * Like `hashOfModern()`, except always returns a plain string of the hash,
  * encoded as base64url.
  */
- export function hashOfModernAsString(value: unknown): string {
-   const result = hashOfModernInternal(value, true);
-   return (typeof result === "string")
-     ? result
-     : result.hashString;
- }
+export function hashOfModernAsString(value: unknown): string {
+  const result = hashOfModernInternal(value, true);
+  return (typeof result === "string") ? result : result.hashString;
+}
