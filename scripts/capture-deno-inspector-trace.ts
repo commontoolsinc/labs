@@ -113,6 +113,8 @@ const cpuOutputPath = parseArg("cpu-output") ??
 const consoleOutputPath = parseArg("console-output");
 const summaryPattern = parseArg("summary-pattern") ??
   "\\d+ passed, \\d+ failed";
+const profileStartPattern = parseArg("profile-start-pattern");
+const profileStopPattern = parseArg("profile-stop-pattern");
 const targetUrlPattern = parseArg("target-url-pattern");
 const connectTimeoutMs = parseNumberArg("connect-timeout", 30_000);
 const timeoutMs = parseNumberArg("timeout", 120_000);
@@ -141,7 +143,17 @@ const celestial = new Celestial(ws);
 const traceEvents: object[] = [];
 const consoleMessages: string[] = [];
 const summaryRegex = new RegExp(summaryPattern);
+const profileStartRegex = profileStartPattern
+  ? new RegExp(profileStartPattern)
+  : undefined;
+const profileStopRegex = profileStopPattern
+  ? new RegExp(profileStopPattern)
+  : undefined;
 let traceEnded = false;
+let profilerActive = false;
+let sawProfileStart = !profileStartRegex;
+let sawProfileStop = false;
+let stopReason: string | undefined;
 
 const tracingComplete = Promise.withResolvers<{
   dataLossOccurred: boolean;
@@ -163,7 +175,33 @@ celestial.addEventListener("Runtime.consoleAPICalled", (event) => {
     .map((arg) => stringifyRemoteObject(arg as Record<string, unknown>))
     .join(" ");
   consoleMessages.push(text);
+  if (profileStartRegex?.test(text)) {
+    sawProfileStart = true;
+  }
+  if (profileStopRegex?.test(text)) {
+    sawProfileStop = true;
+  }
 });
+
+async function startProfiler() {
+  if (profilerActive || ws.readyState !== WebSocket.OPEN) return;
+  await celestial.Profiler.start();
+  profilerActive = true;
+  console.log("trace: profiler started");
+}
+
+const signalHandlers: Array<[Deno.Signal, () => void]> = [];
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  try {
+    const handler = () => {
+      stopReason ??= `signal-${signal}`;
+    };
+    Deno.addSignalListener(signal, handler);
+    signalHandlers.push([signal, handler]);
+  } catch {
+    // Signals are best-effort here.
+  }
+}
 
 async function stopTrace(reason: string) {
   if (traceEnded) return;
@@ -171,9 +209,10 @@ async function stopTrace(reason: string) {
 
   let profile: unknown = null;
   let stopError: string | undefined;
-  if (ws.readyState === WebSocket.OPEN) {
+  if (profilerActive && ws.readyState === WebSocket.OPEN) {
     try {
       profile = (await celestial.Profiler.stop()).profile;
+      profilerActive = false;
     } catch (error) {
       stopError = `Profiler.stop failed: ${error}`;
     }
@@ -233,8 +272,6 @@ await celestial.Console.enable();
 await celestial.Debugger.enable();
 await celestial.Profiler.enable();
 await celestial.Profiler.setSamplingInterval({ interval: 100 });
-await celestial.Profiler.start();
-console.log("trace: profiler started");
 await celestial.Tracing.start({
   categories,
   transferMode: "ReportEvents",
@@ -246,8 +283,25 @@ await celestial.Runtime.runIfWaitingForDebugger();
 await celestial.Debugger.resume().catch(() => {});
 console.log("trace: resumed target");
 
+if (sawProfileStart) {
+  await startProfiler();
+}
+
 const started = performance.now();
 while (performance.now() - started < timeoutMs) {
+  if (stopReason) {
+    await stopTrace(stopReason);
+    console.log(`trace: ${stopReason}`);
+    break;
+  }
+  if (sawProfileStart && !profilerActive) {
+    await startProfiler();
+  }
+  if (profilerActive && sawProfileStop) {
+    await stopTrace("profile-stop-matched");
+    console.log("trace: profile stop matched");
+    break;
+  }
   if (consoleMessages.some((message) => summaryRegex.test(message))) {
     await stopTrace("summary-matched");
     console.log("trace: summary matched");
@@ -264,6 +318,14 @@ while (performance.now() - started < timeoutMs) {
 if (!traceEnded) {
   await stopTrace("timeout");
   console.log("trace: timeout");
+}
+
+for (const [signal, handler] of signalHandlers) {
+  try {
+    Deno.removeSignalListener(signal, handler);
+  } catch {
+    // Listener may already be gone.
+  }
 }
 
 await celestial.close();
