@@ -9,11 +9,9 @@ import {
   type ExecCommandSpec,
   normalizeCallableInputForExecution,
   type ParsedExecArgs,
-  parseExecArgs,
   renderExecHelp,
   renderExecHelpJson,
-  resolveImplicitPipedHandlerInput,
-  resolveParsedExecInput,
+  resolveExecInvocation,
 } from "./exec-schema.ts";
 import {
   canonicalizeMountLookupPath,
@@ -166,13 +164,12 @@ export async function executeMountedCallableFile(
   deps: ExecDependencies = {},
 ): Promise<ExecutedMountedCallableFile> {
   const resolved = await resolveMountedCallableFile(filePath, deps);
-  const implicitInput = await resolveImplicitPipedHandlerInput(
+  const invocation = await resolveExecInvocation(
     resolved.commandSpec,
     rawArgs,
     deps,
   );
-  const parsed = implicitInput?.parsed ??
-    parseExecArgs(resolved.commandSpec, rawArgs);
+  const parsed = invocation.parsed;
   const invocationStyle = deps.invocationStyle ??
     (Deno.env.get("CT_EXEC_SHEBANG") === "1" ? "direct" : "ct");
 
@@ -188,12 +185,7 @@ export async function executeMountedCallableFile(
     };
   }
 
-  const input = implicitInput?.input ??
-    await resolveParsedExecInput(
-      resolved.commandSpec,
-      parsed,
-      deps,
-    );
+  const input = invocation.input;
   const executed = await executeResolvedCallable(
     {
       callableCell: resolved.callableCell,

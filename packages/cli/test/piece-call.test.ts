@@ -190,6 +190,49 @@ describe("executePieceCallable", () => {
     ]);
   });
 
+  it("passes --json-file payloads through for object handlers without CLI shape enforcement", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "editContent",
+      inputSchema: {
+        type: "object",
+        properties: {
+          detail: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+          },
+        },
+        required: ["detail"],
+      },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "of:piece-123",
+        space: "home",
+      },
+      "editContent",
+      ["--json-file", "/tmp/input.json"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        readTextFile: () => Promise.resolve('["not-an-object"]'),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["editContent"],
+        value: ["not-an-object"],
+      },
+    ]);
+  });
+
   it("infers piped stdin for primitive handlers when no args are provided", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -302,6 +345,48 @@ describe("executePieceCallable", () => {
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => false,
         readTextInput: () => Promise.resolve('["not-an-object"]'),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["editContent"],
+        value: ["not-an-object"],
+      },
+    ]);
+  });
+
+  it("passes inline --json through for object handlers without CLI shape enforcement", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "editContent",
+      inputSchema: {
+        type: "object",
+        properties: {
+          detail: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+          },
+        },
+        required: ["detail"],
+      },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "of:piece-123",
+        space: "home",
+      },
+      "editContent",
+      ["--json", '["not-an-object"]'],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
       },
     );
 

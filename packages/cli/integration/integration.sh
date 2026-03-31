@@ -119,6 +119,26 @@ test_value() {
   fi
 }
 
+read_piece_value_or_default() {
+  local piece_id="$1"
+  local path="$2"
+  local fallback="$3"
+  local actual
+
+  actual=$(ct piece get $SPACE_ARGS --piece "$piece_id" "$path" 2>/dev/null || true)
+  if [ -z "$actual" ]; then
+    printf '%s\n' "$fallback"
+    return 0
+  fi
+
+  if [[ ! "$actual" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$fallback"
+    return 0
+  fi
+
+  printf '%s\n' "$actual"
+}
+
 test_json_value() {
   local test_name="$1"
   local path="$2"
@@ -302,15 +322,16 @@ if [ "$RESULT" != '"piece-flags"' ]; then
   error "Flag-based handler call should update lastMessage, got: $RESULT"
 fi
 
+LEGACY_COUNT_BEFORE=$(read_piece_value_or_default "$CALLABLE_PIECE_ID" "legacyCount" "0")
 ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite
 RESULT=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
-if [ "$RESULT" != "1" ]; then
+if [ "$RESULT" != "$((LEGACY_COUNT_BEFORE + 1))" ]; then
   error "Bare no-arg handler call should increment legacyCount, got: $RESULT"
 fi
 
 ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite -- invoke
 RESULT=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
-if [ "$RESULT" != "2" ]; then
+if [ "$RESULT" != "$((LEGACY_COUNT_BEFORE + 2))" ]; then
   error "Explicit invoke should still call an empty-object handler, got legacyCount=$RESULT"
 fi
 

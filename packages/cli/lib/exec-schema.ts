@@ -33,6 +33,11 @@ export interface ExecInputResolverDeps {
   isStdinTerminal?: () => boolean;
 }
 
+export interface ResolvedExecInvocation {
+  parsed: ParsedExecArgs;
+  input?: unknown;
+}
+
 interface FlagDescriptor {
   key: string;
   flagName: string;
@@ -208,6 +213,7 @@ function parseObjectInput(
   }
 
   const input: Record<string, unknown> = {};
+  let directJsonInput: unknown;
   let usedJson = false;
   let usedGeneratedFlags = false;
   let readJsonFromStdin = false;
@@ -232,15 +238,7 @@ function parseObjectInput(
         readJsonFromStdin = true;
         continue;
       }
-      const parsed = parseJson(inlineValue, "--json");
-      if (
-        typeof parsed !== "object" || parsed === null || Array.isArray(parsed)
-      ) {
-        throw new Error("Invalid JSON for --json: expected object");
-      }
-      // TODO(#3117): validate decoded --json input against the linked schema here so
-      // callers get field-level CLI errors before runner-side validation.
-      Object.assign(input, parsed as Record<string, unknown>);
+      directJsonInput = parseJson(inlineValue, "--json");
       if (consumeNext) {
         i++;
       }
@@ -349,7 +347,7 @@ function parseObjectInput(
   }
 
   return {
-    input,
+    input: usedJson ? directJsonInput : input,
     readJsonFromStdin: false,
     readTextFromStdin: false,
     usedJsonInput: usedJson,
@@ -503,14 +501,7 @@ export async function resolveParsedExecInput(
       return await deps.readJsonInput();
     }
     const text = await (deps.readTextInput ?? defaultReadTextInput)();
-    const value = parseJsonText(text, "stdin for --json");
-    if (
-      objectProperties(spec.inputSchema) &&
-      (typeof value !== "object" || value === null || Array.isArray(value))
-    ) {
-      throw new Error("Invalid JSON from stdin for --json: expected object");
-    }
-    return value;
+    return parseJsonText(text, "stdin for --json");
   }
 
   if (parsed.readTextFromStdin) {
@@ -523,19 +514,10 @@ export async function resolveParsedExecInput(
       parsed.inputFile.path,
     );
     if (parsed.inputFile.format === "json") {
-      const value = parseJsonText(
+      return parseJsonText(
         text,
         `${parsed.inputFile.path} for --json-file`,
       );
-      if (
-        objectProperties(spec.inputSchema) &&
-        (typeof value !== "object" || value === null || Array.isArray(value))
-      ) {
-        throw new Error(
-          `Invalid JSON from ${parsed.inputFile.path} for --json-file: expected object`,
-        );
-      }
-      return value;
     }
     return parseValueForSchema(text, spec.inputSchema, "--value-file");
   }
@@ -543,11 +525,11 @@ export async function resolveParsedExecInput(
   return parsed.input;
 }
 
-export async function resolveImplicitPipedHandlerInput(
+async function resolveImplicitPipedHandlerInput(
   spec: ExecCommandSpec,
   rawArgs: string[],
   deps: ExecInputResolverDeps = {},
-): Promise<{ parsed: ParsedExecArgs; input: unknown } | null> {
+): Promise<ResolvedExecInvocation | null> {
   if (spec.callableKind !== "handler" || rawArgs.length > 0) {
     return null;
   }
@@ -570,7 +552,7 @@ export async function resolveImplicitPipedHandlerInput(
   return {
     parsed: {
       verb: spec.defaultVerb,
-      input: properties ? input ?? {} : input,
+      input,
       showHelp: false,
       showHelpJson: false,
       readJsonFromStdin: false,
@@ -578,6 +560,27 @@ export async function resolveImplicitPipedHandlerInput(
       usedJsonInput: properties !== null,
     },
     input,
+  };
+}
+
+export async function resolveExecInvocation(
+  spec: ExecCommandSpec,
+  rawArgs: string[],
+  deps: ExecInputResolverDeps = {},
+): Promise<ResolvedExecInvocation> {
+  const implicit = await resolveImplicitPipedHandlerInput(spec, rawArgs, deps);
+  if (implicit) {
+    return implicit;
+  }
+
+  const parsed = parseExecArgs(spec, rawArgs);
+  if (parsed.showHelp) {
+    return { parsed };
+  }
+
+  return {
+    parsed,
+    input: await resolveParsedExecInput(spec, parsed, deps),
   };
 }
 
@@ -916,7 +919,8 @@ export function parseExecArgs(
   return {
     verb,
     input:
-      properties && !parsedInput.readJsonFromStdin && !parsedInput.inputFile
+      properties && !parsedInput.readJsonFromStdin && !parsedInput.inputFile &&
+        !parsedInput.usedJsonInput
         ? parsedInput.input ?? {}
         : parsedInput.input,
     showHelp: false,

@@ -226,6 +226,22 @@ describe("parseExecArgs", () => {
     });
   });
 
+  it("preserves inline --json payloads for object schemas without CLI shape enforcement", () => {
+    const result = parseExecArgs(
+      makeSpec("handler", {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      }),
+      ["--json", '["not-an-object"]'],
+    );
+
+    expect(result.usedJsonInput).toBe(true);
+    expect(result.input).toEqual(["not-an-object"]);
+  });
+
   it("treats bare --json as stdin input mode", () => {
     const result = parseExecArgs(
       makeSpec("tool", {
@@ -405,6 +421,43 @@ describe("resolveParsedExecInput", () => {
     expect(input).toEqual({
       detail: { value: "Use `cat` to read files" },
     });
+  });
+
+  it("reads --json stdin payloads for object inputs without CLI shape enforcement", async () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+      },
+      required: ["query"],
+    });
+    const parsed = parseExecArgs(spec, ["--json"]);
+
+    const input = await resolveParsedExecInput(spec, parsed, {
+      readTextInput: () => Promise.resolve('["not-an-object"]'),
+    });
+
+    expect(input).toEqual(["not-an-object"]);
+  });
+
+  it("reads --json-file payloads for object inputs without CLI shape enforcement", async () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+      },
+      required: ["query"],
+    });
+    const parsed = parseExecArgs(spec, ["--json-file", "/tmp/input.json"]);
+
+    const input = await resolveParsedExecInput(spec, parsed, {
+      readTextFile: (path) => {
+        expect(path).toBe("/tmp/input.json");
+        return Promise.resolve('["not-an-object"]');
+      },
+    });
+
+    expect(input).toEqual(["not-an-object"]);
   });
 });
 

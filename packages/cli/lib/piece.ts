@@ -22,11 +22,9 @@ import {
   type ExecCommandSpec,
   normalizeCallableInputForExecution,
   type ParsedExecArgs,
-  parseExecArgs,
   renderExecHelpJson,
   renderPieceCallHelp,
-  resolveImplicitPipedHandlerInput,
-  resolveParsedExecInput,
+  resolveExecInvocation,
 } from "./exec-schema.ts";
 
 export interface EntryConfig {
@@ -447,13 +445,12 @@ export async function executePieceCallable(
   deps: PieceCallableDependencies = {},
 ): Promise<ExecutedPieceCallable> {
   const resolved = await resolvePieceCallable(config, callableName, deps);
-  const implicitInput = await resolveImplicitPipedHandlerInput(
+  const invocation = await resolveExecInvocation(
     resolved.commandSpec,
     rawArgs,
     deps,
   );
-  const parsed = implicitInput?.parsed ??
-    parseExecArgs(resolved.commandSpec, rawArgs);
+  const parsed = invocation.parsed;
 
   if (parsed.showHelp) {
     return {
@@ -468,12 +465,7 @@ export async function executePieceCallable(
     };
   }
 
-  const input = implicitInput?.input ??
-    await resolveParsedExecInput(
-      resolved.commandSpec,
-      parsed,
-      deps,
-    );
+  const input = invocation.input;
   const executed = await executeResolvedCallable(
     resolved,
     parsed.usedJsonInput
