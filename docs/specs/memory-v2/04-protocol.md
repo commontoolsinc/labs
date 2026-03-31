@@ -260,6 +260,9 @@ Path conventions on the wire:
 - `ClientCommit` reads and writes use full document paths.
 - `readValue` / `writeValue` style helpers are client-side conveniences that
   prepend `"value"` before constructing those commit paths.
+- Inline `data:` document reads are local-only. Clients may read them during
+  traversal, but must not serialize them into `ClientCommit.reads` because they
+  have no server sequence and do not participate in conflict validation.
 - query selectors remain value-relative and are re-rooted by the shared
   traversal layer.
 

@@ -1081,16 +1081,18 @@ export class V2StorageTransaction implements IStorageTransaction {
     const readMeta = options?.meta ?? EMPTY_META;
     const { space: _, ...memoryAddress } = address;
 
-    const readActivity = {
-      space: address.space,
-      id: address.id,
-      type: address.type,
-      path: address.path,
-      meta: readMeta,
-      ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
-    };
-    this.#readActivities.push(readActivity);
-    this.invalidateReactivityLog();
+    if (!address.id.startsWith("data:")) {
+      const readActivity = {
+        space: address.space,
+        id: address.id,
+        type: address.type,
+        path: address.path,
+        meta: readMeta,
+        ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
+      };
+      this.#readActivities.push(readActivity);
+      this.invalidateReactivityLog();
+    }
     if (options?.trackReadWithoutLoad === true) {
       if (!address.id.startsWith("data:")) {
         doc.validated = true;

@@ -148,7 +148,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   write(
     address: IMemorySpaceAddress,
-    value: any,
+    value: FabricValue,
   ): Result<IAttestation, WriteError | WriterError> {
     this.assertWritable("write()");
     return this.tx.write(address, value);

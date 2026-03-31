@@ -115,3 +115,49 @@ Deno.test("memory v2 keeps descendant reads when the ancestor is non-recursive",
   await runtime.dispose();
   await storage.close();
 });
+
+Deno.test("memory v2 excludes inline data URI reads from tracked commit dependencies", async () => {
+  const { signer, storage, runtime } = await createRuntime(
+    "memory-v2-read-compaction-inline-data",
+  );
+  const space = signer.did();
+  const dataUri = "data:application/json,%7B%22inline%22%3Atrue%7D" as const;
+
+  const seed = runtime.edit();
+  seed.writeValueOrThrow(
+    { ...DOCUMENT_ADDRESS, space },
+    { live: { nested: "value" } },
+  );
+  assertEquals((await seed.commit()).ok, {});
+
+  const tx = runtime.edit();
+  tx.readValueOrThrow({ ...DOCUMENT_ADDRESS, space, path: ["live"] });
+  tx.readValueOrThrow({
+    ...DOCUMENT_ADDRESS,
+    space,
+    id: dataUri,
+    path: [],
+  });
+
+  const replica = storage.open(space).replica as unknown as {
+    buildReads(source: unknown, localSeq: number): {
+      confirmed: Array<{ id: string; path: string[]; seq: number }>;
+      pending: Array<{ id: string; path: string[]; localSeq: number }>;
+    };
+  };
+  const directReads = [...(tx.tx.getReadActivities?.() ?? [])];
+  const reads = replica.buildReads(tx.tx, 1);
+
+  assertEquals(
+    directReads.map((read) => ({ id: read.id, path: read.path })),
+    [{ id: DOCUMENT_ADDRESS.id, path: ["value", "live"] }],
+  );
+  assertEquals(reads.pending, []);
+  assertEquals(
+    reads.confirmed.map((read) => ({ id: read.id, path: read.path })),
+    [{ id: DOCUMENT_ADDRESS.id, path: ["value", "live"] }],
+  );
+
+  await runtime.dispose();
+  await storage.close();
+});
