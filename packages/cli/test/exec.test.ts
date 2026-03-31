@@ -357,9 +357,9 @@ describe("resolveParsedExecInput", () => {
     const parsed = parseExecArgs(spec, ["--value-file", "/tmp/content.md"]);
 
     const input = await resolveParsedExecInput(spec, parsed, {
-      readTextFile: async (path) => {
+      readTextFile: (path) => {
         expect(path).toBe("/tmp/content.md");
-        return "# Title\n\nLine 2";
+        return Promise.resolve("# Title\n\nLine 2");
       },
     });
 
@@ -382,9 +382,11 @@ describe("resolveParsedExecInput", () => {
     const parsed = parseExecArgs(spec, ["--json-file", "/tmp/input.json"]);
 
     const input = await resolveParsedExecInput(spec, parsed, {
-      readTextFile: async (path) => {
+      readTextFile: (path) => {
         expect(path).toBe("/tmp/input.json");
-        return '{"detail":{"value":"Use `cat` to read files"}}';
+        return Promise.resolve(
+          '{"detail":{"value":"Use `cat` to read files"}}',
+        );
       },
     });
 
