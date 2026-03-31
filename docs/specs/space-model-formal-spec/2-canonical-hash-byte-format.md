@@ -23,11 +23,13 @@ implementation plan Phase 6.1.
 The hash function is **SHA-256** (FIPS 180-4). All byte sequences described in
 this document are fed to a SHA-256 context in the order specified.
 
-The digest output is **32 raw bytes** (256 bits). The `modernHash()` function
+The digest output is **32 raw bytes** (256 bits). The `hashOfModern()` function
 wraps the raw bytes into a `FabricHash` instance (Section 1.4.9 of the
 formal spec) with algorithm tag `fid1`. Callers who need a string
 representation call `toString()` on the result, which produces
 `fid1:<base64urlhash>` (unpadded base64url, RFC 4648 Section 5).
+`hashOfModernAsString()` returns the base64url hash directly as a plain
+string, avoiding `FabricHash` allocation when only the string form is needed.
 
 > **Future addition.** BLAKE2b is listed as a recommended second algorithm in
 > the formal spec. When added, it will use the same byte-level input format
@@ -172,7 +174,7 @@ Bytes: TAG_UNDEFINED
 
 Total: 1 byte. No payload.
 
-### 4.7 `FabricUint8Array` (bytes)
+### 4.7 `FabricBytes`
 
 ```
 Bytes: TAG_BYTES  LENGTH_LEB128  RAW_BYTES
@@ -182,7 +184,7 @@ Bytes: TAG_BYTES  LENGTH_LEB128  RAW_BYTES
 Total: 1 + len(LEB128) + N bytes, where N is the byte array length.
 
 - **Length**: The number of bytes in the array, encoded as unsigned LEB128.
-- **Payload**: The raw bytes of the underlying `Uint8Array`, in order.
+- **Payload**: The raw bytes of the underlying byte sequence, in order.
 
 Empty byte array is encoded as `0x25 0x00` — the tag plus a zero-length prefix
 and no payload bytes.
@@ -197,7 +199,7 @@ Bytes: TAG_EPOCH_NSEC  LENGTH_LEB128  TWO_COMP_BYTES
 Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
 
 `FabricEpochNsec` represents a nanosecond-precision Unix epoch timestamp. It
-is a direct `FabricDatum` member (not a `FabricInstance`) and has a dedicated
+is a direct `FabricValue` member (a `FabricPrimitive`, not a `FabricInstance`) and has a dedicated
 type tag.
 
 - **Length**: The number of bytes in the two's-complement representation of the
@@ -219,7 +221,7 @@ Bytes: TAG_EPOCH_DAYS  LENGTH_LEB128  TWO_COMP_BYTES
 Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
 
 `FabricEpochDays` represents a day-precision Unix epoch timestamp. It is a
-direct `FabricDatum` member (not a `FabricInstance`) and has a dedicated type
+direct `FabricValue` member (a `FabricPrimitive`, not a `FabricInstance`) and has a dedicated type
 tag.
 
 - **Length**: The number of bytes in the two's-complement representation of the
@@ -243,7 +245,7 @@ Total: 1 + len(LEB128) + A + len(LEB128) + H bytes, where A is the byte length
 of the algorithm tag in UTF-8 and H is the number of hash bytes.
 
 `FabricHash` represents a content identifier — a hash with an algorithm
-tag. It is a direct `FabricDatum` member (not a `FabricInstance`) and has a
+tag. It is a direct `FabricValue` member (a `FabricPrimitive`, not a `FabricInstance`) and has a
 dedicated type tag.
 
 - **Algorithm tag length**: The byte length of the algorithm tag string in
@@ -306,10 +308,11 @@ Bytes: TAG_INSTANCE  TYPE_TAG_LEN_LEB128  TYPE_TAG_UTF8  STATE_HASH
 - **Deconstructed state**: The value returned by `[DECONSTRUCT]()`, hashed
   recursively as a complete tagged value.
 
-> **Note on types with dedicated tags.** `FabricUint8Array`,
+> **Note on types with dedicated tags.** `FabricBytes`,
 > `FabricEpochNsec`, `FabricEpochDays`, and `FabricHash` are **not**
 > hashed via `TAG_INSTANCE`. Each has a dedicated type tag and is encoded
-> directly (see Sections 4.7, 4.8, 4.9, and 4.10 respectively).
+> directly (see Sections 4.7, 4.8, 4.9, and 4.10 respectively). These are
+> all `FabricPrimitive` subclasses — they do not implement `[DECONSTRUCT]`.
 
 ### 4.14 Holes (sparse array elements)
 
@@ -609,7 +612,7 @@ rather than producing a hash.
 |:----------------------------------|:----------------|:---------------------------------|
 | String byte length                | unsigned LEB128 | Byte count of UTF-8 payload      |
 | Bigint payload bytes              | unsigned LEB128 | Byte count of two's complement   |
-| Byte array (`FabricUint8Array`) | unsigned LEB128 | Byte count of raw payload        |
+| Byte sequence (`FabricBytes`) | unsigned LEB128 | Byte count of raw payload        |
 | `FabricEpochNsec` payload       | unsigned LEB128 | Byte count of two's complement   |
 | `FabricEpochDays` payload       | unsigned LEB128 | Byte count of two's complement   |
 | `FabricHash` algorithm tag | unsigned LEB128 | Byte count of algorithm tag UTF-8|
