@@ -1128,6 +1128,19 @@ export class CellBridge {
 
     try {
       const fsCell = resultCell.key("$FS");
+      const fsRaw = fsCell.get();
+
+      // Plain-object shorthand: no `type` field → treat entire value as JSON content
+      if (
+        typeof fsRaw === "object" && fsRaw !== null &&
+        !("type" in (fsRaw as Record<string, unknown>))
+      ) {
+        return {
+          type: "application/json",
+          content: fsRaw as Record<string, unknown>,
+        };
+      }
+
       const type = String(fsCell.key("type").get() ?? "text/markdown") as
         | "text/markdown"
         | "application/json";

@@ -61,7 +61,11 @@ export function isSigilLink(v: unknown): boolean {
 
 export { isHandlerCell, isStreamValue } from "./callables.ts";
 
-/** Shape of the value a pattern returns under the [FS] key. */
+/**
+ * Resolved shape of a [FS] projection value, after reading from cells.
+ * Mirrors the FsProjection API type but with the plain-object case
+ * normalized into the explicit application/json form.
+ */
 export interface FsValue {
   type: "text/markdown" | "application/json";
   content: string | Record<string, unknown>;

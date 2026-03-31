@@ -88,6 +88,7 @@ export {
   type Cell as BuilderCell,
   type Frame,
   FS,
+  type FsProjection,
   type HandlerFactory,
   ID,
   ID_FIELD,

@@ -4,6 +4,7 @@ import {
   computed,
   type Default,
   FS,
+  type FsProjection,
   generateText,
   handler,
   NAME,
@@ -35,7 +36,7 @@ export { NotePiece };
 interface NoteOutput extends NotePiece {
   [NAME]: string;
   [UI]: VNode;
-  [FS]: { type: string; content: string; frontmatter: Record<string, string> };
+  [FS]: FsProjection;
   title: string;
   content: string;
   summary: string;

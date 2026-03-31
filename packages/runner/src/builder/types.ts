@@ -92,6 +92,7 @@ export type {
   Cell,
   CellKind,
   CellTypeConstructor,
+  FsProjection,
   Handler,
   HandlerFactory,
   HKT,
