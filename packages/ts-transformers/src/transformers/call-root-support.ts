@@ -20,7 +20,7 @@ export type CallRootPolicyDecision =
   | { kind: "unsupported"; unsupportedKind: UnsupportedCallRootKind }
   | { kind: "none" };
 
-type ExpressionSiteHelperBoundaryKind =
+export type ExpressionSiteHelperBoundaryKind =
   | "ifElse"
   | "when"
   | "unless"
@@ -28,7 +28,7 @@ type ExpressionSiteHelperBoundaryKind =
   | "derive"
   | "pattern-tool";
 
-type ExpressionSiteCallRootKind =
+export type ExpressionSiteCallRootKind =
   | "conditional-helper"
   | "ordinary-call"
   | "receiver-method"

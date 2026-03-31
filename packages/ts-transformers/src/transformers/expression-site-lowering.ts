@@ -43,11 +43,21 @@ function isDirectDeriveCall(
   return detectCallKind(expression, context.checker)?.kind === "derive";
 }
 
-function isDirectDeriveCallInArrayMethodCallback(
+function isSyntheticHelperWrapperInArrayMethodCallback(
   expression: ts.Expression,
   context: TransformationContext,
 ): boolean {
-  if (!isDirectDeriveCall(expression, context)) {
+  if (!ts.isCallExpression(expression) || expression.pos >= 0) {
+    return false;
+  }
+
+  const callKind = detectCallKind(expression, context.checker)?.kind;
+  if (
+    callKind !== "derive" &&
+    callKind !== "ifElse" &&
+    callKind !== "when" &&
+    callKind !== "unless"
+  ) {
     return false;
   }
 
@@ -313,7 +323,11 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
           return visitEachChildWithJsx(node, visit, context.tsContext);
         }
 
-        if (isDirectDeriveCallInArrayMethodCallback(node, context)) {
+        // Array-method callback lowering may already have produced a synthetic
+        // helper wrapper (derive/ifElse/when/unless) for this subtree. When
+        // that happens, the later pattern-owned pass should not re-enter the
+        // wrapper root and compete for ownership again.
+        if (isSyntheticHelperWrapperInArrayMethodCallback(node, context)) {
           return node;
         }
 

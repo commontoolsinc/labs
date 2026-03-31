@@ -21,6 +21,8 @@ import {
 import {
   type CallRootPolicyDecision,
   classifyCallRootPolicy,
+  type ExpressionSiteCallRootKind,
+  type ExpressionSiteHelperBoundaryKind,
   type SupportedCallRootKind,
   type UnsupportedCallRootKind,
 } from "./call-root-support.ts";
@@ -31,21 +33,6 @@ import {
 import type { AnalyzeFn } from "./expression-rewrite/types.ts";
 import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
 import type { ExpressionContainerKind } from "./expression-site-types.ts";
-
-type ExpressionSiteHelperBoundaryKind =
-  | "ifElse"
-  | "when"
-  | "unless"
-  | "builder"
-  | "derive"
-  | "pattern-tool";
-
-type ExpressionSiteCallRootKind =
-  | "conditional-helper"
-  | "ordinary-call"
-  | "receiver-method"
-  | "optional-call"
-  | "other";
 
 interface ExpressionSiteCallRootPolicyInfo {
   readonly reactiveContext: ReturnType<typeof classifyReactiveContext>;
