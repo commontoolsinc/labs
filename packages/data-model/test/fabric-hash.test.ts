@@ -15,6 +15,10 @@ import {
 const SAMPLE_HASH = new Uint8Array(32);
 for (let i = 0; i < 32; i++) SAMPLE_HASH[i] = i;
 
+/** A fixed 17-byte hash for deterministic tests. */
+const SAMPLE_HASH_17 = new Uint8Array(17);
+for (let i = 0; i < 17; i++) SAMPLE_HASH[i] = ((i * 17) + 177) & 0xff;
+
 // -----------------------------------------------------------------
 // FabricHash extensions
 // -----------------------------------------------------------------
@@ -44,6 +48,15 @@ describe("FabricHash", () => {
     // Mutating the copy must not affect the original.
     bytes[0] = 0xff;
     expect(cid.hash[0]).toBe(0);
+  });
+
+  it(".length returns the byte length of .bytes", () => {
+    const cid1 = new FabricHash(SAMPLE_HASH, "fid1");
+    expect(cid1.length).toEqual(cid1.bytes.length);
+
+    const cid2 = new FabricHash(SAMPLE_HASH_17, "fake17");
+    expect(cid2.length).toEqual(17);
+    expect(cid2.length).toEqual(cid2.bytes.length);
   });
 
   it("copyInto copies hash bytes into target buffer", () => {
