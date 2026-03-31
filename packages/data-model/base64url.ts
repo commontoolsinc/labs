@@ -7,7 +7,7 @@
  * 2024-04, most current browser releases support it directly, but it's not
  * universal.
  */
-const useBase64Polyfill = !!Uint8Array.fromBase64;
+const useBase64Polyfill = !Uint8Array.fromBase64;
 
 /**
  * Encodes a `Uint8Array` to an unpadded base64url string (no trailing `=`).

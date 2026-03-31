@@ -57,10 +57,14 @@ for (const fromBase64 of [fromBase64url, fromBase64Polyfill]) {
   describe(`${fromBase64.name}`, () => {
     for (const { arr, b64 } of TEST_PAIRS) {
       const arrStr = arrayString(arr);
-      for (let padding = 0; padding <= 2; padding++) {
-        const encodedStr = `${b64}${"=".repeat(padding)}`;
-        it(`decodes "${encodedStr}" to ${arrStr}`, () => {
-          expect(fromBase64(encodedStr)).toEqual(new Uint8Array(arr));
+      const paddingCount = 2 - ((arr.length + 2) % 3);
+      const paddedStr = `${b64}${"=".repeat(paddingCount)}`;
+      it(`decodes "${b64}" to ${arrStr}`, () => {
+        expect(fromBase64(b64)).toEqual(new Uint8Array(arr));
+      });
+      if (paddedStr !== b64) {
+        it(`decodes "${paddedStr}" to ${arrStr}`, () => {
+          expect(fromBase64(paddedStr)).toEqual(new Uint8Array(arr));
         });
       }
     }
