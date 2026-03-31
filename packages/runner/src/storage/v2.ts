@@ -170,6 +170,30 @@ const isArrayIndex = (segment: string): boolean =>
 const createContainer = (nextSegment: string): StorableDatum =>
   isArrayIndex(nextSegment) ? [] : {};
 
+const isPlainRecord = (
+  value: unknown,
+): value is Record<string, unknown> => {
+  if (!isObject(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+const clonePendingDatum = <T>(value: T): T => {
+  if (Array.isArray(value)) {
+    return value.map((entry) => clonePendingDatum(entry)) as T;
+  }
+  if (isPlainRecord(value)) {
+    const clone: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      clone[key] = clonePendingDatum(entry);
+    }
+    return clone as T;
+  }
+  return value;
+};
+
 const hasDocumentPath = (
   root: StorableDatum | undefined,
   path: readonly string[],
@@ -224,10 +248,10 @@ const setDocumentPath = (
   if (path.length === 0) {
     return value === undefined
       ? undefined
-      : structuredClone(value) as EntityDocument;
+      : clonePendingDatum(value) as EntityDocument;
   }
 
-  const nextRoot = structuredClone(root ?? {}) as Record<string, unknown>;
+  const nextRoot = clonePendingDatum(root ?? {}) as Record<string, unknown>;
   let current: Record<string, unknown> | unknown[] = nextRoot;
   for (let index = 0; index < path.length - 1; index += 1) {
     const segment = path[index]!;
@@ -251,9 +275,9 @@ const setDocumentPath = (
 
   const last = path[path.length - 1]!;
   if (Array.isArray(current)) {
-    current[Number(last)] = structuredClone(value);
+    current[Number(last)] = clonePendingDatum(value);
   } else {
-    current[last] = structuredClone(value);
+    current[last] = clonePendingDatum(value);
   }
   return nextRoot as EntityDocument;
 };
@@ -269,7 +293,7 @@ const removeDocumentPath = (
     return undefined;
   }
 
-  const nextRoot = structuredClone(root) as Record<string, unknown>;
+  const nextRoot = clonePendingDatum(root) as Record<string, unknown>;
   let current: Record<string, unknown> | unknown[] = nextRoot;
   for (let index = 0; index < path.length - 1; index += 1) {
     const segment = path[index]!;
@@ -335,7 +359,7 @@ const applyPendingVersion = (
     case "delete":
       return undefined;
     case "set":
-      return structuredClone(pending.value);
+      return clonePendingDatum(pending.value);
     case "patch": {
       let next = base;
       for (

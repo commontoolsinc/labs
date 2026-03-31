@@ -1605,6 +1605,37 @@ Deno.test("memory v2 stacked commits: pending-read compaction keeps localSeq bou
   }
 });
 
+Deno.test("memory v2 stacked commits: pending visibility preserves runtime-only values", async () => {
+  const harness = await createHarness();
+  try {
+    const selector = ({
+      query,
+      emails,
+    }: {
+      query?: string;
+      emails?: unknown[];
+    }) => {
+      if (!query || !emails) {
+        return [];
+      }
+      return emails.filter(Boolean);
+    };
+
+    const c1 = beginSet(harness, DOCS.A, valueFor("pending", { selector }));
+    harness.model.setOutcome(c1.localSeq, { kind: "dropThenReplayAccept" });
+
+    const pendingVisible = harness.provider.get(DOCS.A);
+    assertExists(pendingVisible);
+    const pendingValue = pendingVisible.value as Record<string, unknown>;
+    assertEquals(pendingValue.label, "pending");
+    assertEquals(pendingValue.selector, selector);
+
+    await assertResultOk(c1.promise);
+  } finally {
+    await harness.close();
+  }
+});
+
 Deno.test("memory v2 stacked commits: C1->C2->C3 where C2 fails and C3 error is pending-dependency, not stale-read", async () => {
   const harness = await createHarness();
   try {
