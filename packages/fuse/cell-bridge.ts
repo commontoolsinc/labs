@@ -1087,6 +1087,31 @@ export class CellBridge {
   }
 
   /**
+   * Build a subtree callback for `buildFsProjection`.
+   * Complex frontmatter fields (arrays of entities, nested objects) are
+   * rendered as sibling directories using the standard `buildJsonTree` path.
+   */
+  private makeFsSubtreeBuilder(
+    resolveLink: (v: unknown, depth: number) => string | null,
+    skipEntry: (v: unknown) => boolean,
+    classifyEntry: (k: string, v: unknown) => CallableKind | null,
+  ): (parentIno: bigint, name: string, value: unknown) => void {
+    return (parentIno, name, value) => {
+      buildJsonTree(
+        this.tree,
+        parentIno,
+        name,
+        value,
+        undefined,
+        resolveLink,
+        0,
+        skipEntry,
+        classifyEntry,
+      );
+    };
+  }
+
+  /**
    * Read [FS] projection values from a result cell.
    * Returns null if the result does not declare [FS].
    */
@@ -1112,10 +1137,10 @@ export class CellBridge {
         const contentStr = String(content ?? "");
         const fmCell = fsCell.key("frontmatter");
         const fmRaw = fmCell.get();
-        const frontmatter: Record<string, string> = {};
+        const frontmatter: Record<string, unknown> = {};
         if (fmRaw && typeof fmRaw === "object" && !Array.isArray(fmRaw)) {
           for (const key of Object.keys(fmRaw as Record<string, unknown>)) {
-            frontmatter[key] = String(fmCell.key(key).get() ?? "");
+            frontmatter[key] = fmCell.key(key).get() ?? null;
           }
         }
         return { type, content: contentStr, frontmatter };
@@ -1203,6 +1228,11 @@ export class CellBridge {
                       pieceIno,
                       fsValue,
                       piece.id,
+                      this.makeFsSubtreeBuilder(
+                        resolveLink,
+                        skipEntry,
+                        classifyEntry,
+                      ),
                     );
                     this.buildHandlersFile(pieceIno, callables);
                     if (this.onInvalidate) {
@@ -1503,7 +1533,13 @@ export class CellBridge {
         if (fsValue !== null) {
           // [FS] projection: index.md or index.json at piece root,
           // callable files also at piece root (no result/ dir)
-          buildFsProjection(this.tree, pieceIno, fsValue, piece.id);
+          buildFsProjection(
+            this.tree,
+            pieceIno,
+            fsValue,
+            piece.id,
+            this.makeFsSubtreeBuilder(resolveLink, skipEntry, classifyEntry),
+          );
           this.addCallableFiles(pieceIno, callables, "result");
         } else {
           // Default: exploded result/ directory

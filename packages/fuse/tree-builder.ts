@@ -68,10 +68,18 @@ export interface FsValue {
   frontmatter?: Record<string, unknown>;
 }
 
+function isFrontmatterPrimitive(val: unknown): boolean {
+  return val === null || val === undefined || typeof val === "string" ||
+    typeof val === "number" || typeof val === "boolean";
+}
+
 /**
  * Build a single-file filesystem projection from a [FS] value.
  *
  * - text/markdown  → index.md  (YAML frontmatter + body)
+ *   Primitive frontmatter fields go into YAML.
+ *   Complex fields (objects, arrays of entities) become subdirectories
+ *   alongside index.md via `buildSubtree`.
  * - application/json → index.json (flat JSON object)
  *
  * `entityId` is always injected first (read-only field).
@@ -82,6 +90,7 @@ export function buildFsProjection(
   parentIno: bigint,
   fsValue: FsValue,
   entityId: string,
+  buildSubtree?: (parentIno: bigint, name: string, value: unknown) => void,
 ): bigint {
   if (fsValue.type === "text/markdown") {
     const fmLines: string[] = [`entityId: ${entityId}`];
@@ -89,7 +98,13 @@ export function buildFsProjection(
       for (const [key, val] of Object.entries(fsValue.frontmatter)) {
         // Skip entityId if pattern accidentally includes it
         if (key === "entityId") continue;
-        fmLines.push(`${key}: ${String(val ?? "")}`);
+        if (isFrontmatterPrimitive(val)) {
+          fmLines.push(`${key}: ${String(val ?? "")}`);
+        } else if (buildSubtree) {
+          // Arrays of entities or nested objects can't be expressed in YAML
+          // frontmatter — render as a sibling directory instead.
+          buildSubtree(parentIno, key, val);
+        }
       }
     }
     const body = String(fsValue.content ?? "");
