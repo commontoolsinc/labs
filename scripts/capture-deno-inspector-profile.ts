@@ -1,5 +1,10 @@
 import { Celestial } from "../packages/vendor-astral/bindings/celestial.ts";
 import { dirname } from "@std/path";
+import {
+  markProfilerStarted,
+  type ProfileCaptureState,
+  recordConsoleProfileMessage,
+} from "./capture-deno-inspector-profile-lib.ts";
 
 type InspectorTarget = {
   description?: string;
@@ -130,7 +135,6 @@ await waitForWebSocketOpen(ws);
 console.log("profile: websocket open");
 
 const celestial = new Celestial(ws);
-const consoleMessages: string[] = [];
 const summaryRegex = new RegExp(summaryPattern);
 const profileStartRegex = profileStartPattern
   ? new RegExp(profileStartPattern)
@@ -139,28 +143,30 @@ const profileStopRegex = profileStopPattern
   ? new RegExp(profileStopPattern)
   : undefined;
 let profileEnded = false;
-let profilerActive = false;
-let sawProfileStart = !profileStartRegex;
-let sawProfileStop = false;
 let stopReason: string | undefined;
+const state: ProfileCaptureState = {
+  consoleMessages: [],
+  profilerActive: false,
+  sawProfileStart: !profileStartRegex,
+  sawProfileStop: false,
+};
 
 celestial.addEventListener("Runtime.consoleAPICalled", (event) => {
   const text = event.detail.args
     .map((arg) => stringifyRemoteObject(arg as Record<string, unknown>))
     .join(" ");
-  consoleMessages.push(text);
-  if (profileStartRegex?.test(text)) {
-    sawProfileStart = true;
-  }
-  if (profileStopRegex?.test(text)) {
-    sawProfileStop = true;
-  }
+  recordConsoleProfileMessage(
+    state,
+    text,
+    profileStartRegex,
+    profileStopRegex,
+  );
 });
 
 async function startProfiler() {
-  if (profilerActive || ws.readyState !== WebSocket.OPEN) return;
+  if (state.profilerActive || ws.readyState !== WebSocket.OPEN) return;
   await celestial.Profiler.start();
-  profilerActive = true;
+  markProfilerStarted(state);
   console.log("profile: profiler started");
 }
 
@@ -187,10 +193,10 @@ async function stopProfile(reason: string) {
   const errorOutputPath = outputPath.endsWith(".cpuprofile")
     ? outputPath.replace(/\.cpuprofile$/i, ".error.txt")
     : `${outputPath}.error.txt`;
-  if (profilerActive && ws.readyState === WebSocket.OPEN) {
+  if (state.profilerActive && ws.readyState === WebSocket.OPEN) {
     try {
       profile = (await celestial.Profiler.stop()).profile;
-      profilerActive = false;
+      state.profilerActive = false;
     } catch (error) {
       stopError = `Profiler.stop failed: ${error}`;
     }
@@ -204,7 +210,10 @@ async function stopProfile(reason: string) {
   }
 
   if (consoleOutputPath) {
-    await Deno.writeTextFile(consoleOutputPath, consoleMessages.join("\n"));
+    await Deno.writeTextFile(
+      consoleOutputPath,
+      state.consoleMessages.join("\n"),
+    );
   }
 }
 
@@ -219,7 +228,7 @@ await celestial.Runtime.runIfWaitingForDebugger();
 await celestial.Debugger.resume().catch(() => {});
 console.log("profile: resumed target");
 
-if (sawProfileStart) {
+if (state.sawProfileStart) {
   await startProfiler();
 }
 
@@ -230,15 +239,15 @@ while (performance.now() - started < timeoutMs) {
     console.log(`profile: ${stopReason}`);
     break;
   }
-  if (sawProfileStart && !profilerActive) {
+  if (state.sawProfileStart && !state.profilerActive) {
     await startProfiler();
   }
-  if (profilerActive && sawProfileStop) {
+  if (state.profilerActive && state.sawProfileStop) {
     await stopProfile("profile-stop-matched");
     console.log("profile: profile stop matched");
     break;
   }
-  if (consoleMessages.some((message) => summaryRegex.test(message))) {
+  if (state.consoleMessages.some((message) => summaryRegex.test(message))) {
     await stopProfile("summary-matched");
     console.log("profile: summary matched");
     break;
@@ -271,7 +280,7 @@ console.log(
     {
       reason: stopReason,
       outputPath,
-      consoleMessages: consoleMessages.length,
+      consoleMessages: state.consoleMessages.length,
     },
     null,
     2,

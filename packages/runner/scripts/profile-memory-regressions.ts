@@ -3,6 +3,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { createBenchPhaseMetricsTracker } from "./profile-memory-regressions-lib.ts";
 
 type MemoryVersion = "v1" | "v2";
 type Scenario =
@@ -21,6 +22,7 @@ type PreparedScenario = {
   run(iterations: number): unknown | Promise<unknown>;
   cleanup(): Promise<void>;
   metrics?(): Record<string, unknown>;
+  resetMetrics?(): void;
 };
 
 function parseArg(name: string): string | undefined {
@@ -247,14 +249,8 @@ function prepareBenchBody(
     | "cell-set-single-tx"
     | "cell-set-nested",
 ): PreparedScenario {
-  const phaseTotals = {
-    setupMs: 0,
-    prepareMs: 0,
-    firstCommitMs: 0,
-    loopMs: 0,
-    cleanupCommitMs: 0,
-    disposeMs: 0,
-  };
+  const phaseMetrics = createBenchPhaseMetricsTracker();
+  const { phaseTotals } = phaseMetrics;
   return {
     async run(loopIterations: number) {
       let checksum = 0;
@@ -396,22 +392,18 @@ function prepareBenchBody(
           await storageManager.close();
           throw error;
         }
+        phaseMetrics.recordRun();
       }
       return checksum;
+    },
+    resetMetrics() {
+      phaseMetrics.reset();
     },
     async cleanup() {
       // No shared state; each loop iteration handles its own runtime cleanup.
     },
     metrics() {
-      return {
-        phaseTotalsMs: phaseTotals,
-        phaseAvgMs: Object.fromEntries(
-          Object.entries(phaseTotals).map(([name, total]) => [
-            name,
-            total / Math.max(iterations, 1),
-          ]),
-        ),
-      };
+      return phaseMetrics.metrics();
     },
   };
 }
@@ -445,6 +437,7 @@ const prepared = await prepareScenario(scenario);
 try {
   if (warmup > 0) {
     await prepared.run(warmup);
+    prepared.resetMetrics?.();
   }
 
   const started = performance.now();
