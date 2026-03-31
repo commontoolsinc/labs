@@ -51,13 +51,16 @@ export default pattern<ContactBookInput, ContactBookOutput>(
 
     const summary = computed(() => {
       return contacts.get()
+        .filter((c): c is Contact => c != null)
         .map((c) => c.name || "(unnamed)")
         .join(", ");
     });
 
     const contactSelectItems = computed(
       () =>
-        contacts.map((c) => ({ label: c.name || "(unnamed)", value: c.name })),
+        contacts.get()
+          .filter((c): c is Contact => c != null)
+          .map((c) => ({ label: c.name || "(unnamed)", value: c.name })),
     );
 
     const onAddContact = action(() => {
