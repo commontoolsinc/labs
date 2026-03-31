@@ -107,6 +107,18 @@ describe("frozen-builtins", () => {
       const fm = new FrozenMap(null);
       expect(fm.size).toBe(0);
     });
+
+    it("builder rejects writes after finish()", () => {
+      const builder = FrozenMap.createBuilder<string, number>();
+      builder.set("a", 1);
+
+      const fm = builder.finish();
+
+      expect(() => builder.set("b", 2)).toThrow(
+        "Cannot mutate a finalized FrozenMap builder",
+      );
+      expect([...fm.entries()]).toEqual([["a", 1]]);
+    });
   });
 
   // --------------------------------------------------------------------------
@@ -169,6 +181,18 @@ describe("frozen-builtins", () => {
     it("supports null values argument", () => {
       const fs = new FrozenSet(null);
       expect(fs.size).toBe(0);
+    });
+
+    it("builder rejects writes after finish()", () => {
+      const builder = FrozenSet.createBuilder<number>();
+      builder.add(1);
+
+      const fs = builder.finish();
+
+      expect(() => builder.add(2)).toThrow(
+        "Cannot mutate a finalized FrozenSet builder",
+      );
+      expect([...fs.values()]).toEqual([1]);
     });
   });
 });

@@ -31,6 +31,10 @@ function throwFrozenMutation(typeName: string): never {
   throw new TypeError(`Cannot mutate a ${typeName}`);
 }
 
+function throwFinalizedBuilderMutation(typeName: string): never {
+  throw new TypeError(`Cannot mutate a finalized ${typeName} builder`);
+}
+
 function getMapBacking<K, V>(value: object): MapBacking<K, V> {
   const backing = MAP_BACKING.get(value);
   if (!backing) {
@@ -74,12 +78,22 @@ export class FrozenMap<K, V> implements Map<K, V> {
 
   static createBuilder<K, V>(): MapBuilder<K, V> {
     const wrapper = new FrozenMap<K, V>(undefined, INTERNAL_MAP_BUILDER);
+    let finalized = false;
+
+    const assertOpen = (): void => {
+      if (finalized) {
+        throwFinalizedBuilderMutation("FrozenMap");
+      }
+    };
+
     return {
       wrapper,
       set(key: K, value: V): void {
+        assertOpen();
         getMapBacking<K, V>(wrapper).set(key, value);
       },
       finish(): FrozenMap<K, V> {
+        finalized = true;
         Object.freeze(wrapper);
         return wrapper;
       },
@@ -161,12 +175,22 @@ export class FrozenSet<T> implements Set<T> {
 
   static createBuilder<T>(): SetBuilder<T> {
     const wrapper = new FrozenSet<T>(undefined, INTERNAL_SET_BUILDER);
+    let finalized = false;
+
+    const assertOpen = (): void => {
+      if (finalized) {
+        throwFinalizedBuilderMutation("FrozenSet");
+      }
+    };
+
     return {
       wrapper,
       add(value: T): void {
+        assertOpen();
         getSetBacking<T>(wrapper).add(value);
       },
       finish(): FrozenSet<T> {
+        finalized = true;
         Object.freeze(wrapper);
         return wrapper;
       },
