@@ -5,6 +5,66 @@ Prefix the URLs with
 
 ---
 
+## `annotation.tsx`
+
+A first-class annotation pattern that points at existing cells/pieces, forms
+blocker dependency graphs between annotations, and is discoverable by agents via
+`wish({ query: "#annotation" })`. Annotations automatically create backlinks on
+their target pieces via the `mentioned` array.
+
+**Keywords:** annotation, note, todo, wish, comment, blocker, backlink, agent,
+marker, dependency-graph
+
+### Input Schema
+
+```ts
+type AnnotationKind = "note" | "todo" | "wish";
+type AnnotationStatus = "open" | "in-progress" | "resolved" | "dismissed";
+
+interface AnnotationInput {
+  content: Writable<Default<string, "">>;
+  kind: Writable<Default<AnnotationKind, "note">>;
+  status: Writable<Default<AnnotationStatus, "open">>;
+  targetPiece: Writable<Default<MentionablePiece | null, null>>;
+  blockedBy: Writable<Default<AnnotationPiece[], []>>;
+  isAnnotation: Default<boolean, true>;
+  isHidden: Default<boolean, false>;
+}
+```
+
+### Output Schema
+
+```ts
+interface AnnotationOutput {
+  [NAME]: string; // emoji-prefixed truncated content
+  [UI]: VNode;
+  mentioned: MentionablePiece[]; // [targetPiece] — feeds the backlinks system
+  content: string;
+  kind: AnnotationKind;
+  status: AnnotationStatus;
+  targetPiece: MentionablePiece | null;
+  blockedBy: AnnotationPiece[];
+  isAnnotation: boolean; // always true — enables wish("#annotation")
+}
+```
+
+### Agent usage
+
+```ts
+// Find all annotations in the space
+const annotations = wish<AnnotationPiece[]>({ query: "#annotation" }).result;
+
+// Create an annotation pointing at a specific piece
+const ann = Annotation({
+  content: "This note needs a summary",
+  kind: "wish",
+  targetPiece: somePiece,
+});
+addPiece.send({ piece: ann });
+```
+
+---
+
 ## `counter/counter.tsx`
 
 A simple counter demo.
