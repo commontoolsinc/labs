@@ -1214,6 +1214,47 @@ describe("mounted callable resolution and execution", () => {
     ]);
   });
 
+  it("passes implicit piped JSON through for mounted object handlers without CLI shape enforcement", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/add.handler",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await executeMountedCallableFile(
+      filePath,
+      [],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => false,
+        readTextInput: () => Promise.resolve('["not-an-object"]'),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["add"],
+        value: ["not-an-object"],
+      },
+    ]);
+  });
+
   it("passes stdin --json through unchanged for mounted tools", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {

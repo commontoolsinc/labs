@@ -567,13 +567,6 @@ export async function resolveImplicitPipedHandlerInput(
     ? parseJsonText(text, "stdin")
     : parseValueForSchema(text, spec.inputSchema, "--value-file");
 
-  if (
-    properties &&
-    (typeof input !== "object" || input === null || Array.isArray(input))
-  ) {
-    throw new Error("Invalid JSON from stdin: expected object");
-  }
-
   return {
     parsed: {
       verb: spec.defaultVerb,

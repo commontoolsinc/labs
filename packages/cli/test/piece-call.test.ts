@@ -270,6 +270,50 @@ describe("executePieceCallable", () => {
     ]);
   });
 
+  it("passes implicit piped JSON through for object handlers without CLI shape enforcement", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "editContent",
+      inputSchema: {
+        type: "object",
+        properties: {
+          detail: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+          },
+        },
+        required: ["detail"],
+      },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "of:piece-123",
+        space: "home",
+      },
+      "editContent",
+      [],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => false,
+        readTextInput: () => Promise.resolve('["not-an-object"]'),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["editContent"],
+        value: ["not-an-object"],
+      },
+    ]);
+  });
+
   it("renders piece-call help with the piece-call command prefix", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "tool",
