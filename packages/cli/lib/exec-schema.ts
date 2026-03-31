@@ -675,8 +675,9 @@ export function parseExecArgs(
   }
 
   if (spec.callableKind === "handler" && !explicitVerb && args.length === 0) {
+    const typeShape = schemaShapeString(spec.inputSchema);
     throw new Error(
-      "Refusing to invoke handler with no inputs; use invoke to call it without inputs",
+      `Handler requires input. Expected type: ${typeShape}\nRun --help for full usage.`,
     );
   }
 
@@ -717,10 +718,14 @@ export function renderExecHelp(
   const invocationStyle = options.invocationStyle ?? "ct";
   const specificFlags = specificFlagLines(spec.inputSchema);
   const genericFlags = genericFlagLines(spec.inputSchema);
+  const typeShape = schemaShapeString(spec.inputSchema);
 
   const lines = [
     "Usage:",
     ...helpUsageLines(mountedFilePath, spec, invocationStyle, commandPrefix),
+    "",
+    "Input type:",
+    ...typeShape.split("\n").map((line) => `  ${line}`),
     "",
     "Flags:",
     ...specificFlags,

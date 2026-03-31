@@ -5,6 +5,7 @@
 // Subscribes to cell changes and rebuilds subtrees on updates.
 
 import type { Cell } from "@commontools/runner";
+import { schemaToTypeString } from "@commontools/runner";
 import { FsTree } from "./tree.ts";
 import {
   buildCallableScript,
@@ -13,12 +14,56 @@ import {
   isHandlerCell,
 } from "./callables.ts";
 import { parseMountedCallablePath } from "./callable-path.ts";
-import { buildJsonTree, isSigilLink } from "./tree-builder.ts";
+import {
+  buildFsProjection,
+  buildJsonTree,
+  type FsValue,
+  isSigilLink,
+} from "./tree-builder.ts";
+import type { JSONSchema } from "@commontools/api";
 import type { PieceManager } from "@commontools/piece";
 import type { PieceController, PiecesController } from "@commontools/piece/ops";
+
+/** Strip asStream/asCell markers from a schema for display as input schema. */
+function getInputSchema(
+  schema: JSONSchema | undefined,
+): JSONSchema | undefined {
+  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+    return undefined;
+  }
+  const { asStream: _s, asCell: _c, ...rest } = schema as Record<
+    string,
+    unknown
+  >;
+  return Object.keys(rest).length > 0 ? rest as JSONSchema : undefined;
+}
 // Lazy-imported in connectSpace() to avoid pulling in heavy CLI deps at import
 // time (breaks tests that only use CellBridge for tree/symlink logic).
 // import { loadManager } from "../cli/lib/piece.ts";
+
+/**
+ * Parse YAML frontmatter from a markdown string.
+ * Expects the format: ---\nkey: value\n---\n\nbody...
+ */
+function parseFrontmatter(
+  text: string,
+): { frontmatter: Record<string, string>; body: string } {
+  const fm: Record<string, string> = {};
+  if (!text.startsWith("---\n")) return { frontmatter: fm, body: text };
+  const end = text.indexOf("\n---\n", 4);
+  if (end === -1) return { frontmatter: fm, body: text };
+  const fmText = text.slice(4, end);
+  let body = text.slice(end + 5); // skip "\n---\n"
+  if (body.startsWith("\n")) body = body.slice(1); // strip blank separator line
+  for (const line of fmText.split("\n")) {
+    const colonIdx = line.indexOf(":");
+    if (colonIdx === -1) continue;
+    const key = line.slice(0, colonIdx).trim();
+    const val = line.slice(colonIdx + 1).trim();
+    if (key) fm[key] = val;
+  }
+  return { frontmatter: fm, body };
+}
 
 type Cancel = () => void;
 
@@ -30,6 +75,8 @@ export interface WritePath {
   jsonPath: (string | number)[];
   isJsonFile: boolean;
   piece: PieceController;
+  /** Set when the file is an [FS] projection index file. */
+  fsProjection?: "markdown" | "json";
 }
 
 /** Callback to invalidate kernel cache entries (by name under a parent). */
@@ -201,12 +248,37 @@ export class CellBridge {
     // Read-only files
     const cellSegment = segments[3];
     if (cellSegment === "meta.json") return null;
+    if (cellSegment === ".handlers") return null;
 
     // Find the space and piece controller
     const space = this.spaces.get(spaceName);
     if (!space) return null;
     const piece = space.pieceControllers.get(pieceName);
     if (!piece) return null;
+
+    // Handle [FS] projection index files
+    if (cellSegment === "index.md") {
+      return {
+        spaceName,
+        pieceName,
+        cell: "result",
+        jsonPath: [],
+        isJsonFile: false,
+        piece,
+        fsProjection: "markdown",
+      };
+    }
+    if (cellSegment === "index.json") {
+      return {
+        spaceName,
+        pieceName,
+        cell: "result",
+        jsonPath: [],
+        isJsonFile: false,
+        piece,
+        fsProjection: "json",
+      };
+    }
 
     // Handle .json sibling files: result.json, input.json, result/items.json
     let cell: "input" | "result";
@@ -371,6 +443,33 @@ export class CellBridge {
       value,
       writePath.jsonPath.length > 0 ? writePath.jsonPath : undefined,
     );
+  }
+
+  /**
+   * Write back an [FS] projection index file (index.md or index.json).
+   * Parses the content and writes each field to its corresponding cell path.
+   * entityId is always skipped (read-only).
+   */
+  async writeFsFile(writePath: WritePath, text: string): Promise<void> {
+    if (writePath.fsProjection === "markdown") {
+      const { frontmatter, body } = parseFrontmatter(text);
+      for (const [key, val] of Object.entries(frontmatter)) {
+        if (key === "entityId") continue;
+        await writePath.piece.result.set(val, ["$FS", "frontmatter", key]);
+      }
+      await writePath.piece.result.set(body, ["$FS", "content"]);
+    } else if (writePath.fsProjection === "json") {
+      let obj: Record<string, unknown>;
+      try {
+        obj = JSON.parse(text);
+      } catch {
+        return;
+      }
+      for (const [key, val] of Object.entries(obj)) {
+        if (key === "entityId") continue;
+        await writePath.piece.result.set(val, ["$FS", "content", key]);
+      }
+    }
   }
 
   /** Update the root .spaces.json file. */
@@ -788,7 +887,9 @@ export class CellBridge {
     rootCell: Cell<unknown>,
     value: unknown,
   ): {
-    callables: Array<{ key: string; callableKind: CallableKind }>;
+    callables: Array<
+      { key: string; callableKind: CallableKind; schema?: JSONSchema }
+    >;
     skipEntry: (value: unknown) => boolean;
     classifyEntry: (key: string, value: unknown) => CallableKind | null;
   } {
@@ -802,7 +903,9 @@ export class CellBridge {
 
     const callableValues = new WeakSet<object>();
     const callableKinds = new Map<string, CallableKind>();
-    const callables: Array<{ key: string; callableKind: CallableKind }> = [];
+    const callables: Array<
+      { key: string; callableKind: CallableKind; schema?: JSONSchema }
+    > = [];
     for (
       const [key, candidate] of Object.entries(
         value as Record<string, unknown>,
@@ -835,7 +938,11 @@ export class CellBridge {
 
       if (!callableKind) continue;
 
-      callables.push({ key, callableKind });
+      callables.push({
+        key,
+        callableKind,
+        schema: getInputSchema(childCell.schema),
+      });
       callableKinds.set(key, callableKind);
       if (typeof candidate === "object" && candidate !== null) {
         callableValues.add(candidate);
@@ -918,11 +1025,22 @@ export class CellBridge {
 
   private addCallableFiles(
     propIno: bigint,
-    callables: Array<{ key: string; callableKind: CallableKind }>,
+    callables: Array<
+      { key: string; callableKind: CallableKind; schema?: JSONSchema }
+    >,
     cellProp: "input" | "result",
   ): void {
-    const script = buildCallableScript(this.execCli);
-    for (const { key, callableKind } of callables) {
+    for (const { key, callableKind, schema } of callables) {
+      const defs =
+        schema && typeof schema === "object" && !Array.isArray(schema)
+          ? (schema as Record<string, unknown>).$defs as
+            | Record<string, JSONSchema>
+            | undefined
+          : undefined;
+      const typeStr = schema !== undefined
+        ? schemaToTypeString(schema, { defs, maxDepth: 3 })
+        : undefined;
+      const script = buildCallableScript(this.execCli, schema, typeStr);
       this.tree.addCallable(
         propIno,
         `${key}.${callableKind}`,
@@ -931,6 +1049,89 @@ export class CellBridge {
         cellProp,
         script,
       );
+    }
+  }
+
+  /**
+   * Generate a .handlers summary file at the piece root.
+   * One line per callable: "<name>.<handler|tool>  <input-schema-json>"
+   * Dot-prefixed so it's hidden from plain `ls` but readable with `cat`.
+   */
+  private buildHandlersFile(
+    pieceIno: bigint,
+    callables: Array<
+      { key: string; callableKind: CallableKind; schema?: JSONSchema }
+    >,
+  ): void {
+    const existingIno = this.tree.lookup(pieceIno, ".handlers");
+    if (existingIno !== undefined) this.tree.clear(existingIno);
+    if (callables.length === 0) return;
+    const lines = callables.map(({ key, callableKind, schema }) => {
+      const defs =
+        schema && typeof schema === "object" && !Array.isArray(schema)
+          ? (schema as Record<string, unknown>).$defs as
+            | Record<string, JSONSchema>
+            | undefined
+          : undefined;
+      const typeStr = schema !== undefined
+        ? schemaToTypeString(schema, { defs, maxDepth: 3 })
+        : "void";
+      return `${key}.${callableKind}  ${typeStr}`;
+    });
+    this.tree.addFile(
+      pieceIno,
+      ".handlers",
+      lines.join("\n") + "\n",
+      "string",
+    );
+  }
+
+  /**
+   * Read [FS] projection values from a result cell.
+   * Returns null if the result does not declare [FS].
+   */
+  private readFsValue(
+    resultCell: Cell<unknown>,
+    result: unknown,
+  ): FsValue | null {
+    if (
+      typeof result !== "object" || result === null ||
+      !("$FS" in (result as Record<string, unknown>))
+    ) {
+      return null;
+    }
+
+    try {
+      const fsCell = resultCell.key("$FS");
+      const type = String(fsCell.key("type").get() ?? "text/markdown") as
+        | "text/markdown"
+        | "application/json";
+      const content = fsCell.key("content").get();
+
+      if (type === "text/markdown") {
+        const contentStr = String(content ?? "");
+        const fmCell = fsCell.key("frontmatter");
+        const fmRaw = fmCell.get();
+        const frontmatter: Record<string, string> = {};
+        if (fmRaw && typeof fmRaw === "object" && !Array.isArray(fmRaw)) {
+          for (const key of Object.keys(fmRaw as Record<string, unknown>)) {
+            frontmatter[key] = String(fmCell.key(key).get() ?? "");
+          }
+        }
+        return { type, content: contentStr, frontmatter };
+      }
+
+      if (type === "application/json") {
+        const contentObj = content && typeof content === "object" &&
+            !Array.isArray(content)
+          ? content as Record<string, unknown>
+          : {};
+        return { type, content: contentObj };
+      }
+
+      return null;
+    } catch {
+      return null;
     }
   }
 
@@ -982,6 +1183,35 @@ export class CellBridge {
                     cell,
                     treeValue,
                   );
+
+                if (propName === "result") {
+                  const fsValue = this.readFsValue(cell, treeValue);
+                  if (fsValue !== null) {
+                    // [FS] projection: update index.md or index.json in place
+                    const indexName = fsValue.type === "text/markdown"
+                      ? "index.md"
+                      : "index.json";
+                    const existingIndexIno = this.tree.lookup(
+                      pieceIno,
+                      indexName,
+                    );
+                    if (existingIndexIno !== undefined) {
+                      this.tree.clear(existingIndexIno);
+                    }
+                    buildFsProjection(
+                      this.tree,
+                      pieceIno,
+                      fsValue,
+                      piece.id,
+                    );
+                    this.buildHandlersFile(pieceIno, callables);
+                    if (this.onInvalidate) {
+                      this.onInvalidate(pieceIno, [indexName, ".handlers"]);
+                    }
+                    return;
+                  }
+                }
+
                 const propIno = buildJsonTree(
                   this.tree,
                   pieceIno,
@@ -994,6 +1224,9 @@ export class CellBridge {
                   classifyEntry,
                 );
                 this.addCallableFiles(propIno, callables, propName);
+                if (propName === "result") {
+                  this.buildHandlersFile(pieceIno, callables);
+                }
               }
 
               // Invalidate kernel cache
@@ -1265,18 +1498,29 @@ export class CellBridge {
             resultCell,
             result,
           );
-        const resultIno = buildJsonTree(
-          this.tree,
-          pieceIno,
-          "result",
-          result,
-          undefined,
-          resolveLink,
-          0,
-          skipEntry,
-          classifyEntry,
-        );
-        this.addCallableFiles(resultIno, callables, "result");
+
+        const fsValue = this.readFsValue(resultCell, result);
+        if (fsValue !== null) {
+          // [FS] projection: index.md or index.json at piece root,
+          // callable files also at piece root (no result/ dir)
+          buildFsProjection(this.tree, pieceIno, fsValue, piece.id);
+          this.addCallableFiles(pieceIno, callables, "result");
+        } else {
+          // Default: exploded result/ directory
+          const resultIno = buildJsonTree(
+            this.tree,
+            pieceIno,
+            "result",
+            result,
+            undefined,
+            resolveLink,
+            0,
+            skipEntry,
+            classifyEntry,
+          );
+          this.addCallableFiles(resultIno, callables, "result");
+        }
+        this.buildHandlersFile(pieceIno, callables);
       }
     } catch (e) {
       console.error(`Error loading piece "${name}": ${e}`);

@@ -603,6 +603,24 @@ export async function main(argv: string[] = Deno.args) {
       if (!writePath) return EACCES;
 
       const text = new TextDecoder().decode(buffer);
+
+      // [FS] projection index file: parse and write back to cells
+      if (writePath.fsProjection) {
+        await bridge.writeFsFile(writePath, text);
+        if (handle.version === flushVersion) {
+          handle.dirty = false;
+        }
+        try {
+          const node = tree.getNode(handle.ino);
+          if (node && node.kind === "file") {
+            tree.updateFile(handle.ino, text);
+          }
+        } catch {
+          // Stale inode after subscription rebuild — ignore.
+        }
+        return 0;
+      }
+
       let value: unknown;
 
       if (writePath.isJsonFile) {

@@ -260,7 +260,7 @@ describe("parseExecArgs", () => {
         [],
       )
     ).toThrow(
-      /Refusing to invoke handler with no inputs; use invoke to call it without inputs/i,
+      /Handler requires input/i,
     );
   });
 

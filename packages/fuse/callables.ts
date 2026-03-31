@@ -101,12 +101,22 @@ export function classifyCallableEntry(
   return null;
 }
 
-export function buildCallableScript(execCli: string): Uint8Array {
+export function buildCallableScript(
+  execCli: string,
+  schema?: JSONSchema,
+  typeStr?: string,
+): Uint8Array {
   const shim = execCli || "/usr/bin/false";
-  // Some environments fall back to running mounted files through the shell
-  // instead of honoring the nested shebang interpreter directly.
+  // Comments are readable via `cat` and `head`; ct exec handles --help and
+  // flag-based invocation (--value <x> for scalars, --flag <v> for objects).
+  const schemaComment = schema !== undefined
+    ? `# schema: ${JSON.stringify(schema)}\n`
+    : "";
+  const typeComment = typeStr !== undefined ? `# input: ${typeStr}\n` : "";
   return encoder.encode(
-    `#!${shim} exec\nexec ${shellQuote(shim)} exec "$0" "$@"\n`,
+    `#!${shim} exec\n${schemaComment}${typeComment}exec ${
+      shellQuote(shim)
+    } exec "$0" "$@"\n`,
   );
 }
 

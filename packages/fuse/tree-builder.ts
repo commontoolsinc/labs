@@ -61,6 +61,57 @@ export function isSigilLink(v: unknown): boolean {
 
 export { isHandlerCell, isStreamValue } from "./callables.ts";
 
+/** Shape of the value a pattern returns under the [FS] key. */
+export interface FsValue {
+  type: "text/markdown" | "application/json";
+  content: string | Record<string, unknown>;
+  frontmatter?: Record<string, unknown>;
+}
+
+/**
+ * Build a single-file filesystem projection from a [FS] value.
+ *
+ * - text/markdown  → index.md  (YAML frontmatter + body)
+ * - application/json → index.json (flat JSON object)
+ *
+ * `entityId` is always injected first (read-only field).
+ * Returns the inode of the created file.
+ */
+export function buildFsProjection(
+  tree: FsTree,
+  parentIno: bigint,
+  fsValue: FsValue,
+  entityId: string,
+): bigint {
+  if (fsValue.type === "text/markdown") {
+    const fmLines: string[] = [`entityId: ${entityId}`];
+    if (fsValue.frontmatter) {
+      for (const [key, val] of Object.entries(fsValue.frontmatter)) {
+        // Skip entityId if pattern accidentally includes it
+        if (key === "entityId") continue;
+        fmLines.push(`${key}: ${String(val ?? "")}`);
+      }
+    }
+    const body = String(fsValue.content ?? "");
+    const fileContent = `---\n${fmLines.join("\n")}\n---\n\n${body}`;
+    return tree.addFile(parentIno, "index.md", fileContent, "string");
+  }
+
+  if (fsValue.type === "application/json") {
+    const content = (fsValue.content ?? {}) as Record<string, unknown>;
+    const obj = { entityId, ...content };
+    return tree.addFile(parentIno, "index.json", safeStringify(obj), "object");
+  }
+
+  // Fallback: unknown type
+  return tree.addFile(
+    parentIno,
+    "index.txt",
+    safeStringify(fsValue),
+    "object",
+  );
+}
+
 /** Options for buildJsonTree beyond the required params. */
 export interface BuildJsonTreeOpts {
   seen?: WeakSet<object>;
