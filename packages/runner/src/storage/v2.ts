@@ -22,7 +22,7 @@ import {
   type SessionSync,
   toDocumentPath,
 } from "@commontools/memory/v2";
-import { parsePointer } from "../../../memory/v2/path.ts";
+import { parentPath, parsePointer } from "../../../memory/v2/path.ts";
 import type { AppliedCommit } from "@commontools/memory/v2/engine";
 import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord } from "@commontools/utils/types";
@@ -313,16 +313,47 @@ const removeDocumentPath = (
   return nextRoot as EntityDocument;
 };
 
-const changedPathsForPendingPatch = (patches: readonly PatchOp[]): string[][] =>
+const replayPathForPendingPatchTarget = (
+  base: EntityDocument | undefined,
+  pendingValue: EntityDocument,
+  path: readonly string[],
+): string[] => {
+  if (path.length === 0) {
+    return [...path];
+  }
+  const parent = parentPath(path);
+  if (
+    Array.isArray(readDocumentPath(base, parent)) ||
+    Array.isArray(readDocumentPath(pendingValue, parent))
+  ) {
+    return parent;
+  }
+  return [...path];
+};
+
+const changedPathsForPendingPatch = (
+  base: EntityDocument | undefined,
+  pendingValue: EntityDocument,
+  patches: readonly PatchOp[],
+): string[][] =>
   patches.flatMap((patch) => {
     switch (patch.op) {
       case "replace":
-      case "add":
-      case "remove":
       case "splice":
         return [parsePointer(patch.path)];
-      case "move":
-        return [parsePointer(patch.from), parsePointer(patch.path)];
+      case "add":
+      case "remove": {
+        const path = parsePointer(patch.path);
+        return [replayPathForPendingPatchTarget(base, pendingValue, path)];
+      }
+      case "move": {
+        const from = parsePointer(patch.from);
+        const to = parsePointer(patch.path);
+        return [
+          replayPathForPendingPatchTarget(base, pendingValue, from),
+          replayPathForPendingPatchTarget(base, pendingValue, to),
+        ];
+      }
     }
   });
 
@@ -353,7 +384,7 @@ const applyPendingVersion = (
       let next = base;
       for (
         const path of compactChangedPaths(
-          changedPathsForPendingPatch(pending.patches),
+          changedPathsForPendingPatch(base, pending.value, pending.patches),
         )
       ) {
         if (hasDocumentPath(pending.value, path)) {

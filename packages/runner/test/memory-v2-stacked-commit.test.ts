@@ -481,6 +481,13 @@ const createHarness = () => {
       transaction: {
         operations: Array<
           | { op: "set"; id: URI; type: MIME; value: unknown }
+          | {
+            op: "patch";
+            id: URI;
+            type: MIME;
+            patches: PatchOp[];
+            value: unknown;
+          }
           | { op: "delete"; id: URI; type: MIME }
         >;
       },
@@ -764,6 +771,23 @@ const beginBatch = (
   operations: RootOp[],
   source?: unknown,
 ) => harness.dispatch(operations, source);
+
+const beginPatch = (
+  harness: Harness,
+  id: URI,
+  patches: PatchOp[],
+  value: RootValue,
+  source?: unknown,
+) =>
+  harness.replica.commitNative({
+    operations: [{
+      op: "patch",
+      id,
+      type: DOCUMENT_MIME,
+      patches,
+      value: { value },
+    }],
+  }, source);
 
 const seedAccepted = async (
   harness: Harness,
@@ -1654,6 +1678,119 @@ Deno.test("memory v2 stacked commits: pending visibility preserves rich fabric v
     await harness.close();
     resetStorableValueConfig();
     resetJsonEncodingConfig();
+  }
+});
+
+Deno.test("memory v2 stacked commits: pending visibility preserves array add patches", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, {
+      items: ["a", "b", "c"],
+    });
+
+    harness.model.setOutcome(2, { kind: "accept" });
+    const add = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "add",
+        path: "/value/items/1",
+        value: "x",
+      }],
+      {
+        items: ["a", "x", "b", "c"],
+      },
+    );
+
+    expectVisible(harness, {
+      A: {
+        items: ["a", "x", "b", "c"],
+      },
+    });
+
+    await assertResultOk(add);
+    expectVisible(harness, {
+      A: {
+        items: ["a", "x", "b", "c"],
+      },
+    });
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: pending visibility preserves array remove patches", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, {
+      items: ["a", "b", "c"],
+    });
+
+    harness.model.setOutcome(2, { kind: "accept" });
+    const remove = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "remove",
+        path: "/value/items/1",
+      }],
+      {
+        items: ["a", "c"],
+      },
+    );
+
+    expectVisible(harness, {
+      A: {
+        items: ["a", "c"],
+      },
+    });
+
+    await assertResultOk(remove);
+    expectVisible(harness, {
+      A: {
+        items: ["a", "c"],
+      },
+    });
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: pending visibility preserves array move patches", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, {
+      items: ["a", "b", "c"],
+    });
+
+    harness.model.setOutcome(2, { kind: "accept" });
+    const move = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "move",
+        from: "/value/items/2",
+        path: "/value/items/0",
+      }],
+      {
+        items: ["c", "a", "b"],
+      },
+    );
+
+    expectVisible(harness, {
+      A: {
+        items: ["c", "a", "b"],
+      },
+    });
+
+    await assertResultOk(move);
+    expectVisible(harness, {
+      A: {
+        items: ["c", "a", "b"],
+      },
+    });
+  } finally {
+    await harness.close();
   }
 });
 
