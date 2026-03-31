@@ -110,6 +110,86 @@ describe("executePieceCallable", () => {
     });
   });
 
+  it("reads primitive handler input from --value-file", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "editContent",
+      inputSchema: { type: "string" },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "of:piece-123",
+        space: "home",
+      },
+      "editContent",
+      ["--value-file", "/tmp/content.md"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        readTextFile: () => Promise.resolve("# Title\n\nUse `cat` here"),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["editContent"],
+        value: "# Title\n\nUse `cat` here",
+      },
+    ]);
+  });
+
+  it("reads object handler input from --json-file", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "editContent",
+      inputSchema: {
+        type: "object",
+        properties: {
+          detail: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+          },
+        },
+        required: ["detail"],
+      },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "of:piece-123",
+        space: "home",
+      },
+      "editContent",
+      ["--json-file", "/tmp/input.json"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        readTextFile: () =>
+          Promise.resolve(
+            '{"detail":{"value":"Use `cat` to read files"}}',
+          ),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["editContent"],
+        value: {
+          detail: { value: "Use `cat` to read files" },
+        },
+      },
+    ]);
+  });
+
   it("renders piece-call help with the piece-call command prefix", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "tool",

@@ -746,6 +746,7 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
     piecesIno,
     entitiesIno,
     pieceMap: new Map([["notes", "of:entity-123"]]),
+    pieceAliases: new Map(),
     pieceControllers: new Map([["notes", piece as never]]),
     pieceSubs: new Map(),
     did: "did:key:home",

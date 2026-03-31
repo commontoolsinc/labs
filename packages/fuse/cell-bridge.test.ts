@@ -110,6 +110,7 @@ function buildTestSpace(
     piecesIno,
     entitiesIno,
     pieceMap: new Map(),
+    pieceAliases: new Map(),
     pieceControllers: new Map(),
     pieceSubs: new Map(),
     did: "did:key:zTest",
@@ -634,9 +635,80 @@ Deno.test("CellBridge.subscribePiece renames directory when piece name changes",
     true,
     "New Name dir should exist after rename",
   );
+  const oldNameIno = tree.lookup(state.piecesIno, "Old Name");
+  assertEquals(oldNameIno !== undefined, true, "Old Name alias should remain");
+  const oldNameNode = tree.getNode(oldNameIno!);
   assertEquals(
-    tree.lookup(state.piecesIno, "Old Name"),
+    oldNameNode?.kind,
+    "symlink",
+    "Old Name should become a compatibility symlink after rename",
+  );
+  if (oldNameNode?.kind === "symlink") {
+    assertEquals(
+      oldNameNode.target,
+      "New Name",
+      "Compatibility symlink should point at the renamed piece",
+    );
+  }
+});
+
+Deno.test("CellBridge.subscribePiece keeps only the latest compatibility alias", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  let pieceName = "Reading List (0)";
+  const resultCell = new SinkableCell({});
+
+  const piece = {
+    id: "of:reading-list",
+    name: () => pieceName,
+    getPatternMeta: () => Promise.resolve({ patternName: "reading-list" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+      get: () => Promise.resolve({}),
+    },
+  };
+
+  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace.bind(bridge);
+  await addPiece(state, piece, "home");
+
+  const subs = await (bridge as unknown as { subscribePiece: SubscribePiece })
+    .subscribePiece.call(
+      bridge,
+      piece,
+      tree.lookup(state.piecesIno, "Reading List (0)")!,
+      "Reading List (0)",
+      "home",
+    );
+  state.pieceSubs.set("Reading List (0)", subs);
+
+  pieceName = "Reading List (1)";
+  resultCell.set({});
+  await new Promise((r) => setTimeout(r, 10));
+
+  pieceName = "Reading List (2)";
+  resultCell.set({});
+  await new Promise((r) => setTimeout(r, 10));
+
+  assertEquals(
+    tree.lookup(state.piecesIno, "Reading List (2)") !== undefined,
+    true,
+    "Latest canonical name should exist",
+  );
+  assertEquals(
+    tree.lookup(state.piecesIno, "Reading List (1)") !== undefined,
+    true,
+    "Most recent prior name should remain as a compatibility alias",
+  );
+  assertEquals(
+    tree.lookup(state.piecesIno, "Reading List (0)"),
     undefined,
-    "Old Name dir should be gone after rename",
+    "Older compatibility aliases should be discarded",
   );
 });

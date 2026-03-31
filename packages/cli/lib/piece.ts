@@ -25,6 +25,7 @@ import {
   parseExecArgs,
   renderExecHelpJson,
   renderPieceCallHelp,
+  resolveParsedExecInput,
 } from "./exec-schema.ts";
 
 export interface EntryConfig {
@@ -52,6 +53,8 @@ export interface PieceCallableDependencies extends CallableExecutionDeps {
   loadManager?: (config: SpaceConfig) => Promise<any>;
   loadPiece?: (manager: any, pieceId: string) => Promise<any>;
   readJsonInput?: () => Promise<unknown>;
+  readTextInput?: () => Promise<string>;
+  readTextFile?: (path: string) => Promise<string>;
 }
 
 export interface ExecutedPieceCallable {
@@ -262,19 +265,6 @@ export async function applyPieceInput(
   await piece.setInput(input);
 }
 
-async function defaultReadJsonInput(): Promise<unknown> {
-  const text = await new Response(Deno.stdin.readable).text();
-  if (text.trim().length === 0) {
-    throw new Error("Expected JSON on stdin for --json");
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error("Invalid JSON on stdin for --json");
-  }
-}
-
 function getCallableValue(rootValue: unknown, callableName: string): unknown {
   if (
     typeof rootValue !== "object" || rootValue === null ||
@@ -470,9 +460,11 @@ export async function executePieceCallable(
     };
   }
 
-  const input = parsed.readJsonFromStdin
-    ? await (deps.readJsonInput ?? defaultReadJsonInput)()
-    : parsed.input;
+  const input = await resolveParsedExecInput(
+    resolved.commandSpec,
+    parsed,
+    deps,
+  );
   const executed = await executeResolvedCallable(
     resolved,
     parsed.usedJsonInput

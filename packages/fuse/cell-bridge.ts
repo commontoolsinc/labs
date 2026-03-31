@@ -94,12 +94,14 @@ export interface SpaceState {
   piecesIno: bigint;
   entitiesIno: bigint;
   pieceMap: Map<string, string>; // name → entity ID
+  /** Last compatibility alias left behind for a renamed piece (piece ID → alias). */
+  pieceAliases: Map<string, string>;
   pieceControllers: Map<string, PieceController>; // name → controller
   /** Per-piece subscription cancellers, keyed by piece name. */
   pieceSubs: Map<string, Cancel[]>;
   did: string;
   unsubscribes: Cancel[];
-  /** Used names set for collision resolution. */
+  /** Occupied names set for collision resolution, including compatibility aliases. */
   usedNames: Set<string>;
 }
 
@@ -569,6 +571,7 @@ export class CellBridge {
       piecesIno,
       entitiesIno,
       pieceMap: new Map(),
+      pieceAliases: new Map(),
       pieceControllers: new Map(),
       pieceSubs: new Map(),
       did: spaceDid,
@@ -728,6 +731,8 @@ export class CellBridge {
    * Remove a piece from a space's tree and clean up subscriptions.
    */
   private removePieceFromSpace(state: SpaceState, name: string): void {
+    const pieceId = state.pieceMap.get(name);
+
     // Cancel piece-level subscriptions
     const subs = state.pieceSubs.get(name);
     if (subs) {
@@ -739,8 +744,8 @@ export class CellBridge {
     this.tree.removeChild(state.piecesIno, name);
 
     // Clean up entity tree
-    const pieceId = state.pieceMap.get(name);
     if (pieceId) {
+      this.clearPieceAlias(state, pieceId);
       this.tree.removeChild(state.entitiesIno, pieceId);
       const entitySubsKey = `entity:${pieceId}`;
       const entitySubs = state.pieceSubs.get(entitySubsKey);
@@ -930,6 +935,66 @@ export class CellBridge {
       JSON.stringify(indexObj, null, 2),
       "object",
     );
+  }
+
+  private clearPieceAlias(
+    state: SpaceState,
+    pieceId: string,
+    preserveName?: string,
+  ): string | undefined {
+    const aliasName = state.pieceAliases.get(pieceId);
+    if (!aliasName) return undefined;
+
+    state.pieceAliases.delete(pieceId);
+    state.usedNames.delete(aliasName);
+
+    if (aliasName !== preserveName) {
+      const aliasIno = this.tree.lookup(state.piecesIno, aliasName);
+      if (aliasIno !== undefined) {
+        this.tree.clear(aliasIno);
+      }
+    }
+
+    return aliasName;
+  }
+
+  private installPieceAlias(
+    state: SpaceState,
+    pieceId: string,
+    aliasName: string,
+    targetName: string,
+  ): void {
+    const existingAliasIno = this.tree.lookup(state.piecesIno, aliasName);
+    if (existingAliasIno !== undefined) {
+      this.tree.clear(existingAliasIno);
+    }
+    this.tree.addSymlink(state.piecesIno, aliasName, targetName);
+    state.pieceAliases.set(pieceId, aliasName);
+    state.usedNames.add(aliasName);
+  }
+
+  private updatePieceMetaName(parentIno: bigint, name: string): void {
+    const metaIno = this.tree.lookup(parentIno, "meta.json");
+    if (metaIno === undefined) return;
+
+    const metaNode = this.tree.getNode(metaIno);
+    if (!metaNode || metaNode.kind !== "file") return;
+
+    try {
+      const parsed = JSON.parse(new TextDecoder().decode(metaNode.content));
+      if (
+        typeof parsed !== "object" || parsed === null || Array.isArray(parsed)
+      ) {
+        return;
+      }
+      this.tree.updateFile(
+        metaIno,
+        JSON.stringify({ ...parsed, name }, null, 2),
+        "object",
+      );
+    } catch {
+      // Ignore malformed synthetic metadata.
+    }
   }
 
   private discoverCallableEntries(
@@ -1436,6 +1501,7 @@ export class CellBridge {
             if (currentName === undefined) return;
 
             const newRawName = piece.name() ?? piece.id;
+            const previousAlias = state.pieceAliases.get(piece.id);
 
             // Skip if the raw name hasn't changed.
             if (newRawName === currentName) return;
@@ -1445,12 +1511,13 @@ export class CellBridge {
             // must NOT mutate usedNames until after tree.rename() succeeds —
             // a thrown rename would otherwise leave tracking inconsistent.
             let newName = newRawName;
-            if (state.usedNames.has(newName) && newName !== currentName) {
+            const isOccupied = (candidate: string) =>
+              state.usedNames.has(candidate) &&
+              candidate !== currentName &&
+              candidate !== previousAlias;
+            if (isOccupied(newName)) {
               let suffix = 2;
-              while (
-                state.usedNames.has(`${newName}-${suffix}`) &&
-                `${newName}-${suffix}` !== currentName
-              ) suffix++;
+              while (isOccupied(`${newName}-${suffix}`)) suffix++;
               newName = `${newName}-${suffix}`;
             }
 
@@ -1470,6 +1537,12 @@ export class CellBridge {
               newName,
             );
 
+            const clearedAlias = this.clearPieceAlias(
+              state,
+              piece.id,
+              newName,
+            );
+
             // Tree rename succeeded — now update all four state maps atomically.
             state.usedNames.delete(currentName);
             state.usedNames.add(newName);
@@ -1483,6 +1556,16 @@ export class CellBridge {
             if (subs !== undefined) {
               state.pieceSubs.set(newName, subs);
             }
+            this.installPieceAlias(state, piece.id, currentName, newName);
+
+            const renamedPieceIno = this.tree.lookup(state.piecesIno, newName);
+            if (renamedPieceIno !== undefined) {
+              this.updatePieceMetaName(renamedPieceIno, newName);
+            }
+            const entityIno = this.tree.lookup(state.entitiesIno, piece.id);
+            if (entityIno !== undefined) {
+              this.updatePieceMetaName(entityIno, newName);
+            }
 
             // Rebuild .index.json and pieces.json.
             this.updateIndexJson(state);
@@ -1491,6 +1574,11 @@ export class CellBridge {
             // Invalidate kernel cache.
             if (this.onInvalidate) {
               this.onInvalidate(state.piecesIno, [
+                ...(clearedAlias &&
+                    clearedAlias !== currentName &&
+                    clearedAlias !== newName
+                  ? [clearedAlias]
+                  : []),
                 currentName,
                 newName,
                 ".index.json",

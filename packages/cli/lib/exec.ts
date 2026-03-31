@@ -12,6 +12,7 @@ import {
   parseExecArgs,
   renderExecHelp,
   renderExecHelpJson,
+  resolveParsedExecInput,
 } from "./exec-schema.ts";
 import {
   canonicalizeMountLookupPath,
@@ -48,6 +49,8 @@ export interface ExecDependencies {
   waitForResult?: (resultCell: any, timeoutMs: number) => Promise<unknown>;
   invocationStyle?: "ct" | "direct";
   readJsonInput?: () => Promise<unknown>;
+  readTextInput?: () => Promise<string>;
+  readTextFile?: (path: string) => Promise<string>;
 }
 
 export interface ExecutedMountedCallableFile {
@@ -104,19 +107,6 @@ async function assertMountedCallableFileExists(absPath: string): Promise<void> {
 
   if (!stat.isFile) {
     throw new Error(`Mounted callable file not found: ${absPath}`);
-  }
-}
-
-async function defaultReadJsonInput(): Promise<unknown> {
-  const text = await new Response(Deno.stdin.readable).text();
-  if (text.trim().length === 0) {
-    throw new Error("Expected JSON on stdin for --json");
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error("Invalid JSON on stdin for --json");
   }
 }
 
@@ -190,9 +180,11 @@ export async function executeMountedCallableFile(
     };
   }
 
-  const input = parsed.readJsonFromStdin
-    ? await (deps.readJsonInput ?? defaultReadJsonInput)()
-    : parsed.input;
+  const input = await resolveParsedExecInput(
+    resolved.commandSpec,
+    parsed,
+    deps,
+  );
   const executed = await executeResolvedCallable(
     {
       callableCell: resolved.callableCell,
