@@ -9,7 +9,8 @@ on:
 jobs:
   benchmarks:
     name: "Run Benchmarks"
-    runs-on: ubuntu-24.04-64-core
+    runs-on:
+      group: labs
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
