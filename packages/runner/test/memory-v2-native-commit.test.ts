@@ -783,6 +783,140 @@ Deno.test("memory v2 writeBatch combines dense array element and length writes i
   }
 });
 
+Deno.test("memory v2 array splice drafts elide descendant patches for newly added tail entries", async () => {
+  const { storage, drafts } = captureNativeDrafts();
+
+  try {
+    const seed = storage.edit();
+    const seedWrite = seed.write({
+      space,
+      id: "of:memory-v2-array-splice-subsume-tail",
+      type,
+      path: [],
+    }, {
+      value: {
+        internal: {
+          visibleTemplates: [{
+            id: "support-shift-schedule",
+            tags: ["Support", "Schedule"],
+          }],
+        },
+      },
+    });
+    assert(seedWrite.ok);
+    const seedCommit = await seed.commit();
+    assert(seedCommit.ok);
+
+    drafts.length = 0;
+
+    const tx = storage.edit();
+    const batchResult = tx.writeBatch?.([
+      {
+        address: {
+          space,
+          id: "of:memory-v2-array-splice-subsume-tail",
+          type,
+          path: ["value", "internal", "visibleTemplates", "0"],
+        },
+        value: {
+          id: "hero-email-kit",
+          name: "Hero Email Kit",
+          tags: ["Email", "Hero", "Campaign"],
+        },
+      },
+      {
+        address: {
+          space,
+          id: "of:memory-v2-array-splice-subsume-tail",
+          type,
+          path: ["value", "internal", "visibleTemplates", "1", "id"],
+        },
+        value: "support-shift-schedule",
+      },
+      {
+        address: {
+          space,
+          id: "of:memory-v2-array-splice-subsume-tail",
+          type,
+          path: ["value", "internal", "visibleTemplates", "1", "name"],
+        },
+        value: "Support Shift Schedule",
+      },
+      {
+        address: {
+          space,
+          id: "of:memory-v2-array-splice-subsume-tail",
+          type,
+          path: ["value", "internal", "visibleTemplates", "1", "tags"],
+        },
+        value: ["Support", "Schedule"],
+      },
+      {
+        address: {
+          space,
+          id: "of:memory-v2-array-splice-subsume-tail",
+          type,
+          path: ["value", "internal", "visibleTemplates", "2", "id"],
+        },
+        value: "product-tour-deck",
+      },
+      {
+        address: {
+          space,
+          id: "of:memory-v2-array-splice-subsume-tail",
+          type,
+          path: ["value", "internal", "visibleTemplates", "2", "name"],
+        },
+        value: "Product Tour Deck",
+      },
+      {
+        address: {
+          space,
+          id: "of:memory-v2-array-splice-subsume-tail",
+          type,
+          path: ["value", "internal", "visibleTemplates", "2", "tags"],
+        },
+        value: ["Demo", "Slides"],
+      },
+    ]);
+    assert(batchResult?.ok);
+
+    const commitResult = await tx.commit();
+    assert(commitResult.ok);
+    assertEquals(drafts.length, 1);
+    assertEquals(drafts[0].operations.length, 1);
+    const [operation] = drafts[0].operations;
+    assertEquals(operation.op, "patch");
+    if (operation.op !== "patch") {
+      throw new Error("expected patch operation");
+    }
+    assertEquals(operation.id, "of:memory-v2-array-splice-subsume-tail");
+    assertEquals(operation.type, type);
+    assertEquals(operation.patches.length, 2);
+    assertEquals(operation.patches[0]?.op, "replace");
+    assertEquals(
+      operation.patches[0]?.path,
+      "/value/internal/visibleTemplates/0",
+    );
+    const splicePatch = operation.patches[1];
+    assertEquals(splicePatch?.op, "splice");
+    if (splicePatch?.op !== "splice") {
+      throw new Error("expected trailing splice patch");
+    }
+    assertEquals(splicePatch?.path, "/value/internal/visibleTemplates");
+    assertEquals(splicePatch?.index, 1);
+    assertEquals(splicePatch?.remove, 0);
+    assertEquals(splicePatch?.add?.length, 2);
+    assert(
+      operation.patches.every((patch) =>
+        !patch.path.startsWith("/value/internal/visibleTemplates/1/tags")
+      ),
+    );
+  } finally {
+    await storage.close();
+  }
+});
+
 Deno.test("memory v2 transactions fall back to array replacement when filling sparse holes", async () => {
   const { storage, drafts } = captureNativeDrafts();
 

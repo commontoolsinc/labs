@@ -604,6 +604,7 @@ type PatchDraftCandidate = {
   patch: PatchOp;
   path: readonly string[];
   coversDescendants: boolean;
+  tailSpliceStartIndex?: number;
 };
 
 const findDeepestArrayPath = (
@@ -738,6 +739,7 @@ const buildArrayPatchCandidates = (
       },
       path,
       coversDescendants: false,
+      tailSpliceStartIndex: before.length,
     });
   } else if (after.length < before.length) {
     candidates.push({
@@ -750,6 +752,7 @@ const buildArrayPatchCandidates = (
       },
       path,
       coversDescendants: false,
+      tailSpliceStartIndex: after.length,
     });
   }
 
@@ -765,6 +768,25 @@ const isPrefixPath = (
   prefix: readonly string[],
   path: readonly string[],
 ): boolean => prefix.length <= path.length && pathsOverlap(prefix, path);
+
+const isSubsumedByTailSplice = (
+  spliceCandidate: PatchDraftCandidate,
+  candidatePath: readonly string[],
+): boolean => {
+  if (spliceCandidate.tailSpliceStartIndex === undefined) {
+    return false;
+  }
+  if (
+    !isPrefixPath(spliceCandidate.path, candidatePath) ||
+    candidatePath.length <= spliceCandidate.path.length
+  ) {
+    return false;
+  }
+  const childSegment = candidatePath[spliceCandidate.path.length];
+  return childSegment !== undefined &&
+    isArrayIndexPropertyName(childSegment) &&
+    Number(childSegment) >= spliceCandidate.tailSpliceStartIndex;
+};
 
 const shallowStructureChanged = (
   before: StorableDatum | undefined,
@@ -1951,7 +1973,16 @@ export class V2StorageTransaction implements IStorageTransaction {
       return null;
     }
 
+    const tailSpliceCandidates = nonCoverCandidates.filter((candidate) =>
+      candidate.tailSpliceStartIndex !== undefined
+    );
+
     const retainedCoverCandidates = fullCoverCandidates
+      .filter((candidate) =>
+        !tailSpliceCandidates.some((spliceCandidate) =>
+          isSubsumedByTailSplice(spliceCandidate, candidate.path)
+        )
+      )
       .sort((left, right) => left.path.length - right.path.length);
     const nonOverlappingCoverCandidates: typeof retainedCoverCandidates = [];
     for (const detail of retainedCoverCandidates) {
@@ -1968,6 +1999,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     const retainedNonCoverCandidates = nonCoverCandidates.filter((detail) =>
       !nonOverlappingCoverCandidates.some((existing) =>
         isPrefixPath(existing.path, detail.path)
+      ) &&
+      !tailSpliceCandidates.some((spliceCandidate) =>
+        spliceCandidate !== detail &&
+        isSubsumedByTailSplice(spliceCandidate, detail.path)
       )
     );
 

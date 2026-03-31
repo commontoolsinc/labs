@@ -21,6 +21,7 @@ import {
   type SessionSync,
   toDocumentPath,
 } from "@commontools/memory/v2";
+import { parsePointer } from "../../../memory/v2/path.ts";
 import type { AppliedCommit } from "@commontools/memory/v2/engine";
 import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord } from "@commontools/utils/types";
@@ -87,11 +88,22 @@ type CachedTransactionValue =
   | typeof UNCACHED_TRANSACTION_VALUE
   | undefined;
 
-type PendingVersion = {
-  localSeq: number;
-  value: EntityDocument | undefined;
-  transactionValue: CachedTransactionValue;
-};
+type PendingVersion =
+  | {
+    localSeq: number;
+    op: "set";
+    value: EntityDocument;
+  }
+  | {
+    localSeq: number;
+    op: "patch";
+    patches: PatchOp[];
+    value: EntityDocument;
+  }
+  | {
+    localSeq: number;
+    op: "delete";
+  };
 
 type ConfirmedVersion = {
   seq: number;
@@ -120,12 +132,11 @@ type PendingCommitRead = {
 
 const pendingVersion = (
   localSeq: number,
-  value: EntityDocument | undefined,
-): PendingVersion => ({
-  localSeq,
-  value,
-  transactionValue: UNCACHED_TRANSACTION_VALUE,
-});
+  operation:
+    | { op: "set"; value: EntityDocument }
+    | { op: "patch"; patches: PatchOp[]; value: EntityDocument }
+    | { op: "delete" },
+): PendingVersion => ({ localSeq, ...operation });
 
 const confirmedVersion = (
   seq: number,
@@ -137,12 +148,214 @@ const confirmedVersion = (
 });
 
 const transactionValueForVersion = (
-  version: PendingVersion | ConfirmedVersion,
+  version: ConfirmedVersion,
 ): StorableDatum | undefined => {
   if (version.transactionValue === UNCACHED_TRANSACTION_VALUE) {
     version.transactionValue = toTransactionDocumentValue(version.value);
   }
   return version.transactionValue;
+};
+
+const isPathPrefix = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) => segment === path[index]);
+
+const isArrayIndex = (segment: string): boolean =>
+  `${Number.parseInt(segment, 10)}` === segment &&
+  Number.parseInt(segment, 10) >= 0;
+
+const createContainer = (nextSegment: string): StorableDatum =>
+  isArrayIndex(nextSegment) ? [] : {};
+
+const hasDocumentPath = (
+  root: StorableDatum | undefined,
+  path: readonly string[],
+): boolean => {
+  let current: unknown = root;
+  for (const segment of path) {
+    if (Array.isArray(current)) {
+      if (!isArrayIndex(segment)) {
+        return false;
+      }
+      const index = Number(segment);
+      if (!(index in current)) {
+        return false;
+      }
+      current = current[index];
+      continue;
+    }
+    if (!isRecord(current) || !(segment in current)) {
+      return false;
+    }
+    current = current[segment];
+  }
+  return true;
+};
+
+const readDocumentPath = (
+  root: StorableDatum | undefined,
+  path: readonly string[],
+): StorableDatum | undefined => {
+  let current: unknown = root;
+  for (const segment of path) {
+    if (Array.isArray(current)) {
+      if (!isArrayIndex(segment)) {
+        return undefined;
+      }
+      current = current[Number(segment)];
+      continue;
+    }
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+  return current as StorableDatum | undefined;
+};
+
+const setDocumentPath = (
+  root: EntityDocument | undefined,
+  path: readonly string[],
+  value: StorableDatum | undefined,
+): EntityDocument | undefined => {
+  if (path.length === 0) {
+    return value === undefined
+      ? undefined
+      : structuredClone(value) as EntityDocument;
+  }
+
+  const nextRoot = structuredClone(root ?? {}) as Record<string, unknown>;
+  let current: Record<string, unknown> | unknown[] = nextRoot;
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const segment = path[index]!;
+    const nextSegment = path[index + 1]!;
+    if (Array.isArray(current)) {
+      const slot = Number(segment);
+      const existing = current[slot];
+      if (!isRecord(existing) && !Array.isArray(existing)) {
+        current[slot] = createContainer(nextSegment);
+      }
+      current = current[slot] as Record<string, unknown> | unknown[];
+      continue;
+    }
+
+    const existing = current[segment];
+    if (!isRecord(existing) && !Array.isArray(existing)) {
+      current[segment] = createContainer(nextSegment);
+    }
+    current = current[segment] as Record<string, unknown> | unknown[];
+  }
+
+  const last = path[path.length - 1]!;
+  if (Array.isArray(current)) {
+    current[Number(last)] = structuredClone(value);
+  } else {
+    current[last] = structuredClone(value);
+  }
+  return nextRoot as EntityDocument;
+};
+
+const removeDocumentPath = (
+  root: EntityDocument | undefined,
+  path: readonly string[],
+): EntityDocument | undefined => {
+  if (root === undefined) {
+    return undefined;
+  }
+  if (path.length === 0) {
+    return undefined;
+  }
+
+  const nextRoot = structuredClone(root) as Record<string, unknown>;
+  let current: Record<string, unknown> | unknown[] = nextRoot;
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const segment = path[index]!;
+    if (Array.isArray(current)) {
+      const slot = Number(segment);
+      const next = current[slot];
+      if (!isRecord(next) && !Array.isArray(next)) {
+        return nextRoot as EntityDocument;
+      }
+      current = next as Record<string, unknown> | unknown[];
+      continue;
+    }
+
+    const next = current[segment];
+    if (!isRecord(next) && !Array.isArray(next)) {
+      return nextRoot as EntityDocument;
+    }
+    current = next as Record<string, unknown> | unknown[];
+  }
+
+  const last = path[path.length - 1]!;
+  if (Array.isArray(current)) {
+    const slot = Number(last);
+    if (slot >= 0 && slot < current.length) {
+      current.splice(slot, 1);
+    }
+  } else {
+    delete current[last];
+  }
+  return nextRoot as EntityDocument;
+};
+
+const changedPathsForPendingPatch = (patches: readonly PatchOp[]): string[][] =>
+  patches.flatMap((patch) => {
+    switch (patch.op) {
+      case "replace":
+      case "add":
+      case "remove":
+      case "splice":
+        return [parsePointer(patch.path)];
+      case "move":
+        return [parsePointer(patch.from), parsePointer(patch.path)];
+    }
+  });
+
+const compactChangedPaths = (paths: readonly string[][]): string[][] => {
+  const sorted = [...paths].sort((left, right) => left.length - right.length);
+  const retained: string[][] = [];
+  for (const path of sorted) {
+    if (retained.some((existing) => isPathPrefix(existing, path))) {
+      continue;
+    }
+    retained.push(path);
+  }
+  return retained;
+};
+
+const applyPendingVersion = (
+  base: EntityDocument | undefined,
+  pending: PendingVersion,
+): EntityDocument | undefined => {
+  switch (pending.op) {
+    case "delete":
+      return undefined;
+    case "set":
+      return structuredClone(pending.value);
+    case "patch": {
+      let next = base;
+      for (
+        const path of compactChangedPaths(
+          changedPathsForPendingPatch(pending.patches),
+        )
+      ) {
+        if (hasDocumentPath(pending.value, path)) {
+          next = setDocumentPath(
+            next,
+            path,
+            readDocumentPath(pending.value, path),
+          );
+          continue;
+        }
+        next = removeDocumentPath(next, path);
+      }
+      return next;
+    }
+  }
 };
 
 export interface Options {
@@ -1189,11 +1402,7 @@ class SpaceReplica implements ISpaceReplica {
       : undefined;
 
     for (const operation of operations) {
-      this.applyPending(
-        operation.id,
-        localSeq,
-        operation.op === "delete" ? undefined : operation.value,
-      );
+      this.applyPending(operation, localSeq);
     }
 
     if (before !== undefined) {
@@ -1391,12 +1600,15 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private applyPending(
-    id: URI,
+    operation:
+      | { op: "set"; id: URI; value: EntityDocument }
+      | { op: "patch"; id: URI; patches: PatchOp[]; value: EntityDocument }
+      | { op: "delete"; id: URI },
     localSeq: number,
-    value: EntityDocument | undefined,
   ): void {
+    const { id, ...pending } = operation;
     const record = this.record(id);
-    record.pending.push(pendingVersion(localSeq, value));
+    record.pending.push(pendingVersion(localSeq, pending));
   }
 
   private confirmPending(
@@ -1421,7 +1633,9 @@ class SpaceReplica implements ISpaceReplica {
       }
       record.confirmed = confirmedVersion(
         applied.seq,
-        pending.value,
+        record.confirmed.seq < applied.seq
+          ? applyPendingVersion(record.confirmed.value, pending)
+          : record.confirmed.value,
       );
       record.pending = record.pending.filter((entry) =>
         entry.localSeq !== localSeq
@@ -1442,11 +1656,14 @@ class SpaceReplica implements ISpaceReplica {
     if (!record) {
       return undefined;
     }
-    const pending = record.pending.at(-1);
-    if (pending !== undefined) {
-      return transactionValueForVersion(pending);
+    if (record.pending.length === 0) {
+      return transactionValueForVersion(record.confirmed);
     }
-    return transactionValueForVersion(record.confirmed);
+    let value = record.confirmed.value;
+    for (const pending of record.pending) {
+      value = applyPendingVersion(value, pending);
+    }
+    return toTransactionDocumentValue(value);
   }
 
   private getState(id: URI): State | undefined {
@@ -1470,11 +1687,14 @@ class SpaceReplica implements ISpaceReplica {
     if (!record) {
       return undefined;
     }
-    const pending = record.pending.at(-1);
-    if (pending !== undefined) {
-      return pending.value;
+    if (record.pending.length === 0) {
+      return record.confirmed.value;
     }
-    return record.confirmed.value;
+    let value = record.confirmed.value;
+    for (const pending of record.pending) {
+      value = applyPendingVersion(value, pending);
+    }
+    return value;
   }
 
   private notifySinks(changes: IMergedChanges): void {

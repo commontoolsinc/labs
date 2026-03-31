@@ -1,7 +1,11 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
 import { Identity } from "@commontools/identity";
-import type { MIME, URI } from "@commontools/memory/interface";
-import { type EntityDocument, getMemoryV2Flags } from "@commontools/memory/v2";
+import type { MIME, StorableDatum, URI } from "@commontools/memory/interface";
+import {
+  type EntityDocument,
+  getMemoryV2Flags,
+  type PatchOp,
+} from "@commontools/memory/v2";
 import type {
   ClientCommit,
   ConfirmedRead,
@@ -13,6 +17,7 @@ import {
   parsePointer,
   pathsOverlap,
 } from "../../memory/v2/path.ts";
+import { applyPatch } from "../../memory/v2/patch.ts";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import type { AppliedCommit } from "@commontools/memory/v2/engine";
 import type {
@@ -297,7 +302,10 @@ class ScriptedServerModel {
     } as AppliedCommit;
 
     for (const operation of commit.operations) {
-      const next = applyOperation(operation);
+      const next = applyOperation(
+        operation,
+        this.confirmed.get(operation.id as URI)?.value,
+      );
       this.confirmed.set(operation.id as URI, {
         seq: applied.seq,
         value: next,
@@ -591,7 +599,10 @@ const touchedWritesForOperation = (operation: Operation): TouchedWrite[] => {
   return [{ id: operation.id as URI, paths }];
 };
 
-const applyOperation = (operation: Operation): RootValue => {
+const applyOperation = (
+  operation: Operation,
+  current: RootValue,
+): RootValue => {
   if (operation.op === "delete") {
     return undefined;
   }
@@ -602,7 +613,11 @@ const applyOperation = (operation: Operation): RootValue => {
         : operation.value as RootValue,
     );
   }
-  throw new Error("Patch operations are not used in the stacked suite");
+  const next = applyPatch(
+    { value: clone(current) ?? {} } as StorableDatum,
+    operation.patches,
+  ) as { value?: RootValue };
+  return next.value;
 };
 
 const isEntityDocumentValue = (value: unknown): value is { value: RootValue } =>
@@ -943,6 +958,137 @@ Deno.test("memory v2 stacked commits: C1,C2,C3 all succeed on one doc", async ()
       changedIdsFor(harness.notifications.notifications, "revert"),
       [],
     );
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits preserve earlier patch fields across later stale same-doc patches", async () => {
+  const harness = await createHarness();
+  try {
+    const supportOnly = {
+      internal: {
+        selectedCategory: "support",
+        visibleTemplates: [{ id: "support-shift-schedule" }],
+        "__#4": "Support",
+      },
+    };
+    const allVisible = [
+      { id: "hero-email-kit" },
+      { id: "support-shift-schedule" },
+      { id: "product-tour-deck" },
+      { id: "ops-kanban" },
+      { id: "retro-guide" },
+    ];
+
+    await seedAccepted(harness, DOCS.A, supportOnly);
+
+    harness.model.setOutcome(2, { kind: "accept" });
+    harness.model.setOutcome(3, { kind: "accept" });
+    harness.model.setOutcome(4, { kind: "accept" });
+
+    const replica = harness.replica as unknown as {
+      commitNative(
+        transaction: {
+          operations: Array<
+            {
+              op: "patch";
+              id: URI;
+              type: MIME;
+              patches: PatchOp[];
+              value: { value: RootValue };
+            }
+          >;
+        },
+      ): Promise<any>;
+    };
+
+    const c2 = replica.commitNative({
+      operations: [{
+        op: "patch",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        patches: [{
+          op: "replace",
+          path: "/value/internal/selectedCategory",
+          value: "all",
+        }],
+        value: {
+          value: {
+            internal: {
+              selectedCategory: "all",
+              visibleTemplates: [{ id: "support-shift-schedule" }],
+              "__#4": "Support",
+            },
+          },
+        },
+      }],
+    });
+    const c3 = replica.commitNative({
+      operations: [{
+        op: "patch",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        patches: [
+          {
+            op: "replace",
+            path: "/value/internal/visibleTemplates/0",
+            value: allVisible[0],
+          },
+          {
+            op: "splice",
+            path: "/value/internal/visibleTemplates",
+            index: 1,
+            remove: 0,
+            add: allVisible.slice(1),
+          },
+        ],
+        value: {
+          value: {
+            internal: {
+              selectedCategory: "all",
+              visibleTemplates: allVisible,
+              "__#4": "Support",
+            },
+          },
+        },
+      }],
+    });
+    const c4 = replica.commitNative({
+      operations: [{
+        op: "patch",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        patches: [{
+          op: "replace",
+          path: "/value/internal/__#4",
+          value: "All",
+        }],
+        value: {
+          value: {
+            internal: {
+              selectedCategory: "all",
+              visibleTemplates: [{ id: "support-shift-schedule" }],
+              "__#4": "All",
+            },
+          },
+        },
+      }],
+    });
+
+    await assertResultOk(c2);
+    await assertResultOk(c3);
+    await assertResultOk(c4);
+
+    expectVisible(harness, {
+      A: {
+        internal: {
+          selectedCategory: "all",
+          visibleTemplates: allVisible,
+          "__#4": "All",
+        },
+      },
+    });
   } finally {
     await harness.close();
   }
