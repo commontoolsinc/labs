@@ -6,11 +6,8 @@ import {
 } from "@commontools/data-model/json-encoding";
 import { getSchemaHashConfig } from "@commontools/data-model/schema-hash";
 import { getModernHashConfig } from "@commontools/data-model/value-hash";
-import type { SchemaPathSelector, StorableDatum } from "./interface.ts";
-import type {
-  FabricValue,
-  ReconstructionContext,
-} from "@commontools/data-model/interface";
+import type { FabricValue, SchemaPathSelector } from "./interface.ts";
+import type { ReconstructionContext } from "@commontools/data-model/interface";
 import { isObject, isRecord } from "@commontools/utils/types";
 import { getExperimentalStorableConfig } from "./storable-value.ts";
 
@@ -43,10 +40,10 @@ export interface SourceLink {
   "/": string;
 }
 
-export type EntityDocumentField = StorableDatum | SourceLink | undefined;
+export type EntityDocumentField = FabricValue | SourceLink | undefined;
 
 export interface EntityDocument {
-  value?: StorableDatum;
+  value?: FabricValue;
   source?: SourceLink;
   [key: string]: EntityDocumentField;
 }
@@ -59,8 +56,8 @@ export interface Blob {
 }
 
 export type PatchOp =
-  | { op: "replace"; path: string; value: StorableDatum }
-  | { op: "add"; path: string; value: StorableDatum }
+  | { op: "replace"; path: string; value: FabricValue }
+  | { op: "add"; path: string; value: FabricValue }
   | { op: "remove"; path: string }
   | { op: "move"; from: string; path: string }
   | {
@@ -68,7 +65,7 @@ export type PatchOp =
     path: string;
     index: number;
     remove: number;
-    add: StorableDatum[];
+    add: FabricValue[];
   };
 
 export interface SetOperation {
@@ -169,7 +166,7 @@ export interface SessionOpenRequest {
   space: string;
   session: SessionDescriptor;
   invocation?: Record<string, unknown>;
-  authorization?: StorableDatum;
+  authorization?: FabricValue;
 }
 
 export interface GraphQueryRoot {
@@ -252,7 +249,7 @@ export interface TransactRequest {
   sessionId: SessionId;
   commit: ClientCommit;
   invocation?: Record<string, unknown>;
-  authorization?: StorableDatum;
+  authorization?: FabricValue;
 }
 
 export interface GraphQueryRequest {
@@ -368,7 +365,7 @@ export const isMemoryV2Flags = (value: unknown): value is MemoryV2Flags => {
 export const encodeMemoryV2Boundary = (value: unknown): string =>
   jsonFromValue(value as FabricValue);
 
-export const decodeMemoryV2Boundary = <Value = StorableDatum>(
+export const decodeMemoryV2Boundary = <Value = FabricValue>(
   source: string,
 ): Value =>
   cloneIfNecessary(

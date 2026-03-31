@@ -1,7 +1,7 @@
 import { Database } from "@db/sqlite";
 import { fromDigest } from "merkle-reference";
 import { sha256 } from "@commontools/data-model/sha256-impl";
-import type { StorableDatum } from "../interface.ts";
+import type { FabricValue } from "../interface.ts";
 import { refer } from "../reference.ts";
 import { applyPatch } from "./patch.ts";
 import { parentPath, parsePointer, pathsOverlap } from "./path.ts";
@@ -485,16 +485,16 @@ export interface InvocationRecord {
   aud?: string | null;
   cmd: string;
   sub: string;
-  args?: StorableDatum;
+  args?: FabricValue;
   [key: string]: unknown;
 }
 
-export type AuthorizationRecord = StorableDatum;
+export type AuthorizationRecord = FabricValue;
 
 export interface ApplyCommitOptions {
   sessionId: SessionId;
   invocation: InvocationRecord;
-  invocationPayload?: StorableDatum;
+  invocationPayload?: FabricValue;
   authorization: AuthorizationRecord;
   commit: ClientCommit;
 }
@@ -1407,7 +1407,7 @@ const applyPatchDocument = (
   document: EntityDocument,
   patches: PatchOp[],
 ): EntityDocument =>
-  applyPatch(document as StorableDatum, patches) as EntityDocument;
+  applyPatch(document as FabricValue, patches) as EntityDocument;
 
 const sameStoredOriginal = (
   stored: string,

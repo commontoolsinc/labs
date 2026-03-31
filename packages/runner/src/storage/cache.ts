@@ -2,10 +2,7 @@ import {
   hashObjectFromString,
 } from "@commonfabric/data-model/value-hash";
 import { refer } from "@commonfabric/memory/reference";
-import type {
-  StorableDatum,
-  StorableValue,
-} from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/memory/interface";
 import type {
   CauseString,
   Changes as MemoryChanges,
@@ -306,7 +303,7 @@ class Heap implements SyncPush<Revision<State>> {
 type RevisionArchive = {
   the: The;
   of: Entity;
-  is?: StorableDatum;
+  is?: FabricValue;
   cause?: string;
   since: number;
 };
@@ -598,7 +595,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     }
     const traverse = (
       value: Readonly<any>,
-    ): StorableDatum => {
+    ): FabricValue => {
       if (isRecord(value)) {
         if (Array.isArray(value)) {
           return value.map((val) => traverse(val));
@@ -1421,7 +1418,7 @@ export class Replica {
       return;
     }
 
-    const initialACL: StorableDatum = {
+    const initialACL: FabricValue = {
       value: {
         [userIdentity.did()]: "OWNER",
         [ANYONE_USER]: "WRITE",
@@ -1809,7 +1806,7 @@ export class Provider implements IStorageProvider {
 
   subscribers: Map<
     string,
-    Set<(value: StorageValue<StorableDatum>) => void>
+    Set<(value: StorageValue<FabricValue>) => void>
   > = new Map();
   // Tracks server-side subscriptions so we can re-establish them after reconnection
   // These promises will sometimes be pending, since we also use this to avoid
@@ -1908,7 +1905,7 @@ export class Provider implements IStorageProvider {
       Promise.all(this.workspace.commitPromises),
     ]);
   }
-  get<T extends StorableValue = StorableValue>(
+  get<T extends FabricValue = FabricValue>(
     uri: URI,
   ): OptStorageValue<T> {
     const entity = this.workspace.get({ id: uri, type: this.the });
@@ -1918,7 +1915,7 @@ export class Provider implements IStorageProvider {
 
   // This is mostly just used by tests and tools, since the transactions will
   // directly commit their results.
-  async send<T extends StorableValue = StorableValue>(
+  async send<T extends FabricValue = FabricValue>(
     batch: { uri: URI; value: StorageValue<T> }[],
   ): Promise<
     Result<Unit, PushError>
@@ -1940,7 +1937,7 @@ export class Provider implements IStorageProvider {
           facts.push(assert({
             the,
             of: uri,
-            is: newValue as StorableDatum,
+            is: newValue as FabricValue,
             // If fact has no `cause` it is unclaimed fact.
             cause: current?.cause ? current : null,
           }));
@@ -1955,7 +1952,7 @@ export class Provider implements IStorageProvider {
             facts.push(assert({
               the: LABEL_TYPE,
               of: uri,
-              is: value.labels as StorableDatum,
+              is: value.labels as FabricValue,
               // If fact has no `cause` it is unclaimed fact.
               cause: currentLabel?.cause ? currentLabel : null,
             }));

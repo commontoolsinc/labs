@@ -12,7 +12,7 @@ import {
 } from "@commontools/data-model/json-encoding";
 import { FabricEpochNsec } from "@commontools/data-model/fabric-epoch";
 import { Identity } from "@commontools/identity";
-import type { MIME, StorableDatum, URI } from "@commontools/memory/interface";
+import type { FabricValue, MIME, URI } from "@commontools/memory/interface";
 import {
   resetStorableValueConfig,
   setStorableValueConfig,
@@ -22,10 +22,7 @@ import {
   getMemoryV2Flags,
   type PatchOp,
 } from "@commontools/memory/v2";
-import type {
-  FabricValue,
-  ReconstructionContext,
-} from "@commontools/data-model/interface";
+import type { ReconstructionContext } from "@commontools/data-model/interface";
 import type {
   ClientCommit,
   ConfirmedRead,
@@ -76,7 +73,7 @@ type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
 };
 
-type RootValue = Record<string, StorableDatum> | undefined;
+type RootValue = Record<string, FabricValue> | undefined;
 type DocState = {
   seq: number;
   value: RootValue;
@@ -544,8 +541,8 @@ const clone = <T>(value: T): T => structuredClone(value);
 
 const valueFor = (
   label: string,
-  extra: Record<string, StorableDatum> = {},
-): Record<string, StorableDatum> => ({ label, ...extra });
+  extra: Record<string, FabricValue> = {},
+): Record<string, FabricValue> => ({ label, ...extra });
 
 const sourceFromReads = (
   reads: Array<{
@@ -642,7 +639,7 @@ const applyOperation = (
     );
   }
   const next = applyPatch(
-    { value: clone(current) ?? {} } as StorableDatum,
+    { value: clone(current) ?? {} } as FabricValue,
     operation.patches,
   ) as { value?: RootValue };
   return next.value;
@@ -1647,7 +1644,7 @@ Deno.test("memory v2 stacked commits: pending visibility preserves rich fabric v
 
     const pendingVisible = harness.provider.get(DOCS.A);
     assertExists(pendingVisible);
-    const pendingValue = pendingVisible.value as Record<string, StorableDatum>;
+    const pendingValue = pendingVisible.value as Record<string, FabricValue>;
     assertEquals(pendingValue.label, "pending");
     assertStrictEquals(pendingValue.timestamp, timestamp);
 

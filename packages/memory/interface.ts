@@ -11,6 +11,7 @@ export type { SchemaPathSelector };
 // naming from the memory package surface.
 export type StorableDatum = FabricDatum;
 export type StorableValue = FabricValue;
+export type { FabricValue };
 
 export type { JSONValue };
 export type MemoryVersion = "v1" | "v2";

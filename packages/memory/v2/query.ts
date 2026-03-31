@@ -15,7 +15,7 @@ import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
 import { ContextualFlowControl } from "../../runner/src/cfc.ts";
 import { type Immutable, isObject } from "@commontools/utils/types";
-import type { MemorySpace, StorableDatum, URI } from "../interface.ts";
+import type { FabricValue, MemorySpace, URI } from "../interface.ts";
 import {
   type EntitySnapshot,
   type GraphQuery,
@@ -82,7 +82,7 @@ export class EngineObjectManager implements ObjectStorageManager {
         type: address.type,
         path: [],
       },
-      value: state.document as unknown as Immutable<StorableDatum>,
+      value: state.document as unknown as Immutable<FabricValue>,
     };
     this.#attestations.set(key, attestation);
     this.#details.set(key, {
@@ -232,7 +232,7 @@ export const trackGraph = (
     reuse?.managers?.set(managerKey, manager);
   }
   const tracker = new CompoundCycleTracker<
-    Immutable<StorableDatum>,
+    Immutable<FabricValue>,
     JSONSchema | undefined
   >();
   const schemaTracker = new MapSetStringToPathSelectors(true);
@@ -438,7 +438,7 @@ const loadFactsForDoc = (
   fact: IAttestation,
   selector: SchemaPathSelector,
   tracker: CompoundCycleTracker<
-    Immutable<StorableDatum>,
+    Immutable<FabricValue>,
     JSONSchema | undefined
   >,
   cfc: ContextualFlowControl,
@@ -467,7 +467,7 @@ const loadFactsForDoc = (
       },
     }),
   );
-  const document = fact.value as { value: StorableDatum };
+  const document = fact.value as { value: FabricValue };
   const factValue: IMemorySpaceValueAttestation = {
     address: { ...fact.address, space: space as MemorySpace, path: ["value"] },
     value: document.value,
@@ -524,7 +524,7 @@ const evaluateTrackedDocument = (
     return;
   }
   const tracker = new CompoundCycleTracker<
-    Immutable<StorableDatum>,
+    Immutable<FabricValue>,
     JSONSchema | undefined
   >();
   const cfc = new ContextualFlowControl();

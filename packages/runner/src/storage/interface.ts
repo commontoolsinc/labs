@@ -8,6 +8,7 @@ import {
   type ConnectionError as IConnectionError,
   DEFAULT_MEMORY_VERSION,
   type DID,
+  type FabricValue,
   type Fact,
   getDefaultMemoryVersion,
   getIntegrationMemoryVersionOverride,
@@ -20,8 +21,6 @@ import {
   type SchemaPathSelector,
   type Signer,
   type State,
-  type StorableDatum,
-  type StorableValue,
   type The as MediaType,
   type TransactionError,
   type Unit,
@@ -99,14 +98,14 @@ export type Labels = {
 };
 
 /** Immutable storage value container. */
-export interface StorageValue<T extends StorableValue = StorableValue> {
+export interface StorageValue<T extends FabricValue = FabricValue> {
   readonly value: Immutable<T>;
   readonly source?: EntityId;
   readonly labels?: Immutable<Labels>;
 }
 
 /** Optional `StorageValue<T>`. */
-export type OptStorageValue<T extends StorableValue = StorableValue> =
+export type OptStorageValue<T extends FabricValue = FabricValue> =
   | StorageValue<T>
   | undefined;
 
@@ -413,7 +412,7 @@ export interface IMergedChanges extends Iterable<IMemoryChange> {
 
 export interface ITransactionWriteRequest {
   address: IMemorySpaceAddress;
-  value: StorableValue;
+  value: FabricValue;
 }
 
 export interface IMemoryChange {
@@ -424,11 +423,11 @@ export interface IMemoryChange {
   /**
    * Value memory address had before change.
    */
-  before: Immutable<StorableValue>;
+  before: Immutable<FabricValue>;
   /**
    * Value memory address has after change.
    */
-  after: Immutable<StorableValue>;
+  after: Immutable<FabricValue>;
 }
 
 export type StorageTransactionStatus =
@@ -551,7 +550,7 @@ export interface IStorageTransaction {
    */
   write(
     address: IMemorySpaceAddress,
-    value?: StorableDatum,
+    value?: FabricValue,
   ): Result<IAttestation, WriterError | WriteError>;
 
   /**
@@ -636,7 +635,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): StorableValue;
+  ): FabricValue;
 
   /**
    * Reads a value from a (local) memory address and throws on error, except for
@@ -651,7 +650,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   readValueOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): StorableValue;
+  ): FabricValue;
 
   /**
    * Writes a value into a storage at a given address, including creating parent
@@ -662,7 +661,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    */
   writeOrThrow(
     address: IMemorySpaceAddress,
-    value: StorableValue,
+    value: FabricValue,
   ): void;
 
   /**
@@ -677,7 +676,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    */
   writeValueOrThrow(
     address: IMemorySpaceAddress,
-    value: StorableValue,
+    value: FabricValue,
   ): void;
 
   /**
@@ -740,7 +739,7 @@ export interface ITransactionWriter extends ITransactionReader {
    */
   write(
     address: IMemoryAddress,
-    value?: StorableDatum,
+    value?: FabricValue,
   ): Result<IAttestation, WriteError>;
 }
 
@@ -877,7 +876,7 @@ export interface IMemoryAddress {
    */
   type: MediaType;
   /**
-   * Intra-value path to the {@link StorableDatum} being referenced by this
+   * Intra-value path to the {@link FabricValue} being referenced by this
    * address. It is a path within the `is` field of the fact in memory protocol.
    */
   path: readonly MemoryAddressPathComponent[];
@@ -892,7 +891,7 @@ export type MemoryAddressPathComponent = string;
 export interface Assert {
   the: MediaType;
   of: URI;
-  is: StorableDatum;
+  is: FabricValue;
 
   claim?: void;
 }
@@ -976,8 +975,8 @@ export interface TransactionReactivityLog {
 
 export interface TransactionWriteDetail {
   address: IMemorySpaceAddress;
-  value?: Immutable<StorableDatum>;
-  previousValue?: Immutable<StorableDatum>;
+  value?: Immutable<FabricValue>;
+  previousValue?: Immutable<FabricValue>;
 }
 
 export type NativeStorageCommitOperation =
@@ -985,7 +984,7 @@ export type NativeStorageCommitOperation =
     op: "set";
     id: URI;
     type: MediaType;
-    value: StorableDatum;
+    value: FabricValue;
   }
   | {
     op: "delete";
@@ -997,7 +996,7 @@ export type NativeStorageCommitOperation =
     id: URI;
     type: MediaType;
     patches: PatchOp[];
-    value: StorableDatum;
+    value: FabricValue;
   };
 
 export interface NativeStorageCommit {
@@ -1084,13 +1083,13 @@ export interface ITypeMismatchError extends IStorageError {
  */
 export interface IAttestation {
   readonly address: IMemoryAddress;
-  readonly value?: Immutable<StorableDatum>;
+  readonly value?: Immutable<FabricValue>;
 }
 
 // An IAttestation where the address is an IMemorySpaceAddress
 export interface IMemorySpaceAttestation {
   readonly address: IMemorySpaceAddress;
-  readonly value?: Immutable<StorableDatum>;
+  readonly value?: Immutable<FabricValue>;
 }
 
 // Re-export transaction wrapper utilities from implementation

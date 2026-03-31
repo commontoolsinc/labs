@@ -65,11 +65,7 @@ export {
   valueEqual,
 };
 
-export type {
-  FabricNativeObject as StorableNativeObject,
-  FabricValue as StorableValue,
-  FabricValueLayer as StorableValueLayer,
-};
+export type { FabricNativeObject, FabricValue, FabricValueLayer };
 
 export function isStorableValue(
   value: unknown,

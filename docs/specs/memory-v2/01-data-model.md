@@ -11,7 +11,7 @@ TypeScript type definition.
 
 Unless a subsection is explicitly talking about pure JSON schema/query syntax,
 runtime payloads in the current implementation should be read as
-`StorableDatum`, not plain `JSONValue`. `StorableDatum` is the shared rich-value
+`FabricValue`, not plain `JSONValue`. `FabricValue` is the shared rich-value
 surface from the data-model layer: it includes ordinary JSON values and also
 runtime-supported richer leaves such as `bigint`, `undefined`, and the escaped
 single-slash object forms used by the boundary codec.
@@ -49,7 +49,7 @@ Entity values are stored in an **envelope** with well-known top-level keys:
 
 ```typescript
 interface EntityDocument {
-  value?: StorableDatum; // The cell's data when present.
+  value?: FabricValue; // The cell's data when present.
   source?: SourceLink; // {"/":"<short-id>"} -> resolves to of:<short-id> in same space.
   // Future: labels, schema, etc.
 }
@@ -440,13 +440,13 @@ type JSONPointer = string;
 interface ReplaceOp {
   op: "replace";
   path: JSONPointer;
-  value: StorableDatum;
+  value: FabricValue;
 }
 
 interface AddOp {
   op: "add";
   path: JSONPointer;
-  value: StorableDatum;
+  value: FabricValue;
   // Creates intermediate parents automatically:
   // numeric path segments → array, string segments → object,
   // schema-guided when available.
@@ -471,7 +471,7 @@ interface SpliceOp {
   path: JSONPointer; // Path to the target array
   index: number; // Start index
   remove: number; // Number of elements to remove
-  add: StorableDatum[]; // Elements to insert at the index
+  add: FabricValue[]; // Elements to insert at the index
 }
 
 type PatchOp = ReplaceOp | AddOp | RemoveOp | MoveOp | SpliceOp;
@@ -498,7 +498,7 @@ patch list is invalid (e.g., removing a non-existent path), the entire patch
 fails and the fact is rejected.
 
 ```typescript
-function applyPatch(state: StorableDatum, ops: PatchOp[]): StorableDatum {
+function applyPatch(state: FabricValue, ops: PatchOp[]): FabricValue {
   let current = state;
   for (const op of ops) {
     current = applyOp(current, op);
@@ -712,7 +712,7 @@ type JSONValue =
  * such as bigint/undefined plus escaped slash-key objects when the active
  * runtime experimental flags enable them.
  */
-type StorableDatum = unknown;
+type FabricValue = unknown;
 
 /** A JSON Schema definition. */
 type JSONSchema =

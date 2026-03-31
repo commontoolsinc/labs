@@ -6,7 +6,7 @@ import {
   getExperimentalStorableConfig,
   isArrayIndexPropertyName,
 } from "@commontools/memory/storable-value";
-import type { StorableDatum } from "@commontools/memory/interface";
+import type { FabricValue } from "@commontools/memory/interface";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
 import type {
@@ -73,7 +73,7 @@ type ReadDocumentEntry = {
   seq?: number;
   validated: boolean;
   current?: RootAttestation;
-  frozenReads?: Map<string, StorableDatum | undefined>;
+  frozenReads?: Map<string, FabricValue | undefined>;
   writeDetails?: Map<string, TransactionWriteDetail>;
   patchDetails?: Map<string, TransactionWriteDetail>;
 };
@@ -83,7 +83,7 @@ type WritableDocumentEntry = {
   current: RootAttestation;
   seq?: number;
   validated: boolean;
-  frozenReads: Map<string, StorableDatum | undefined>;
+  frozenReads: Map<string, FabricValue | undefined>;
   writeDetails: Map<string, TransactionWriteDetail>;
   patchDetails: Map<string, TransactionWriteDetail>;
 };
@@ -186,18 +186,18 @@ const ensureWritableDocument = (
 
 const createMissingContainer = (
   nextKey: string,
-): StorableDatum => isArrayIndexPropertyName(nextKey) ? [] : {};
+): FabricValue => isArrayIndexPropertyName(nextKey) ? [] : {};
 
 const ensureParentContainers = (
-  root: StorableDatum,
+  root: FabricValue,
   path: readonly string[],
   lastKey: string,
-): StorableDatum => {
+): FabricValue => {
   if (path.length === 0) {
     return root;
   }
 
-  let current = root as Record<string, StorableDatum> | StorableDatum[];
+  let current = root as Record<string, FabricValue> | FabricValue[];
   for (let index = 0; index < path.length; index += 1) {
     const key = path[index]!;
     const nextKey = path[index + 1] ?? lastKey;
@@ -210,8 +210,8 @@ const ensureParentContainers = (
         current[slot] = container;
       }
       current = current[slot] as
-        | Record<string, StorableDatum>
-        | StorableDatum[];
+        | Record<string, FabricValue>
+        | FabricValue[];
       continue;
     }
 
@@ -219,13 +219,13 @@ const ensureParentContainers = (
     if (!isRecord(existing) && !Array.isArray(existing)) {
       current[key] = container;
     }
-    current = current[key] as Record<string, StorableDatum> | StorableDatum[];
+    current = current[key] as Record<string, FabricValue> | FabricValue[];
   }
 
   return root;
 };
 
-const freezeReadValue = <T extends StorableDatum | undefined>(value: T): T => {
+const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   if (
     value === undefined || value === null ||
     typeof value !== "object"
@@ -237,8 +237,8 @@ const freezeReadValue = <T extends StorableDatum | undefined>(value: T): T => {
 
 const collapseEmptyJsonDocumentEnvelope = (
   type: MediaType,
-  value: StorableDatum | undefined,
-): StorableDatum | undefined => {
+  value: FabricValue | undefined,
+): FabricValue | undefined => {
   if (
     type !== "application/json" ||
     value === undefined ||
@@ -257,9 +257,9 @@ const normalizeReactivityPath = (path: readonly string[]): string[] =>
   path[0] === "value" ? [...path.slice(1)] : [...path];
 
 const readPathValue = (
-  value: StorableDatum | undefined,
+  value: FabricValue | undefined,
   path: readonly string[],
-): StorableDatum | undefined => {
+): FabricValue | undefined => {
   let current: unknown = value;
   for (const segment of path) {
     if (Array.isArray(current)) {
@@ -278,13 +278,13 @@ const readPathValue = (
     }
     current = current[segment];
   }
-  return current as StorableDatum | undefined;
+  return current as FabricValue | undefined;
 };
 
 type PathInspection =
   | {
     kind: "ok";
-    value: StorableDatum | undefined;
+    value: FabricValue | undefined;
   }
   | {
     kind: "notFound";
@@ -297,7 +297,7 @@ type PathInspection =
   };
 
 const inspectPath = (
-  value: StorableDatum | undefined,
+  value: FabricValue | undefined,
   path: readonly string[],
 ): PathInspection => {
   if (path.length === 0) {
@@ -339,22 +339,22 @@ const inspectPath = (
     return {
       kind: "typeMismatch",
       path: path.slice(0, index + 1),
-      actualType: getValueTypeName(current as StorableDatum | undefined),
+      actualType: getValueTypeName(current as FabricValue | undefined),
     };
   }
 
   return {
     kind: "ok",
-    value: current as StorableDatum | undefined,
+    value: current as FabricValue | undefined,
   };
 };
 
 const isContainerValue = (
-  value: StorableDatum | undefined,
-): value is Record<string, StorableDatum> | StorableDatum[] =>
+  value: FabricValue | undefined,
+): value is Record<string, FabricValue> | FabricValue[] =>
   Array.isArray(value) || isRecord(value);
 
-const getValueTypeName = (value: StorableDatum | undefined): string => {
+const getValueTypeName = (value: FabricValue | undefined): string => {
   if (value === null) {
     return "null";
   }
@@ -365,15 +365,15 @@ const getValueTypeName = (value: StorableDatum | undefined): string => {
 };
 
 type MutableWriteResult = {
-  root: StorableDatum | undefined;
-  previousValue: StorableDatum | undefined;
+  root: FabricValue | undefined;
+  previousValue: FabricValue | undefined;
   changed: boolean;
 };
 
 const applyMutablePathWrite = (
-  currentRoot: StorableDatum | undefined,
+  currentRoot: FabricValue | undefined,
   address: IMemoryAddress,
-  value: StorableDatum | undefined,
+  value: FabricValue | undefined,
 ): Result<MutableWriteResult, ITypeMismatchError> => {
   if (address.path.length === 0) {
     return {
@@ -407,8 +407,8 @@ const applyMutablePathWrite = (
   }
 
   const root = currentRoot;
-  let current = root as Record<string, StorableDatum> | StorableDatum[];
-  let parent: Record<string, StorableDatum> | StorableDatum[] | undefined;
+  let current = root as Record<string, FabricValue> | FabricValue[];
+  let parent: Record<string, FabricValue> | FabricValue[] | undefined;
   let parentKey: string | number | undefined;
 
   for (let index = 0; index < address.path.length; index += 1) {
@@ -507,7 +507,7 @@ const applyMutablePathWrite = (
           ),
         };
       }
-      current = next as Record<string, StorableDatum> | StorableDatum[];
+      current = next as Record<string, FabricValue> | FabricValue[];
       continue;
     }
 
@@ -545,16 +545,16 @@ const applyMutablePathWrite = (
         ),
       };
     }
-    current = next as Record<string, StorableDatum> | StorableDatum[];
+    current = next as Record<string, FabricValue> | FabricValue[];
   }
 
   return { ok: { root, previousValue: undefined, changed: false } };
 };
 
 const findMaterializedParentPath = (
-  currentRoot: StorableDatum | undefined,
+  currentRoot: FabricValue | undefined,
   path: readonly string[],
-  value: StorableDatum | undefined,
+  value: FabricValue | undefined,
 ): readonly string[] | undefined => {
   if (value === undefined || path.length <= 1) {
     return undefined;
@@ -568,7 +568,7 @@ const findMaterializedParentPath = (
     return undefined;
   }
 
-  let current = currentRoot as Record<string, StorableDatum> | StorableDatum[];
+  let current = currentRoot as Record<string, FabricValue> | FabricValue[];
   for (let index = 0; index < path.length - 1; index += 1) {
     const key = path[index]!;
 
@@ -608,8 +608,8 @@ type PatchDraftCandidate = {
 };
 
 const findDeepestArrayPath = (
-  before: StorableDatum | undefined,
-  after: StorableDatum | undefined,
+  before: FabricValue | undefined,
+  after: FabricValue | undefined,
   path: readonly string[],
 ): readonly string[] | null => {
   let deepestArrayPath: readonly string[] | null = null;
@@ -637,8 +637,8 @@ const findDeepestArrayPath = (
 
 const buildValuePatchCandidate = (
   path: readonly string[],
-  value: StorableDatum | undefined,
-  previousValue: StorableDatum | undefined,
+  value: FabricValue | undefined,
+  previousValue: FabricValue | undefined,
 ): PatchDraftCandidate | null => {
   if (deepEqual(value, previousValue)) {
     return null;
@@ -667,7 +667,7 @@ const buildValuePatchCandidate = (
 };
 
 const arrayTailIsDense = (
-  value: readonly StorableDatum[],
+  value: readonly FabricValue[],
   start: number,
 ): boolean => {
   for (let index = start; index < value.length; index += 1) {
@@ -680,8 +680,8 @@ const arrayTailIsDense = (
 
 const buildArrayPatchCandidates = (
   path: readonly string[],
-  before: StorableDatum | undefined,
-  after: StorableDatum | undefined,
+  before: FabricValue | undefined,
+  after: FabricValue | undefined,
 ): PatchDraftCandidate[] => {
   if (deepEqual(before, after)) {
     return [];
@@ -711,8 +711,8 @@ const buildArrayPatchCandidates = (
       continue;
     }
 
-    const nextValue = after[index] as StorableDatum | undefined;
-    const previousValue = before[index] as StorableDatum | undefined;
+    const nextValue = after[index] as FabricValue | undefined;
+    const previousValue = before[index] as FabricValue | undefined;
     if (deepEqual(nextValue, previousValue)) {
       continue;
     }
@@ -735,7 +735,7 @@ const buildArrayPatchCandidates = (
         path: encodePointer(path),
         index: before.length,
         remove: 0,
-        add: after.slice(before.length) as StorableDatum[],
+        add: after.slice(before.length) as FabricValue[],
       },
       path,
       coversDescendants: false,
@@ -789,8 +789,8 @@ const isSubsumedByTailSplice = (
 };
 
 const shallowStructureChanged = (
-  before: StorableDatum | undefined,
-  after: StorableDatum | undefined,
+  before: FabricValue | undefined,
+  after: FabricValue | undefined,
 ): boolean => {
   if (isRecord(before) && isRecord(after)) {
     const beforeKeys = Object.keys(before);
@@ -824,8 +824,8 @@ const compareDocPaths = (
 };
 
 const buildReactivityPathsForChange = (
-  beforeRoot: StorableDatum | undefined,
-  afterRoot: StorableDatum | undefined,
+  beforeRoot: FabricValue | undefined,
+  afterRoot: FabricValue | undefined,
   path: readonly string[],
 ): readonly (readonly string[])[] => {
   const beforeValue = readPathValue(beforeRoot, path);
@@ -919,7 +919,7 @@ class V2Reader implements ITransactionReader {
 class V2Writer extends V2Reader implements ITransactionWriter {
   write(
     address: IMemoryAddress,
-    value?: StorableDatum,
+    value?: FabricValue,
   ): Result<IAttestation, WriteError> {
     return this.tx.writeWithinSpace(this.did(), address, value);
   }
@@ -1177,7 +1177,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   write(
     address: IMemorySpaceAddress,
-    value?: StorableDatum,
+    value?: FabricValue,
   ): Result<IAttestation, WriterError | WriteError> {
     const ready = this.prepareWriteSpace(address.space);
     if (ready.error) {
@@ -1229,7 +1229,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   writeWithinSpace(
     space: MemorySpace,
     address: IMemoryAddress,
-    value?: StorableDatum,
+    value?: FabricValue,
   ): Result<IAttestation, WriteError> {
     this.assertWritable("write()");
     return this.writeWithinBranch(this.branch(space), space, address, value);
@@ -1239,7 +1239,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     branch: SpaceBranch,
     space: MemorySpace,
     address: IMemoryAddress,
-    value?: StorableDatum,
+    value?: FabricValue,
   ): Result<IAttestation, WriteError> {
     if (address.id.startsWith("data:")) {
       return { error: ReadOnlyAddressError(address).from(space) };
@@ -1254,7 +1254,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
     const isolatedValue = value === undefined
       ? undefined
-      : isolateTransactionValue(value) as StorableDatum;
+      : isolateTransactionValue(value) as FabricValue;
     const result = writeAttestation(current, address, isolatedValue);
     if (result.error) {
       return { error: result.error.from(space) };
@@ -1279,7 +1279,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       address,
       readPathValue(collapsedNext.value, address.path),
       previous.kind === "ok"
-        ? isolateTransactionValue(previous.value) as StorableDatum | undefined
+        ? isolateTransactionValue(previous.value) as FabricValue | undefined
         : undefined,
       doc,
     );
@@ -1297,7 +1297,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   private writeWithinSpaceCreatingParents(
     space: MemorySpace,
     address: IMemoryAddress,
-    value?: StorableDatum,
+    value?: FabricValue,
   ): Result<IAttestation, WriteError> {
     const direct = this.writeWithinSpace(space, address, value);
     if (direct.ok || direct.error?.name !== "NotFoundError") {
@@ -1320,7 +1320,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       return direct;
     }
 
-    let parentValue: StorableDatum;
+    let parentValue: FabricValue;
     if (lastExistingPath.length === 0) {
       parentValue = {};
     } else {
@@ -1335,7 +1335,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (!isRecord(existingParent) && !Array.isArray(existingParent)) {
         return direct;
       }
-      parentValue = isolateTransactionValue(existingParent) as StorableDatum;
+      parentValue = isolateTransactionValue(existingParent) as FabricValue;
     }
 
     const seededParent = ensureParentContainers(
@@ -1343,7 +1343,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       remainingPath.slice(0, -1),
       remainingPath[remainingPath.length - 1]!,
     );
-    const isolatedValue = isolateTransactionValue(value) as StorableDatum;
+    const isolatedValue = isolateTransactionValue(value) as FabricValue;
     const parentWrite = writeAttestation(
       {
         address: {
@@ -1379,7 +1379,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const previousActivityValue = isolateTransactionValue(
       readPathValue(doc.current.value, lastExistingPath),
-    ) as StorableDatum | undefined;
+    ) as FabricValue | undefined;
 
     doc.current = collapsedNext;
     doc.frozenReads.clear();
@@ -1433,7 +1433,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     for (const { address, value } of writes) {
       const isolatedValue = value === undefined
         ? undefined
-        : isolateTransactionValue(value) as StorableDatum;
+        : isolateTransactionValue(value) as FabricValue;
       const previousValue = readPathValue(nextRoot, address.path);
       if (deepEqual(previousValue, isolatedValue)) {
         continue;
@@ -1445,11 +1445,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       ) ?? address.path;
       const previousActivityValue = isolateTransactionValue(
         readPathValue(nextRoot, activityPath),
-      ) as StorableDatum | undefined;
+      ) as FabricValue | undefined;
       if (
         !hasMutableRoot && address.path.length > 0 && nextRoot !== undefined
       ) {
-        nextRoot = isolateTransactionValue(nextRoot) as StorableDatum;
+        nextRoot = isolateTransactionValue(nextRoot) as FabricValue;
         hasMutableRoot = true;
       }
       const result = applyMutablePathWrite(nextRoot, address, isolatedValue);
@@ -1475,7 +1475,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         space,
         address,
         readPathValue(result.ok.root, address.path),
-        isolateTransactionValue(previousValue) as StorableDatum | undefined,
+        isolateTransactionValue(previousValue) as FabricValue | undefined,
         doc,
       );
       this.recordWriteActivity(
@@ -1508,8 +1508,8 @@ export class V2StorageTransaction implements IStorageTransaction {
   private recordWriteActivity(
     space: MemorySpace,
     address: IMemoryAddress,
-    value: StorableDatum | undefined,
-    previousValue: StorableDatum | undefined,
+    value: FabricValue | undefined,
+    previousValue: FabricValue | undefined,
     doc: WritableDocumentEntry,
   ): void {
     recordWriteStackTrace(
@@ -1539,8 +1539,8 @@ export class V2StorageTransaction implements IStorageTransaction {
   private recordPatchIntent(
     space: MemorySpace,
     address: IMemoryAddress,
-    value: StorableDatum | undefined,
-    previousValue: StorableDatum | undefined,
+    value: FabricValue | undefined,
+    previousValue: FabricValue | undefined,
     doc: WritableDocumentEntry,
   ): void {
     this.upsertWriteDetail(
@@ -1556,8 +1556,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     details: Map<string, TransactionWriteDetail>,
     space: MemorySpace,
     address: IMemoryAddress,
-    value: StorableDatum | undefined,
-    previousValue: StorableDatum | undefined,
+    value: FabricValue | undefined,
+    previousValue: FabricValue | undefined,
   ): void {
     const writeActivity = {
       space,
@@ -1904,8 +1904,8 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const patchDetails = new Map<string, {
       path: readonly string[];
-      value: StorableDatum | undefined;
-      previousValue: StorableDatum | undefined;
+      value: FabricValue | undefined;
+      previousValue: FabricValue | undefined;
     }>();
     const arrayGroups = new Map<string, readonly string[]>();
     for (const detail of details) {

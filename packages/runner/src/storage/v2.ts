@@ -3,11 +3,11 @@ import { cloneIfNecessary } from "@commontools/data-model/fabric-value";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
+  type FabricValue,
   type MemorySpace,
   type MIME,
   type SchemaPathSelector,
   type Signer,
-  type StorableDatum,
   type TransactionError,
   type URI,
 } from "@commontools/memory/interface";
@@ -75,7 +75,7 @@ const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 const DOCUMENT_MIME = "application/json" as const;
 const UNCACHED_TRANSACTION_VALUE = Symbol("uncachedTransactionValue");
 
-const toExplicitDocument = (value: StorableDatum): EntityDocument => {
+const toExplicitDocument = (value: FabricValue): EntityDocument => {
   if (!isObject(value)) {
     throw new Error(
       "memory v2 transactions require explicit full-document roots",
@@ -85,7 +85,7 @@ const toExplicitDocument = (value: StorableDatum): EntityDocument => {
 };
 
 type CachedTransactionValue =
-  | StorableDatum
+  | FabricValue
   | typeof UNCACHED_TRANSACTION_VALUE
   | undefined;
 
@@ -150,7 +150,7 @@ const confirmedVersion = (
 
 const transactionValueForVersion = (
   version: ConfirmedVersion,
-): StorableDatum | undefined => {
+): FabricValue | undefined => {
   if (version.transactionValue === UNCACHED_TRANSACTION_VALUE) {
     version.transactionValue = toTransactionDocumentValue(version.value);
   }
@@ -168,11 +168,11 @@ const isArrayIndex = (segment: string): boolean =>
   `${Number.parseInt(segment, 10)}` === segment &&
   Number.parseInt(segment, 10) >= 0;
 
-const createContainer = (nextSegment: string): StorableDatum =>
+const createContainer = (nextSegment: string): FabricValue =>
   isArrayIndex(nextSegment) ? [] : {};
 
 const hasDocumentPath = (
-  root: StorableDatum | undefined,
+  root: FabricValue | undefined,
   path: readonly string[],
 ): boolean => {
   let current: unknown = root;
@@ -197,9 +197,9 @@ const hasDocumentPath = (
 };
 
 const readDocumentPath = (
-  root: StorableDatum | undefined,
+  root: FabricValue | undefined,
   path: readonly string[],
-): StorableDatum | undefined => {
+): FabricValue | undefined => {
   let current: unknown = root;
   for (const segment of path) {
     if (Array.isArray(current)) {
@@ -214,23 +214,23 @@ const readDocumentPath = (
     }
     current = current[segment];
   }
-  return current as StorableDatum | undefined;
+  return current as FabricValue | undefined;
 };
 
 const setDocumentPath = (
   root: EntityDocument | undefined,
   path: readonly string[],
-  value: StorableDatum | undefined,
+  value: FabricValue | undefined,
 ): EntityDocument | undefined => {
   if (path.length === 0) {
     return value === undefined
       ? undefined
-      : cloneIfNecessary(value as StorableDatum, {
+      : cloneIfNecessary(value as FabricValue, {
         frozen: false,
       }) as EntityDocument;
   }
 
-  const nextRoot = cloneIfNecessary((root ?? {}) as StorableDatum, {
+  const nextRoot = cloneIfNecessary((root ?? {}) as FabricValue, {
     frozen: false,
   }) as Record<string, unknown>;
   let current: Record<string, unknown> | unknown[] = nextRoot;
@@ -258,11 +258,11 @@ const setDocumentPath = (
   if (Array.isArray(current)) {
     current[Number(last)] = value === undefined
       ? undefined
-      : cloneIfNecessary(value as StorableDatum, { frozen: false });
+      : cloneIfNecessary(value as FabricValue, { frozen: false });
   } else {
     current[last] = value === undefined
       ? undefined
-      : cloneIfNecessary(value as StorableDatum, { frozen: false });
+      : cloneIfNecessary(value as FabricValue, { frozen: false });
   }
   return nextRoot as EntityDocument;
 };
@@ -278,7 +278,7 @@ const removeDocumentPath = (
     return undefined;
   }
 
-  const nextRoot = cloneIfNecessary(root as StorableDatum, {
+  const nextRoot = cloneIfNecessary(root as FabricValue, {
     frozen: false,
   }) as Record<string, unknown>;
   let current: Record<string, unknown> | unknown[] = nextRoot;
@@ -346,7 +346,7 @@ const applyPendingVersion = (
     case "delete":
       return undefined;
     case "set":
-      return cloneIfNecessary(pending.value as StorableDatum, {
+      return cloneIfNecessary(pending.value as FabricValue, {
         frozen: false,
       }) as EntityDocument;
     case "patch": {
@@ -1664,7 +1664,7 @@ class SpaceReplica implements ISpaceReplica {
     }
   }
 
-  private visibleValue(id: URI): StorableDatum | undefined {
+  private visibleValue(id: URI): FabricValue | undefined {
     const record = this.#docs.get(id);
     if (!record) {
       return undefined;

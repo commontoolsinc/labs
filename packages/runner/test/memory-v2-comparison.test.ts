@@ -1,7 +1,7 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Identity } from "@commontools/identity";
-import type { StorableValue, URI } from "@commontools/memory/interface";
+import type { FabricValue, URI } from "@commontools/memory/interface";
 import * as Consumer from "@commontools/memory/consumer";
 import * as MemoryProvider from "@commontools/memory/provider";
 import type { EntityDocument } from "@commontools/memory/v2";
@@ -41,7 +41,7 @@ type TestProvider = {
 
 type LegacyComparisonProvider = {
   send(
-    batch: { uri: URI; value: { value: StorableValue | undefined } }[],
+    batch: { uri: URI; value: { value: FabricValue | undefined } }[],
   ): Promise<
     {
       ok?: Record<PropertyKey, never>;
@@ -225,7 +225,7 @@ const normalizedGraphNotifications = (
 
 const sendDocs = async (
   provider: TestProvider,
-  docs: Array<{ id: URI; value: StorableValue }>,
+  docs: Array<{ id: URI; value: FabricValue }>,
 ) => {
   for (const doc of docs) {
     assertEquals(

@@ -21,7 +21,7 @@ import {
   manySmallObjectsA,
   medianComplexityA,
 } from "./bench-fixtures.ts";
-import type { StorableValue } from "@commontools/memory/interface";
+import type { FabricValue } from "@commontools/memory/interface";
 
 const signer = await Identity.fromPassphrase("bench server sim");
 const space = signer.did();
@@ -48,7 +48,7 @@ function setup() {
 const writeDocument = (
   tx: IExtendedStorageTransaction,
   id: string,
-  value: StorableValue,
+  value: FabricValue,
 ) => {
   tx.writeValueOrThrow({
     space,

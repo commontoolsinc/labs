@@ -1,16 +1,16 @@
-import type { StorableDatum } from "../interface.ts";
+import type { FabricValue } from "../interface.ts";
 import { isInstance, isObject } from "@commontools/utils/types";
 import type { PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
 
-type PatchObject = Record<string, StorableDatum>;
-type PatchContainer = PatchObject | StorableDatum[];
+type PatchObject = Record<string, FabricValue>;
+type PatchContainer = PatchObject | FabricValue[];
 const MAX_ARRAY_INDEX = 2 ** 32 - 2;
 
 export const applyPatch = (
-  state: StorableDatum,
+  state: FabricValue,
   ops: PatchOp[],
-): StorableDatum => {
+): FabricValue => {
   // Clone once up front, then mutate the working copy per op.
   let current = structuredClone(state);
   for (const op of ops) {
@@ -19,7 +19,7 @@ export const applyPatch = (
   return current;
 };
 
-const applyOp = (state: StorableDatum, op: PatchOp): StorableDatum => {
+const applyOp = (state: FabricValue, op: PatchOp): FabricValue => {
   switch (op.op) {
     case "replace":
       return replaceAtPath(state, parsePointer(op.path), op.value);
@@ -41,10 +41,10 @@ const applyOp = (state: StorableDatum, op: PatchOp): StorableDatum => {
 };
 
 const replaceAtPath = (
-  root: StorableDatum,
+  root: FabricValue,
   path: string[],
-  value: StorableDatum,
-): StorableDatum => {
+  value: FabricValue,
+): FabricValue => {
   if (path.length === 0) {
     return structuredClone(value);
   }
@@ -60,10 +60,10 @@ const replaceAtPath = (
 };
 
 const addAtPath = (
-  root: StorableDatum,
+  root: FabricValue,
   path: string[],
-  value: StorableDatum,
-): StorableDatum => {
+  value: FabricValue,
+): FabricValue => {
   if (path.length === 0) {
     return structuredClone(value);
   }
@@ -82,7 +82,7 @@ const addAtPath = (
   return root;
 };
 
-const removeAtPath = (root: StorableDatum, path: string[]): StorableDatum => {
+const removeAtPath = (root: FabricValue, path: string[]): FabricValue => {
   if (path.length === 0) {
     throw new Error("root remove must be represented as a delete operation");
   }
@@ -100,10 +100,10 @@ const removeAtPath = (root: StorableDatum, path: string[]): StorableDatum => {
 };
 
 const moveValue = (
-  root: StorableDatum,
+  root: FabricValue,
   from: string[],
   path: string[],
-): StorableDatum => {
+): FabricValue => {
   if (from.length === 0) {
     throw new Error("cannot move the root value");
   }
@@ -117,12 +117,12 @@ const moveValue = (
 };
 
 const spliceAtPath = (
-  root: StorableDatum,
+  root: FabricValue,
   path: string[],
   index: number,
   remove: number,
-  add: StorableDatum[],
-): StorableDatum => {
+  add: FabricValue[],
+): FabricValue => {
   const target = path.length === 0 ? root : getAtPath(root, path);
   if (!Array.isArray(target)) {
     throw new Error(`splice target is not an array at ${encodePointer(path)}`);
@@ -138,8 +138,8 @@ const spliceAtPath = (
   return root;
 };
 
-const getAtPath = (root: StorableDatum, path: string[]): StorableDatum => {
-  let current: StorableDatum = root;
+const getAtPath = (root: FabricValue, path: string[]): FabricValue => {
+  let current: FabricValue = root;
   for (const segment of path) {
     if (Array.isArray(current)) {
       current = current[requireExistingArrayIndex(current, segment, path)];
@@ -153,11 +153,11 @@ const getAtPath = (root: StorableDatum, path: string[]): StorableDatum => {
 };
 
 const getExistingParent = (
-  root: StorableDatum,
+  root: FabricValue,
   path: string[],
 ): { parent: PatchContainer; key: string } => {
   const key = path[path.length - 1]!;
-  let current: StorableDatum = root;
+  let current: FabricValue = root;
 
   for (const segment of path.slice(0, -1)) {
     if (Array.isArray(current)) {
@@ -185,11 +185,11 @@ const getExistingParent = (
 };
 
 const getCreatableParent = (
-  root: StorableDatum,
+  root: FabricValue,
   path: string[],
 ): { parent: PatchContainer; key: string } => {
   const key = path[path.length - 1]!;
-  let current: StorableDatum = root;
+  let current: FabricValue = root;
 
   for (let index = 0; index < path.length - 1; index += 1) {
     const segment = path[index]!;
@@ -242,7 +242,7 @@ const parseArrayInsertIndex = (segment: string, length: number): number => {
 };
 
 const requireExistingArrayIndex = (
-  array: StorableDatum[],
+  array: FabricValue[],
   segment: string,
   path: string[],
 ): number => {
@@ -263,8 +263,8 @@ const isStrictPrefixPath = (
 const isArraySegment = (segment: string): boolean =>
   /^(0|[1-9]\d*)$/.test(segment);
 
-const isPatchObject = (value: StorableDatum): value is PatchObject =>
+const isPatchObject = (value: FabricValue): value is PatchObject =>
   isObject(value) && !isInstance(value);
 
-const isContainer = (value: StorableDatum): value is PatchContainer =>
+const isContainer = (value: FabricValue): value is PatchContainer =>
   Array.isArray(value) || isPatchObject(value);

@@ -229,7 +229,7 @@ interface TransactRequest {
   sessionId: SessionId;
   commit: ClientCommit;
   invocation?: Record<string, unknown>;
-  authorization?: StorableDatum;
+  authorization?: FabricValue;
 }
 
 interface Commit {

@@ -7,7 +7,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { StorableValue } from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/memory/interface";
 import { isCell, recursivelyAddIDIfNeeded } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
@@ -742,7 +742,7 @@ describe("Cell utility functions", () => {
       // Write a sigil link via setRawUntyped — this would not type-check
       // with setRaw because a link object is not assignable to string.
       const link = target.getAsWriteRedirectLink();
-      cell.setRawUntyped(link as StorableValue);
+      cell.setRawUntyped(link as FabricValue);
 
       // The raw untyped read should return the link structure.
       const raw = cell.getRawUntyped();
@@ -790,7 +790,7 @@ describe("Cell utility functions", () => {
         undefined,
         tx,
       );
-      cell.setRawUntyped([1, 2, 3] as StorableValue);
+      cell.setRawUntyped([1, 2, 3] as FabricValue);
       expect(cell.getRawUntyped()).toEqual([1, 2, 3]);
     });
 
@@ -801,7 +801,7 @@ describe("Cell utility functions", () => {
         undefined,
         tx,
       );
-      cell.setRawUntyped({ a: { b: { c: 42 } } } as StorableValue);
+      cell.setRawUntyped({ a: { b: { c: 42 } } } as FabricValue);
       const raw = cell.getRawUntyped() as { a: { b: { c: number } } };
       expect(raw.a.b.c).toBe(42);
     });
@@ -814,7 +814,7 @@ describe("Cell utility functions", () => {
         tx,
       );
       cell.set(10);
-      cell.setRawUntyped(null as StorableValue);
+      cell.setRawUntyped(null as FabricValue);
       expect(cell.getRawUntyped()).toBe(null);
     });
 
@@ -825,7 +825,7 @@ describe("Cell utility functions", () => {
         undefined,
         tx,
       );
-      cell.setRawUntyped([] as StorableValue);
+      cell.setRawUntyped([] as FabricValue);
       expect(cell.getRawUntyped()).toEqual([]);
     });
 
@@ -834,7 +834,7 @@ describe("Cell utility functions", () => {
         space,
         "setRawUntyped no tx",
       );
-      expect(() => cell.setRawUntyped(42 as StorableValue)).toThrow(
+      expect(() => cell.setRawUntyped(42 as FabricValue)).toThrow(
         "Transaction required",
       );
     });
@@ -955,7 +955,7 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
       undefined,
       tx,
     );
-    cell.setRawUntyped([10, 20, 30] as StorableValue);
+    cell.setRawUntyped([10, 20, 30] as FabricValue);
     const raw = cell.getRawUntyped();
     expect(raw).toEqual([10, 20, 30]);
     expect(Object.isFrozen(raw)).toBe(true);
@@ -968,7 +968,7 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
       undefined,
       tx,
     );
-    cell.setRawUntyped({ a: { b: [1, 2] } } as StorableValue);
+    cell.setRawUntyped({ a: { b: [1, 2] } } as FabricValue);
     const raw = cell.getRawUntyped() as { a: { b: readonly number[] } };
     expect(raw.a.b).toEqual([1, 2]);
     expect(Object.isFrozen(raw)).toBe(true);
@@ -984,7 +984,7 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
       tx,
     );
     cell.set(5);
-    cell.setRawUntyped(null as StorableValue);
+    cell.setRawUntyped(null as FabricValue);
     expect(cell.getRawUntyped()).toBe(null);
   });
 

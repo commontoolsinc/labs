@@ -5,8 +5,8 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import type { StorableValue } from "@commonfabric/memory/interface";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import type { FabricValue } from "@commonfabric/memory/interface";
 import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 import {
   largeStringA,
@@ -55,7 +55,7 @@ async function cleanup(
 const writeDocument = (
   tx: IExtendedStorageTransaction,
   id: string,
-  value: StorableValue,
+  value: FabricValue,
 ) => {
   tx.writeValueOrThrow({
     space,

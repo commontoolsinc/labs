@@ -23,10 +23,7 @@ import type {
   Result,
   State,
 } from "../interface.ts";
-import type {
-  StorableDatum,
-  StorableValue,
-} from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/memory/interface";
 import * as Address from "./address.ts";
 import {
   attest,
@@ -43,7 +40,7 @@ import { refer } from "@commonfabric/memory/reference";
 import * as Edit from "./edit.ts";
 
 const isEmptyRecord = (
-  value: StorableValue | undefined,
+  value: FabricValue | undefined,
 ): value is Record<string, never> =>
   value !== null &&
   value !== undefined &&
@@ -53,12 +50,12 @@ const isEmptyRecord = (
 
 const alignRootWriteWithLoadedShape = (
   type: string,
-  _loaded: StorableValue | undefined,
-  merged: StorableValue | undefined,
+  _loaded: FabricValue | undefined,
+  merged: FabricValue | undefined,
   options: {
     isV2JsonRoot: boolean;
   },
-): StorableValue | undefined => {
+): FabricValue | undefined => {
   if (type !== "application/json") {
     return merged;
   }
@@ -156,7 +153,7 @@ export class Chronicle {
    */
   write(
     address: IMemoryAddress,
-    value?: StorableDatum,
+    value?: FabricValue,
   ): Result<
     IAttestation,
     | IStorageTransactionInconsistent
@@ -328,7 +325,7 @@ export class Chronicle {
 
           edit.assert({
             ...loaded,
-            is: alignedMerged as StorableDatum,
+            is: alignedMerged as FabricValue,
             cause: causeRef,
           });
         }
@@ -567,7 +564,7 @@ class Changes {
    */
   applyWrite(
     address: IMemoryAddress,
-    value: StorableValue,
+    value: FabricValue,
   ): Result<
     IAttestation,
     IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
