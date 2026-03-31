@@ -19,6 +19,8 @@ import {
   buildJsonTree,
   type FsValue,
   isSigilLink,
+  isVNode,
+  safeStringify,
 } from "./tree-builder.ts";
 import type { JSONSchema } from "@commontools/api";
 import type { PieceManager } from "@commontools/piece";
@@ -952,8 +954,9 @@ export class CellBridge {
     return {
       callables,
       skipEntry: (candidate: unknown) =>
-        typeof candidate === "object" && candidate !== null &&
-        callableValues.has(candidate),
+        (typeof candidate === "object" && candidate !== null &&
+          callableValues.has(candidate)) ||
+        isVNode(candidate),
       classifyEntry: (key: string, candidate: unknown) =>
         typeof candidate === "object" && candidate !== null &&
           callableValues.has(candidate)
@@ -1049,6 +1052,29 @@ export class CellBridge {
         cellProp,
         script,
       );
+    }
+  }
+
+  /**
+   * For each VNode-typed property in `value`, add a `<key>.json` file under
+   * `parentIno`. This replaces the recursive directory explosion that
+   * buildJsonTree would otherwise produce for UI trees.
+   */
+  private addVNodeJsonFiles(parentIno: bigint, value: unknown): void {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return;
+    }
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      if (isVNode(val)) {
+        const existing = this.tree.lookup(parentIno, `${key}.json`);
+        if (existing !== undefined) this.tree.clear(existing);
+        this.tree.addFile(
+          parentIno,
+          `${key}.json`,
+          safeStringify(val),
+          "object",
+        );
+      }
     }
   }
 
@@ -1247,6 +1273,7 @@ export class CellBridge {
                         classifyEntry,
                       ),
                     );
+                    this.addVNodeJsonFiles(pieceIno, treeValue);
                     this.buildHandlersFile(pieceIno, callables);
                     if (this.onInvalidate) {
                       this.onInvalidate(pieceIno, [indexName, ".handlers"]);
@@ -1268,6 +1295,7 @@ export class CellBridge {
                 );
                 this.addCallableFiles(propIno, callables, propName);
                 if (propName === "result") {
+                  this.addVNodeJsonFiles(propIno, treeValue);
                   this.buildHandlersFile(pieceIno, callables);
                 }
               }
@@ -1553,6 +1581,7 @@ export class CellBridge {
             piece.id,
             this.makeFsSubtreeBuilder(resolveLink, skipEntry, classifyEntry),
           );
+          this.addVNodeJsonFiles(pieceIno, result);
           this.addCallableFiles(pieceIno, callables, "result");
         } else {
           // Default: exploded result/ directory
@@ -1567,6 +1596,7 @@ export class CellBridge {
             skipEntry,
             classifyEntry,
           );
+          this.addVNodeJsonFiles(resultIno, result);
           this.addCallableFiles(resultIno, callables, "result");
         }
         this.buildHandlersFile(pieceIno, callables);

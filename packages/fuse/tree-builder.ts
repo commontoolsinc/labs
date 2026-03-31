@@ -61,6 +61,13 @@ export function isSigilLink(v: unknown): boolean {
 
 export { isHandlerCell, isStreamValue } from "./callables.ts";
 
+/** Returns true if the value is a VNode (virtual DOM element). */
+export function isVNode(value: unknown): boolean {
+  return typeof value === "object" && value !== null &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>).type === "vnode";
+}
+
 /**
  * Resolved shape of a [FS] projection value, after reading from cells.
  * Mirrors the FsProjection API type but with the plain-object case
