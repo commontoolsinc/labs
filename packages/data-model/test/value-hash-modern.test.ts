@@ -33,7 +33,7 @@ function hex(hash: Uint8Array): string {
 
 /** Extract the raw hash bytes from modernHash for comparison. */
 function modernHash(value: unknown): Uint8Array {
-  return modernHashRaw(value).hash;
+  return modernHashRaw(value).bytes;
 }
 
 // =========================================================================
@@ -895,7 +895,7 @@ describe("modernHash", () => {
     const result = modernHashRaw(42);
     expect(result).toBeInstanceOf(FabricHash);
     expect(result.algorithmTag).toBe("fid1");
-    expect(result.hash.length).toBe(32);
+    expect(result.length).toBe(32);
   });
 
   it("FabricHash.toString() produces fid1:<base64>", () => {
@@ -973,13 +973,13 @@ describe("modernHash caching", () => {
     obj.a = 2;
     const b = modernHashRaw(obj);
     // Hashes should differ because the object changed
-    expect(hex(a.hash)).not.toBe(hex(b.hash));
+    expect(hex(a.bytes)).not.toBe(hex(b.bytes));
   });
 
   it("different primitives with same type produce different hashes", () => {
     const a = modernHashRaw("hello");
     const b = modernHashRaw("world");
-    expect(hex(a.hash)).not.toBe(hex(b.hash));
+    expect(hex(a.bytes)).not.toBe(hex(b.bytes));
   });
 });
 

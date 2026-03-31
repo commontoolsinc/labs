@@ -38,16 +38,16 @@ describe("FabricHash", () => {
     expect(json["/"]).toBe(cid.toString());
   });
 
-  it(".bytes returns a defensive copy of .hash", () => {
+  it(".bytes returns a defensive copy", () => {
     const cid = new FabricHash(SAMPLE_HASH, "fid1");
     const bytes = cid.bytes;
     // Contents match.
-    expect(bytes).toEqual(cid.hash);
-    // But it's a copy, not the same reference.
-    expect(bytes).not.toBe(cid.hash);
+    expect(bytes).toEqual(SAMPLE_HASH);
+    // Each call returns a fresh copy.
+    expect(bytes).not.toBe(cid.bytes);
     // Mutating the copy must not affect the original.
     bytes[0] = 0xff;
-    expect(cid.hash[0]).toBe(0);
+    expect(cid.bytes[0]).toBe(0);
   });
 
   it(".length returns the byte length of .bytes", () => {
@@ -65,16 +65,17 @@ describe("FabricHash", () => {
     const returned = cid.copyInto(target);
     // Returns the same target buffer.
     expect(returned).toBe(target);
-    expect(target).toEqual(cid.hash);
+    expect(target).toEqual(cid.bytes);
     expect(cid.algorithmTag).toBe("sha3");
   });
 
   it('["/"] getter returns the raw hash bytes (not a copy)', () => {
     const cid = new FabricHash(SAMPLE_HASH, "test2");
     const slash = cid["/"];
-    // Should be the exact same array reference as .hash (not a defensive copy).
-    expect(slash).toBe(cid.hash);
+    // Returns the internal bytes directly (not a defensive copy).
     expect(slash).toEqual(SAMPLE_HASH);
+    // Calling twice returns the same reference.
+    expect(slash).toBe(cid["/"]);
     expect(cid.algorithmTag).toBe("test2");
   });
 
@@ -118,7 +119,7 @@ describe("FabricHash flag dispatch", () => {
       expect(reconstructed).toBeInstanceOf(FabricHash);
       const cid = reconstructed as unknown as FabricHash;
       expect(cid.toString()).toBe(original.toString());
-      expect(cid.hash).toEqual(original.hash);
+      expect(cid.bytes).toEqual(original.bytes);
     } finally {
       resetModernHashConfig();
     }
@@ -135,7 +136,7 @@ describe("FabricHash flag dispatch", () => {
       expect(reconstructed).toBeInstanceOf(FabricHash);
       const cid = reconstructed as unknown as FabricHash;
       expect(cid.toString()).toBe(original.toString());
-      expect(cid.hash).toEqual(original.hash);
+      expect(cid.bytes).toEqual(original.bytes);
       expect(cid.algorithmTag).toBe("sha3");
     } finally {
       resetModernHashConfig();

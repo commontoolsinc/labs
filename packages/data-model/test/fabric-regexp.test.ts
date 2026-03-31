@@ -297,27 +297,27 @@ describe("FabricRegExp", () => {
     it("produces a hash for FabricRegExp", () => {
       const sr = new FabricRegExp(/abc/gi);
       const hash = hashOfModern(sr);
-      expect(hash.hash).toBeInstanceOf(Uint8Array);
-      expect(hash.hash.length).toBe(32); // SHA-256
+      expect(hash.bytes).toBeInstanceOf(Uint8Array);
+      expect(hash.length).toBe(32); // SHA-256
     });
 
     it("same regex produces same hash", () => {
       const sr1 = new FabricRegExp(/abc/gi);
       const sr2 = new FabricRegExp(/abc/gi);
-      const h1 = Array.from(hashOfModern(sr1).hash);
-      const h2 = Array.from(hashOfModern(sr2).hash);
+      const h1 = Array.from(hashOfModern(sr1).bytes);
+      const h2 = Array.from(hashOfModern(sr2).bytes);
       expect(h1).toEqual(h2);
     });
 
     it("different source produces different hash", () => {
-      const h1 = Array.from(hashOfModern(new FabricRegExp(/abc/)).hash);
-      const h2 = Array.from(hashOfModern(new FabricRegExp(/def/)).hash);
+      const h1 = Array.from(hashOfModern(new FabricRegExp(/abc/)).bytes);
+      const h2 = Array.from(hashOfModern(new FabricRegExp(/def/)).bytes);
       expect(h1).not.toEqual(h2);
     });
 
     it("different flags produce different hash", () => {
-      const h1 = Array.from(hashOfModern(new FabricRegExp(/abc/g)).hash);
-      const h2 = Array.from(hashOfModern(new FabricRegExp(/abc/i)).hash);
+      const h1 = Array.from(hashOfModern(new FabricRegExp(/abc/g)).bytes);
+      const h2 = Array.from(hashOfModern(new FabricRegExp(/abc/i)).bytes);
       expect(h1).not.toEqual(h2);
     });
   });

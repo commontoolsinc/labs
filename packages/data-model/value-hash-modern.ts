@@ -187,8 +187,9 @@ function feedObjectValue(
       const algTagUtf8 = encoder.encode(cid.algorithmTag);
       feedLength(hasher, algTagUtf8.length);
       hasher.update(algTagUtf8);
-      feedLength(hasher, cid.hash.length);
-      hasher.update(cid.hash);
+      const cidBytes = cid.bytes;
+      feedLength(hasher, cidBytes.length);
+      hasher.update(cidBytes);
       return;
     }
 

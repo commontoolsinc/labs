@@ -17,6 +17,7 @@ import { fromBase64url, toUnpaddedBase64url } from "./base64url.ts";
  * that repeated `toString()` calls are O(1).
  */
 export class FabricHash extends FabricPrimitive {
+  readonly #hash: Uint8Array;
   readonly #justHashString: string;
   readonly #fullStringForm: string;
 
@@ -28,17 +29,18 @@ export class FabricHash extends FabricPrimitive {
    * it to the constructor. `Object.freeze` freezes the object reference but
    * not the underlying `ArrayBuffer`, so the bytes remain technically
    * mutable. The cached string form is computed once at construction time;
-   * post-construction mutation of `hash` would cause `hash` and `toString()`
-   * to diverge.
+   * post-construction mutation of the bytes would cause the internal state
+   * and `toString()` to diverge.
    *
    * @param hash - The raw hash bytes (ownership transferred to this instance).
    * @param algorithmTag - Algorithm identifier (e.g., `"fid1"` for fabric ID v1).
    */
   constructor(
-    readonly hash: Uint8Array, // TODO(@danfuzz): Should not be exposed.
+    hash: Uint8Array,
     readonly algorithmTag: string,
   ) {
     super();
+    this.#hash = hash;
     this.#justHashString = toUnpaddedBase64url(hash);
     this.#fullStringForm = `${algorithmTag}:${this.#justHashString}`;
     Object.freeze(this);
@@ -50,17 +52,17 @@ export class FabricHash extends FabricPrimitive {
    * TODO(danfuzz): Remove after canonical hashing flag graduates.
    */
   get "/"(): Uint8Array {
-    return this.hash; // TODO(@danfuzz): `hash` should not be exposed.
+    return this.#hash;
   }
 
   /** Defensive copy of the raw hash bytes. */
   get bytes(): Uint8Array {
-    return new Uint8Array(this.hash);
+    return new Uint8Array(this.#hash);
   }
 
   /** Length of the hash in bytes. */
   get length(): number {
-    return this.hash.length;
+    return this.#hash.length;
   }
 
   /** String form of the hash _without_ an algorithm tag. */
@@ -70,7 +72,7 @@ export class FabricHash extends FabricPrimitive {
 
   /** Copy the hash bytes into `target` starting at offset 0. Returns `target`. */
   copyInto(target: Uint8Array): Uint8Array {
-    target.set(this.hash);
+    target.set(this.#hash);
     return target;
   }
 
