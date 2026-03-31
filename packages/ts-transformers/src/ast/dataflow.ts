@@ -14,6 +14,7 @@ import {
   isReactiveValueExpression,
   isReactiveValueSymbol,
 } from "./call-kind.ts";
+import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
 
 export interface DataFlowScopeParameter {
   readonly name: string;
@@ -94,6 +95,31 @@ const mergeAnalyses = (...analyses: InternalAnalysis[]): InternalAnalysis => {
     rewriteHint: undefined,
   };
 };
+
+function unwrapStructuralDataFlowExpression(
+  expression: ts.Expression,
+): ts.Expression {
+  let current = expression;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isPartiallyEmittedExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function isStructuralOpaqueKeyDataFlow(
+  expression: ts.Expression,
+): boolean {
+  const target = unwrapStructuralDataFlowExpression(expression);
+  return ts.isCallExpression(target) &&
+    classifyOpaquePathTerminalCall(target) === "key";
+}
 
 export function createDataFlowAnalyzer(
   checker: ts.TypeChecker,
@@ -192,6 +218,7 @@ export function createDataFlowAnalyzer(
   // Determine how CallExpressions should be handled based on their call kind.
   // Returns the appropriate InternalAnalysis with correct requiresRewrite logic.
   const handleCallExpression = (
+    expression: ts.CallExpression,
     merged: InternalAnalysis,
     callKind: ReturnType<typeof detectCallKind>,
     isArrayMethodFamily: boolean,
@@ -213,6 +240,18 @@ export function createDataFlowAnalyzer(
       return {
         ...merged,
         requiresRewrite: callee.requiresRewrite,
+        rewriteHint,
+      };
+    }
+
+    if (
+      classifyOpaquePathTerminalCall(expression) !== "get" &&
+      merged.dataFlows.length > 0 &&
+      merged.dataFlows.every(isStructuralOpaqueKeyDataFlow)
+    ) {
+      return {
+        ...merged,
+        requiresRewrite: false,
         rewriteHint,
       };
     }
@@ -637,6 +676,23 @@ export function createDataFlowAnalyzer(
     }
 
     if (ts.isCallExpression(expression)) {
+      if (classifyOpaquePathTerminalCall(expression) === "key") {
+        const callee = expression.expression;
+        const parentId = (
+          ts.isPropertyAccessExpression(callee) ||
+            ts.isElementAccessExpression(callee)
+        )
+          ? context.expressionToNodeId.get(callee.expression) ?? null
+          : null;
+        recordDataFlow(expression, scope, parentId, true);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
+          dataFlows: [expression],
+          rewriteHint: undefined,
+        };
+      }
+
       const callee = analyzeExpression(expression.expression, scope, context);
       const analyses: InternalAnalysis[] = [callee];
       for (const arg of expression.arguments) {
@@ -680,6 +736,7 @@ export function createDataFlowAnalyzer(
       })();
 
       return handleCallExpression(
+        expression,
         combined,
         callKind,
         isArrayMethodFamily,

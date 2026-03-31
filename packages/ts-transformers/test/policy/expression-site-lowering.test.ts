@@ -136,6 +136,29 @@ function findAllNodes<T extends ts.Node>(
   return found;
 }
 
+function findArrayMethodCallback(
+  sourceFile: ts.SourceFile,
+  methodName = "map",
+): ts.ArrowFunction | ts.FunctionExpression {
+  const call = findFirstNode(
+    sourceFile,
+    (node): node is ts.CallExpression =>
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === methodName,
+  );
+
+  const callback = call.arguments[0];
+  if (
+    !callback || (!ts.isArrowFunction(callback) &&
+      !ts.isFunctionExpression(callback))
+  ) {
+    throw new Error(`Expected ${methodName} callback function`);
+  }
+
+  return callback;
+}
+
 type ExpressionSiteHandling = ReturnType<typeof classifyExpressionSiteHandling>;
 type JsxRoute =
   | { route: "shared-pre-closure" }
@@ -318,7 +341,7 @@ Deno.test(
       );
     `);
 
-    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const callback = findArrayMethodCallback(sourceFile);
     context.markAsArrayMethodCallback(callback);
 
     const call = findFirstNode(
@@ -1065,7 +1088,7 @@ Deno.test(
       );
     `);
 
-    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const callback = findArrayMethodCallback(sourceFile);
     context.markAsArrayMethodCallback(callback);
 
     const call = findFirstNode(
@@ -1095,7 +1118,7 @@ Deno.test(
       );
     `);
 
-    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const callback = findArrayMethodCallback(sourceFile);
     context.markAsArrayMethodCallback(callback);
 
     const receiverCall = findFirstNode(

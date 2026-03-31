@@ -350,3 +350,56 @@ export default pattern<{ left: Default<number, 0>; right: Default<number, 0> }>(
     );
   },
 );
+
+Deno.test(
+  "Transform guards: ordinary helper calls with child key references stay structural",
+  async () => {
+    const source = `/// <cts-enable />
+import { Cell, Default, handler, pattern, type Stream } from "commontools";
+
+const asIncrementStream = (
+  ref: unknown,
+): Stream<{ amount?: number }> => ref as Stream<{ amount?: number }>;
+
+const childIncrement = handler(
+  (_event: { amount?: number } | undefined, _context: { value: Cell<number> }) => {},
+);
+
+const bubbleToChild = handler(
+  (_event: unknown, context: { childIncrement: Stream<{ amount?: number }> }) => {
+    context.childIncrement.send({ amount: 1 });
+  },
+);
+
+const childCounter = pattern<{ value: Default<number, 0> }>(({ value }) => ({
+  value,
+  increment: childIncrement({ value }),
+}));
+
+export default pattern<{ child: Default<number, 0> }>(({ child }) => {
+  const childState = childCounter({ value: child });
+  return {
+    bubbleToChild: bubbleToChild({
+      childIncrement: asIncrementStream(childState.key("increment")),
+    }),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(
+      output,
+      'childIncrement: asIncrementStream(childState.key("increment"))',
+    );
+    assert(
+      !/__ctHelpers\.(?:computed|derive)\([\s\S]{0,240}asIncrementStream\(childState\.key\("increment"\)\)/
+        .test(
+          output,
+        ),
+      "expected child stream key reference to stay structural inside ordinary helper call arguments",
+    );
+  },
+);
