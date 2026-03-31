@@ -129,7 +129,7 @@ async function prepareGetAsLink(
   );
   cell.set({ value: 42 });
   let base:
-    | ReturnType<typeof runtime.getCell<{ other: string }>>
+    | ReturnType<typeof runtime.getCell<any>>
     | undefined;
   if (includeOptions) {
     base = runtime.getCell<{ other: string }>(

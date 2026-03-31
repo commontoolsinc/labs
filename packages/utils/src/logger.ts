@@ -570,12 +570,15 @@ function getEnvTimingOutputConfig(): TimingOutputConfig | undefined {
     const minMsRaw = Deno.env.get("CT_LOG_TIMING_MIN_MS");
     const minMs = minMsRaw !== undefined ? Number(minMsRaw) : undefined;
 
-    return {
+    const config: TimingOutputConfig = {
       include,
       console: consoleEnabled,
       measure: measureEnabled,
-      minMs: Number.isFinite(minMs) ? minMs : undefined,
     };
+    if (typeof minMs === "number" && Number.isFinite(minMs)) {
+      config.minMs = minMs;
+    }
+    return config;
   } catch {
     return undefined;
   }
