@@ -58,6 +58,11 @@ export class FabricHash extends FabricPrimitive {
     return new Uint8Array(this.hash);
   }
 
+  /** Length of the hash in bytes. */
+  get length(): number {
+    return this.hash.length;
+  }
+
   /** String form of the hash _without_ an algorithm tag. */
   get hashString(): string {
     return this.#justHashString;
