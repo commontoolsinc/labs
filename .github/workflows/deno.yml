@@ -41,7 +41,8 @@ jobs:
 
   test:
     name: "Test"
-    runs-on: ubuntu-24.04-32-core
+    runs-on:
+      group: labs
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -70,7 +71,8 @@ jobs:
 
   build-binaries:
     name: "Build Binaries"
-    runs-on: ubuntu-24.04-32-core
+    runs-on:
+      group: labs
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -406,7 +408,8 @@ jobs:
   attest-binaries:
     name: "Attest and Upload Binaries"
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04-32-core
+    runs-on:
+      group: labs
     needs:
       [
         "test",
