@@ -5,12 +5,11 @@ import {
   parseCompiledBundleSource as parseCompiledBundleSourceRaw,
 } from "../src/sandbox/compiled-js-parser.ts";
 import {
+  verifyCompiledBundleModuleFactoriesWithParser
+    as verifyCompiledBundleModuleFactoriesRaw,
   verifyParsedCompiledBundleModuleFactoriesWithParser
     as verifyParsedCompiledBundleModuleFactoriesWithParserRaw,
 } from "../src/sandbox/compiled-bundle-verifier.ts";
-import {
-  verifyCompiledBundleModuleFactories as verifyCompiledBundleModuleFactoriesRaw,
-} from "../src/sandbox/module-verifier.ts";
 
 const FACTORY_SHADOW_GUARD = createFactoryShadowGuardSource().map((statement) =>
   `    ${statement}`

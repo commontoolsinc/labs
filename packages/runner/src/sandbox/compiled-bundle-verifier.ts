@@ -21,10 +21,10 @@ import {
   isRuntimeModuleIdentifier,
 } from "./runtime-module-policy.ts";
 import {
+  isTrustedBuilder,
+  isTrustedDataHelper,
   SAFE_GLOBAL_IDENTIFIERS,
   TOP_LEVEL_CALL_RESULT_ERROR,
-  TRUSTED_BUILDERS,
-  TRUSTED_DATA_HELPERS,
 } from "./policy.ts";
 import {
   createFactoryShadowGuardSource,
@@ -509,7 +509,7 @@ function provisionalBindingForExpression(
   const normalizedCallee = stripJsTrivia(call.callee);
   const trustedCall = resolveTrustedCallName(normalizedCallee, env);
   if (trustedCall) {
-    if (TRUSTED_BUILDERS.has(trustedCall)) {
+    if (isTrustedBuilder(trustedCall)) {
       return { kind: "builder" };
     }
     return {
@@ -612,7 +612,7 @@ function classifyExpressionText(
         const normalizedCallee = stripJsTrivia(call.callee);
         const trustedCall = resolveTrustedCallName(normalizedCallee, env);
         if (trustedCall) {
-          if (TRUSTED_BUILDERS.has(trustedCall)) {
+          if (isTrustedBuilder(trustedCall)) {
             verifyTrustedBuilderCall(
               source,
               filename,
@@ -721,7 +721,7 @@ function classifyExpressionText(
       const normalizedCallee = stripJsTrivia(call.callee);
       const trustedCall = resolveTrustedCallName(normalizedCallee, env);
       if (trustedCall) {
-        if (TRUSTED_BUILDERS.has(trustedCall)) {
+        if (isTrustedBuilder(trustedCall)) {
           verifyTrustedBuilderCall(
             source,
             filename,
@@ -1118,8 +1118,8 @@ function resolveTrustedCallName(
     const binding = env.get(ref.root);
     if (
       binding?.trustedRuntimeName &&
-      (TRUSTED_BUILDERS.has(binding.trustedRuntimeName) ||
-        TRUSTED_DATA_HELPERS.has(binding.trustedRuntimeName))
+      (isTrustedBuilder(binding.trustedRuntimeName) ||
+        isTrustedDataHelper(binding.trustedRuntimeName))
     ) {
       return binding.trustedRuntimeName;
     }
@@ -1131,8 +1131,8 @@ function resolveTrustedCallName(
     binding?.namespaceImport &&
     binding.trustedRuntimeName &&
     ref.property &&
-    (TRUSTED_BUILDERS.has(ref.property) ||
-      TRUSTED_DATA_HELPERS.has(ref.property))
+    (isTrustedBuilder(ref.property) ||
+      isTrustedDataHelper(ref.property))
   ) {
     return ref.property;
   }

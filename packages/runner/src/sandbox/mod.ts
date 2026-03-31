@@ -1,32 +1,11 @@
-export {
-  BundlePreflightError,
-  preflightCompiledBundle,
-} from "./bundle-preflight.ts";
-export {
-  createCallbackCompartmentGlobals,
-  createModuleCompartmentGlobals,
-  createSafeConsoleGlobal,
-} from "./compartment-globals.ts";
-export { hardenVerifiedFunction } from "./function-hardening.ts";
+export { createModuleCompartmentGlobals } from "./compartment-globals.ts";
 export {
   ensureSESLockdown,
   evaluateCallbackSourceInSES,
-  evaluateFunctionSourceInSES,
   SESIsolate,
   SESRuntime,
   type SESRuntimeOptions,
 } from "./ses-runtime.ts";
-export {
-  ModuleVerificationError,
-  verifyCompiledBundleModuleFactories,
-} from "./module-verifier.ts";
-export {
-  assertPlainData,
-  freezeVerifiedPlainData,
-  type ModuleSafeValue,
-  PlainDataValidationError,
-} from "./plain-data.ts";
-export type { RuntimeModuleIdentifier } from "./runtime-modules.ts";
 export {
   getRuntimeModuleExports,
   getRuntimeModuleTypes,

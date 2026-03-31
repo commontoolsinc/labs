@@ -4,6 +4,40 @@ export const SHADOWED_FACTORY_BINDINGS = [
   "__ctAmdHooks",
 ] as const;
 
+export const TRUSTED_BUILDERS = Object.freeze(
+  [
+    "action",
+    "computed",
+    "derive",
+    "handler",
+    "lift",
+    "pattern",
+  ] as const,
+);
+export type TrustedBuilderName = (typeof TRUSTED_BUILDERS)[number];
+const TRUSTED_BUILDER_SET = new Set<string>(TRUSTED_BUILDERS);
+
+export function isTrustedBuilder(name: string): name is TrustedBuilderName {
+  return TRUSTED_BUILDER_SET.has(name);
+}
+
+export const TRUSTED_DATA_HELPERS = Object.freeze(
+  [
+    "schema",
+    "__ct_data",
+    "nonPrivateRandom",
+    "safeDateNow",
+  ] as const,
+);
+export type TrustedDataHelperName = (typeof TRUSTED_DATA_HELPERS)[number];
+const TRUSTED_DATA_HELPER_SET = new Set<string>(TRUSTED_DATA_HELPERS);
+
+export function isTrustedDataHelper(
+  name: string,
+): name is TrustedDataHelperName {
+  return TRUSTED_DATA_HELPER_SET.has(name);
+}
+
 export const FUNCTION_HARDENING_HELPER_NAME = "__ctHardenFn";
 
 export const RESERVED_FACTORY_BINDINGS = [

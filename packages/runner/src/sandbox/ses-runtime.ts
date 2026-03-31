@@ -16,23 +16,6 @@ export interface SESRuntimeOptions {
   lockdown?: boolean;
 }
 
-interface SESLockdownOptions {
-  errorTaming: "safe" | "unsafe" | "unsafe-debug";
-  errorTrapping: "platform" | "none" | "report" | "abort" | "exit";
-  reporting: "platform" | "console" | "none";
-  unhandledRejectionTrapping: "none" | "report";
-  regExpTaming: "safe" | "unsafe";
-  localeTaming: "safe" | "unsafe";
-  consoleTaming: "unsafe" | "safe";
-  overrideTaming: "moderate" | "min" | "severe";
-  stackFiltering: "concise" | "omit-frames" | "shorten-paths" | "verbose";
-  domainTaming: "safe" | "unsafe";
-  evalTaming: "safe-eval" | "unsafe-eval" | "no-eval";
-  overrideDebug: string[];
-  legacyRegeneratorRuntimeTaming: "safe" | "unsafe-ignore";
-  __hardenTaming__: "safe" | "unsafe";
-}
-
 export interface JsValue {
   invoke(...args: unknown[]): JsValue;
   inner(): unknown;
@@ -261,23 +244,6 @@ let callbackCompartment:
 const callbackCreatorCache = new Map<string, () => unknown>();
 const SES_RUNTIME_STATE = Symbol.for("@commontools/runner/ses-runtime-state");
 
-const DEFAULT_LOCKDOWN_OPTIONS: SESLockdownOptions = {
-  errorTaming: "safe",
-  errorTrapping: "platform",
-  reporting: "none",
-  unhandledRejectionTrapping: "report",
-  regExpTaming: "safe",
-  localeTaming: "safe",
-  consoleTaming: "unsafe",
-  overrideTaming: "severe",
-  stackFiltering: "concise",
-  domainTaming: "safe",
-  evalTaming: "safe-eval",
-  overrideDebug: [],
-  legacyRegeneratorRuntimeTaming: "safe",
-  __hardenTaming__: "safe",
-};
-
 function ensureSESInitialized(lockdownEnabled: boolean): void {
   if (!lockdownEnabled) {
     return;
@@ -297,6 +263,40 @@ function ensureSESInitialized(lockdownEnabled: boolean): void {
   globalState.lockdownInitialized = true;
   sesInitialized = true;
 }
+
+interface SESLockdownOptions {
+  errorTaming: "safe" | "unsafe" | "unsafe-debug";
+  errorTrapping: "platform" | "none" | "report" | "abort" | "exit";
+  reporting: "platform" | "console" | "none";
+  unhandledRejectionTrapping: "none" | "report";
+  regExpTaming: "safe" | "unsafe";
+  localeTaming: "safe" | "unsafe";
+  consoleTaming: "unsafe" | "safe";
+  overrideTaming: "moderate" | "min" | "severe";
+  stackFiltering: "concise" | "omit-frames" | "shorten-paths" | "verbose";
+  domainTaming: "safe" | "unsafe";
+  evalTaming: "safe-eval" | "unsafe-eval" | "no-eval";
+  overrideDebug: string[];
+  legacyRegeneratorRuntimeTaming: "safe" | "unsafe-ignore";
+  __hardenTaming__: "safe" | "unsafe";
+}
+
+const DEFAULT_LOCKDOWN_OPTIONS: SESLockdownOptions = {
+  errorTaming: "safe",
+  errorTrapping: "platform",
+  reporting: "none",
+  unhandledRejectionTrapping: "report",
+  regExpTaming: "safe",
+  localeTaming: "safe",
+  consoleTaming: "unsafe",
+  overrideTaming: "severe",
+  stackFiltering: "concise",
+  domainTaming: "safe",
+  evalTaming: "safe-eval",
+  overrideDebug: [],
+  legacyRegeneratorRuntimeTaming: "safe",
+  __hardenTaming__: "safe",
+};
 
 function createCompartment(globals: Record<string, unknown>) {
   const CompartmentCtor = (globalThis as {

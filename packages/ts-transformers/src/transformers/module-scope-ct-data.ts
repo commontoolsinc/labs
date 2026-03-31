@@ -1,25 +1,15 @@
 import ts from "typescript";
 import {
+  isTrustedBuilder,
+  isTrustedDataHelper,
+} from "@commontools/utils/sandbox-contract";
+import {
   CT_HELPERS_IDENTIFIER,
   TransformationContext,
   Transformer,
 } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 
-const TRUSTED_BUILDER_NAMES = new Set([
-  "action",
-  "computed",
-  "derive",
-  "handler",
-  "lift",
-  "pattern",
-]);
-const TRUSTED_DATA_HELPER_NAMES = new Set([
-  "schema",
-  "__ct_data",
-  "nonPrivateRandom",
-  "safeDateNow",
-]);
 const CT_DATA_CONSTRUCTOR_NAMES = new Set(["Map", "Set"]);
 
 export class ModuleScopeCtDataTransformer extends Transformer {
@@ -198,11 +188,11 @@ function createCtHelpersImport(factory: ts.NodeFactory): ts.ImportDeclaration {
 }
 
 function isTrustedBuilderCall(expression: ts.CallExpression): boolean {
-  return hasNamedTarget(expression.expression, TRUSTED_BUILDER_NAMES);
+  return hasNamedTarget(expression.expression, isTrustedBuilder);
 }
 
 function isTrustedDataHelperCall(expression: ts.CallExpression): boolean {
-  return hasNamedTarget(expression.expression, TRUSTED_DATA_HELPER_NAMES);
+  return hasNamedTarget(expression.expression, isTrustedDataHelper);
 }
 
 function isImmediatelyInvokedFunction(expression: ts.CallExpression): boolean {
@@ -267,14 +257,17 @@ function isPrimitiveLikeType(type: ts.Type): boolean {
 
 function hasNamedTarget(
   expression: ts.Expression,
-  names: ReadonlySet<string>,
+  namesOrMatcher: ReadonlySet<string> | ((name: string) => boolean),
 ): boolean {
+  const matchesName = typeof namesOrMatcher === "function"
+    ? namesOrMatcher
+    : (name: string) => namesOrMatcher.has(name);
   const target = unwrapExpression(expression);
   if (ts.isIdentifier(target)) {
-    return names.has(target.text);
+    return matchesName(target.text);
   }
   if (ts.isPropertyAccessExpression(target)) {
-    return names.has(target.name.text);
+    return matchesName(target.name.text);
   }
   return false;
 }

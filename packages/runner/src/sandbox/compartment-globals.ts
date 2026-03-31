@@ -22,6 +22,7 @@ const CONSOLE_METHOD_NAMES = [
   "trace",
   "warn",
 ] as const;
+const EMPTY_CONSOLE_METHOD = freezeSandboxValue(() => undefined);
 
 function createCompatibilityGlobals(): Record<string, unknown> {
   const globals: Record<string, unknown> = {};
@@ -86,9 +87,9 @@ export function createSafeConsoleGlobal(
 
   for (const methodName of CONSOLE_METHOD_NAMES) {
     const method = consoleLike?.[methodName];
-    if (typeof method === "function") {
-      safeConsole[methodName] = method.bind(consoleLike);
-    }
+    safeConsole[methodName] = typeof method === "function"
+      ? freezeSandboxValue(method.bind(consoleLike))
+      : EMPTY_CONSOLE_METHOD;
   }
 
   return freezeSandboxValue(safeConsole);

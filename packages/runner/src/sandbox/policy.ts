@@ -1,18 +1,16 @@
-export const TRUSTED_BUILDERS = new Set([
-  "action",
-  "computed",
-  "derive",
-  "handler",
-  "lift",
-  "pattern",
-]);
+import {
+  isTrustedBuilder,
+  isTrustedDataHelper,
+  TRUSTED_BUILDERS,
+  TRUSTED_DATA_HELPERS,
+} from "@commontools/utils/sandbox-contract";
 
-export const TRUSTED_DATA_HELPERS = new Set([
-  "schema",
-  "__ct_data",
-  "nonPrivateRandom",
-  "safeDateNow",
-]);
+export {
+  isTrustedBuilder,
+  isTrustedDataHelper,
+  TRUSTED_BUILDERS,
+  TRUSTED_DATA_HELPERS,
+};
 
 export const SAFE_GLOBAL_IDENTIFIERS = new Set([
   "Array",
@@ -57,9 +55,3 @@ export const SAFE_GLOBAL_IDENTIFIERS = new Set([
 
 export const TOP_LEVEL_CALL_RESULT_ERROR =
   "Top-level call results must be wrapped in __ct_data() in SES mode";
-
-export function isTrustedSnapshotHelperName(
-  name: string | undefined,
-): name is "nonPrivateRandom" | "safeDateNow" {
-  return name === "nonPrivateRandom" || name === "safeDateNow";
-}

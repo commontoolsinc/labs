@@ -3,14 +3,15 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { preflightCompiledBundle } from "../src/sandbox/bundle-preflight.ts";
+import { createCallbackCompartmentGlobals } from "../src/sandbox/compartment-globals.ts";
+import { hardenVerifiedFunction } from "../src/sandbox/function-hardening.ts";
 import {
-  createCallbackCompartmentGlobals,
-  evaluateCallbackSourceInSES,
-  evaluateFunctionSourceInSES,
-  hardenVerifiedFunction,
-  preflightCompiledBundle,
-  verifyCompiledBundleModuleFactories,
-} from "../src/sandbox/mod.ts";
+  verifyCompiledBundleModuleFactoriesWithParser
+    as verifyCompiledBundleModuleFactories,
+} from "../src/sandbox/compiled-bundle-verifier.ts";
+import { evaluateCallbackSourceInSES } from "../src/sandbox/mod.ts";
+import { evaluateFunctionSourceInSES } from "../src/sandbox/ses-runtime.ts";
 
 const signer = await Identity.fromPassphrase("bench ses boundary");
 

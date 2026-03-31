@@ -6,11 +6,9 @@ import { getPatternEnvironment } from "../src/env.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import {
-  createCallbackCompartmentGlobals,
-  createModuleCompartmentGlobals,
-  evaluateFunctionSourceInSES,
-} from "../src/sandbox/mod.ts";
+import { createModuleCompartmentGlobals } from "../src/sandbox/mod.ts";
+import { createCallbackCompartmentGlobals } from "../src/sandbox/compartment-globals.ts";
+import { evaluateFunctionSourceInSES } from "../src/sandbox/ses-runtime.ts";
 import { getAMDLoader } from "../../js-compiler/typescript/bundler/amd-loader.ts";
 
 const signer = await Identity.fromPassphrase("test operator");

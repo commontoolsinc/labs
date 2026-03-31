@@ -5,10 +5,6 @@ export interface SourceRange {
 
 export interface StatementChunk extends SourceRange {}
 
-export interface IdentifierToken extends SourceRange {
-  text: string;
-}
-
 export interface ParsedBlock extends SourceRange {
   statements: StatementChunk[];
 }
@@ -111,7 +107,7 @@ export function stripJsTrivia(
   return output;
 }
 
-export function parseBlock(
+function parseBlock(
   source: string,
   start: number,
   end: number,
@@ -422,41 +418,6 @@ export function findTopLevelEquals(
   }
 
   return undefined;
-}
-
-export function collectIdentifierTokens(
-  source: string,
-  start: number,
-  end: number,
-): IdentifierToken[] {
-  const identifiers: IdentifierToken[] = [];
-  const state: ScanState = {
-    parenDepth: 0,
-    braceDepth: 0,
-    bracketDepth: 0,
-    regexAllowed: true,
-  };
-
-  for (let cursor = start; cursor < end;) {
-    const tokenStart = skipTrivia(source, cursor, end);
-    if (tokenStart >= end) {
-      break;
-    }
-    const identifier = tryReadIdentifier(source, tokenStart, end);
-    if (identifier) {
-      identifiers.push(identifier);
-      state.regexAllowed = isRegexPrefixKeyword(
-        source,
-        identifier.start,
-        identifier.end,
-      );
-      cursor = identifier.end;
-      continue;
-    }
-    cursor = advanceScanner(source, tokenStart, end, state);
-  }
-
-  return identifiers;
 }
 
 export function locationFromOffset(

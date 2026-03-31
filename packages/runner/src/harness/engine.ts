@@ -28,8 +28,6 @@ import { StaticCache } from "@commonfabric/static";
 import { pretransformProgram } from "./pretransform.ts";
 import { popFrame, pushFrame } from "../builder/pattern.ts";
 import {
-  createModuleCompartmentGlobals,
-  createSafeConsoleGlobal,
   ensureSESLockdown,
   evaluateCallbackSourceInSES,
   getRuntimeModuleExports,
@@ -39,6 +37,10 @@ import {
   SESIsolate,
   SESRuntime,
 } from "../sandbox/mod.ts";
+import {
+  createModuleCompartmentGlobals,
+  createSafeConsoleGlobal,
+} from "../sandbox/compartment-globals.ts";
 import {
   BundlePreflightError,
   preflightParsedCompiledBundle,
@@ -120,7 +122,7 @@ export class Engine extends EventTarget implements Harness {
     string,
     Map<string, HarnessedFunction>
   >();
-  private consoleShim = createSafeConsoleGlobal(new Console(this));
+  private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
 
   constructor(ctRuntime: Runtime) {
     super();
