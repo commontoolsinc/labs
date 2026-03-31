@@ -416,7 +416,7 @@ function hashOfModernInternal(
 /**
  * Compute the canonical SHA-256 hash of a `FabricValue`. Returns a
  * `FabricHash` with algorithm tag `fid1` (fabric ID, v1).
- * The caller (`hashOf()`) extracts the raw digest via `.hash` for
+ * The caller (`hashOf()`) extracts the raw digest via `.bytes` for
  * `Reference.fromDigest()`.
  *
  * Caches results for primitives (LRU) and deep-frozen objects (WeakMap).
