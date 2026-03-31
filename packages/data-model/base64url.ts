@@ -100,7 +100,7 @@ export function fromBase64Polyfill(encoded: string): Uint8Array {
     inLen--;
   }
   if ((s.length - inLen) > 2) {
-    throw new Error('fromBase64url: too much padding');
+    throw new Error("fromBase64url: too much padding");
   }
 
   // Compute output byte count from the number of base64 characters.

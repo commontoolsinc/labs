@@ -7,7 +7,7 @@ import {
   toUnpaddedBase64url,
 } from "../base64url.ts";
 
-const TEST_PAIRS: { arr: readonly number[], b64: string }[] = [
+const TEST_PAIRS: { arr: readonly number[]; b64: string }[] = [
   { arr: [], b64: "" },
   { arr: [0x00], b64: "AA" },
   { arr: [0xff], b64: "_w" },
@@ -52,7 +52,6 @@ for (const toBase64 of [toUnpaddedBase64url, toBase64Polyfill]) {
 // ============================================================================
 // fromBase64url and polyfill
 // ============================================================================
-
 
 for (const fromBase64 of [fromBase64url, fromBase64Polyfill]) {
   describe(`${fromBase64.name}`, () => {
