@@ -119,7 +119,7 @@ export function canBeStoredLegacy(
 /**
  * Legacy implementation of `cloneIfNecessary()`. As a legacy version, this is
  * an intentionally simplified implementation meant to capture only the truly
- * necessary behavior to keep the system running without the rich-data flag
+ * necessary behavior to keep the system running without the modern-data flag
  * turned on. Details:
  *
  * * This function just returns the given `value` in many cases that ideally
@@ -131,7 +131,7 @@ export function canBeStoredLegacy(
  *   a result which has a non-`null` prototype.
  * * When producing a clone with `deep === true`, this just uses the built-in
  *   `structuredClone()` function (which would be incorrect given arbitrary
- *   rich-data values).
+ *   modern-data values).
  *
  * Callers must resolve `CloneOptions` defaults and validate before calling;
  * the dispatcher in `fabric-value.ts` handles that.

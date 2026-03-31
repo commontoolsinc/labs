@@ -222,7 +222,7 @@ describe("FabricRegExp", () => {
   // Conversion: shallowFabricFromNativeValueModern
   // --------------------------------------------------------------------------
 
-  describe("shallowFabricFromNativeValue (rich path)", () => {
+  describe("shallowFabricFromNativeValue (modern path)", () => {
     it("converts RegExp to FabricRegExp", () => {
       setDataModelConfig(true);
       try {

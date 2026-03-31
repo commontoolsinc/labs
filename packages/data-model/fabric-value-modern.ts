@@ -237,7 +237,7 @@ export function fabricFromNativeValueModern(
   if (freeze && isDeepFrozenFabricValue(value)) {
     return value as FabricValue;
   }
-  return fabricFromNativeValueRichInternal(
+  return fabricFromNativeValueModernInternal(
     value,
     new Map(),
     freeze,
@@ -279,13 +279,13 @@ function isDeepFrozenFabricValue(value: unknown): boolean {
 }
 
 /**
- * Internal recursive implementation for the rich path. Single-pass: checks,
+ * Internal recursive implementation for the modern path. Single-pass: checks,
  * wraps, and optionally freezes each node as it's built. By the time this
  * returns, the whole tree is converted and (if `freeze` is true) deep-frozen.
  * Unlike the legacy version, this never returns OMIT -- `undefined` values
  * are preserved.
  */
-function fabricFromNativeValueRichInternal(
+function fabricFromNativeValueModernInternal(
   original: unknown,
   converted: Map<object, unknown>,
   freeze: boolean,
@@ -304,7 +304,7 @@ function fabricFromNativeValueRichInternal(
     converted.set(original, PROCESSING);
   }
 
-  // Try to convert the top level via the rich shallow converter.
+  // Try to convert the top level via the modern shallow converter.
   // Pass freeze=false: the deep path handles freezing its own newly-built
   // results; the shallow converter should not freeze anything.
   let value: FabricValueLayer;
@@ -370,7 +370,7 @@ function fabricFromNativeValueRichInternal(
         // This keeps the hole distinct from `undefined`.
         resultArray.length = i + 1;
       } else {
-        resultArray[i] = fabricFromNativeValueRichInternal(
+        resultArray[i] = fabricFromNativeValueModernInternal(
           value[i],
           converted,
           freeze,
@@ -386,7 +386,7 @@ function fabricFromNativeValueRichInternal(
     const proto = Object.getPrototypeOf(value);
     const obj = Object.create(proto) as Record<string, FabricValue>;
     for (const [key, val] of Object.entries(value)) {
-      obj[key] = fabricFromNativeValueRichInternal(
+      obj[key] = fabricFromNativeValueModernInternal(
         val,
         converted,
         freeze,
@@ -432,7 +432,7 @@ function convertErrorInternals(
 
   // Recursively convert cause -- it could be a raw Error, Map, etc.
   if (error.cause !== undefined) {
-    result.cause = fabricFromNativeValueRichInternal(
+    result.cause = fabricFromNativeValueModernInternal(
       error.cause,
       converted,
       freeze,
@@ -445,7 +445,7 @@ function convertErrorInternals(
   for (const key of Object.keys(error)) {
     if (SKIP_KEYS.has(key) || UNSAFE_KEYS.has(key)) continue;
     (result as unknown as Record<string, unknown>)[key] =
-      fabricFromNativeValueRichInternal(
+      fabricFromNativeValueModernInternal(
         (error as unknown as Record<string, unknown>)[key],
         converted,
         freeze,
@@ -489,7 +489,7 @@ export function isFabricValueModern(
         return true;
       }
       if (Array.isArray(value)) {
-        // In the rich path, arrays with `undefined` elements and sparse holes
+        // In the modern path, arrays with `undefined` elements and sparse holes
         // are accepted. Only reject arrays with non-index properties.
         return isArrayWithOnlyIndexProperties(value);
       }
@@ -530,7 +530,7 @@ export function isFabricValueModern(
  * that return fabric values. It checks recursively, so all nested values in
  * arrays and objects must also be fabric-compatible or convertible.
  */
-export function canBeStoredRich(
+export function canBeStoredModern(
   value: unknown,
 ): value is FabricValue | FabricNativeObject {
   return canBeStoredInternal(value, new Set());
@@ -582,7 +582,7 @@ export interface CloneOptions {
  * @param deep - Whether to clone deeply or shallowly.
  * @param force - Whether to force a copy.
  */
-export function cloneIfNecessaryRich(
+export function cloneIfNecessaryModern(
   value: FabricValue,
   frozen: boolean,
   deep: boolean,

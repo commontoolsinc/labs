@@ -13,8 +13,8 @@ import { FabricBytes } from "../fabric-bytes.ts";
 
 describe("fabric-value", () => {
   // Explicitly pin modernDataModel off so the legacy-path tests (below the
-  // rich-path section) exercise flag-off behavior regardless of the ambient
-  // default. The rich-path describe blocks override this in their own
+  // modern-path section) exercise flag-off behavior regardless of the ambient
+  // default. The modern-path describe blocks override this in their own
   // beforeEach.
   beforeEach(() => {
     setDataModelConfig(false);
@@ -931,10 +931,10 @@ describe("fabric-value", () => {
   });
 
   // --------------------------------------------------------------------------
-  // freeze parameter (rich path only)
+  // freeze parameter (modern path only)
   // --------------------------------------------------------------------------
 
-  describe("freeze parameter (rich path)", () => {
+  describe("freeze parameter (modern path)", () => {
     beforeEach(() => {
       setDataModelConfig(true);
     });
@@ -1010,7 +1010,7 @@ describe("fabric-value", () => {
         expect(result).not.toBe(obj);
       });
 
-      it("converts function with toJSON via toRichStorableValueBase", () => {
+      it("converts function with toJSON via modern path", () => {
         const fn = () => {};
         (fn as unknown as { toJSON: () => string }).toJSON = () =>
           "converted fn";
@@ -1250,11 +1250,11 @@ describe("fabric-value", () => {
   });
 
   // =========================================================================
-  // Error internals conversion (rich path): cause and custom properties must
+  // Error internals conversion (modern path): cause and custom properties must
   // be recursively converted to FabricValue before wrapping in FabricError
   // =========================================================================
 
-  describe("Error internals deep conversion (rich path)", () => {
+  describe("Error internals deep conversion (modern path)", () => {
     beforeEach(() => {
       setDataModelConfig(true);
     });

@@ -25,8 +25,8 @@ import type {
 import { deepEqual } from "@commontools/utils/deep-equal";
 import type { Immutable } from "@commontools/utils/types";
 import {
-  canBeStoredRich,
-  cloneIfNecessaryRich,
+  canBeStoredModern,
+  cloneIfNecessaryModern,
   type CloneOptions,
   fabricFromNativeValueModern,
   isFabricValueModern,
@@ -89,7 +89,7 @@ export function resetDataModelConfig(): void {
  * Convert a native JS value to fabric form (deep, recursive).
  *
  * Flag OFF (legacy): performs deep conversion via `fabricFromNativeValueLegacy`.
- * Flag ON (rich): wraps native types (Error, Date, RegExp, etc.) into
+ * Flag ON (modern): wraps native types (Error, Date, RegExp, etc.) into
  * fabric wrappers and deep-freezes via `fabricFromNativeValueModern`.
  *
  * @param freeze - When `true` (default), deep-freezes the result. Only
@@ -112,7 +112,7 @@ export function fabricFromNativeValue(
  * UnknownValue, etc.) pass through as-is.
  *
  * Flag OFF (legacy): identity passthrough (legacy values contain no
- * `FabricNativeWrapper` instances). Flag ON (rich): delegates to
+ * `FabricNativeWrapper` instances). Flag ON (modern): delegates to
  * `nativeFromFabricValueModern`.
  *
  * @param frozen - When `true` (default), deep-freezes the result. Only
@@ -137,7 +137,7 @@ export function nativeFromFabricValue(
  * `FabricValue` and only adjusts frozenness by cloning where necessary.
  *
  * Flag OFF (legacy): identity passthrough (legacy values are not frozen).
- * Flag ON (rich): delegates to `cloneIfNecessaryRich`.
+ * Flag ON (modern): delegates to `cloneIfNecessaryModern`.
  *
  * @param value - An already-valid `FabricValue`.
  * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
@@ -177,7 +177,7 @@ export function cloneIfNecessary<T extends FabricValue>(
   }
 
   return (modernDataModelEnabled
-    ? cloneIfNecessaryRich(value, frozen, deep, force)
+    ? cloneIfNecessaryModern(value, frozen, deep, force)
     : cloneIfNecessaryLegacy(value, frozen, deep, force)) as T;
 }
 
@@ -191,7 +191,7 @@ export function cloneIfNecessary<T extends FabricValue>(
  * not recursively validate nested values in arrays or objects.
  *
  * Flag OFF (legacy): fabric values are JSON-encodable values plus
- * `undefined`. Flag ON (rich): delegates to `isFabricValueModern` which
+ * `undefined`. Flag ON (modern): delegates to `isFabricValueModern` which
  * accepts the extended type system.
  *
  * @param value - The value to check.
@@ -211,7 +211,7 @@ export function isFabricValue(
  * or a deep tree thereof.
  *
  * Flag OFF (legacy): equivalent to `isFabricValue()` (non-recursive).
- * Flag ON (rich): delegates to the rich `canBeStored` which recursively
+ * Flag ON (modern): delegates to `canBeStoredModern` which recursively
  * validates nested values.
  *
  * @param value - The value to check.
@@ -221,7 +221,7 @@ export function canBeStored(
   value: unknown,
 ): value is FabricValue | FabricNativeObject {
   return modernDataModelEnabled
-    ? canBeStoredRich(value)
+    ? canBeStoredModern(value)
     : canBeStoredLegacy(value);
 }
 
@@ -234,7 +234,7 @@ export function canBeStored(
  * JSON-encodable values pass through as-is. Functions and instances are
  * converted via `toJSON()` if available.
  *
- * Flag OFF (legacy): JSON-only type system. Flag ON (rich): delegates to
+ * Flag OFF (legacy): JSON-only type system. Flag ON (modern): delegates to
  * `shallowFabricFromNativeValueModern` which handles the extended type system.
  *
  * @param value - The value to convert.
@@ -263,7 +263,7 @@ export function shallowFabricFromNativeValue(
  * the original `JSON.parse(JSON.stringify(...))` round-trip (strips undefined,
  * coerces NaN to null, etc.).
  *
- * Flag ON (rich): uses deep structural equality that correctly handles
+ * Flag ON (modern): uses deep structural equality that correctly handles
  * undefined, sparse arrays, and other extended types.
  */
 export function valueEqual(a: unknown, b: unknown): boolean {

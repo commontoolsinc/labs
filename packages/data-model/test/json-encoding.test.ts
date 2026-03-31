@@ -72,10 +72,10 @@ describe("json-encoding", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Flag ON: rich type encoding
+  // Flag ON: modern type encoding
   // --------------------------------------------------------------------------
 
-  describe("flag ON: rich type encoding", () => {
+  describe("flag ON: modern type encoding", () => {
     it("round-trip preserves undefined", () => {
       setJsonEncodingConfig(true);
       expect(roundTrip(undefined)).toBe(undefined);
@@ -230,7 +230,7 @@ describe("json-encoding", () => {
       });
     });
 
-    it("mixed value with rich types and slash-keys round-trips", () => {
+    it("mixed value with modern types and slash-keys round-trips", () => {
       setJsonEncodingConfig(true);
       const value = {
         count: 42n,

@@ -76,7 +76,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   // -------------------------------------------------------------------------
 
   /**
-   * Encode a fabric value to a JSON string. Serializes rich types into
+   * Encode a fabric value to a JSON string. Serializes modern types into
    * the `/<Type>@<Version>` tagged wire format, then stringifies.
    */
   encode(value: FabricValue): string {
@@ -85,7 +85,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
   /**
    * Decode a JSON string back into a fabric value. Parses the string,
-   * then deserializes tagged forms back into rich runtime types.
+   * then deserializes tagged forms back into modern runtime types.
    */
   decode(data: string, runtime: ReconstructionContext): FabricValue {
     const parsed = JSON.parse(data) as JsonWireValue;
@@ -301,7 +301,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   // -------------------------------------------------------------------------
 
   /**
-   * Deserialize a wire-format value back into rich runtime types.
+   * Deserialize a wire-format value back into modern runtime types.
    * See Section 4.5 of the formal spec.
    */
   private deserialize(

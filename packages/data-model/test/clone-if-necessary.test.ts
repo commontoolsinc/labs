@@ -20,13 +20,13 @@ describe("cloneIfNecessary", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Error cases (both legacy and rich -- validation runs before flag dispatch)
+  // Error cases (both legacy and modern -- validation runs before flag dispatch)
   // --------------------------------------------------------------------------
 
-  for (const richMode of [false, true]) {
-    const label = richMode ? "rich" : "legacy";
+  for (const modernMode of [false, true]) {
+    const label = modernMode ? "modern" : "legacy";
     describe(`error cases (${label} path)`, () => {
-      if (richMode) {
+      if (modernMode) {
         beforeEach(() => setDataModelConfig(true));
       }
 
@@ -276,10 +276,10 @@ describe("cloneIfNecessary", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Flag ON (rich) -- default options (frozen=true, deep=true, force=false)
+  // Flag ON (modern) -- default options (frozen=true, deep=true, force=false)
   // --------------------------------------------------------------------------
 
-  describe("rich path: default options (frozen=true, deep=true)", () => {
+  describe("modern path: default options (frozen=true, deep=true)", () => {
     it("passes through primitives unchanged", () => {
       setDataModelConfig(true);
       expect(cloneIfNecessary(42 as FabricValue)).toBe(42);
@@ -350,7 +350,7 @@ describe("cloneIfNecessary", () => {
   // frozen=false, force=true (default when frozen=false) -- deep
   // --------------------------------------------------------------------------
 
-  describe("rich path: frozen=false (deep, force=true default)", () => {
+  describe("modern path: frozen=false (deep, force=true default)", () => {
     it("returns a mutable copy of a frozen object", () => {
       setDataModelConfig(true);
       const value = Object.freeze({ a: 1, b: "two" }) as FabricValue;
@@ -407,7 +407,7 @@ describe("cloneIfNecessary", () => {
   // shallow clone (deep=false)
   // --------------------------------------------------------------------------
 
-  describe("rich path: shallow clone (deep=false)", () => {
+  describe("modern path: shallow clone (deep=false)", () => {
     it("shallow-clones an unfrozen object to frozen", () => {
       setDataModelConfig(true);
       const inner = { x: 1 };
@@ -684,11 +684,11 @@ describe("cloneIfNecessary", () => {
   // --------------------------------------------------------------------------
 
   describe("config lifecycle", () => {
-    it("switching from rich to legacy restores identity passthrough", () => {
+    it("switching from modern to legacy restores identity passthrough", () => {
       setDataModelConfig(true);
       const value = { a: 1 } as FabricValue;
-      const richResult = cloneIfNecessary(value);
-      expect(richResult).not.toBe(value); // rich path clones
+      const modernResult = cloneIfNecessary(value);
+      expect(modernResult).not.toBe(value); // modern path clones
 
       resetDataModelConfig();
       const legacyResult = cloneIfNecessary(value);

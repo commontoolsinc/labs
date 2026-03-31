@@ -79,7 +79,7 @@ export function toDeepFrozenSchema<T extends JSONSchema>(
   // At this point, we have a mutable `schemaObj` which is allowed to be
   // directly frozen and is in fact to become the frozen return value.
   // TODO(danfuzz): `structuredClone()` will no longer be appropriate to use
-  // once the schema system grows to support the full rich-data model.
+  // once the schema system grows to support the full modern data model.
   const schemaRecord = schemaObj as Record<string, unknown>;
   for (const [key, value] of Object.entries(schemaRecord)) {
     schemaRecord[key] = isDeepFrozen(value)

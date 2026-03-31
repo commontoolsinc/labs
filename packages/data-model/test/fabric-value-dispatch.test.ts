@@ -63,10 +63,10 @@ describe("fabric-value-dispatch", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Flag ON: rich fabric value conversion
+  // Flag ON: modern fabric value conversion
   // --------------------------------------------------------------------------
 
-  describe("flag ON: rich fabric value conversion", () => {
+  describe("flag ON: modern fabric value conversion", () => {
     it("round-trip preserves primitives", () => {
       setDataModelConfig(true);
       expect(roundTrip(42 as FabricValue)).toBe(42);
@@ -158,7 +158,7 @@ describe("fabric-value-dispatch", () => {
     });
 
     it("multiple set/reset cycles work correctly", () => {
-      // Cycle 1: ON — rich conversion
+      // Cycle 1: ON — modern conversion
       setDataModelConfig(true);
       const error1 = new Error("test1");
       expect(fabricFromNativeValue(error1 as unknown as FabricValue))
@@ -175,7 +175,7 @@ describe("fabric-value-dispatch", () => {
       expect(stored1).not.toBeInstanceOf(FabricError);
       expect((stored1 as Record<string, unknown>)["@Error"]).toBeDefined();
 
-      // Cycle 2: ON — rich conversion
+      // Cycle 2: ON — modern conversion
       setDataModelConfig(true);
       const error2 = new Error("test2");
       expect(fabricFromNativeValue(error2 as unknown as FabricValue))
