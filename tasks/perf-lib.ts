@@ -153,22 +153,6 @@ export interface BaselineOverrides {
   metrics: Map<string, number>;
 }
 
-/**
- * Metrics to exclude from regression checks because they are aggregate values
- * dominated by CI setup noise or because they naturally grow as tests are
- * added. More specific step- and test-level metrics remain tracked.
- */
-export const EXCLUDED_METRIC_PATTERNS = [
-  /^job: Pattern Unit Tests/,
-  /^step: pattern unit tests$/,
-  // This job mostly mirrors "step: workspace tests" plus noisy CI setup.
-  /^job: Test$/,
-];
-
-export function isExcludedMetric(metric: string): boolean {
-  return EXCLUDED_METRIC_PATTERNS.some((re) => re.test(metric));
-}
-
 // ---------------------------------------------------------------------------
 // GitHub API helpers
 // ---------------------------------------------------------------------------
