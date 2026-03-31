@@ -1308,6 +1308,35 @@ describe("Engine in SES mode", () => {
 
     expect(probe()).toBe("undefined");
   });
+
+  it("owns callback creator caches on the engine runtime and clears them on dispose", () => {
+    const next = engine.getInvocation("function next(x) { return x + 1; }") as (
+      input: number,
+    ) => number;
+
+    expect(next(1)).toBe(2);
+    expect(
+      (engine as unknown as {
+        sesRuntime: {
+          callbackEvaluator: {
+            callbackCreatorCache: Map<string, () => unknown>;
+          };
+        };
+      }).sesRuntime.callbackEvaluator.callbackCreatorCache.size,
+    ).toBe(1);
+
+    engine.dispose();
+
+    expect(
+      (engine as unknown as {
+        sesRuntime?: {
+          callbackEvaluator: {
+            callbackCreatorCache: Map<string, () => unknown>;
+          };
+        };
+      }).sesRuntime?.callbackEvaluator.callbackCreatorCache.size ?? 0,
+    ).toBe(0);
+  });
 });
 
 describe("Engine compile + evaluate", () => {

@@ -12,6 +12,43 @@ import { SESRuntime } from "../src/sandbox/mod.ts";
 const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
 
 describe("Runtime", () => {
+  it("creates distinct isolates per key and resets them on clear", () => {
+    const runtime = new SESRuntime({ lockdown: true });
+
+    const alpha = runtime.getIsolate("alpha");
+    const beta = runtime.getIsolate("beta");
+
+    expect(alpha).not.toBe(beta);
+
+    runtime.clear();
+
+    const alphaAfterClear = runtime.getIsolate("alpha");
+    expect(alphaAfterClear).not.toBe(alpha);
+  });
+
+  it("clears cached callback creators on runtime.clear", () => {
+    const runtime = new SESRuntime({ lockdown: true });
+
+    const next = runtime.evaluateCallback(
+      "function next(x) { return x + 1; }",
+    ) as (x: number) => number;
+
+    expect(next(1)).toBe(2);
+    expect(
+      (runtime as unknown as {
+        callbackEvaluator: { callbackCreatorCache: Map<string, () => unknown> };
+      }).callbackEvaluator.callbackCreatorCache.size,
+    ).toBe(1);
+
+    runtime.clear();
+
+    expect(
+      (runtime as unknown as {
+        callbackEvaluator: { callbackCreatorCache: Map<string, () => unknown> };
+      }).callbackEvaluator.callbackCreatorCache.size,
+    ).toBe(0);
+  });
+
   it("Compiles and executes a set of typescript files", async () => {
     const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.tsx", {

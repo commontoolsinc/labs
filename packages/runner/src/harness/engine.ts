@@ -29,12 +29,10 @@ import { pretransformProgram } from "./pretransform.ts";
 import { popFrame, pushFrame } from "../builder/pattern.ts";
 import {
   ensureSESLockdown,
-  evaluateCallbackSourceInSES,
   getRuntimeModuleExports,
   getRuntimeModuleTypes,
   isRuntimeModuleIdentifier,
   RuntimeModuleIdentifiers,
-  SESIsolate,
   SESRuntime,
 } from "../sandbox/mod.ts";
 import {
@@ -99,7 +97,6 @@ export class EngineProgramResolver extends InMemoryProgram {
 interface Internals {
   compiler: TypeScriptCompiler;
   runtime: SESRuntime;
-  isolate: SESIsolate;
   runtimeExports: Record<string, any> | undefined;
   // Callback will be called with a map of exported values to `RuntimeProgram`
   // after compilation and initial eval and before compilation returns, so
@@ -110,6 +107,7 @@ interface Internals {
 export class Engine extends EventTarget implements Harness {
   private internals: Internals | undefined;
   private ctRuntime: Runtime;
+  private sesRuntime: SESRuntime | undefined;
   private verifiedBundleHashes = new Set<string>();
   private readonly loadIds = new WeakMap<JsScript, string>();
   private nextLoadId = 0;
@@ -134,16 +132,9 @@ export class Engine extends EventTarget implements Harness {
       this.ctRuntime.staticCache,
     );
     const compiler = new TypeScriptCompiler(environmentTypes);
-    ensureSESLockdown();
-    const runtime = new SESRuntime({
-      globals: createModuleCompartmentGlobals({
-        console: this.consoleShim,
-      }),
-      lockdown: false,
-    });
-    const isolate = runtime.getIsolate("");
+    const runtime = this.getSESRuntime();
     const { runtimeExports, exportsCallback } = await getRuntimeModuleExports();
-    return { compiler, runtime, isolate, runtimeExports, exportsCallback };
+    return { compiler, runtime, runtimeExports, exportsCallback };
   }
 
   // Resolve a `ProgramResolver` into a `Program`.
@@ -225,9 +216,10 @@ export class Engine extends EventTarget implements Harness {
     logger.timeStart("evaluate");
     try {
       this.verifyCompiledBundle(jsScript, `${id}.js`);
-      const { isolate, runtimeExports, exportsCallback } = await this
+      const { runtime, runtimeExports, exportsCallback } = await this
         .getInternals();
       const loadId = this.getLoadId(id, jsScript);
+      const isolate = runtime.getIsolate(loadId);
       const runtimeDeps = this.createRuntimeDeps(runtimeExports ?? {});
       const sourceLocationFrame = pushFrame({
         runtime: this.ctRuntime,
@@ -290,14 +282,15 @@ export class Engine extends EventTarget implements Harness {
     // be set up.
     // Some tests invoke values outside of this isolate, so just
     // execute and return if internals have not been initialized.
-    if (!this.internals) {
+    if (!this.internals && !this.sesRuntime) {
       return fn();
     }
-    return this.internals.isolate.value(fn).invoke().inner();
+    return this.getSESRuntime().getIsolate("__engine-invoke__").value(fn)
+      .invoke().inner();
   }
 
   getInvocation(source: string): HarnessedFunction {
-    return evaluateCallbackSourceInSES(source) as HarnessedFunction;
+    return this.getSESRuntime().evaluateCallback(source) as HarnessedFunction;
   }
 
   getVerifiedFunction(
@@ -327,7 +320,7 @@ export class Engine extends EventTarget implements Harness {
     column: number,
   ): MappedPosition | null {
     if (!this.internals) return null;
-    return this.internals.isolate.mapPosition(filename, line, column);
+    return this.internals.runtime.mapPosition(filename, line, column);
   }
 
   // Parse an error stack trace, mapping all positions back to original sources.
@@ -336,7 +329,7 @@ export class Engine extends EventTarget implements Harness {
     if (!this.internals) {
       return stack;
     }
-    return this.internals.isolate.parseStack(stack);
+    return this.internals.runtime.parseStack(stack);
   }
 
   // Returns a map of runtime module types.
@@ -364,17 +357,28 @@ export class Engine extends EventTarget implements Harness {
    * Clears accumulated source maps and other state to prevent memory leaks.
    */
   dispose(): void {
-    if (this.internals) {
-      // Clear the SES runtime state which holds accumulated source maps
-      this.internals.runtime.clear();
-
-      // Clear references to allow GC
-      this.internals = undefined;
+    if (this.sesRuntime) {
+      this.sesRuntime.clear();
     }
+    this.sesRuntime = undefined;
+    this.internals = undefined;
     this.verifiedFunctions.clear();
     this.verifiedFunctionIndex.clear();
     this.patternFunctions.clear();
     this.verifiedBundleHashes.clear();
+  }
+
+  private getSESRuntime(): SESRuntime {
+    if (!this.sesRuntime) {
+      ensureSESLockdown();
+      this.sesRuntime = new SESRuntime({
+        globals: createModuleCompartmentGlobals({
+          console: this.consoleShim,
+        }),
+        lockdown: false,
+      });
+    }
+    return this.sesRuntime;
   }
 
   private verifyCompiledBundle(jsScript: JsScript, fallbackFilename: string) {

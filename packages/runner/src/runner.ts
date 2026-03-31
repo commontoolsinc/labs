@@ -65,7 +65,6 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
-import { evaluateCallbackSourceInSES } from "./sandbox/mod.ts";
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
 const triggerFlowLogger = getLogger("runner.trigger-flow", {
@@ -1278,7 +1277,7 @@ export class Runner {
       if (cached) {
         fn = cached as (inputs: any) => any;
       } else {
-        fn = evaluateCallbackSourceInSES(module.implementation) as (
+        fn = this.runtime.harness.getInvocation(module.implementation) as (
           inputs: any,
         ) => any;
         this.functionCache.set(module, fn);

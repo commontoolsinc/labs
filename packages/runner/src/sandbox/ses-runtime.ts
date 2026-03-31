@@ -16,6 +16,11 @@ export interface SESRuntimeOptions {
   lockdown?: boolean;
 }
 
+interface SESCompartmentLike {
+  evaluate(source: string): unknown;
+  globalThis?: object;
+}
+
 export interface JsValue {
   invoke(...args: unknown[]): JsValue;
   inner(): unknown;
@@ -109,10 +114,12 @@ class SESJsValue implements JsValue {
 }
 
 export class SESIsolate {
-  private internals = new SESInternals();
   private globals: Record<string, unknown>;
 
-  constructor(private options: SESRuntimeOptions = {}) {
+  constructor(
+    private options: SESRuntimeOptions = {},
+    private internals = new SESInternals(),
+  ) {
     this.globals = { ...(options.globals ?? {}) };
     ensureSESInitialized(!!options.lockdown);
   }
@@ -170,15 +177,24 @@ export class SESIsolate {
 }
 
 export class SESRuntime extends EventTarget {
-  private isolateSingleton: SESIsolate;
+  private internals = new SESInternals();
+  private isolates = new Map<string, SESIsolate>();
+  private callbackEvaluator: SESCallbackEvaluator;
 
   constructor(private options: SESRuntimeOptions = {}) {
     super();
-    this.isolateSingleton = new SESIsolate(options);
+    this.callbackEvaluator = new SESCallbackEvaluator(options);
   }
 
-  getIsolate(_key: string): SESIsolate {
-    return this.isolateSingleton;
+  getIsolate(key: string): SESIsolate {
+    const existing = this.isolates.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const isolate = new SESIsolate(this.options, this.internals);
+    this.isolates.set(key, isolate);
+    return isolate;
   }
 
   mapPosition(
@@ -186,15 +202,21 @@ export class SESRuntime extends EventTarget {
     line: number,
     column: number,
   ): MappedPosition | null {
-    return this.isolateSingleton.mapPosition(filename, line, column);
+    return this.internals.mapPosition(filename, line, column);
   }
 
   parseStack(stack: string): string {
-    return this.isolateSingleton.parseStack(stack);
+    return this.internals.parseStack(stack);
+  }
+
+  evaluateCallback(source: string): unknown {
+    return this.callbackEvaluator.evaluate(source);
   }
 
   clear(): void {
-    this.isolateSingleton.clear();
+    this.internals.clear();
+    this.callbackEvaluator.clear();
+    this.isolates.clear();
   }
 }
 
@@ -220,28 +242,12 @@ export function ensureSESLockdown(): void {
 
 export function evaluateCallbackSourceInSES(
   source: string,
+  options: SESRuntimeOptions = {},
 ): unknown {
-  const normalizedSource = normalizeDirectFunctionSource(source);
-  const createCallback = getCachedCallbackCreator(normalizedSource);
-
-  return hardenVerifiedFunction((...args: unknown[]) => {
-    const fn = createCallback();
-    if (typeof fn !== "function") {
-      throw new Error("Callback source did not produce a function");
-    }
-    return Reflect.apply(
-      hardenVerifiedFunction(fn as (...args: unknown[]) => unknown),
-      undefined,
-      args,
-    );
-  });
+  return new SESCallbackEvaluator(options).evaluate(source);
 }
 
 let sesInitialized = false;
-let callbackCompartment:
-  | { evaluate(source: string): unknown }
-  | undefined;
-const callbackCreatorCache = new Map<string, () => unknown>();
 const SES_RUNTIME_STATE = Symbol.for("@commontools/runner/ses-runtime-state");
 
 function ensureSESInitialized(lockdownEnabled: boolean): void {
@@ -302,7 +308,7 @@ function createCompartment(globals: Record<string, unknown>) {
   const CompartmentCtor = (globalThis as {
     Compartment?: new (
       globals?: Record<string, unknown>,
-    ) => { evaluate(source: string): unknown; globalThis: object };
+    ) => SESCompartmentLike;
   }).Compartment;
   if (!CompartmentCtor) {
     throw new Error("SES Compartment is unavailable");
@@ -314,28 +320,59 @@ function createCompartment(globals: Record<string, unknown>) {
   return compartment;
 }
 
-function getCachedCallbackCreator(source: string): () => unknown {
-  const cached = callbackCreatorCache.get(source);
-  if (cached) {
-    return cached;
+class SESCallbackEvaluator {
+  private callbackCompartment: SESCompartmentLike | undefined;
+  private callbackCreatorCache = new Map<string, () => unknown>();
+
+  constructor(private options: SESRuntimeOptions = {}) {}
+
+  evaluate(source: string): unknown {
+    const normalizedSource = normalizeDirectFunctionSource(source);
+    const createCallback = this.getCachedCallbackCreator(normalizedSource);
+
+    return hardenVerifiedFunction((...args: unknown[]) => {
+      const fn = createCallback();
+      if (typeof fn !== "function") {
+        throw new Error("Callback source did not produce a function");
+      }
+      return Reflect.apply(
+        hardenVerifiedFunction(fn as (...args: unknown[]) => unknown),
+        undefined,
+        args,
+      );
+    });
   }
 
-  const compartment = getSharedCallbackCompartment();
-  const creator = compartment.evaluate(createCallbackCreatorSource(source));
-  if (typeof creator !== "function") {
-    throw new Error("Callback source must evaluate to a function creator");
+  clear(): void {
+    this.callbackCreatorCache.clear();
+    this.callbackCompartment = undefined;
   }
 
-  callbackCreatorCache.set(source, creator as () => unknown);
-  return creator as () => unknown;
-}
+  private getCachedCallbackCreator(source: string): () => unknown {
+    const cached = this.callbackCreatorCache.get(source);
+    if (cached) {
+      return cached;
+    }
 
-function getSharedCallbackCompartment(): { evaluate(source: string): unknown } {
-  ensureSESInitialized(true);
-  if (!callbackCompartment) {
-    callbackCompartment = createCompartment(createCallbackCompartmentGlobals());
+    const compartment = this.getSharedCallbackCompartment();
+    const creator = compartment.evaluate(createCallbackCreatorSource(source));
+    if (typeof creator !== "function") {
+      throw new Error("Callback source must evaluate to a function creator");
+    }
+
+    this.callbackCreatorCache.set(source, creator as () => unknown);
+    return creator as () => unknown;
   }
-  return callbackCompartment;
+
+  private getSharedCallbackCompartment(): SESCompartmentLike {
+    ensureSESInitialized(true);
+    if (!this.callbackCompartment) {
+      this.callbackCompartment = createCompartment(
+        createCallbackCompartmentGlobals(this.options.globals ?? {}),
+      );
+    }
+    return this.callbackCompartment;
+  }
 }
 
 function normalizeDirectFunctionSource(source: string): string {
