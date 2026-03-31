@@ -41,7 +41,7 @@ jobs:
 
   test:
     name: "Test"
-    runs-on: ubuntu-24.04-64-core
+    runs-on: ubuntu-24.04-32-core
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -70,7 +70,7 @@ jobs:
 
   build-binaries:
     name: "Build Binaries"
-    runs-on: ubuntu-24.04-64-core
+    runs-on: ubuntu-24.04-32-core
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
