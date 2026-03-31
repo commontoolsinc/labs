@@ -46,10 +46,10 @@ describe("FabricHash", () => {
     expect(cid.hash[0]).toBe(0);
   });
 
-  it("copyHashInto copies hash bytes into target buffer", () => {
+  it("copyInto copies hash bytes into target buffer", () => {
     const cid = new FabricHash(SAMPLE_HASH, "sha3");
     const target = new Uint8Array(32);
-    const returned = cid.copyHashInto(target);
+    const returned = cid.copyInto(target);
     // Returns the same target buffer.
     expect(returned).toBe(target);
     expect(target).toEqual(cid.hash);

@@ -64,7 +64,7 @@ export class FabricHash extends FabricPrimitive {
   }
 
   /** Copy the hash bytes into `target` starting at offset 0. Returns `target`. */
-  copyHashInto(target: Uint8Array): Uint8Array {
+  copyInto(target: Uint8Array): Uint8Array {
     target.set(this.hash);
     return target;
   }
