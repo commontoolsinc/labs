@@ -15,3 +15,4 @@ Directory listings reflect space contents and JSON structure traversal.
 - [5. Architecture](./5-architecture.md)
 - [6. Reactivity and Caching](./6-reactivity.md)
 - [7. Open Questions](./7-open-questions.md)
+- [8. Filesystem Projections (`[FS]`)](./8-fs-projections.md)

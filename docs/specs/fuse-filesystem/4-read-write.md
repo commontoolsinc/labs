@@ -35,9 +35,11 @@ Always includes `.` and `..`.
 For object values: keys become entries, plus any `.json` siblings.
 For array values: indices become entries, plus `.json` sibling.
 
-Piece directories always contain: `input.json`, `input/`, `result.json`,
-`result/`, `meta.json`. Top-level callable children appear as `*.handler` or
-`*.tool` files under `input/` and `result/`.
+Piece directories always contain `input.json`, `input/`, and `meta.json`.
+For pieces without `[FS]`, they also contain `result.json` and `result/`;
+callable files appear under `result/`. For pieces with `[FS]`, `result/` is
+replaced by `index.md` or `index.json`, and callable files appear at the
+piece root. All pieces have a `.handlers` file at the piece root.
 
 ### `read`
 
@@ -116,6 +118,30 @@ target path parsing rules and examples.
 
 Handlers remain writable so legacy flows like
 `echo '{"message":"hi"}' > result/addItem.handler` keep working.
+
+### `write` to `index.md` or `index.json` (`[FS]` Projection)
+
+When a piece uses the `[FS]` projection, writing to `index.md` or
+`index.json` parses the content and writes back to the corresponding cells:
+
+**`index.md`**: The file is parsed as YAML frontmatter + markdown body.
+- Each frontmatter key (except `entityId`, which is read-only) is written to
+  its corresponding cell via the `$FS.frontmatter.<key>` path.
+- The body is written to the `$FS.content` cell.
+- Invalid YAML frontmatter is silently skipped.
+
+**`index.json`**: Parsed as a JSON object.
+- Each key (except `entityId`) is written to `$FS.content.<key>`.
+- Invalid JSON is silently ignored.
+
+`entityId` is always read-only and cannot be changed by writing to either
+file.
+
+### `read` from `.handlers`
+
+`.handlers` is a read-only dot file at the piece root. It is generated
+automatically when the piece is loaded and updated when the result cell
+changes. Writing to `.handlers` fails with `EACCES`.
 
 ### `write` to `.tool` File
 

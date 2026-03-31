@@ -55,6 +55,39 @@ result/items/      # [{"text": "Buy milk"}, {"text": "Walk dog"}]
     text           # file: Walk dog
 ```
 
+## Special System Fields
+
+Patterns use symbol-keyed fields to declare metadata and capabilities. These
+fields begin with `$` and are treated specially by the filesystem projection.
+
+### `$NAME` — Piece Display Name
+
+`$NAME` is a string computed by the pattern used as the piece's filesystem
+directory name. It is not surfaced as a file in the piece directory.
+
+### `$UI` — UI Tree
+
+`$UI` holds a `VNode` — a virtual DOM tree potentially thousands of nodes
+deep. Exploding this into a directory tree would flood the filesystem with
+noise and make `grep` and `ls` unusable.
+
+Instead, `$UI` is serialized as a single `$UI.json` file. It is skipped
+during recursive directory expansion and written once as a compact JSON
+snapshot. It is readable but not writable (the UI is computed).
+
+### `$FS` — Filesystem Projection
+
+`$FS` declares how the pattern wants its result represented on disk. When
+present it is consumed entirely to produce `index.md` or `index.json` at
+the piece root; it does not appear as a file in the result tree.
+
+See [Filesystem Projections](./8-fs-projections.md) for full details.
+
+### `$TYPE` — Pattern Type Tag
+
+`$TYPE` is an internal tag used for type-based discovery. Not surfaced as a
+file.
+
 ## The `.json` Sibling Convention
 
 Every directory (object or array) has a corresponding `.json` file that provides
@@ -315,6 +348,19 @@ siblings for those directories:
 Mounted callable files are readable. Their content starts with a stable
 shebang whose first line is `#!... exec`, so `ct exec <mounted-callable-file>`
 can resolve the backing callable schema and execute it.
+
+Callable files also embed the handler's input schema as readable comments:
+
+```sh
+#!/path/to/ct-exec exec
+# schema: {"type":"string"}
+# input: string
+exec '/path/to/ct-exec' exec "$0" "$@"
+```
+
+Reading the file with `cat` or `head` reveals the expected input type before
+invoking. For compound types, `# input:` shows a TypeScript-ish shape such
+as `{ detail: { value: string } }`. Handlers with no payload show `void`.
 
 ---
 
