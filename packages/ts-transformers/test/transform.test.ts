@@ -1,7 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertRejects, assertStringIncludes } from "@std/assert";
-import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
-import { transformFiles, transformSource } from "./utils.ts";
+import { transformFiles } from "./utils.ts";
 
 const fixture = `
 import { toSchema } from "commonfabric";
@@ -23,21 +22,23 @@ describe("CommonFabricTransformerPipeline", () => {
       "/main.ts": fixture,
     });
     assert(
-      !/import \* as __cfHelpers/.test(disabled["/main.ts"]!),
+      !/import \{\s*__ctHelpers\s+as\s+__cfHelpers\s*\} from "commonfabric";/
+        .test(disabled["/main.ts"]!),
       "no replacements without <cts-enable />",
     );
     const enabled = await transformFiles({
       "/main.ts": `/// <cts-enable />\n` + fixture,
     });
     assert(
-      /import \* as __cfHelpers/.test(enabled["/main.ts"]!),
+      /import \{\s*__ctHelpers\s+as\s+__cfHelpers\s*\} from "commonfabric";/
+        .test(enabled["/main.ts"]!),
       "no replacements without <cts-enable />",
     );
   });
 
-  it("wraps top-level data candidates with __ctHelpers.__ct_data", async () => {
+  it("wraps top-level data candidates with __cfHelpers.__ct_data", async () => {
     const source = `/// <cts-enable />
-import { lift, schema } from "commontools";
+import { lift, schema } from "commonfabric";
 
 function buildYears() {
   return Array.from({ length: 3 }, (_, index) => String(index + 1));
@@ -66,38 +67,38 @@ export { model, lookup, days, matcher, scopes, years, tags, proxied, passthrough
 
     assertStringIncludes(
       main,
-      'const model = __ctHelpers.__ct_data(schema({ type: "string" } as const));',
+      'const model = __cfHelpers.__ct_data(schema({ type: "string" } as const));',
     );
     assertStringIncludes(
       main,
-      'const lookup = __ctHelpers.__ct_data((() => ({ open: "Open" }))());',
+      'const lookup = __cfHelpers.__ct_data((() => ({ open: "Open" }))());',
     );
     assertStringIncludes(
       main,
-      "const days = __ctHelpers.__ct_data(Array.from({ length: 3 }, (_, index) => String(index + 1)));",
+      "const days = __cfHelpers.__ct_data(Array.from({ length: 3 }, (_, index) => String(index + 1)));",
     );
     assertStringIncludes(
       main,
-      "const matcher = __ctHelpers.__ct_data(/^[a-z]+$/);",
+      "const matcher = __cfHelpers.__ct_data(/^[a-z]+$/);",
     );
     assertStringIncludes(
       main,
-      "const scopes = __ctHelpers.__ct_data(Object.fromEntries(",
+      "const scopes = __cfHelpers.__ct_data(Object.fromEntries(",
     );
     assertStringIncludes(
       main,
-      "const years = __ctHelpers.__ct_data(buildYears());",
+      "const years = __cfHelpers.__ct_data(buildYears());",
     );
     assertStringIncludes(
       main,
-      'const tags = __ctHelpers.__ct_data(new Set(["a", "b"]));',
+      'const tags = __cfHelpers.__ct_data(new Set(["a", "b"]));',
     );
     assert(
-      !main.includes('__ctHelpers.__ct_data(new Proxy({ open: "Open" }, {}));'),
+      !main.includes('__cfHelpers.__ct_data(new Proxy({ open: "Open" }, {}));'),
       "Proxy snapshots stay unsupported until Proxy is re-enabled in SES compartments",
     );
     assert(
-      !main.includes("__ctHelpers.__ct_data(lift("),
+      !main.includes("__cfHelpers.__ct_data(lift("),
       "top-level builder calls should not be wrapped",
     );
   });
@@ -123,9 +124,9 @@ export default function next(value: number) {
     assertStringIncludes(main, "__ctHardenFn(next);");
   });
 
-  it("wraps explicit snapshot helpers with __ctHelpers.__ct_data", async () => {
+  it("wraps explicit snapshot helpers with __cfHelpers.__ct_data", async () => {
     const source = `/// <cts-enable />
-import { nonPrivateRandom, safeDateNow } from "commontools";
+import { nonPrivateRandom, safeDateNow } from "commonfabric";
 
 const startedAt = safeDateNow();
 const seed = nonPrivateRandom();
@@ -142,23 +143,23 @@ export default function probe() {
 
     assertStringIncludes(
       main,
-      "const startedAt = __ctHelpers.__ct_data(safeDateNow());",
+      "const startedAt = __cfHelpers.__ct_data(safeDateNow());",
     );
     assertStringIncludes(
       main,
-      "const seed = __ctHelpers.__ct_data(nonPrivateRandom());",
+      "const seed = __cfHelpers.__ct_data(nonPrivateRandom());",
     );
     assert(
-      !main.includes("__ctHelpers.safeDateNow"),
+      !main.includes("__cfHelpers.safeDateNow"),
       "explicit helper calls should not be rewritten",
     );
     assert(
-      !main.includes("__ctHelpers.nonPrivateRandom"),
+      !main.includes("__cfHelpers.nonPrivateRandom"),
       "explicit helper calls should not be rewritten",
     );
   });
 
-  it("injects __ctHelpers on demand for non-CTS top-level snapshots", async () => {
+  it("injects __ctDataHelper on demand for non-CTS top-level snapshots", async () => {
     const output = await transformFiles({
       "/main.ts": `
 function pow(x: number): number {
@@ -173,11 +174,11 @@ export default pow(5);
 
     assertStringIncludes(
       main,
-      'import * as __ctHelpers from "commontools";',
+      'import { __ct_data as __ctDataHelper } from "commonfabric";',
     );
     assertStringIncludes(
       main,
-      "export default __ctHelpers.__ct_data(pow(5));",
+      "export default __ctDataHelper(pow(5));",
     );
   });
 });

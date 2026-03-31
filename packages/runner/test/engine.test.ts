@@ -543,7 +543,7 @@ describe("Engine.evaluate()", () => {
     );
   });
 
-  it("freezes authored local-module namespace exports", async () => {
+  it("rejects authored local-module namespace imports in SES mode", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
@@ -568,10 +568,9 @@ describe("Engine.evaluate()", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
-
-    expect(main?.default()).toBe("TypeError");
+    await expect(engine.compile(program)).rejects.toThrow(
+      "unsupported top-level executable code",
+    );
   });
 
   it("allows top-level schema() without CTS because it is a runtime helper", async () => {
@@ -692,7 +691,7 @@ describe("Engine.evaluate()", () => {
     };
 
     const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__ct_data(");
+    expect(jsScript.js).toContain("__ct_data)(");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toBe(25);
@@ -1044,11 +1043,11 @@ describe("Engine in SES mode", () => {
     };
 
     const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain(
-      "exports.TEMPLATE_REGISTRY = __ctHelpers.__ct_data({",
+    expect(jsScript.js).toMatch(
+      /exports\.TEMPLATE_REGISTRY = commontools_\d+\.__ctHelpers\.__ct_data\(\{/,
     );
-    expect(jsScript.js).toContain(
-      'exports.INTERNAL_MODULE_TYPES = __ctHelpers.__ct_data(new Set(["type-picker"]));',
+    expect(jsScript.js).toMatch(
+      /exports\.INTERNAL_MODULE_TYPES = commontools_\d+\.__ctHelpers\.__ct_data\(new Set\(\["type-picker"\]\)\);/,
     );
 
     const { main } = await engine.evaluate(id, jsScript, program.files);

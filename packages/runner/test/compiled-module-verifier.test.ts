@@ -229,6 +229,23 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("rejects compiled namespace-import normalization", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "./dep"], function (require, exports, dep_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    dep_1 = __importStar(dep_1);
+    exports.default = dep_1.default;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
   it("accepts regex literals inside compiled helper functions", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
@@ -384,6 +401,22 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     const scopes = (0, commontools_1.__ct_data)(Object.fromEntries(Object.entries(scopeMap).map(([key, value]) => [key, { value }])));
     const payload = (0, commontools_1.__ct_data)({ years, scopes });
     exports.default = payload;
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts compiled nested __ctHelpers.__ct_data() runtime helper calls", () => {
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const startedAt = commontools_1.__ctHelpers.__ct_data((0, commontools_1.safeDateNow)());
+    const seed = commontools_1.__ctHelpers.__ct_data((0, commontools_1.nonPrivateRandom)());
+    exports.default = (0, commontools_1.__ct_data)({ startedAt, seed });
   });
 });
 `;

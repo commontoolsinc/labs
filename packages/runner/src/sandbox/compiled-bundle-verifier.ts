@@ -58,6 +58,7 @@ interface ParsedNormalizedCallReference {
   kind: "identifier" | "member" | "commaMember";
   root: string;
   property?: string;
+  properties?: string[];
 }
 
 export function verifyCompiledBundleModuleFactoriesWithParser(
@@ -1127,14 +1128,22 @@ function resolveTrustedCallName(
   }
 
   const binding = env.get(ref.root);
+  if (!binding?.namespaceImport || !binding.trustedRuntimeName) {
+    return undefined;
+  }
+
+  const properties = ref.properties ?? (ref.property ? [ref.property] : []);
+  const helperName = properties.length === 1
+    ? properties[0]
+    : properties.length === 2 && properties[0] === "__ctHelpers"
+    ? properties[1]
+    : undefined;
+
   if (
-    binding?.namespaceImport &&
-    binding.trustedRuntimeName &&
-    ref.property &&
-    (isTrustedBuilder(ref.property) ||
-      isTrustedDataHelper(ref.property))
+    helperName &&
+    (isTrustedBuilder(helperName) || isTrustedDataHelper(helperName))
   ) {
-    return ref.property;
+    return helperName;
   }
 
   return undefined;
@@ -1270,7 +1279,7 @@ function isCompiledImportNormalizationRebindingNormalized(
   env: Map<string, BindingInfo>,
 ): boolean {
   const match = normalized.match(
-    /^([A-Za-z_$][\w$]*)=__(importDefault|importStar)\(\1\);?$/,
+    /^([A-Za-z_$][\w$]*)=__importDefault\(\1\);?$/,
   );
   if (!match) return false;
   return env.get(match[1])?.kind === "import";
@@ -1533,6 +1542,7 @@ function parseNormalizedCallReference(
       kind: "commaMember",
       root: inner.root,
       property: inner.property,
+      properties: inner.properties,
     };
   }
 
@@ -1544,12 +1554,13 @@ function parseNormalizedCallReference(
     kind: "member",
     root: member.root,
     property: member.property,
+    properties: member.properties,
   };
 }
 
 function parseNormalizedMemberReference(
   normalized: string,
-): { root: string; property?: string } | undefined {
+): { root: string; property?: string; properties: string[] } | undefined {
   const rootEnd = readSimpleIdentifierEnd(normalized, 0);
   if (rootEnd === undefined) {
     return undefined;
@@ -1558,6 +1569,7 @@ function parseNormalizedMemberReference(
   const root = normalized.slice(0, rootEnd);
   let cursor = rootEnd;
   let property: string | undefined;
+  const properties: string[] = [];
   let sawSegment = false;
 
   while (cursor < normalized.length) {
@@ -1569,6 +1581,7 @@ function parseNormalizedMemberReference(
         return undefined;
       }
       property = normalized.slice(propertyStart, propertyEnd);
+      properties.push(property);
       cursor = propertyEnd;
       sawSegment = true;
       continue;
@@ -1591,6 +1604,7 @@ function parseNormalizedMemberReference(
         return undefined;
       }
       property = normalized.slice(cursor + 2, index);
+      properties.push(property);
       cursor = index + 2;
       sawSegment = true;
       continue;
@@ -1603,7 +1617,7 @@ function parseNormalizedMemberReference(
     return undefined;
   }
 
-  return { root, property };
+  return { root, property, properties };
 }
 
 function isSimpleIdentifierText(source: string): boolean {

@@ -80,26 +80,11 @@ describe("preflightCompiledBundle()", () => {
       .toThrow();
   });
 
-  it("accepts canonical tslib helper IIFE initializers", () => {
+  it("accepts compiler-emitted __importDefault helper initializers", () => {
     const bundle = bundleWithCanonicalLoader(`
-  var __importStar = (function () {
-    var ownKeys = function (o) {
-      ownKeys = Object.getOwnPropertyNames || function (o) {
-        var ar = [];
-        for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-        return ar;
-      };
-      return ownKeys(o);
-    };
-    return function (mod) {
-      if (mod && mod.__esModule) return mod;
-      var result = {};
-      if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) {
-        if (k[i] !== "default") result[k[i]] = mod[k[i]];
-      }
-      return result;
-    };
-  })();
+  var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+  };
   define("main", ["require", "exports"], function (require, exports) {
     "use strict";
     exports.default = 42;
@@ -110,7 +95,7 @@ describe("preflightCompiledBundle()", () => {
     expect(() => preflightCompiledBundle(bundle)).not.toThrow();
   });
 
-  it("accepts compiler-emitted __importStar helper initializers", () => {
+  it("rejects compiler-emitted __importStar helper initializers", () => {
     const bundle = bundleWithCanonicalLoader(`
   var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function (o, v) {
     Object.defineProperty(o, "default", { enumerable: true, value: v });
@@ -143,7 +128,9 @@ describe("preflightCompiledBundle()", () => {
   return require("main");
 `);
 
-    expect(() => preflightCompiledBundle(bundle)).not.toThrow();
+    expect(() => preflightCompiledBundle(bundle)).toThrow(
+      "unsupported top-level executable code",
+    );
   });
 
   it("accepts regex literals inside compiled module factories", () => {
@@ -220,12 +207,26 @@ describe("preflightCompiledBundle()", () => {
     );
   });
 
-  it("rejects tslib helper declarations with side effects in the helper body", () => {
+  it("rejects canonical __importStar helper IIFE initializers", () => {
     const bundle = bundleWithCanonicalLoader(`
-  var __importStar = (this && this.__importStar) || function (mod) {
-    breakOut();
-    return mod;
-  };
+  var __importStar = (function () {
+    var ownKeys = function (o) {
+      ownKeys = Object.getOwnPropertyNames || function (o) {
+        var ar = [];
+        for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+        return ar;
+      };
+      return ownKeys(o);
+    };
+    return function (mod) {
+      if (mod && mod.__esModule) return mod;
+      var result = {};
+      if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) {
+        if (k[i] !== "default") result[k[i]] = mod[k[i]];
+      }
+      return result;
+    };
+  })();
   define("main", ["require", "exports"], function (require, exports) {
     "use strict";
     exports.default = 42;

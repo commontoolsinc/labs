@@ -7,6 +7,7 @@ export type {
 } from "./core/mod.ts";
 export {
   injectCfHelpers,
+  injectCtDataHelper,
   Pipeline,
   sourceUsesCfDirective,
   transformCfDirective,

@@ -2089,6 +2089,10 @@ export declare const getEntityId: GetEntityIdFunction;
 export declare const schema: SchemaFunction;
 export declare const toSchema: ToSchemaFunction;
 export declare const __ct_data: CtDataFunction;
+export declare const __ctHelpers: any;
+export declare namespace __ctHelpers {
+  export type JSONSchema = import("commontools").JSONSchema;
+}
 
 /**
  * Dynamic properties. Can either be string type (static) or a Mustache

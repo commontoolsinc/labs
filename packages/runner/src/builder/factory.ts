@@ -93,7 +93,7 @@ export const createBuilder = (): {
     }
   };
 
-  const builder: BuilderFunctionsAndConstants = {
+  const commontools = {
     // Pattern creation
     pattern,
     patternTool,
@@ -172,12 +172,14 @@ export const createBuilder = (): {
     FabricEpochNsec,
     FabricEpochDays,
     FabricHash,
+  } as BuilderFunctionsAndConstants & {
+    __ctHelpers?: BuilderFunctionsAndConstants;
   };
+  commontools.__ctHelpers = commontools;
 
   return {
-    commonfabric: builder,
-    // Backward-compat alias for older tests and compiled patterns.
-    commontools: builder,
+    commonfabric: commontools,
+    commontools,
     exportsCallback,
   };
 };

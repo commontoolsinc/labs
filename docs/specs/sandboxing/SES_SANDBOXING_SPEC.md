@@ -1830,12 +1830,17 @@ builder implementations are hardened in the runtime builder layer as soon as
 `lift(...)`, `handler(...)`, `pattern(...)`, or related constructors receive
 them.
 
-The compiled-bundle verifier also treats TypeScript's canonical
-import-normalization rebindings as part of the accepted grammar, including
-`local = __importStar(local)` and `local = __importDefault(local)` when `local`
-is already the AMD factory's
-import binding for that dependency. These statements are normalization steps
-over an already-verified import edge, not new capability acquisition.
+The compiled-bundle verifier also treats TypeScript's canonical default-import
+normalization rebinding as part of the accepted grammar:
+`local = __importDefault(local)` when `local` is already the AMD factory's
+import binding for that dependency. This statement is a normalization step over
+an already-verified import edge, not new capability acquisition.
+
+Namespace-import normalization via `local = __importStar(local)` is
+intentionally not supported in v1. That transform introduces additional
+namespace-object surface that must be deliberately specified and hardened before
+it becomes part of the accepted SES grammar. Future work may add support once
+that hardening contract exists.
 
 #### 2.4 Enforce import policy at verification time (Priority: High)
 

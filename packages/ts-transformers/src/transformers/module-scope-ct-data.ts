@@ -4,7 +4,7 @@ import {
   isTrustedDataHelper,
 } from "@commontools/utils/sandbox-contract";
 import {
-  CT_HELPERS_IDENTIFIER,
+  CT_DATA_HELPER_IDENTIFIER,
   TransformationContext,
   Transformer,
 } from "../core/mod.ts";
@@ -34,9 +34,12 @@ export class ModuleScopeCtDataTransformer extends Transformer {
       return sourceFile;
     }
 
-    const statements = context.ctHelpers.sourceHasHelpers()
+    const statements = (
+        context.cfHelpers.sourceHasHelpers() ||
+        context.cfHelpers.sourceHasDataHelper()
+      )
       ? transformedStatements
-      : [createCtHelpersImport(factory), ...transformedStatements];
+      : [createCtDataHelperImport(factory), ...transformedStatements];
     return factory.updateSourceFile(sourceFile, statements);
   }
 }
@@ -110,12 +113,11 @@ function wrapWithCtData(
   expression: ts.Expression,
   context: TransformationContext,
 ): ts.CallExpression {
-  const helperExpr = context.ctHelpers.sourceHasHelpers()
-    ? context.ctHelpers.getHelperExpr("__ct_data")
-    : context.factory.createPropertyAccessExpression(
-      context.factory.createIdentifier(CT_HELPERS_IDENTIFIER),
-      "__ct_data",
-    );
+  const helperExpr = context.cfHelpers.sourceHasHelpers()
+    ? context.cfHelpers.getHelperExpr("__ct_data")
+    : context.cfHelpers.sourceHasDataHelper()
+    ? context.cfHelpers.getDataHelperExpr(expression)
+    : context.factory.createIdentifier(CT_DATA_HELPER_IDENTIFIER);
   return context.factory.createCallExpression(
     helperExpr,
     undefined,
@@ -133,7 +135,7 @@ function shouldWrapTopLevelExpression(
   }
 
   const expr = unwrapExpression(expression);
-  const helpersPresent = context.ctHelpers.sourceHasHelpers();
+  const helpersPresent = context.cfHelpers.sourceHasHelpers();
 
   if (
     ts.isArrowFunction(expr) ||
@@ -172,17 +174,23 @@ function shouldWrapTopLevelExpression(
   return false;
 }
 
-function createCtHelpersImport(factory: ts.NodeFactory): ts.ImportDeclaration {
+function createCtDataHelperImport(
+  factory: ts.NodeFactory,
+): ts.ImportDeclaration {
   return factory.createImportDeclaration(
     undefined,
     factory.createImportClause(
       false,
       undefined,
-      factory.createNamespaceImport(
-        factory.createIdentifier(CT_HELPERS_IDENTIFIER),
-      ),
+      factory.createNamedImports([
+        factory.createImportSpecifier(
+          false,
+          factory.createIdentifier("__ct_data"),
+          factory.createIdentifier(CT_DATA_HELPER_IDENTIFIER),
+        ),
+      ]),
     ),
-    factory.createStringLiteral("commontools"),
+    factory.createStringLiteral("commonfabric"),
     undefined,
   );
 }
