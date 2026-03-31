@@ -147,7 +147,10 @@ export class CellController<T> implements ReactiveController {
         this._currentValue.equals(value))
     ) {
       this._cleanupCellSubscription();
-      if (schema !== undefined && value instanceof CellHandle) {
+      if (
+        schema !== undefined && value instanceof CellHandle &&
+        !value.ref().schema
+      ) {
         this._currentValue = value.asSchema<T>(schema);
       } else {
         this._currentValue = value;

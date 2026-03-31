@@ -250,12 +250,15 @@ describe("CellController", () => {
     ctrl.setValue("ignored");
   });
 
-  it("bind() with schema parameter creates schema-annotated handle", () => {
+  it("bind() with schema parameter creates schema-annotated handle when cell has no schema", () => {
     const host = createMockHost();
     const ctrl = new CellController<string>(host, {
       timing: { strategy: "immediate" },
     });
-    const cell = createMockCellHandle("typed");
+    // Create a handle WITHOUT a schema so bind() will apply one via asSchema
+    const cell = createMockCellHandle("typed", {
+      schema: undefined,
+    });
     const schema = { type: "string" } as const;
     ctrl.bind(cell, schema);
     // bind(cell, schema) calls cell.asSchema(schema) — the controller should
@@ -265,6 +268,30 @@ describe("CellController", () => {
     const bound = ctrl.getCell()!;
     expect(bound).not.toBe(cell); // asSchema creates a new handle
     expect(bound.ref().schema).toEqual(schema);
+  });
+
+  it("bind() preserves existing schema when cell already has one", () => {
+    const host = createMockHost();
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "immediate" },
+    });
+    // Create a handle WITH a schema (as pattern compiler would)
+    const patternSchema = { type: "array", items: { type: "string" } } as const;
+    const cell = createMockCellHandle("from-pattern", {
+      schema: patternSchema,
+    });
+    const componentSchema = {
+      type: "array",
+      items: { type: "object" },
+    } as const;
+    ctrl.bind(cell, componentSchema);
+    // bind() should NOT call asSchema — the controller should use the
+    // original handle directly, preserving the pattern's schema.
+    expect(ctrl.getValue()).toBe("from-pattern");
+    expect(ctrl.hasCell()).toBe(true);
+    const bound = ctrl.getCell()!;
+    expect(bound).toBe(cell); // same handle, no asSchema
+    expect(bound.ref().schema).toEqual(patternSchema); // pattern schema preserved
   });
 
   it("hostConnected() re-establishes subscription after disconnect", () => {
