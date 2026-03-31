@@ -38,7 +38,7 @@ const captureNativeDrafts = () => {
   replica.commit = () =>
     Promise.reject(new Error("legacy commit path should not be used"));
   replica.commitNative = async (transaction, source) => {
-    drafts.push(transaction);
+    drafts.push(structuredClone(transaction));
     return await originalCommitNative(transaction, source);
   };
 
@@ -161,6 +161,39 @@ Deno.test("memory v2 transactions emit patch drafts for safe object-path writes"
   }
 });
 
+Deno.test("memory v2 transactions emit set drafts for leaf writes into new documents", async () => {
+  const { storage, drafts } = captureNativeDrafts();
+
+  try {
+    const tx = storage.edit();
+    const batchWrite = tx.writeBatch?.([
+      {
+        address: {
+          space,
+          id: "of:memory-v2-native-create-via-patch",
+          type,
+          path: ["value", "profile", "name"],
+        },
+        value: "Ada",
+      },
+    ]);
+    assert(batchWrite?.ok);
+
+    const commitResult = await tx.commit();
+    assert(commitResult.ok);
+    assertEquals(drafts, [{
+      operations: [{
+        op: "set",
+        id: "of:memory-v2-native-create-via-patch",
+        type,
+        value: { value: { profile: { name: "Ada" } } },
+      }],
+    }]);
+  } finally {
+    await storage.close();
+  }
+});
+
 Deno.test("memory v2 transactions emit add and remove patch drafts for safe object-path writes", async () => {
   const { storage, drafts } = captureNativeDrafts();
 
@@ -233,7 +266,7 @@ Deno.test("memory v2 transactions emit add and remove patch drafts for safe obje
   }
 });
 
-Deno.test("memory v2 transactions emit array-path patch drafts for array element writes", async () => {
+Deno.test("memory v2 transactions emit index patch drafts for dense array element writes", async () => {
   const { storage, drafts } = captureNativeDrafts();
 
   try {
@@ -269,8 +302,56 @@ Deno.test("memory v2 transactions emit array-path patch drafts for array element
         value: { value: { tags: ["zero", "two"] } },
         patches: [{
           op: "replace",
+          path: "/value/tags/0",
+          value: "zero",
+        }],
+      }],
+    }]);
+  } finally {
+    await storage.close();
+  }
+});
+
+Deno.test("memory v2 transactions emit splice patch drafts for dense array append writes", async () => {
+  const { storage, drafts } = captureNativeDrafts();
+
+  try {
+    const seed = storage.edit();
+    const seedWrite = seed.write({
+      space,
+      id: "of:memory-v2-native-array-append",
+      type,
+      path: [],
+    }, { value: { tags: ["one", "two"] } });
+    assert(seedWrite.ok);
+    const seedCommit = await seed.commit();
+    assert(seedCommit.ok);
+
+    drafts.length = 0;
+
+    const tx = storage.edit();
+    const writeResult = tx.write({
+      space,
+      id: "of:memory-v2-native-array-append",
+      type,
+      path: ["value", "tags", "2"],
+    }, "three");
+    assert(writeResult.ok);
+
+    const commitResult = await tx.commit();
+    assert(commitResult.ok);
+    assertEquals(drafts, [{
+      operations: [{
+        op: "patch",
+        id: "of:memory-v2-native-array-append",
+        type,
+        value: { value: { tags: ["one", "two", "three"] } },
+        patches: [{
+          op: "splice",
           path: "/value/tags",
-          value: ["zero", "two"],
+          index: 2,
+          remove: 0,
+          add: ["three"],
         }],
       }],
     }]);
@@ -588,7 +669,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
   }
 });
 
-Deno.test("memory v2 transactions emit array-path patch drafts for array length writes", async () => {
+Deno.test("memory v2 transactions emit splice patch drafts for dense array length writes", async () => {
   const { storage, drafts } = captureNativeDrafts();
 
   try {
@@ -623,9 +704,11 @@ Deno.test("memory v2 transactions emit array-path patch drafts for array length 
         type,
         value: { value: { tags: ["one"] } },
         patches: [{
-          op: "replace",
+          op: "splice",
           path: "/value/tags",
-          value: ["one"],
+          index: 1,
+          remove: 1,
+          add: [],
         }],
       }],
     }]);
@@ -634,7 +717,7 @@ Deno.test("memory v2 transactions emit array-path patch drafts for array length 
   }
 });
 
-Deno.test("memory v2 writeBatch collapses array element and length writes to the containing array patch", async () => {
+Deno.test("memory v2 writeBatch combines dense array element and length writes into index and splice patches", async () => {
   const { storage, drafts } = captureNativeDrafts();
 
   try {
@@ -684,8 +767,14 @@ Deno.test("memory v2 writeBatch collapses array element and length writes to the
         value: { value: { tags: ["zero"] } },
         patches: [{
           op: "replace",
+          path: "/value/tags/0",
+          value: "zero",
+        }, {
+          op: "splice",
           path: "/value/tags",
-          value: ["zero"],
+          index: 1,
+          remove: 1,
+          add: [],
         }],
       }],
     }]);
@@ -694,7 +783,57 @@ Deno.test("memory v2 writeBatch collapses array element and length writes to the
   }
 });
 
-Deno.test("memory v2 transactions keep overlapping object-path writes on full set drafts for now", async () => {
+Deno.test("memory v2 transactions fall back to array replacement when filling sparse holes", async () => {
+  const { storage, drafts } = captureNativeDrafts();
+
+  try {
+    const sparse: string[] = new Array(3);
+    sparse[0] = "one";
+    sparse[2] = "three";
+
+    const seed = storage.edit();
+    const seedWrite = seed.write({
+      space,
+      id: "of:memory-v2-native-array-sparse-fill",
+      type,
+      path: [],
+    }, { value: { tags: sparse } });
+    assert(seedWrite.ok);
+    const seedCommit = await seed.commit();
+    assert(seedCommit.ok);
+
+    drafts.length = 0;
+
+    const tx = storage.edit();
+    const writeResult = tx.write({
+      space,
+      id: "of:memory-v2-native-array-sparse-fill",
+      type,
+      path: ["value", "tags", "1"],
+    }, "two");
+    assert(writeResult.ok);
+
+    const commitResult = await tx.commit();
+    assert(commitResult.ok);
+    assertEquals(drafts, [{
+      operations: [{
+        op: "patch",
+        id: "of:memory-v2-native-array-sparse-fill",
+        type,
+        value: { value: { tags: ["one", "two", "three"] } },
+        patches: [{
+          op: "replace",
+          path: "/value/tags",
+          value: ["one", "two", "three"],
+        }],
+      }],
+    }]);
+  } finally {
+    await storage.close();
+  }
+});
+
+Deno.test("memory v2 transactions collapse overlapping object-path writes into a parent patch draft", async () => {
   const { storage, drafts } = captureNativeDrafts();
 
   try {
@@ -731,10 +870,82 @@ Deno.test("memory v2 transactions keep overlapping object-path writes on full se
     assert(commitResult.ok);
     assertEquals(drafts, [{
       operations: [{
-        op: "set",
+        op: "patch",
         id: "of:memory-v2-native-overlap",
         type,
         value: { value: { profile: { name: "Grace", title: "Professor" } } },
+        patches: [{
+          op: "replace",
+          path: "/value/profile",
+          value: { name: "Grace", title: "Professor" },
+        }],
+      }],
+    }]);
+  } finally {
+    await storage.close();
+  }
+});
+
+Deno.test("memory v2 transactions keep materialized-parent writes as fine-grained patch drafts", async () => {
+  const { storage, drafts } = captureNativeDrafts();
+
+  try {
+    const seed = storage.edit();
+    const seedWrite = seed.write({
+      space,
+      id: "of:memory-v2-native-materialized-parent",
+      type,
+      path: [],
+    }, { value: { count: 1 } });
+    assert(seedWrite.ok);
+    const seedCommit = await seed.commit();
+    assert(seedCommit.ok);
+
+    drafts.length = 0;
+
+    const tx = storage.edit();
+    const batchWrite = tx.writeBatch?.([
+      {
+        address: {
+          space,
+          id: "of:memory-v2-native-materialized-parent",
+          type,
+          path: ["value", "profile", "name"],
+        },
+        value: "Ada",
+      },
+      {
+        address: {
+          space,
+          id: "of:memory-v2-native-materialized-parent",
+          type,
+          path: ["value", "profile", "age"],
+        },
+        value: 42,
+      },
+    ]);
+    assert(batchWrite?.ok);
+
+    const commitResult = await tx.commit();
+    assert(commitResult.ok);
+    assertEquals(drafts, [{
+      operations: [{
+        op: "patch",
+        id: "of:memory-v2-native-materialized-parent",
+        type,
+        value: { value: { count: 1, profile: { name: "Ada", age: 42 } } },
+        patches: [
+          {
+            op: "add",
+            path: "/value/profile/name",
+            value: "Ada",
+          },
+          {
+            op: "add",
+            path: "/value/profile/age",
+            value: 42,
+          },
+        ],
       }],
     }]);
   } finally {

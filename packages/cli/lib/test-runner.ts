@@ -57,15 +57,31 @@ const phaseLogger = getLogger("test-runner-phase", {
   logCountEvery: 0,
 });
 
+type TimeStampConsole = Console & {
+  timeStamp?: (label?: string) => void;
+};
+
+let phaseMarkSequence = 0;
+
+function markPhaseBoundary(label: string, boundary: "start" | "end"): string {
+  const markName = `${label}:${boundary}#${++phaseMarkSequence}`;
+  performance.mark(markName);
+  (console as TimeStampConsole).timeStamp?.(`${label}:${boundary}`);
+  return markName;
+}
 async function withPhase<T>(
   keys: readonly string[],
   fn: () => Promise<T> | T,
 ): Promise<T> {
+  const label = `ct-test/${keys.join("/")}`;
+  const startMark = markPhaseBoundary(label, "start");
   phaseLogger.timeStart(...keys);
   try {
     return await fn();
   } finally {
+    const endMark = markPhaseBoundary(label, "end");
     phaseLogger.timeEnd(...keys);
+    performance.measure(`${label}#${phaseMarkSequence}`, startMark, endMark);
   }
 }
 

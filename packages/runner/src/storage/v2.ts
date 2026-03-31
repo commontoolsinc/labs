@@ -1179,10 +1179,14 @@ class SpaceReplica implements ISpaceReplica {
       }),
     };
     const touched = operations.map((operation) => operation.id);
-    const before = Differential.checkout(
-      this,
-      touched.map((id) => snapshotState(this, id)),
-    );
+    const shouldNotifySubscribers = this.hasNotificationSubscribers();
+    const shouldNotifySinks = this.hasSinkSubscribers(touched);
+    const before = shouldNotifySubscribers
+      ? Differential.checkout(
+        this,
+        touched.map((id) => snapshotState(this, id)),
+      )
+      : undefined;
 
     for (const operation of operations) {
       this.applyPending(
@@ -1192,14 +1196,20 @@ class SpaceReplica implements ISpaceReplica {
       );
     }
 
-    const optimistic = before.compare(this);
-    this.#subscription.next({
-      type: "commit",
-      space: this.#space,
-      changes: optimistic,
-      source,
-    });
-    this.notifySinks(optimistic);
+    if (before !== undefined) {
+      const optimistic = before.compare(this);
+      this.#subscription.next({
+        type: "commit",
+        space: this.#space,
+        changes: optimistic,
+        source,
+      });
+      if (shouldNotifySinks) {
+        this.notifySinks(optimistic);
+      }
+    } else if (shouldNotifySinks) {
+      this.notifySinksForIds(touched);
+    }
 
     const promise = this.pushCommit(
       localSeq,
@@ -1230,20 +1240,31 @@ class SpaceReplica implements ISpaceReplica {
       return { ok: {} };
     } catch (error) {
       const rejection = toRejectedError(error, commit);
-      const before = Differential.checkout(
-        this,
-        operations.map((operation) => snapshotState(this, operation.id)),
-      );
+      const touched = operations.map((operation) => operation.id);
+      const shouldNotifySubscribers = this.hasNotificationSubscribers();
+      const shouldNotifySinks = this.hasSinkSubscribers(touched);
+      const before = shouldNotifySubscribers
+        ? Differential.checkout(
+          this,
+          touched.map((operationId) => snapshotState(this, operationId)),
+        )
+        : undefined;
       this.dropPending(localSeq);
-      const changes = before.compare(this);
-      this.#subscription.next({
-        type: "revert",
-        space: this.#space,
-        changes,
-        reason: rejection,
-        source,
-      });
-      this.notifySinks(changes);
+      if (before !== undefined) {
+        const changes = before.compare(this);
+        this.#subscription.next({
+          type: "revert",
+          space: this.#space,
+          changes,
+          reason: rejection,
+          source,
+        });
+        if (shouldNotifySinks) {
+          this.notifySinks(changes);
+        }
+      } else if (shouldNotifySinks) {
+        this.notifySinksForIds(touched);
+      }
       return { error: rejection };
     }
   }
@@ -1316,10 +1337,14 @@ class SpaceReplica implements ISpaceReplica {
       ...sync.removes.map((remove) => remove.id as URI),
     ]);
 
-    const before = Differential.checkout(
-      this,
-      [...touchedIds].map((id) => snapshotState(this, id)),
-    );
+    const shouldNotifySubscribers = this.hasNotificationSubscribers();
+    const shouldNotifySinks = this.hasSinkSubscribers(touchedIds);
+    const before = shouldNotifySubscribers
+      ? Differential.checkout(
+        this,
+        [...touchedIds].map((id) => snapshotState(this, id)),
+      )
+      : undefined;
 
     for (const upsert of sync.upserts) {
       const record = this.record(upsert.id as URI);
@@ -1336,14 +1361,20 @@ class SpaceReplica implements ISpaceReplica {
       this.#watchedIds.delete(id);
     }
 
-    const changes = before.compare(this);
-    if (type === "pull" || [...changes].length > 0) {
-      this.#subscription.next({
-        type,
-        space: this.#space,
-        changes,
-      } as StorageNotification);
-      this.notifySinks(changes);
+    if (before !== undefined) {
+      const changes = before.compare(this);
+      if (type === "pull" || [...changes].length > 0) {
+        this.#subscription.next({
+          type,
+          space: this.#space,
+          changes,
+        } as StorageNotification);
+        if (shouldNotifySinks) {
+          this.notifySinks(changes);
+        }
+      }
+    } else if (shouldNotifySinks) {
+      this.notifySinksForIds(touchedIds);
     }
   }
 
@@ -1451,6 +1482,10 @@ class SpaceReplica implements ISpaceReplica {
     for (const change of changes) {
       ids.add(change.address.id as URI);
     }
+    this.notifySinksForIds(ids);
+  }
+
+  private notifySinksForIds(ids: Iterable<URI>): void {
     for (const id of ids) {
       const current = this.visibleDocument(id);
       for (const callback of this.#sinks.get(id) ?? []) {
@@ -1461,6 +1496,25 @@ class SpaceReplica implements ISpaceReplica {
         }
       }
     }
+  }
+
+  private hasNotificationSubscribers(): boolean {
+    const candidate = this.#subscription as IStorageSubscription & {
+      hasSubscribers?: () => boolean;
+    };
+    if (typeof candidate.hasSubscribers === "function") {
+      return candidate.hasSubscribers();
+    }
+    return true;
+  }
+
+  private hasSinkSubscribers(ids: Iterable<URI>): boolean {
+    for (const id of ids) {
+      if ((this.#sinks.get(id)?.size ?? 0) > 0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private sessionHandle(): Promise<{

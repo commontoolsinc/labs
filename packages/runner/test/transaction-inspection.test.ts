@@ -492,6 +492,16 @@ describe("transaction inspection", () => {
           id,
           type: "application/json",
           path: [],
+        }, {
+          space,
+          id,
+          type: "application/json",
+          path: ["profile"],
+        }, {
+          space,
+          id,
+          type: "application/json",
+          path: ["profile", "name"],
         }],
       });
 
@@ -561,7 +571,17 @@ describe("transaction inspection", () => {
           space,
           id,
           type: "application/json",
+          path: ["profile"],
+        }, {
+          space,
+          id,
+          type: "application/json",
           path: ["profile", "age"],
+        }, {
+          space,
+          id,
+          type: "application/json",
+          path: ["profile", "name"],
         }],
       });
 
@@ -581,6 +601,103 @@ describe("transaction inspection", () => {
           path: ["value", "profile", "age"],
         }],
       );
+    } finally {
+      await storageManager.close();
+    }
+  });
+
+  it("derives precise array reactivity writes while keeping structural ancestors for length changes", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+
+    try {
+      const id = "test:transaction-inspection-array-reactivity-v2" as const;
+      const seed = storageManager.edit();
+      seed.write({
+        space,
+        id,
+        type: "application/json",
+        path: [],
+      }, { value: { tags: ["one", "two"] } });
+      await seed.commit();
+
+      const tx = storageManager.edit();
+      tx.write({
+        space,
+        id,
+        type: "application/json",
+        path: ["value", "tags", "0"],
+      }, "zero");
+      tx.write({
+        space,
+        id,
+        type: "application/json",
+        path: ["value", "tags", "length"],
+      }, 1);
+
+      assertEquals(tx.getReactivityLog?.(), {
+        reads: [],
+        shallowReads: [],
+        writes: [{
+          space,
+          id,
+          type: "application/json",
+          path: ["tags"],
+        }, {
+          space,
+          id,
+          type: "application/json",
+          path: ["tags", "0"],
+        }, {
+          space,
+          id,
+          type: "application/json",
+          path: ["tags", "length"],
+        }],
+      });
+    } finally {
+      await storageManager.close();
+    }
+  });
+
+  it("keeps same-length array element writes exact in native v2 reactivity logs", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+
+    try {
+      const id =
+        "test:transaction-inspection-array-element-reactivity-v2" as const;
+      const seed = storageManager.edit();
+      seed.write({
+        space,
+        id,
+        type: "application/json",
+        path: [],
+      }, { value: { tags: ["one", "two"] } });
+      await seed.commit();
+
+      const tx = storageManager.edit();
+      tx.write({
+        space,
+        id,
+        type: "application/json",
+        path: ["value", "tags", "0"],
+      }, "zero");
+
+      assertEquals(tx.getReactivityLog?.(), {
+        reads: [],
+        shallowReads: [],
+        writes: [{
+          space,
+          id,
+          type: "application/json",
+          path: ["tags", "0"],
+        }],
+      });
     } finally {
       await storageManager.close();
     }

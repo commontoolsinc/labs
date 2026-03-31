@@ -135,6 +135,94 @@ describe("Memory v2 storage notifications", () => {
       .toContainEqual({ value: "hello" });
   });
 
+  it("emits precise commit notification paths for nested v2 writes", async () => {
+    const subscription = new Subscription();
+    storageManager.subscribe(subscription);
+
+    const uri = `of:memory-v2-precise-commit-${Date.now()}` as URI;
+    tx.write({
+      space,
+      id: uri,
+      type: "application/json",
+      path: [],
+    }, { value: { profile: { name: "Ada", title: "Dr" } } });
+    await tx.commit();
+
+    subscription.clear();
+
+    tx = runtime.edit();
+    tx.write({
+      space,
+      id: uri,
+      type: "application/json",
+      path: ["value", "profile", "name"],
+    }, "Grace");
+    await tx.commit();
+
+    const commit = subscription.commits.at(-1);
+    expect(commit).toMatchObject({
+      type: "commit",
+      space,
+      source: tx.tx,
+    });
+
+    const changes = [...commit!.changes];
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toEqual({
+      address: {
+        id: uri,
+        type: "application/json",
+        path: ["value", "profile", "name"],
+      },
+      before: { value: { profile: { name: "Ada", title: "Dr" } } },
+      after: { value: { profile: { name: "Grace", title: "Dr" } } },
+    });
+  });
+
+  it("emits array-path commit notification paths for v2 shape changes", async () => {
+    const subscription = new Subscription();
+    storageManager.subscribe(subscription);
+
+    const uri = `of:memory-v2-precise-array-${Date.now()}` as URI;
+    tx.write({
+      space,
+      id: uri,
+      type: "application/json",
+      path: [],
+    }, { value: { tags: ["alpha", "beta", "gamma"] } });
+    await tx.commit();
+
+    subscription.clear();
+
+    tx = runtime.edit();
+    tx.write({
+      space,
+      id: uri,
+      type: "application/json",
+      path: ["value", "tags", "length"],
+    }, 2);
+    await tx.commit();
+
+    const commit = subscription.commits.at(-1);
+    expect(commit).toMatchObject({
+      type: "commit",
+      space,
+      source: tx.tx,
+    });
+
+    const changes = [...commit!.changes];
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toEqual({
+      address: {
+        id: uri,
+        type: "application/json",
+        path: ["value", "tags"],
+      },
+      before: { value: { tags: ["alpha", "beta", "gamma"] } },
+      after: { value: { tags: ["alpha", "beta"] } },
+    });
+  });
+
   it("emits a revert notification when a v2 commit conflicts", async () => {
     const subscription = new Subscription();
     storageManager.subscribe(subscription);
@@ -213,7 +301,11 @@ describe("Memory v2 storage notifications", () => {
     });
     expect(subscription.reverts[0].reason.name).toBe("ConflictError");
     expect([...subscription.reverts[0].changes]).toContainEqual({
-      address: { id: uri, type: "application/json", path: [] },
+      address: {
+        id: uri,
+        type: "application/json",
+        path: ["value", "version"],
+      },
       before: { value: { version: 2 } },
       after: { value: { version: 3 } },
     });

@@ -241,7 +241,7 @@ describe("Storage Subscription", () => {
       const changes = [...revert.changes];
       expect(changes.length).toBeGreaterThan(0);
       expect([...changes]).toContainEqual({
-        address: { id: entityId, type: "application/json", path: [] },
+        address: { id: entityId, type: "application/json", path: ["version"] },
         before: { version: 2 },
         after: { version: 1 },
       });

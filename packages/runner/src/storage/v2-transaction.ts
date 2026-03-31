@@ -75,6 +75,7 @@ type ReadDocumentEntry = {
   current?: RootAttestation;
   frozenReads?: Map<string, StorableDatum | undefined>;
   writeDetails?: Map<string, TransactionWriteDetail>;
+  patchDetails?: Map<string, TransactionWriteDetail>;
 };
 
 type WritableDocumentEntry = {
@@ -84,6 +85,7 @@ type WritableDocumentEntry = {
   validated: boolean;
   frozenReads: Map<string, StorableDatum | undefined>;
   writeDetails: Map<string, TransactionWriteDetail>;
+  patchDetails: Map<string, TransactionWriteDetail>;
 };
 
 type DocumentEntry = ReadDocumentEntry | WritableDocumentEntry;
@@ -166,7 +168,8 @@ const isWritableDocument = (
 ): doc is WritableDocumentEntry =>
   doc.current !== undefined &&
   doc.frozenReads !== undefined &&
-  doc.writeDetails !== undefined;
+  doc.writeDetails !== undefined &&
+  doc.patchDetails !== undefined;
 
 const ensureWritableDocument = (
   doc: DocumentEntry,
@@ -177,6 +180,7 @@ const ensureWritableDocument = (
   doc.current = doc.initial;
   doc.frozenReads = new Map();
   doc.writeDetails = new Map();
+  doc.patchDetails = new Map();
   return doc as WritableDocumentEntry;
 };
 
@@ -596,7 +600,13 @@ const findMaterializedParentPath = (
   return undefined;
 };
 
-const resolveArrayPatchPath = (
+type PatchDraftCandidate = {
+  patch: PatchOp;
+  path: readonly string[];
+  coversDescendants: boolean;
+};
+
+const findDeepestArrayPath = (
   before: StorableDatum | undefined,
   after: StorableDatum | undefined,
   path: readonly string[],
@@ -622,6 +632,207 @@ const resolveArrayPatchPath = (
   return firstArrayLikeSegment === -1
     ? null
     : path.slice(0, firstArrayLikeSegment);
+};
+
+const buildValuePatchCandidate = (
+  path: readonly string[],
+  value: StorableDatum | undefined,
+  previousValue: StorableDatum | undefined,
+): PatchDraftCandidate | null => {
+  if (deepEqual(value, previousValue)) {
+    return null;
+  }
+
+  const pointer = encodePointer(path);
+  if (value === undefined) {
+    return {
+      patch: { op: "remove", path: pointer },
+      path,
+      coversDescendants: true,
+    };
+  }
+  if (previousValue === undefined) {
+    return {
+      patch: { op: "add", path: pointer, value },
+      path,
+      coversDescendants: true,
+    };
+  }
+  return {
+    patch: { op: "replace", path: pointer, value },
+    path,
+    coversDescendants: true,
+  };
+};
+
+const arrayTailIsDense = (
+  value: readonly StorableDatum[],
+  start: number,
+): boolean => {
+  for (let index = start; index < value.length; index += 1) {
+    if (!(index in value)) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const buildArrayPatchCandidates = (
+  path: readonly string[],
+  before: StorableDatum | undefined,
+  after: StorableDatum | undefined,
+): PatchDraftCandidate[] => {
+  if (deepEqual(before, after)) {
+    return [];
+  }
+
+  if (!Array.isArray(before) || !Array.isArray(after)) {
+    const candidate = buildValuePatchCandidate(path, after, before);
+    return candidate ? [candidate] : [];
+  }
+
+  const overlappingLength = Math.min(before.length, after.length);
+  for (let index = 0; index < overlappingLength; index += 1) {
+    if ((index in before) !== (index in after)) {
+      const fallback = buildValuePatchCandidate(path, after, before);
+      return fallback ? [fallback] : [];
+    }
+  }
+
+  if (after.length > before.length && !arrayTailIsDense(after, before.length)) {
+    const fallback = buildValuePatchCandidate(path, after, before);
+    return fallback ? [fallback] : [];
+  }
+
+  const candidates: PatchDraftCandidate[] = [];
+  for (let index = 0; index < overlappingLength; index += 1) {
+    if (!(index in before)) {
+      continue;
+    }
+
+    const nextValue = after[index] as StorableDatum | undefined;
+    const previousValue = before[index] as StorableDatum | undefined;
+    if (deepEqual(nextValue, previousValue)) {
+      continue;
+    }
+
+    candidates.push({
+      patch: {
+        op: "replace",
+        path: encodePointer([...path, index.toString()]),
+        value: nextValue,
+      },
+      path: [...path, index.toString()],
+      coversDescendants: true,
+    });
+  }
+
+  if (after.length > before.length) {
+    candidates.push({
+      patch: {
+        op: "splice",
+        path: encodePointer(path),
+        index: before.length,
+        remove: 0,
+        add: after.slice(before.length) as StorableDatum[],
+      },
+      path,
+      coversDescendants: false,
+    });
+  } else if (after.length < before.length) {
+    candidates.push({
+      patch: {
+        op: "splice",
+        path: encodePointer(path),
+        index: after.length,
+        remove: before.length - after.length,
+        add: [],
+      },
+      path,
+      coversDescendants: false,
+    });
+  }
+
+  if (candidates.length === 0) {
+    const fallback = buildValuePatchCandidate(path, after, before);
+    return fallback ? [fallback] : [];
+  }
+
+  return candidates;
+};
+
+const isPrefixPath = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean => prefix.length <= path.length && pathsOverlap(prefix, path);
+
+const shallowStructureChanged = (
+  before: StorableDatum | undefined,
+  after: StorableDatum | undefined,
+): boolean => {
+  if (isRecord(before) && isRecord(after)) {
+    const beforeKeys = Object.keys(before);
+    const afterKeys = Object.keys(after);
+    if (beforeKeys.length !== afterKeys.length) {
+      return true;
+    }
+    if (Array.isArray(before) !== Array.isArray(after)) {
+      return true;
+    }
+    if (Array.isArray(before) && before.length !== after.length) {
+      return true;
+    }
+    return !beforeKeys.every((key) => Object.hasOwn(after, key));
+  }
+
+  return !deepEqual(before, after);
+};
+
+const compareDocPaths = (
+  left: readonly string[],
+  right: readonly string[],
+): number => {
+  if (left.length !== right.length) {
+    return left.length - right.length;
+  }
+
+  const leftPointer = encodePointer(left);
+  const rightPointer = encodePointer(right);
+  return leftPointer < rightPointer ? -1 : leftPointer > rightPointer ? 1 : 0;
+};
+
+const buildReactivityPathsForChange = (
+  beforeRoot: StorableDatum | undefined,
+  afterRoot: StorableDatum | undefined,
+  path: readonly string[],
+): readonly (readonly string[])[] => {
+  const beforeValue = readPathValue(beforeRoot, path);
+  const afterValue = readPathValue(afterRoot, path);
+  if (deepEqual(beforeValue, afterValue)) {
+    return [];
+  }
+
+  const paths = new Map<string, readonly string[]>();
+  if (path.length === 0) {
+    paths.set("", []);
+    return [...paths.values()];
+  }
+
+  for (let prefixLength = 1; prefixLength < path.length; prefixLength += 1) {
+    const prefix = path.slice(0, prefixLength);
+    if (
+      !shallowStructureChanged(
+        readPathValue(beforeRoot, prefix),
+        readPathValue(afterRoot, prefix),
+      )
+    ) {
+      continue;
+    }
+    paths.set(encodePointer(prefix), prefix);
+  }
+
+  paths.set(encodePointer(path), path);
+  return [...paths.values()].sort(compareDocPaths);
 };
 
 class V2TransactionJournal implements ITransactionJournal {
@@ -1041,6 +1252,15 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     doc.current = collapsedNext;
     doc.frozenReads.clear();
+    this.recordPatchIntent(
+      space,
+      address,
+      readPathValue(collapsedNext.value, address.path),
+      previous.kind === "ok"
+        ? isolateTransactionValue(previous.value) as StorableDatum | undefined
+        : undefined,
+      doc,
+    );
     this.recordWriteActivity(
       space,
       address,
@@ -1141,6 +1361,13 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     doc.current = collapsedNext;
     doc.frozenReads.clear();
+    this.recordPatchIntent(
+      space,
+      address,
+      readPathValue(collapsedNext.value, address.path),
+      undefined,
+      doc,
+    );
     this.recordWriteActivity(
       space,
       { ...address, path: lastExistingPath },
@@ -1222,6 +1449,13 @@ export class V2StorageTransaction implements IStorageTransaction {
         continue;
       }
       changed = true;
+      this.recordPatchIntent(
+        space,
+        address,
+        readPathValue(result.ok.root, address.path),
+        isolateTransactionValue(previousValue) as StorableDatum | undefined,
+        doc,
+      );
       this.recordWriteActivity(
         space,
         { ...address, path: activityPath },
@@ -1270,6 +1504,39 @@ export class V2StorageTransaction implements IStorageTransaction {
       },
     );
 
+    this.upsertWriteDetail(
+      doc.writeDetails,
+      space,
+      address,
+      value,
+      previousValue,
+    );
+    this.invalidateReactivityLog();
+  }
+
+  private recordPatchIntent(
+    space: MemorySpace,
+    address: IMemoryAddress,
+    value: StorableDatum | undefined,
+    previousValue: StorableDatum | undefined,
+    doc: WritableDocumentEntry,
+  ): void {
+    this.upsertWriteDetail(
+      doc.patchDetails,
+      space,
+      address,
+      value,
+      previousValue,
+    );
+  }
+
+  private upsertWriteDetail(
+    details: Map<string, TransactionWriteDetail>,
+    space: MemorySpace,
+    address: IMemoryAddress,
+    value: StorableDatum | undefined,
+    previousValue: StorableDatum | undefined,
+  ): void {
     const writeActivity = {
       space,
       id: address.id,
@@ -1277,22 +1544,20 @@ export class V2StorageTransaction implements IStorageTransaction {
       path: address.path,
     };
     const key = encodePointer(address.path);
-    const existing = doc.writeDetails.get(key);
+    const existing = details.get(key);
     if (existing) {
       // Only update the latest value — previousValue intentionally stays as the
       // pre-transaction state so that journal.history() reports the correct
       // before-snapshot for reverts and conflict detection.
       existing.value = value;
-      this.invalidateReactivityLog();
       return;
     }
 
-    doc.writeDetails.set(key, {
+    details.set(key, {
       address: writeActivity,
       value,
       previousValue,
     });
-    this.invalidateReactivityLog();
   }
 
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
@@ -1412,17 +1677,34 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const writes: IMemorySpaceAddress[] = [];
-    for (const branch of this.#branches.values()) {
-      for (const doc of branch.docs.values()) {
+    for (const [space, branch] of this.#branches.entries()) {
+      for (const [key, doc] of branch.docs.entries()) {
         if (!isWritableDocument(doc)) {
           continue;
         }
-        for (const detail of doc.writeDetails.values()) {
+
+        const { id, type } = this.parseDocKey(key);
+        const reactivityPaths = new Map<string, readonly string[]>();
+        for (const detail of doc.patchDetails.values()) {
+          for (
+            const path of buildReactivityPathsForChange(
+              doc.initial.value,
+              doc.current.value,
+              detail.address.path,
+            )
+          ) {
+            reactivityPaths.set(encodePointer(path), path);
+          }
+        }
+
+        for (
+          const path of [...reactivityPaths.values()].sort(compareDocPaths)
+        ) {
           writes.push({
-            space: detail.address.space,
-            id: detail.address.id,
-            type: detail.address.type,
-            path: normalizeReactivityPath(detail.address.path),
+            space,
+            id,
+            type,
+            path: normalizeReactivityPath(path),
           });
         }
       }
@@ -1593,7 +1875,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       return null;
     }
 
-    const details = [...doc.writeDetails.values()];
+    const details = [...doc.patchDetails.values()];
     if (details.some((detail) => detail.address.path.length === 0)) {
       return null;
     }
@@ -1603,56 +1885,96 @@ export class V2StorageTransaction implements IStorageTransaction {
       value: StorableDatum | undefined;
       previousValue: StorableDatum | undefined;
     }>();
+    const arrayGroups = new Map<string, readonly string[]>();
     for (const detail of details) {
-      const arrayPatchPath = resolveArrayPatchPath(
-        doc.initial.value,
+      const value = readPathValue(
         doc.current.value,
         detail.address.path,
       );
-      const patchPath = arrayPatchPath ?? detail.address.path;
-      const value = readPathValue(
-        doc.current.value,
-        patchPath,
-      );
       const previousValue = readPathValue(
         doc.initial.value,
-        patchPath,
+        detail.address.path,
       );
       if (deepEqual(value, previousValue)) {
         continue;
       }
 
-      patchDetails.set(patchPath.join("\0"), {
-        path: patchPath,
+      const arrayPatchPath = findDeepestArrayPath(
+        doc.initial.value,
+        doc.current.value,
+        detail.address.path,
+      );
+      if (arrayPatchPath) {
+        arrayGroups.set(arrayPatchPath.join("\0"), arrayPatchPath);
+        continue;
+      }
+
+      patchDetails.set(detail.address.path.join("\0"), {
+        path: detail.address.path,
         value,
         previousValue,
       });
     }
-    if (patchDetails.size === 0) {
-      return null;
+
+    const fullCoverCandidates: PatchDraftCandidate[] = [];
+    for (const detail of patchDetails.values()) {
+      const candidate = buildValuePatchCandidate(
+        detail.path,
+        detail.value,
+        detail.previousValue,
+      );
+      if (candidate) {
+        fullCoverCandidates.push(candidate);
+      }
     }
 
-    const compactedPaths = [...patchDetails.values()].map((detail) =>
-      detail.path
-    );
-    for (let index = 0; index < compactedPaths.length; index += 1) {
-      for (let other = index + 1; other < compactedPaths.length; other += 1) {
-        if (pathsOverlap(compactedPaths[index]!, compactedPaths[other]!)) {
-          return null;
+    const nonCoverCandidates: PatchDraftCandidate[] = [];
+    for (const arrayPath of arrayGroups.values()) {
+      const beforeValue = readPathValue(doc.initial.value, arrayPath);
+      const afterValue = readPathValue(doc.current.value, arrayPath);
+      for (
+        const candidate of buildArrayPatchCandidates(
+          arrayPath,
+          beforeValue,
+          afterValue,
+        )
+      ) {
+        if (candidate.coversDescendants) {
+          fullCoverCandidates.push(candidate);
+        } else {
+          nonCoverCandidates.push(candidate);
         }
       }
     }
 
-    const patches: PatchOp[] = [...patchDetails.values()].map((detail) => {
-      const path = encodePointer(detail.path);
-      if (detail.value === undefined) {
-        return { op: "remove", path };
+    if (fullCoverCandidates.length === 0 && nonCoverCandidates.length === 0) {
+      return null;
+    }
+
+    const retainedCoverCandidates = fullCoverCandidates
+      .sort((left, right) => left.path.length - right.path.length);
+    const nonOverlappingCoverCandidates: typeof retainedCoverCandidates = [];
+    for (const detail of retainedCoverCandidates) {
+      if (
+        nonOverlappingCoverCandidates.some((existing) =>
+          pathsOverlap(existing.path, detail.path)
+        )
+      ) {
+        continue;
       }
-      if (detail.previousValue === undefined) {
-        return { op: "add", path, value: detail.value };
-      }
-      return { op: "replace", path, value: detail.value };
-    });
+      nonOverlappingCoverCandidates.push(detail);
+    }
+
+    const retainedNonCoverCandidates = nonCoverCandidates.filter((detail) =>
+      !nonOverlappingCoverCandidates.some((existing) =>
+        isPrefixPath(existing.path, detail.path)
+      )
+    );
+
+    const patches: PatchOp[] = [
+      ...nonOverlappingCoverCandidates.map((candidate) => candidate.patch),
+      ...retainedNonCoverCandidates.map((candidate) => candidate.patch),
+    ];
 
     return { op: "patch", id, type, patches, value: doc.current.value };
   }
