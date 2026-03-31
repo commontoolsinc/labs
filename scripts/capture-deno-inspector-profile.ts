@@ -108,8 +108,6 @@ async function waitForTarget(
 const host = parseArg("host") ?? "127.0.0.1";
 const port = parseNumberArg("port", 9229);
 const outputPath = requireArg("output");
-const cpuOutputPath = parseArg("cpu-output") ??
-  outputPath.replace(/\.json$/i, ".cpuprofile");
 const consoleOutputPath = parseArg("console-output");
 const summaryPattern = parseArg("summary-pattern") ??
   "\\d+ passed, \\d+ failed";
@@ -118,14 +116,6 @@ const profileStopPattern = parseArg("profile-stop-pattern");
 const targetUrlPattern = parseArg("target-url-pattern");
 const connectTimeoutMs = parseNumberArg("connect-timeout", 30_000);
 const timeoutMs = parseNumberArg("timeout", 120_000);
-const categories = parseArg("categories") ??
-  [
-    "devtools.timeline",
-    "disabled-by-default-v8.cpu_profiler",
-    "disabled-by-default-v8.runtime_stats",
-    "v8.execute",
-    "blink.user_timing",
-  ].join(",");
 
 const target = await waitForTarget(
   host,
@@ -133,14 +123,13 @@ const target = await waitForTarget(
   connectTimeoutMs,
   targetUrlPattern ? new RegExp(targetUrlPattern) : undefined,
 );
-console.log(`trace: target ${target.title ?? target.id}`);
+console.log(`profile: target ${target.title ?? target.id}`);
 
 const ws = new WebSocket(target.webSocketDebuggerUrl);
 await waitForWebSocketOpen(ws);
-console.log("trace: websocket open");
+console.log("profile: websocket open");
 
 const celestial = new Celestial(ws);
-const traceEvents: object[] = [];
 const consoleMessages: string[] = [];
 const summaryRegex = new RegExp(summaryPattern);
 const profileStartRegex = profileStartPattern
@@ -149,26 +138,11 @@ const profileStartRegex = profileStartPattern
 const profileStopRegex = profileStopPattern
   ? new RegExp(profileStopPattern)
   : undefined;
-let traceEnded = false;
+let profileEnded = false;
 let profilerActive = false;
 let sawProfileStart = !profileStartRegex;
 let sawProfileStop = false;
 let stopReason: string | undefined;
-
-const tracingComplete = Promise.withResolvers<{
-  dataLossOccurred: boolean;
-  stream?: string;
-  traceFormat?: string;
-  streamCompression?: string;
-}>();
-
-celestial.addEventListener("Tracing.dataCollected", (event) => {
-  traceEvents.push(...event.detail.value);
-});
-
-celestial.addEventListener("Tracing.tracingComplete", (event) => {
-  tracingComplete.resolve(event.detail);
-});
 
 celestial.addEventListener("Runtime.consoleAPICalled", (event) => {
   const text = event.detail.args
@@ -187,7 +161,7 @@ async function startProfiler() {
   if (profilerActive || ws.readyState !== WebSocket.OPEN) return;
   await celestial.Profiler.start();
   profilerActive = true;
-  console.log("trace: profiler started");
+  console.log("profile: profiler started");
 }
 
 const signalHandlers: Array<[Deno.Signal, () => void]> = [];
@@ -203,12 +177,16 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   }
 }
 
-async function stopTrace(reason: string) {
-  if (traceEnded) return;
-  traceEnded = true;
+async function stopProfile(reason: string) {
+  if (profileEnded) return;
+  profileEnded = true;
+  stopReason ??= reason;
 
   let profile: unknown = null;
   let stopError: string | undefined;
+  const errorOutputPath = outputPath.endsWith(".cpuprofile")
+    ? outputPath.replace(/\.cpuprofile$/i, ".error.txt")
+    : `${outputPath}.error.txt`;
   if (profilerActive && ws.readyState === WebSocket.OPEN) {
     try {
       profile = (await celestial.Profiler.stop()).profile;
@@ -219,47 +197,11 @@ async function stopTrace(reason: string) {
   }
 
   await Deno.mkdir(dirname(outputPath), { recursive: true }).catch(() => {});
-  await Deno.mkdir(dirname(cpuOutputPath), { recursive: true }).catch(() => {});
   if (profile) {
-    await Deno.writeTextFile(cpuOutputPath, JSON.stringify(profile, null, 2));
+    await Deno.writeTextFile(outputPath, JSON.stringify(profile, null, 2));
+  } else if (stopError) {
+    await Deno.writeTextFile(errorOutputPath, stopError);
   }
-
-  if (ws.readyState === WebSocket.OPEN) {
-    try {
-      await celestial.Tracing.end();
-    } catch (error) {
-      stopError = `${
-        stopError ? `${stopError}; ` : ""
-      }Tracing.end failed: ${error}`;
-    }
-  }
-  const complete = await Promise.race([
-    tracingComplete.promise,
-    sleep(5_000).then(() => ({
-      dataLossOccurred: false,
-    })),
-  ]);
-
-  await Deno.writeTextFile(
-    outputPath,
-    JSON.stringify(
-      {
-        traceEvents,
-        metadata: {
-          reason,
-          host,
-          port,
-          categories,
-          target,
-          consoleMessages,
-          stopError,
-          tracingComplete: complete,
-        },
-      },
-      null,
-      2,
-    ),
-  );
 
   if (consoleOutputPath) {
     await Deno.writeTextFile(consoleOutputPath, consoleMessages.join("\n"));
@@ -267,21 +209,15 @@ async function stopTrace(reason: string) {
 }
 
 await celestial.Runtime.enable();
-console.log("trace: runtime enabled");
+console.log("profile: runtime enabled");
 await celestial.Console.enable();
 await celestial.Debugger.enable();
 await celestial.Profiler.enable();
 await celestial.Profiler.setSamplingInterval({ interval: 100 });
-await celestial.Tracing.start({
-  categories,
-  transferMode: "ReportEvents",
-  streamCompression: "none",
-});
-console.log("trace: tracing started");
 
 await celestial.Runtime.runIfWaitingForDebugger();
 await celestial.Debugger.resume().catch(() => {});
-console.log("trace: resumed target");
+console.log("profile: resumed target");
 
 if (sawProfileStart) {
   await startProfiler();
@@ -290,34 +226,34 @@ if (sawProfileStart) {
 const started = performance.now();
 while (performance.now() - started < timeoutMs) {
   if (stopReason) {
-    await stopTrace(stopReason);
-    console.log(`trace: ${stopReason}`);
+    await stopProfile(stopReason);
+    console.log(`profile: ${stopReason}`);
     break;
   }
   if (sawProfileStart && !profilerActive) {
     await startProfiler();
   }
   if (profilerActive && sawProfileStop) {
-    await stopTrace("profile-stop-matched");
-    console.log("trace: profile stop matched");
+    await stopProfile("profile-stop-matched");
+    console.log("profile: profile stop matched");
     break;
   }
   if (consoleMessages.some((message) => summaryRegex.test(message))) {
-    await stopTrace("summary-matched");
-    console.log("trace: summary matched");
+    await stopProfile("summary-matched");
+    console.log("profile: summary matched");
     break;
   }
   if (ws.readyState === WebSocket.CLOSED) {
-    await stopTrace("websocket-closed");
-    console.log("trace: websocket closed");
+    await stopProfile("websocket-closed");
+    console.log("profile: websocket closed");
     break;
   }
   await sleep(100);
 }
 
-if (!traceEnded) {
-  await stopTrace("timeout");
-  console.log("trace: timeout");
+if (!profileEnded) {
+  await stopProfile("timeout");
+  console.log("profile: timeout");
 }
 
 for (const [signal, handler] of signalHandlers) {
@@ -333,9 +269,8 @@ await celestial.close();
 console.log(
   JSON.stringify(
     {
+      reason: stopReason,
       outputPath,
-      cpuOutputPath,
-      eventCount: traceEvents.length,
       consoleMessages: consoleMessages.length,
     },
     null,

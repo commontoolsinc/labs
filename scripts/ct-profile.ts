@@ -10,7 +10,6 @@ type ProfileOptions = {
   inspectPort?: number;
   timeoutMs: number;
   connectTimeoutMs: number;
-  categories?: string;
 };
 
 const DEFAULT_SUMMARY_PATTERN = String.raw`\d+ passed, \d+ failed`;
@@ -54,8 +53,6 @@ function parseArgs(args: string[]): {
       options.connectTimeoutMs = Number(
         arg.slice("--profile-connect-timeout-ms=".length),
       );
-    } else if (arg.startsWith("--profile-categories=")) {
-      options.categories = arg.slice("--profile-categories=".length);
     } else {
       ctArgs.push(arg);
     }
@@ -149,18 +146,20 @@ const defaultOutputDir = join(
   "ct-profile",
   `${timestamp()}-${slugify(ctArgs)}`,
 );
-const tracePath = options.outputPath
+const requestedOutputPath = options.outputPath
   ? resolve(Deno.cwd(), options.outputPath)
-  : join(options.outputDir ?? defaultOutputDir, "trace.json");
-const traceStem = tracePath.endsWith(".json")
-  ? tracePath.slice(0, -".json".length)
-  : tracePath;
-const outputDir = dirname(tracePath);
+  : join(options.outputDir ?? defaultOutputDir, "profile.cpuprofile");
+const cpuPath = requestedOutputPath.endsWith(".json")
+  ? requestedOutputPath.replace(/\.json$/i, ".cpuprofile")
+  : requestedOutputPath;
+const profileStem = cpuPath.endsWith(".cpuprofile")
+  ? cpuPath.slice(0, -".cpuprofile".length)
+  : cpuPath;
+const outputDir = dirname(cpuPath);
 await Deno.mkdir(outputDir, { recursive: true });
 
-const cpuPath = `${traceStem}.cpuprofile`;
-const consolePath = `${traceStem}.console.log`;
-const metaPath = `${traceStem}.meta.json`;
+const consolePath = `${profileStem}.console.log`;
+const metaPath = `${profileStem}.meta.json`;
 const summaryPattern = options.summaryPattern ??
   (ctArgs[0] === "test" ? DEFAULT_SUMMARY_PATTERN : DISABLED_SUMMARY_PATTERN);
 const summaryRegex = new RegExp(summaryPattern);
@@ -174,10 +173,10 @@ const cliPath = join(repoRoot, "packages", "cli", "mod.ts");
 const capturePath = join(
   repoRoot,
   "scripts",
-  "capture-deno-inspector-trace.ts",
+  "capture-deno-inspector-profile.ts",
 );
 
-console.log(`ct-profile: writing trace to ${tracePath}`);
+console.log(`ct-profile: writing CPU profile to ${cpuPath}`);
 
 const ct = new Deno.Command(Deno.execPath(), {
   args: [
@@ -206,8 +205,7 @@ const captureArgs = [
   "run",
   "-A",
   capturePath,
-  `--output=${tracePath}`,
-  `--cpu-output=${cpuPath}`,
+  `--output=${cpuPath}`,
   `--console-output=${consolePath}`,
   `--summary-pattern=${summaryPattern}`,
   `--target-url-pattern=${targetUrlPattern}`,
@@ -219,9 +217,6 @@ if (options.profileStartPattern) {
   captureArgs.push(`--profile-start-pattern=${options.profileStartPattern}`);
 }
 captureArgs.push(`--profile-stop-pattern=${profileStopPattern}`);
-if (options.categories) {
-  captureArgs.push(`--categories=${options.categories}`);
-}
 
 const capture = new Deno.Command(Deno.execPath(), {
   args: captureArgs,
@@ -275,7 +270,6 @@ await Deno.writeTextFile(
       command: ctArgs,
       cwd: Deno.cwd(),
       outputDir,
-      tracePath,
       cpuPath,
       consolePath,
       summaryPattern,
@@ -294,7 +288,7 @@ await Deno.writeTextFile(
 
 console.log(`ct-profile: CPU profile ${cpuPath}`);
 console.log(`ct-profile: console log ${consolePath}`);
-console.log(`ct-profile: trace ${tracePath}`);
+console.log(`ct-profile: metadata ${metaPath}`);
 
 if (!captureStatus.success) {
   Deno.exit(captureStatus.code);

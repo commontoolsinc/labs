@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   getGlobalLogFloor,
+  getGlobalTimingOutputConfig,
   getLogger,
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
@@ -11,6 +12,7 @@ import {
   resetAllLoggerCounts,
   resetAllTimingStats,
   setGlobalLogFloor,
+  setGlobalTimingOutputConfig,
 } from "../src/logger.ts";
 
 describe("logger", () => {
@@ -19,6 +21,8 @@ describe("logger", () => {
     log.level = "info";
     // Clear global floor so it doesn't interfere with tests
     setGlobalLogFloor(undefined);
+    setGlobalTimingOutputConfig(undefined);
+    performance.clearMeasures();
   });
 
   afterEach(() => {
@@ -29,6 +33,8 @@ describe("logger", () => {
     if (global.commonfabric?.logger) {
       global.commonfabric.logger = {};
     }
+    setGlobalTimingOutputConfig(undefined);
+    performance.clearMeasures();
   });
 
   // Helper to check styled timestamp format
@@ -1442,6 +1448,80 @@ describe("logger", () => {
         expect(stats1?.count).toBe(1);
         expect(stats2?.count).toBe(1);
       });
+
+      it("should emit performance measures for matching timings when enabled", () => {
+        const logger = getLogger("timing-measure");
+        setGlobalTimingOutputConfig({
+          include: ["timing-measure:operation"],
+          measure: true,
+        });
+
+        logger.time(10, 25, "operation");
+
+        const measures = performance.getEntriesByType("measure").filter((
+          entry,
+        ) => entry.name === "logger:timing-measure:operation");
+
+        expect(measures).toHaveLength(1);
+        expect(measures[0].duration).toBe(15);
+      });
+
+      it("should not emit performance measures when timing config does not match", () => {
+        const logger = getLogger("timing-measure-filter");
+        setGlobalTimingOutputConfig({
+          include: ["other-prefix"],
+          measure: true,
+        });
+
+        logger.time(10, 25, "operation");
+
+        const measures = performance.getEntriesByType("measure").filter((
+          entry,
+        ) => entry.name.includes("timing-measure-filter"));
+
+        expect(measures).toHaveLength(0);
+      });
+
+      it("should emit console timing output for matching timings when enabled", () => {
+        const logger = getLogger("timing-console");
+        setGlobalTimingOutputConfig({
+          include: ["timing-console"],
+          console: true,
+          measure: false,
+        });
+
+        const { calls } = captureConsole("log", () => {
+          logger.time(0, 12.5, "operation");
+        });
+
+        expect(calls).toHaveLength(1);
+        expect(calls[0][0]).toMatch(
+          /^\%c\[TIMING\]\[timing-console::\d{2}:\d{2}:\d{2}\.\d{3}\]$/,
+        );
+        expect(calls[0][1]).toBe(LOG_COLORS.debug);
+        expect(calls[0][2]).toBe("operation");
+        expect(calls[0][3]).toBe("12.500ms");
+      });
+
+      it("should respect minimum duration threshold for timing output", () => {
+        const logger = getLogger("timing-min-threshold");
+        setGlobalTimingOutputConfig({
+          include: ["timing-min-threshold"],
+          console: true,
+          measure: true,
+          minMs: 10,
+        });
+
+        const { calls } = captureConsole("log", () => {
+          logger.time(0, 5, "operation");
+        });
+
+        expect(calls).toHaveLength(0);
+        const measures = performance.getEntriesByType("measure").filter((
+          entry,
+        ) => entry.name.includes("timing-min-threshold"));
+        expect(measures).toHaveLength(0);
+      });
     });
 
     describe("time() direct recording", () => {
@@ -1924,6 +2004,26 @@ describe("logger", () => {
       expect(logger.counts.info).toBe(1);
       expect(logger.counts.warn).toBe(1);
       expect(logger.counts.error).toBe(1);
+    });
+  });
+
+  describe("global timing output config", () => {
+    it("should expose timing output config getters and setters", () => {
+      expect(getGlobalTimingOutputConfig()).toBeUndefined();
+
+      setGlobalTimingOutputConfig({
+        include: ["scheduler/execute"],
+        measure: true,
+        console: true,
+        minMs: 5,
+      });
+
+      expect(getGlobalTimingOutputConfig()).toEqual({
+        include: ["scheduler/execute"],
+        measure: true,
+        console: true,
+        minMs: 5,
+      });
     });
   });
 });
