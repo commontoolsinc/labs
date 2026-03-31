@@ -606,7 +606,8 @@ export async function main(argv: string[] = Deno.args) {
 
       // [FS] projection index file: parse and write back to cells
       if (writePath.fsProjection) {
-        await bridge.writeFsFile(writePath, text);
+        const ok = await bridge.writeFsFile(writePath, text);
+        if (!ok) return EINVAL;
         if (handle.version === flushVersion) {
           handle.dirty = false;
         }

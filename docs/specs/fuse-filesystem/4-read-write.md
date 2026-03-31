@@ -132,7 +132,9 @@ When a piece uses the `[FS]` projection, writing to `index.md` or
 
 **`index.json`**: Parsed as a JSON object.
 - Each key (except `entityId`) is written to `$FS.content.<key>`.
-- Invalid JSON is silently ignored.
+- Keys present in the cell but absent from the file are removed (deleted keys
+  are cleared).
+- Invalid JSON returns `EINVAL`.
 
 `entityId` is always read-only and cannot be changed by writing to either
 file.

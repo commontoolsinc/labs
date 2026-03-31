@@ -674,7 +674,13 @@ export function parseExecArgs(
     }
   }
 
-  if (spec.callableKind === "handler" && !explicitVerb && args.length === 0) {
+  const props = objectProperties(spec.inputSchema);
+  const hasOptionalInputs = props !== null && Object.keys(props).length > 0 &&
+    requiredFlags(spec.inputSchema).size === 0;
+  if (
+    spec.callableKind === "handler" && !explicitVerb && args.length === 0 &&
+    !hasOptionalInputs
+  ) {
     const typeShape = schemaShapeString(spec.inputSchema);
     throw new Error(
       `Handler requires input. Expected type: ${typeShape}\nRun --help for full usage.`,

@@ -73,11 +73,16 @@ export function isVNode(value: unknown): boolean {
  * Mirrors the FsProjection API type but with the plain-object case
  * normalized into the explicit application/json form.
  */
-export interface FsValue {
-  type: "text/markdown" | "application/json";
-  content: string | Record<string, unknown>;
-  frontmatter?: Record<string, unknown>;
-}
+export type FsValue =
+  | {
+    type: "text/markdown";
+    content: string;
+    frontmatter?: Record<string, unknown>;
+  }
+  | {
+    type: "application/json";
+    content: Record<string, unknown>;
+  };
 
 function isFrontmatterPrimitive(val: unknown): boolean {
   return val === null || val === undefined || typeof val === "string" ||
@@ -124,8 +129,8 @@ export function buildFsProjection(
   }
 
   if (fsValue.type === "application/json") {
-    const content = (fsValue.content ?? {}) as Record<string, unknown>;
-    const obj = { entityId, ...content };
+    const { entityId: _skipEntityId, ...safeContent } = fsValue.content ?? {};
+    const obj = { entityId, ...safeContent };
     return tree.addFile(parentIno, "index.json", safeStringify(obj), "object");
   }
 

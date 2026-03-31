@@ -2165,4 +2165,4 @@ export type FsProjection =
     type: "application/json";
     content: Record<string, unknown>;
   }
-  | Record<string, unknown>;
+  | { type?: undefined; [key: string]: unknown };

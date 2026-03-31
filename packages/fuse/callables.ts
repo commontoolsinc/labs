@@ -112,7 +112,9 @@ export function buildCallableScript(
   const schemaComment = schema !== undefined
     ? `# schema: ${JSON.stringify(schema)}\n`
     : "";
-  const typeComment = typeStr !== undefined ? `# input: ${typeStr}\n` : "";
+  const typeComment = typeStr !== undefined
+    ? `# input: ${typeStr.replaceAll("\n", "\n# ")}\n`
+    : "";
   return encoder.encode(
     `#!${shim} exec\n${schemaComment}${typeComment}exec ${
       shellQuote(shim)
