@@ -679,9 +679,9 @@ export function createDataFlowAnalyzer(
       if (classifyOpaquePathTerminalCall(expression) === "key") {
         const callee = expression.expression;
         const parentId = (
-          ts.isPropertyAccessExpression(callee) ||
+            ts.isPropertyAccessExpression(callee) ||
             ts.isElementAccessExpression(callee)
-        )
+          )
           ? context.expressionToNodeId.get(callee.expression) ?? null
           : null;
         recordDataFlow(expression, scope, parentId, true);
