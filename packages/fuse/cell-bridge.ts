@@ -344,7 +344,13 @@ export class CellBridge {
     const piece = this.resolvePieceController(space, parsed);
     if (!piece) throw new Error(`Piece "${parsed.rootName}" not found`);
 
-    await piece[parsed.cellProp].set(value, [parsed.cellKey]);
+    const rootCell = await piece[parsed.cellProp].getCell();
+    const handlerCell = rootCell.key(parsed.cellKey as keyof unknown) as Cell<
+      unknown
+    >;
+    handlerCell.send(value);
+    await piece.manager().runtime.idle();
+    await piece.manager().synced();
   }
 
   private resolvePieceController(

@@ -692,20 +692,25 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
     path: (string | number)[] | undefined;
     value: unknown;
   }> = [];
+  const makeChannel = (channel: "input" | "result") => ({
+    key: (key: string) => ({
+      send: (value: unknown) => {
+        calls.push({ channel, value, path: [key] });
+      },
+    }),
+  });
   const piece = {
     id: "of:entity-123",
     input: {
-      set: (value: unknown, path?: (string | number)[]) => {
-        calls.push({ channel: "input", value, path });
-        return Promise.resolve();
-      },
+      getCell: () => Promise.resolve(makeChannel("input")),
     },
     result: {
-      set: (value: unknown, path?: (string | number)[]) => {
-        calls.push({ channel: "result", value, path });
-        return Promise.resolve();
-      },
+      getCell: () => Promise.resolve(makeChannel("result")),
     },
+    manager: () => ({
+      runtime: { idle: () => Promise.resolve() },
+      synced: () => Promise.resolve(),
+    }),
   };
 
   const spaceIno = tree.addDir(tree.rootIno, "home");
