@@ -561,6 +561,13 @@ export function extractMetrics(
     durationSeconds: duration,
   });
 
+  const setIfLonger = (name: string, sample: TimingSample) => {
+    const existing = metrics.get(name);
+    if (!existing || sample.durationSeconds > existing.durationSeconds) {
+      metrics.set(name, sample);
+    }
+  };
+
   for (const job of jobs) {
     const jobDuration = durationSeconds(job.started_at, job.completed_at);
     if (jobDuration <= 0) continue;
@@ -569,31 +576,31 @@ export function extractMetrics(
 
     for (const pattern of INTEGRATION_JOB_PATTERNS) {
       if (normalizedJobName.includes(pattern)) {
-        metrics.set(`job: ${pattern}`, makeSample(jobDuration));
+        setIfLonger(`job: ${pattern}`, makeSample(jobDuration));
       }
     }
 
     const unitMatch = PATTERN_UNIT_RE.exec(normalizedJobName);
     if (unitMatch) {
-      metrics.set(
+      setIfLonger(
         `job: Pattern Unit Tests (${unitMatch[1]}/${unitMatch[2]})`,
         makeSample(jobDuration),
       );
     }
 
     if (normalizedJobName.includes("Test and Build")) {
-      metrics.set("job: Test and Build", makeSample(jobDuration));
+      setIfLonger("job: Test and Build", makeSample(jobDuration));
     }
 
     // New parallelized job names (after CI restructure)
     if (normalizedJobName === "Build Binaries") {
-      metrics.set("job: Build Binaries", makeSample(jobDuration));
+      setIfLonger("job: Build Binaries", makeSample(jobDuration));
     }
     if (normalizedJobName === "Test") {
-      metrics.set("job: Test", makeSample(jobDuration));
+      setIfLonger("job: Test", makeSample(jobDuration));
     }
     if (normalizedJobName === "Check") {
-      metrics.set("job: Check", makeSample(jobDuration));
+      setIfLonger("job: Check", makeSample(jobDuration));
     }
 
     for (const step of job.steps) {
@@ -603,7 +610,7 @@ export function extractMetrics(
       const normalizedStepName = normalizeName(step.name).toLowerCase();
       for (const keyword of STEP_KEYWORDS) {
         if (normalizedStepName.includes(keyword.toLowerCase())) {
-          metrics.set(`step: ${keyword}`, makeSample(stepDuration));
+          setIfLonger(`step: ${keyword}`, makeSample(stepDuration));
         }
       }
     }
