@@ -40,6 +40,7 @@ import {
   githubGet,
   githubPatch,
   githubPost,
+  isExcludedMetric,
   ISSUE_LABEL,
   JOB_TO_LABEL,
   mapConcurrent,
@@ -87,6 +88,10 @@ function detectRegressions(
   const regressions: Regression[] = [];
 
   for (const [name, timeline] of timelines) {
+    if (isExcludedMetric(name)) {
+      continue;
+    }
+
     const samples = timeline.samples;
     if (samples.length < MIN_SAMPLES + RECENT_WINDOW) continue;
 

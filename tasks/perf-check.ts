@@ -31,6 +31,7 @@ import {
   formatMetricValue,
   formatOverrideSuggestion,
   githubGet,
+  isExcludedMetric,
   mapConcurrent,
   type MetricTimeline,
   MIN_ABSOLUTE_DELTA,
@@ -48,16 +49,6 @@ import {
 
 /** How many recent main-branch runs to use for baseline. */
 const BASELINE_RUNS = 20;
-
-/**
- * Metrics to exclude from regression checks because their aggregate values
- * naturally grow as new tests are added.  Per-test timings from JUnit
- * artifacts are tracked instead.
- */
-const EXCLUDED_METRIC_PATTERNS = [
-  /^job: Pattern Unit Tests/,
-  /^step: pattern unit tests$/,
-];
 
 // ---------------------------------------------------------------------------
 // Main
@@ -228,8 +219,7 @@ async function main() {
   }[] = [];
 
   for (const [metric, currentSample] of currentMetrics) {
-    // Skip metrics whose aggregate values grow as tests are added
-    if (EXCLUDED_METRIC_PATTERNS.some((re) => re.test(metric))) {
+    if (isExcludedMetric(metric)) {
       continue;
     }
 
