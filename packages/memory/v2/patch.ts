@@ -1,4 +1,5 @@
 import type { StorableDatum } from "../interface.ts";
+import { isInstance, isObject } from "@commontools/utils/types";
 import type { PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
 
@@ -142,7 +143,7 @@ const getAtPath = (root: StorableDatum, path: string[]): StorableDatum => {
   for (const segment of path) {
     if (Array.isArray(current)) {
       current = current[requireExistingArrayIndex(current, segment, path)];
-    } else if (isObject(current) && Object.hasOwn(current, segment)) {
+    } else if (isPatchObject(current) && Object.hasOwn(current, segment)) {
       current = current[segment];
     } else {
       throw new Error(`missing path ${encodePointer(path)}`);
@@ -161,7 +162,7 @@ const getExistingParent = (
   for (const segment of path.slice(0, -1)) {
     if (Array.isArray(current)) {
       current = current[requireExistingArrayIndex(current, segment, path)];
-    } else if (isObject(current) && Object.hasOwn(current, segment)) {
+    } else if (isPatchObject(current) && Object.hasOwn(current, segment)) {
       current = current[segment];
     } else {
       throw new Error(`missing path ${encodePointer(path)}`);
@@ -196,7 +197,7 @@ const getCreatableParent = (
 
     if (Array.isArray(current)) {
       current = current[requireExistingArrayIndex(current, segment, path)];
-    } else if (isObject(current)) {
+    } else if (isPatchObject(current)) {
       if (!Object.hasOwn(current, segment)) {
         current[segment] = createContainer(next);
       }
@@ -262,10 +263,8 @@ const isStrictPrefixPath = (
 const isArraySegment = (segment: string): boolean =>
   /^(0|[1-9]\d*)$/.test(segment);
 
-const isObject = (value: StorableDatum): value is PatchObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value) &&
-  (Object.getPrototypeOf(value) === Object.prototype ||
-    Object.getPrototypeOf(value) === null);
+const isPatchObject = (value: StorableDatum): value is PatchObject =>
+  isObject(value) && !isInstance(value);
 
 const isContainer = (value: StorableDatum): value is PatchContainer =>
-  Array.isArray(value) || isObject(value);
+  Array.isArray(value) || isPatchObject(value);
