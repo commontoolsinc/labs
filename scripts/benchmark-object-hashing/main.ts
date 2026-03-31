@@ -11,6 +11,9 @@
  *   deno run --allow-net --allow-read --allow-env scripts/benchmark-object-hashing/main.ts
  */
 
+// Import our own hasher for comparison
+import { hashOfModernAsString } from "../../packages/data-model/value-hash-modern.ts";
+
 // Import libraries from esm.sh to avoid adding dependencies
 // @ts-ignore - dynamic import from esm.sh
 const MerkleReference = await import("https://esm.sh/merkle-reference@2.2.0");
@@ -912,6 +915,11 @@ async function createStrategies() {
     return cid.toString();
   };
 
+  // hashOfModernAsString (our own hasher)
+  strategies["hashOfModernAsString"] = (obj: any) => {
+    return hashOfModernAsString(obj);
+  };
+
   return strategies;
 }
 
@@ -1094,8 +1102,9 @@ async function main() {
             opsPerSec.toFixed(0)
           } ops/sec)`,
         );
-      } catch (err) {
-        console.log(`${strategyName.padEnd(40)} ERROR: ${err.message}`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.log(`${strategyName.padEnd(40)} ERROR: ${message}`);
       }
     }
   }
