@@ -294,12 +294,12 @@ describe("schema-hash dispatch", () => {
   // -------------------------------------------------------------------------
 
   describe("with `modernSchemaHash = true`", () => {
-    it("hashSchema returns fid1: prefixed strings", () => {
+    it("hashSchema returns base64url strings (no algorithm prefix)", () => {
       setSchemaHashConfig(true);
       const result = hashSchema({ type: "number" });
       assert(
-        result.startsWith("fid1:"),
-        `Expected fid1: prefix, got: ${result}`,
+        /^[A-Za-z0-9_-]+$/.test(result),
+        `Expected plain base64url, got: ${result}`,
       );
     });
   });

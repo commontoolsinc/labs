@@ -21,13 +21,13 @@ import type { FabricValue } from "./interface.ts";
 import { SchemaAndHash } from "./schema-and-hash.ts";
 import {
   hashSchemaItemLegacy,
-  hashSchemaItemLegacyAsFabricHash,
-  hashSchemaLegacy,
+  hashSchemaItemLegacyAsString,
+  hashSchemaLegacyAsString,
 } from "./schema-hash-legacy.ts";
 import {
   hashSchemaItemModern,
-  hashSchemaItemModernAsFabricHash,
-  hashSchemaModern,
+  hashSchemaItemModernAsString,
+  hashSchemaModernAsString,
 } from "./schema-hash-modern.ts";
 import { toDeepFrozenSchema } from "./schema-utils.ts";
 
@@ -70,8 +70,8 @@ export function resetSchemaHashConfig(): void {
  */
 export function hashSchema(schema: JSONSchema): string {
   return modernSchemaHashEnabled
-    ? hashSchemaModern(schema)
-    : hashSchemaLegacy(schema);
+    ? hashSchemaModernAsString(schema)
+    : hashSchemaLegacyAsString(schema);
 }
 
 /**
@@ -81,8 +81,8 @@ export function hashSchema(schema: JSONSchema): string {
  */
 export function hashSchemaItem(item: FabricValue): string {
   return modernSchemaHashEnabled
-    ? hashSchemaItemModern(item)
-    : hashSchemaItemLegacy(item);
+    ? hashSchemaItemModernAsString(item)
+    : hashSchemaItemLegacyAsString(item);
 }
 
 // ---------------------------------------------------------------------------
@@ -92,8 +92,8 @@ export function hashSchemaItem(item: FabricValue): string {
 /** Hash a schema-related item as a FabricHash (for intern cache). */
 function _hashSchemaItemAsFabricHash(item: FabricValue): FabricHash {
   return modernSchemaHashEnabled
-    ? hashSchemaItemModernAsFabricHash(item)
-    : hashSchemaItemLegacyAsFabricHash(item);
+    ? hashSchemaItemModern(item)
+    : hashSchemaItemLegacy(item);
 }
 
 // ---------------------------------------------------------------------------

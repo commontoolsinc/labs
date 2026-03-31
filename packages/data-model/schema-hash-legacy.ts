@@ -61,17 +61,17 @@ function makeLegacyFabricHash(s: string): FabricHash {
 }
 
 /** Legacy hash of a JSONSchema, returned as a string. */
-export function hashSchemaLegacy(schema: JSONSchema): string {
+export function hashSchemaLegacyAsString(schema: JSONSchema): string {
   return stableStringify(schema);
 }
 
 /** Legacy hash of a schema-related item, returned as a string. */
-export function hashSchemaItemLegacy(item: FabricValue): string {
+export function hashSchemaItemLegacyAsString(item: FabricValue): string {
   return stableStringify(item);
 }
 
 /** Legacy hash of a schema-related item, returned as a FabricHash. */
-export function hashSchemaItemLegacyAsFabricHash(
+export function hashSchemaItemLegacy(
   item: FabricValue,
 ): FabricHash {
   return makeLegacyFabricHash(stableStringify(item));
