@@ -302,17 +302,17 @@ if [ "$RESULT" != '"piece-flags"' ]; then
   error "Flag-based handler call should update lastMessage, got: $RESULT"
 fi
 
-NO_ARG_HANDLER_ERR=$(mktemp)
-if ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite > /dev/null 2>"$NO_ARG_HANDLER_ERR"; then
-  error "Bare no-arg handler calls should fail without explicit invoke"
+LEGACY_COUNT_BEFORE=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
+ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite
+RESULT=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
+if [ "$RESULT" != "$((LEGACY_COUNT_BEFORE + 1))" ]; then
+  error "Bare no-arg handler call should increment legacyCount, got: $RESULT"
 fi
-grep -q "Expected JSON on stdin for --json" "$NO_ARG_HANDLER_ERR" ||
-  error "Bare no-arg handler call should explain that JSON input is required"
 
 ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite -- invoke
 RESULT=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
-if [ "$RESULT" != "1" ]; then
-  error "Explicit invoke should call a no-input handler, got legacyCount=$RESULT"
+if [ "$RESULT" != "$((LEGACY_COUNT_BEFORE + 2))" ]; then
+  error "Explicit invoke should still call an empty-object handler, got legacyCount=$RESULT"
 fi
 
 TOOL_RESULT=$(ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search -- --query tea)

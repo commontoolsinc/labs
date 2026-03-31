@@ -190,6 +190,86 @@ describe("executePieceCallable", () => {
     ]);
   });
 
+  it("infers piped stdin for primitive handlers when no args are provided", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "editContent",
+      inputSchema: { type: "string" },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "of:piece-123",
+        space: "home",
+      },
+      "editContent",
+      [],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => false,
+        readTextInput: () => Promise.resolve("# Title\n\nLine 2"),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["editContent"],
+        value: "# Title\n\nLine 2",
+      },
+    ]);
+  });
+
+  it("infers piped stdin for object handlers when no args are provided", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "editContent",
+      inputSchema: {
+        type: "object",
+        properties: {
+          detail: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+          },
+        },
+        required: ["detail"],
+      },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "of:piece-123",
+        space: "home",
+      },
+      "editContent",
+      [],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => false,
+        readTextInput: () =>
+          Promise.resolve('{"detail":{"value":"Use `cat` to read files"}}'),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["editContent"],
+        value: {
+          detail: { value: "Use `cat` to read files" },
+        },
+      },
+    ]);
+  });
+
   it("renders piece-call help with the piece-call command prefix", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "tool",

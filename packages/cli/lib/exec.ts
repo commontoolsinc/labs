@@ -12,6 +12,7 @@ import {
   parseExecArgs,
   renderExecHelp,
   renderExecHelpJson,
+  resolveImplicitPipedHandlerInput,
   resolveParsedExecInput,
 } from "./exec-schema.ts";
 import {
@@ -51,6 +52,7 @@ export interface ExecDependencies {
   readJsonInput?: () => Promise<unknown>;
   readTextInput?: () => Promise<string>;
   readTextFile?: (path: string) => Promise<string>;
+  isStdinTerminal?: () => boolean;
 }
 
 export interface ExecutedMountedCallableFile {
@@ -164,7 +166,13 @@ export async function executeMountedCallableFile(
   deps: ExecDependencies = {},
 ): Promise<ExecutedMountedCallableFile> {
   const resolved = await resolveMountedCallableFile(filePath, deps);
-  const parsed = parseExecArgs(resolved.commandSpec, rawArgs);
+  const implicitInput = await resolveImplicitPipedHandlerInput(
+    resolved.commandSpec,
+    rawArgs,
+    deps,
+  );
+  const parsed = implicitInput?.parsed ??
+    parseExecArgs(resolved.commandSpec, rawArgs);
   const invocationStyle = deps.invocationStyle ??
     (Deno.env.get("CT_EXEC_SHEBANG") === "1" ? "direct" : "ct");
 
@@ -180,11 +188,12 @@ export async function executeMountedCallableFile(
     };
   }
 
-  const input = await resolveParsedExecInput(
-    resolved.commandSpec,
-    parsed,
-    deps,
-  );
+  const input = implicitInput?.input ??
+    await resolveParsedExecInput(
+      resolved.commandSpec,
+      parsed,
+      deps,
+    );
   const executed = await executeResolvedCallable(
     {
       callableCell: resolved.callableCell,

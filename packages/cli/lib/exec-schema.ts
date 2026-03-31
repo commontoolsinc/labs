@@ -30,6 +30,7 @@ export interface ExecInputResolverDeps {
   readJsonInput?: () => Promise<unknown>;
   readTextInput?: () => Promise<string>;
   readTextFile?: (path: string) => Promise<string>;
+  isStdinTerminal?: () => boolean;
 }
 
 interface FlagDescriptor {
@@ -542,6 +543,51 @@ export async function resolveParsedExecInput(
   return parsed.input;
 }
 
+export async function resolveImplicitPipedHandlerInput(
+  spec: ExecCommandSpec,
+  rawArgs: string[],
+  deps: ExecInputResolverDeps = {},
+): Promise<{ parsed: ParsedExecArgs; input: unknown } | null> {
+  if (spec.callableKind !== "handler" || rawArgs.length > 0) {
+    return null;
+  }
+
+  const isTerminal = deps.isStdinTerminal?.() ?? Deno.stdin.isTerminal();
+  if (isTerminal) {
+    return null;
+  }
+
+  const text = await (deps.readTextInput ?? defaultReadTextInput)();
+  if (text.length === 0) {
+    return null;
+  }
+
+  const properties = objectProperties(spec.inputSchema);
+  const input = properties
+    ? parseJsonText(text, "stdin")
+    : parseValueForSchema(text, spec.inputSchema, "--value-file");
+
+  if (
+    properties &&
+    (typeof input !== "object" || input === null || Array.isArray(input))
+  ) {
+    throw new Error("Invalid JSON from stdin: expected object");
+  }
+
+  return {
+    parsed: {
+      verb: spec.defaultVerb,
+      input: properties ? input ?? {} : input,
+      showHelp: false,
+      showHelpJson: false,
+      readJsonFromStdin: false,
+      readTextFromStdin: false,
+      usedJsonInput: properties !== null,
+    },
+    input,
+  };
+}
+
 function schemaDescription(schema: JSONSchema): string | undefined {
   return isSchemaObject(schema) && typeof schema.description === "string"
     ? schema.description
@@ -859,12 +905,9 @@ export function parseExecArgs(
     }
   }
 
-  const props = objectProperties(spec.inputSchema);
-  const hasOptionalInputs = props !== null && Object.keys(props).length > 0 &&
-    requiredFlags(spec.inputSchema).size === 0;
   if (
     spec.callableKind === "handler" && !explicitVerb && args.length === 0 &&
-    !hasOptionalInputs
+    !handlerAllowsInvokeWithoutInputs(spec.inputSchema)
   ) {
     const typeShape = schemaShapeString(spec.inputSchema);
     throw new Error(

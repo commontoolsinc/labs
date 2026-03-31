@@ -68,7 +68,7 @@ function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
   }
 
   if (tail.length === 0) {
-    return ["--json"];
+    return [];
   }
 
   if (tail[0] === "--help") {

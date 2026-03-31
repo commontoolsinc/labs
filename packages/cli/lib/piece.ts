@@ -25,6 +25,7 @@ import {
   parseExecArgs,
   renderExecHelpJson,
   renderPieceCallHelp,
+  resolveImplicitPipedHandlerInput,
   resolveParsedExecInput,
 } from "./exec-schema.ts";
 
@@ -55,6 +56,7 @@ export interface PieceCallableDependencies extends CallableExecutionDeps {
   readJsonInput?: () => Promise<unknown>;
   readTextInput?: () => Promise<string>;
   readTextFile?: (path: string) => Promise<string>;
+  isStdinTerminal?: () => boolean;
 }
 
 export interface ExecutedPieceCallable {
@@ -445,7 +447,13 @@ export async function executePieceCallable(
   deps: PieceCallableDependencies = {},
 ): Promise<ExecutedPieceCallable> {
   const resolved = await resolvePieceCallable(config, callableName, deps);
-  const parsed = parseExecArgs(resolved.commandSpec, rawArgs);
+  const implicitInput = await resolveImplicitPipedHandlerInput(
+    resolved.commandSpec,
+    rawArgs,
+    deps,
+  );
+  const parsed = implicitInput?.parsed ??
+    parseExecArgs(resolved.commandSpec, rawArgs);
 
   if (parsed.showHelp) {
     return {
@@ -460,11 +468,12 @@ export async function executePieceCallable(
     };
   }
 
-  const input = await resolveParsedExecInput(
-    resolved.commandSpec,
-    parsed,
-    deps,
-  );
+  const input = implicitInput?.input ??
+    await resolveParsedExecInput(
+      resolved.commandSpec,
+      parsed,
+      deps,
+    );
   const executed = await executeResolvedCallable(
     resolved,
     parsed.usedJsonInput

@@ -294,14 +294,26 @@ describe("parseExecArgs", () => {
     expect(() =>
       parseExecArgs(
         makeSpec("handler", {
-          type: "object",
-          properties: {},
+          type: "string",
         }),
         [],
       )
     ).toThrow(
       /Handler requires input/i,
     );
+  });
+
+  it("allows handlers with empty object inputs to invoke without arguments", () => {
+    const result = parseExecArgs(
+      makeSpec("handler", {
+        type: "object",
+        properties: {},
+      }),
+      [],
+    );
+
+    expect(result.verb).toBe("invoke");
+    expect(result.input).toEqual({});
   });
 
   it("allows invoke alone for handlers whose inputs are all optional", () => {
@@ -1161,6 +1173,43 @@ describe("mounted callable resolution and execution", () => {
         cellProp: "result",
         path: ["add"],
         value: { query: "milk" },
+      },
+    ]);
+  });
+
+  it("infers piped stdin for mounted primitive handlers when no args are provided", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/add.handler",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:piece-123",
+      inputSchema: { type: "string" },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await executeMountedCallableFile(
+      filePath,
+      [],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => false,
+        readTextInput: () => Promise.resolve("# Title\n\nLine 2"),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["add"],
+        value: "# Title\n\nLine 2",
       },
     ]);
   });

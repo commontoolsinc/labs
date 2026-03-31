@@ -366,16 +366,11 @@ assert_json_eq \
 success "ct exec runs mounted tools without an explicit verb"
 
 LEGACY_COUNT_BEFORE_EXEC=$(read_piece_value_or_default "legacyCount" "0")
-NO_ARG_HANDLER_ERR=$(mktemp)
-if ct exec "$LEGACY_HANDLER_FILE" >/dev/null 2>"$NO_ARG_HANDLER_ERR"; then
-  error "Handlers without inputs should require invoke for no-arg execution."
-fi
-NO_ARG_HANDLER_ERROR=$(cat "$NO_ARG_HANDLER_ERR")
-rm -f "$NO_ARG_HANDLER_ERR"
-assert_contains "$NO_ARG_HANDLER_ERROR" "use invoke to call it without inputs" "No-arg handler error should explain the explicit invoke requirement."
-ct exec "$LEGACY_HANDLER_FILE" invoke
+ct exec "$LEGACY_HANDLER_FILE"
 wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE_EXEC + 1))"
-success "No-arg handlers require invoke, and invoke alone still works for optional-input handlers"
+ct exec "$LEGACY_HANDLER_FILE" invoke
+wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE_EXEC + 2))"
+success "Empty-object handlers run without an explicit verb, and invoke still works"
 
 COUNT_BEFORE_PIECES_SHARED=$(read_piece_value_or_default "messageCount" "0")
 ct exec "$HANDLER_FILE" --message "shared-message"
