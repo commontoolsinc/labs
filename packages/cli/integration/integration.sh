@@ -302,16 +302,15 @@ if [ "$RESULT" != '"piece-flags"' ]; then
   error "Flag-based handler call should update lastMessage, got: $RESULT"
 fi
 
-LEGACY_COUNT_BEFORE=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
 ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite
 RESULT=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
-if [ "$RESULT" != "$((LEGACY_COUNT_BEFORE + 1))" ]; then
+if [ "$RESULT" != "1" ]; then
   error "Bare no-arg handler call should increment legacyCount, got: $RESULT"
 fi
 
 ct piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite -- invoke
 RESULT=$(ct piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
-if [ "$RESULT" != "$((LEGACY_COUNT_BEFORE + 2))" ]; then
+if [ "$RESULT" != "2" ]; then
   error "Explicit invoke should still call an empty-object handler, got legacyCount=$RESULT"
 fi
 
