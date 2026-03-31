@@ -1,67 +1,72 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { fromBase64url, toUnpaddedBase64url } from "../base64url.ts";
+import {
+  fromBase64Polyfill,
+  fromBase64url,
+  toBase64Polyfill,
+  toUnpaddedBase64url,
+} from "../base64url.ts";
+
+const TEST_PAIRS: { arr: readonly number[], b64: string }[] = [
+  { arr: [], b64: "" },
+  { arr: [0x00], b64: "AA" },
+  { arr: [0xff], b64: "_w" },
+  { arr: [0x12, 0x34], b64: "EjQ" },
+  { arr: [0x98, 0x76, 0x54], b64: "mHZU" },
+  { arr: [0x0a, 0x2b, 0x4c, 0x5d], b64: "CitMXQ" },
+] as const;
+
+function arrayString(arr: readonly number[]): string {
+  const result: string[] = ["["];
+  let first = true;
+  for (const elem of arr) {
+    if (first) {
+      first = false;
+    } else {
+      result.push(", ");
+    }
+    if (elem < 0x10) {
+      result.push("0");
+    }
+    result.push(elem.toString(16));
+  }
+  result.push("]");
+  return result.join("");
+}
 
 // ============================================================================
-// toUnpaddedBase64url
+// toUnpaddedBase64url and polyfill
 // ============================================================================
 
-describe("toUnpaddedBase64url", () => {
-  it("encodes empty bytes to empty string", () => {
-    expect(toUnpaddedBase64url(new Uint8Array([]))).toBe("");
-  });
-
-  it("encodes [0x00] to 'AA'", () => {
-    expect(toUnpaddedBase64url(new Uint8Array([0x00]))).toBe("AA");
-  });
-
-  it("encodes [0xFF] to '_w'", () => {
-    expect(toUnpaddedBase64url(new Uint8Array([0xff]))).toBe("_w");
-  });
-
-  it("encodes 3-byte input (no padding case)", () => {
-    // 3 bytes -> 4 base64url chars (exact, no padding)
-    const b64 = toUnpaddedBase64url(new Uint8Array([0x01, 0x02, 0x03]));
-    expect(b64.length).toBe(4);
-    expect(b64).not.toContain("=");
-  });
-
-  it("never produces padding characters", () => {
-    // Test various lengths (1, 2, 3, 4, 5 bytes)
-    for (let len = 1; len <= 5; len++) {
-      const bytes = new Uint8Array(len);
-      bytes.fill(0x42);
-      const b64 = toUnpaddedBase64url(bytes);
-      expect(b64).not.toContain("=");
+for (const toBase64 of [toUnpaddedBase64url, toBase64Polyfill]) {
+  describe(`${toBase64.name}`, () => {
+    for (const { arr, b64 } of TEST_PAIRS) {
+      const arrStr = arrayString(arr);
+      it(`encodes ${arrStr} to "${b64}"`, () => {
+        expect(toBase64(new Uint8Array(arr))).toBe(b64);
+      });
     }
   });
-});
+}
 
 // ============================================================================
-// fromBase64url
+// fromBase64url and polyfill
 // ============================================================================
 
-describe("fromBase64url", () => {
-  it("decodes empty string to empty bytes", () => {
-    expect(fromBase64url("")).toEqual(new Uint8Array([]));
-  });
 
-  it("decodes 'AA' to [0x00]", () => {
-    expect(fromBase64url("AA")).toEqual(new Uint8Array([0x00]));
+for (const fromBase64 of [fromBase64url, fromBase64Polyfill]) {
+  describe(`${fromBase64.name}`, () => {
+    for (const { arr, b64 } of TEST_PAIRS) {
+      const arrStr = arrayString(arr);
+      for (let padding = 0; padding <= 2; padding++) {
+        const encodedStr = `${b64}${"=".repeat(padding)}`;
+        it(`decodes "${encodedStr}" to ${arrStr}`, () => {
+          expect(fromBase64(encodedStr)).toEqual(new Uint8Array(arr));
+        });
+      }
+    }
   });
-
-  it("decodes '_w' to [0xFF]", () => {
-    expect(fromBase64url("_w")).toEqual(new Uint8Array([0xff]));
-  });
-
-  it("accepts padded input ('AA==')", () => {
-    expect(fromBase64url("AA==")).toEqual(new Uint8Array([0x00]));
-  });
-
-  it("accepts padded input ('_w==')", () => {
-    expect(fromBase64url("_w==")).toEqual(new Uint8Array([0xff]));
-  });
-});
+}
 
 // ============================================================================
 // Base64url round-trip
