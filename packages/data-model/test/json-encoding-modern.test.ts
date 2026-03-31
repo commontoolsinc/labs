@@ -365,6 +365,13 @@ describe("json encoding", () => {
       expect(serializedNum).not.toEqual(serializedBig);
     });
 
+    it("accepts unpadded base64url input", () => {
+      // "Kg" is the standard unpadded base64url encoding of 42n.
+      const data = { "/BigInt@1": "Kg" } as JsonWireValue;
+      const result = fromWireFormat(data);
+      expect(result).toBe(42n);
+    });
+
     it("accepts padded base64 input", () => {
       // "Kg==" is the padded form of "Kg" (42n) -- padding is accepted by the
       // web-standard Uint8Array.fromBase64.
