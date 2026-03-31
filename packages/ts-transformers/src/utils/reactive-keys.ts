@@ -6,7 +6,7 @@ import {
   type TransformationContext,
 } from "../core/mod.ts";
 
-type CommonToolsKeyName = "NAME" | "UI" | "SELF";
+type CommonToolsKeyName = "NAME" | "UI" | "SELF" | "FS";
 
 export function cloneKeyExpression(
   expr: ts.Expression,
@@ -74,7 +74,7 @@ export function getKnownComputedKeyExpression(
   expr: ts.Expression,
   context: TransformationContext,
 ): ts.Expression | undefined {
-  for (const name of ["NAME", "UI", "SELF"] as const) {
+  for (const name of ["NAME", "UI", "SELF", "FS"] as const) {
     if (
       isCommonToolsKeyIdentifier(expr, context, name) ||
       isCtHelpersKeyAccess(expr, name)

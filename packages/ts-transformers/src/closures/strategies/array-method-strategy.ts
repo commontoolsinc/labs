@@ -399,7 +399,8 @@ function isKnownComputedKey(
 ): expression is ts.Identifier {
   return isCommonToolsKeyIdentifier(expression, context, "NAME") ||
     isCommonToolsKeyIdentifier(expression, context, "UI") ||
-    isCommonToolsKeyIdentifier(expression, context, "SELF");
+    isCommonToolsKeyIdentifier(expression, context, "SELF") ||
+    isCommonToolsKeyIdentifier(expression, context, "FS");
 }
 
 function lowerMapReceiverMemberAccess(

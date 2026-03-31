@@ -3,6 +3,7 @@ import {
   action,
   computed,
   type Default,
+  FS,
   generateText,
   handler,
   NAME,
@@ -34,6 +35,7 @@ export { NotePiece };
 interface NoteOutput extends NotePiece {
   [NAME]: string;
   [UI]: VNode;
+  [FS]: { type: string; content: string; frontmatter: Record<string, string> };
   title: string;
   content: string;
   summary: string;
@@ -361,6 +363,11 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     return {
       [NAME]: computed(() => `📝 ${title.get()}`),
+      [FS]: {
+        type: "text/markdown",
+        frontmatter: { title },
+        content,
+      },
       [UI]: (
         <ct-screen>
           <ct-vstack

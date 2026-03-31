@@ -13,6 +13,7 @@ import {
   AsStream,
   AsWriteonlyCell,
   AuthSchema,
+  FS,
   ID,
   ID_FIELD,
   isPattern,
@@ -145,6 +146,7 @@ export const createBuilder = (): {
       TYPE,
       NAME,
       UI,
+      FS,
 
       // Schema utilities
       schema,

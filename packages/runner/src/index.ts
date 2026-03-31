@@ -87,6 +87,7 @@ export {
   AuthSchema,
   type Cell as BuilderCell,
   type Frame,
+  FS,
   type HandlerFactory,
   ID,
   ID_FIELD,
@@ -141,3 +142,5 @@ export {
 export { createJsonSchema } from "./builder/json-utils.ts";
 export { deepEqual } from "@commontools/utils/deep-equal";
 export { getValueAtPath, setValueAtPath } from "./path-utils.ts";
+export { schemaToTypeString } from "./schema-format.ts";
+export type { SchemaFormatOptions } from "./schema-format.ts";

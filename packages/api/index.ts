@@ -153,6 +153,7 @@ export declare const ID_FIELD: unique symbol;
 export declare const TYPE: "$TYPE";
 export declare const NAME: "$NAME";
 export declare const UI: "$UI";
+export declare const FS: "$FS";
 
 // Symbol for accessing self-reference in patterns
 export declare const SELF: unique symbol;
