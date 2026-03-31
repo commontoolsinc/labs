@@ -1,4 +1,5 @@
 import { hashSchema } from "@commontools/data-model/schema-hash";
+import { cloneIfNecessary } from "@commontools/data-model/fabric-value";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -170,30 +171,6 @@ const isArrayIndex = (segment: string): boolean =>
 const createContainer = (nextSegment: string): StorableDatum =>
   isArrayIndex(nextSegment) ? [] : {};
 
-const isPlainRecord = (
-  value: unknown,
-): value is Record<string, unknown> => {
-  if (!isObject(value)) {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-};
-
-const clonePendingDatum = <T>(value: T): T => {
-  if (Array.isArray(value)) {
-    return value.map((entry) => clonePendingDatum(entry)) as T;
-  }
-  if (isPlainRecord(value)) {
-    const clone: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      clone[key] = clonePendingDatum(entry);
-    }
-    return clone as T;
-  }
-  return value;
-};
-
 const hasDocumentPath = (
   root: StorableDatum | undefined,
   path: readonly string[],
@@ -248,10 +225,14 @@ const setDocumentPath = (
   if (path.length === 0) {
     return value === undefined
       ? undefined
-      : clonePendingDatum(value) as EntityDocument;
+      : cloneIfNecessary(value as StorableDatum, {
+        frozen: false,
+      }) as EntityDocument;
   }
 
-  const nextRoot = clonePendingDatum(root ?? {}) as Record<string, unknown>;
+  const nextRoot = cloneIfNecessary((root ?? {}) as StorableDatum, {
+    frozen: false,
+  }) as Record<string, unknown>;
   let current: Record<string, unknown> | unknown[] = nextRoot;
   for (let index = 0; index < path.length - 1; index += 1) {
     const segment = path[index]!;
@@ -275,9 +256,13 @@ const setDocumentPath = (
 
   const last = path[path.length - 1]!;
   if (Array.isArray(current)) {
-    current[Number(last)] = clonePendingDatum(value);
+    current[Number(last)] = value === undefined
+      ? undefined
+      : cloneIfNecessary(value as StorableDatum, { frozen: false });
   } else {
-    current[last] = clonePendingDatum(value);
+    current[last] = value === undefined
+      ? undefined
+      : cloneIfNecessary(value as StorableDatum, { frozen: false });
   }
   return nextRoot as EntityDocument;
 };
@@ -293,7 +278,9 @@ const removeDocumentPath = (
     return undefined;
   }
 
-  const nextRoot = clonePendingDatum(root) as Record<string, unknown>;
+  const nextRoot = cloneIfNecessary(root as StorableDatum, {
+    frozen: false,
+  }) as Record<string, unknown>;
   let current: Record<string, unknown> | unknown[] = nextRoot;
   for (let index = 0; index < path.length - 1; index += 1) {
     const segment = path[index]!;
@@ -359,7 +346,9 @@ const applyPendingVersion = (
     case "delete":
       return undefined;
     case "set":
-      return clonePendingDatum(pending.value);
+      return cloneIfNecessary(pending.value as StorableDatum, {
+        frozen: false,
+      }) as EntityDocument;
     case "patch": {
       let next = base;
       for (

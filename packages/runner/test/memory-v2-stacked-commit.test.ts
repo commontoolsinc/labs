@@ -1,11 +1,31 @@
-import { assert, assertEquals, assertExists } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertExists,
+  assertStrictEquals,
+} from "@std/assert";
+import {
+  jsonFromValue,
+  resetJsonEncodingConfig,
+  setJsonEncodingConfig,
+  valueFromJson,
+} from "@commontools/data-model/json-encoding";
+import { FabricEpochNsec } from "@commontools/data-model/fabric-epoch";
 import { Identity } from "@commontools/identity";
 import type { MIME, StorableDatum, URI } from "@commontools/memory/interface";
+import {
+  resetStorableValueConfig,
+  setStorableValueConfig,
+} from "@commontools/memory/storable-value";
 import {
   type EntityDocument,
   getMemoryV2Flags,
   type PatchOp,
 } from "@commontools/memory/v2";
+import type {
+  FabricValue,
+  ReconstructionContext,
+} from "@commontools/data-model/interface";
 import type {
   ClientCommit,
   ConfirmedRead,
@@ -34,11 +54,16 @@ import {
 const signer = await Identity.fromPassphrase("memory-v2-stacked-commit");
 const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
-const HELLO_OK = {
+const helloOk = () => ({
   type: "hello.ok",
   protocol: "memory/v2",
   flags: getMemoryV2Flags(),
-} as const;
+} as const);
+const testReconstructionContext: ReconstructionContext = {
+  getCell() {
+    throw new Error("getCell is not available in stacked commit transport");
+  },
+};
 const DOCS = {
   A: "of:memory-v2-stacked-A" as URI,
   B: "of:memory-v2-stacked-B" as URI,
@@ -51,7 +76,7 @@ type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
 };
 
-type RootValue = Record<string, unknown> | undefined;
+type RootValue = Record<string, StorableDatum> | undefined;
 type DocState = {
   seq: number;
   value: RootValue;
@@ -356,7 +381,10 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = valueFromJson(
+      payload,
+      testReconstructionContext,
+    ) as {
       type: string;
       requestId?: string;
       session?: { sessionId?: string };
@@ -366,7 +394,7 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
     switch (message.type) {
       case "hello":
         this.model.connectionCount += 1;
-        this.respond(HELLO_OK);
+        this.respond(helloOk());
         break;
       case "session.open":
         this.respond({
@@ -432,7 +460,7 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
   }
 
   private respond(message: unknown): void {
-    this.#receiver(JSON.stringify(message));
+    this.#receiver(jsonFromValue(message as FabricValue));
   }
 }
 
@@ -516,8 +544,8 @@ const clone = <T>(value: T): T => structuredClone(value);
 
 const valueFor = (
   label: string,
-  extra: Record<string, unknown> = {},
-): Record<string, unknown> => ({ label, ...extra });
+  extra: Record<string, StorableDatum> = {},
+): Record<string, StorableDatum> => ({ label, ...extra });
 
 const sourceFromReads = (
   reads: Array<{
@@ -1605,34 +1633,30 @@ Deno.test("memory v2 stacked commits: pending-read compaction keeps localSeq bou
   }
 });
 
-Deno.test("memory v2 stacked commits: pending visibility preserves runtime-only values", async () => {
+Deno.test("memory v2 stacked commits: pending visibility preserves rich fabric values", async () => {
+  setStorableValueConfig({ richStorableValues: true });
+  setJsonEncodingConfig(true);
   const harness = await createHarness();
+  let commitPromise: Promise<any> | undefined;
   try {
-    const selector = ({
-      query,
-      emails,
-    }: {
-      query?: string;
-      emails?: unknown[];
-    }) => {
-      if (!query || !emails) {
-        return [];
-      }
-      return emails.filter(Boolean);
-    };
+    const timestamp = new FabricEpochNsec(1_234n);
 
-    const c1 = beginSet(harness, DOCS.A, valueFor("pending", { selector }));
-    harness.model.setOutcome(c1.localSeq, { kind: "dropThenReplayAccept" });
+    const c1 = beginSet(harness, DOCS.A, valueFor("pending", { timestamp }));
+    commitPromise = c1.promise;
+    harness.model.setOutcome(c1.localSeq, { kind: "accept" });
 
     const pendingVisible = harness.provider.get(DOCS.A);
     assertExists(pendingVisible);
-    const pendingValue = pendingVisible.value as Record<string, unknown>;
+    const pendingValue = pendingVisible.value as Record<string, StorableDatum>;
     assertEquals(pendingValue.label, "pending");
-    assertEquals(pendingValue.selector, selector);
+    assertStrictEquals(pendingValue.timestamp, timestamp);
 
     await assertResultOk(c1.promise);
   } finally {
+    await commitPromise?.catch(() => {});
     await harness.close();
+    resetStorableValueConfig();
+    resetJsonEncodingConfig();
   }
 });
 
