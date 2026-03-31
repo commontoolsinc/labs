@@ -49,8 +49,8 @@ function getInputSchema(
  */
 function parseFrontmatter(
   text: string,
-): { frontmatter: Record<string, string>; body: string } {
-  const fm: Record<string, string> = {};
+): { frontmatter: Record<string, unknown>; body: string } {
+  const fm: Record<string, unknown> = {};
   if (!text.startsWith("---\n")) return { frontmatter: fm, body: text };
   const end = text.indexOf("\n---\n", 4);
   if (end === -1) return { frontmatter: fm, body: text };
@@ -62,7 +62,24 @@ function parseFrontmatter(
     if (colonIdx === -1) continue;
     const key = line.slice(0, colonIdx).trim();
     const val = line.slice(colonIdx + 1).trim();
-    if (key) fm[key] = val;
+    if (!key) continue;
+    if (val.length === 0) {
+      fm[key] = "";
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(val);
+      fm[key] = (
+          typeof parsed === "string" ||
+          typeof parsed === "number" ||
+          typeof parsed === "boolean" ||
+          parsed === null
+        )
+        ? parsed
+        : val;
+    } catch {
+      fm[key] = val;
+    }
   }
   return { frontmatter: fm, body };
 }
@@ -94,14 +111,12 @@ export interface SpaceState {
   piecesIno: bigint;
   entitiesIno: bigint;
   pieceMap: Map<string, string>; // name → entity ID
-  /** Last compatibility alias left behind for a renamed piece (piece ID → alias). */
-  pieceAliases: Map<string, string>;
   pieceControllers: Map<string, PieceController>; // name → controller
   /** Per-piece subscription cancellers, keyed by piece name. */
   pieceSubs: Map<string, Cancel[]>;
   did: string;
   unsubscribes: Cancel[];
-  /** Occupied names set for collision resolution, including compatibility aliases. */
+  /** Used names set for collision resolution. */
   usedNames: Set<string>;
 }
 
@@ -122,10 +137,10 @@ export class CellBridge {
   private syncAgain: Set<string> = new Set();
   private execCli: string;
   /**
-   * Tracks sibling directory names that were created by buildSubtree (complex
-   * frontmatter) for each piece inode. Used to clear stale dirs on rebuild.
+   * Tracks root-level entries created by [FS] projections so they can be
+   * cleared when the result switches back to the default result/ tree.
    */
-  private fsFrontmatterSiblings: Map<bigint, Set<string>> = new Map();
+  private fsProjectionEntries: Map<bigint, Set<string>> = new Map();
 
   private startedAt = new Date().toISOString();
   /** Inode of the .status file (created by initStatus). */
@@ -468,9 +483,34 @@ export class CellBridge {
   async writeFsFile(writePath: WritePath, text: string): Promise<boolean> {
     if (writePath.fsProjection === "markdown") {
       const { frontmatter, body } = parseFrontmatter(text);
+      let existingFrontmatter: Record<string, unknown> | null = null;
+      try {
+        const current = await writePath.piece.result.get([
+          "$FS",
+          "frontmatter",
+        ]);
+        if (
+          typeof current === "object" && current !== null &&
+          !Array.isArray(current)
+        ) {
+          existingFrontmatter = current as Record<string, unknown>;
+        }
+      } catch {
+        // Missing frontmatter is fine.
+      }
       for (const [key, val] of Object.entries(frontmatter)) {
         if (key === "entityId") continue;
         await writePath.piece.result.set(val, ["$FS", "frontmatter", key]);
+      }
+      if (existingFrontmatter) {
+        for (const key of Object.keys(existingFrontmatter)) {
+          if (key === "entityId" || key in frontmatter) continue;
+          await writePath.piece.result.set(undefined, [
+            "$FS",
+            "frontmatter",
+            key,
+          ]);
+        }
       }
       await writePath.piece.result.set(body, ["$FS", "content"]);
       return true;
@@ -571,7 +611,6 @@ export class CellBridge {
       piecesIno,
       entitiesIno,
       pieceMap: new Map(),
-      pieceAliases: new Map(),
       pieceControllers: new Map(),
       pieceSubs: new Map(),
       did: spaceDid,
@@ -732,6 +771,10 @@ export class CellBridge {
    */
   private removePieceFromSpace(state: SpaceState, name: string): void {
     const pieceId = state.pieceMap.get(name);
+    const pieceIno = this.tree.lookup(state.piecesIno, name);
+    if (pieceIno !== undefined) {
+      this.fsProjectionEntries.delete(pieceIno);
+    }
 
     // Cancel piece-level subscriptions
     const subs = state.pieceSubs.get(name);
@@ -745,7 +788,10 @@ export class CellBridge {
 
     // Clean up entity tree
     if (pieceId) {
-      this.clearPieceAlias(state, pieceId);
+      const entityIno = this.tree.lookup(state.entitiesIno, pieceId);
+      if (entityIno !== undefined) {
+        this.fsProjectionEntries.delete(entityIno);
+      }
       this.tree.removeChild(state.entitiesIno, pieceId);
       const entitySubsKey = `entity:${pieceId}`;
       const entitySubs = state.pieceSubs.get(entitySubsKey);
@@ -937,42 +983,6 @@ export class CellBridge {
     );
   }
 
-  private clearPieceAlias(
-    state: SpaceState,
-    pieceId: string,
-    preserveName?: string,
-  ): string | undefined {
-    const aliasName = state.pieceAliases.get(pieceId);
-    if (!aliasName) return undefined;
-
-    state.pieceAliases.delete(pieceId);
-    state.usedNames.delete(aliasName);
-
-    if (aliasName !== preserveName) {
-      const aliasIno = this.tree.lookup(state.piecesIno, aliasName);
-      if (aliasIno !== undefined) {
-        this.tree.clear(aliasIno);
-      }
-    }
-
-    return aliasName;
-  }
-
-  private installPieceAlias(
-    state: SpaceState,
-    pieceId: string,
-    aliasName: string,
-    targetName: string,
-  ): void {
-    const existingAliasIno = this.tree.lookup(state.piecesIno, aliasName);
-    if (existingAliasIno !== undefined) {
-      this.tree.clear(existingAliasIno);
-    }
-    this.tree.addSymlink(state.piecesIno, aliasName, targetName);
-    state.pieceAliases.set(pieceId, aliasName);
-    state.usedNames.add(aliasName);
-  }
-
   private updatePieceMetaName(parentIno: bigint, name: string): void {
     const metaIno = this.tree.lookup(parentIno, "meta.json");
     if (metaIno === undefined) return;
@@ -995,6 +1005,76 @@ export class CellBridge {
     } catch {
       // Ignore malformed synthetic metadata.
     }
+  }
+
+  private clearFsProjectionEntries(pieceIno: bigint): void {
+    const entries = this.fsProjectionEntries.get(pieceIno);
+    this.fsProjectionEntries.delete(pieceIno);
+
+    for (const name of ["index.md", "index.json"]) {
+      const ino = this.tree.lookup(pieceIno, name);
+      if (ino !== undefined) this.tree.clear(ino);
+    }
+
+    if (!entries) return;
+    for (const name of entries) {
+      const ino = this.tree.lookup(pieceIno, name);
+      if (ino !== undefined) this.tree.clear(ino);
+    }
+  }
+
+  private buildFsProjectionTree(
+    pieceIno: bigint,
+    pieceId: string,
+    fsValue: FsValue,
+    treeValue: unknown,
+    callables: Array<
+      { key: string; callableKind: CallableKind; schema?: JSONSchema }
+    >,
+    resolveLink: (value: unknown, depth: number) => string | null,
+    skipEntry: (value: unknown) => boolean,
+    classifyEntry: (key: string, value: unknown) => CallableKind | null,
+  ): "index.md" | "index.json" {
+    const entries = new Set<string>();
+    const indexName = fsValue.type === "text/markdown"
+      ? "index.md"
+      : "index.json";
+    entries.add(indexName);
+
+    buildFsProjection(
+      this.tree,
+      pieceIno,
+      fsValue,
+      pieceId,
+      (siblingParentIno, name, value) => {
+        if (siblingParentIno === pieceIno) {
+          entries.add(name);
+        }
+        this.makeFsSubtreeBuilder(
+          resolveLink,
+          skipEntry,
+          classifyEntry,
+        )(siblingParentIno, name, value);
+      },
+    );
+
+    this.addVNodeJsonFiles(pieceIno, treeValue);
+    if (
+      typeof treeValue === "object" && treeValue !== null &&
+      !Array.isArray(treeValue)
+    ) {
+      for (const [key, value] of Object.entries(treeValue)) {
+        if (isVNode(value)) entries.add(`${key}.json`);
+      }
+    }
+
+    this.addCallableFiles(pieceIno, callables, "result");
+    for (const { key, callableKind } of callables) {
+      entries.add(`${key}.${callableKind}`);
+    }
+
+    this.fsProjectionEntries.set(pieceIno, entries);
+    return indexName;
   }
 
   private discoverCallableEntries(
@@ -1373,59 +1453,41 @@ export class CellBridge {
               if (jsonIno !== undefined) {
                 this.tree.clear(jsonIno);
               }
+              if (propName === "result") {
+                this.clearFsProjectionEntries(pieceIno);
+              }
 
               // Rebuild
               const treeValue = this.materializeTreeValue(cell, newValue);
+              let callables: Array<
+                { key: string; callableKind: CallableKind; schema?: JSONSchema }
+              > = [];
               if (treeValue !== undefined && treeValue !== null) {
-                const { callables, classifyEntry, skipEntry } = this
+                const {
+                  callables: discoveredCallables,
+                  classifyEntry,
+                  skipEntry,
+                } = this
                   .discoverCallableEntries(
                     cell,
                     treeValue,
                   );
+                callables = discoveredCallables;
 
                 if (propName === "result") {
                   const fsValue = this.readFsValue(cell, treeValue);
                   if (fsValue !== null) {
-                    // [FS] projection: update index.md or index.json in place.
-                    // Clear both possible index files (handles type switching).
-                    for (const staleIndex of ["index.md", "index.json"]) {
-                      const staleIno = this.tree.lookup(pieceIno, staleIndex);
-                      if (staleIno !== undefined) this.tree.clear(staleIno);
-                    }
-                    // Clear stale complex frontmatter sibling dirs from prior render.
-                    const prevSiblings = this.fsFrontmatterSiblings.get(
+                    const indexName = this.buildFsProjectionTree(
                       pieceIno,
-                    );
-                    if (prevSiblings) {
-                      for (const name of prevSiblings) {
-                        const staleIno = this.tree.lookup(pieceIno, name);
-                        if (staleIno !== undefined) this.tree.clear(staleIno);
-                      }
-                    }
-                    // Track which sibling dirs this rebuild creates.
-                    const newSiblings = new Set<string>();
-                    buildFsProjection(
-                      this.tree,
-                      pieceIno,
-                      fsValue,
                       piece.id,
-                      (siblingParentIno, name, value) => {
-                        if (siblingParentIno === pieceIno) {
-                          newSiblings.add(name);
-                        }
-                        this.makeFsSubtreeBuilder(
-                          resolveLink,
-                          skipEntry,
-                          classifyEntry,
-                        )(siblingParentIno, name, value);
-                      },
+                      fsValue,
+                      treeValue,
+                      callables,
+                      resolveLink,
+                      skipEntry,
+                      classifyEntry,
                     );
-                    this.fsFrontmatterSiblings.set(pieceIno, newSiblings);
-                    this.addVNodeJsonFiles(pieceIno, treeValue);
                     this.buildHandlersFile(pieceIno, callables);
-                    const indexName = fsValue.type === "text/markdown"
-                      ? "index.md"
-                      : "index.json";
                     if (this.onInvalidate) {
                       this.onInvalidate(pieceIno, [indexName, ".handlers"]);
                     }
@@ -1447,8 +1509,10 @@ export class CellBridge {
                 this.addCallableFiles(propIno, callables, propName);
                 if (propName === "result") {
                   this.addVNodeJsonFiles(propIno, treeValue);
-                  this.buildHandlersFile(pieceIno, callables);
                 }
+              }
+              if (propName === "result") {
+                this.buildHandlersFile(pieceIno, callables);
               }
 
               // Invalidate kernel cache
@@ -1501,7 +1565,6 @@ export class CellBridge {
             if (currentName === undefined) return;
 
             const newRawName = piece.name() ?? piece.id;
-            const previousAlias = state.pieceAliases.get(piece.id);
 
             // Skip if the raw name hasn't changed.
             if (newRawName === currentName) return;
@@ -1511,13 +1574,12 @@ export class CellBridge {
             // must NOT mutate usedNames until after tree.rename() succeeds —
             // a thrown rename would otherwise leave tracking inconsistent.
             let newName = newRawName;
-            const isOccupied = (candidate: string) =>
-              state.usedNames.has(candidate) &&
-              candidate !== currentName &&
-              candidate !== previousAlias;
-            if (isOccupied(newName)) {
+            if (state.usedNames.has(newName) && newName !== currentName) {
               let suffix = 2;
-              while (isOccupied(`${newName}-${suffix}`)) suffix++;
+              while (
+                state.usedNames.has(`${newName}-${suffix}`) &&
+                `${newName}-${suffix}` !== currentName
+              ) suffix++;
               newName = `${newName}-${suffix}`;
             }
 
@@ -1537,12 +1599,6 @@ export class CellBridge {
               newName,
             );
 
-            const clearedAlias = this.clearPieceAlias(
-              state,
-              piece.id,
-              newName,
-            );
-
             // Tree rename succeeded — now update all four state maps atomically.
             state.usedNames.delete(currentName);
             state.usedNames.add(newName);
@@ -1556,7 +1612,6 @@ export class CellBridge {
             if (subs !== undefined) {
               state.pieceSubs.set(newName, subs);
             }
-            this.installPieceAlias(state, piece.id, currentName, newName);
 
             const renamedPieceIno = this.tree.lookup(state.piecesIno, newName);
             if (renamedPieceIno !== undefined) {
@@ -1574,11 +1629,6 @@ export class CellBridge {
             // Invalidate kernel cache.
             if (this.onInvalidate) {
               this.onInvalidate(state.piecesIno, [
-                ...(clearedAlias &&
-                    clearedAlias !== currentName &&
-                    clearedAlias !== newName
-                  ? [clearedAlias]
-                  : []),
                 currentName,
                 newName,
                 ".index.json",
@@ -1588,6 +1638,9 @@ export class CellBridge {
             }
             if (this.onInvalidateInode) {
               this.onInvalidateInode(state.piecesIno);
+              if (renamedPieceIno !== undefined) {
+                this.onInvalidateInode(renamedPieceIno);
+              }
             }
 
             console.log(
@@ -1748,15 +1801,16 @@ export class CellBridge {
         if (fsValue !== null) {
           // [FS] projection: index.md or index.json at piece root,
           // callable files also at piece root (no result/ dir)
-          buildFsProjection(
-            this.tree,
+          this.buildFsProjectionTree(
             pieceIno,
-            fsValue,
             piece.id,
-            this.makeFsSubtreeBuilder(resolveLink, skipEntry, classifyEntry),
+            fsValue,
+            result,
+            callables,
+            resolveLink,
+            skipEntry,
+            classifyEntry,
           );
-          this.addVNodeJsonFiles(pieceIno, result);
-          this.addCallableFiles(pieceIno, callables, "result");
         } else {
           // Default: exploded result/ directory
           const resultIno = buildJsonTree(

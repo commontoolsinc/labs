@@ -19,11 +19,20 @@ interface OwnershipProvider {
   gid?: () => number | null;
 }
 
+function safeCall(fn: (() => number | null) | undefined): number | null {
+  if (typeof fn !== "function") return null;
+  try {
+    return fn();
+  } catch {
+    return null;
+  }
+}
+
 export function getMountOwnership(
   provider: OwnershipProvider = Deno,
 ): MountOwnership {
-  const uid = typeof provider.uid === "function" ? provider.uid() : null;
-  const gid = typeof provider.gid === "function" ? provider.gid() : null;
+  const uid = safeCall(provider.uid);
+  const gid = safeCall(provider.gid);
   return {
     uid: uid ?? 0,
     gid: gid ?? 0,

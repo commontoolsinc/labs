@@ -17,6 +17,20 @@ Deno.test("getMountOwnership falls back to root ids when unavailable", () => {
   assertEquals(getMountOwnership({}), { uid: 0, gid: 0 });
 });
 
+Deno.test("getMountOwnership falls back when uid/gid probes throw", () => {
+  assertEquals(
+    getMountOwnership({
+      uid: () => {
+        throw new Error("uid unavailable");
+      },
+      gid: () => {
+        throw new Error("gid unavailable");
+      },
+    }),
+    { uid: 0, gid: 0 },
+  );
+});
+
 Deno.test("buildNodeStat assigns mounted handler files to the current user", () => {
   const script = new TextEncoder().encode("#!/bin/sh\n");
   const node: FsNode = {

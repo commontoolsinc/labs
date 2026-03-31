@@ -15,6 +15,7 @@ interface FakeCell {
   getRaw(): unknown;
   asSchemaFromLinks(): FakeCell;
   key(segment: string): FakeCell;
+  sink?: (fn: (v: unknown) => void) => () => void;
   isStream?: () => boolean;
 }
 
@@ -34,6 +35,7 @@ function makeCell(
     key(segment: string) {
       return children[segment] ?? makeCell(undefined, undefined);
     },
+    sink: () => () => {},
     isStream: options.isStream ? () => true : undefined,
   };
 }
@@ -45,20 +47,37 @@ class SinkableCell {
   _value: unknown;
   _sinks: Array<(v: unknown) => void> = [];
   schema = undefined;
+  private root: SinkableCell;
+  private path: string[];
 
-  constructor(value: unknown) {
+  constructor(value: unknown, root?: SinkableCell, path: string[] = []) {
     this._value = value;
+    this.root = root ?? this;
+    this.path = path;
   }
 
   get() {
-    return this._value;
+    let current = this.root._value;
+    for (const segment of this.path) {
+      if (
+        typeof current !== "object" || current === null ||
+        Array.isArray(current)
+      ) {
+        return undefined;
+      }
+      current = (current as Record<string, unknown>)[segment];
+    }
+    return current;
   }
 
   getRaw() {
-    return this._value;
+    return this.get();
   }
 
   set(v: unknown) {
+    if (this.root !== this) {
+      throw new Error("set() is only supported on the root SinkableCell");
+    }
     this._value = v;
     for (const fn of this._sinks) fn(v);
   }
@@ -67,11 +86,17 @@ class SinkableCell {
     return this as unknown as FakeCell;
   }
 
-  key(_s: string): FakeCell {
-    return this as unknown as FakeCell;
+  key(segment: string): FakeCell {
+    return new SinkableCell(undefined, this.root, [
+      ...this.path,
+      segment,
+    ]) as unknown as FakeCell;
   }
 
   sink(fn: (v: unknown) => void): () => void {
+    if (this.root !== this) {
+      return this.root.sink(() => fn(this.get()));
+    }
     this._sinks.push(fn);
     return () => {
       this._sinks = this._sinks.filter((s) => s !== fn);
@@ -110,7 +135,6 @@ function buildTestSpace(
     piecesIno,
     entitiesIno,
     pieceMap: new Map(),
-    pieceAliases: new Map(),
     pieceControllers: new Map(),
     pieceSubs: new Map(),
     did: "did:key:zTest",
@@ -422,6 +446,49 @@ Deno.test("CellBridge.writeFsFile writes markdown frontmatter and body to FS pat
   ]);
 });
 
+Deno.test("CellBridge.writeFsFile removes deleted markdown frontmatter keys and preserves scalar types", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const writes: Array<{ path: (string | number)[]; value: unknown }> = [];
+
+  const ok = await (bridge as unknown as { writeFsFile: WriteFsFile })
+    .writeFsFile(
+      {
+        fsProjection: "markdown",
+        piece: {
+          result: {
+            get: (path?: (string | number)[]) => {
+              if (path?.join("/") === "$FS/frontmatter") {
+                return Promise.resolve({
+                  title: "Old Title",
+                  stale: true,
+                });
+              }
+              return Promise.resolve(undefined);
+            },
+            set: (
+              value: unknown,
+              path?: (string | number)[],
+            ) => {
+              writes.push({ path: path ?? [], value });
+              return Promise.resolve();
+            },
+          },
+        },
+      },
+      "---\ntitle: Updated Title\ncount: 42\npublished: true\n---\n\nUpdated body",
+    );
+
+  assertEquals(ok, true);
+  assertEquals(writes, [
+    { path: ["$FS", "frontmatter", "title"], value: "Updated Title" },
+    { path: ["$FS", "frontmatter", "count"], value: 42 },
+    { path: ["$FS", "frontmatter", "published"], value: true },
+    { path: ["$FS", "frontmatter", "stale"], value: undefined },
+    { path: ["$FS", "content"], value: "Updated body" },
+  ]);
+});
+
 Deno.test("CellBridge.writeFsFile removes deleted keys from application/json projections", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/ct-exec");
@@ -635,42 +702,42 @@ Deno.test("CellBridge.subscribePiece renames directory when piece name changes",
     true,
     "New Name dir should exist after rename",
   );
-  const oldNameIno = tree.lookup(state.piecesIno, "Old Name");
-  assertEquals(oldNameIno !== undefined, true, "Old Name alias should remain");
-  const oldNameNode = tree.getNode(oldNameIno!);
   assertEquals(
-    oldNameNode?.kind,
-    "symlink",
-    "Old Name should become a compatibility symlink after rename",
+    tree.lookup(state.piecesIno, "Old Name"),
+    undefined,
+    "Old Name dir should be gone after rename",
   );
-  if (oldNameNode?.kind === "symlink") {
-    assertEquals(
-      oldNameNode.target,
-      "New Name",
-      "Compatibility symlink should point at the renamed piece",
-    );
-  }
 });
 
-Deno.test("CellBridge.subscribePiece keeps only the latest compatibility alias", async () => {
+Deno.test("CellBridge.subscribePiece clears stale FS root entries when result switches to result/ tree", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/ct-exec");
   const state = buildTestSpace(bridge, "home", []);
 
-  let pieceName = "Reading List (0)";
-  const resultCell = new SinkableCell({});
+  const inputCell = new SinkableCell({});
+  const resultCell = new SinkableCell({
+    $FS: {
+      type: "text/markdown",
+      content: "Hello",
+      frontmatter: {
+        meta: {
+          pinned: true,
+        },
+      },
+    },
+  });
 
   const piece = {
-    id: "of:reading-list",
-    name: () => pieceName,
-    getPatternMeta: () => Promise.resolve({ patternName: "reading-list" }),
+    id: "of:fs-piece",
+    name: () => "FS Piece",
+    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
     input: {
-      getCell: () => Promise.resolve(makeCell({}, undefined)),
-      get: () => Promise.resolve({}),
+      getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
+      get: () => Promise.resolve(inputCell.get()),
     },
     result: {
       getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
-      get: () => Promise.resolve({}),
+      get: () => Promise.resolve(resultCell.get()),
     },
   };
 
@@ -678,37 +745,28 @@ Deno.test("CellBridge.subscribePiece keeps only the latest compatibility alias",
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
-  const subs = await (bridge as unknown as { subscribePiece: SubscribePiece })
-    .subscribePiece.call(
-      bridge,
-      piece,
-      tree.lookup(state.piecesIno, "Reading List (0)")!,
-      "Reading List (0)",
-      "home",
-    );
-  state.pieceSubs.set("Reading List (0)", subs);
+  const pieceIno = tree.lookup(state.piecesIno, "FS Piece")!;
+  assertEquals(tree.lookup(pieceIno, "index.md") !== undefined, true);
+  assertEquals(tree.lookup(pieceIno, "meta") !== undefined, true);
+  assertEquals(tree.lookup(pieceIno, "result"), undefined);
 
-  pieceName = "Reading List (1)";
-  resultCell.set({});
+  resultCell.set({ content: "Now a regular result tree" });
   await new Promise((r) => setTimeout(r, 10));
 
-  pieceName = "Reading List (2)";
-  resultCell.set({});
-  await new Promise((r) => setTimeout(r, 10));
-
+  const resultIno = tree.lookup(pieceIno, "result");
+  assertEquals(resultIno !== undefined, true, "result/ dir should exist");
   assertEquals(
-    tree.lookup(state.piecesIno, "Reading List (2)") !== undefined,
-    true,
-    "Latest canonical name should exist",
-  );
-  assertEquals(
-    tree.lookup(state.piecesIno, "Reading List (1)") !== undefined,
-    true,
-    "Most recent prior name should remain as a compatibility alias",
-  );
-  assertEquals(
-    tree.lookup(state.piecesIno, "Reading List (0)"),
+    tree.lookup(pieceIno, "index.md"),
     undefined,
-    "Older compatibility aliases should be discarded",
+    "index.md should be removed when leaving FS projection mode",
+  );
+  assertEquals(
+    tree.lookup(pieceIno, "meta"),
+    undefined,
+    "Complex frontmatter dirs should be removed when leaving FS projection mode",
+  );
+  assertEquals(
+    resultIno !== undefined ? getFileContent(tree, resultIno, "content") : "",
+    "Now a regular result tree",
   );
 });
