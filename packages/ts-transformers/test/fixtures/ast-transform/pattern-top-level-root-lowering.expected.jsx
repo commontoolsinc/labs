@@ -2,17 +2,66 @@ import * as __ctHelpers from "commontools";
 import { pattern } from "commontools";
 const identity = <T,>(value: T) => value;
 // FIXTURE: pattern-top-level-root-lowering
-// Verifies: top-level non-JSX expression roots lower after closure
-//   normalization instead of being left as raw opaque operations.
-//   identity(state.user.name)     -> key() in call argument
-//   identity(state.maybeUser?.name) -> lowered optional property access
+// Verifies: top-level non-JSX ordinary helper calls with reactive inputs are
+//   lifted as whole calls instead of lowering only inner argument expressions.
+//   identity(state.user.name)     -> derive-wrapped local-helper root
+//   identity(state.maybeUser?.name) -> derive-wrapped optional property access
 //   Math.max(state.a, state.b)    -> derive-wrapped free-function root
 //   parseInt(state.float)         -> derive-wrapped free-function root
 //   state.label ?? "Pending"      -> derive-wrapped nullish root
 //   state.items?.[0]              -> lowered optional element access
 export default pattern((state) => {
-    const label = identity(state.key("user", "name"));
-    const maybeLabel = identity(state.key("maybeUser", "name"));
+    const label = __ctHelpers.derive({
+        type: "object",
+        properties: {
+            state: {
+                type: "object",
+                properties: {
+                    user: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["name"]
+                    }
+                },
+                required: ["user"]
+            }
+        },
+        required: ["state"]
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __ctHelpers.JSONSchema, { state: {
+            user: {
+                name: state.key("user", "name")
+            }
+        } }, ({ state }) => identity(state.user.name));
+    const maybeLabel = __ctHelpers.derive({
+        type: "object",
+        properties: {
+            state: {
+                type: "object",
+                properties: {
+                    maybeUser: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["name"]
+                    }
+                }
+            }
+        },
+        required: ["state"]
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: ["string", "undefined"]
+    } as const satisfies __ctHelpers.JSONSchema, { state: {
+            maybeUser: state.key("maybeUser")
+        } }, ({ state }) => identity(state.maybeUser?.name));
     return {
         label,
         maybeLabel,

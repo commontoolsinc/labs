@@ -4,10 +4,10 @@ import { pattern } from "commontools";
 const identity = <T,>(value: T) => value;
 
 // FIXTURE: pattern-call-arg-conditional
-// Verifies: top-level non-JSX ternary in a call argument is lowered after
-//   closure normalization rather than being left as raw JS truthiness.
+// Verifies: top-level ordinary helper calls with reactive arguments are lifted
+//   as whole calls rather than lowering only the inner argument expression.
 //   const label = identity(state.done ? "Done" : "Pending")
-//   → const label = identity(ifElse(state.done, "Done", "Pending"))
+//   → const label = derive(..., ({ state }) => identity(state.done ? "Done" : "Pending"))
 export default pattern<{ done: boolean }>((state) => {
   const label = identity(state.done ? "Done" : "Pending");
   return { label };

@@ -42,7 +42,7 @@ type ExpressionSiteHelperBoundaryKind =
 
 type ExpressionSiteCallRootKind =
   | "conditional-helper"
-  | "free-function"
+  | "ordinary-call"
   | "receiver-method"
   | "optional-call"
   | "other";
@@ -262,9 +262,7 @@ function classifyCallExpressionRoot(
 
   const callee = expression.expression;
   if (ts.isIdentifier(callee)) {
-    return isLocalValueReference(callee, context.checker)
-      ? "other"
-      : "free-function";
+    return "ordinary-call";
   }
 
   if (
@@ -281,9 +279,7 @@ function classifyCallExpressionRoot(
       return "other";
     }
 
-    return isLocalValueReference(base, context.checker)
-      ? "other"
-      : "free-function";
+    return "ordinary-call";
   }
 
   return "other";
@@ -924,7 +920,7 @@ export function classifyExpressionSiteHandling(
     }
 
     if (
-      siteInfo.callRootKind === "free-function" ||
+      siteInfo.callRootKind === "ordinary-call" ||
       isSharedJsxLocalHelperCallRoot(expression, context, analyze)
     ) {
       return {
@@ -997,12 +993,30 @@ export function classifyExpressionSiteHandling(
     };
   }
 
+  if (
+    siteInfo.arrayMethodOwned &&
+    siteInfo.callRootKind === "ordinary-call" &&
+    !siteInfo.controlFlowRewriteRoot &&
+    containerKind === "return-expression"
+  ) {
+    return {
+      kind: "shared",
+      lowerable: isExpressionSiteLowerable(
+        expression,
+        containerKind,
+        siteInfo,
+        analysis,
+      ),
+    };
+  }
+
   if (siteInfo.arrayMethodOwned && !siteInfo.controlFlowRewriteRoot) {
     return { kind: "skip", reason: "not-lowerable" };
   }
 
   if (!siteInfo.controlFlowRewriteRoot) {
-    const sharedPostClosureCallRoot = siteInfo.callRootKind === "free-function";
+    const sharedPostClosureCallRoot = siteInfo.callRootKind ===
+      "ordinary-call";
     const patternOwnedReceiverMethod = supportedCallRootKind ===
       "pattern-owned-receiver-method";
     if (!sharedPostClosureCallRoot && !patternOwnedReceiverMethod) {
@@ -1071,10 +1085,11 @@ export function findLowerableExpressionSite(
   analyze: AnalyzeFn,
 ): LowerableExpressionSite | undefined {
   let current: ts.Node | undefined = expression;
+  let deferredArrayMethodReceiverSite: LowerableExpressionSite | undefined;
 
   while (current) {
     if (current !== expression && ts.isFunctionLike(current)) {
-      return undefined;
+      return deferredArrayMethodReceiverSite;
     }
 
     if (ts.isExpression(current)) {
@@ -1108,9 +1123,21 @@ export function findLowerableExpressionSite(
           decision.kind !== "skip" &&
           decision.lowerable
         ) {
-          return {
+          const site = {
             expression: current,
             containerKind,
+          } as const;
+          if (
+            decision.kind === "owned" &&
+            decision.owner === "array-method-receiver-method"
+          ) {
+            deferredArrayMethodReceiverSite ??= site;
+            current = current.parent;
+            continue;
+          }
+          return {
+            expression: site.expression,
+            containerKind: site.containerKind,
           };
         }
       }
@@ -1119,7 +1146,7 @@ export function findLowerableExpressionSite(
     current = current.parent;
   }
 
-  return undefined;
+  return deferredArrayMethodReceiverSite;
 }
 
 export function classifyRestrictedReactiveComputation(

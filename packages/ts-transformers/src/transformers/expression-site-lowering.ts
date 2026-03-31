@@ -10,6 +10,7 @@ import type { TransformationContext } from "../core/mod.ts";
 import {
   classifyExpressionSiteHandling,
   containsLogicalBinaryOperator,
+  findLowerableExpressionSite,
   getExpressionContainerKind,
   isControlFlowRewriteExpression,
   isDirectArrayMethodRootExpression,
@@ -40,6 +41,25 @@ function isDirectDeriveCall(
   }
 
   return detectCallKind(expression, context.checker)?.kind === "derive";
+}
+
+function isDirectDeriveCallInArrayMethodCallback(
+  expression: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  if (!isDirectDeriveCall(expression, context)) {
+    return false;
+  }
+
+  let current: ts.Node | undefined = expression.parent;
+  while (current) {
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      return context.isArrayMethodCallback(current);
+    }
+    current = current.parent;
+  }
+
+  return false;
 }
 
 export function rewriteExpressionSite(
@@ -241,6 +261,14 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
   const analyze = createDataFlowAnalyzer(context.checker);
 
   const visit: ts.Visitor = (node) => {
+    if (
+      (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+      context.isArrayMethodCallback(node) &&
+      !ts.isBlock(node.body)
+    ) {
+      return node;
+    }
+
     if (ts.isJsxExpression(node)) {
       if (!node.expression) {
         return visitEachChildWithJsx(node, visit, context.tsContext);
@@ -285,6 +313,10 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
           return visitEachChildWithJsx(node, visit, context.tsContext);
         }
 
+        if (isDirectDeriveCallInArrayMethodCallback(node, context)) {
+          return node;
+        }
+
         const rewritten = rewriteExpressionSite({
           expression: node,
           containerKind,
@@ -314,6 +346,15 @@ export function rewriteArrayMethodCallbackExpressionSites(
   const rewriteArrayMethodOwnedReceiverMethodExpressionSite = (
     expression: ts.Expression,
   ): ts.Expression | undefined => {
+    const lowerableSite = findLowerableExpressionSite(
+      expression,
+      context,
+      analyze,
+    );
+    if (lowerableSite && lowerableSite.expression !== expression) {
+      return undefined;
+    }
+
     const containerKind = expression === body
       ? "return-expression"
       : getExpressionContainerKind(expression);
@@ -419,6 +460,7 @@ export function rewriteArrayMethodCallbackExpressionSites(
           context,
           analyze,
           visit,
+          preferDeriveWrappers: true,
         });
         if (rewritten) {
           return rewritten;

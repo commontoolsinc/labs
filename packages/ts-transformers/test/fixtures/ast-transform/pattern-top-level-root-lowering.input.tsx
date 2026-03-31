@@ -4,10 +4,10 @@ import { pattern } from "commontools";
 const identity = <T,>(value: T) => value;
 
 // FIXTURE: pattern-top-level-root-lowering
-// Verifies: top-level non-JSX expression roots lower after closure
-//   normalization instead of being left as raw opaque operations.
-//   identity(state.user.name)     -> key() in call argument
-//   identity(state.maybeUser?.name) -> lowered optional property access
+// Verifies: top-level non-JSX ordinary helper calls with reactive inputs are
+//   lifted as whole calls instead of lowering only inner argument expressions.
+//   identity(state.user.name)     -> derive-wrapped local-helper root
+//   identity(state.maybeUser?.name) -> derive-wrapped optional property access
 //   Math.max(state.a, state.b)    -> derive-wrapped free-function root
 //   parseInt(state.float)         -> derive-wrapped free-function root
 //   state.label ?? "Pending"      -> derive-wrapped nullish root

@@ -30,7 +30,7 @@ type ExpressionSiteHelperBoundaryKind =
 
 type ExpressionSiteCallRootKind =
   | "conditional-helper"
-  | "free-function"
+  | "ordinary-call"
   | "receiver-method"
   | "optional-call"
   | "other";

@@ -1027,7 +1027,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: local helper calls stay out of the shared non-JSX free-function slice",
+  "Expression site policy: local helper calls join the shared non-JSX ordinary-call slice",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare function pattern<T>(fn: (state: any) => T): T;
@@ -1048,8 +1048,81 @@ Deno.test(
     const analyze = createDataFlowAnalyzer(checker);
     assertEquals(
       canRewriteExpressionSite(call, "object-property", context, analyze),
-      false,
+      true,
     );
+  },
+);
+
+Deno.test(
+  "Expression site policy: non-JSX array callback local helper calls join the shared ordinary-call slice",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare function pattern<T>(fn: (state: any) => T): T;
+      const identity = <T,>(value: T) => value;
+
+      const view = pattern(({ items }: { items: string[] }) =>
+        items.map((item) => identity(item.toUpperCase()))
+      );
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    context.markAsArrayMethodCallback(callback);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "identity",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    assertEquals(
+      canRewriteExpressionSite(call, "return-expression", context, analyze),
+      true,
+    );
+  },
+);
+
+Deno.test(
+  "Expression site policy: lowerable-site search prefers an ordinary parent call over an array-callback receiver-method child",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare function pattern<T>(fn: (state: any) => T): T;
+      const identity = <T,>(value: T) => value;
+
+      const view = pattern(({ items }: { items: string[] }) =>
+        items.map((item) => identity(item.toUpperCase()))
+      );
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    context.markAsArrayMethodCallback(callback);
+
+    const receiverCall = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "toUpperCase",
+    );
+
+    const identityCall = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "identity",
+    );
+
+    const analyze = createDataFlowAnalyzer(checker);
+    const lowerableSite = findLowerableExpressionSite(
+      receiverCall,
+      context,
+      analyze,
+    );
+    assert(lowerableSite);
+    assert(lowerableSite.expression === identityCall);
+    assertEquals(lowerableSite.containerKind, "return-expression");
   },
 );
 

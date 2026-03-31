@@ -85,7 +85,28 @@ const helper = (value: Writable<{
 const patternHelper = pattern((input: Writable<{
     foo: string;
     bar: string;
-}>) => helper(input), {
+}>) => __ctHelpers.derive({
+    type: "object",
+    properties: {
+        input: {
+            type: "object",
+            properties: {
+                foo: {
+                    type: "string"
+                },
+                bar: {
+                    type: "string"
+                }
+            },
+            required: ["foo", "bar"],
+            asCell: true
+        }
+    },
+    required: ["input"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "string",
+    asCell: true
+} as const satisfies __ctHelpers.JSONSchema, { input: input }, ({ input }) => helper(input)), {
     type: "object",
     properties: {
         foo: {

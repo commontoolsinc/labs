@@ -85,7 +85,31 @@ export default pattern((__ct_pattern_input) => {
                 items: {
                     type: "string"
                 }
-            } as const satisfies __ctHelpers.JSONSchema, item.key("tags", "length"), __ctHelpers.computed((): string[] => [prefix + item.tags[0]]), []);
+            } as const satisfies __ctHelpers.JSONSchema, item.key("tags", "length"), __ctHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            tags: {
+                                type: "array",
+                                items: {
+                                    type: "string"
+                                }
+                            }
+                        },
+                        required: ["tags"]
+                    }
+                },
+                required: ["item"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "array",
+                items: {
+                    type: "string"
+                }
+            } as const satisfies __ctHelpers.JSONSchema, { item: {
+                    tags: item.key("tags")
+                } }, ({ item }) => [prefix + item.tags[0]]), []);
         }, {
             type: "object",
             properties: {

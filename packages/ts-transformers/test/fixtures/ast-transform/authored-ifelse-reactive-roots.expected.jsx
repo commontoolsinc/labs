@@ -6,13 +6,14 @@ const identity = <T,>(value: T) => value;
 //   ifElse(show, count + 1, 0)         → compute-wrapped branch
 //   ifElse(show, cell.get(), 0)        → reactive branch lowering around Writable.get()
 //   ifElse(show, name.trim(), "x")     → reactive receiver-method branch
-//   name.trim() / identity(name.trim()) → top-level receiver-method roots lowered via derive
+//   name.trim()                        → top-level receiver-method root lowered via derive
+//   identity(name.trim())             → derive-wrapped local-helper root
 export default pattern((__ct_pattern_input) => {
     const count = __ct_pattern_input.key("count");
     const show = __ct_pattern_input.key("show");
     const name = __ct_pattern_input.key("name");
     const cell = __ct_pattern_input.key("cell");
-    const upper = identity(__ctHelpers.derive({
+    const upper = __ctHelpers.derive({
         type: "object",
         properties: {
             name: {
@@ -22,7 +23,7 @@ export default pattern((__ct_pattern_input) => {
         required: ["name"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, { name: name }, ({ name }) => name.trim()));
+    } as const satisfies __ctHelpers.JSONSchema, { name: name }, ({ name }) => identity(name.trim()));
     return {
         value: ifElse({
             type: "boolean"

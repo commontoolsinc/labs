@@ -2,20 +2,30 @@ import * as __ctHelpers from "commontools";
 import { pattern } from "commontools";
 const identity = <T,>(value: T) => value;
 // FIXTURE: pattern-call-arg-conditional
-// Verifies: top-level non-JSX ternary in a call argument is lowered after
-//   closure normalization rather than being left as raw JS truthiness.
+// Verifies: top-level ordinary helper calls with reactive arguments are lifted
+//   as whole calls rather than lowering only the inner argument expression.
 //   const label = identity(state.done ? "Done" : "Pending")
-//   → const label = identity(ifElse(state.done, "Done", "Pending"))
+//   → const label = derive(..., ({ state }) => identity(state.done ? "Done" : "Pending"))
 export default pattern((state) => {
-    const label = identity(__ctHelpers.ifElse({
-        type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "string"
+    const label = __ctHelpers.derive({
+        type: "object",
+        properties: {
+            state: {
+                type: "object",
+                properties: {
+                    done: {
+                        type: "boolean"
+                    }
+                },
+                required: ["done"]
+            }
+        },
+        required: ["state"]
     } as const satisfies __ctHelpers.JSONSchema, {
         "enum": ["Done", "Pending"]
-    } as const satisfies __ctHelpers.JSONSchema, state.key("done"), "Done", "Pending"));
+    } as const satisfies __ctHelpers.JSONSchema, { state: {
+            done: state.key("done")
+        } }, ({ state }) => identity(state.done ? "Done" : "Pending"));
     return { label };
 }, {
     type: "object",
