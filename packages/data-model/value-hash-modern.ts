@@ -187,6 +187,8 @@ function feedObjectValue(
       const algTagUtf8 = encoder.encode(cid.tag);
       feedLength(hasher, algTagUtf8.length);
       hasher.update(algTagUtf8);
+      // TODO(@danfuzz): Look into avoiding making a copy of bytes here.
+      // This could be a performance issue.
       const cidBytes = cid.bytes;
       feedLength(hasher, cidBytes.length);
       hasher.update(cidBytes);

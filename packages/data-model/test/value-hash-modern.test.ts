@@ -973,13 +973,13 @@ describe("modernHash caching", () => {
     obj.a = 2;
     const b = modernHashRaw(obj);
     // Hashes should differ because the object changed
-    expect(hex(a.bytes)).not.toBe(hex(b.bytes));
+    expect(hex(a.bytes)).not.toEqual(hex(b.bytes));
   });
 
   it("different primitives with same type produce different hashes", () => {
     const a = modernHashRaw("hello");
     const b = modernHashRaw("world");
-    expect(hex(a.bytes)).not.toBe(hex(b.bytes));
+    expect(hex(a.bytes)).not.toEqual(hex(b.bytes));
   });
 });
 

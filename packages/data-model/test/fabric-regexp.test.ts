@@ -304,20 +304,20 @@ describe("FabricRegExp", () => {
     it("same regex produces same hash", () => {
       const sr1 = new FabricRegExp(/abc/gi);
       const sr2 = new FabricRegExp(/abc/gi);
-      const h1 = Array.from(hashOfModern(sr1).bytes);
-      const h2 = Array.from(hashOfModern(sr2).bytes);
+      const h1 = hashOfModern(sr1).bytes;
+      const h2 = hashOfModern(sr2).bytes;
       expect(h1).toEqual(h2);
     });
 
     it("different source produces different hash", () => {
-      const h1 = Array.from(hashOfModern(new FabricRegExp(/abc/)).bytes);
-      const h2 = Array.from(hashOfModern(new FabricRegExp(/def/)).bytes);
+      const h1 = hashOfModern(new FabricRegExp(/abc/)).bytes;
+      const h2 = hashOfModern(new FabricRegExp(/def/)).bytes;
       expect(h1).not.toEqual(h2);
     });
 
     it("different flags produce different hash", () => {
-      const h1 = Array.from(hashOfModern(new FabricRegExp(/abc/g)).bytes);
-      const h2 = Array.from(hashOfModern(new FabricRegExp(/abc/i)).bytes);
+      const h1 = hashOfModern(new FabricRegExp(/abc/g)).bytes;
+      const h2 = hashOfModern(new FabricRegExp(/abc/i)).bytes;
       expect(h1).not.toEqual(h2);
     });
   });

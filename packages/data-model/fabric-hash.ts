@@ -54,7 +54,7 @@ export class FabricHash extends FabricPrimitive {
    * TODO(danfuzz): Remove after canonical hashing flag graduates.
    */
   get "/"(): Uint8Array {
-    return this.#hash;
+    return new Uint8Array(this.#hash);
   }
 
   /** Defensive copy of the raw hash bytes. */

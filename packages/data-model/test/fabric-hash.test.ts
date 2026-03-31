@@ -69,13 +69,12 @@ describe("FabricHash", () => {
     expect(cid.tag).toBe("sha3");
   });
 
-  it('["/"] getter returns the raw hash bytes (not a copy)', () => {
+  it('["/"] getter returns a copy of the raw hash bytes', () => {
     const cid = new FabricHash(SAMPLE_HASH, "test2");
     const slash = cid["/"];
-    // Returns the internal bytes directly (not a defensive copy).
     expect(slash).toEqual(SAMPLE_HASH);
-    // Calling twice returns the same reference.
-    expect(slash).toBe(cid["/"]);
+    // Each call returns a fresh copy.
+    expect(slash).not.toBe(cid["/"]);
     expect(cid.tag).toBe("test2");
   });
 
