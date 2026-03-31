@@ -31,7 +31,7 @@ import {
   SYMLINK_MODE,
 } from "./platform.ts";
 import { FsTree } from "./tree.ts";
-import { HandleMap } from "./handles.ts";
+import { HandleMap, type HandleState } from "./handles.ts";
 
 const encoder = new TextEncoder();
 
@@ -116,6 +116,10 @@ export async function main(argv: string[] = Deno.args) {
   const tree = new FsTree();
 
   let bridge: CellBridge | null = null;
+  const scheduledFlushes = new WeakMap<
+    HandleState,
+    ReturnType<typeof setTimeout>
+  >();
 
   // Populate tree
   const apiUrl = args["api-url"];
@@ -692,6 +696,36 @@ export async function main(argv: string[] = Deno.args) {
     }
   }
 
+  function clearScheduledFlush(
+    handle: NonNullable<ReturnType<typeof handles.get>>,
+  ): void {
+    const timer = scheduledFlushes.get(handle);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      scheduledFlushes.delete(handle);
+    }
+  }
+
+  function scheduleFlush(
+    handle: NonNullable<ReturnType<typeof handles.get>>,
+    delayMs: number,
+  ): void {
+    clearScheduledFlush(handle);
+    const timer = setTimeout(() => {
+      scheduledFlushes.delete(handle);
+      if (handle.flushing) {
+        // A flush is already in flight; retry shortly so we commit the latest
+        // stable buffer rather than an intermediate chunk from a multi-write save.
+        scheduleFlush(handle, 10);
+        return;
+      }
+      flushHandle(handle).catch((e) => {
+        console.error(`[fuse] scheduled flush error: ${e}`);
+      });
+    }, delayMs);
+    scheduledFlushes.set(handle, timer);
+  }
+
   // write(req, ino, buf_ptr, size, offset, fi_ptr)
   const writeCb = new Deno.UnsafeCallback(
     {
@@ -753,9 +787,17 @@ export async function main(argv: string[] = Deno.args) {
       fuse.symbols.fuse_reply_err(req, 0);
 
       // Fire-and-forget the actual write to the cell
-      flushHandle(handle).catch((e) => {
-        console.error(`[fuse] flush write error: ${e}`);
-      });
+      const writePath = bridge?.resolveWritePath(handle.ino);
+      if (writePath?.fsProjection === "markdown") {
+        // Markdown saves often arrive as several small writes plus flushes.
+        // Delay slightly so we commit the settled buffer, not a truncated
+        // intermediate body that still parses as valid markdown.
+        scheduleFlush(handle, 25);
+      } else {
+        flushHandle(handle).catch((e) => {
+          console.error(`[fuse] flush write error: ${e}`);
+        });
+      }
     },
   );
   callbacks.push(flushCb);
@@ -830,10 +872,15 @@ export async function main(argv: string[] = Deno.args) {
 
       // Reply immediately and close the handle.
       // Fire-and-forget the write if dirty.
-      if (handle && handle.dirty && bridge && !handle.flushing) {
-        flushHandle(handle).catch((e) => {
-          console.error(`[fuse] release flush error: ${e}`);
-        });
+      if (handle && handle.dirty && bridge) {
+        const writePath = bridge.resolveWritePath(handle.ino);
+        if (writePath?.fsProjection === "markdown") {
+          scheduleFlush(handle, 0);
+        } else if (!handle.flushing) {
+          flushHandle(handle).catch((e) => {
+            console.error(`[fuse] release flush error: ${e}`);
+          });
+        }
       }
       handles.close(fh);
       fuse.symbols.fuse_reply_err(req, 0);

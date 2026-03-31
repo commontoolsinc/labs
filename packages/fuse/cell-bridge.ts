@@ -476,9 +476,8 @@ export class CellBridge {
       if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
         return false;
       }
-      // Detect whether this piece uses plain-object shorthand (no $FS.type/content
-      // wrapper) or explicit application/json (content is nested under $FS.content).
-      // Plain-object shorthand: $FS has no `type` field.
+      // Plain-object shorthand stores keys directly under $FS instead of
+      // nesting them under $FS.content.
       let isPlainObjectShorthand = false;
       let existingContent: Record<string, unknown> | null = null;
       try {
@@ -495,27 +494,22 @@ export class CellBridge {
           existingContent = contentRaw as Record<string, unknown>;
         }
       } catch {
-        // If we can't read, default to explicit form
+        // If we can't read current state, default to the explicit content form.
       }
       const basePath = isPlainObjectShorthand ? ["$FS"] : ["$FS", "content"];
 
-      // Collect keys currently in the cell so we can remove deleted ones.
       const existingKeys = new Set<string>(
         existingContent ? Object.keys(existingContent) : [],
       );
-
       for (const [key, val] of Object.entries(obj)) {
         if (key === "entityId") continue;
         await writePath.piece.result.set(val, [...basePath, key]);
         existingKeys.delete(key);
       }
-
-      // Remove keys that were deleted from the file
       for (const key of existingKeys) {
         if (key === "entityId") continue;
         await writePath.piece.result.set(undefined, [...basePath, key]);
       }
-
       return true;
     }
     return false;

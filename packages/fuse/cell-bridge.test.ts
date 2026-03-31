@@ -152,6 +152,11 @@ type SubscribePiece = (
   spaceName: string,
 ) => Promise<Array<() => void>>;
 
+type WriteFsFile = (
+  writePath: unknown,
+  text: string,
+) => Promise<boolean>;
+
 // ---------------------------------------------------------------------------
 // Group 1: loadPieceTree — initial tree structure
 // ---------------------------------------------------------------------------
@@ -383,6 +388,80 @@ Deno.test("CellBridge.updateIndexJson writes .index.json mapping names to entity
 
   assertEquals(indexJson["Alpha"], "of:alpha");
   assertEquals(indexJson["Beta"], "of:beta");
+});
+
+Deno.test("CellBridge.writeFsFile writes markdown frontmatter and body to FS paths", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const writes: Array<{ path: (string | number)[]; value: unknown }> = [];
+
+  const ok = await (bridge as unknown as { writeFsFile: WriteFsFile })
+    .writeFsFile(
+      {
+        fsProjection: "markdown",
+        piece: {
+          result: {
+            set: (
+              value: unknown,
+              path?: (string | number)[],
+            ) => {
+              writes.push({ path: path ?? [], value });
+              return Promise.resolve();
+            },
+          },
+        },
+      },
+      "---\ntitle: Updated Title\n---\n\nUpdated body",
+    );
+
+  assertEquals(ok, true);
+  assertEquals(writes, [
+    { path: ["$FS", "frontmatter", "title"], value: "Updated Title" },
+    { path: ["$FS", "content"], value: "Updated body" },
+  ]);
+});
+
+Deno.test("CellBridge.writeFsFile removes deleted keys from application/json projections", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const writes: Array<{ path: (string | number)[]; value: unknown }> = [];
+
+  const ok = await (bridge as unknown as { writeFsFile: WriteFsFile })
+    .writeFsFile(
+      {
+        fsProjection: "json",
+        piece: {
+          result: {
+            get: (path?: (string | number)[]) => {
+              if (path?.join("/") === "$FS") {
+                return Promise.resolve({
+                  type: "application/json",
+                  content: { title: "Old", stale: true },
+                });
+              }
+              if (path?.join("/") === "$FS/content") {
+                return Promise.resolve({ title: "Old", stale: true });
+              }
+              return Promise.resolve(undefined);
+            },
+            set: (
+              value: unknown,
+              path?: (string | number)[],
+            ) => {
+              writes.push({ path: path ?? [], value });
+              return Promise.resolve();
+            },
+          },
+        },
+      },
+      '{"title":"New"}',
+    );
+
+  assertEquals(ok, true);
+  assertEquals(writes, [
+    { path: ["$FS", "content", "title"], value: "New" },
+    { path: ["$FS", "content", "stale"], value: undefined },
+  ]);
 });
 
 // ---------------------------------------------------------------------------
