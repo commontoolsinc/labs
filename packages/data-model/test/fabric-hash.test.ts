@@ -17,7 +17,7 @@ for (let i = 0; i < 32; i++) SAMPLE_HASH[i] = i;
 
 /** A fixed 17-byte hash for deterministic tests. */
 const SAMPLE_HASH_17 = new Uint8Array(17);
-for (let i = 0; i < 17; i++) SAMPLE_HASH[i] = ((i * 17) + 177) & 0xff;
+for (let i = 0; i < 17; i++) SAMPLE_HASH_17[i] = ((i * 17) + 177) & 0xff;
 
 // -----------------------------------------------------------------
 // FabricHash extensions
