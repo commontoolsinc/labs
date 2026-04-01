@@ -20,6 +20,7 @@ type CapabilityAnalyzableFunction =
 export interface CapabilityAnalysisOptions {
   readonly checker?: ts.TypeChecker;
   readonly interprocedural?: boolean;
+  readonly includeNestedCallbacks?: boolean;
   readonly summaryCache?: WeakMap<ts.Node, FunctionCapabilitySummary>;
   readonly inProgress?: WeakSet<ts.Node>;
 }
@@ -391,6 +392,7 @@ export function analyzeFunctionCapabilities(
   try {
     const checker = options?.checker;
     const interprocedural = !!options?.interprocedural && !!checker;
+    const includeNestedCallbacks = !!options?.includeNestedCallbacks;
     const summarySourceFile = fn.getSourceFile();
 
     if (!fn.body) {
@@ -828,6 +830,9 @@ export function analyzeFunctionCapabilities(
 
     const visit = (node: ts.Node): void => {
       if (node !== fn && isCapabilityAnalyzableFunction(node)) {
+        if (includeNestedCallbacks) {
+          visitScopedFunctionBody(node);
+        }
         return;
       }
 

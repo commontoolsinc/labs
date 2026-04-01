@@ -1,9 +1,18 @@
-// transformed: /index.ts
-export * from "/ba4jca7apnzcsjtvn6d4xk66o5b7n7fo5xaucah7xuooakxk2zckexpjk/.codex-tmp/files-capture-repros/helper-owned-handler-nested-captures.tsx";
-export { default } from "/ba4jca7apnzcsjtvn6d4xk66o5b7n7fo5xaucah7xuooakxk2zckexpjk/.codex-tmp/files-capture-repros/helper-owned-handler-nested-captures.tsx";
-
-// transformed: /ba4jca7apnzcsjtvn6d4xk66o5b7n7fo5xaucah7xuooakxk2zckexpjk/.codex-tmp/files-capture-repros/helper-owned-handler-nested-captures.tsx
 import * as __ctHelpers from "commontools";
+/**
+ * TRANSFORM REPRO: helper-owned handler with nested callback captures
+ *
+ * Compare on main vs transformer branch:
+ *   deno task ct check packages/patterns/gideon-tests/test-helper-owned-handler-nested-captures.tsx --show-transformed --no-run
+ *
+ * Expected main shape:
+ * - generated handler state includes `timer`, `fileId`, `content`,
+ *   `savedContent`, and `onSaveFile`
+ *
+ * Current branch bug:
+ * - generated handler state only includes `timer`, while the handler body
+ *   still uses the other captures inside the nested `setTimeout(...)` callback
+ */
 import { action, Default, pattern, Stream, Writable } from "commontools";
 function flushLater(fileId: Writable<Default<string, "">>, content: Writable<Default<string, "">>, savedContent: Writable<Default<string, "">>, onSaveFile: Stream<{
     fileId: string;
@@ -142,4 +151,3 @@ export default pattern((__ct_pattern_input) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-

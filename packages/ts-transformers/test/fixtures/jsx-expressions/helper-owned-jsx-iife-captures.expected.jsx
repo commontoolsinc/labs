@@ -1,9 +1,19 @@
-// transformed: /index.ts
-export * from "/ba4jcbhp5xdmodklp4svhxwe4byht62haa5wwnm7xjiotgakxz737ui6o/.codex-tmp/files-capture-repros/helper-owned-jsx-iife-captures.tsx";
-export { default } from "/ba4jcbhp5xdmodklp4svhxwe4byht62haa5wwnm7xjiotgakxz737ui6o/.codex-tmp/files-capture-repros/helper-owned-jsx-iife-captures.tsx";
-
-// transformed: /ba4jcbhp5xdmodklp4svhxwe4byht62haa5wwnm7xjiotgakxz737ui6o/.codex-tmp/files-capture-repros/helper-owned-jsx-iife-captures.tsx
 import * as __ctHelpers from "commontools";
+/**
+ * TRANSFORM REPRO: helper-owned JSX IIFE drops captured reactive inputs
+ *
+ * Compare on main vs transformer branch:
+ *   deno task ct check packages/patterns/gideon-tests/test-helper-owned-jsx-iife-captures.tsx --show-transformed --no-run
+ *
+ * Expected main shape:
+ * - the second helper-owned JSX closure captures `path`, `entries`, and
+ *   `pushPath` in its generated derive params
+ *
+ * Current branch bug:
+ * - the branch rewrites the closure into a different shape that only derives
+ *   `path`, leaving `entries` and `pushPath` outside the generated param
+ *   bundle even though they are still used in the closure body
+ */
 import { action, Default, pattern, Stream, UI, VNode, Writable, } from "commontools";
 interface Entry {
     name: string;
@@ -56,117 +66,146 @@ export default pattern((__ct_pattern_input) => {
     return {
         [UI]: (<div>
         {(() => {
-                const p = path.get() || [];
+                const p = __ctHelpers.unless({
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "array",
+                    items: false
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        path: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            },
+                            asCell: true
+                        }
+                    },
+                    required: ["path"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                } as const satisfies __ctHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []);
                 if (p.length === 0)
                     return null;
                 return <div>{p[p.length - 1]}</div>;
             })()}
-        {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                path: {
+        {(() => {
+                const p = __ctHelpers.unless({
                     type: "array",
                     items: {
-                        type: "unknown"
+                        type: "string"
+                    }
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "array",
+                    items: false
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        path: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            },
+                            asCell: true
+                        }
                     },
-                    asCell: true
-                },
-                entries: {
+                    required: ["path"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                } as const satisfies __ctHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []);
+                const visible = __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        entries: {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/Entry"
+                            },
+                            asCell: true
+                        }
+                    },
+                    required: ["entries"],
+                    $defs: {
+                        Entry: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    }
+                } as const satisfies __ctHelpers.JSONSchema, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/Entry"
                     },
-                    asCell: true
-                },
-                pushPath: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        }
-                    },
-                    required: ["name"],
-                    asStream: true
-                }
-            },
-            required: ["path", "entries", "pushPath"],
-            $defs: {
-                Entry: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        }
-                    },
-                    required: ["name"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                $ref: "#/$defs/JSXElement"
-            },
-            $defs: {
-                JSXElement: {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
-                        }, {
+                    $defs: {
+                        Entry: {
                             type: "object",
-                            properties: {}
-                        }]
-                },
-                UIRenderable: {
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    }
+                } as const satisfies __ctHelpers.JSONSchema, { entries: entries }, ({ entries }) => visibleEntries(entries, p[0] || ""));
+                return visible.map((entry) => (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
                     type: "object",
                     properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        pushPath: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"],
+                            asStream: true
+                        },
+                        entry: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"]
                         }
                     },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            path: path,
-            entries: entries,
-            pushPath: pushPath
-        }, ({ path, entries, pushPath }) => (() => {
-            const p = path.get() || [];
-            const visible = visibleEntries(entries, p[0] || "");
-            return visible.map((entry) => (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-                type: "object",
-                properties: {
-                    pushPath: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"],
-                        asStream: true
-                    },
+                    required: ["pushPath", "entry"]
+                } as const satisfies __ctHelpers.JSONSchema, (_, { pushPath, entry }) => pushPath.send({ name: entry.name }))({
+                    pushPath: pushPath,
                     entry: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
+                        name: entry.name
                     }
-                },
-                required: ["pushPath", "entry"]
-            } as const satisfies __ctHelpers.JSONSchema, (_, { pushPath, entry }) => pushPath.send({ name: entry.name }))({
-                pushPath: pushPath,
-                entry: {
-                    name: entry.name
-                }
-            })}>
+                })}>
               {entry.name}
             </button>));
-        })())}
+            })()}
       </div>),
     };
 }, {
@@ -206,4 +245,3 @@ export default pattern((__ct_pattern_input) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-

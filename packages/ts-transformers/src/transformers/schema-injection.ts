@@ -239,10 +239,19 @@ function findCapabilitySummaryForParameter(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   index: number,
   capabilityRegistry?: CapabilitySummaryRegistry,
+  options?: {
+    readonly checker?: ts.TypeChecker;
+    readonly includeNestedCallbacks?: boolean;
+  },
 ): CapabilityParamSummary | undefined {
-  if (!capabilityRegistry) return undefined;
-  const summary = capabilityRegistry?.get(fn) ??
-    analyzeFunctionCapabilities(fn);
+  const summary = options?.includeNestedCallbacks
+    ? analyzeFunctionCapabilities(fn, {
+      checker: options.checker,
+      includeNestedCallbacks: true,
+    })
+    : capabilityRegistry
+    ? (capabilityRegistry.get(fn) ?? analyzeFunctionCapabilities(fn))
+    : undefined;
   if (!summary) return undefined;
   const parameter = fn.parameters[index];
   if (!parameter) return undefined;
@@ -270,6 +279,13 @@ function applyCapabilitySummaryToArgument(
     fn,
     0,
     capabilityRegistry,
+    (argumentNode.pos < 0 || argumentNode.end < 0) &&
+      context?.isSyntheticComputeCallback?.(fnNode ?? fn)
+      ? {
+        checker,
+        includeNestedCallbacks: true,
+      }
+      : undefined,
   );
   if (!paramSummary) {
     return argumentNode;
@@ -363,6 +379,12 @@ function applyCapabilitySummaryToParameter(
     fn,
     parameterIndex,
     capabilityRegistry,
+    parameterNode.pos < 0 || parameterNode.end < 0
+      ? {
+        checker,
+        includeNestedCallbacks: true,
+      }
+      : undefined,
   );
   if (!paramSummary) {
     return parameterNode;
