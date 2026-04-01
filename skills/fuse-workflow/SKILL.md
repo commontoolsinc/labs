@@ -13,7 +13,8 @@ user-invocable: false
 # CT FUSE Agent Workflow
 
 Ground-truth reference for agents operating on Common Tools spaces via FUSE.
-Validated through Runs 9–11. Update this skill when new friction patterns emerge.
+Validated through Runs 9–11. Update this skill when new friction patterns
+emerge.
 
 ---
 
@@ -23,7 +24,8 @@ The most important thing to internalise. Two layouts, one for each piece type.
 
 ### `[FS]` pieces (notes)
 
-Pattern exports the `[FS]` symbol. Content is a single `index.md` at the piece root.
+Pattern exports the `[FS]` symbol. Content is a single `index.md` at the piece
+root.
 
 ```
 MOUNT/SPACE/pieces/📝 Note Name/
@@ -37,7 +39,8 @@ MOUNT/SPACE/pieces/📝 Note Name/
 
 ### Non-`[FS]` pieces (everything else)
 
-Notebook, todo-list, contacts, reading-list, calendar, etc. Data lives under `result/`.
+Notebook, todo-list, contacts, reading-list, calendar, etc. Data lives under
+`result/`.
 
 ```
 MOUNT/SPACE/pieces/Piece Name (N)/
@@ -53,7 +56,8 @@ MOUNT/SPACE/pieces/Piece Name (N)/
 ```
 
 **The most common confusion:** agents look for handlers at the piece root for
-non-`[FS]` pieces and find nothing. Handlers for non-`[FS]` pieces are in `result/`.
+non-`[FS]` pieces and find nothing. Handlers for non-`[FS]` pieces are in
+`result/`.
 
 ---
 
@@ -69,12 +73,14 @@ unset CLAUDECODE
 ```
 
 **Mount:**
+
 ```bash
 ct fuse mount /tmp/ct-mount --background
 sleep 3  # wait for SummaryIndex warmup before accessing pieces
 ```
 
 **Health check — do this first every session:**
+
 ```bash
 ls /tmp/ct-mount/  # if empty or hangs, mount is stale
 # Remount:
@@ -93,12 +99,15 @@ cat "MOUNT/SPACE/pieces/pieces.json"
 ```
 
 Use this to:
-- Find the current piece name (including its count suffix) before any handler call
+
+- Find the current piece name (including its count suffix) before any handler
+  call
 - Get the piece `id` for `ct piece step` calls
 - Check whether a piece already exists before deploying
 - Confirm piece count after deploy
 
-**Never use `ls pieces/` to discover pieces** — directory listing is unreliable for filtering.
+**Never use `ls pieces/` to discover pieces** — directory listing is unreliable
+for filtering.
 
 ### Reading `[FS]` notes
 
@@ -112,7 +121,8 @@ cat "MOUNT/SPACE/pieces/📝 Note Name/index.md"
 # (body content)
 ```
 
-No JSON decoding. Read the frontmatter — you'll need `entityId` and `title` if you Write back.
+No JSON decoding. Read the frontmatter — you'll need `entityId` and `title` if
+you Write back.
 
 ### Reading structured data
 
@@ -147,16 +157,19 @@ cat "MOUNT/SPACE/pieces/Piece Name (N)/.handlers"
 Handlers are executables. Invoke them directly with CLI flags.
 
 **Non-`[FS]` pieces — handler is in `result/`:**
+
 ```bash
 "MOUNT/SPACE/pieces/Todo List (N)/result/addItem.handler" --title "Task title"
 ```
 
 **`[FS]` pieces — handler is at piece root:**
+
 ```bash
 "MOUNT/SPACE/pieces/📝 Note Name/setTitle.handler" --value "New Title"
 ```
 
 **String enum values need JSON quoting:**
+
 ```bash
 "MOUNT/SPACE/pieces/Reading List (N)/result/addItem.handler" \
   --title "Book Title" --author "Author" --type '"book"'
@@ -164,17 +177,20 @@ Handlers are executables. Invoke them directly with CLI flags.
 ```
 
 **Void handlers need `--value null`:**
+
 ```bash
 "MOUNT/SPACE/pieces/Contact Book/result/onAddContact.handler" --value null
 # Without --value null: "Handler requires input. Expected type: unknown" — does nothing
 ```
 
 **NEVER redirect to handler files (CT-1417):**
+
 ```bash
 echo '{"title":"x"}' > piece.handler  # SILENTLY FAILS — write does nothing
 ```
 
 **After ANY handler call — re-read pieces.json immediately:**
+
 ```bash
 cat "MOUNT/SPACE/pieces/pieces.json"
 # Piece names include count suffixes that update on every mutation:
@@ -184,7 +200,8 @@ cat "MOUNT/SPACE/pieces/pieces.json"
 
 ### Writing to `[FS]` note pieces
 
-Use Read/Write/Edit tools directly on `index.md`. Never use handler invocation for notes.
+Use Read/Write/Edit tools directly on `index.md`. Never use handler invocation
+for notes.
 
 ```
 1. Read  "MOUNT/SPACE/pieces/📝 Note Name/index.md"  — capture frontmatter
@@ -225,7 +242,9 @@ data = json.loads(result.stdout)
 print(f"{len(data)} contacts written")
 ```
 
-**`input/` directory layout** — two things coexist, only one is the write target:
+**`input/` directory layout** — two things coexist, only one is the write
+target:
+
 - `input/contacts.json` — writable flat JSON array (**correct write target**)
 - `input/contacts/` — directory of individual cell-slot files (read-only view)
 - Writing to `input/contacts/N` does not work as expected
@@ -255,6 +274,7 @@ cat "MOUNT/SPACE/pieces/pieces.json"
 **Pattern index:** `cat ~/code/labs/packages/patterns/index.md`
 
 **After deploying a structural piece:**
+
 1. Re-read `pieces.json` — get the current name with count suffix
 2. Read `.handlers` — discover available operations, never assume schema
 3. Populate using direct handler invocation
@@ -267,10 +287,11 @@ cat "MOUNT/SPACE/pieces/pieces.json"
 
 ### Piece name instability
 
-Every handler call that changes piece state updates the count suffix in the name:
-`Reading List (0)` → `Reading List (1)` → `Reading List (2)`
+Every handler call that changes piece state updates the count suffix in the
+name: `Reading List (0)` → `Reading List (1)` → `Reading List (2)`
 
-All previously constructed FUSE paths are immediately invalid. Before every handler call:
+All previously constructed FUSE paths are immediately invalid. Before every
+handler call:
 
 ```bash
 # Find current name dynamically:
@@ -280,30 +301,32 @@ cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c \
 
 ### When to run `ct piece step`
 
-| Operation | Step needed? |
-|-----------|-------------|
-| `ct piece call` (CLI) | Always |
-| `ct piece set` (CLI) | Always |
-| FUSE handler invocation | Sometimes — if count suffix doesn't update |
-| Read/Write/Edit on `index.md` | Never |
+| Operation                     | Step needed?                               |
+| ----------------------------- | ------------------------------------------ |
+| `ct piece call` (CLI)         | Always                                     |
+| `ct piece set` (CLI)          | Always                                     |
+| FUSE handler invocation       | Sometimes — if count suffix doesn't update |
+| Read/Write/Edit on `index.md` | Never                                      |
 
-When in doubt after a FUSE handler call: run `ct piece step --piece $ID --space SPACE`,
-then re-read `pieces.json`.
+When in doubt after a FUSE handler call: run
+`ct piece step --piece $ID --space SPACE`, then re-read `pieces.json`.
 
 ### Error-that-succeeds patterns
 
-**Reading List `addItem.handler`:** prints an error-looking message on stderr, but
-the item IS added. Do not retry. Verify via `result/summary`.
+**Reading List `addItem.handler`:** prints an error-looking message on stderr,
+but the item IS added. Do not retry. Verify via `result/summary`.
 
 **FUSE write `FileNotFoundError on close` (Python):** write succeeded. The error
 is a FUSE-T close quirk. Verify success via `result/` — not by absence of error.
 
 **Shell heredoc writes fail on FUSE:**
+
 ```bash
 cat > "MOUNT/SPACE/pieces/📝 Note/index.md" << 'EOF'  # DOES NOT WORK
 content
 EOF
 ```
+
 Use Python `open(...).write(...)` or the Write tool instead.
 
 ### NFS timeout and remount
@@ -329,20 +352,22 @@ Add `sleep 2` before verification reads if you see repeated stalls.
 ct piece rm --piece $ID --space SPACE
 ```
 
-Use this to clean up duplicate pieces deployed by accident (no `--confirm` needed).
-Check `pieces.json` for orphaned pieces with `-2` or `-3` suffixes.
+Use this to clean up duplicate pieces deployed by accident (no `--confirm`
+needed). Check `pieces.json` for orphaned pieces with `-2` or `-3` suffixes.
 
 ---
 
 ## Running Agents
 
 Agent system prompts live at `.claude/commands/agents/<name>.md`. Structure:
+
 - First line: constraints (read-only access, temp dir, no git/network)
 - Role description
 - CT Space Filesystem reference (generic MOUNT/SPACE placeholders)
 - "Start here" loop
 
 Agent runner script pattern:
+
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
@@ -360,7 +385,8 @@ claude -p --dangerously-skip-permissions --model sonnet \
   "Begin your Pass ${PASS_NUM:-1} run." >> "$OUTPUT" 2>&1
 ```
 
-Traces land in `TRACE_FILE` when set. Score with `python3 scripts/score-pass.py <trace.jsonl>`.
+Traces land in `TRACE_FILE` when set. Score with
+`python3 scripts/score-pass.py <trace.jsonl>`.
 
 ---
 
@@ -368,6 +394,6 @@ Traces land in `TRACE_FILE` when set. Score with `python3 scripts/score-pass.py 
 
 - `ct skill` or `skills/ct/SKILL.md` — CLI command reference
 - `packages/patterns/index.md` — pattern index for deployable pieces
-- `Common Fabric/ct-fuse-agent-run11-report.md` (work-notes vault) — full friction
-  point inventory with 13 documented issues and their workarounds
+- `Common Fabric/ct-fuse-agent-run11-report.md` (work-notes vault) — full
+  friction point inventory with 13 documented issues and their workarounds
 - `packages/fuse/cell-bridge.ts` — FUSE daemon implementation
