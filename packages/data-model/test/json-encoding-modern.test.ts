@@ -1267,15 +1267,15 @@ describe("json encoding", () => {
     });
 
     it("returns true for custom FabricInstance subclass", () => {
-      class CustomStorable extends FabricInstance {
+      class CustomFabInst extends FabricInstance {
         [DECONSTRUCT](): FabricValue {
           return { value: 42 };
         }
-        protected shallowUnfrozenClone(): CustomStorable {
-          return new CustomStorable();
+        protected shallowUnfrozenClone(): CustomFabInst {
+          return new CustomFabInst();
         }
       }
-      const instance = new CustomStorable();
+      const instance = new CustomFabInst();
       expect(instance instanceof FabricInstance).toBe(true);
     });
 
