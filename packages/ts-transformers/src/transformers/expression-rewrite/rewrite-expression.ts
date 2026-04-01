@@ -2,9 +2,7 @@ import ts from "typescript";
 
 import {
   classifyArrayMethodCall,
-  classifyReactiveContext,
   detectCallKind,
-  getRelevantDataFlows,
   isInsideSafeCallbackWrapper,
   visitEachChildWithJsx,
 } from "../../ast/mod.ts";
@@ -42,8 +40,8 @@ function isSameReactiveContextBoundary(
   target: ts.Expression,
   context: RewriteParams["context"],
 ): boolean {
-  const sourceInfo = classifyReactiveContext(source, context.checker, context);
-  const targetInfo = classifyReactiveContext(target, context.checker, context);
+  const sourceInfo = context.getReactiveContext(source);
+  const targetInfo = context.getReactiveContext(target);
   return sourceInfo.kind === targetInfo.kind &&
     sourceInfo.owner === targetInfo.owner;
 }
@@ -205,11 +203,7 @@ export function rewriteExpression(
     preferDeriveWrappers,
     reactiveContextKind,
     containerKind: params.containerKind,
-    dataFlows: getRelevantDataFlows(
-      params.analysis,
-      params.context.checker,
-      params.context,
-    ),
+    dataFlows: params.context.getRelevantDataFlowsFromAnalysis(params.analysis),
   };
 
   for (const emitter of EMITTERS) {

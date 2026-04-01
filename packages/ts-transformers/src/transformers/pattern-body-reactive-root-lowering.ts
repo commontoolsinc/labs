@@ -1,9 +1,6 @@
 import ts from "typescript";
 import {
-  classifyReactiveContext,
-  createDataFlowAnalyzer,
   getCapabilitySummaryCallbackArgument,
-  getRelevantDataFlows,
   getTypeAtLocationWithFallback,
   isWildcardTraversalCall,
   visitEachChildWithJsx,
@@ -173,7 +170,7 @@ function rewriteTrackedOpaquePatternBody(
 
   const diagnosticsSeen = new Set<number>();
   const syntheticDiagnosticsSeen = new WeakSet<ts.Node>();
-  const analyze = createDataFlowAnalyzer(context.checker);
+  const analyze = context.getDataFlowAnalyzer();
   const resolveDiagnosticNode = (node: ts.Node): ts.Node => {
     const original = ts.getOriginalNode(node);
     if (original.pos >= 0) {
@@ -246,12 +243,7 @@ function rewriteTrackedOpaquePatternBody(
   const getRelevantDataFlowsForExpression = (
     expression: ts.Expression,
   ) => {
-    const analysis = analyze(expression);
-    const relevantDataFlows = getRelevantDataFlows(
-      analysis,
-      context.checker,
-      context,
-    );
+    const relevantDataFlows = context.getRelevantDataFlows(expression);
     return relevantDataFlows.length > 0 ? relevantDataFlows : undefined;
   };
 
@@ -326,11 +318,7 @@ function rewriteTrackedOpaquePatternBody(
   const maybeWrapDynamicJsxAccess = (
     expression: ts.Expression,
   ): ts.Expression | undefined => {
-    const reactiveContext = classifyReactiveContext(
-      expression,
-      context.checker,
-      context,
-    );
+    const reactiveContext = context.getReactiveContext(expression);
     if (
       reactiveContext.kind !== "pattern" || !reactiveContext.inJsxExpression
     ) {
@@ -625,11 +613,7 @@ function rewriteTrackedOpaquePatternBody(
         analyze,
       );
       if (unsupportedCallRoot === "unsupported-receiver-method") {
-        const reactiveContext = classifyReactiveContext(
-          visited,
-          context.checker,
-          context,
-        );
+        const reactiveContext = context.getReactiveContext(visited);
         if (
           reactiveContext.kind === "pattern" &&
           (reactiveContext.owner === "pattern" ||

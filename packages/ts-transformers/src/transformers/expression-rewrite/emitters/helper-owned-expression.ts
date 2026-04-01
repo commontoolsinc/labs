@@ -1,7 +1,6 @@
 import ts from "typescript";
 import { getCellKind } from "@commontools/schema-generator/cell-brand";
 
-import { getRelevantDataFlows } from "../../../ast/mod.ts";
 import { classifyOpaquePathTerminalCall } from "../../opaque-roots.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import {
@@ -77,11 +76,7 @@ export function rewriteHelperOwnedExpression(
   }
 
   const analysis = analyze(expression);
-  const relevantDataFlows = getRelevantDataFlows(
-    analysis,
-    context.checker,
-    context,
-  );
+  const relevantDataFlows = context.getRelevantDataFlowsFromAnalysis(analysis);
 
   const pendingRewrite = relevantDataFlows.length > 0
     ? findPendingComputeWrapCandidate(expression, analyze, context)

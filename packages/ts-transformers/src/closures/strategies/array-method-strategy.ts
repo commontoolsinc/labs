@@ -3,7 +3,6 @@ import { type TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   classifyArrayMethodCall,
-  classifyReactiveContext,
   getEnclosingFunctionLikeDeclaration,
   getLoweredArrayMethodName,
   getTypeAtLocationWithFallback,
@@ -200,11 +199,7 @@ function shouldTransformArrayMethod(
   }
 
   const mapTarget = methodCall.expression.expression;
-  const contextInfo = classifyReactiveContext(
-    methodCall,
-    context.checker,
-    context,
-  );
+  const contextInfo = context.getReactiveContext(methodCall);
   assertValidSyntheticComputeOwnedArrayMethodContext(
     methodCall,
     contextInfo,

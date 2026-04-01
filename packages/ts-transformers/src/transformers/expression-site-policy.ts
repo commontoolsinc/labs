@@ -2,13 +2,12 @@ import ts from "typescript";
 import {
   classifyArrayMethodCall,
   classifyArrayMethodCallSite,
-  classifyReactiveContext,
   detectCallKind,
-  findEnclosingCallbackContext,
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
   isInRestrictedReactiveContext,
   isWildcardTraversalCall,
+  type ReactiveContextInfo,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
@@ -31,7 +30,7 @@ import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
 import type { ExpressionContainerKind } from "./expression-site-types.ts";
 
 interface ExpressionSiteCallRootPolicyInfo {
-  readonly reactiveContext: ReturnType<typeof classifyReactiveContext>;
+  readonly reactiveContext: ReactiveContextInfo;
   readonly arrayMethodOwned: boolean;
   readonly helperBoundaryKind?: ExpressionSiteHelperBoundaryKind;
   readonly callRootKind?: ExpressionSiteCallRootKind;
@@ -291,7 +290,7 @@ function isEligiblePatternOwnedWrapperCallbackSite(
   expression: ts.Expression,
   context: TransformationContext,
 ): boolean {
-  const callbackContext = findEnclosingCallbackContext(expression);
+  const callbackContext = context.getEnclosingCallbackContext(expression);
   if (!callbackContext) {
     return true;
   }
@@ -308,7 +307,7 @@ function hasEnclosingComputeLikeCallback(
   expression: ts.Expression,
   context: TransformationContext,
 ): boolean {
-  const callbackContext = findEnclosingCallbackContext(expression);
+  const callbackContext = context.getEnclosingCallbackContext(expression);
   if (!callbackContext) {
     return false;
   }
@@ -346,7 +345,7 @@ function isWithinComputeLikePlainArrayValueCallback(
   expression: ts.Expression,
   context: TransformationContext,
 ): boolean {
-  const callbackContext = findEnclosingCallbackContext(expression);
+  const callbackContext = context.getEnclosingCallbackContext(expression);
   if (!callbackContext) {
     return false;
   }
@@ -500,16 +499,12 @@ function isArrayMethodOwnedExpressionSite(
   expression: ts.Expression,
   context: TransformationContext,
 ): boolean {
-  const contextInfo = classifyReactiveContext(
-    expression,
-    context.checker,
-    context,
-  );
+  const contextInfo = context.getReactiveContext(expression);
   if (contextInfo.kind === "pattern" && contextInfo.owner === "array-method") {
     return true;
   }
 
-  const callbackContext = findEnclosingCallbackContext(expression);
+  const callbackContext = context.getEnclosingCallbackContext(expression);
   if (!callbackContext) {
     return false;
   }
@@ -701,11 +696,7 @@ function getExpressionSiteCallRootPolicyInfo(
   analyze: AnalyzeFn,
 ): ExpressionSiteCallRootPolicyInfo {
   return {
-    reactiveContext: classifyReactiveContext(
-      expression,
-      context.checker,
-      context,
-    ),
+    reactiveContext: context.getReactiveContext(expression),
     arrayMethodOwned: isArrayMethodOwnedExpressionSite(expression, context),
     helperBoundaryKind: getHelperBoundaryKind(expression, context),
     callRootKind: ts.isCallExpression(expression)
@@ -1082,8 +1073,7 @@ export function findLowerableExpressionSite(
       const containerKind = getExpressionContainerKind(current);
       if (containerKind) {
         if (
-          classifyReactiveContext(current, context.checker, context).kind !==
-            "pattern"
+          context.getReactiveContext(current).kind !== "pattern"
         ) {
           current = current.parent;
           continue;

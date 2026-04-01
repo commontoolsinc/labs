@@ -6,9 +6,7 @@ import type { Emitter } from "../types.ts";
 import {
   classifyArrayMethodResultSinkCall,
   classifyArrayMethodResultSinkReceiverChainCall,
-  classifyReactiveContext,
   detectCallKind,
-  findEnclosingCallbackContext,
 } from "../../../ast/mod.ts";
 import { createDeriveCall } from "../../builtins/derive.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
@@ -36,11 +34,7 @@ function shouldFilterNestedLocalsForCallWrapper(
   context: Parameters<Emitter>[0]["context"],
   analyze: Parameters<Emitter>[0]["analyze"],
 ): boolean {
-  const reactiveContext = classifyReactiveContext(
-    expression,
-    context.checker,
-    context,
-  );
+  const reactiveContext = context.getReactiveContext(expression);
   if (
     reactiveContext.kind !== "pattern" ||
     (reactiveContext.owner !== "pattern" && reactiveContext.owner !== "render")
@@ -48,7 +42,7 @@ function shouldFilterNestedLocalsForCallWrapper(
     return false;
   }
 
-  const callbackContext = findEnclosingCallbackContext(expression);
+  const callbackContext = context.getEnclosingCallbackContext(expression);
   if (
     callbackContext &&
     (context.isArrayMethodCallback(callbackContext.callback) ||

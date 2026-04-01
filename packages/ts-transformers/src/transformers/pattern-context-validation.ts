@@ -39,8 +39,6 @@ import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
   classifyArrayMethodCallSite,
-  classifyReactiveContext,
-  createDataFlowAnalyzer,
   detectCallKind,
   detectDirectBuilderCall,
   isInRestrictedReactiveContext,
@@ -65,7 +63,7 @@ const EMPTY_OPAQUE_ROOTS = new Set<string>();
 export class PatternContextValidationTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     const checker = context.checker;
-    const analyze = createDataFlowAnalyzer(checker);
+    const analyze = context.getDataFlowAnalyzer();
 
     const visit = (node: ts.Node): ts.Node => {
       // Skip JSX element containers; expression-level handling is shared.
@@ -198,7 +196,7 @@ export class PatternContextValidationTransformer extends Transformer {
   private validateComputationExpression(
     node: ts.Node,
     context: TransformationContext,
-    analyze: ReturnType<typeof createDataFlowAnalyzer>,
+    analyze: ReturnType<TransformationContext["getDataFlowAnalyzer"]>,
   ): void {
     const expression = node as ts.Expression;
     const decision = classifyRestrictedReactiveComputation(
@@ -418,7 +416,7 @@ export class PatternContextValidationTransformer extends Transformer {
       checker,
       context,
     );
-    const bodyContext = classifyReactiveContext(func.body, checker, context);
+    const bodyContext = context.getReactiveContext(func.body);
     if (
       !boundarySemantics.supportsPatternOwnedStatements ||
       bodyContext.kind !== "pattern"

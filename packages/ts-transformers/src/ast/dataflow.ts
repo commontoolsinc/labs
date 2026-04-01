@@ -7,7 +7,7 @@ import {
   setParentPointers,
 } from "./utils.ts";
 import { isFunctionLikeExpression } from "./function-predicates.ts";
-import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
+import { symbolDeclaresCommonToolsDefault } from "../core/common-tools-symbols.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import {
   detectCallKind,

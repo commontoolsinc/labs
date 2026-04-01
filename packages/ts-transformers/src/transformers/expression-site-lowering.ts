@@ -1,11 +1,5 @@
 import ts from "typescript";
-import {
-  classifyReactiveContext,
-  createDataFlowAnalyzer,
-  detectCallKind,
-  getRelevantDataFlows,
-  visitEachChildWithJsx,
-} from "../ast/mod.ts";
+import { detectCallKind, visitEachChildWithJsx } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import {
   classifyExpressionSiteHandling,
@@ -97,11 +91,7 @@ export function rewriteExpressionSite(
     return undefined;
   }
 
-  const contextInfo = classifyReactiveContext(
-    expression,
-    context.checker,
-    context,
-  );
+  const contextInfo = context.getReactiveContext(expression);
   const analysis = analyze(expression);
   const hasLogicalOps = containsLogicalBinaryOperator(expression);
   const controlFlowNeedsRewrite = containerKind === "jsx-expression" &&
@@ -161,11 +151,7 @@ export function rewriteOwnedPreClosureJsxExpressionSite(
     preferDeriveWrappers = false,
   } = params;
 
-  const contextInfo = classifyReactiveContext(
-    expression,
-    context.checker,
-    context,
-  );
+  const contextInfo = context.getReactiveContext(expression);
   const inSafeContext = contextInfo.kind === "compute";
   const analysis = analyze(expression);
   const hasLogicalOps = containsLogicalBinaryOperator(expression);
@@ -217,7 +203,7 @@ export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
   root: T,
   context: TransformationContext,
 ): T {
-  const analyze = createDataFlowAnalyzer(context.checker);
+  const analyze = context.getDataFlowAnalyzer();
 
   const visit: ts.Visitor = (node) => {
     const visited = visitEachChildWithJsx(node, visit, context.tsContext);
@@ -267,7 +253,7 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
   root: T,
   context: TransformationContext,
 ): T {
-  const analyze = createDataFlowAnalyzer(context.checker);
+  const analyze = context.getDataFlowAnalyzer();
 
   const visit: ts.Visitor = (node) => {
     if (
@@ -354,7 +340,7 @@ export function rewriteArrayMethodCallbackExpressionSites(
   body: ts.ConciseBody,
   context: TransformationContext,
 ): ts.ConciseBody {
-  const analyze = createDataFlowAnalyzer(context.checker);
+  const analyze = context.getDataFlowAnalyzer();
 
   const rewriteArrayMethodOwnedReceiverMethodExpressionSite = (
     expression: ts.Expression,
@@ -390,10 +376,8 @@ export function rewriteArrayMethodCallbackExpressionSites(
     }
 
     const analysis = analyze(expression);
-    const relevantDataFlows = getRelevantDataFlows(
+    const relevantDataFlows = context.getRelevantDataFlowsFromAnalysis(
       analysis,
-      context.checker,
-      context,
     );
     if (relevantDataFlows.length === 0) {
       return undefined;

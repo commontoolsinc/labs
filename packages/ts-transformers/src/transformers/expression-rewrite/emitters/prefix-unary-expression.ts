@@ -1,6 +1,4 @@
 import ts from "typescript";
-import { getRelevantDataFlows } from "../../../ast/mod.ts";
-
 import type { Emitter } from "../types.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 
@@ -27,10 +25,8 @@ export const emitPrefixUnaryExpression: Emitter = ({
 
   if (relevantDataFlows.length === 0 && analysis.containsOpaqueRef) {
     const fallbackAnalysis = analyze(expression.operand);
-    relevantDataFlows = getRelevantDataFlows(
+    relevantDataFlows = context.getRelevantDataFlowsFromAnalysis(
       fallbackAnalysis,
-      context.checker,
-      context,
     );
 
     if (relevantDataFlows.length === 0) return undefined;

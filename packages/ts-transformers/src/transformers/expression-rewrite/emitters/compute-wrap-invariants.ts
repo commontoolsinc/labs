@@ -1,7 +1,6 @@
 import ts from "typescript";
 
 import {
-  classifyReactiveContext,
   detectCallKind,
   isSimpleReactiveAccessExpression,
 } from "../../../ast/mod.ts";
@@ -84,11 +83,7 @@ function throwComputeWrapCompilerBug(
   containerLabel: string,
   context: TransformationContext,
 ): never {
-  const culpritContext = classifyReactiveContext(
-    culprit,
-    context.checker,
-    context,
-  );
+  const culpritContext = context.getReactiveContext(culprit);
   throw new Error(
     [
       `Internal Common Tools compiler error: ${containerLabel} compute-wrap decision disagreed with reactive-context classification.`,
@@ -139,11 +134,7 @@ export function assertValidComputeWrapCandidate(
   containerLabel: string,
   context: TransformationContext,
 ): void {
-  const culpritContext = classifyReactiveContext(
-    culprit,
-    context.checker,
-    context,
-  );
+  const culpritContext = context.getReactiveContext(culprit);
 
   if (culpritContext.kind === "compute") {
     throwComputeWrapCompilerBug(

@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
-import { createDataFlowAnalyzer, visitEachChildWithJsx } from "../ast/mod.ts";
+import { visitEachChildWithJsx } from "../ast/mod.ts";
 import { classifyExpressionSiteHandling } from "./expression-site-policy.ts";
 import {
   rewriteExpressionSite,
@@ -14,7 +14,7 @@ export class JsxExpressionSiteRouterTransformer extends HelpersOnlyTransformer {
 }
 
 function transform(context: TransformationContext): ts.SourceFile {
-  const analyze = createDataFlowAnalyzer(context.checker);
+  const analyze = context.getDataFlowAnalyzer();
 
   const visit: ts.Visitor = (node) => {
     if (ts.isJsxExpression(node)) {

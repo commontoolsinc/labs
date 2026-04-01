@@ -3,7 +3,6 @@ import ts from "typescript";
 import type { Emitter } from "../types.ts";
 import { createIfElseCall } from "../../builtins/ifelse.ts";
 import {
-  getRelevantDataFlows,
   isSimpleReactiveAccessExpression,
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
@@ -54,10 +53,8 @@ function processBranch(
   }
 
   const branchAnalysis = analyze(expr);
-  const branchDataFlows = getRelevantDataFlows(
+  const branchDataFlows = context.getRelevantDataFlowsFromAnalysis(
     branchAnalysis,
-    context.checker,
-    context,
   );
 
   const pendingRewrite = branchDataFlows.length > 0

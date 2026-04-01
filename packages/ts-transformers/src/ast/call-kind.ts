@@ -31,7 +31,8 @@
  */
 import ts from "typescript";
 
-import { CT_HELPERS_IDENTIFIER, isCommonToolsSymbol } from "../core/mod.ts";
+import { CT_HELPERS_IDENTIFIER } from "../core/ct-helpers.ts";
+import { isCommonToolsSymbol } from "../core/common-tools-symbols.ts";
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 import {
   COMMONTOOLS_BUILDER_EXPORT_NAMES,
