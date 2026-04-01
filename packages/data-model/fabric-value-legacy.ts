@@ -103,14 +103,14 @@ export function isFabricValueLegacy(
 }
 
 /**
- * Legacy implementation of `canBeStored()` for the JSON-only type system.
+ * Legacy implementation of `isFabricCompatible()` for the JSON-only type system.
  * In legacy mode, equivalent to `isFabricValueLegacy()` since the legacy
  * path doesn't support `FabricNativeObject` types.
  *
  * @param value - The value to check.
  * @returns `true` if the value can be stored, `false` otherwise.
  */
-export function canBeStoredLegacy(
+export function isFabricCompatibleLegacy(
   value: unknown,
 ): value is FabricValue | FabricNativeObject {
   return isFabricValueLegacy(value);

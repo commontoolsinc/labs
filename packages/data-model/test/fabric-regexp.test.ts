@@ -13,7 +13,7 @@ import {
   isConvertibleNativeInstance,
 } from "../fabric-native-instances.ts";
 import {
-  canBeStored,
+  isFabricCompatible,
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
@@ -269,10 +269,10 @@ describe("FabricRegExp", () => {
   });
 
   // --------------------------------------------------------------------------
-  // canBeStored
+  // isFabricCompatible
   // --------------------------------------------------------------------------
 
-  describe("canBeStored", () => {
+  describe("isFabricCompatible", () => {
     beforeEach(() => {
       setDataModelConfig(true);
     });
@@ -281,11 +281,11 @@ describe("FabricRegExp", () => {
     });
 
     it("returns true for plain RegExp", () => {
-      expect(canBeStored(/abc/gi)).toBe(true);
+      expect(isFabricCompatible(/abc/gi)).toBe(true);
     });
 
     it("returns true for RegExp nested in objects", () => {
-      expect(canBeStored({ pattern: /abc/gi })).toBe(true);
+      expect(isFabricCompatible({ pattern: /abc/gi })).toBe(true);
     });
   });
 

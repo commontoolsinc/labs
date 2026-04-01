@@ -20,7 +20,7 @@ import {
 import { nativeFromFabricValueModern } from "../fabric-value-modern.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
 import {
-  canBeStored,
+  isFabricCompatible,
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
@@ -1645,10 +1645,10 @@ describe("json encoding", () => {
   });
 
   // --------------------------------------------------------------------------
-  // canBeStored: deep storability check
+  // isFabricCompatible: deep storability check
   // --------------------------------------------------------------------------
 
-  describe("canBeStored", () => {
+  describe("isFabricCompatible", () => {
     beforeEach(() => {
       setDataModelConfig(true);
     });
@@ -1658,90 +1658,90 @@ describe("json encoding", () => {
 
     // -- Primitives that ARE fabric-compatible --
     it("accepts null", () => {
-      expect(canBeStored(null)).toBe(true);
+      expect(isFabricCompatible(null)).toBe(true);
     });
 
     it("accepts boolean", () => {
-      expect(canBeStored(true)).toBe(true);
-      expect(canBeStored(false)).toBe(true);
+      expect(isFabricCompatible(true)).toBe(true);
+      expect(isFabricCompatible(false)).toBe(true);
     });
 
     it("accepts finite numbers", () => {
-      expect(canBeStored(42)).toBe(true);
-      expect(canBeStored(0)).toBe(true);
-      expect(canBeStored(-3.14)).toBe(true);
+      expect(isFabricCompatible(42)).toBe(true);
+      expect(isFabricCompatible(0)).toBe(true);
+      expect(isFabricCompatible(-3.14)).toBe(true);
     });
 
     it("accepts strings", () => {
-      expect(canBeStored("hello")).toBe(true);
-      expect(canBeStored("")).toBe(true);
+      expect(isFabricCompatible("hello")).toBe(true);
+      expect(isFabricCompatible("")).toBe(true);
     });
 
     it("accepts undefined", () => {
-      expect(canBeStored(undefined)).toBe(true);
+      expect(isFabricCompatible(undefined)).toBe(true);
     });
 
     it("accepts bigint", () => {
-      expect(canBeStored(42n)).toBe(true);
-      expect(canBeStored(0n)).toBe(true);
+      expect(isFabricCompatible(42n)).toBe(true);
+      expect(isFabricCompatible(0n)).toBe(true);
     });
 
     // -- Primitives that are NOT fabric-compatible --
     it("rejects NaN", () => {
-      expect(canBeStored(NaN)).toBe(false);
+      expect(isFabricCompatible(NaN)).toBe(false);
     });
 
     it("rejects Infinity", () => {
-      expect(canBeStored(Infinity)).toBe(false);
-      expect(canBeStored(-Infinity)).toBe(false);
+      expect(isFabricCompatible(Infinity)).toBe(false);
+      expect(isFabricCompatible(-Infinity)).toBe(false);
     });
 
     it("rejects symbols", () => {
-      expect(canBeStored(Symbol("test"))).toBe(false);
+      expect(isFabricCompatible(Symbol("test"))).toBe(false);
     });
 
     it("rejects functions without toJSON", () => {
-      expect(canBeStored(() => 42)).toBe(false);
+      expect(isFabricCompatible(() => 42)).toBe(false);
     });
 
     // -- FabricNativeObject types (would be wrapped) --
     it("accepts Error instances", () => {
-      expect(canBeStored(new Error("test"))).toBe(true);
-      expect(canBeStored(new TypeError("test"))).toBe(true);
+      expect(isFabricCompatible(new Error("test"))).toBe(true);
+      expect(isFabricCompatible(new TypeError("test"))).toBe(true);
     });
 
     it("accepts Map instances", () => {
-      expect(canBeStored(new Map())).toBe(true);
+      expect(isFabricCompatible(new Map())).toBe(true);
     });
 
     it("accepts Set instances", () => {
-      expect(canBeStored(new Set())).toBe(true);
+      expect(isFabricCompatible(new Set())).toBe(true);
     });
 
     it("accepts Date instances", () => {
-      expect(canBeStored(new Date())).toBe(true);
+      expect(isFabricCompatible(new Date())).toBe(true);
     });
 
     it("accepts Uint8Array instances", () => {
-      expect(canBeStored(new Uint8Array([1, 2, 3]))).toBe(true);
+      expect(isFabricCompatible(new Uint8Array([1, 2, 3]))).toBe(true);
     });
 
     // -- FabricInstance values --
     it("accepts FabricError wrappers", () => {
-      expect(canBeStored(new FabricError(new Error("test")))).toBe(true);
+      expect(isFabricCompatible(new FabricError(new Error("test")))).toBe(true);
     });
 
     // -- Containers --
     it("accepts plain objects with fabric values", () => {
-      expect(canBeStored({ a: 1, b: "hello", c: null })).toBe(true);
+      expect(isFabricCompatible({ a: 1, b: "hello", c: null })).toBe(true);
     });
 
     it("accepts arrays with fabric values", () => {
-      expect(canBeStored([1, "hello", null, true])).toBe(true);
+      expect(isFabricCompatible([1, "hello", null, true])).toBe(true);
     });
 
     it("accepts nested structures", () => {
-      expect(canBeStored({
+      expect(isFabricCompatible({
         users: [{ name: "Alice", age: 30 }],
         meta: { version: 1 },
       })).toBe(true);
@@ -1749,11 +1749,11 @@ describe("json encoding", () => {
 
     // -- Deep checks with FabricNativeObject --
     it("accepts objects containing Error values", () => {
-      expect(canBeStored({ error: new Error("test"), code: 500 })).toBe(true);
+      expect(isFabricCompatible({ error: new Error("test"), code: 500 })).toBe(true);
     });
 
     it("accepts arrays containing Error values", () => {
-      expect(canBeStored([1, new Error("test"), "hello"])).toBe(true);
+      expect(isFabricCompatible([1, new Error("test"), "hello"])).toBe(true);
     });
 
     // -- Rejections --
@@ -1761,19 +1761,19 @@ describe("json encoding", () => {
       class Foo {
         x = 1;
       }
-      expect(canBeStored(new Foo())).toBe(false);
+      expect(isFabricCompatible(new Foo())).toBe(false);
     });
 
     it("rejects objects with non-fabric nested values", () => {
-      expect(canBeStored({ a: 1, b: Symbol("bad") })).toBe(false);
+      expect(isFabricCompatible({ a: 1, b: Symbol("bad") })).toBe(false);
     });
 
     it("rejects arrays with non-fabric elements", () => {
-      expect(canBeStored([1, Symbol("bad")])).toBe(false);
+      expect(isFabricCompatible([1, Symbol("bad")])).toBe(false);
     });
 
     it("rejects deeply nested non-fabric values", () => {
-      expect(canBeStored({
+      expect(isFabricCompatible({
         a: { b: { c: [1, 2, { d: Symbol("bad") }] } },
       })).toBe(false);
     });
@@ -1782,18 +1782,18 @@ describe("json encoding", () => {
     it("returns false for circular references", () => {
       const obj: Record<string, unknown> = { a: 1 };
       obj.self = obj;
-      expect(canBeStored(obj)).toBe(false);
+      expect(isFabricCompatible(obj)).toBe(false);
     });
 
     // -- toJSON support --
     it("accepts objects with toJSON returning fabric values", () => {
       const obj = { toJSON: () => ({ x: 1 }) };
-      expect(canBeStored(obj)).toBe(true);
+      expect(isFabricCompatible(obj)).toBe(true);
     });
 
     it("rejects objects with toJSON returning non-fabric values", () => {
       const obj = { toJSON: () => Symbol("bad") };
-      expect(canBeStored(obj)).toBe(false);
+      expect(isFabricCompatible(obj)).toBe(false);
     });
   });
 });

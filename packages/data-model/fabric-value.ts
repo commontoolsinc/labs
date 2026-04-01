@@ -25,7 +25,7 @@ import type {
 import { deepEqual } from "@commontools/utils/deep-equal";
 import type { Immutable } from "@commontools/utils/types";
 import {
-  canBeStoredModern,
+  isFabricCompatibleModern,
   cloneIfNecessaryModern,
   type CloneOptions,
   fabricFromNativeValueModern,
@@ -35,7 +35,7 @@ import {
 } from "./fabric-value-modern.ts";
 export type { CloneOptions } from "./fabric-value-modern.ts";
 import {
-  canBeStoredLegacy,
+  isFabricCompatibleLegacy,
   cloneIfNecessaryLegacy,
   fabricFromNativeValueLegacy,
   isFabricValueLegacy,
@@ -211,18 +211,18 @@ export function isFabricValue(
  * or a deep tree thereof.
  *
  * Flag OFF (legacy): equivalent to `isFabricValue()` (non-recursive).
- * Flag ON (modern): delegates to `canBeStoredModern` which recursively
+ * Flag ON (modern): delegates to `isFabricCompatibleModern` which recursively
  * validates nested values.
  *
  * @param value - The value to check.
  * @returns `true` if the value can be stored, `false` otherwise.
  */
-export function canBeStored(
+export function isFabricCompatible(
   value: unknown,
 ): value is FabricValue | FabricNativeObject {
   return modernDataModelEnabled
-    ? canBeStoredModern(value)
-    : canBeStoredLegacy(value);
+    ? isFabricCompatibleModern(value)
+    : isFabricCompatibleLegacy(value);
 }
 
 // ---------------------------------------------------------------------------

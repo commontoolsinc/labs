@@ -185,7 +185,7 @@ export type FabricValueLayer =
  *
  * The `{ toJSON(): unknown }` arm covers objects (and functions) that are
  * convertible to fabric form via their `toJSON()` method. This is a legacy
- * conversion path but is included here so the `canBeStored()` type predicate
+ * conversion path but is included here so the `isFabricCompatible()` type predicate
  * (`value is FabricValue | FabricNativeObject`) remains sound.
  *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)

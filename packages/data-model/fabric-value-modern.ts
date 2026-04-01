@@ -512,7 +512,7 @@ export function isFabricValueModern(
 }
 
 // ---------------------------------------------------------------------------
-// canBeStored: deep check for fabric compatibility
+// isFabricCompatible: deep check for fabric compatibility
 // ---------------------------------------------------------------------------
 
 /**
@@ -522,18 +522,18 @@ export function isFabricValueModern(
  *
  * The distinction from `isFabricValue()` / `isFabricValueModern()`:
  * - `isFabricValueModern(x)` -- "is x already a `FabricValue`?"
- * - `canBeStored(x)` -- "could x be converted to a `FabricValue` via
+ * - `isFabricCompatible(x)` -- "could x be converted to a `FabricValue` via
  *   `fabricFromNativeValue()`?"
  *
- * `canBeStored` additionally accepts `FabricNativeObject` types and
+ * `isFabricCompatible` additionally accepts `FabricNativeObject` types and
  * objects/functions with `toJSON()` methods
  * that return fabric values. It checks recursively, so all nested values in
  * arrays and objects must also be fabric-compatible or convertible.
  */
-export function canBeStoredModern(
+export function isFabricCompatibleModern(
   value: unknown,
 ): value is FabricValue | FabricNativeObject {
-  return canBeStoredInternal(value, new Set());
+  return isFabricCompatibleInternal(value, new Set());
 }
 
 // ---------------------------------------------------------------------------
@@ -708,7 +708,7 @@ function cloneHelper(
   }
 }
 
-function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
+function isFabricCompatibleInternal(value: unknown, seen: Set<object>): boolean {
   // Primitives: null, boolean, string, number (finite), bigint, undefined.
   if (value === null || value === undefined) return true;
 
@@ -729,7 +729,7 @@ function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
       // Functions are only fabric-compatible if they have toJSON().
       if (typeof value === "function" && hasToJSONMethod(value)) {
         const converted = value.toJSON();
-        return canBeStoredInternal(converted, seen);
+        return isFabricCompatibleInternal(converted, seen);
       }
       return false;
     }
@@ -755,7 +755,7 @@ function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
         }
         // Check all elements recursively.
         for (let i = 0; i < value.length; i++) {
-          if (i in value && !canBeStoredInternal(value[i], seen)) {
+          if (i in value && !isFabricCompatibleInternal(value[i], seen)) {
             seen.delete(value);
             return false;
           }
@@ -767,7 +767,7 @@ function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
       // Objects with toJSON() -- check the converted result.
       if (hasToJSONMethod(value)) {
         const converted = value.toJSON();
-        const result = canBeStoredInternal(converted, seen);
+        const result = isFabricCompatibleInternal(converted, seen);
         seen.delete(value);
         return result;
       }
@@ -780,7 +780,7 @@ function canBeStoredInternal(value: unknown, seen: Set<object>): boolean {
 
       // Plain objects -- check all property values recursively.
       for (const val of Object.values(value)) {
-        if (!canBeStoredInternal(val, seen)) {
+        if (!isFabricCompatibleInternal(val, seen)) {
           seen.delete(value);
           return false;
         }

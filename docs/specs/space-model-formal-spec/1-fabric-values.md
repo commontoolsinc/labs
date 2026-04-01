@@ -109,7 +109,7 @@ type FabricValue =
 
 > **Excluded JS types.** The following JavaScript types are explicitly **not**
 > representable as fabric values and cause rejection (thrown error) in
-> `fabricFromNativeValue()` and `canBeStored()`:
+> `fabricFromNativeValue()` and `isFabricCompatible()`:
 >
 > - `symbol` — Symbols are inherently local (not serializable across realms or
 >   processes). Symbol-keyed properties on objects are silently ignored; a bare
@@ -1692,7 +1692,7 @@ that bridge the left layer (JS wild west) and the middle layer
 (`FabricValue`) at the `Cell` read/write boundary.
 
 The module also re-exports flag-dispatched type-check functions
-(`isFabricValue()`, `canBeStored()`), a shallow conversion function
+(`isFabricValue()`, `isFabricCompatible()`), a shallow conversion function
 (`shallowFabricFromNativeValue()`), and a comparison function
 (`valueEqual()`).
 
@@ -1743,8 +1743,8 @@ The implementation is split across several files for separation of concerns:
 | File | Purpose |
 |------|---------|
 | `fabric-value.ts` | Dispatch module: flag-gated public API, config lifecycle |
-| `fabric-value-modern.ts` | Modern (flag-ON) conversion: `shallowFabricFromNativeValueModern`, `fabricFromNativeValueModern`, `isFabricValueModern`, `canBeStoredModern` |
-| `fabric-value-legacy.ts` | Legacy (flag-OFF) conversion: `fabricFromNativeValueLegacy`, `isFabricValueLegacy`, `canBeStoredLegacy` |
+| `fabric-value-modern.ts` | Modern (flag-ON) conversion: `shallowFabricFromNativeValueModern`, `fabricFromNativeValueModern`, `isFabricValueModern`, `isFabricCompatibleModern` |
+| `fabric-value-legacy.ts` | Legacy (flag-OFF) conversion: `fabricFromNativeValueLegacy`, `isFabricValueLegacy`, `isFabricCompatibleLegacy` |
 | `array-utils.ts` | Pure utilities shared by both paths: `isArrayIndexPropertyName`, `isArrayWithOnlyIndexProperties` |
 | `fabric-native-instances.ts` | Native object wrapper classes (`FabricError`, `FabricMap`, etc.) and unwrap functions (`nativeFromFabricValue`, `nativeFromFabricValueModern`) |
 
@@ -2510,7 +2510,7 @@ tree incrementally (e.g., merging data from multiple sources) can use
 complete. The `freeze` parameter does not affect validation or wrapping — the
 returned value is always a valid `FabricValue` regardless of its frozen state.
 
-### 8.3 `canBeStored()`
+### 8.3 `isFabricCompatible()`
 
 ```typescript
 // file: packages/data-model/fabric-value.ts
@@ -2520,7 +2520,7 @@ returned value is always a valid `FabricValue` regardless of its frozen state.
  * on the given value — i.e., the value is a `FabricValue`, a
  * `FabricNativeObject`, or a tree of these types. The return type is a
  * type predicate (`value is FabricValue | FabricNativeObject`), so
- * callers can use `canBeStored(x)` as a type guard in conditionals.
+ * callers can use `isFabricCompatible(x)` as a type guard in conditionals.
  *
  * This is a check-without-conversion function for system boundaries where
  * code receives `unknown` and needs to determine convertibility without
@@ -2530,13 +2530,13 @@ returned value is always a valid `FabricValue` regardless of its frozen state.
  * Relationship to other functions:
  * - `isFabricValue(x)`: "Is `x` already a `FabricValue`?" Does NOT
  *   return `true` for raw native types like `Error` or `Map`.
- * - `canBeStored(x)`: "Could `x` be converted to a `FabricValue` via
+ * - `isFabricCompatible(x)`: "Could `x` be converted to a `FabricValue` via
  *   `fabricFromNativeValue()`?" Returns `true` for both `FabricValue`
  *   values AND `FabricNativeObject` values (and deep trees thereof).
  * - `fabricFromNativeValue(x)`: Actually performs the conversion,
  *   throwing on unsupported types.
  */
-export function canBeStored(
+export function isFabricCompatible(
   value: unknown,
 ): value is FabricValue | FabricNativeObject;
 ```
@@ -2549,14 +2549,14 @@ if the value is:
 - A `FabricInstance` (including the native object wrapper classes)
 - A `FabricNativeObject` (`Error`, `Map`, `Set`, `Date`, `RegExp`,
   `Uint8Array`, or an object with a `toJSON()` method — legacy)
-- An array where every present element satisfies `canBeStored()`
-- A plain object where every value satisfies `canBeStored()`
+- An array where every present element satisfies `isFabricCompatible()`
+- A plain object where every value satisfies `isFabricCompatible()`
 
 It returns `false` for unsupported types (`WeakMap`, `Promise`, DOM nodes,
 class instances that don't implement `FabricInstance`, non-finite numbers,
 etc.).
 
-> **Performance note.** `canBeStored()` walks the value tree without
+> **Performance note.** `isFabricCompatible()` walks the value tree without
 > allocating wrappers or frozen copies. For large trees, this is cheaper than
 > calling `fabricFromNativeValue()` inside a try/catch, since it avoids the
 > wrapping and freezing work that would be discarded on failure. However, if
