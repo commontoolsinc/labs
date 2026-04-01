@@ -146,7 +146,7 @@ export abstract class FabricNativeWrapper<T extends object>
  * Wrapper for `Error` instances in the fabric type system. Bridges native
  * `Error` (JS wild west) into the strongly-typed `FabricValue` layer by
  * implementing `FabricInstance`. The serialization layer handles
- * `FabricError` via the generic `StorableInstanceHandler` path.
+ * `FabricError` via the generic `FabricInstanceHandler` path.
  * See Section 1.4.1 of the formal spec.
  */
 export class FabricError extends FabricNativeWrapper<Error> {

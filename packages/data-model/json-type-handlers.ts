@@ -96,7 +96,7 @@ export class TypeHandlerRegistry {
 
   /** Register a handler. Handlers with non-empty tags are indexed for
    *  O(1) deserialization lookup. Handlers with empty tags (like
-   *  `StorableInstanceHandler`) participate in serialization matching only. */
+   *  `FabricInstanceHandler`) participate in serialization matching only. */
   register(handler: TypeHandler): void {
     this.handlers.push(handler);
     if (handler.tag !== "") {
@@ -385,7 +385,7 @@ export const BytesHandler: TypeHandler = {
  * tag like `TAGS.Error`); instead, the deserializer falls back to the class
  * registry for those tags.
  */
-export const StorableInstanceHandler: TypeHandler = {
+export const FabricInstanceHandler: TypeHandler = {
   // This tag is not used for deserialization dispatch -- FabricInstance
   // types are looked up by their individual tags. The handler is registered
   // for serialization matching only.
@@ -423,7 +423,7 @@ export const StorableInstanceHandler: TypeHandler = {
   ): FabricValue {
     // Not reached via tag dispatch -- FabricInstance deserialization is
     // handled by the class registry fallback in deserialize().
-    throw new Error("StorableInstanceHandler.deserialize should not be called");
+    throw new Error("FabricInstanceHandler.deserialize should not be called");
   },
 };
 
@@ -439,12 +439,12 @@ export function createDefaultRegistry(): TypeHandlerRegistry {
   const registry = new TypeHandlerRegistry();
   // FabricPrimitive subclasses first -- they are direct FabricValue members
   // matched by instanceof, and must be checked before the generic
-  // StorableInstanceHandler.
+  // FabricInstanceHandler.
   registry.register(EpochNsecHandler);
   registry.register(EpochDaysHandler);
   registry.register(BytesHandler);
   // FabricInstance (generic -- checked via instanceof).
-  registry.register(StorableInstanceHandler);
+  registry.register(FabricInstanceHandler);
   // Primitives that need tagged encoding (can't be expressed in JSON natively).
   registry.register(BigIntHandler);
   registry.register(UndefinedHandler);
