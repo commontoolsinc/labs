@@ -1629,6 +1629,16 @@ export default pattern<Input, Output>(
                                         >
                                           Add
                                         </ct-button>
+                                        <ct-button
+                                          size="sm"
+                                          variant="secondary"
+                                          onClick={mergeExtractedAisle({
+                                            aisles,
+                                            extracted: extractedAisle,
+                                          })}
+                                        >
+                                          Merge
+                                        </ct-button>
                                       </ct-hstack>
                                     ),
                                   )}
