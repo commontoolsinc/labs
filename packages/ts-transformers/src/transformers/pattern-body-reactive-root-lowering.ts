@@ -3,6 +3,7 @@ import {
   classifyReactiveContext,
   createDataFlowAnalyzer,
   getCapabilitySummaryCallbackArgument,
+  getRelevantDataFlows,
   getTypeAtLocationWithFallback,
   isWildcardTraversalCall,
   visitEachChildWithJsx,
@@ -22,7 +23,6 @@ import {
 } from "./destructuring-lowering.ts";
 import {
   createReactiveWrapperForExpression,
-  getRelevantDataFlows,
 } from "./expression-rewrite/rewrite-helpers.ts";
 import {
   addBindingTargetSymbols,
@@ -247,7 +247,11 @@ function rewriteTrackedOpaquePatternBody(
     expression: ts.Expression,
   ) => {
     const analysis = analyze(expression);
-    const relevantDataFlows = getRelevantDataFlows(analysis, context);
+    const relevantDataFlows = getRelevantDataFlows(
+      analysis,
+      context.checker,
+      context,
+    );
     return relevantDataFlows.length > 0 ? relevantDataFlows : undefined;
   };
 

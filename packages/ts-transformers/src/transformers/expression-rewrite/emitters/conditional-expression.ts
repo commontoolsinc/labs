@@ -3,14 +3,12 @@ import ts from "typescript";
 import type { Emitter } from "../types.ts";
 import { createIfElseCall } from "../../builtins/ifelse.ts";
 import {
+  getRelevantDataFlows,
   isSimpleReactiveAccessExpression,
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
-import {
-  createReactiveWrapperForExpression,
-  getRelevantDataFlows,
-} from "../rewrite-helpers.ts";
+import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import {
   assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
@@ -56,7 +54,11 @@ function processBranch(
   }
 
   const branchAnalysis = analyze(expr);
-  const branchDataFlows = getRelevantDataFlows(branchAnalysis, context);
+  const branchDataFlows = getRelevantDataFlows(
+    branchAnalysis,
+    context.checker,
+    context,
+  );
 
   const pendingRewrite = branchDataFlows.length > 0
     ? findPendingComputeWrapCandidate(expr, analyze, context)

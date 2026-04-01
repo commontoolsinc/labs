@@ -4,6 +4,7 @@ import {
   classifyArrayMethodCall,
   classifyReactiveContext,
   detectCallKind,
+  getRelevantDataFlowSet,
   isInsideSafeCallbackWrapper,
   visitEachChildWithJsx,
 } from "../../ast/mod.ts";
@@ -24,7 +25,6 @@ import {
   emitPropertyAccess,
   emitTemplateExpression,
 } from "./emitters/mod.ts";
-import { getRelevantDataFlowSet } from "./rewrite-helpers.ts";
 
 const EMITTERS: readonly Emitter[] = [
   emitPropertyAccess,
@@ -205,7 +205,11 @@ export function rewriteExpression(
     preferDeriveWrappers,
     reactiveContextKind,
     containerKind: params.containerKind,
-    dataFlows: getRelevantDataFlowSet(params.analysis, params.context),
+    dataFlows: getRelevantDataFlowSet(
+      params.analysis,
+      params.context.checker,
+      params.context,
+    ),
   };
 
   for (const emitter of EMITTERS) {

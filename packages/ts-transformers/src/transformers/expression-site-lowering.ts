@@ -3,6 +3,7 @@ import {
   classifyReactiveContext,
   createDataFlowAnalyzer,
   detectCallKind,
+  getRelevantDataFlows,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
@@ -17,7 +18,6 @@ import {
 import { rewriteExpression } from "./expression-rewrite/mod.ts";
 import {
   createReactiveWrapperForExpression,
-  getRelevantDataFlows,
 } from "./expression-rewrite/rewrite-helpers.ts";
 import type { AnalyzeFn } from "./expression-rewrite/types.ts";
 import type { ExpressionContainerKind } from "./expression-site-types.ts";
@@ -390,7 +390,11 @@ export function rewriteArrayMethodCallbackExpressionSites(
     }
 
     const analysis = analyze(expression);
-    const relevantDataFlows = getRelevantDataFlows(analysis, context);
+    const relevantDataFlows = getRelevantDataFlows(
+      analysis,
+      context.checker,
+      context,
+    );
     if (relevantDataFlows.length === 0) {
       return undefined;
     }

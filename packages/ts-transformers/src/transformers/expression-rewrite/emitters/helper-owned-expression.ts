@@ -1,11 +1,9 @@
 import ts from "typescript";
 import { getCellKind } from "@commontools/schema-generator/cell-brand";
 
+import { getRelevantDataFlows } from "../../../ast/mod.ts";
 import { classifyOpaquePathTerminalCall } from "../../opaque-roots.ts";
-import {
-  createReactiveWrapperForExpression,
-  getRelevantDataFlows,
-} from "../rewrite-helpers.ts";
+import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import {
   assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
@@ -79,7 +77,11 @@ export function rewriteHelperOwnedExpression(
   }
 
   const analysis = analyze(expression);
-  const relevantDataFlows = getRelevantDataFlows(analysis, context);
+  const relevantDataFlows = getRelevantDataFlows(
+    analysis,
+    context.checker,
+    context,
+  );
 
   const pendingRewrite = relevantDataFlows.length > 0
     ? findPendingComputeWrapCandidate(expression, analyze, context)

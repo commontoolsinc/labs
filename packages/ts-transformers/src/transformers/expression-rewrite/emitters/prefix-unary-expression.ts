@@ -1,10 +1,8 @@
 import ts from "typescript";
+import { getRelevantDataFlows } from "../../../ast/mod.ts";
 
 import type { Emitter } from "../types.ts";
-import {
-  createReactiveWrapperForExpression,
-  getRelevantDataFlows,
-} from "../rewrite-helpers.ts";
+import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 
 export const emitPrefixUnaryExpression: Emitter = ({
   expression,
@@ -29,7 +27,11 @@ export const emitPrefixUnaryExpression: Emitter = ({
 
   if (relevantDataFlows.length === 0 && analysis.containsOpaqueRef) {
     const fallbackAnalysis = analyze(expression.operand);
-    relevantDataFlows = getRelevantDataFlows(fallbackAnalysis, context);
+    relevantDataFlows = getRelevantDataFlows(
+      fallbackAnalysis,
+      context.checker,
+      context,
+    );
 
     if (relevantDataFlows.length === 0) return undefined;
   } else if (relevantDataFlows.length === 0) {
