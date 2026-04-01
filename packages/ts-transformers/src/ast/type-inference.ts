@@ -1,5 +1,8 @@
 import ts from "typescript";
-import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import {
+  getCellKind,
+  isOpaqueRefType,
+} from "../transformers/opaque-ref/opaque-ref.ts";
 import { classifyArrayMethodCall } from "./call-kind.ts";
 import {
   getTypeAtLocationWithFallback,
@@ -257,6 +260,28 @@ export function getTypeReferenceArgument(type: ts.Type): ts.Type | undefined {
   return undefined;
 }
 
+export function isArrayLikeType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  const typeChecker = checker as ts.TypeChecker & {
+    isArrayType?: (type: ts.Type) => boolean;
+    isTupleType?: (type: ts.Type) => boolean;
+  };
+  return !!(typeChecker.isArrayType?.(type) ||
+    typeChecker.isTupleType?.(type) ||
+    checker.getIndexTypeOfType(type, ts.IndexKind.Number));
+}
+
+export function isCellLikeType(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!type) return false;
+  return getCellKind(type, checker) !== undefined ||
+    isOpaqueRefType(type, checker);
+}
+
 /**
  * Unwrap OpaqueRef-like types to get the underlying type
  * Handles unions, intersections, and nested OpaqueRef types
@@ -316,6 +341,23 @@ export function unwrapOpaqueLikeType(
   }
 
   return type;
+}
+
+export function unwrapCellLikeType(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  if (!type) return undefined;
+  if (!isCellLikeType(type, checker)) {
+    return type;
+  }
+
+  const opaqueUnwrapped = unwrapOpaqueLikeType(type, checker);
+  if (opaqueUnwrapped && opaqueUnwrapped !== type) {
+    return opaqueUnwrapped;
+  }
+
+  return getTypeReferenceArgument(type) ?? type;
 }
 
 /**

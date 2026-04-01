@@ -12,6 +12,7 @@ import {
   ensureTypeNodeRegistered,
   getTypeFromTypeNodeWithFallback,
   isAnyOrUnknownType,
+  isArrayLikeType,
   typeToSchemaTypeNode,
 } from "../ast/mod.ts";
 
@@ -194,14 +195,7 @@ function buildShrunkTypeNodeFromType(
   // However, when only array-intrinsic properties like `length` are accessed
   // (no item-level access), shrink the item type to `unknown` to avoid
   // fetching full item schemas unnecessarily.
-  const typeChecker = checker as ts.TypeChecker & {
-    isArrayType?: (type: ts.Type) => boolean;
-    isTupleType?: (type: ts.Type) => boolean;
-  };
-  const isArrayLike = typeChecker.isArrayType?.(type) ||
-    typeChecker.isTupleType?.(type) ||
-    !!checker.getIndexTypeOfType(type, ts.IndexKind.Number);
-  if (isArrayLike) {
+  if (isArrayLikeType(type, checker)) {
     const allNonItem = normalized.every(
       (path) =>
         path.length === 1 && path[0] !== undefined &&
@@ -717,14 +711,7 @@ function typeHasHead(
 
   // Numeric heads are valid on array-like types (index access)
   if (Number.isFinite(Number(head))) {
-    const tc = checker as ts.TypeChecker & {
-      isArrayType?: (t: ts.Type) => boolean;
-      isTupleType?: (t: ts.Type) => boolean;
-    };
-    if (
-      tc.isArrayType?.(type) || tc.isTupleType?.(type) ||
-      !!checker.getIndexTypeOfType(type, ts.IndexKind.Number)
-    ) {
+    if (isArrayLikeType(type, checker)) {
       return true;
     }
   }

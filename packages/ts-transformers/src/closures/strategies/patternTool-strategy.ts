@@ -4,10 +4,10 @@ import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   detectCallKind,
   ensureTypeNodeRegistered,
+  isCellLikeType,
   isFunctionLikeExpression,
 } from "../../ast/mod.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
-import { isOpaqueRefType } from "../../transformers/opaque-ref/opaque-ref.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { buildCapturePropertyAssignments } from "../utils/capture-scaffold.ts";
 
@@ -359,35 +359,4 @@ function addCapturesToTypeLiteral(
     context.options.typeRegistry,
   );
   return typeNode;
-}
-
-/**
- * Check if a type is a CellLike type (Cell, Writable, OpaqueCell, Stream).
- *
- * This function is used to decide which module-scoped variables to capture
- * in patternTool() extraParams. In practice, module-scoped reactive variables
- * come from cell(), Cell.of(), Writable.of(), etc. — never OpaqueRef (which
- * is a proxy wrapper for pattern parameters, always pattern-scoped).
- *
- * The isOpaqueRefType brand check is included as a safety net; it shouldn't
- * match in practice because isModuleScopedDeclaration filters first.
- *
- * See also: standalone-function validation in pattern-context-validation.ts,
- * which now relies on shared array-method ownership classification for
- * reactive receiver checks.
- */
-function isCellLikeType(type: ts.Type, checker: ts.TypeChecker): boolean {
-  if (isOpaqueRefType(type, checker)) {
-    return true;
-  }
-
-  const typeStr = checker.typeToString(type);
-  const cellLikePatterns = [
-    "Cell<",
-    "OpaqueCell<",
-    "Writable<",
-    "Stream<",
-  ];
-
-  return cellLikePatterns.some((pattern) => typeStr.includes(pattern));
 }

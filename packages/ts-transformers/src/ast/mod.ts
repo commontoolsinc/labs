@@ -77,6 +77,8 @@ export {
   inferWidenedTypeFromExpression,
   isAnyOrUnknownType,
   isAnyType,
+  isArrayLikeType,
+  isCellLikeType,
   isDeriveCall,
   isReactiveArrayMethodCall,
   isUnknownType,
@@ -84,6 +86,7 @@ export {
   registerSyntheticCallType,
   typeToSchemaTypeNode,
   typeToTypeNode,
+  unwrapCellLikeType,
   unwrapOpaqueLikeType,
   widenLiteralType,
 } from "./type-inference.ts";

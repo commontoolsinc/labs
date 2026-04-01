@@ -6,16 +6,17 @@ import {
   ensureTypeNodeRegistered,
   getTypeAtLocationWithFallback,
   getTypeFromTypeNodeWithFallback,
-  getTypeReferenceArgument,
   getVariableInitializer,
   inferContextualType,
   inferParameterType,
   inferReturnType,
   isAnyOrUnknownType,
+  isArrayLikeType,
   isFunctionLikeExpression,
   isUnresolvedSchemaType,
   registerSyntheticCallType,
   typeToSchemaTypeNode,
+  unwrapCellLikeType,
   unwrapOpaqueLikeType,
   widenLiteralType,
 } from "../ast/mod.ts";
@@ -120,18 +121,6 @@ function extractCellLikeInnerTypeNode(
   return node.typeArguments[0];
 }
 
-function unwrapCellLikeType(
-  type: ts.Type | undefined,
-  checker: ts.TypeChecker,
-): ts.Type | undefined {
-  if (!type) return undefined;
-  const opaqueUnwrapped = unwrapOpaqueLikeType(type, checker);
-  if (opaqueUnwrapped && opaqueUnwrapped !== type) {
-    return opaqueUnwrapped;
-  }
-  return getTypeReferenceArgument(type) ?? type;
-}
-
 function getSymbolTypeAtSource(
   symbol: ts.Symbol,
   checker: ts.TypeChecker,
@@ -140,19 +129,6 @@ function getSymbolTypeAtSource(
   const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0] ??
     sourceFile;
   return checker.getTypeOfSymbolAtLocation(symbol, declaration);
-}
-
-function isArrayLikeType(
-  type: ts.Type,
-  checker: ts.TypeChecker,
-): boolean {
-  const typeChecker = checker as ts.TypeChecker & {
-    isArrayType?: (type: ts.Type) => boolean;
-    isTupleType?: (type: ts.Type) => boolean;
-  };
-  return !!(typeChecker.isArrayType?.(type) ||
-    typeChecker.isTupleType?.(type) ||
-    checker.getIndexTypeOfType(type, ts.IndexKind.Number));
 }
 
 function collectAllPropertyLeafPaths(
