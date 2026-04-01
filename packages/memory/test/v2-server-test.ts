@@ -68,14 +68,12 @@ Deno.test("memory v2 session registry scopes session ids by space", () => {
     0,
   );
 
-  assertEquals(first, {
-    sessionId: "session:fixed",
-    serverSeq: 0,
-  });
-  assertEquals(second, {
-    sessionId: "session:fixed",
-    serverSeq: 0,
-  });
+  assertEquals(first.sessionId, "session:fixed");
+  assertEquals(first.serverSeq, 0);
+  assertExists(first.sessionToken);
+  assertEquals(second.sessionId, "session:fixed");
+  assertEquals(second.serverSeq, 0);
+  assertExists(second.sessionToken);
 });
 
 Deno.test("memory v2 server allows the same session id in different spaces", async () => {
@@ -93,14 +91,15 @@ Deno.test("memory v2 server allows the same session id in different spaces", asy
       space: "did:key:z6Mk-space-one",
       session: { sessionId: "session:fixed" },
     }));
-    assertEquals(shiftMessage(messages), {
-      type: "response",
-      requestId: "open-1",
-      ok: {
-        sessionId: "session:fixed",
-        serverSeq: 0,
-      },
-    });
+    const openedOne = assertResponse<{
+      sessionId: string;
+      sessionToken: string;
+      serverSeq: number;
+    }>(shiftMessage(messages));
+    assertEquals(openedOne.requestId, "open-1");
+    assertEquals(openedOne.ok?.sessionId, "session:fixed");
+    assertEquals(openedOne.ok?.serverSeq, 0);
+    assertExists(openedOne.ok?.sessionToken);
 
     await connection.receive(encodeMemoryV2Boundary({
       type: "session.open",
@@ -108,14 +107,15 @@ Deno.test("memory v2 server allows the same session id in different spaces", asy
       space: "did:key:z6Mk-space-two",
       session: { sessionId: "session:fixed" },
     }));
-    assertEquals(shiftMessage(messages), {
-      type: "response",
-      requestId: "open-2",
-      ok: {
-        sessionId: "session:fixed",
-        serverSeq: 0,
-      },
-    });
+    const openedTwo = assertResponse<{
+      sessionId: string;
+      sessionToken: string;
+      serverSeq: number;
+    }>(shiftMessage(messages));
+    assertEquals(openedTwo.requestId, "open-2");
+    assertEquals(openedTwo.ok?.sessionId, "session:fixed");
+    assertEquals(openedTwo.ok?.serverSeq, 0);
+    assertExists(openedTwo.ok?.sessionToken);
   } finally {
     await server.close();
   }
@@ -152,14 +152,15 @@ Deno.test("memory v2 server binds resumed sessions to the original principal", a
       session: { sessionId: "session:fixed" },
       authorization: { principal: "did:key:z6Mk-alice" },
     }));
-    assertEquals(shiftMessage(firstMessages), {
-      type: "response",
-      requestId: "open-1",
-      ok: {
-        sessionId: "session:fixed",
-        serverSeq: 0,
-      },
-    });
+    const opened = assertResponse<{
+      sessionId: string;
+      sessionToken: string;
+      serverSeq: number;
+    }>(shiftMessage(firstMessages));
+    assertEquals(opened.requestId, "open-1");
+    assertEquals(opened.ok?.sessionId, "session:fixed");
+    assertEquals(opened.ok?.serverSeq, 0);
+    assertExists(opened.ok?.sessionToken);
 
     await secondConnection.receive(encodeMemoryV2Boundary(HELLO));
     assertEquals(shiftMessage(secondMessages), HELLO_OK);
@@ -299,6 +300,107 @@ Deno.test("memory v2 server requires sessions to be opened on the current connec
       error: {
         name: "SessionError",
         message: "Session is not open on this connection",
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server transfers session ownership and rejects stale resume tokens", async () => {
+  const server = createServer("memory://memory-v2-server-session-takeover");
+  const firstMessages: ServerMessage[] = [];
+  const secondMessages: ServerMessage[] = [];
+  const space = "did:key:z6Mk-space-session-takeover";
+  const firstConnection = server.connect((message) =>
+    firstMessages.push(message)
+  );
+  const secondConnection = server.connect((message) =>
+    secondMessages.push(message)
+  );
+
+  try {
+    await firstConnection.receive(encodeMemoryV2Boundary(HELLO));
+    await secondConnection.receive(encodeMemoryV2Boundary(HELLO));
+    assertEquals(shiftMessage(firstMessages), HELLO_OK);
+    assertEquals(shiftMessage(secondMessages), HELLO_OK);
+
+    await firstConnection.receive(encodeMemoryV2Boundary({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: { sessionId: "session:fixed" },
+    }));
+    const openedFirst = assertResponse<{
+      sessionId: string;
+      sessionToken: string;
+      serverSeq: number;
+    }>(shiftMessage(firstMessages));
+    const initialToken = openedFirst.ok?.sessionToken;
+    assertEquals(openedFirst.ok?.sessionId, "session:fixed");
+    assertEquals(openedFirst.ok?.serverSeq, 0);
+    assertExists(initialToken);
+
+    await secondConnection.receive(encodeMemoryV2Boundary({
+      type: "session.open",
+      requestId: "open-2",
+      space,
+      session: {
+        sessionId: "session:fixed",
+        sessionToken: initialToken,
+      },
+    }));
+
+    assertEquals(shiftMessage(firstMessages), {
+      type: "session/revoked",
+      space,
+      sessionId: "session:fixed",
+      reason: "taken-over",
+    });
+
+    const openedSecond = assertResponse<{
+      sessionId: string;
+      sessionToken: string;
+      serverSeq: number;
+      resumed?: boolean;
+    }>(shiftMessage(secondMessages));
+    assertEquals(openedSecond.ok?.sessionId, "session:fixed");
+    assertEquals(openedSecond.ok?.serverSeq, 0);
+    assertEquals(openedSecond.ok?.resumed, true);
+    assertExists(openedSecond.ok?.sessionToken);
+    assertEquals(openedSecond.ok?.sessionToken === initialToken, false);
+
+    await firstConnection.receive(encodeMemoryV2Boundary({
+      type: "graph.query",
+      requestId: "query-1",
+      space,
+      sessionId: "session:fixed",
+      query: { roots: [] },
+    }));
+    assertEquals(shiftMessage(firstMessages), {
+      type: "response",
+      requestId: "query-1",
+      error: {
+        name: "SessionError",
+        message: "Session is not open on this connection",
+      },
+    });
+
+    await firstConnection.receive(encodeMemoryV2Boundary({
+      type: "session.open",
+      requestId: "open-3",
+      space,
+      session: {
+        sessionId: "session:fixed",
+        sessionToken: initialToken,
+      },
+    }));
+    assertEquals(shiftMessage(firstMessages), {
+      type: "response",
+      requestId: "open-3",
+      error: {
+        name: "SessionRevokedError",
+        message: "session session:fixed resume token is no longer valid",
       },
     });
   } finally {

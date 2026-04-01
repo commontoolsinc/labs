@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { Server, SessionRegistry } from "../v2/server.ts";
 import {
@@ -1195,6 +1195,74 @@ Deno.test("memory v2 client replays retained commits in localSeq order after rec
     assertEquals(applied2.seq, 2);
   } finally {
     await client.close();
+  }
+});
+
+Deno.test("memory v2 client closes a revoked session after takeover and rejects stale resume tokens", async () => {
+  const server = new Server({
+    store: new URL("memory://memory-v2-client-session-takeover"),
+  });
+  const firstClient = await connect({
+    transport: loopback(server),
+  });
+  const secondClient = await connect({
+    transport: loopback(server),
+  });
+  const staleClient = await connect({
+    transport: loopback(server),
+  });
+  const space = "did:key:z6Mk-memory-v2-client-session-takeover";
+
+  try {
+    const first = await firstClient.mount(space, {
+      sessionId: "session:shared",
+    });
+    const initialToken = first.sessionToken;
+    assertExists(initialToken);
+
+    const second = await secondClient.mount(space, {
+      sessionId: first.sessionId,
+      sessionToken: initialToken,
+    });
+    assertEquals(second.sessionId, first.sessionId);
+    assertExists(second.sessionToken);
+    assertEquals(second.sessionToken === initialToken, false);
+
+    await assertRejects(
+      () => first.queryGraph({ roots: [] }),
+      Error,
+      "session revoked",
+    );
+
+    const applied = await second.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:takeover",
+        value: {
+          value: {
+            adopted: true,
+          },
+        },
+      }],
+    });
+    assertEquals(applied.seq, 1);
+
+    await assertRejects(
+      () =>
+        staleClient.mount(space, {
+          sessionId: first.sessionId,
+          sessionToken: initialToken,
+        }),
+      Error,
+      "resume token is no longer valid",
+    );
+  } finally {
+    await firstClient.close();
+    await secondClient.close();
+    await staleClient.close();
+    await server.close();
   }
 });
 

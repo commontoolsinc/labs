@@ -89,11 +89,13 @@ interface SessionOpenRequest {
   session: {
     sessionId?: SessionId;
     seenSeq?: number;
+    sessionToken?: string;
   };
 }
 
 interface SessionOpenResult {
   sessionId: SessionId;
+  sessionToken: string;
   serverSeq: number;
   resumed?: boolean;
   sync?: SessionSync;
@@ -107,10 +109,18 @@ Rules:
 - `sessionId` is caller-supplied in the current pass when the client wants to
   resume an existing logical session; server-issued, principal-bound ids remain
   deferred
+- `sessionToken` is a server-issued opaque resume capability; clients MUST
+  present the latest token when resuming an existing session
 - `seenSeq` is the highest canonical seq the client has fully integrated into
   confirmed state
 - `resumed: true` means the server found an existing logical session for the
   supplied `(space, sessionId)` pair
+- the server rotates `sessionToken` on every successful `session.open`
+- at most one connection may own a given `(space, sessionId)` at a time
+- a successful resume transfers ownership to the new connection, invalidates the
+  old owner for that session, and MAY emit `session/revoked` to the previous
+  owner with reason `"taken-over"`
+- a stale `sessionToken` MUST fail with `SessionRevokedError`
 - when a resumed session already has watches installed, `sync` carries the
   catch-up delta the client missed while offline
 - after reconnect, the client resumes the session, replays retained commits,
@@ -164,6 +174,7 @@ The server sends:
 
 - `response` for command results
 - `session/effect` for catch-up sync on an open logical session
+- `session/revoked` when a session loses ownership to a newer connection
 
 ```typescript
 interface ResponseMessage<Result> {
@@ -178,6 +189,13 @@ interface SessionEffect<Effect> {
   space: SpaceId;
   sessionId: SessionId;
   effect: Effect;
+}
+
+interface SessionRevoked {
+  type: "session/revoked";
+  space: SpaceId;
+  sessionId: SessionId;
+  reason: "taken-over";
 }
 ```
 

@@ -363,12 +363,20 @@ the underlying semantic write.
 
 Pending-read resolution is scoped to a logical session, not to a single
 WebSocket connection. The server issues a `sessionId` bound to the authenticated
-client and space.
+client and space. The server also issues a rotating `sessionToken` that the
+client must present to resume that logical session.
+
+At most one connection may own a given logical session at a time. When a newer
+connection successfully resumes a session with the current token, ownership
+transfers to that connection, the old owner is revoked for that session, and
+the server rotates the token. A client presenting a stale token receives
+`SessionRevokedError` and must not assume it can continue replaying retained
+commits on that session.
 
 On reconnect:
 
 1. the client resumes the logical session and reports the highest canonical
-   `seenSeq` it has fully integrated
+   `seenSeq` it has fully integrated, along with the latest `sessionToken`
 2. the client replays retained unacknowledged commits for that session
 3. the server deduplicates by `(sessionId, localSeq)`
 4. the client re-establishes its watch set and receives session-scoped catch-up

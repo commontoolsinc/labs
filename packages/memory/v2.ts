@@ -18,6 +18,7 @@ export const DEFAULT_BRANCH = "" as const;
 export type EntityId = string;
 export type BranchName = string;
 export type SessionId = string;
+export type SessionToken = string;
 export type JobId = `job:${string}`;
 export type Reference = string & {
   readonly __memoryV2Reference: unique symbol;
@@ -120,6 +121,7 @@ export interface ClientCommit {
 export interface SessionOpenArgs {
   sessionId?: SessionId;
   seenSeq?: number;
+  sessionToken?: SessionToken;
 }
 
 export interface SessionOpenCommand {
@@ -131,6 +133,7 @@ export interface SessionOpenCommand {
 
 export interface SessionOpenResult {
   sessionId: SessionId;
+  sessionToken: SessionToken;
   serverSeq: number;
   resumed?: boolean;
   sync?: SessionSync;
@@ -158,6 +161,7 @@ export interface HelloOkMessage {
 export interface SessionDescriptor {
   sessionId?: SessionId;
   seenSeq?: number;
+  sessionToken?: SessionToken;
 }
 
 export interface SessionOpenRequest {
@@ -298,6 +302,13 @@ export interface SessionEffectMessage {
   effect: SessionSync;
 }
 
+export interface SessionRevokedMessage {
+  type: "session/revoked";
+  space: string;
+  sessionId: SessionId;
+  reason: "taken-over";
+}
+
 export interface V2Error {
   name: string;
   message: string;
@@ -325,7 +336,8 @@ export type ClientMessage =
 export type ServerMessage =
   | HelloOkMessage
   | ResponseMessage<unknown>
-  | SessionEffectMessage;
+  | SessionEffectMessage
+  | SessionRevokedMessage;
 
 const memoryV2ReconstructionContext: ReconstructionContext = {
   getCell() {

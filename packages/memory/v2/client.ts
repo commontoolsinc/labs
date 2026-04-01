@@ -13,6 +13,7 @@ import {
   type ServerMessage,
   type SessionEffectMessage,
   type SessionOpenResult,
+  type SessionRevokedMessage,
   type SessionSync,
   type WatchAddResult,
   type WatchSetResult,
@@ -35,6 +36,7 @@ export interface ConnectOptions {
 export interface MountOptions {
   sessionId?: string;
   seenSeq?: number;
+  sessionToken?: string;
 }
 
 export interface SessionOpenAuth {
@@ -112,6 +114,7 @@ export class Client {
       this,
       space,
       result.sessionId,
+      result.sessionToken,
       result.serverSeq,
       openAuthFactory,
     );
@@ -240,6 +243,17 @@ export class Client {
       }
       return;
     }
+    if (isSessionRevoked(message)) {
+      for (const session of this.#spaces) {
+        if (
+          session.sessionId === message.sessionId &&
+          session.space === message.space
+        ) {
+          session.handleRevoked(message.reason);
+        }
+      }
+      return;
+    }
     if (isResponse(message)) {
       const pending = this.#pending.get(message.requestId);
       if (pending) {
@@ -335,6 +349,7 @@ export class SpaceSession {
   #watchSpecs: WatchSpec[] = [];
   #watchView: WatchView | null = null;
   #sessionId: string;
+  #sessionToken: string | undefined;
   #serverSeq: number;
   #ackedSeq = 0;
   #pendingAckSeq = 0;
@@ -343,16 +358,19 @@ export class SpaceSession {
   #background = new Set<Promise<void>>();
   #watchMutation: Promise<void> = Promise.resolve();
   #closed = false;
+  #closeError: Error | null = null;
   #restoring = false;
 
   constructor(
     private readonly client: Client,
     readonly space: string,
     sessionId: string,
+    sessionToken: string | undefined,
     serverSeq: number,
     private readonly openAuthFactory?: SessionOpenAuthFactory,
   ) {
     this.#sessionId = sessionId;
+    this.#sessionToken = sessionToken;
     this.#serverSeq = serverSeq;
     this.#ackedSeq = serverSeq;
   }
@@ -361,13 +379,17 @@ export class SpaceSession {
     return this.#sessionId;
   }
 
+  get sessionToken(): string | undefined {
+    return this.#sessionToken;
+  }
+
   get serverSeq(): number {
     return this.#serverSeq;
   }
 
   #assertOpen(): void {
     if (this.#closed) {
-      throw new Error("memory/v2 session closed");
+      throw this.#closeError ?? new Error("memory/v2 session closed");
     }
   }
 
@@ -521,7 +543,16 @@ export class SpaceSession {
     }
     this.#restoring = true;
     try {
-      const restored = await this.reopen();
+      let restored: SessionOpenResult;
+      try {
+        restored = await this.reopen();
+      } catch (error) {
+        if (isSessionRevokedError(error)) {
+          this.handleRevoked("taken-over");
+          return;
+        }
+        throw error;
+      }
       if (this.#closed) {
         return;
       }
@@ -566,6 +597,7 @@ export class SpaceSession {
       return;
     }
     this.#closed = true;
+    this.#closeError = new Error("memory/v2 session closed");
     this.client.forgetSession(this);
     await this.#flushing;
     for (const pending of this.#outstandingCommits.values()) {
@@ -578,6 +610,24 @@ export class SpaceSession {
     const background = [...this.#background];
     this.#background.clear();
     await Promise.allSettled(background);
+  }
+
+  handleRevoked(reason: SessionRevokedMessage["reason"]): void {
+    if (this.#closed) {
+      return;
+    }
+    const error = new Error(`memory/v2 session revoked: ${reason}`);
+    error.name = "SessionRevokedError";
+    this.#closed = true;
+    this.#closeError = error;
+    this.client.forgetSession(this);
+    for (const pending of this.#outstandingCommits.values()) {
+      pending.pending.reject(error);
+    }
+    this.#outstandingCommits.clear();
+    this.#watchSpecs = [];
+    this.#watchView?.close();
+    this.#watchView = null;
   }
 
   private queueBackground(task: Promise<void>): void {
@@ -657,13 +707,16 @@ export class SpaceSession {
     const session = {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
+      sessionToken: this.#sessionToken,
     };
     const auth = await this.openAuthFactory?.(this.space, session);
     const restored = await this.client.openSession(this.space, {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
+      sessionToken: this.#sessionToken,
     }, auth);
     this.#sessionId = restored.sessionId;
+    this.#sessionToken = restored.sessionToken ?? this.#sessionToken;
     this.noteResult(restored.serverSeq);
 
     if (restored.sessionId !== oldSessionId) {
@@ -1008,6 +1061,16 @@ const isSessionEffect = (
     (message as { type?: string }).type === "session/effect";
 };
 
+const isSessionRevoked = (
+  message: unknown,
+): message is SessionRevokedMessage => {
+  return typeof message === "object" && message !== null &&
+    (message as { type?: string }).type === "session/revoked" &&
+    typeof (message as { space?: string }).space === "string" &&
+    typeof (message as { sessionId?: string }).sessionId === "string" &&
+    (message as { reason?: string }).reason === "taken-over";
+};
+
 const isResponse = (message: unknown): message is ResponseMessage<unknown> => {
   return typeof message === "object" && message !== null &&
     (message as { type?: string }).type === "response" &&
@@ -1016,3 +1079,6 @@ const isResponse = (message: unknown): message is ResponseMessage<unknown> => {
 
 const isEmptySync = (sync: SessionSync): boolean =>
   sync.upserts.length === 0 && sync.removes.length === 0;
+
+const isSessionRevokedError = (error: unknown): boolean =>
+  error instanceof Error && error.name === "SessionRevokedError";

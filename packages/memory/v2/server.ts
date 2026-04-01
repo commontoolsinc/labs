@@ -27,8 +27,10 @@ import {
   type SessionEffectMessage,
   type SessionOpenRequest,
   type SessionOpenResult,
+  type SessionRevokedMessage,
   type SessionSync,
   type SessionSyncUpsert,
+  type SessionToken,
   type TransactRequest,
   type V2Error,
   type WatchAddRequest,
@@ -54,6 +56,7 @@ type SessionCacheEntry = SessionSyncUpsert;
 type SessionState = {
   id: string;
   space: string;
+  sessionToken: SessionToken;
   seenSeq: number;
   lastSyncedSeq: number;
   watches: WatchSpec[];
@@ -61,8 +64,12 @@ type SessionState = {
   entities: Map<string, SessionCacheEntry>;
   trackedIds: Set<string>;
   expiresAt: number | null;
-  attachedConnections: number;
+  ownerConnectionId: string | null;
   principal?: string;
+};
+
+type OpenSessionState = SessionOpenResult & {
+  revokedConnectionId?: string;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -106,6 +113,12 @@ const sessionKey = (space: string, sessionId: string): string =>
 
 const authorizationError = (message: string): Error =>
   Object.assign(new Error(message), { name: "AuthorizationError" });
+
+const revokedError = (message: string): Error =>
+  Object.assign(new Error(message), { name: "SessionRevokedError" });
+
+const nextSessionToken = (): SessionToken =>
+  crypto.randomUUID() as SessionToken;
 
 const toCacheEntry = (
   entity: EntitySnapshot,
@@ -264,8 +277,9 @@ export class SessionRegistry {
     space: string,
     session: SessionDescriptor,
     serverSeq: number,
+    ownerConnectionId = "session-registry",
     principal?: string,
-  ): SessionOpenResult {
+  ): OpenSessionState {
     this.#prune();
     const sessionId = session.sessionId ?? crypto.randomUUID();
     const key = sessionKey(space, sessionId);
@@ -278,13 +292,28 @@ export class SessionRegistry {
         `session ${sessionId} is already bound to ${existing.principal}`,
       );
     }
+    if (
+      existing !== undefined &&
+      session.sessionToken !== existing.sessionToken
+    ) {
+      throw revokedError(
+        `session ${sessionId} resume token is no longer valid`,
+      );
+    }
     const seenSeq = Math.max(
       existing?.seenSeq ?? 0,
       session.seenSeq ?? 0,
     );
+    const sessionToken = nextSessionToken();
+    const revokedConnectionId = existing?.ownerConnectionId !== undefined &&
+        existing.ownerConnectionId !== null &&
+        existing.ownerConnectionId !== ownerConnectionId
+      ? existing.ownerConnectionId
+      : undefined;
     this.#sessions.set(key, {
       id: sessionId,
       space,
+      sessionToken,
       seenSeq,
       lastSyncedSeq: existing?.lastSyncedSeq ?? seenSeq,
       watches: existing?.watches ?? [],
@@ -292,16 +321,16 @@ export class SessionRegistry {
       entities: existing?.entities ?? new Map(),
       trackedIds: existing?.trackedIds ??
         trackedIdsFromEntries(existing?.entities?.values() ?? []),
-      expiresAt: existing?.attachedConnections === 0
-        ? existing.expiresAt
-        : null,
-      attachedConnections: existing?.attachedConnections ?? 0,
+      expiresAt: null,
+      ownerConnectionId,
       principal: existing?.principal ?? principal,
     });
     return {
       sessionId,
+      sessionToken,
       serverSeq,
       ...(existing !== undefined ? { resumed: true } : {}),
+      ...(revokedConnectionId ? { revokedConnectionId } : {}),
     };
   }
 
@@ -323,24 +352,11 @@ export class SessionRegistry {
     return session;
   }
 
-  attach(space: string, sessionId: string): void {
+  detach(space: string, sessionId: string, ownerConnectionId: string): void {
     const session = this.#sessions.get(sessionKey(space, sessionId));
-    if (session !== undefined) {
-      session.attachedConnections += 1;
-      session.expiresAt = null;
-    }
-  }
-
-  detach(space: string, sessionId: string): void {
-    const session = this.#sessions.get(sessionKey(space, sessionId));
-    if (session !== undefined) {
-      session.attachedConnections = Math.max(
-        session.attachedConnections - 1,
-        0,
-      );
-      if (session.attachedConnections === 0) {
-        session.expiresAt = Date.now() + this.#ttlMs;
-      }
+    if (session?.ownerConnectionId === ownerConnectionId) {
+      session.ownerConnectionId = null;
+      session.expiresAt = Date.now() + this.#ttlMs;
     }
   }
 }
@@ -358,7 +374,11 @@ class Connection {
   #sessions = new Map<string, SessionHandle>();
   #receiving: Promise<void> = Promise.resolve();
 
-  constructor(private readonly server: Server, private readonly send: Send) {}
+  constructor(
+    readonly id: string,
+    private readonly server: Server,
+    private readonly send: Send,
+  ) {}
 
   hasSession(space: string, sessionId: string): boolean {
     return this.#sessions.has(sessionKey(space, sessionId));
@@ -370,7 +390,23 @@ class Connection {
       return;
     }
     this.#sessions.set(key, { space, sessionId });
-    this.server.attachSession(space, sessionId);
+  }
+
+  revokeSession(
+    space: string,
+    sessionId: string,
+    reason: SessionRevokedMessage["reason"],
+  ): void {
+    const key = sessionKey(space, sessionId);
+    if (!this.#sessions.delete(key) || this.#closed) {
+      return;
+    }
+    this.send({
+      type: "session/revoked",
+      space,
+      sessionId,
+      reason,
+    });
   }
 
   async receive(payload: string): Promise<void> {
@@ -471,7 +507,7 @@ class Connection {
         });
         return;
       case "session.open": {
-        const response = await this.server.openSession(parsed);
+        const response = await this.server.openSession(parsed, this);
         if (response.ok?.sessionId) {
           this.addSession(parsed.space, response.ok.sessionId);
         }
@@ -573,7 +609,7 @@ class Connection {
     }
     this.#closed = true;
     for (const { space, sessionId } of this.#sessions.values()) {
-      this.server.detachSession(space, sessionId);
+      this.server.detachSession(space, sessionId, this.id);
     }
     this.server.disconnect(this);
   }
@@ -581,7 +617,7 @@ class Connection {
 
 export class Server {
   #sessions: SessionRegistry;
-  #connections = new Set<Connection>();
+  #connections = new Map<string, Connection>();
   #engines = new Map<string, Promise<Engine.Engine>>();
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
@@ -605,24 +641,24 @@ export class Server {
   }
 
   connect(send: Send): Connection {
-    const connection = new Connection(this, send);
-    this.#connections.add(connection);
+    const connection = new Connection(crypto.randomUUID(), this, send);
+    this.#connections.set(connection.id, connection);
     return connection;
   }
 
   disconnect(connection: Connection): void {
-    this.#connections.delete(connection);
+    this.#connections.delete(connection.id);
     if (this.#connections.size === 0) {
       this.cancelScheduledRefresh();
     }
   }
 
-  attachSession(space: string, sessionId: string): void {
-    this.#sessions.attach(space, sessionId);
-  }
-
-  detachSession(space: string, sessionId: string): void {
-    this.#sessions.detach(space, sessionId);
+  detachSession(
+    space: string,
+    sessionId: string,
+    ownerConnectionId: string,
+  ): void {
+    this.#sessions.detach(space, sessionId, ownerConnectionId);
   }
 
   async close(): Promise<void> {
@@ -637,6 +673,7 @@ export class Server {
 
   async openSession(
     message: SessionOpenRequest,
+    connection: Connection,
   ): Promise<ResponseMessage<SessionOpenResult>> {
     try {
       const engine = await this.openEngine(message.space);
@@ -645,8 +682,16 @@ export class Server {
         message.space,
         message.session,
         Engine.serverSeq(engine),
+        connection.id,
         principal,
       );
+      if (opened.revokedConnectionId !== undefined) {
+        this.#connections.get(opened.revokedConnectionId)?.revokeSession(
+          message.space,
+          opened.sessionId,
+          "taken-over",
+        );
+      }
       const catchup = opened.resumed === true
         ? await this.syncSessionForConnection(
           message.space,
@@ -657,7 +702,10 @@ export class Server {
         type: "response",
         requestId: message.requestId,
         ok: {
-          ...opened,
+          sessionId: opened.sessionId,
+          sessionToken: opened.sessionToken,
+          serverSeq: opened.serverSeq,
+          ...(opened.resumed === true ? { resumed: true } : {}),
           ...(catchup ? { sync: catchup.effect } : {}),
         },
       };
@@ -667,6 +715,8 @@ export class Server {
         toError(
           error instanceof Error && error.name === "AuthorizationError"
             ? "AuthorizationError"
+            : error instanceof Error && error.name === "SessionRevokedError"
+            ? "SessionRevokedError"
             : "ProtocolError",
           error instanceof Error ? error.message : String(error),
         ),
@@ -1245,7 +1295,7 @@ export class Server {
         if (dirtyIds !== undefined) {
           this.#dirtyDocsBySpace.delete(space);
         }
-        for (const connection of this.#connections) {
+        for (const connection of this.#connections.values()) {
           await connection.refreshDirty(space, dirtyIds);
         }
       }
@@ -1389,6 +1439,9 @@ export const parseClientMessage = (
           : undefined,
         seenSeq: typeof parsed.session.seenSeq === "number"
           ? parsed.session.seenSeq
+          : undefined,
+        sessionToken: typeof parsed.session.sessionToken === "string"
+          ? parsed.session.sessionToken
           : undefined,
       },
       invocation: isRecord(parsed.invocation) ? parsed.invocation : undefined,
