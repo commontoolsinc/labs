@@ -107,6 +107,8 @@ function parseFrontmatter(
 
 type Cancel = () => void;
 
+type ResolveLink = (value: unknown, depth: number) => string | null;
+
 /** Result of resolving an inode to a writable cell path. */
 export interface WritePath {
   spaceName: string;
@@ -117,6 +119,12 @@ export interface WritePath {
   piece: PieceController;
   /** Set when the file is an [FS] projection index file. */
   fsProjection?: "markdown" | "json";
+}
+
+export interface HandlerTarget {
+  piece: PieceController;
+  cellProp: "input" | "result";
+  cellKey: string;
 }
 
 /** Callback to invalidate kernel cache entries (by name under a parent). */
@@ -156,6 +164,21 @@ export class CellBridge {
   private syncing: Set<string> = new Set();
   /** Flag: re-run sync after current pass completes. */
   private syncAgain: Set<string> = new Set();
+  /** Coalesced subtree rebuilds keyed by piece inode + prop name. */
+  private pendingPropRebuilds = new Map<
+    string,
+    {
+      cell: Cell<unknown>;
+      latestValue: unknown;
+      pieceId: string;
+      pieceIno: bigint;
+      pieceName: string;
+      propName: "input" | "result";
+      resolveLink: ResolveLink;
+      spaceName: string;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
   private execCli: string;
   /**
    * Tracks root-level entries created by [FS] projections so they can be
@@ -364,31 +387,50 @@ export class CellBridge {
 
   /** Send a value to a handler (stream) cell. */
   async sendToHandler(ino: bigint, value: unknown): Promise<void> {
+    const target = this.resolveHandlerTarget(ino);
+    if (!target) {
+      throw new Error("Not a handler node");
+    }
+    await this.sendToHandlerTarget(target, value);
+  }
+
+  resolveHandlerTarget(ino: bigint): HandlerTarget | null {
     const node = this.tree.getNode(ino);
     if (
       !node || node.kind !== "callable" || node.callableKind !== "handler"
     ) {
-      throw new Error("Not a handler node");
+      return null;
     }
 
     const parsed = parseMountedCallablePath(this.tree.getPath(ino));
     if (!parsed || parsed.callableKind !== "handler") {
-      throw new Error("Invalid handler path");
+      return null;
     }
 
     const space = this.spaces.get(parsed.spaceName);
-    if (!space) throw new Error(`Space "${parsed.spaceName}" not found`);
+    if (!space) return null;
 
     const piece = this.resolvePieceController(space, parsed);
-    if (!piece) throw new Error(`Piece "${parsed.rootName}" not found`);
+    if (!piece) return null;
 
-    const rootCell = await piece[parsed.cellProp].getCell();
-    const handlerCell = rootCell.key(parsed.cellKey as keyof unknown) as Cell<
+    return {
+      piece,
+      cellProp: node.cellProp,
+      cellKey: node.cellKey,
+    };
+  }
+
+  async sendToHandlerTarget(
+    target: HandlerTarget,
+    value: unknown,
+  ): Promise<void> {
+    const rootCell = await target.piece[target.cellProp].getCell();
+    const handlerCell = rootCell.key(target.cellKey as keyof unknown) as Cell<
       unknown
     >;
     handlerCell.send(value);
-    await piece.manager().runtime.idle();
-    await piece.manager().synced();
+    await target.piece.manager().runtime.idle();
+    await target.piece.manager().synced();
   }
 
   private resolvePieceController(
@@ -411,6 +453,158 @@ export class CellBridge {
     }
 
     return undefined;
+  }
+
+  private propRebuildKey(
+    pieceIno: bigint,
+    propName: "input" | "result",
+  ): string {
+    return `${pieceIno}:${propName}`;
+  }
+
+  private schedulePropRebuild(args: {
+    cell: Cell<unknown>;
+    newValue: unknown;
+    pieceId: string;
+    pieceIno: bigint;
+    pieceName: string;
+    propName: "input" | "result";
+    resolveLink: ResolveLink;
+    spaceName: string;
+  }): void {
+    const key = this.propRebuildKey(args.pieceIno, args.propName);
+    const pending = this.pendingPropRebuilds.get(key);
+    if (pending) {
+      pending.latestValue = args.newValue;
+      pending.pieceName = args.pieceName;
+      return;
+    }
+
+    const entry = {
+      cell: args.cell,
+      latestValue: args.newValue,
+      pieceId: args.pieceId,
+      pieceIno: args.pieceIno,
+      pieceName: args.pieceName,
+      propName: args.propName,
+      resolveLink: args.resolveLink,
+      spaceName: args.spaceName,
+      timer: setTimeout(() => {
+        this.pendingPropRebuilds.delete(key);
+        this.rebuildPieceProp({
+          cell: entry.cell,
+          newValue: entry.latestValue,
+          pieceId: entry.pieceId,
+          pieceIno: entry.pieceIno,
+          pieceName: entry.pieceName,
+          propName: entry.propName,
+          resolveLink: entry.resolveLink,
+          spaceName: entry.spaceName,
+        }).catch((e) => {
+          console.error(
+            `[${entry.spaceName}] Error rebuilding ${entry.pieceName}/${entry.propName}: ${e}`,
+          );
+        });
+      }, 0),
+    };
+    this.pendingPropRebuilds.set(key, entry);
+  }
+
+  private async rebuildPieceProp(args: {
+    cell: Cell<unknown>;
+    newValue: unknown;
+    pieceId: string;
+    pieceIno: bigint;
+    pieceName: string;
+    propName: "input" | "result";
+    resolveLink: ResolveLink;
+    spaceName: string;
+  }): Promise<void> {
+    if (this.tree.getNode(args.pieceIno)?.kind !== "dir") {
+      return;
+    }
+
+    const {
+      cell,
+      newValue,
+      pieceId,
+      pieceIno,
+      pieceName,
+      propName,
+      resolveLink,
+      spaceName,
+    } = args;
+
+    const existingIno = this.tree.lookup(pieceIno, propName);
+    if (existingIno !== undefined) {
+      this.tree.clear(existingIno);
+    }
+    const jsonIno = this.tree.lookup(pieceIno, `${propName}.json`);
+    if (jsonIno !== undefined) {
+      this.tree.clear(jsonIno);
+    }
+    if (propName === "result") {
+      this.clearFsProjectionEntries(pieceIno);
+    }
+
+    const treeValue = this.materializeTreeValue(cell, newValue);
+    let callables: Array<
+      { key: string; callableKind: CallableKind; schema?: JSONSchema }
+    > = [];
+    if (treeValue !== undefined && treeValue !== null) {
+      const {
+        callables: discoveredCallables,
+        classifyEntry,
+        skipEntry,
+      } = this.discoverCallableEntries(cell, treeValue);
+      callables = discoveredCallables;
+
+      if (propName === "result") {
+        const fsValue = this.readFsValue(cell, treeValue);
+        if (fsValue !== null) {
+          const indexName = this.buildFsProjectionTree(
+            pieceIno,
+            pieceId,
+            fsValue,
+            treeValue,
+            callables,
+            resolveLink,
+            skipEntry,
+            classifyEntry,
+          );
+          this.buildHandlersFile(pieceIno, callables);
+          if (this.onInvalidate) {
+            this.onInvalidate(pieceIno, [indexName, ".handlers"]);
+          }
+          return;
+        }
+      }
+
+      const propIno = buildJsonTree(
+        this.tree,
+        pieceIno,
+        propName,
+        treeValue,
+        undefined,
+        resolveLink,
+        0,
+        skipEntry,
+        classifyEntry,
+      );
+      this.addCallableFiles(propIno, callables, propName);
+      if (propName === "result") {
+        this.addVNodeJsonFiles(propIno, treeValue);
+      }
+    }
+    if (propName === "result") {
+      this.buildHandlersFile(pieceIno, callables);
+    }
+
+    if (this.onInvalidate) {
+      this.onInvalidate(pieceIno, [propName, `${propName}.json`]);
+    }
+
+    console.log(`[${spaceName}] Updated ${pieceName}/${propName}`);
   }
 
   /**
@@ -1438,102 +1632,21 @@ export class CellBridge {
       try {
         const cell = await piece[propName].getCell();
         const cancel = cell.sink((newValue: unknown) => {
-          // Defer the tree rebuild out of the current execution context.
-          // cell.sink fires synchronously during cell.set(), which may be
-          // called from within a FUSE callback (e.g. flush). Rebuilding
-          // the tree and calling notify_inval_entry from inside a FUSE
-          // callback crashes FUSE-T and invalidates inodes mid-operation.
-          setTimeout(() => {
-            try {
-              // Clear existing subtree for this prop
-              const existingIno = this.tree.lookup(pieceIno, propName);
-              if (existingIno !== undefined) {
-                this.tree.clear(existingIno);
-              }
-              // Also clear the .json sibling
-              const jsonIno = this.tree.lookup(
-                pieceIno,
-                `${propName}.json`,
-              );
-              if (jsonIno !== undefined) {
-                this.tree.clear(jsonIno);
-              }
-              if (propName === "result") {
-                this.clearFsProjectionEntries(pieceIno);
-              }
-
-              // Rebuild
-              const treeValue = this.materializeTreeValue(cell, newValue);
-              let callables: Array<
-                { key: string; callableKind: CallableKind; schema?: JSONSchema }
-              > = [];
-              if (treeValue !== undefined && treeValue !== null) {
-                const {
-                  callables: discoveredCallables,
-                  classifyEntry,
-                  skipEntry,
-                } = this
-                  .discoverCallableEntries(
-                    cell,
-                    treeValue,
-                  );
-                callables = discoveredCallables;
-
-                if (propName === "result") {
-                  const fsValue = this.readFsValue(cell, treeValue);
-                  if (fsValue !== null) {
-                    const indexName = this.buildFsProjectionTree(
-                      pieceIno,
-                      piece.id,
-                      fsValue,
-                      treeValue,
-                      callables,
-                      resolveLink,
-                      skipEntry,
-                      classifyEntry,
-                    );
-                    this.buildHandlersFile(pieceIno, callables);
-                    if (this.onInvalidate) {
-                      this.onInvalidate(pieceIno, [indexName, ".handlers"]);
-                    }
-                    return;
-                  }
-                }
-
-                const propIno = buildJsonTree(
-                  this.tree,
-                  pieceIno,
-                  propName,
-                  treeValue,
-                  undefined,
-                  resolveLink,
-                  0,
-                  skipEntry,
-                  classifyEntry,
-                );
-                this.addCallableFiles(propIno, callables, propName);
-                if (propName === "result") {
-                  this.addVNodeJsonFiles(propIno, treeValue);
-                }
-              }
-              if (propName === "result") {
-                this.buildHandlersFile(pieceIno, callables);
-              }
-
-              // Invalidate kernel cache
-              if (this.onInvalidate) {
-                this.onInvalidate(pieceIno, [propName, `${propName}.json`]);
-              }
-
-              console.log(
-                `[${spaceName}] Updated ${pieceName}/${propName}`,
-              );
-            } catch (e) {
-              console.error(
-                `[${spaceName}] Error rebuilding ${pieceName}/${propName}: ${e}`,
-              );
-            }
-          }, 0);
+          // Defer and coalesce the tree rebuild out of the current execution
+          // context. cell.sink fires synchronously during cell.set(), which may
+          // be called from within a FUSE callback (e.g. flush). Rebuilding the
+          // tree and calling notify_inval_entry from inside a FUSE callback
+          // crashes FUSE-T and invalidates inodes mid-operation.
+          this.schedulePropRebuild({
+            cell,
+            newValue,
+            pieceId: piece.id,
+            pieceIno,
+            pieceName: piece.name() || pieceName,
+            propName,
+            resolveLink,
+            spaceName,
+          });
         });
         cancels.push(cancel);
       } catch (e) {

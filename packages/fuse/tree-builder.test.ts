@@ -762,6 +762,77 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
   ]);
 });
 
+Deno.test("CellBridge.sendToHandlerTarget survives callable inode rebuilds", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree);
+  const calls: Array<{
+    channel: "input" | "result";
+    path: (string | number)[] | undefined;
+    value: unknown;
+  }> = [];
+  const makeChannel = (channel: "input" | "result") => ({
+    key: (key: string) => ({
+      send: (value: unknown) => {
+        calls.push({ channel, value, path: [key] });
+      },
+    }),
+  });
+  const piece = {
+    id: "of:entity-123",
+    input: {
+      getCell: () => Promise.resolve(makeChannel("input")),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeChannel("result")),
+    },
+    manager: () => ({
+      runtime: { idle: () => Promise.resolve() },
+      synced: () => Promise.resolve(),
+    }),
+  };
+
+  const spaceIno = tree.addDir(tree.rootIno, "home");
+  const piecesIno = tree.addDir(spaceIno, "pieces");
+  const entitiesIno = tree.addDir(spaceIno, "entities");
+  const pieceIno = tree.addDir(piecesIno, "notes");
+  const pieceResultIno = tree.addDir(pieceIno, "result", "object");
+  const script = buildCallableScript("/tmp/ct-exec");
+
+  const handlerIno = tree.addCallable(
+    pieceResultIno,
+    "add.handler",
+    "handler",
+    "add",
+    "result",
+    script,
+  );
+
+  bridge.spaces.set("home", {
+    manager: {} as never,
+    pieces: {} as never,
+    spaceIno,
+    piecesIno,
+    entitiesIno,
+    pieceMap: new Map([["notes", "of:entity-123"]]),
+    pieceControllers: new Map([["notes", piece as never]]),
+    pieceSubs: new Map(),
+    did: "did:key:home",
+    unsubscribes: [],
+    usedNames: new Set(["notes"]),
+  });
+
+  const target = bridge.resolveHandlerTarget(handlerIno);
+  assertEquals(target !== null, true);
+
+  tree.clear(pieceResultIno);
+
+  await bridge.sendToHandlerTarget(target!, { count: 3 });
+
+  assertEquals(calls, [
+    { channel: "result", value: { count: 3 }, path: ["add"] },
+  ]);
+});
+
 Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse result roots", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/ct-exec");
