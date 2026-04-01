@@ -176,12 +176,13 @@ Handlers are executables. Invoke them directly with CLI flags.
 # '"book"' not 'book' — the outer quotes are shell, inner are JSON
 ```
 
-**Void handlers need `--value null`:**
+**Void handlers can be invoked with no args:**
 
 ```bash
-"MOUNT/SPACE/pieces/Contact Book/result/onAddContact.handler" --value null
-# Without --value null: "Handler requires input. Expected type: unknown" — does nothing
+"MOUNT/SPACE/pieces/Contact Book/result/onAddContact.handler"
 ```
+
+Use `--value null` only if you specifically need the older explicit form.
 
 **NEVER redirect to handler files (CT-1417):**
 
