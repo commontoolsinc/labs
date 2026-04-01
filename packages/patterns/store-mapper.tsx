@@ -1555,10 +1555,12 @@ export default pattern<Input, Output>(
                               </ct-button>
                             </ct-hstack>
 
-                            {/* Status: pending / error / results
+                            {
+                              /* Status: pending / error / results
                                  Uses nested ifElse with static JSX branches.
                                  Note: computed() returning JSX does not render
-                                 inside ifElse branches within mapWithPattern. */}
+                                 inside ifElse branches within mapWithPattern. */
+                            }
                             {ifElse(
                               extraction.pending,
                               <div
