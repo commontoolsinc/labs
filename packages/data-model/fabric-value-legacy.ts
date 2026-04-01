@@ -16,7 +16,7 @@ import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
  * @param value - The value to check and potentially convert.
  * @returns The fabric form of the instance, or `null` if not recognized.
  */
-function specialInstanceToStorableValue(
+function specialInstanceToFabricValue(
   value: unknown,
 ): FabricValueLayer | null {
   if (Error.isError(value)) {
@@ -87,7 +87,7 @@ export function isFabricValueLegacy(
       if (value === null) {
         return true;
       } else if (Array.isArray(value)) {
-        return isStorableArray(value);
+        return isFabricArray(value);
       } else {
         return !isInstance(value);
       }
@@ -215,7 +215,7 @@ export function shallowFabricFromNativeValueLegacy(
           "Cannot store function per se (needs to have a `toJSON()` method)",
         );
       } else if (isInstance(value)) {
-        const special = specialInstanceToStorableValue(value);
+        const special = specialInstanceToFabricValue(value);
         if (special !== null) {
           return special;
         }
@@ -229,7 +229,7 @@ export function shallowFabricFromNativeValueLegacy(
           throw new Error(
             "Cannot store array with enumerable named properties.",
           );
-        } else if (isStorableArray(value)) {
+        } else if (isFabricArray(value)) {
           return value;
         } else {
           // Array has holes or `undefined` elements. Preserve holes (sparse
@@ -282,7 +282,7 @@ export function fabricFromNativeValueLegacy(value: unknown): FabricValue {
   // The internal helper can return OMIT for nested values that should be
   // omitted, but at the top level this never happens (OMIT is only returned
   // when converted.size > 0, i.e., in nested calls).
-  return storableFromNativeValueLegacyInternal(
+  return fabricFromNativeValueLegacyInternal(
     value,
     new Map(),
     false,
@@ -293,7 +293,7 @@ export function fabricFromNativeValueLegacy(value: unknown): FabricValue {
  * Internal recursive implementation. Can return `OMIT` for nested values that
  * should be omitted from objects (functions without toJSON, undefined).
  */
-function storableFromNativeValueLegacyInternal(
+function fabricFromNativeValueLegacyInternal(
   original: unknown,
   converted: Map<object, unknown>,
   inArray: boolean,
@@ -335,7 +335,8 @@ function storableFromNativeValueLegacyInternal(
   }
 
   // Try to convert the top level to fabric form. Calls the legacy function
-  // directly since storableFromNativeValueLegacyInternal is part of the legacy path.
+  // directly since `fabricFromNativeValueLegacyInternal()` is part of the
+  // legacy path.
   let value: FabricValueLayer;
   try {
     value = shallowFabricFromNativeValueLegacy(original);
@@ -370,13 +371,13 @@ function storableFromNativeValueLegacyInternal(
   if (Array.isArray(value)) {
     const arr = new Array(value.length);
     value.forEach((v, i) => {
-      arr[i] = storableFromNativeValueLegacyInternal(v, converted, true);
+      arr[i] = fabricFromNativeValueLegacyInternal(v, converted, true);
     });
     result = arr as FabricValue;
   } else {
     const entries: [string, FabricValue][] = [];
     for (const [key, val] of Object.entries(value)) {
-      const convertedVal = storableFromNativeValueLegacyInternal(
+      const convertedVal = fabricFromNativeValueLegacyInternal(
         val,
         converted,
         false,
@@ -406,7 +407,7 @@ function storableFromNativeValueLegacyInternal(
  * @param array The array to check.
  * @returns `true` if the array is in fabric form, `false` otherwise.
  */
-function isStorableArray(array: unknown[]): boolean {
+function isFabricArray(array: unknown[]): boolean {
   // Reject extra non-numeric properties by checking that all keys are valid
   // array indices. Sparse arrays have fewer keys than length, which is fine.
   if (!isArrayWithOnlyIndexProperties(array)) {
