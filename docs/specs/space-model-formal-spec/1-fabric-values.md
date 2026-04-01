@@ -108,8 +108,9 @@ type FabricValue =
 ```
 
 > **Excluded JS types.** The following JavaScript types are explicitly **not**
-> representable as fabric values and cause rejection (thrown error) in
-> `fabricFromNativeValue()` and `isFabricCompatible()`:
+> representable as fabric values, eliciting a thrown error from
+> `fabricFromNativeValue()` and a `false` return value from
+> `isFabricCompatible()`:
 >
 > - `symbol` — Symbols are inherently local (not serializable across realms or
 >   processes). Symbol-keyed properties on objects are silently ignored; a bare
