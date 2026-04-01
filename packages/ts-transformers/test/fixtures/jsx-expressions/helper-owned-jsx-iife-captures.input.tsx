@@ -11,7 +11,6 @@ import {
   action,
   Default,
   pattern,
-  Stream,
   UI,
   VNode,
   Writable,
