@@ -44,15 +44,6 @@ import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
 import { getTypeAtLocationWithFallback } from "./utils.ts";
 
-const ARRAY_METHOD_NAMES = new Set([
-  "map",
-  "mapWithPattern",
-  "filter",
-  "filterWithPattern",
-  "flatMap",
-  "flatMapWithPattern",
-]);
-
 const BUILDER_SYMBOL_NAMES = COMMONTOOLS_BUILDER_EXPORT_NAMES;
 
 const ARRAY_OWNER_NAMES = new Set([
@@ -87,6 +78,17 @@ export interface ArrayMethodAccessKind {
   readonly family: ArrayMethodFamilyName;
   readonly lowered: boolean;
 }
+
+const ARRAY_METHOD_ACCESS_BY_NAME: Readonly<
+  Record<string, ArrayMethodAccessKind | undefined>
+> = {
+  map: { family: "map", lowered: false },
+  mapWithPattern: { family: "map", lowered: true },
+  filter: { family: "filter", lowered: false },
+  filterWithPattern: { family: "filter", lowered: true },
+  flatMap: { family: "flatMap", lowered: false },
+  flatMapWithPattern: { family: "flatMap", lowered: true },
+};
 
 export type ArrayMethodOwnership = "plain" | "reactive";
 
@@ -387,28 +389,19 @@ export function classifyArrayMethodAccess(
     }
   }
 
-  switch (methodName) {
-    case "map":
-      return { family: "map", lowered: false };
-    case "mapWithPattern":
-      return { family: "map", lowered: true };
-    case "filter":
-      return { family: "filter", lowered: false };
-    case "filterWithPattern":
-      return { family: "filter", lowered: true };
-    case "flatMap":
-      return { family: "flatMap", lowered: false };
-    case "flatMapWithPattern":
-      return { family: "flatMap", lowered: true };
-    default:
-      return undefined;
-  }
+  return methodName ? ARRAY_METHOD_ACCESS_BY_NAME[methodName] : undefined;
 }
 
 export function classifyArrayMethodCall(
   call: ts.CallExpression,
 ): ArrayMethodAccessKind | undefined {
   return classifyArrayMethodAccess(call.expression);
+}
+
+export function getLoweredArrayMethodName(
+  family: ArrayMethodFamilyName,
+): string {
+  return `${family}WithPattern`;
 }
 
 export function classifyArrayMethodCallSite(
@@ -930,7 +923,7 @@ function resolveExpressionKind(
 
   if (ts.isPropertyAccessExpression(target)) {
     const name = target.name.text;
-    if (ARRAY_METHOD_NAMES.has(name)) {
+    if (ARRAY_METHOD_ACCESS_BY_NAME[name]) {
       // Fallback path: when symbol resolution doesn't already identify the
       // array-method family, only treat it as such for reactive receivers.
       if (isReactiveArrayMethodReceiverExpression(target.expression, checker)) {
@@ -1022,7 +1015,7 @@ export function isConsumedByTerminalChainCall(
       ts.isPropertyAccessExpression(parent) && parent.expression === current
     ) {
       const memberName = parent.name.text;
-      if (ARRAY_METHOD_NAMES.has(memberName)) {
+      if (ARRAY_METHOD_ACCESS_BY_NAME[memberName]) {
         const callParent = parent.parent;
         if (
           callParent &&
@@ -1598,7 +1591,7 @@ function detectCellMethodFromDeclaration(
 function isArrayMethodDeclaration(declaration: ts.Declaration): boolean {
   return isMethodDeclarationOwnedBy(
     declaration,
-    ARRAY_METHOD_NAMES,
+    (name) => !!ARRAY_METHOD_ACCESS_BY_NAME[name],
     ARRAY_OWNER_NAMES,
   );
 }
@@ -1606,18 +1599,18 @@ function isArrayMethodDeclaration(declaration: ts.Declaration): boolean {
 function isOpaqueRefMethodDeclaration(declaration: ts.Declaration): boolean {
   return isMethodDeclarationOwnedBy(
     declaration,
-    ARRAY_METHOD_NAMES,
+    (name) => !!ARRAY_METHOD_ACCESS_BY_NAME[name],
     OPAQUE_REF_OWNER_NAMES,
   );
 }
 
 function isMethodDeclarationOwnedBy(
   declaration: ts.Declaration,
-  methodNames: ReadonlySet<string>,
+  hasMethodName: (name: string) => boolean,
   ownerNames: ReadonlySet<string>,
 ): boolean {
   if (!hasIdentifierName(declaration)) return false;
-  if (!methodNames.has(declaration.name.text)) return false;
+  if (!hasMethodName(declaration.name.text)) return false;
 
   const owner = findOwnerName(declaration);
   return !!owner && ownerNames.has(owner);

@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import { classifyArrayMethodCall } from "./call-kind.ts";
 import {
   getTypeAtLocationWithFallback,
   isDefaultAliasSymbol,
@@ -1155,8 +1156,6 @@ export function isDeriveCall(expr: ts.Expression): boolean {
   return false;
 }
 
-const REACTIVE_ARRAY_METHODS = new Set(["map", "filter", "flatMap"]);
-
 /**
  * Checks if a call expression is a .map()/.filter()/.flatMap() call on a reactive array
  * (OpaqueRef<T[]> or Cell<T[]>). Used to determine if the call will be transformed to
@@ -1172,11 +1171,11 @@ export function isReactiveArrayMethodCall(
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
   logger?: (message: string) => void,
 ): boolean {
-  // Check if this is a property access expression with a reactive array method name
-  if (!ts.isPropertyAccessExpression(node.expression)) return false;
-  if (!REACTIVE_ARRAY_METHODS.has(node.expression.name.text)) return false;
+  const arrayMethodInfo = classifyArrayMethodCall(node);
+  if (!arrayMethodInfo || arrayMethodInfo.lowered) return false;
 
   // Get the type of the target (what we're calling .map on)
+  if (!ts.isPropertyAccessExpression(node.expression)) return false;
   const target = node.expression.expression;
 
   // Special case: derive() always returns OpaqueRef<T> at runtime.

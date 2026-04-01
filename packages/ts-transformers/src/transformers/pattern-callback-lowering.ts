@@ -1,5 +1,6 @@
 import ts from "typescript";
 import {
+  classifyArrayMethodCall,
   getCapabilitySummaryCallbackArgument,
   getPatternBuilderCallbackArgument,
   visitEachChildWithJsx,
@@ -13,12 +14,6 @@ import {
   addBindingTargetSymbols,
   isOpaqueSourceExpression,
 } from "./opaque-roots.ts";
-
-const ARRAY_METHOD_PATTERN_METHOD_NAMES = new Set([
-  "mapWithPattern",
-  "filterWithPattern",
-  "flatMapWithPattern",
-]);
 
 interface PatternScopeInfo {
   opaqueNames: Set<string>;
@@ -128,8 +123,7 @@ function getArrayMethodCallbackInfo(
     !parent ||
     !ts.isCallExpression(parent) ||
     parent.arguments[0] !== patternCall ||
-    !ts.isPropertyAccessExpression(parent.expression) ||
-    !ARRAY_METHOD_PATTERN_METHOD_NAMES.has(parent.expression.name.text)
+    !classifyArrayMethodCall(parent)?.lowered
   ) {
     return { isArrayMethodCallback: false };
   }

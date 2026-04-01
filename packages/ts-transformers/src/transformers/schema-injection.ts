@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import {
+  classifyArrayMethodCall,
   detectCallKind,
   ensureTypeNodeRegistered,
   getTypeAtLocationWithFallback,
@@ -1391,8 +1392,10 @@ function isMapWithPatternCallbackPatternCall(node: ts.CallExpression): boolean {
   if (parent.arguments[0] !== node) {
     return false;
   }
-  return ts.isPropertyAccessExpression(parent.expression) &&
-    parent.expression.name.text === "mapWithPattern";
+  const arrayMethodInfo = classifyArrayMethodCall(parent);
+  return !!arrayMethodInfo &&
+    arrayMethodInfo.lowered &&
+    arrayMethodInfo.family === "map";
 }
 
 function handlePatternSchemaInjection(

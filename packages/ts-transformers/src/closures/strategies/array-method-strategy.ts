@@ -2,8 +2,10 @@ import ts from "typescript";
 import { type TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
+  classifyArrayMethodCall,
   classifyReactiveContext,
   getEnclosingFunctionLikeDeclaration,
+  getLoweredArrayMethodName,
   getTypeAtLocationWithFallback,
   hasReactiveCollectionProvenance,
   isConsumedByTerminalChainCall,
@@ -39,20 +41,20 @@ import {
 } from "../../utils/reactive-keys.ts";
 import { rewriteArrayMethodCallbackExpressionSites } from "../../transformers/expression-site-lowering.ts";
 
-const METHOD_TO_WITH_PATTERN: Record<string, string> = {
-  map: "mapWithPattern",
-  filter: "filterWithPattern",
-  flatMap: "flatMapWithPattern",
-};
-
 export class ArrayMethodStrategy implements ClosureTransformationStrategy {
   canTransform(
     node: ts.Node,
     _context: TransformationContext,
   ): boolean {
-    return ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      Object.hasOwn(METHOD_TO_WITH_PATTERN, node.expression.name.text);
+    if (
+      !ts.isCallExpression(node) ||
+      !ts.isPropertyAccessExpression(node.expression)
+    ) {
+      return false;
+    }
+
+    const arrayMethodInfo = classifyArrayMethodCall(node);
+    return !!arrayMethodInfo && !arrayMethodInfo.lowered;
   }
 
   transform(
@@ -187,10 +189,11 @@ function shouldTransformArrayMethod(
 ): boolean {
   if (!ts.isPropertyAccessExpression(methodCall.expression)) return false;
 
-  const methodName = methodCall.expression.name.text;
-  if (!Object.hasOwn(METHOD_TO_WITH_PATTERN, methodName)) {
+  const arrayMethodInfo = classifyArrayMethodCall(methodCall);
+  if (!arrayMethodInfo || arrayMethodInfo.lowered) {
     return false;
   }
+  const methodName = arrayMethodInfo.family;
 
   if (isConsumedByTerminalChainCall(methodCall)) {
     return false;
@@ -508,10 +511,13 @@ function createPatternCallWithParams(
     context,
   );
 
-  const originalMethodName =
-    (methodCall.expression as ts.PropertyAccessExpression).name.text;
-  const targetMethodName = METHOD_TO_WITH_PATTERN[originalMethodName] ??
-    "mapWithPattern";
+  const originalMethodName = classifyArrayMethodCall(methodCall);
+  if (!originalMethodName || originalMethodName.lowered) {
+    throw new Error("Expected methodCall to be a source array method call");
+  }
+  const targetMethodName = getLoweredArrayMethodName(
+    originalMethodName.family,
+  );
   const mapWithPatternAccess = factory.createPropertyAccessExpression(
     loweredArrayExpr,
     factory.createIdentifier(targetMethodName),
