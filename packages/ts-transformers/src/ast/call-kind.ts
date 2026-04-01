@@ -146,6 +146,54 @@ export type WildcardTraversalCallKind =
   | "object-wildcard-traversal"
   | "json-stringify";
 
+type ExpressionCache<T> = WeakMap<ts.TypeChecker, WeakMap<ts.Expression, T>>;
+
+const callKindCacheByChecker: ExpressionCache<CallKind | null> = new WeakMap();
+const directBuilderKindCacheByChecker: ExpressionCache<
+  Extract<CallKind, { kind: "builder" }> | null
+> = new WeakMap();
+const reactiveValueCacheByChecker: ExpressionCache<boolean> = new WeakMap();
+const reactiveCollectionProvenanceCacheByChecker: ExpressionCache<boolean> =
+  new WeakMap();
+
+function getCheckerExpressionCache<T>(
+  cacheByChecker: ExpressionCache<T>,
+  checker: ts.TypeChecker,
+): WeakMap<ts.Expression, T> {
+  let cache = cacheByChecker.get(checker);
+  if (!cache) {
+    cache = new WeakMap<ts.Expression, T>();
+    cacheByChecker.set(checker, cache);
+  }
+  return cache;
+}
+
+function getCachedExpressionValue<T>(
+  cacheByChecker: ExpressionCache<T>,
+  checker: ts.TypeChecker,
+  expression: ts.Expression,
+  compute: () => T,
+): T {
+  const cache = getCheckerExpressionCache(cacheByChecker, checker);
+  if (cache.has(expression)) {
+    return cache.get(expression)!;
+  }
+  const value = compute();
+  cache.set(expression, value);
+  return value;
+}
+
+function usesDefaultReactiveCollectionProvenanceOptions(
+  options: ReactiveCollectionProvenanceOptions,
+): boolean {
+  return options.allowTypeBasedRoot === undefined &&
+    options.allowImplicitReactiveParameters === undefined &&
+    options.allowReactiveArrayCallbackParameters === undefined &&
+    options.sameScope === undefined &&
+    options.typeRegistry === undefined &&
+    options.logger === undefined;
+}
+
 export function detectCallKind(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -157,13 +205,12 @@ export function detectDirectBuilderCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
 ): Extract<CallKind, { kind: "builder" }> | undefined {
-  const builderKind = resolveBuilderExpressionKind(
+  return resolveBuilderExpressionKind(
     call.expression,
     checker,
     new Set(),
     { followFactoryResults: false },
   );
-  return builderKind?.kind === "builder" ? builderKind : undefined;
 }
 
 export function isPatternBuilderCall(
@@ -567,39 +614,49 @@ export function isReactiveValueExpression(
   expression: ts.Expression,
   checker: ts.TypeChecker,
 ): boolean {
-  const target = stripWrappers(expression);
+  return getCachedExpressionValue(
+    reactiveValueCacheByChecker,
+    checker,
+    expression,
+    () => {
+      const target = stripWrappers(expression);
 
-  try {
-    const type = checker.getTypeAtLocation(target);
-    if (isOpaqueRefType(type, checker)) {
-      return true;
-    }
-  } catch {
-    // Fall through to structural analysis.
-  }
+      try {
+        const type = checker.getTypeAtLocation(target);
+        if (isOpaqueRefType(type, checker)) {
+          return true;
+        }
+      } catch {
+        // Fall through to structural analysis.
+      }
 
-  if (ts.isIdentifier(target)) {
-    return isReactiveValueSymbol(checker.getSymbolAtLocation(target), checker);
-  }
+      if (ts.isIdentifier(target)) {
+        return isReactiveValueSymbol(
+          checker.getSymbolAtLocation(target),
+          checker,
+        );
+      }
 
-  if (
-    ts.isPropertyAccessExpression(target) ||
-    ts.isElementAccessExpression(target)
-  ) {
-    return isReactiveValueExpression(target.expression, checker);
-  }
+      if (
+        ts.isPropertyAccessExpression(target) ||
+        ts.isElementAccessExpression(target)
+      ) {
+        return isReactiveValueExpression(target.expression, checker);
+      }
 
-  if (ts.isCallExpression(target)) {
-    if (classifyOpaquePathTerminalCall(target) === "key") {
-      return true;
-    }
-    if (isReactiveOriginCall(target, checker)) {
-      return true;
-    }
-    return isLoweredReactiveArrayMethodCall(target, checker);
-  }
+      if (ts.isCallExpression(target)) {
+        if (classifyOpaquePathTerminalCall(target) === "key") {
+          return true;
+        }
+        if (isReactiveOriginCall(target, checker)) {
+          return true;
+        }
+        return isLoweredReactiveArrayMethodCall(target, checker);
+      }
 
-  return false;
+      return false;
+    },
+  );
 }
 
 export function hasReactiveCollectionProvenance(
@@ -607,6 +664,21 @@ export function hasReactiveCollectionProvenance(
   checker: ts.TypeChecker,
   options: ReactiveCollectionProvenanceOptions = {},
 ): boolean {
+  if (usesDefaultReactiveCollectionProvenanceOptions(options)) {
+    return getCachedExpressionValue(
+      reactiveCollectionProvenanceCacheByChecker,
+      checker,
+      expression,
+      () =>
+        hasReactiveCollectionProvenanceInternal(
+          expression,
+          checker,
+          options,
+          new Set(),
+        ),
+    );
+  }
+
   return hasReactiveCollectionProvenanceInternal(
     expression,
     checker,
@@ -806,18 +878,31 @@ function resolveExpressionKind(
   checker: ts.TypeChecker,
   seen: Set<ts.Symbol>,
 ): CallKind | undefined {
+  const cache = getCheckerExpressionCache(callKindCacheByChecker, checker);
+  if (cache.has(expression)) {
+    return cache.get(expression) ?? undefined;
+  }
+
   const target = stripWrappers(expression);
 
   const builderKind = resolveBuilderExpressionKind(target, checker, new Set(), {
     followFactoryResults: true,
   });
-  if (builderKind) return builderKind;
+  if (builderKind) {
+    cache.set(expression, builderKind);
+    return builderKind;
+  }
 
   const syntheticHelperKind = getSyntheticHelperCallKind(target);
-  if (syntheticHelperKind) return syntheticHelperKind;
+  if (syntheticHelperKind) {
+    cache.set(expression, syntheticHelperKind);
+    return syntheticHelperKind;
+  }
 
   if (ts.isCallExpression(target)) {
-    return resolveExpressionKind(target.expression, checker, seen);
+    const result = resolveExpressionKind(target.expression, checker, seen);
+    cache.set(expression, result ?? null);
+    return result;
   }
 
   let symbol: ts.Symbol | undefined;
@@ -836,7 +921,10 @@ function resolveExpressionKind(
 
   if (symbol) {
     const kind = resolveSymbolKind(symbol, checker, seen);
-    if (kind) return kind;
+    if (kind) {
+      cache.set(expression, kind);
+      return kind;
+    }
   }
 
   if (ts.isPropertyAccessExpression(target)) {
@@ -845,7 +933,9 @@ function resolveExpressionKind(
       // Fallback path: when symbol resolution doesn't already identify the
       // array-method family, only treat it as such for reactive receivers.
       if (isReactiveArrayMethodReceiverExpression(target.expression, checker)) {
-        return { kind: "array-method" };
+        const result = { kind: "array-method" } as const;
+        cache.set(expression, result);
+        return result;
       }
     }
   }
@@ -856,9 +946,13 @@ function resolveExpressionKind(
     const signatureSymbol = getSignatureSymbol(signature);
     if (!signatureSymbol) continue;
     const kind = resolveSymbolKind(signatureSymbol, checker, seen);
-    if (kind) return kind;
+    if (kind) {
+      cache.set(expression, kind);
+      return kind;
+    }
   }
 
+  cache.set(expression, null);
   return undefined;
 }
 
@@ -1117,10 +1211,18 @@ function resolveBuilderExpressionKind(
   seen: Set<ts.Symbol>,
   options: { followFactoryResults: boolean },
 ): Extract<CallKind, { kind: "builder" }> | undefined {
+  const cache = options.followFactoryResults
+    ? undefined
+    : getCheckerExpressionCache(directBuilderKindCacheByChecker, checker);
+  if (cache?.has(expression)) {
+    return cache.get(expression) ?? undefined;
+  }
+
   const target = stripWrappers(expression);
 
   if (ts.isCallExpression(target)) {
     if (!options.followFactoryResults) {
+      cache?.set(expression, null);
       return undefined;
     }
     return resolveBuilderExpressionKind(
@@ -1134,11 +1236,16 @@ function resolveBuilderExpressionKind(
   const symbol = getExpressionSymbol(target, checker);
   if (symbol) {
     const kind = resolveBuilderSymbolKind(symbol, checker, seen, options);
-    if (kind) return kind;
+    if (kind) {
+      cache?.set(expression, kind);
+      return kind;
+    }
   } else {
     const fallbackName = getDirectBuilderName(target);
     if (fallbackName) {
-      return { kind: "builder", builderName: fallbackName };
+      const result = { kind: "builder", builderName: fallbackName } as const;
+      cache?.set(expression, result);
+      return result;
     }
   }
 
@@ -1154,10 +1261,14 @@ function resolveBuilderExpressionKind(
         seen,
         options,
       );
-      if (kind) return kind;
+      if (kind) {
+        cache?.set(expression, kind);
+        return kind;
+      }
     }
   }
 
+  cache?.set(expression, null);
   return undefined;
 }
 

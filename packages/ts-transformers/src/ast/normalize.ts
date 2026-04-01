@@ -19,9 +19,6 @@ export function normalizeDataFlows(
   graph: DataFlowGraph,
   requestedDataFlows?: ts.Expression[],
 ): NormalizedDataFlowSet {
-  const nodesById = new Map<number, DataFlowNode>();
-  for (const node of graph.nodes) nodesById.set(node.id, node);
-
   // If specific dataFlows were requested, only process nodes corresponding to those expressions
   // This prevents suppressing nodes that are explicitly needed as dependencies
   let nodesToProcess = graph.nodes;
@@ -117,31 +114,19 @@ export function normalizeDataFlows(
   }
 
   const suppressed = new Set<string>();
+  const explicitChildrenByParentId = new Set(
+    graph.nodes
+      .filter((node) => node.isExplicit && node.parentId !== null)
+      .map((node) => node.parentId!),
+  );
 
   // Parent suppression: suppress parents that have more specific children
   // BUT: If we're working with explicitly requested dataFlows, don't suppress any of them
   // They were all explicitly requested as dependencies
   if (!requestedDataFlows || requestedDataFlows.length === 0) {
     for (const [canonicalKey, group] of grouped.entries()) {
-      // Check if any node in this group has an explicit child
-      // If so, this parent should be suppressed in favor of the more specific child
-      for (const node of group.nodes) {
-        let hasExplicitChild = false;
-
-        // Check all nodes to see if any child is explicit
-        for (const potentialChild of graph.nodes) {
-          if (
-            potentialChild.parentId === node.id && potentialChild.isExplicit
-          ) {
-            hasExplicitChild = true;
-            break;
-          }
-        }
-
-        if (hasExplicitChild) {
-          suppressed.add(canonicalKey);
-          break;
-        }
+      if (group.nodes.some((node) => explicitChildrenByParentId.has(node.id))) {
+        suppressed.add(canonicalKey);
       }
     }
   }

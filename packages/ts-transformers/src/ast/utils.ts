@@ -1,27 +1,43 @@
 import * as ts from "typescript";
 
+const expressionTextCache = new WeakMap<ts.Expression, string>();
+const syntheticExpressionPrinter = ts.createPrinter();
+const syntheticExpressionSourceFile = ts.createSourceFile(
+  "",
+  "",
+  ts.ScriptTarget.Latest,
+);
+
 /**
  * Safely get text from an expression, handling both regular and synthetic nodes.
  * Synthetic nodes (created by transformers) don't have valid source positions,
  * so we use a printer instead of getText().
  */
 export function getExpressionText(expr: ts.Expression): string {
+  const cached = expressionTextCache.get(expr);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  let text: string;
   const sourceFile = expr.getSourceFile();
   // Check both: no source file OR synthetic node (pos=-1)
   if (!sourceFile || expr.pos === -1) {
     // Synthetic node - use printer
     try {
-      const printer = ts.createPrinter();
-      return printer.printNode(
+      text = syntheticExpressionPrinter.printNode(
         ts.EmitHint.Unspecified,
         expr,
-        ts.createSourceFile("", "", ts.ScriptTarget.Latest),
+        syntheticExpressionSourceFile,
       );
     } catch {
-      return `<error printing ${ts.SyntaxKind[expr.kind]}>`;
+      text = `<error printing ${ts.SyntaxKind[expr.kind]}>`;
     }
+  } else {
+    text = expr.getText(sourceFile);
   }
-  return expr.getText(sourceFile);
+  expressionTextCache.set(expr, text);
+  return text;
 }
 
 /**

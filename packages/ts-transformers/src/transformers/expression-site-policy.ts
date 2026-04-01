@@ -804,16 +804,20 @@ export function classifyExpressionSiteHandling(
     context,
     analyze,
   );
-  const analysis = analyze(expression);
   const callRootPolicy = classifyCallRootPolicy(expression, siteInfo, context);
   const supportedCallRootKind = getSupportedCallRootKind(callRootPolicy);
+  let analysis: ReturnType<AnalyzeFn> | undefined;
+  const getAnalysis = (): ReturnType<AnalyzeFn> => {
+    analysis ??= analyze(expression);
+    return analysis;
+  };
 
   const helperOwned = classifyHelperOwnedExpressionSiteHandling(
     expression,
     containerKind,
     siteInfo,
     callRootPolicy,
-    analysis,
+    getAnalysis(),
   );
   if (helperOwned) {
     return helperOwned;
@@ -835,7 +839,7 @@ export function classifyExpressionSiteHandling(
       return {
         kind: "owned",
         owner: "array-method-callback-jsx",
-        lowerable: analysis.requiresRewrite ||
+        lowerable: getAnalysis().requiresRewrite ||
           isLogicalBinaryExpression(expression),
       };
     }
@@ -848,7 +852,7 @@ export function classifyExpressionSiteHandling(
         return {
           kind: "owned",
           owner: "jsx-root",
-          lowerable: analysis.requiresRewrite ||
+          lowerable: getAnalysis().requiresRewrite ||
             isLogicalBinaryExpression(expression),
         };
       }
@@ -863,7 +867,7 @@ export function classifyExpressionSiteHandling(
       return {
         kind: "owned",
         owner: "jsx-root",
-        lowerable: analysis.requiresRewrite ||
+        lowerable: getAnalysis().requiresRewrite ||
           isLogicalBinaryExpression(expression),
       };
     }
@@ -872,7 +876,7 @@ export function classifyExpressionSiteHandling(
       return {
         kind: "owned",
         owner: "jsx-root",
-        lowerable: analysis.requiresRewrite ||
+        lowerable: getAnalysis().requiresRewrite ||
           isLogicalBinaryExpression(expression),
       };
     }
@@ -881,7 +885,7 @@ export function classifyExpressionSiteHandling(
       return {
         kind: "shared",
         jsxRoute: "shared-post-closure",
-        lowerable: analysis.requiresRewrite ||
+        lowerable: getAnalysis().requiresRewrite ||
           isLogicalBinaryExpression(expression),
       };
     }
@@ -901,7 +905,7 @@ export function classifyExpressionSiteHandling(
           expression,
           containerKind,
           siteInfo,
-          analysis,
+          getAnalysis(),
         ),
       };
     }
@@ -917,7 +921,7 @@ export function classifyExpressionSiteHandling(
           expression,
           containerKind,
           siteInfo,
-          analysis,
+          getAnalysis(),
         ),
       };
     }
@@ -930,7 +934,7 @@ export function classifyExpressionSiteHandling(
         return {
           kind: "owned",
           owner: "jsx-root",
-          lowerable: analysis.requiresRewrite ||
+          lowerable: getAnalysis().requiresRewrite ||
             isLogicalBinaryExpression(expression),
         };
       }
@@ -942,7 +946,7 @@ export function classifyExpressionSiteHandling(
           expression,
           containerKind,
           siteInfo,
-          analysis,
+          getAnalysis(),
         ),
       };
     }
@@ -958,7 +962,7 @@ export function classifyExpressionSiteHandling(
         expression,
         containerKind,
         siteInfo,
-        analysis,
+        getAnalysis(),
       ),
     };
   }
@@ -976,7 +980,7 @@ export function classifyExpressionSiteHandling(
     return {
       kind: "owned",
       owner: "array-method-receiver-method",
-      lowerable: analysis.requiresRewrite,
+      lowerable: getAnalysis().requiresRewrite,
     };
   }
 
@@ -992,7 +996,7 @@ export function classifyExpressionSiteHandling(
         expression,
         containerKind,
         siteInfo,
-        analysis,
+        getAnalysis(),
       ),
     };
   }
@@ -1023,7 +1027,7 @@ export function classifyExpressionSiteHandling(
       expression,
       containerKind,
       siteInfo,
-      analysis,
+      getAnalysis(),
     ),
   };
 }
@@ -1082,16 +1086,6 @@ export function findLowerableExpressionSite(
     if (ts.isExpression(current)) {
       const containerKind = getExpressionContainerKind(current);
       if (containerKind) {
-        if (!hasAuthoredSourceSite(current)) {
-          current = current.parent;
-          continue;
-        }
-
-        if (isWithinEventHandlerJsxAttribute(current, context.checker)) {
-          current = current.parent;
-          continue;
-        }
-
         if (
           classifyReactiveContext(current, context.checker, context).kind !==
             "pattern"
