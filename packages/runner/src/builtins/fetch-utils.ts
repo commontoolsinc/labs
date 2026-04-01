@@ -36,8 +36,8 @@ export function computeInputHashFromValue<T extends Record<string, any>>(
   delete (inputsOnly as Record<string, unknown>).result;
   // hashOf() cannot hash undefined values; normalize to a deep fabric shape
   // (omits undefined object props, converts undefined array elements to null).
-  const storableInputs = fabricFromNativeValue(inputsOnly);
-  const normalized = storableInputs === undefined ? {} : storableInputs;
+  const fabricInputs = fabricFromNativeValue(inputsOnly);
+  const normalized = fabricInputs === undefined ? {} : fabricInputs;
   return hashOf(normalized as Record<string, unknown>).toString();
 }
 

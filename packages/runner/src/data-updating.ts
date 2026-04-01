@@ -442,14 +442,14 @@ export function normalizeAndDiff(
   // Convert the (top level of) the value to something JSON-encodable if not
   // already JSON-encodable, or throw if it's neither already valid nor
   // convertible.
-  const storableValue = shallowFabricFromNativeValue(newValue);
-  if (storableValue !== newValue) {
+  const fabricValue = shallowFabricFromNativeValue(newValue);
+  if (fabricValue !== newValue) {
     diffLogger.debug(
       "diff",
       () =>
         `[TO_STORABLE_VALUE] Converted ${typeof newValue} at path=${pathStr}`,
     );
-    newValue = storableValue;
+    newValue = fabricValue;
   }
 
   // Handle arrays
