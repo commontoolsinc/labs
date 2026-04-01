@@ -36,6 +36,23 @@ function shouldFilterNestedLocalsForCallWrapper(
   context: Parameters<Emitter>[0]["context"],
   analyze: Parameters<Emitter>[0]["analyze"],
 ): boolean {
+  let normalizedCallee: ts.Expression = expression.expression;
+  while (
+    ts.isParenthesizedExpression(normalizedCallee) ||
+    ts.isAsExpression(normalizedCallee) ||
+    ts.isTypeAssertionExpression(normalizedCallee) ||
+    ts.isNonNullExpression(normalizedCallee)
+  ) {
+    normalizedCallee = normalizedCallee.expression;
+  }
+
+  if (
+    ts.isFunctionExpression(normalizedCallee) ||
+    ts.isArrowFunction(normalizedCallee)
+  ) {
+    return true;
+  }
+
   const reactiveContext = classifyReactiveContext(
     expression,
     context.checker,

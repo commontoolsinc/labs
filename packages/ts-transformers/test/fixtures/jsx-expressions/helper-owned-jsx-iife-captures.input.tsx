@@ -1,18 +1,11 @@
 /// <cts-enable />
 /**
- * TRANSFORM REPRO: helper-owned JSX IIFE drops captured reactive inputs
+ * TRANSFORM REPRO: helper-owned JSX IIFE decomposes through local aliases
  *
- * Compare on main vs transformer branch:
- *   deno task ct check packages/patterns/gideon-tests/test-helper-owned-jsx-iife-captures.tsx --show-transformed --no-run
- *
- * Expected main shape:
- * - the second helper-owned JSX closure captures `path`, `entries`, and
- *   `pushPath` in its generated derive params
- *
- * Current branch bug:
- * - the branch rewrites the closure into a different shape that only derives
- *   `path`, leaving `entries` and `pushPath` outside the generated param
- *   bundle even though they are still used in the closure body
+ * We want the decomposed branch shape, not main's blanket outer-IIFE wrapping.
+ * The important invariant is that local aliases like `const p = path.get() || []`
+ * must not hide the explicit `path -> visible` dependency when later helper-owned
+ * derives are created.
  */
 import {
   action,

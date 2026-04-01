@@ -125,6 +125,7 @@ export function createDataFlowAnalyzer(
   checker: ts.TypeChecker,
 ): (expression: ts.Expression) => DataFlowAnalysis {
   const analysisCache = new WeakMap<ts.Expression, DataFlowAnalysis>();
+  const resolvingConstAliases = new Set<ts.Symbol>();
 
   // === Synthetic node helpers ===
   // These enable unified handling of both synthetic (transformer-created) and
@@ -147,6 +148,59 @@ export function createDataFlowAnalyzer(
     } catch {
       return undefined;
     }
+  };
+
+  const getStableConstAliasInitializer = (
+    symbol: ts.Symbol | undefined,
+  ): ts.Expression | undefined => {
+    if (!symbol || resolvingConstAliases.has(symbol)) {
+      return undefined;
+    }
+
+    const declaration = symbol.valueDeclaration;
+    if (
+      !declaration ||
+      !ts.isVariableDeclaration(declaration) ||
+      !ts.isIdentifier(declaration.name) ||
+      !declaration.initializer
+    ) {
+      return undefined;
+    }
+
+    const declarationList = declaration.parent;
+    if (
+      !declarationList ||
+      !ts.isVariableDeclarationList(declarationList) ||
+      (declarationList.flags & ts.NodeFlags.Const) === 0
+    ) {
+      return undefined;
+    }
+
+    return declaration.initializer;
+  };
+
+  const shouldPreserveConstAliasIdentity = (
+    initializer: ts.Expression,
+  ): boolean => {
+    const target = unwrapStructuralDataFlowExpression(initializer);
+
+    if (
+      ts.isIdentifier(target) ||
+      ts.isPropertyAccessExpression(target) ||
+      ts.isElementAccessExpression(target)
+    ) {
+      return false;
+    }
+
+    if (
+      ts.isObjectLiteralExpression(target) ||
+      ts.isArrayLiteralExpression(target) ||
+      isFunctionLikeExpression(target)
+    ) {
+      return false;
+    }
+
+    return true;
   };
 
   // Convert symbols to enriched parameters with name and declaration info
@@ -273,6 +327,160 @@ export function createDataFlowAnalyzer(
       ts.isExpression(argumentExpression) &&
       (ts.isLiteralExpression(argumentExpression) ||
         ts.isNoSubstitutionTemplateLiteral(argumentExpression));
+  };
+
+  const analyzeStatement = (
+    statement: ts.Statement,
+    scope: DataFlowScope,
+    context: AnalyzerContext,
+  ): InternalAnalysis => {
+    if (ts.isBlock(statement)) {
+      return mergeAnalyses(
+        ...statement.statements.map((child) =>
+          analyzeStatement(child, scope, context)
+        ),
+      );
+    }
+
+    if (ts.isVariableStatement(statement)) {
+      return mergeAnalyses(
+        ...statement.declarationList.declarations.map((declaration) => {
+          const initializer = declaration.initializer;
+          if (!initializer || isFunctionLikeExpression(initializer)) {
+            return emptyAnalysis();
+          }
+          return analyzeExpression(initializer, scope, context);
+        }),
+      );
+    }
+
+    if (ts.isExpressionStatement(statement)) {
+      return analyzeExpression(statement.expression, scope, context);
+    }
+
+    if (ts.isReturnStatement(statement)) {
+      return statement.expression
+        ? analyzeExpression(statement.expression, scope, context)
+        : emptyAnalysis();
+    }
+
+    if (ts.isIfStatement(statement)) {
+      return mergeAnalyses(
+        analyzeExpression(statement.expression, scope, context),
+        analyzeStatement(statement.thenStatement, scope, context),
+        statement.elseStatement
+          ? analyzeStatement(statement.elseStatement, scope, context)
+          : emptyAnalysis(),
+      );
+    }
+
+    if (ts.isSwitchStatement(statement)) {
+      const clauseAnalyses = statement.caseBlock.clauses.flatMap((clause) => {
+        const analyses: InternalAnalysis[] = [];
+        if (ts.isCaseClause(clause)) {
+          analyses.push(analyzeExpression(clause.expression, scope, context));
+        }
+        analyses.push(
+          ...clause.statements.map((child) =>
+            analyzeStatement(child, scope, context)
+          ),
+        );
+        return analyses;
+      });
+
+      return mergeAnalyses(
+        analyzeExpression(statement.expression, scope, context),
+        ...clauseAnalyses,
+      );
+    }
+
+    if (ts.isForStatement(statement)) {
+      const analyses: InternalAnalysis[] = [];
+      const initializer = statement.initializer;
+      if (initializer) {
+        if (ts.isExpression(initializer)) {
+          analyses.push(analyzeExpression(initializer, scope, context));
+        } else if (ts.isVariableDeclarationList(initializer)) {
+          analyses.push(
+            mergeAnalyses(
+              ...initializer.declarations.map((declaration) => {
+                const init = declaration.initializer;
+                if (!init || isFunctionLikeExpression(init)) {
+                  return emptyAnalysis();
+                }
+                return analyzeExpression(init, scope, context);
+              }),
+            ),
+          );
+        }
+      }
+
+      if (statement.condition) {
+        analyses.push(analyzeExpression(statement.condition, scope, context));
+      }
+
+      if (statement.incrementor) {
+        analyses.push(analyzeExpression(statement.incrementor, scope, context));
+      }
+
+      analyses.push(analyzeStatement(statement.statement, scope, context));
+      return mergeAnalyses(...analyses);
+    }
+
+    if (ts.isForInStatement(statement) || ts.isForOfStatement(statement)) {
+      const analyses: InternalAnalysis[] = [];
+      const initializer = statement.initializer;
+      if (ts.isExpression(initializer)) {
+        analyses.push(analyzeExpression(initializer, scope, context));
+      } else if (ts.isVariableDeclarationList(initializer)) {
+        analyses.push(
+          mergeAnalyses(
+            ...initializer.declarations.map((declaration) => {
+              const init = declaration.initializer;
+              if (!init || isFunctionLikeExpression(init)) {
+                return emptyAnalysis();
+              }
+              return analyzeExpression(init, scope, context);
+            }),
+          ),
+        );
+      }
+
+      analyses.push(analyzeExpression(statement.expression, scope, context));
+      analyses.push(analyzeStatement(statement.statement, scope, context));
+      return mergeAnalyses(...analyses);
+    }
+
+    if (ts.isWhileStatement(statement) || ts.isDoStatement(statement)) {
+      return mergeAnalyses(
+        analyzeExpression(statement.expression, scope, context),
+        analyzeStatement(statement.statement, scope, context),
+      );
+    }
+
+    if (ts.isTryStatement(statement)) {
+      return mergeAnalyses(
+        analyzeStatement(statement.tryBlock, scope, context),
+        statement.catchClause
+          ? analyzeStatement(statement.catchClause.block, scope, context)
+          : emptyAnalysis(),
+        statement.finallyBlock
+          ? analyzeStatement(statement.finallyBlock, scope, context)
+          : emptyAnalysis(),
+      );
+    }
+
+    if (ts.isThrowStatement(statement)) {
+      return statement.expression
+        ? analyzeExpression(statement.expression, scope, context)
+        : emptyAnalysis();
+    }
+
+    if (ts.isLabeledStatement(statement)) {
+      return analyzeStatement(statement.statement, scope, context);
+    }
+
+    return emptyAnalysis();
   };
 
   const analyzeExpression = (
@@ -422,6 +630,38 @@ export function createDataFlowAnalyzer(
           dataFlows: [expression],
         };
       }
+
+      const stableConstInitializer = getStableConstAliasInitializer(symbol);
+      if (symbol && stableConstInitializer) {
+        resolvingConstAliases.add(symbol);
+        try {
+          const initializerAnalysis = analyzeExpression(
+            stableConstInitializer,
+            scope,
+            context,
+          );
+          if (
+            initializerAnalysis.containsOpaqueRef ||
+            initializerAnalysis.requiresRewrite ||
+            initializerAnalysis.dataFlows.length > 0
+          ) {
+            if (!shouldPreserveConstAliasIdentity(stableConstInitializer)) {
+              return emptyAnalysis();
+            }
+            recordDataFlow(expression, scope, null, true);
+            return {
+              containsOpaqueRef: initializerAnalysis.containsOpaqueRef ||
+                initializerAnalysis.requiresRewrite ||
+                initializerAnalysis.dataFlows.length > 0,
+              requiresRewrite: initializerAnalysis.requiresRewrite,
+              dataFlows: [expression],
+            };
+          }
+        } finally {
+          resolvingConstAliases.delete(symbol);
+        }
+      }
+
       // Check if this identifier is a parameter to a builder or array-map call (like pattern)
       // These parameters become implicitly opaque even though their type isn't OpaqueRef
       return emptyAnalysis();
@@ -699,15 +939,13 @@ export function createDataFlowAnalyzer(
         if (isFunctionLikeExpression(arg)) {
           const childScope = createScope(context, scope, arg.parameters);
           if (ts.isBlock(arg.body)) {
-            const blockAnalyses: InternalAnalysis[] = [];
-            for (const statement of arg.body.statements) {
-              if (ts.isReturnStatement(statement) && statement.expression) {
-                blockAnalyses.push(
-                  analyzeExpression(statement.expression, childScope, context),
-                );
-              }
-            }
-            analyses.push(mergeAnalyses(...blockAnalyses));
+            analyses.push(
+              mergeAnalyses(
+                ...arg.body.statements.map((statement) =>
+                  analyzeStatement(statement, childScope, context)
+                ),
+              ),
+            );
           } else {
             analyses.push(analyzeExpression(arg.body, childScope, context));
           }
@@ -748,15 +986,11 @@ export function createDataFlowAnalyzer(
     if (isFunctionLikeExpression(expression)) {
       const childScope = createScope(context, scope, expression.parameters);
       if (ts.isBlock(expression.body)) {
-        const analyses: InternalAnalysis[] = [];
-        for (const statement of expression.body.statements) {
-          if (ts.isReturnStatement(statement) && statement.expression) {
-            analyses.push(
-              analyzeExpression(statement.expression, childScope, context),
-            );
-          }
-        }
-        return mergeAnalyses(...analyses);
+        return mergeAnalyses(
+          ...expression.body.statements.map((statement) =>
+            analyzeStatement(statement, childScope, context)
+          ),
+        );
       }
       return analyzeExpression(expression.body, childScope, context);
     }
