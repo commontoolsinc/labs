@@ -140,6 +140,7 @@ export async function main(argv: string[] = Deno.args) {
       apiUrl,
       identity: args.identity || "",
     });
+    bridge.setDebug(debug);
     bridge.initStatus();
 
     // Connect initial spaces (default: "home")

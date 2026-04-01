@@ -815,3 +815,53 @@ Deno.test("CellBridge.subscribePiece clears stale FS root entries when result sw
     "Now a regular result tree",
   );
 });
+
+Deno.test("CellBridge.status tracks coalesced rebuild metrics", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  bridge.init({
+    apiUrl: "http://localhost:8000",
+    identity: "/tmp/test-identity.pem",
+  });
+  bridge.initStatus();
+  const state = buildTestSpace(bridge, "home", []);
+
+  const inputCell = new SinkableCell({});
+  const resultCell = new SinkableCell({ content: "Initial" });
+
+  const piece = {
+    id: "of:status-piece",
+    name: () => "Status Piece",
+    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    input: {
+      getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
+      get: () => Promise.resolve(inputCell.get()),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+      get: () => Promise.resolve(resultCell.get()),
+    },
+  };
+
+  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace.bind(bridge);
+  await addPiece(state, piece, "home");
+
+  const pieceIno = tree.lookup(state.piecesIno, "Status Piece")!;
+
+  resultCell.set({ content: "Second" });
+  resultCell.set({ content: "Final" });
+  await new Promise((r) => setTimeout(r, 10));
+
+  const resultIno = tree.lookup(pieceIno, "result")!;
+  assertEquals(getFileContent(tree, resultIno, "content"), "Final");
+
+  const status = JSON.parse(getFileContent(tree, tree.rootIno, ".status"));
+  assertEquals(status.debug, false);
+  assertEquals(status.rebuilds.pending, 0);
+  assertEquals(status.rebuilds.scheduled, 1);
+  assertEquals(status.rebuilds.coalesced, 1);
+  assertEquals(status.rebuilds.completed, 1);
+  assertEquals(status.rebuilds.errors, 0);
+  assertEquals(status.rebuilds.maxPending, 1);
+});

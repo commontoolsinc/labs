@@ -179,6 +179,15 @@ export class CellBridge {
       timer: ReturnType<typeof setTimeout>;
     }
   >();
+  private debug = false;
+  private rebuildStats = {
+    scheduled: 0,
+    coalesced: 0,
+    completed: 0,
+    errors: 0,
+    maxPending: 0,
+    lastDurationMs: 0,
+  };
   private execCli: string;
   /**
    * Tracks root-level entries created by [FS] projections so they can be
@@ -201,6 +210,17 @@ export class CellBridge {
   }): void {
     this.apiUrl = config.apiUrl;
     this.identity = config.identity;
+  }
+
+  setDebug(debug: boolean): void {
+    this.debug = debug;
+    this.updateStatus();
+  }
+
+  private debugLog(message: string): void {
+    if (this.debug) {
+      console.log(message);
+    }
   }
 
   /** Create the .status file at the mount root. Call once after init. */
@@ -234,6 +254,16 @@ export class CellBridge {
     return JSON.stringify(
       {
         apiUrl: this.apiUrl,
+        debug: this.debug,
+        rebuilds: {
+          pending: this.pendingPropRebuilds.size,
+          scheduled: this.rebuildStats.scheduled,
+          coalesced: this.rebuildStats.coalesced,
+          completed: this.rebuildStats.completed,
+          errors: this.rebuildStats.errors,
+          maxPending: this.rebuildStats.maxPending,
+          lastDurationMs: this.rebuildStats.lastDurationMs,
+        },
         startedAt: this.startedAt,
         spaces,
       },
@@ -477,9 +507,12 @@ export class CellBridge {
     if (pending) {
       pending.latestValue = args.newValue;
       pending.pieceName = args.pieceName;
+      this.rebuildStats.coalesced++;
+      this.updateStatus();
       return;
     }
 
+    this.rebuildStats.scheduled++;
     const entry = {
       cell: args.cell,
       latestValue: args.newValue,
@@ -501,6 +534,8 @@ export class CellBridge {
           resolveLink: entry.resolveLink,
           spaceName: entry.spaceName,
         }).catch((e) => {
+          this.rebuildStats.errors++;
+          this.updateStatus();
           console.error(
             `[${entry.spaceName}] Error rebuilding ${entry.pieceName}/${entry.propName}: ${e}`,
           );
@@ -508,6 +543,11 @@ export class CellBridge {
       }, 0),
     };
     this.pendingPropRebuilds.set(key, entry);
+    this.rebuildStats.maxPending = Math.max(
+      this.rebuildStats.maxPending,
+      this.pendingPropRebuilds.size,
+    );
+    this.updateStatus();
   }
 
   private async rebuildPieceProp(args: {
@@ -520,6 +560,7 @@ export class CellBridge {
     resolveLink: ResolveLink;
     spaceName: string;
   }): Promise<void> {
+    const startedAt = Date.now();
     if (this.tree.getNode(args.pieceIno)?.kind !== "dir") {
       return;
     }
@@ -576,6 +617,9 @@ export class CellBridge {
           if (this.onInvalidate) {
             this.onInvalidate(pieceIno, [indexName, ".handlers"]);
           }
+          this.rebuildStats.completed++;
+          this.rebuildStats.lastDurationMs = Date.now() - startedAt;
+          this.updateStatus();
           return;
         }
       }
@@ -604,7 +648,10 @@ export class CellBridge {
       this.onInvalidate(pieceIno, [propName, `${propName}.json`]);
     }
 
-    console.log(`[${spaceName}] Updated ${pieceName}/${propName}`);
+    this.rebuildStats.completed++;
+    this.rebuildStats.lastDurationMs = Date.now() - startedAt;
+    this.updateStatus();
+    this.debugLog(`[${spaceName}] Updated ${pieceName}/${propName}`);
   }
 
   /**
@@ -835,7 +882,7 @@ export class CellBridge {
 
     // Fetch all pieces and populate tree
     const allPieces = await pieces.getAllPieces();
-    console.log(`[${spaceName}] Found ${allPieces.length} pieces`);
+    this.debugLog(`[${spaceName}] Found ${allPieces.length} pieces`);
 
     for (const piece of allPieces) {
       await this.addPieceToSpace(state, piece, spaceName);
@@ -1081,12 +1128,12 @@ export class CellBridge {
 
     for (const name of toRemove) {
       this.removePieceFromSpace(state, name);
-      console.log(`[${spaceName}] Removed piece: ${name}`);
+      this.debugLog(`[${spaceName}] Removed piece: ${name}`);
     }
 
     for (const piece of toAdd) {
       const name = await this.addPieceToSpace(state, piece, spaceName);
-      console.log(`[${spaceName}] Added piece: ${name}`);
+      this.debugLog(`[${spaceName}] Added piece: ${name}`);
     }
 
     // Update index and invalidate
@@ -1761,7 +1808,7 @@ export class CellBridge {
               }
             }
 
-            console.log(
+            this.debugLog(
               `[${spaceName}] Renamed piece: ${currentName} → ${newName}`,
             );
           } catch (e) {
