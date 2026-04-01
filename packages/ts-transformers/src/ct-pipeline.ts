@@ -40,9 +40,9 @@ export class CommonToolsTransformerPipeline extends Pipeline {
 
     const transformers: Transformer[] = [
       // Validation transformers run first to catch errors early.
-      // PatternContextValidation runs in both modes. In capability-first mode
-      // it still enforces placement/standalone/get-call rules while skipping
-      // legacy computation/optional heuristics.
+      // PatternContextValidation still enforces placement/standalone/get-call
+      // rules while skipping the old computation/optional heuristics that were
+      // tied to the removed legacy path.
       new CastValidationTransformer(sharedOps),
       new EmptyArrayOfValidationTransformer(sharedOps),
       new OpaqueGetValidationTransformer(sharedOps),

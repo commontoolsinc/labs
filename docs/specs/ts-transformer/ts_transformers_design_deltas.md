@@ -18,7 +18,7 @@ behavior and open follow-up work.
 ## Implementation Snapshot (March 17, 2026)
 
 - Landed:
-  - capability-first transform pipeline (legacy `useLegacyOpaqueRefSemantics`
+  - single transform pipeline (legacy `useLegacyOpaqueRefSemantics`
     flag removed)
   - unified context classifier (`pattern` / `compute` / `neutral`)
   - provenance-first CommonTools call detection with shadowed-helper rejection
@@ -231,8 +231,8 @@ contract support).
 6. Optional-call forms (for example `foo?.bar()`) are explicitly out of scope
    for key-lowering until modeled separately.
 7. ~~A feature gate exists for rollout and A/B fixture validation.~~
-   (Completed: `useLegacyOpaqueRefSemantics` gate has been removed; capability-first
-   is the only path.)
+   (Completed: `useLegacyOpaqueRefSemantics` gate has been removed; the single
+   transform pipeline is the only path.)
 8. Destructured callback parameters in pattern-style contexts are lowered to
    non-destructured receiver parameters with explicit `key(...)` bindings.
 9. Alias/nested destructuring (for example `{ bar: b }`, `{ user: { name } }`)
@@ -836,7 +836,7 @@ without major compile-time regression.
 **Status:** Landed
 
 1. ~~Flip `capabilityDataflowV1` to default after stabilization window.~~
-   Done — capability-first is the only path.
+   Done — the single transform pipeline is the only path.
 2. ~~Remove legacy branches tied to old `OpaqueRef` heuristics.~~
    Done — `useLegacyOpaqueRefSemantics` flag and all legacy branches removed.
 3. ~~Update behavior spec to reflect new default behavior.~~

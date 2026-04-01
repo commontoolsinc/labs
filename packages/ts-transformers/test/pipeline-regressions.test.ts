@@ -8,7 +8,7 @@ import { transformSource, validateSource } from "./utils.ts";
 import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
 
 Deno.test(
-  "Capability-first: manual mapWithPattern preserves computed plain-capture keys",
+  "Pipeline regression: manual mapWithPattern preserves computed plain-capture keys",
   async () => {
     const source = `/// <cts-enable />
 import { pattern, UI } from "commontools";
@@ -46,7 +46,7 @@ const p = pattern<{ items: string[] }>((state) => ({
 );
 
 Deno.test(
-  "Capability-first: nested authored ifElse predicate in helper-owned branch lowers to derive",
+  "Pipeline regression: nested authored ifElse predicate in helper-owned branch lowers to derive",
   async () => {
     const source = `/// <cts-enable />
 import { computed, ifElse, pattern, UI } from "commontools";
@@ -172,7 +172,7 @@ export default pattern<{
 );
 
 Deno.test(
-  "Capability-first: dynamic key access in helper-owned map callback initializer lowers without computation diagnostics",
+  "Pipeline regression: dynamic key access in helper-owned map callback initializer lowers without computation diagnostics",
   async () => {
     const source = `/// <cts-enable />
 import { computed, ifElse, pattern, UI } from "commontools";
@@ -231,7 +231,7 @@ export default pattern<{
 );
 
 Deno.test(
-  "Capability-first: self-improving classifier examples map keeps examples capture",
+  "Pipeline regression: self-improving classifier examples map keeps examples capture",
   async () => {
     const source = await Deno.readTextFile(
       new URL("../../patterns/self-improving-classifier.tsx", import.meta.url),
@@ -263,7 +263,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Capability-first: shopping-list sorted ifElse branch does not wrap mapped results in derive",
+  "Pipeline regression: shopping-list sorted ifElse branch does not wrap mapped results in derive",
   async () => {
     const source = await Deno.readTextFile(
       new URL("../../patterns/shopping-list.tsx", import.meta.url),

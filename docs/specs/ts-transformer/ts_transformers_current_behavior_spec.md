@@ -740,7 +740,7 @@ Additional non-fixture unit suites cover:
 - diagnostic message transformer behavior
 - event-handler detection heuristics
 - opaque-ref analysis/normalization/runtime-style APIs
-- capability-first and policy/capability-analysis behavior
+- pipeline regression and policy/capability-analysis behavior
 - derive call helper and identifier utilities
 
 ## 15. Stability Statement
