@@ -15,13 +15,11 @@ export const emitTemplateExpression = ({
   // Skip derive wrapping in safe contexts - they don't need it
   if (inSafeContext) return undefined;
 
-  if (dataFlows.all.length === 0) return undefined;
-
-  if (dataFlows.all.length === 0) return undefined;
+  if (dataFlows.length === 0) return undefined;
 
   return createReactiveWrapperForExpression(
     expression,
-    dataFlows.all,
+    dataFlows,
     context,
     {
       preferDeriveWrapper: preferDeriveWrappers,

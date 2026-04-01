@@ -142,7 +142,7 @@ export const emitCallExpression: Emitter = ({
   preferDeriveWrappers,
 }) => {
   if (!ts.isCallExpression(expression)) return undefined;
-  if (dataFlows.all.length === 0) return undefined;
+  if (dataFlows.length === 0) return undefined;
 
   const hint = analysis.rewriteHint;
   const callKind = detectCallKind(expression, context.checker);
@@ -227,7 +227,7 @@ export const emitCallExpression: Emitter = ({
     return undefined;
   }
 
-  if (dataFlows.all.length === 0) return undefined;
+  if (dataFlows.length === 0) return undefined;
 
   if (preferDeriveWrappers) {
     const inlineCaptureRefs = getInlineFunctionReactiveCaptureRefs(
@@ -247,7 +247,7 @@ export const emitCallExpression: Emitter = ({
 
   return createReactiveWrapperForExpression(
     expression,
-    dataFlows.all,
+    dataFlows,
     context,
     {
       filterNestedFunctionLocalCaptures: shouldFilterNestedLocalsForCallWrapper(

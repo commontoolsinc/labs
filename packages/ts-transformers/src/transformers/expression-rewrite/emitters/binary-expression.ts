@@ -46,7 +46,7 @@ export const emitBinaryExpression: Emitter = ({
 
   // Skip if no dataflows AND left side isn't reactive
   if (
-    dataFlows.all.length === 0 &&
+    dataFlows.length === 0 &&
     !leftIsOpaqueRef &&
     !shouldLowerByContextPolicy
   ) {
@@ -157,7 +157,7 @@ export const emitBinaryExpression: Emitter = ({
     return undefined;
   }
 
-  if (dataFlows.all.length === 0) return undefined;
+  if (dataFlows.length === 0) return undefined;
 
   if (
     reactiveContextKind === "pattern" &&
@@ -182,7 +182,7 @@ export const emitBinaryExpression: Emitter = ({
 
   return createReactiveWrapperForExpression(
     expression,
-    dataFlows.all,
+    dataFlows,
     context,
     {
       preferDeriveWrapper: preferDeriveWrappers,

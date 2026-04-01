@@ -4,7 +4,7 @@ import {
   classifyArrayMethodCall,
   classifyReactiveContext,
   detectCallKind,
-  getRelevantDataFlowSet,
+  getRelevantDataFlows,
   isInsideSafeCallbackWrapper,
   visitEachChildWithJsx,
 } from "../../ast/mod.ts";
@@ -205,7 +205,7 @@ export function rewriteExpression(
     preferDeriveWrappers,
     reactiveContextKind,
     containerKind: params.containerKind,
-    dataFlows: getRelevantDataFlowSet(
+    dataFlows: getRelevantDataFlows(
       params.analysis,
       params.context.checker,
       params.context,

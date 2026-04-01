@@ -101,7 +101,7 @@ export const emitConditionalExpression: Emitter = ({
   if (!ts.isConditionalExpression(expression)) return undefined;
 
   if (inSafeContext) return undefined;
-  if (dataFlows.all.length === 0) return undefined;
+  if (dataFlows.length === 0) return undefined;
 
   const predicateDataFlows = selectDataFlowsReferencedIn(
     dataFlows,

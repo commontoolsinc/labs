@@ -21,9 +21,9 @@ export const emitPrefixUnaryExpression: Emitter = ({
   if (expression.operator !== ts.SyntaxKind.ExclamationToken) {
     return undefined;
   }
-  if (dataFlows.all.length === 0) return undefined;
+  if (dataFlows.length === 0) return undefined;
 
-  let relevantDataFlows = dataFlows.all;
+  let relevantDataFlows = dataFlows;
 
   if (relevantDataFlows.length === 0 && analysis.containsOpaqueRef) {
     const fallbackAnalysis = analyze(expression.operand);

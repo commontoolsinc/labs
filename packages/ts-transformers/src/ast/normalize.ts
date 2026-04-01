@@ -19,11 +19,6 @@ export interface NormalizedDataFlow {
   readonly scopeId: number;
 }
 
-export interface NormalizedDataFlowSet {
-  readonly all: readonly NormalizedDataFlow[];
-  readonly byCanonicalKey: ReadonlyMap<string, NormalizedDataFlow>;
-}
-
 function originatesFromIgnoredParameter(
   expression: ts.Expression,
   scopeId: number,
@@ -225,7 +220,7 @@ function filterRelevantDataFlows(
 export function normalizeDataFlows(
   graph: DataFlowGraph,
   requestedDataFlows?: ts.Expression[],
-): NormalizedDataFlowSet {
+): readonly NormalizedDataFlow[] {
   // If specific dataFlows were requested, only process nodes corresponding to those expressions
   // This prevents suppressing nodes that are explicitly needed as dependencies
   let nodesToProcess = graph.nodes;
@@ -243,7 +238,6 @@ export function normalizeDataFlows(
     nodes: DataFlowNode[];
     scopeId: number;
   }>();
-  const nodeToGroup = new Map<number, string>();
 
   const normalizeExpression = (node: DataFlowNode): ts.Expression => {
     let current: ts.Expression = node.expression;
@@ -317,7 +311,6 @@ export function normalizeDataFlows(
       grouped.set(key, group);
     }
     group.nodes.push(node);
-    nodeToGroup.set(node.id, key);
   }
 
   const suppressed = new Set<string>();
@@ -341,7 +334,7 @@ export function normalizeDataFlows(
   const filtered = Array.from(grouped.entries())
     .filter(([canonicalKey]) => !suppressed.has(canonicalKey));
 
-  const all: NormalizedDataFlow[] = filtered.map(([canonicalKey, value]) => ({
+  return filtered.map(([canonicalKey, value]) => ({
     canonicalKey,
     expression: value.expression,
     occurrences: value.nodes,
@@ -351,38 +344,6 @@ export function normalizeDataFlows(
     const bId = b.occurrences[0]?.id ?? -1;
     return aId - bId;
   });
-
-  return {
-    all,
-    byCanonicalKey: new Map(all.map((dependency) => [
-      dependency.canonicalKey,
-      dependency,
-    ])),
-  };
-}
-
-export function getRelevantDataFlowSet(
-  analysis: DataFlowAnalysis,
-  checker: ts.TypeChecker,
-  lookup?: ReactiveContextLookup,
-): NormalizedDataFlowSet {
-  const normalized = normalizeDataFlows(
-    analysis.graph,
-    analysis.dataFlows,
-  );
-  const all = filterRelevantDataFlows(
-    normalized.all,
-    analysis,
-    checker,
-    lookup,
-  );
-  return {
-    all,
-    byCanonicalKey: new Map(all.map((dataFlow) => [
-      dataFlow.canonicalKey,
-      dataFlow,
-    ])),
-  };
 }
 
 export function getRelevantDataFlows(
@@ -390,7 +351,16 @@ export function getRelevantDataFlows(
   checker: ts.TypeChecker,
   lookup?: ReactiveContextLookup,
 ): readonly NormalizedDataFlow[] {
-  return getRelevantDataFlowSet(analysis, checker, lookup).all;
+  const normalized = normalizeDataFlows(
+    analysis.graph,
+    analysis.dataFlows,
+  );
+  return filterRelevantDataFlows(
+    normalized,
+    analysis,
+    checker,
+    lookup,
+  );
 }
 
 const isWithin = (outer: ts.Node, inner: ts.Node): boolean => {
@@ -398,10 +368,10 @@ const isWithin = (outer: ts.Node, inner: ts.Node): boolean => {
 };
 
 export function selectDataFlowsWithin(
-  set: NormalizedDataFlowSet,
+  dataFlows: readonly NormalizedDataFlow[],
   node: ts.Node,
 ): NormalizedDataFlow[] {
-  return set.all.filter((dataFlow) =>
+  return dataFlows.filter((dataFlow) =>
     dataFlow.occurrences.some((occurrence) =>
       isWithin(node, occurrence.expression)
     )
@@ -420,7 +390,7 @@ export function selectDataFlowsWithin(
  * @returns Data flows whose expressions are referenced within the node
  */
 export function selectDataFlowsReferencedIn(
-  set: NormalizedDataFlowSet,
+  dataFlows: readonly NormalizedDataFlow[],
   node: ts.Node,
 ): NormalizedDataFlow[] {
   const referencedExpressions = new Set<string>();
@@ -435,7 +405,7 @@ export function selectDataFlowsReferencedIn(
   visit(node);
 
   // Return data flows whose expression text matches any referenced expression
-  return set.all.filter((dataFlow) => {
+  return dataFlows.filter((dataFlow) => {
     const flowExprText = getExpressionText(dataFlow.expression);
     return referencedExpressions.has(flowExprText);
   });

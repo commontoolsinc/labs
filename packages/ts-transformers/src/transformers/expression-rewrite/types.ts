@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { DataFlowAnalysis, NormalizedDataFlowSet } from "../../ast/mod.ts";
+import type { DataFlowAnalysis, NormalizedDataFlow } from "../../ast/mod.ts";
 import type { ReactiveContextKind } from "../../ast/mod.ts";
 import { TransformationContext } from "../../core/mod.ts";
 import type { ExpressionContainerKind } from "../expression-site-types.ts";
@@ -38,7 +38,7 @@ export interface RewriteParams {
 }
 
 export interface EmitterContext extends RewriteParams {
-  readonly dataFlows: NormalizedDataFlowSet;
+  readonly dataFlows: readonly NormalizedDataFlow[];
   readonly inSafeContext: boolean;
   readonly reactiveContextKind: ReactiveContextKind;
   readonly containerKind?: ExpressionContainerKind;

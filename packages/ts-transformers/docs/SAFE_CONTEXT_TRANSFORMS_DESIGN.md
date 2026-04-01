@@ -257,7 +257,7 @@ export const emitBinaryExpression: Emitter = ({
   }
 
   const relevantDataFlows = filterRelevantDataFlows(
-    dataFlows.all,
+    dataFlows,
     analysis,
     context,
   );
