@@ -13,9 +13,20 @@ export interface CaptureAnalysis {
   readonly captureTree: Map<string, CaptureTreeNode>;
 }
 
+export interface CaptureCollectorOptions {
+  readonly captureNonModuleExternalIdentifiers?: boolean;
+  readonly captureNonModuleExternalPropertyAccesses?: boolean;
+  readonly captureModuleScopedIdentifierWhen?: (
+    identifier: ts.Identifier,
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ) => boolean;
+}
+
 export class CaptureCollector {
   constructor(
     private readonly checker: ts.TypeChecker,
+    private readonly options: CaptureCollectorOptions = {},
   ) {}
 
   analyze(func: ts.FunctionLikeDeclaration): CaptureAnalysis {
@@ -188,7 +199,8 @@ export class CaptureCollector {
       return undefined;
     }
 
-    // Skip module-scoped declarations
+    // Skip module-scoped declarations; property-access captures are only used
+    // for non-module closure extraction, not for patternTool-style module captures.
     if (
       declarations.some((decl: ts.Declaration) =>
         isModuleScopedDeclaration(decl)
@@ -213,6 +225,9 @@ export class CaptureCollector {
     });
 
     if (hasExternalDeclaration) {
+      if (this.options.captureNonModuleExternalPropertyAccesses === false) {
+        return undefined;
+      }
       // Capture the whole property access expression
       return node;
     }
@@ -271,7 +286,9 @@ export class CaptureCollector {
         if (allDeclaredInside) {
           return undefined;
         }
-        return node;
+        return this.shouldCaptureExternalIdentifier(node, propDeclarations)
+          ? node
+          : undefined;
       }
       // If we can't resolve the shorthand symbol, fall through to normal handling
     }
@@ -345,20 +362,25 @@ export class CaptureCollector {
       return undefined;
     }
 
-    // Skip module-scoped declarations (constants/variables at top level)
-    const isModuleScoped = declarations.some((decl: ts.Declaration) =>
-      isModuleScopedDeclaration(decl)
-    );
-    if (isModuleScoped) {
+    if (!this.shouldCaptureExternalIdentifier(node, declarations)) {
       return undefined;
     }
 
+    // If we got here, at least one declaration is outside the callback
+    // So it's a captured variable
+    return node;
+  }
+
+  private shouldCaptureExternalIdentifier(
+    node: ts.Identifier,
+    declarations: readonly ts.Declaration[],
+  ): boolean {
     // Skip function declarations (can't serialize functions)
     const isFunction = declarations.some((decl: ts.Declaration) =>
       isFunctionDeclaration(decl, this.checker)
     );
     if (isFunction) {
-      return undefined;
+      return false;
     }
 
     // Skip type parameters (generic type parameters like T, U, etc.)
@@ -368,12 +390,22 @@ export class CaptureCollector {
       ts.isTypeParameterDeclaration(decl)
     );
     if (isTypeParameter) {
-      return undefined;
+      return false;
     }
 
-    // If we got here, at least one declaration is outside the callback
-    // So it's a captured variable
-    return node;
+    const isModuleScoped = declarations.some((decl: ts.Declaration) =>
+      isModuleScopedDeclaration(decl)
+    );
+    if (isModuleScoped) {
+      const predicate = this.options.captureModuleScopedIdentifierWhen;
+      if (!predicate) {
+        return false;
+      }
+      const type = this.checker.getTypeAtLocation(node);
+      return predicate(node, type, this.checker);
+    }
+
+    return this.options.captureNonModuleExternalIdentifiers !== false;
   }
 
   /**

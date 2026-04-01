@@ -6,13 +6,10 @@ import {
   ensureTypeNodeRegistered,
   isFunctionLikeExpression,
 } from "../../ast/mod.ts";
-import {
-  buildHierarchicalParamsValue,
-  type CaptureTreeNode,
-  groupCapturesByRoot,
-} from "../../utils/capture-tree.ts";
-import { createPropertyName } from "../../utils/identifiers.ts";
+import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import { isOpaqueRefType } from "../../transformers/opaque-ref/opaque-ref.ts";
+import { CaptureCollector } from "../capture-collector.ts";
+import { buildCapturePropertyAssignments } from "../utils/capture-scaffold.ts";
 
 /**
  * PatternToolStrategy transforms patternTool() calls to capture closed-over variables.
@@ -88,13 +85,17 @@ function transformPatternToolCall(
   }
 
   // Collect module-scoped reactive captures from the callback
-  // Unlike CaptureCollector which skips module-scoped variables,
-  // patternTool needs to capture reactive (Cell-like) module-scoped variables
-  const captureExpressions = collectModuleScopedReactiveCaptures(
+  // Unlike the default closure strategies, patternTool only wants
+  // module-scoped reactive identifier captures in extraParams.
+  const collector = new CaptureCollector(context.checker, {
+    captureNonModuleExternalIdentifiers: false,
+    captureNonModuleExternalPropertyAccesses: false,
+    captureModuleScopedIdentifierWhen: (_identifier, type, checker) =>
+      isCellLikeType(type, checker),
+  });
+  const { captures: captureExpressions, captureTree } = collector.analyze(
     callback,
-    context,
   );
-  const captureTree = groupCapturesByRoot(captureExpressions);
 
   // If no captures, no transformation needed
   if (captureExpressions.size === 0) {
@@ -111,17 +112,10 @@ function transformPatternToolCall(
   const existingExtraParams = patternToolCall.arguments[1];
 
   // Build the merged extraParams object
-  const captureProperties: ts.ObjectLiteralElementLike[] = [];
-
-  // Add captures
-  for (const [captureName, node] of captureTree) {
-    captureProperties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(captureName, factory),
-        buildHierarchicalParamsValue(node, captureName, factory),
-      ),
-    );
-  }
+  const captureProperties = buildCapturePropertyAssignments(
+    captureTree,
+    factory,
+  );
 
   // Merge with existing extraParams if present
   let mergedExtraParams: ts.Expression;
@@ -365,173 +359,6 @@ function addCapturesToTypeLiteral(
     context.options.typeRegistry,
   );
   return typeNode;
-}
-
-/**
- * Collect module-scoped reactive (Cell-like) captures from a function.
- *
- * Unlike the regular CaptureCollector which skips module-scoped declarations,
- * patternTool needs to capture reactive values declared at module scope so
- * they can be passed as extraParams.
- */
-function collectModuleScopedReactiveCaptures(
-  func: ts.FunctionLikeDeclaration,
-  context: TransformationContext,
-): Set<ts.Expression> {
-  const { checker } = context;
-  const captures = new Set<ts.Expression>();
-
-  // Get the function's parameters to exclude from captures
-  const funcParamNames = new Set<string>();
-  for (const param of func.parameters) {
-    extractBindingNames(param.name, funcParamNames);
-  }
-
-  const visit = (node: ts.Node) => {
-    // Skip nested function declarations - they have their own scope
-    if (
-      node !== func &&
-      (ts.isArrowFunction(node) ||
-        ts.isFunctionExpression(node) ||
-        ts.isFunctionDeclaration(node))
-    ) {
-      // Still visit nested function to capture module-scoped refs used there
-      ts.forEachChild(node, visit);
-      return;
-    }
-
-    // Check identifiers for module-scoped reactive captures
-    if (ts.isIdentifier(node)) {
-      // Skip if this is part of a property access name (the property, not the object)
-      if (
-        ts.isPropertyAccessExpression(node.parent) &&
-        node.parent.name === node
-      ) {
-        return;
-      }
-
-      // Skip if this is a function parameter
-      if (funcParamNames.has(node.text)) {
-        return;
-      }
-
-      // Skip property names in object literals
-      if (ts.isPropertyAssignment(node.parent) && node.parent.name === node) {
-        return;
-      }
-
-      // Skip shorthand property assignments (we'll check their value separately)
-      if (ts.isShorthandPropertyAssignment(node.parent)) {
-        // Check if this shorthand is referencing a captured value
-        const valueSymbol = checker.getShorthandAssignmentValueSymbol(
-          node.parent,
-        );
-        if (valueSymbol) {
-          const decls = valueSymbol.getDeclarations();
-          if (decls && decls.length > 0) {
-            const isModuleScoped = decls.some((d) =>
-              isModuleScopedDeclaration(d)
-            );
-            if (isModuleScoped) {
-              const type = checker.getTypeAtLocation(node);
-              if (isCellLikeType(type, checker)) {
-                captures.add(node);
-              }
-            }
-          }
-        }
-        return;
-      }
-
-      const symbol = checker.getSymbolAtLocation(node);
-      if (!symbol) return;
-
-      const declarations = symbol.getDeclarations();
-      if (!declarations || declarations.length === 0) return;
-
-      // Skip imports
-      const isImport = declarations.some(
-        (decl) =>
-          ts.isImportSpecifier(decl) ||
-          ts.isImportClause(decl) ||
-          ts.isNamespaceImport(decl),
-      );
-      if (isImport) return;
-
-      // Check if it's module-scoped
-      const isModuleScoped = declarations.some((decl) =>
-        isModuleScopedDeclaration(decl)
-      );
-      if (!isModuleScoped) return;
-
-      // Check if it's a reactive (Cell-like) type
-      const type = checker.getTypeAtLocation(node);
-      if (isCellLikeType(type, checker)) {
-        captures.add(node);
-      }
-    }
-
-    ts.forEachChild(node, visit);
-  };
-
-  if (func.body) {
-    visit(func.body);
-  }
-
-  return captures;
-}
-
-/**
- * Extract all binding names from a binding pattern recursively.
- */
-function extractBindingNames(
-  binding: ts.BindingName,
-  names: Set<string>,
-): void {
-  if (ts.isIdentifier(binding)) {
-    names.add(binding.text);
-    return;
-  }
-
-  if (ts.isObjectBindingPattern(binding)) {
-    for (const element of binding.elements) {
-      extractBindingNames(element.name, names);
-    }
-  } else if (ts.isArrayBindingPattern(binding)) {
-    for (const element of binding.elements) {
-      if (!ts.isOmittedExpression(element)) {
-        extractBindingNames(element.name, names);
-      }
-    }
-  }
-}
-
-/**
- * Check if a declaration is at module scope (top level of a source file).
- */
-function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
-  // For variable declarations, check if the containing variable statement
-  // is directly at source file level. We must NOT walk further up the tree,
-  // because ancestor nodes (e.g. a module-scoped `const Note = pattern(...)`)
-  // would falsely match for locally-declared variables inside callbacks.
-  if (ts.isVariableDeclaration(decl)) {
-    const varDeclList = decl.parent;
-    if (ts.isVariableDeclarationList(varDeclList)) {
-      const varStatement = varDeclList.parent;
-      return (
-        ts.isVariableStatement(varStatement) &&
-        ts.isSourceFile(varStatement.parent)
-      );
-    }
-    return false;
-  }
-
-  // For function declarations, check if directly at source file level
-  if (ts.isFunctionDeclaration(decl)) {
-    return !!decl.parent && ts.isSourceFile(decl.parent);
-  }
-
-  return false;
 }
 
 /**
