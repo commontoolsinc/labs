@@ -4,12 +4,9 @@ import ts from "typescript";
 import { TransformationContext } from "../../src/core/mod.ts";
 import { classifyReactiveContext } from "../../src/ast/mod.ts";
 import {
-  allowsRestrictedContextFunctionCallback,
-  classifyCallbackSupport,
-  isReactiveArrayMethodCallbackSupport,
-  supportsPatternOwnedWrapperCallbackSite,
-} from "../../src/transformers/callback-support.ts";
-import { classifyCallbackBoundary } from "../../src/policy/callback-boundary.ts";
+  classifyCallbackBoundary,
+  getCallbackBoundarySemantics,
+} from "../../src/policy/callback-boundary.ts";
 
 function createProgramAndContext(source: string): {
   sourceFile: ts.SourceFile;
@@ -96,15 +93,18 @@ Deno.test(
     `);
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
-    const decision = classifyCallbackSupport(callback, checker, context);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
 
-    assertEquals(decision, {
+    assertEquals(semantics.decision, {
       kind: "supported",
-      supportedKind: "plain-array-value",
+      boundaryKind: "plain-array-value",
+      bodyContext: {
+        strategy: "inherit-parent",
+      },
     });
-    assertEquals(isReactiveArrayMethodCallbackSupport(decision), false);
-    assertEquals(allowsRestrictedContextFunctionCallback(decision), true);
-    assertEquals(supportsPatternOwnedWrapperCallbackSite(decision), false);
+    assertEquals(semantics.isReactiveArrayMethodCallback, false);
+    assertEquals(semantics.allowsRestrictedContextFunctionCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
   },
 );
 
@@ -121,15 +121,18 @@ Deno.test(
     `);
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
-    const decision = classifyCallbackSupport(callback, checker, context);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
 
-    assertEquals(decision, {
+    assertEquals(semantics.decision, {
       kind: "supported",
-      supportedKind: "plain-array-value",
+      boundaryKind: "plain-array-value",
+      bodyContext: {
+        strategy: "inherit-parent",
+      },
     });
-    assertEquals(isReactiveArrayMethodCallbackSupport(decision), false);
-    assertEquals(allowsRestrictedContextFunctionCallback(decision), true);
-    assertEquals(supportsPatternOwnedWrapperCallbackSite(decision), false);
+    assertEquals(semantics.isReactiveArrayMethodCallback, false);
+    assertEquals(semantics.allowsRestrictedContextFunctionCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
   },
 );
 
@@ -143,15 +146,18 @@ Deno.test(
     `);
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
-    const decision = classifyCallbackSupport(callback, checker, context);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
 
-    assertEquals(decision, {
+    assertEquals(semantics.decision, {
       kind: "supported",
-      supportedKind: "reactive-array-method",
+      boundaryKind: "reactive-array-method",
+      bodyContext: {
+        strategy: "inherit-parent",
+      },
     });
-    assertEquals(isReactiveArrayMethodCallbackSupport(decision), true);
-    assertEquals(allowsRestrictedContextFunctionCallback(decision), true);
-    assertEquals(supportsPatternOwnedWrapperCallbackSite(decision), true);
+    assertEquals(semantics.isReactiveArrayMethodCallback, true);
+    assertEquals(semantics.allowsRestrictedContextFunctionCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
   },
 );
 
@@ -232,14 +238,19 @@ Deno.test(
     `);
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
-    const decision = classifyCallbackSupport(callback, checker, context);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
 
-    assertEquals(decision, {
+    assertEquals(semantics.decision, {
       kind: "supported",
-      supportedKind: "event-handler",
+      boundaryKind: "event-handler",
+      bodyContext: {
+        strategy: "explicit",
+        kind: "compute",
+        owner: "handler",
+      },
     });
-    assertEquals(allowsRestrictedContextFunctionCallback(decision), false);
-    assertEquals(supportsPatternOwnedWrapperCallbackSite(decision), false);
+    assertEquals(semantics.allowsRestrictedContextFunctionCallback, false);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
   },
 );
 
@@ -438,13 +449,17 @@ Deno.test(
     `);
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
-    const decision = classifyCallbackSupport(callback, checker, context);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
 
-    assertEquals(decision, {
+    assertEquals(semantics.decision, {
       kind: "unsupported",
-      unsupportedKind: "plain-array-void",
+      boundaryKind: "plain-array-void",
+      boundaryDiagnostic: "function-creation",
+      bodyContext: {
+        strategy: "inherit-parent",
+      },
     });
-    assertEquals(allowsRestrictedContextFunctionCallback(decision), false);
-    assertEquals(supportsPatternOwnedWrapperCallbackSite(decision), false);
+    assertEquals(semantics.allowsRestrictedContextFunctionCallback, false);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
   },
 );

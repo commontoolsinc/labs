@@ -60,6 +60,18 @@ export type CallbackBoundaryDecision =
     boundaryDiagnostic: "callback-container" | "function-creation";
   };
 
+export interface CallbackBoundarySemantics {
+  readonly decision: CallbackBoundaryDecision;
+  readonly bodyContext: CallbackBoundaryBodyContext | undefined;
+  readonly isReactiveArrayMethodCallback: boolean;
+  readonly isPlainArrayValueCallback: boolean;
+  readonly isPatternToolCallback: boolean;
+  readonly supportsPatternOwnedWrapperCallbackSite: boolean;
+  readonly supportsPatternOwnedStatements: boolean;
+  readonly allowsRestrictedContextFunctionCallback: boolean;
+  readonly establishesLocalReactiveAliasScope: boolean;
+}
+
 function isWithinJsxExpression(node: ts.Node): boolean {
   let current: ts.Node | undefined = node.parent;
   while (current) {
@@ -282,5 +294,40 @@ export function classifyCallbackBoundary(
     boundaryKind: "unsupported-container",
     boundaryDiagnostic: "function-creation",
     bodyContext: { strategy: "inherit-parent" },
+  };
+}
+
+export function getCallbackBoundarySemantics(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  checker: ts.TypeChecker,
+  lookup?: CallbackBoundaryLookup,
+): CallbackBoundarySemantics {
+  const decision = classifyCallbackBoundary(callback, checker, lookup);
+  const bodyContext = decision.kind === "none"
+    ? undefined
+    : decision.bodyContext;
+  const supportedKind = decision.kind === "supported"
+    ? decision.boundaryKind
+    : undefined;
+
+  return {
+    decision,
+    bodyContext,
+    isReactiveArrayMethodCallback: supportedKind === "reactive-array-method",
+    isPlainArrayValueCallback: supportedKind === "plain-array-value",
+    isPatternToolCallback: supportedKind === "pattern-tool",
+    supportsPatternOwnedWrapperCallbackSite: supportedKind ===
+        "reactive-array-method" ||
+      supportedKind === "pattern-builder" ||
+      supportedKind === "render-builder",
+    supportsPatternOwnedStatements: supportedKind === "reactive-array-method" ||
+      supportedKind === "pattern-builder" ||
+      supportedKind === "render-builder",
+    allowsRestrictedContextFunctionCallback: !!supportedKind &&
+      supportedKind !== "event-handler" &&
+      supportedKind !== "pattern-builder" &&
+      supportedKind !== "render-builder",
+    establishesLocalReactiveAliasScope: supportedKind === "derive" ||
+      supportedKind === "computed-builder",
   };
 }

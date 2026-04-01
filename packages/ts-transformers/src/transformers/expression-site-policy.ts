@@ -13,11 +13,7 @@ import {
 import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
-import {
-  classifyCallbackSupport,
-  isReactiveArrayMethodCallbackSupport,
-  supportsPatternOwnedWrapperCallbackSite,
-} from "./callback-support.ts";
+import { getCallbackBoundarySemantics } from "../policy/callback-boundary.ts";
 import {
   type CallRootPolicyDecision,
   classifyCallRootPolicy,
@@ -300,12 +296,12 @@ function isEligiblePatternOwnedWrapperCallbackSite(
     return true;
   }
 
-  const callbackSupport = classifyCallbackSupport(
+  const boundarySemantics = getCallbackBoundarySemantics(
     callbackContext.callback,
     context.checker,
     context,
   );
-  return supportsPatternOwnedWrapperCallbackSite(callbackSupport);
+  return boundarySemantics.supportsPatternOwnedWrapperCallbackSite;
 }
 
 function hasEnclosingComputeLikeCallback(
@@ -355,14 +351,13 @@ function isWithinComputeLikePlainArrayValueCallback(
     return false;
   }
 
-  const callbackSupport = classifyCallbackSupport(
+  const boundarySemantics = getCallbackBoundarySemantics(
     callbackContext.callback,
     context.checker,
     context,
   );
 
-  return callbackSupport.kind === "supported" &&
-    callbackSupport.supportedKind === "plain-array-value" &&
+  return boundarySemantics.isPlainArrayValueCallback &&
     hasEnclosingComputeLikeCallback(expression, context);
 }
 
@@ -519,12 +514,12 @@ function isArrayMethodOwnedExpressionSite(
     return false;
   }
 
-  const callbackSupport = classifyCallbackSupport(
+  const boundarySemantics = getCallbackBoundarySemantics(
     callbackContext.callback,
     context.checker,
     context,
   );
-  return isReactiveArrayMethodCallbackSupport(callbackSupport);
+  return boundarySemantics.isReactiveArrayMethodCallback;
 }
 
 const HELPER_BOUNDARY_KINDS = new Set<ExpressionSiteHelperBoundaryKind>([

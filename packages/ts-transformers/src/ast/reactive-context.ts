@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { detectCallKind } from "./call-kind.ts";
-import { classifyCallbackBoundary } from "../policy/callback-boundary.ts";
+import { getCallbackBoundarySemantics } from "../policy/callback-boundary.ts";
 
 export type ReactiveContextKind = "pattern" | "compute" | "neutral";
 
@@ -206,32 +206,24 @@ export function classifyReactiveContext(
           return { kind: "compute", owner: "standalone", inJsxExpression };
         }
 
-        const callbackBoundary = classifyCallbackBoundary(current, checker, {
-          isArrayMethodCallback: (node) =>
-            lookup?.isArrayMethodCallback(node) ?? false,
-        });
-        if (callbackBoundary.kind === "supported") {
-          if (callbackBoundary.bodyContext.strategy === "inherit-parent") {
+        const boundarySemantics = getCallbackBoundarySemantics(
+          current,
+          checker,
+          {
+            isArrayMethodCallback: (node) =>
+              lookup?.isArrayMethodCallback(node) ?? false,
+          },
+        );
+        const bodyContext = boundarySemantics.bodyContext;
+        if (bodyContext) {
+          if (bodyContext.strategy === "inherit-parent") {
             current = current.parent;
             continue;
           }
 
           return {
-            kind: callbackBoundary.bodyContext.kind,
-            owner: callbackBoundary.bodyContext.owner,
-            inJsxExpression,
-          };
-        }
-
-        if (callbackBoundary.kind === "unsupported") {
-          if (callbackBoundary.bodyContext.strategy === "inherit-parent") {
-            current = current.parent;
-            continue;
-          }
-
-          return {
-            kind: callbackBoundary.bodyContext.kind,
-            owner: callbackBoundary.bodyContext.owner,
+            kind: bodyContext.kind,
+            owner: bodyContext.owner,
             inJsxExpression,
           };
         }

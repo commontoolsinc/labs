@@ -48,8 +48,7 @@ import {
   isInsideSafeCallbackWrapper,
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
-import { classifyCallbackSupport } from "./callback-support.ts";
-import { classifyCallbackBoundary } from "../policy/callback-boundary.ts";
+import { getCallbackBoundarySemantics } from "../policy/callback-boundary.ts";
 import {
   collectLocalOpaqueRootSymbols,
   isOpaqueSourceExpression,
@@ -88,18 +87,12 @@ export class PatternContextValidationTransformer extends Transformer {
         }
 
         if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
-          const callbackSupport = classifyCallbackSupport(
+          const boundarySemantics = getCallbackBoundarySemantics(
             node,
             checker,
             context,
           );
-          if (
-            callbackSupport.kind === "supported" &&
-            (
-              callbackSupport.supportedKind === "derive" ||
-              callbackSupport.supportedKind === "computed-builder"
-            )
-          ) {
+          if (boundarySemantics.establishesLocalReactiveAliasScope) {
             this.validateLocalReactiveAliasUsage(node, context);
           }
 
@@ -420,15 +413,14 @@ export class PatternContextValidationTransformer extends Transformer {
   ): void {
     if (!ts.isBlock(func.body)) return;
 
-    const callbackBoundary = classifyCallbackBoundary(func, checker, context);
+    const boundarySemantics = getCallbackBoundarySemantics(
+      func,
+      checker,
+      context,
+    );
     const bodyContext = classifyReactiveContext(func.body, checker, context);
     if (
-      callbackBoundary.kind !== "supported" ||
-      (
-        callbackBoundary.boundaryKind !== "reactive-array-method" &&
-        callbackBoundary.boundaryKind !== "pattern-builder" &&
-        callbackBoundary.boundaryKind !== "render-builder"
-      ) ||
+      !boundarySemantics.supportsPatternOwnedStatements ||
       bodyContext.kind !== "pattern"
     ) {
       return;
@@ -543,16 +535,11 @@ export class PatternContextValidationTransformer extends Transformer {
     // Skip if inside safe wrapper callback (computed, action, derive, lift, handler)
     if (isInsideSafeCallbackWrapper(node, checker, context)) return;
 
-    const callbackBoundary = ts.isFunctionDeclaration(node)
-      ? { kind: "none" as const }
-      : classifyCallbackBoundary(node, checker, context);
+    const boundarySemantics = !ts.isFunctionDeclaration(node)
+      ? getCallbackBoundarySemantics(node, checker, context)
+      : undefined;
 
-    if (
-      callbackBoundary.kind === "supported" &&
-      callbackBoundary.boundaryKind !== "event-handler" &&
-      callbackBoundary.boundaryKind !== "pattern-builder" &&
-      callbackBoundary.boundaryKind !== "render-builder"
-    ) {
+    if (boundarySemantics?.allowsRestrictedContextFunctionCallback) {
       return;
     }
 
@@ -560,13 +547,13 @@ export class PatternContextValidationTransformer extends Transformer {
     if (!isInsideRestrictedContext(node, checker, context)) return;
 
     if (this.isInsideJsx(node)) {
-      if (callbackBoundary.kind === "supported") {
+      if (boundarySemantics?.decision.kind === "supported") {
         return;
       }
 
       if (
-        callbackBoundary.kind === "unsupported" &&
-        callbackBoundary.boundaryDiagnostic === "callback-container"
+        boundarySemantics?.decision.kind === "unsupported" &&
+        boundarySemantics.decision.boundaryDiagnostic === "callback-container"
       ) {
         context.reportDiagnostic({
           severity: "error",
@@ -672,11 +659,12 @@ export class PatternContextValidationTransformer extends Transformer {
   ): void {
     // Skip if this function is passed to patternTool()
     if (!ts.isFunctionDeclaration(func)) {
-      const callbackBoundary = classifyCallbackBoundary(func, checker, context);
-      if (
-        callbackBoundary.kind === "supported" &&
-        callbackBoundary.boundaryKind === "pattern-tool"
-      ) {
+      const boundarySemantics = getCallbackBoundarySemantics(
+        func,
+        checker,
+        context,
+      );
+      if (boundarySemantics.isPatternToolCallback) {
         return;
       }
     }
