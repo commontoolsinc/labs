@@ -117,7 +117,7 @@ desired state:
 ```typescript
 interface IAttestation {
   address: IMemoryAddress; // What was read/written
-  value?: StorableDatum; // The value (undefined = deleted)
+  value?: FabricValue; // The value (undefined = deleted)
 }
 ```
 
