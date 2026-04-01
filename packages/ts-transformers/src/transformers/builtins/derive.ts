@@ -1,7 +1,6 @@
 import ts from "typescript";
 import { CTHelpers } from "../../core/ct-helpers.ts";
 import {
-  ensureTypeNodeRegistered,
   getExpressionText,
   getTypeAtLocationWithFallback,
   setParentPointers,
@@ -20,6 +19,7 @@ import {
 } from "../../utils/identifiers.ts";
 import {
   buildCaptureTypeElements,
+  createRegisteredTypeLiteral,
   expressionToTypeNode,
 } from "../../ast/type-building.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
@@ -296,14 +296,14 @@ function buildInputTypeNode(
     );
   }
 
-  const typeLiteral = factory.createTypeLiteralNode(typeElements);
-  ensureTypeNodeRegistered(
-    typeLiteral,
-    context.checker,
-    context.options.typeRegistry,
+  return createRegisteredTypeLiteral(
+    typeElements,
+    {
+      factory,
+      checker: context.checker,
+      typeRegistry: context.options.typeRegistry,
+    },
   );
-
-  return typeLiteral;
 }
 
 function buildResultTypeNode(

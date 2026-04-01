@@ -20,6 +20,12 @@ import {
 export const DEFAULT_TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation |
   ts.NodeBuilderFlags.UseStructuralFallback;
 
+export interface TypeLiteralRegistrationContext {
+  readonly factory: ts.NodeFactory;
+  readonly checker: ts.TypeChecker;
+  readonly typeRegistry?: WeakMap<ts.Node, ts.Type>;
+}
+
 /**
  * Converts a Type to a TypeNode, optionally registering it in the type registry.
  * Provides a central place for type-to-typenode conversion with consistent flags.
@@ -43,6 +49,19 @@ export function typeToTypeNodeWithRegistry(
   }
 
   return node;
+}
+
+export function createRegisteredTypeLiteral(
+  members: readonly ts.TypeElement[],
+  context: TypeLiteralRegistrationContext,
+): ts.TypeLiteralNode {
+  const typeNode = context.factory.createTypeLiteralNode([...members]);
+  ensureTypeNodeRegistered(
+    typeNode,
+    context.checker,
+    context.typeRegistry,
+  );
+  return typeNode;
 }
 
 /**
@@ -167,11 +186,13 @@ export function buildTypeElementsFromCaptureTree(
         currentExpr,
         currentType,
       );
-      typeNode = factory.createTypeLiteralNode(nested);
-      ensureTypeNodeRegistered(
-        typeNode,
-        checker,
-        context.options.typeRegistry,
+      typeNode = createRegisteredTypeLiteral(
+        nested,
+        {
+          factory,
+          checker,
+          typeRegistry: context.options.typeRegistry,
+        },
       );
     } else {
       // Fallback to unknown
@@ -227,15 +248,14 @@ export function createCaptureTypeLiteral(
   context: TransformationContext,
   renameMap?: ReadonlyMap<string, string>,
 ): ts.TypeLiteralNode {
-  const typeNode = context.factory.createTypeLiteralNode(
+  return createRegisteredTypeLiteral(
     buildCaptureTypeElements(captureTree, context, renameMap),
+    {
+      factory: context.factory,
+      checker: context.checker,
+      typeRegistry: context.options.typeRegistry,
+    },
   );
-  ensureTypeNodeRegistered(
-    typeNode,
-    context.checker,
-    context.options.typeRegistry,
-  );
-  return typeNode;
 }
 
 export function mergeCaptureTypesIntoTypeLiteral(
@@ -271,11 +291,12 @@ export function mergeCaptureTypesIntoTypeLiteral(
     existingMembers.push(captureMember);
   }
 
-  const typeNode = context.factory.createTypeLiteralNode(existingMembers);
-  ensureTypeNodeRegistered(
-    typeNode,
-    context.checker,
-    context.options.typeRegistry,
+  return createRegisteredTypeLiteral(
+    existingMembers,
+    {
+      factory: context.factory,
+      checker: context.checker,
+      typeRegistry: context.options.typeRegistry,
+    },
   );
-  return typeNode;
 }

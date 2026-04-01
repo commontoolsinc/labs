@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { getPropertyNameText } from "@commontools/schema-generator/property-name";
+import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import { uniquePaths } from "../utils/path-serialization.ts";
 import {
@@ -343,9 +344,10 @@ function buildShrunkTypeNodeFromType(
     return undefined;
   }
 
-  const typeLiteral = factory.createTypeLiteralNode(properties);
-  ensureTypeNodeRegistered(typeLiteral, checker, typeRegistry);
-  return typeLiteral;
+  return createRegisteredTypeLiteral(
+    properties,
+    { factory, checker, typeRegistry },
+  );
 }
 
 function buildShrunkTypeNodeFromTypeNode(
@@ -646,11 +648,9 @@ function shrinkTypeLiteralMembers(
   if (result.length === 0) {
     return undefined;
   }
-  const typeLiteral = factory.createTypeLiteralNode(result);
-  if (checker) {
-    ensureTypeNodeRegistered(typeLiteral, checker, typeRegistry);
-  }
-  return typeLiteral;
+  return checker
+    ? createRegisteredTypeLiteral(result, { factory, checker, typeRegistry })
+    : factory.createTypeLiteralNode(result);
 }
 
 // ---------------------------------------------------------------------------

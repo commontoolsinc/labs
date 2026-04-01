@@ -4,10 +4,10 @@ import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
   buildCaptureTypeElements,
   buildTypeElementsFromCaptureTree,
+  createRegisteredTypeLiteral,
   expressionToTypeNode,
 } from "../../ast/type-building.ts";
 import {
-  ensureTypeNodeRegistered,
   inferArrayElementType,
   registerTypeForNode,
   tryExplicitParameterType,
@@ -111,15 +111,10 @@ export class SchemaFactory {
       );
     }
 
-    const typeNode = this.factory.createTypeLiteralNode(
+    return createRegisteredTypeLiteral(
       callbackParamProperties,
+      { factory: this.factory, checker, typeRegistry },
     );
-    ensureTypeNodeRegistered(
-      typeNode,
-      checker,
-      typeRegistry,
-    );
-    return typeNode;
   }
 
   /**
@@ -145,13 +140,14 @@ export class SchemaFactory {
       captureTree,
       this.context,
     );
-    const typeNode = this.factory.createTypeLiteralNode(paramsProperties);
-    ensureTypeNodeRegistered(
-      typeNode,
-      this.context.checker,
-      this.context.options.typeRegistry,
+    return createRegisteredTypeLiteral(
+      paramsProperties,
+      {
+        factory: this.factory,
+        checker: this.context.checker,
+        typeRegistry: this.context.options.typeRegistry,
+      },
     );
-    return typeNode;
   }
 
   /**
@@ -204,13 +200,14 @@ export class SchemaFactory {
     typeElements.push(...captureTypeElements);
 
     // Create object type literal
-    const typeNode = factory.createTypeLiteralNode(typeElements);
-    ensureTypeNodeRegistered(
-      typeNode,
-      this.context.checker,
-      this.context.options.typeRegistry,
+    return createRegisteredTypeLiteral(
+      typeElements,
+      {
+        factory,
+        checker: this.context.checker,
+        typeRegistry: this.context.options.typeRegistry,
+      },
     );
-    return typeNode;
   }
 
   /**

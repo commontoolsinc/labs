@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
 
 import {
   classifyArrayMethodCall,
@@ -1248,9 +1249,10 @@ function buildObjectLiteralReturnTypeNode(
     );
   }
 
-  const typeLiteral = factory.createTypeLiteralNode(members);
-  ensureTypeNodeRegistered(typeLiteral, checker, typeRegistry);
-  return typeLiteral;
+  return createRegisteredTypeLiteral(
+    members,
+    { factory, checker, typeRegistry },
+  );
 }
 
 /**
