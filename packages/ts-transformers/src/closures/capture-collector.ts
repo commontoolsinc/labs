@@ -7,6 +7,7 @@ import {
 } from "../ast/scope-analysis.ts";
 import { groupCapturesByRoot } from "../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
+import { extractBindingNames } from "../utils/identifiers.ts";
 
 export interface CaptureAnalysis {
   readonly captures: Set<ts.Expression>;
@@ -92,7 +93,7 @@ export class CaptureCollector {
         // This prevents spurious name collisions when nested callbacks reference outer parameters.
         const funcParams = new Set<string>(
           func.parameters.flatMap((p: ts.ParameterDeclaration) =>
-            this.extractBindingNames(p.name)
+            extractBindingNames(p.name)
           ),
         );
 
@@ -325,7 +326,7 @@ export class CaptureCollector {
       // Use extractBindingNames to handle nested destructuring patterns
       const isCallbackParam = func.parameters.some((
         param: ts.ParameterDeclaration,
-      ) => this.extractBindingNames(param.name).includes(node.text));
+      ) => extractBindingNames(param.name).includes(node.text));
 
       if (isCallbackParam) {
         return undefined; // Don't capture - it's just referencing a callback parameter
@@ -419,33 +420,6 @@ export class CaptureCollector {
       ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) ||
       ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node) ||
       ts.isConstructorDeclaration(node);
-  }
-
-  /**
-   * Recursively extract all binding names from a parameter binding pattern.
-   * Handles identifiers, object destructuring, array destructuring, and nested patterns.
-   */
-  private extractBindingNames(binding: ts.BindingName): string[] {
-    if (ts.isIdentifier(binding)) {
-      return [binding.text];
-    }
-
-    const names: string[] = [];
-
-    if (ts.isObjectBindingPattern(binding)) {
-      for (const element of binding.elements) {
-        names.push(...this.extractBindingNames(element.name));
-      }
-    } else if (ts.isArrayBindingPattern(binding)) {
-      for (const element of binding.elements) {
-        if (ts.isOmittedExpression(element)) {
-          continue; // Skip holes in array patterns like [a, , c]
-        }
-        names.push(...this.extractBindingNames(element.name));
-      }
-    }
-
-    return names;
   }
 
   private isParameterOrLocalVariable(

@@ -221,3 +221,61 @@ export function buildCaptureTypeElements(
     );
   });
 }
+
+export function createCaptureTypeLiteral(
+  captureTree: Iterable<[string, CaptureTreeNode]>,
+  context: TransformationContext,
+  renameMap?: ReadonlyMap<string, string>,
+): ts.TypeLiteralNode {
+  const typeNode = context.factory.createTypeLiteralNode(
+    buildCaptureTypeElements(captureTree, context, renameMap),
+  );
+  ensureTypeNodeRegistered(
+    typeNode,
+    context.checker,
+    context.options.typeRegistry,
+  );
+  return typeNode;
+}
+
+export function mergeCaptureTypesIntoTypeLiteral(
+  typeLiteral: ts.TypeLiteralNode,
+  captureTree: Iterable<[string, CaptureTreeNode]>,
+  context: TransformationContext,
+  renameMap?: ReadonlyMap<string, string>,
+): ts.TypeLiteralNode {
+  const existingMembers = [...typeLiteral.members];
+  const existingNames = new Set(
+    existingMembers.flatMap((member) =>
+      ts.isPropertySignature(member) && member.name &&
+        ts.isIdentifier(member.name)
+        ? [member.name.text]
+        : []
+    ),
+  );
+
+  for (
+    const captureMember of buildCaptureTypeElements(
+      captureTree,
+      context,
+      renameMap,
+    )
+  ) {
+    if (
+      ts.isPropertySignature(captureMember) &&
+      ts.isIdentifier(captureMember.name) &&
+      existingNames.has(captureMember.name.text)
+    ) {
+      continue;
+    }
+    existingMembers.push(captureMember);
+  }
+
+  const typeNode = context.factory.createTypeLiteralNode(existingMembers);
+  ensureTypeNodeRegistered(
+    typeNode,
+    context.checker,
+    context.options.typeRegistry,
+  );
+  return typeNode;
+}

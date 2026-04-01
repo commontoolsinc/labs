@@ -6,11 +6,18 @@ import {
   type CaptureTreeNode,
 } from "../../utils/capture-tree.ts";
 import {
+  createBindingElementsFromNames,
+  extractBindingNames,
+} from "../../utils/identifiers.ts";
+import {
   detectCallKind,
-  ensureTypeNodeRegistered,
   isCellLikeType,
   isFunctionLikeExpression,
 } from "../../ast/mod.ts";
+import {
+  createCaptureTypeLiteral,
+  mergeCaptureTypesIntoTypeLiteral,
+} from "../../ast/type-building.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 
 /**
@@ -70,6 +77,17 @@ export class PatternToolStrategy implements ClosureTransformationStrategy {
   }
 }
 
+function createPatternToolCaptureCollector(
+  checker: ts.TypeChecker,
+): CaptureCollector {
+  return new CaptureCollector(checker, {
+    captureNonModuleExternalIdentifiers: false,
+    captureNonModuleExternalPropertyAccesses: false,
+    captureModuleScopedIdentifierWhen: (_identifier, type, checker) =>
+      isCellLikeType(type, checker),
+  });
+}
+
 /**
  * Transform a patternTool call to include captured variables in extraParams.
  */
@@ -89,12 +107,7 @@ function transformPatternToolCall(
   // Collect module-scoped reactive captures from the callback
   // Unlike the default closure strategies, patternTool only wants
   // module-scoped reactive identifier captures in extraParams.
-  const collector = new CaptureCollector(context.checker, {
-    captureNonModuleExternalIdentifiers: false,
-    captureNonModuleExternalPropertyAccesses: false,
-    captureModuleScopedIdentifierWhen: (_identifier, type, checker) =>
-      isCellLikeType(type, checker),
-  });
+  const collector = createPatternToolCaptureCollector(context.checker);
   const { captures: captureExpressions, captureTree } = collector.analyze(
     callback,
   );
@@ -204,26 +217,21 @@ function buildCallbackWithCaptures(
     if (ts.isObjectBindingPattern(existingBinding)) {
       // Add capture bindings to the existing object pattern
       const newBindingElements = [...existingBinding.elements];
+      const existingBindingNames = new Set(
+        extractBindingNames(existingBinding),
+      );
 
       for (const captureName of captureTree.keys()) {
-        // Check if this capture is already in the binding
-        const alreadyExists = existingBinding.elements.some((element) => {
-          if (ts.isIdentifier(element.name)) {
-            return element.name.text === captureName;
-          }
-          return false;
-        });
-
-        if (!alreadyExists) {
-          newBindingElements.push(
-            factory.createBindingElement(
-              undefined,
-              undefined,
-              factory.createIdentifier(captureName),
-              undefined,
-            ),
-          );
+        if (existingBindingNames.has(captureName)) {
+          continue;
         }
+        newBindingElements.push(
+          ...createBindingElementsFromNames(
+            [captureName],
+            factory,
+            (propertyName) => factory.createIdentifier(propertyName),
+          ),
+        );
       }
 
       const newBindingPattern = factory.createObjectBindingPattern(
@@ -233,7 +241,7 @@ function buildCallbackWithCaptures(
       // Update the type annotation if present
       let newTypeNode = originalParam.type;
       if (newTypeNode && ts.isTypeLiteralNode(newTypeNode)) {
-        newTypeNode = addCapturesToTypeLiteral(
+        newTypeNode = mergeCaptureTypesIntoTypeLiteral(
           newTypeNode,
           captureTree,
           context,
@@ -254,33 +262,14 @@ function buildCallbackWithCaptures(
     }
   } else {
     // No original parameter, create one with just captures
-    const bindingElements = Array.from(captureTree.keys()).map((captureName) =>
-      factory.createBindingElement(
-        undefined,
-        undefined,
-        factory.createIdentifier(captureName),
-        undefined,
-      )
+    const bindingElements = createBindingElementsFromNames(
+      captureTree.keys(),
+      factory,
+      (captureName) => factory.createIdentifier(captureName),
     );
 
     const bindingPattern = factory.createObjectBindingPattern(bindingElements);
-
-    // Build type literal for captures
-    const typeElements = Array.from(captureTree.keys()).map((captureName) => {
-      return factory.createPropertySignature(
-        undefined,
-        factory.createIdentifier(captureName),
-        undefined,
-        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
-      );
-    });
-
-    const captureTypeNode = factory.createTypeLiteralNode(typeElements);
-    ensureTypeNodeRegistered(
-      captureTypeNode,
-      context.checker,
-      context.options.typeRegistry,
-    );
+    const captureTypeNode = createCaptureTypeLiteral(captureTree, context);
 
     newParam = factory.createParameterDeclaration(
       undefined,
@@ -315,50 +304,4 @@ function buildCallbackWithCaptures(
         : factory.createBlock([factory.createReturnStatement(transformedBody)]),
     );
   }
-}
-
-/**
- * Add captured variable types to a type literal node.
- */
-function addCapturesToTypeLiteral(
-  typeLiteral: ts.TypeLiteralNode,
-  captureTree: Map<string, CaptureTreeNode>,
-  context: TransformationContext,
-): ts.TypeLiteralNode {
-  const { factory } = context;
-
-  // Get existing members
-  const existingMembers = [...typeLiteral.members];
-
-  // Add type for each capture
-  for (const [captureName] of captureTree) {
-    // Check if this property already exists
-    const alreadyExists = existingMembers.some((member) => {
-      if (ts.isPropertySignature(member) && ts.isIdentifier(member.name)) {
-        return member.name.text === captureName;
-      }
-      return false;
-    });
-
-    if (!alreadyExists) {
-      // Add a property signature for the capture
-      // We use 'unknown' as a placeholder type since we don't have precise type info
-      existingMembers.push(
-        factory.createPropertySignature(
-          undefined,
-          factory.createIdentifier(captureName),
-          undefined,
-          factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
-        ),
-      );
-    }
-  }
-
-  const typeNode = factory.createTypeLiteralNode(existingMembers);
-  ensureTypeNodeRegistered(
-    typeNode,
-    context.checker,
-    context.options.typeRegistry,
-  );
-  return typeNode;
 }
