@@ -218,12 +218,14 @@ but it is a `FabricPrimitive`, not a `FabricInstance`.
 
 The **special primitive** types (`FabricEpochNsec`, `FabricEpochDays`,
 `FabricHash`, `FabricBytes`) are **not** `FabricInstance`s — they are
-direct members of `FabricValue`, like `bigint`. They all extend
-`FabricPrimitive` (Section 1.4.6), which marks them as always-frozen value
-types that bypass the `freeze` option in conversion functions. They have
-dedicated canonical hash tags and dedicated `TypeHandler`s for wire format
-serialization, but they do not implement `[DECONSTRUCT]`, `[RECONSTRUCT]`, or
-carry a `typeTag` property.
+`FabricPrimitive` subclasses (Section 1.4.6). `FabricPrimitive` extends
+`FabricSpecialObject`, and the `FabricValue` union includes
+`FabricSpecialObject`, so all `FabricPrimitive` subclasses are implicitly
+members of `FabricValue`. They are always-frozen value types that bypass the
+`freeze` option in conversion functions. They have dedicated canonical hash
+tags and dedicated `TypeHandler`s for wire format serialization, but they do
+not implement `[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag`
+property.
 
 #### 1.4.1 Wrapper Class Summary
 
@@ -552,14 +554,14 @@ export abstract class FabricSpecialObject {}
 ```
 
 **`FabricPrimitive`** is the abstract base class for non-`FabricInstance` types
-that sit directly in the `FabricValue` union alongside JS primitives. It
-extends `FabricSpecialObject`.
+that are included in `FabricValue` via the `FabricSpecialObject` arm of the
+union. It extends `FabricSpecialObject`.
 
 - `ExplicitTagValue` is the base for `FabricInstance` subtypes that carry
   an explicit wire-format tag (`UnknownValue`, `ProblematicValue`).
-- `FabricPrimitive` is the base for direct primitive types that behave like
-  primitives but need a class wrapper (`FabricEpochNsec`, `FabricEpochDays`,
-  `FabricHash`, `FabricBytes`).
+- `FabricPrimitive` is the base for types that behave like primitives but
+  need a class wrapper (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`,
+  `FabricBytes`).
 
 ```typescript
 // file: packages/data-model/interface.ts
@@ -1532,16 +1534,17 @@ The built-in type handlers are:
 |---------|-----|------------|-------|
 | `EpochNsecHandler` | `EpochNsec@1` | `FabricEpochNsec` | `FabricPrimitive` subclass; matched by `instanceof`. |
 | `EpochDaysHandler` | `EpochDays@1` | `FabricEpochDays` | `FabricPrimitive` subclass; matched by `instanceof`. |
+| `BytesHandler` | `Bytes@1` | `FabricBytes` | `FabricPrimitive` subclass; matched by `instanceof`. |
 | `FabricInstanceHandler` | _(empty)_ | `FabricInstance` | Generic handler for all `FabricInstance` values. Uses `[DECONSTRUCT]` and the codec's tag methods. No tag for deserialization — individual instance types are deserialized via the class registry. |
 | `BigIntHandler` | `BigInt@1` | `bigint` | Encodes as unpadded base64url of minimal two's complement big-endian bytes. |
 | `UndefinedHandler` | `Undefined@1` | `undefined` | Stateless; state is `null`. |
 
-Handler registration order matters for serialization: `EpochNsec` and
-`EpochDays` are checked first (they are `FabricPrimitive` subclasses matched
-by `instanceof` and must be found before the generic `FabricInstanceHandler`),
-then `FabricInstance` (generic protocol types via `instanceof FabricInstance`), then
-`bigint` and `undefined`. Primitives, arrays, and plain objects are handled as
-fallthrough after no handler matches.
+Handler registration order matters for serialization: `EpochNsec`,
+`EpochDays`, and `Bytes` are checked first (they are `FabricPrimitive`
+subclasses matched by `instanceof` and must be found before the generic
+`FabricInstanceHandler`), then `FabricInstance` (generic protocol types via
+`instanceof FabricInstance`), then `bigint` and `undefined`. Primitives,
+arrays, and plain objects are handled as fallthrough after no handler matches.
 
 #### Private `serialize()` method
 
@@ -1569,7 +1572,7 @@ The context's private `deserialize()` method walks the `JsonWireValue` tree:
    delegates to the handler's `deserialize()`. When the context is in lenient
    mode, handler exceptions produce `ProblematicValue` (Section 3.5).
 4. **Class registry fallback** — for tags not handled by type handlers (e.g.,
-   `Error@1`, `Map@1`, `Set@1`, `Bytes@1`, `RegExp@1`), the context looks up
+   `Error@1`, `Map@1`, `Set@1`, `RegExp@1`), the context looks up
    the `FabricClass` in its class registry, recursively deserializes the
    state, and calls `[RECONSTRUCT]`. Unknown tags produce `UnknownValue`.
 5. **Primitives** — pass through.

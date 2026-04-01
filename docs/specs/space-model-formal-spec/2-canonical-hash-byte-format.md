@@ -199,8 +199,7 @@ Bytes: TAG_EPOCH_NSEC  LENGTH_LEB128  TWO_COMP_BYTES
 Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
 
 `FabricEpochNsec` represents a nanosecond-precision Unix epoch timestamp. It
-is a direct `FabricValue` member (a `FabricPrimitive`, not a `FabricInstance`) and has a dedicated
-type tag.
+is a `FabricPrimitive` subclass and has a dedicated type tag.
 
 - **Length**: The number of bytes in the two's-complement representation of the
   wrapped `bigint` value, encoded as unsigned LEB128.
@@ -221,8 +220,7 @@ Bytes: TAG_EPOCH_DAYS  LENGTH_LEB128  TWO_COMP_BYTES
 Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
 
 `FabricEpochDays` represents a day-precision Unix epoch timestamp. It is a
-direct `FabricValue` member (a `FabricPrimitive`, not a `FabricInstance`) and has a dedicated type
-tag.
+`FabricPrimitive` subclass and has a dedicated type tag.
 
 - **Length**: The number of bytes in the two's-complement representation of the
   wrapped `bigint` value, encoded as unsigned LEB128.
@@ -245,8 +243,7 @@ Total: 1 + len(LEB128) + A + len(LEB128) + H bytes, where A is the byte length
 of the algorithm tag in UTF-8 and H is the number of hash bytes.
 
 `FabricHash` represents a content identifier — a hash with an algorithm
-tag. It is a direct `FabricValue` member (a `FabricPrimitive`, not a `FabricInstance`) and has a
-dedicated type tag.
+tag. It is a `FabricPrimitive` subclass and has a dedicated type tag.
 
 - **Algorithm tag length**: The byte length of the algorithm tag string in
   UTF-8, encoded as unsigned LEB128.
