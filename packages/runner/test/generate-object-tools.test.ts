@@ -56,7 +56,7 @@ describe("generateObject with tools", () => {
     });
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, generateObject, handler, Cell, patternTool, str } =
       commonfabric);
     dummyPattern = pattern(() => ({}), { type: "object" });

@@ -52,7 +52,7 @@ describe("Conflict Reproduction", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ lift, pattern, cell, handler } = commonfabric);
   });
 

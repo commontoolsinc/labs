@@ -33,7 +33,7 @@ describe("Pattern Runner - Regressions", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
       derive,
       pattern,

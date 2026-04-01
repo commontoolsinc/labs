@@ -4,6 +4,7 @@ import type {
   ProgramResolver,
   Source,
 } from "@commonfabric/js-compiler";
+import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 
 export type HarnessedFunction = (input: any) => void;
 
@@ -65,4 +66,9 @@ export interface Harness extends EventTarget {
   invoke(fn: () => any): any;
 
   getInvocation(source: string): HarnessedFunction;
+
+  unsafeTrustHostValue(
+    value: unknown,
+    options: UnsafeHostTrustOptions,
+  ): void;
 }

@@ -2,10 +2,10 @@ import { Console } from "./console.ts";
 import {
   type CompileResult,
   type Exports,
-  Harness,
-  HarnessedFunction,
-  RuntimeProgram,
-  TypeScriptHarnessProcessOptions,
+  type Harness,
+  type HarnessedFunction,
+  type RuntimeProgram,
+  type TypeScriptHarnessProcessOptions,
 } from "./types.ts";
 import {
   getTypeScriptEnvironmentTypes,
@@ -39,6 +39,7 @@ import {
   createModuleCompartmentGlobals,
   createSafeConsoleGlobal,
 } from "../sandbox/compartment-globals.ts";
+import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import {
   BundlePreflightError,
   preflightParsedCompiledBundle,
@@ -116,9 +117,13 @@ export class Engine extends EventTarget implements Harness {
     Map<string, HarnessedFunction>
   >();
   private readonly verifiedFunctionIndex = new Map<string, HarnessedFunction>();
-  private readonly patternFunctions = new Map<
+  private readonly verifiedPatternFunctions = new Map<
     string,
     Map<string, HarnessedFunction>
+  >();
+  private readonly trustedHostFunctionIndex = new Map<
+    string,
+    HarnessedFunction
   >();
   private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
 
@@ -298,7 +303,7 @@ export class Engine extends EventTarget implements Harness {
     patternId?: string,
   ): HarnessedFunction | undefined {
     if (patternId) {
-      const registry = this.patternFunctions.get(patternId);
+      const registry = this.verifiedPatternFunctions.get(patternId);
       if (registry?.has(implementationRef)) {
         return registry.get(implementationRef);
       }
@@ -306,10 +311,45 @@ export class Engine extends EventTarget implements Harness {
     return this.verifiedFunctionIndex.get(implementationRef);
   }
 
+  getTrustedHostFunction(
+    implementationRef: string,
+  ): HarnessedFunction | undefined {
+    return this.trustedHostFunctionIndex.get(implementationRef);
+  }
+
+  getExecutableFunction(
+    implementationRef: string,
+    patternId?: string,
+  ): HarnessedFunction | undefined {
+    return this.getVerifiedFunction(implementationRef, patternId) ??
+      this.getTrustedHostFunction(implementationRef);
+  }
+
   associatePattern(patternId: string, value: unknown): void {
     const registry = new Map<string, HarnessedFunction>();
+    this.collectAssociatedFunctions(
+      value,
+      registry,
+      new Set(),
+      (implementationRef) => this.getVerifiedFunction(implementationRef),
+    );
+    this.verifiedPatternFunctions.set(patternId, registry);
+  }
+
+  unsafeTrustHostValue(
+    value: unknown,
+    options: UnsafeHostTrustOptions,
+  ): void {
+    if (
+      typeof options.reason !== "string" || options.reason.trim().length === 0
+    ) {
+      throw new Error("unsafe host trust requires a non-empty reason");
+    }
+    const registry = new Map<string, HarnessedFunction>();
     this.collectAssociatedFunctions(value, registry, new Set());
-    this.patternFunctions.set(patternId, registry);
+    for (const [implementationRef, implementation] of registry) {
+      this.trustedHostFunctionIndex.set(implementationRef, implementation);
+    }
   }
 
   // Map a single position to its original source location.
@@ -364,7 +404,8 @@ export class Engine extends EventTarget implements Harness {
     this.internals = undefined;
     this.verifiedFunctions.clear();
     this.verifiedFunctionIndex.clear();
-    this.patternFunctions.clear();
+    this.verifiedPatternFunctions.clear();
+    this.trustedHostFunctionIndex.clear();
     this.verifiedBundleHashes.clear();
   }
 
@@ -559,6 +600,9 @@ export class Engine extends EventTarget implements Harness {
     value: unknown,
     registry: Map<string, HarnessedFunction>,
     seen: Set<unknown>,
+    fallbackLookup?: (
+      implementationRef: string,
+    ) => HarnessedFunction | undefined,
   ): void {
     if (!value || (typeof value !== "object" && typeof value !== "function")) {
       return;
@@ -568,7 +612,7 @@ export class Engine extends EventTarget implements Harness {
     }
     seen.add(value);
 
-    const associated = this.extractAssociatedFunction(value);
+    const associated = this.extractAssociatedFunction(value, fallbackLookup);
     if (associated) {
       registry.set(associated.implementationRef, associated.implementation);
     }
@@ -578,12 +622,20 @@ export class Engine extends EventTarget implements Harness {
       if (!descriptor || !("value" in descriptor)) {
         continue;
       }
-      this.collectAssociatedFunctions(descriptor.value, registry, seen);
+      this.collectAssociatedFunctions(
+        descriptor.value,
+        registry,
+        seen,
+        fallbackLookup,
+      );
     }
   }
 
   private extractAssociatedFunction(
     value: unknown,
+    fallbackLookup?: (
+      implementationRef: string,
+    ) => HarnessedFunction | undefined,
   ): { implementationRef: string; implementation: HarnessedFunction } | null {
     if (typeof value === "function") {
       const implementationRef = (value as { implementationRef?: string })
@@ -610,7 +662,7 @@ export class Engine extends EventTarget implements Harness {
       };
     }
 
-    const rebound = this.verifiedFunctionIndex.get(record.implementationRef);
+    const rebound = fallbackLookup?.(record.implementationRef);
     return rebound
       ? { implementationRef: record.implementationRef, implementation: rebound }
       : null;

@@ -10,6 +10,7 @@ import { createModuleCompartmentGlobals } from "../src/sandbox/mod.ts";
 import { createCallbackCompartmentGlobals } from "../src/sandbox/compartment-globals.ts";
 import { evaluateFunctionSourceInSES } from "../src/sandbox/ses-runtime.ts";
 import { getAMDLoader } from "../../js-compiler/typescript/bundler/amd-loader.ts";
+import { createBuilder } from "../src/builder/factory.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const FACTORY_SHADOW_GUARD = [
@@ -192,6 +193,46 @@ describe("SES security regressions", () => {
       hasProxy: false,
       hasConsoleHook: false,
     });
+  });
+
+  it("refuses to execute direct builder callbacks that were never verified by SES", async () => {
+    const { commontools } = createBuilder();
+    const double = commontools.lift((value: number) => value * 2);
+    const testPattern = commontools.pattern<{ value: number }>(({ value }) => ({
+      total: double(value),
+    }));
+
+    const resultCell = runtime.getCell<{ total: number }>(
+      signer.did(),
+      "reject direct builder callbacks",
+      testPattern.resultSchema,
+    );
+
+    await expect(runtime.runSynced(resultCell, testPattern, { value: 2 }))
+      .rejects.toThrow("Unknown executable implementationRef");
+  });
+
+  it("allows direct builder callbacks only when explicitly trusted", async () => {
+    const { commontools } = createBuilder({
+      unsafeHostTrust: runtime.createUnsafeHostTrust({
+        reason: "security regression fixture",
+      }),
+    });
+    const double = commontools.lift((value: number) => value * 2);
+    const testPattern = commontools.pattern<{ value: number }>(({ value }) => ({
+      total: double(value),
+    }));
+
+    const resultCell = runtime.getCell<{ total: number }>(
+      signer.did(),
+      "trusted direct builder callbacks",
+      testPattern.resultSchema,
+    );
+
+    const result = await runtime.runSynced(resultCell, testPattern, {
+      value: 2,
+    });
+    await expect(result.pull()).resolves.toEqual({ total: 4 });
   });
 
   it("freezes callback compartment globalThis bindings", () => {

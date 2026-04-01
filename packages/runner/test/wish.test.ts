@@ -28,7 +28,7 @@ describe("wish built-in", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ wish, pattern } = commonfabric);
   });
 
@@ -860,7 +860,7 @@ describe("wish built-in", () => {
       });
       tx = runtime.edit();
 
-      const { commonfabric } = createBuilder();
+      const { commonfabric } = createTrustedBuilder(runtime);
       ({ wish, pattern } = commonfabric);
     });
 
@@ -2183,7 +2183,7 @@ describe("wish built-in", () => {
       });
       tx = runtime.edit();
 
-      const { commonfabric } = createBuilder();
+      const { commonfabric } = createTrustedBuilder(runtime);
       ({ wish, pattern } = commonfabric);
     });
 
@@ -2374,7 +2374,7 @@ describe("wish built-in", () => {
 
     it("resolves hashtag using computed query (GoogleAuthManager pattern)", async () => {
       // This test mimics GoogleAuthManager which uses computed() for the wish query
-      const { commonfabric: { computed } } = createBuilder();
+      const { commonfabric: { computed } } = createTrustedBuilder(runtime);
 
       // Setup: Favorites with #googleAuth tag in home space
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);

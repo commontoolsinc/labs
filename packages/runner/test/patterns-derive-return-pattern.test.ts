@@ -37,7 +37,7 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
       derive,
       lift,

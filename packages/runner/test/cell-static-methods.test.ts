@@ -85,7 +85,7 @@ describe("Cell Static Methods", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ Cell } = commonfabric);
   });
 

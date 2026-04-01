@@ -28,7 +28,7 @@ describe("fetch-data mutex mechanism", () => {
     });
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     pattern = commonfabric.pattern;
     computed = commonfabric.computed;
     byRef = commonfabric.byRef;

@@ -1071,12 +1071,16 @@ export class Runner {
 
     switch (module.type) {
       case "javascript":
-        // Cache JavaScript functions that are already function objects
-        if (
-          typeof module.implementation === "function" &&
-          !this.functionCache.has(module)
-        ) {
-          this.functionCache.set(module, module.implementation);
+        // Only prewarm the cache from functions that were already registered
+        // by the SES verification/evaluation pipeline. Host callbacks must not
+        // enter the execution cache directly.
+        if (module.implementationRef && !this.functionCache.has(module)) {
+          const executable = this.runtime.harness.getExecutableFunction(
+            module.implementationRef,
+          );
+          if (executable) {
+            this.functionCache.set(module, executable);
+          }
         }
         break;
 
@@ -1254,20 +1258,15 @@ export class Runner {
     let fn: (inputs: any) => any;
     const patternId = this.runtime.patternManager.getPatternId(pattern);
 
-    if (typeof module.implementation === "function") {
-      fn = module.implementation as (inputs: any) => any;
-      if (module.implementationRef && !this.functionCache.has(module)) {
-        this.functionCache.set(module, fn);
-      }
-    } else if (module.implementationRef) {
+    if (module.implementationRef) {
       const cached = this.functionCache.get(module) ??
-        this.runtime.harness.getVerifiedFunction(
+        this.runtime.harness.getExecutableFunction(
           module.implementationRef,
           patternId,
         );
       if (!cached) {
         throw new Error(
-          `Unknown verified implementationRef: ${module.implementationRef}`,
+          `Unknown executable implementationRef: ${module.implementationRef}`,
         );
       }
       this.functionCache.set(module, cached as (inputs: any) => any);
@@ -1282,6 +1281,11 @@ export class Runner {
         ) => any;
         this.functionCache.set(module, fn);
       }
+    } else if (typeof module.implementation === "function") {
+      throw new Error(
+        "Refused to execute JavaScript function implementation without " +
+          "verified implementationRef",
+      );
     } else {
       throw new Error(
         "JavaScript module is missing an executable implementation",

@@ -527,6 +527,14 @@ export class PatternManager {
     patternId: string,
     value: Pattern | Module,
   ): void {
+    const originalPattern = this.findOriginalPattern(value as Pattern) as
+      & Pattern
+      & {
+        program?: RuntimeProgram;
+      };
+    if (!originalPattern.program) {
+      return;
+    }
     this.runtime.harness.associatePattern(patternId, value);
   }
 }

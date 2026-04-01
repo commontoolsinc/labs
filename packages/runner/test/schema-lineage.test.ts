@@ -272,7 +272,7 @@ describe("Schema propagation end-to-end example", () => {
       storageManager,
     });
     tx = runtime.edit();
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, UI } = commonfabric);
   });
 

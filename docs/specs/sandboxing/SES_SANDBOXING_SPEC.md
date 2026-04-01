@@ -1821,14 +1821,21 @@ snapshot that escapes module load.
 #### 2.3 Harden approved functions immediately after load (Priority: High)
 
 Direct top-level functions and trusted builder implementations must be hardened
-as soon as they are created.
+as soon as they are created. Hardening is not an execution grant. A hardened
+host callback remains non-executable unless it is either:
+
+- produced by the compiled SES verification/evaluation pipeline, or
+- explicitly admitted through the runtime-scoped unsafe host trust API in
+  Section 4.1.1
 
 The spec does not require a helper-shaped encoding for direct top-level
 functions. Implementations may harden them however they choose, provided the
 verifier only needs to recognize direct top-level function forms. Trusted
 builder implementations are hardened in the runtime builder layer as soon as
 `lift(...)`, `handler(...)`, `pattern(...)`, or related constructors receive
-them.
+them, but runner execution must still resolve those callbacks through the
+verified or trusted-host registries rather than by invoking raw function
+objects from the host graph.
 
 The compiled-bundle verifier also treats TypeScript's canonical default-import
 normalization rebinding as part of the accepted grammar:
@@ -1906,22 +1913,83 @@ private instantiateJavaScriptNode(
   ...
 ): void {
   let fn: Function;
+  const patternId = this.runtime.patternManager.getPatternId(pattern);
 
-  if (typeof module.implementation === "string") {
+  if (module.implementationRef) {
+    fn = this.runtime.harness.getExecutableFunction(
+      module.implementationRef,
+      patternId,
+    );
+    if (!fn) {
+      throw new Error(
+        `Unknown executable implementationRef: ${module.implementationRef}`,
+      );
+    }
+  } else if (typeof module.implementation === "string") {
     // String-backed implementations may be rehydrated lazily, but only inside
     // the dedicated SES callback compartment with the approved compatibility
     // globals and no runtime-module injection.
     fn = evaluateInCallbackCompartment(module.implementation);
   } else {
-    fn = assertVerifiedFunctionObject(module.implementation);
+    throw new Error(
+      "Refused to execute JavaScript function implementation without " +
+        "verified or explicitly trusted implementationRef",
+    );
   }
 
   // ... rest of existing logic ...
 }
 ```
 
+The runner must distinguish executable JavaScript implementations by origin:
+
+- verified callbacks: produced by compiled-bundle verification plus SES module
+  evaluation
+- trusted-host callbacks: admitted explicitly through the unsafe host trust API
+- all other raw host function objects: rejected
+
+“Hardened” is not a third category. Freezing a host callback prevents mutation;
+it does not prove provenance.
+
 **Files to modify:**
 - `packages/runner/src/runner.ts`
+
+#### 4.1.1 Explicit Unsafe Host Trust API
+
+Some tests, legacy comparison harnesses, and other trusted in-process fixtures
+construct patterns directly with host builder functions instead of compiling
+authored source through CTS and the compiled-bundle verifier. Those fixtures are
+outside the verified SES path and therefore must not become executable by
+default.
+
+The runtime may expose an explicit, runtime-scoped opt-in for those cases:
+
+```typescript
+const trust = runtime.createUnsafeHostTrust({
+  reason: "unit test fixture",
+});
+
+const { commontools } = createBuilder({
+  unsafeHostTrust: trust,
+});
+```
+
+The builder option may recursively register the host-created pattern/module
+graph with a trusted-host function registry as values are produced. Equivalent
+direct helpers such as `runtime.unsafeTrustPattern(pattern, options)` or
+`runtime.unsafeTrustModule(module, options)` are also allowed.
+
+The unsafe host trust contract is:
+
+- explicit at the callsite
+- scoped to one runtime / harness instance
+- non-serializable and not persisted into pattern metadata
+- separate from the verified SES function registry
+- auditable via a required non-empty reason string
+
+This API exists only to admit already-trusted host fixtures. It must not become
+an implicit fallback path when normal runner execution cannot find a verified
+implementation reference.
 
 #### 4.2 Remove Legacy UnsafeEvalIsolate Usage
 

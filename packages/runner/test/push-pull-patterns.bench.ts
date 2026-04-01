@@ -1,7 +1,7 @@
 /**
  * Push vs pull benchmarks using real patterns and list builtins.
  *
- * These benches go through createBuilder() + runtime.run() so they exercise the
+ * These benches go through createTrustedBuilder(runtime) + runtime.run() so they exercise the
  * actual map/filter/flatMap machinery instead of synthetic scheduler actions.
  */
 import { Identity } from "@commonfabric/identity";
@@ -350,7 +350,7 @@ function createEnv(pullMode: boolean): BenchEnv {
   if (pullMode) runtime.scheduler.enablePullMode();
   else runtime.scheduler.disablePullMode();
 
-  const { commonfabric } = createBuilder();
+  const { commonfabric } = createTrustedBuilder(runtime);
   const { lift, pattern } = commonfabric;
 
   return { runtime, storageManager, lift, pattern };

@@ -28,7 +28,7 @@ describe("when and unless built-in functions", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, lift, when, unless } = commonfabric);
   });
 

@@ -39,7 +39,7 @@ describe("generateText", () => {
     });
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, generateText } = commonfabric);
     dummyPattern = pattern(() => ({}), { type: "object" });
   });
@@ -264,7 +264,7 @@ describe("generateText with queue", () => {
     });
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, generateText } = commonfabric);
   });
 

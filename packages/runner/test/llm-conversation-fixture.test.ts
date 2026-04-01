@@ -69,7 +69,7 @@ describe("conversation fixtures", () => {
     });
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, generateObject, llmDialog, Cell, patternTool } = commonfabric);
   });
 

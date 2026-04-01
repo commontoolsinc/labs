@@ -94,7 +94,10 @@ export async function comparePatternResult<TArgument>(
     const legacy = await executeLegacy(jsScript);
     const exportName = program.mainExport ?? "default";
     const sesPattern = ses.main?.[exportName] as Pattern;
-    const legacyPattern = legacy.main[exportName] as Pattern;
+    const legacyPattern = legacyRuntime.unsafeTrustPattern(
+      legacy.main[exportName] as Pattern,
+      { reason: "legacy differential runtime comparison" },
+    );
 
     const sesResultCell = sesRuntime.getCell(
       sesSigner.did(),
@@ -169,7 +172,10 @@ export async function comparePatternScenario<TArgument>(
     const legacy = await executeLegacy(jsScript);
     const exportName = program.mainExport ?? "default";
     const sesPattern = ses.main?.[exportName] as Pattern;
-    const legacyPattern = legacy.main[exportName] as Pattern;
+    const legacyPattern = legacyRuntime.unsafeTrustPattern(
+      legacy.main[exportName] as Pattern,
+      { reason: "legacy differential runtime comparison" },
+    );
 
     const sesResultCell = sesRuntime.getCell(
       sesSigner.did(),
@@ -248,7 +254,10 @@ export async function comparePatternMappedError<TArgument>(
     const legacy = await executeLegacy(jsScript);
     const exportName = program.mainExport ?? "default";
     const sesPattern = ses.main?.[exportName] as Pattern;
-    const legacyPattern = legacy.main[exportName] as Pattern;
+    const legacyPattern = legacyRuntime.unsafeTrustPattern(
+      legacy.main[exportName] as Pattern,
+      { reason: "legacy differential runtime comparison" },
+    );
 
     const sesResultCell = sesRuntime.getCell(
       sesSigner.did(),

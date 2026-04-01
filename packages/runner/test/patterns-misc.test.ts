@@ -32,7 +32,7 @@ describe("Pattern Runner - Miscellaneous", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commonfabric } = createTrustedBuilder(runtime);
     ({
       lift,
       pattern,

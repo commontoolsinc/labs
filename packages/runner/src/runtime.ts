@@ -75,6 +75,11 @@ import {
   getWriteStackTrace,
   setWriteStackTraceMatchers,
 } from "./storage/write-stack-trace.ts";
+import {
+  createUnsafeHostTrustToken,
+  type UnsafeHostTrust,
+  type UnsafeHostTrustOptions,
+} from "./unsafe-host-trust.ts";
 
 interface WriteDebugContextStore<T> {
   getStore(): T | undefined;
@@ -528,6 +533,31 @@ export class Runtime {
 
   getWriteDebugContext(): string | undefined {
     return this.writeDebugContext.getStore() ?? this.scheduler.currentActionId;
+  }
+
+  createUnsafeHostTrust(
+    options: UnsafeHostTrustOptions,
+  ): UnsafeHostTrust {
+    return createUnsafeHostTrustToken(
+      options,
+      (value) => this.harness.unsafeTrustHostValue(value, options),
+    );
+  }
+
+  unsafeTrustPattern<T extends Pattern>(
+    pattern: T,
+    options: UnsafeHostTrustOptions,
+  ): T {
+    this.harness.unsafeTrustHostValue(pattern, options);
+    return pattern;
+  }
+
+  unsafeTrustModule<T extends Module>(
+    module: T,
+    options: UnsafeHostTrustOptions,
+  ): T {
+    this.harness.unsafeTrustHostValue(module, options);
+    return module;
   }
 
   withWriteDebugContext<T>(

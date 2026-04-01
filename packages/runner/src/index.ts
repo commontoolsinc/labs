@@ -7,6 +7,10 @@ export type {
   RuntimeOptions,
   SpaceCellContents,
 } from "./runtime.ts";
+export type {
+  UnsafeHostTrust,
+  UnsafeHostTrustOptions,
+} from "./unsafe-host-trust.ts";
 export * from "./interface.ts";
 export { raw } from "./module.ts";
 export type { Cell, Stream } from "./cell.ts";
@@ -62,7 +66,7 @@ export {
 export * from "./pattern-manager.ts";
 
 // Builder functionality (migrated from @commonfabric/builder package)
-export { createBuilder } from "./builder/factory.ts";
+export { createBuilder, type CreateBuilderOptions } from "./builder/factory.ts";
 export type {
   BuilderFunctionsAndConstants as BuilderFunctions,
   BuilderRuntime,
