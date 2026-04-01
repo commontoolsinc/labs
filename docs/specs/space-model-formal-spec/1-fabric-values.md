@@ -1669,7 +1669,7 @@ The dispatch is configured by `setJsonEncodingConfig(enabled)` /
   type signature promises. `valueFromJson` = `JSON.parse`. This is the legacy
   path — the storage layer sees plain JSON values with no tagged types.
 - **Flag ON:** `jsonFromValue` routes through `JsonEncodingContext.encode()`,
-  `valueFromJson` routes through `JsonEncodingContext.decode()`. Rich types
+  `valueFromJson` routes through `JsonEncodingContext.decode()`. Modern types
   are preserved across the storage boundary.
 
 The dispatch module creates a single stateless `JsonEncodingContext` instance at
