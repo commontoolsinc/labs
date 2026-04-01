@@ -295,9 +295,9 @@ copying in the common case and centralizes the freeze-state logic for all
 wrapper types.
 
 Unlike the wrappers above, the special primitive types (`FabricEpochNsec`,
-`FabricEpochDays`, `FabricHash`, `FabricBytes`) are **direct members of
-`FabricValue`** and do not extend `FabricInstance`. They all extend
-`FabricPrimitive` (Section 1.4.6), which provides always-frozen semantics.
+`FabricEpochDays`, `FabricHash`, `FabricBytes`) are **`FabricPrimitive`
+subclasses** and do not extend `FabricInstance`. They are included in
+`FabricValue` via the `FabricSpecialObject` arm of the union (Section 1.4.6).
 See Sections 1.4.6 through 1.4.10.
 
 | Special Primitive Type | Extends | Wire Tag | Stored Value | Notes |
@@ -968,8 +968,8 @@ export const RECONSTRUCT = Symbol.for('common.reconstruct');
  * `ProblematicValue`).
  *
  * Note: `FabricPrimitive` subclasses (`FabricEpochNsec`,
- * `FabricEpochDays`, `FabricHash`, `FabricBytes`) are direct
- * `FabricValue` members and do NOT extend this class.
+ * `FabricEpochDays`, `FabricHash`, `FabricBytes`) do NOT extend
+ * this class — they extend `FabricPrimitive` instead.
  */
 export abstract class FabricInstance extends FabricSpecialObject {
   /**
