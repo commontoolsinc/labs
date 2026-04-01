@@ -68,7 +68,7 @@ Transformers always run in this order:
 7. `ClosureTransformer`
 8. `PatternOwnedExpressionSiteLoweringTransformer`
 9. `HelperOwnedExpressionSiteLoweringTransformer`
-10. `CapabilityLoweringTransformer`
+10. `PatternCallbackLoweringTransformer`
 11. `SchemaInjectionTransformer`
 12. `SchemaGeneratorTransformer`
 
@@ -227,7 +227,7 @@ Guards that skip validation:
   `__param0`, etc. — names starting with `__`)
 - `never`-typed parameters (bottom type, vacuously valid)
 - paths whose head is `"key"` (reactive proxy accessor injected by
-  `CapabilityLoweringTransformer`)
+  `PatternCallbackLoweringTransformer`)
 
 Diagnostics:
 
@@ -498,9 +498,9 @@ values:
 
 If no qualifying captures exist, call is unchanged.
 
-### 9.7 Capability lowering
+### 9.7 Pattern callback lowering
 
-`CapabilityLoweringTransformer` runs after closure transformation.
+`PatternCallbackLoweringTransformer` runs after closure transformation.
 
 Primary behaviors:
 

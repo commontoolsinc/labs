@@ -432,7 +432,7 @@ fields/defaults unless an explicit author opt-in narrowing model is introduced.
 - `packages/ts-transformers/src/ast/type-building.ts`
 - validation messaging in
   `packages/ts-transformers/src/transformers/pattern-context-validation.ts`
-- replacement/merge path for that validation in capability-lowering diagnostics
+- replacement/merge path for that validation in pattern-callback-lowering diagnostics
 - schema emission in
   `packages/ts-transformers/src/transformers/schema-injection.ts`
 - schema generation coupling in

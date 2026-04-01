@@ -8,7 +8,6 @@ export type {
 export { Pipeline, transformCtDirective, Transformer } from "./core/mod.ts";
 
 export {
-  CapabilityLoweringTransformer,
   CastValidationTransformer,
   JsxExpressionSiteRouterTransformer,
   PatternCallbackLoweringTransformer,

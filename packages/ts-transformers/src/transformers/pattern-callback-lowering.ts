@@ -92,5 +92,3 @@ export class PatternCallbackLoweringTransformer extends HelpersOnlyTransformer {
     ) as ts.SourceFile;
   }
 }
-
-export { PatternCallbackLoweringTransformer as CapabilityLoweringTransformer };

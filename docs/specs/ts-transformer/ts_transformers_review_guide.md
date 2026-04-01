@@ -85,7 +85,7 @@ does **not** make foreign callback containers themselves part of the language.
   - semantic `any` / `unknown` is still representable elsewhere when that
     boundary is explicit
   - unresolved generic definition-site type params -> `{ type: "unknown" }`
-- `capability-lowering.ts` is no longer the central junk drawer; major
+- `pattern-callback-lowering.ts` is no longer the central junk drawer; major
   responsibilities are split into focused policy and transform files.
 
 ## Files To Review
