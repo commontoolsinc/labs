@@ -49,7 +49,10 @@ export {
   isEventHandlerType,
   isSafeEventHandlerCall,
 } from "./event-handlers.ts";
-export { isFunctionLikeExpression } from "./function-predicates.ts";
+export {
+  getEnclosingFunctionLikeDeclaration,
+  isFunctionLikeExpression,
+} from "./function-predicates.ts";
 export {
   getExpressionText,
   getMemberSymbol,

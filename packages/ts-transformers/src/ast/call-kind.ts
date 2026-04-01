@@ -32,6 +32,7 @@
 import ts from "typescript";
 
 import { CT_HELPERS_IDENTIFIER, isCommonToolsSymbol } from "../core/mod.ts";
+import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 import {
   COMMONTOOLS_BUILDER_EXPORT_NAMES,
   COMMONTOOLS_CALL_EXPORT_NAMES,
@@ -1182,27 +1183,6 @@ function isSymbolDeclaredInScope(
   return (symbol.getDeclarations() ?? []).some((declaration) =>
     isDeclarationInScope(declaration, scope)
   );
-}
-
-function getEnclosingFunctionLikeDeclaration(
-  node: ts.Node,
-): ts.FunctionLikeDeclaration | undefined {
-  let current: ts.Node | undefined = node.parent;
-  while (current) {
-    if (
-      ts.isArrowFunction(current) ||
-      ts.isFunctionExpression(current) ||
-      ts.isFunctionDeclaration(current) ||
-      ts.isMethodDeclaration(current) ||
-      ts.isGetAccessorDeclaration(current) ||
-      ts.isSetAccessorDeclaration(current) ||
-      ts.isConstructorDeclaration(current)
-    ) {
-      return current;
-    }
-    current = current.parent;
-  }
-  return undefined;
 }
 
 function resolveBuilderExpressionKind(

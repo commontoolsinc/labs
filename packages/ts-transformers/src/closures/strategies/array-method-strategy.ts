@@ -3,6 +3,7 @@ import { type TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   classifyReactiveContext,
+  getEnclosingFunctionLikeDeclaration,
   getTypeAtLocationWithFallback,
   hasReactiveCollectionProvenance,
   isConsumedByTerminalChainCall,
@@ -89,27 +90,6 @@ export function buildCapturePropertyAssignments(
     );
   }
   return properties;
-}
-
-function getEnclosingFunctionLike(
-  node: ts.Node,
-): ts.FunctionLikeDeclaration | undefined {
-  let current: ts.Node | undefined = node.parent;
-  while (current) {
-    if (
-      ts.isArrowFunction(current) ||
-      ts.isFunctionExpression(current) ||
-      ts.isFunctionDeclaration(current) ||
-      ts.isMethodDeclaration(current) ||
-      ts.isGetAccessorDeclaration(current) ||
-      ts.isSetAccessorDeclaration(current) ||
-      ts.isConstructorDeclaration(current)
-    ) {
-      return current;
-    }
-    current = current.parent;
-  }
-  return undefined;
 }
 
 function hasSharedReactiveCollectionProvenance(
@@ -247,7 +227,7 @@ function shouldTransformArrayMethod(
     return true;
   }
 
-  const enclosingFunction = getEnclosingFunctionLike(methodCall);
+  const enclosingFunction = getEnclosingFunctionLikeDeclaration(methodCall);
   if (
     contextInfo.kind === "compute" &&
     enclosingFunction &&

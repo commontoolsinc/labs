@@ -1,4 +1,5 @@
 import * as ts from "typescript";
+import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 
 const expressionTextCache = new WeakMap<ts.Expression, string>();
 const syntheticExpressionPrinter = ts.createPrinter();
@@ -298,19 +299,8 @@ export function isFunctionParameter(
           ts.isFunctionDeclaration(parent) ||
           ts.isMethodDeclaration(parent)
         ) {
-          let callExpr: ts.Node = parent;
-          while (callExpr.parent && !ts.isCallExpression(callExpr.parent)) {
-            callExpr = callExpr.parent;
-          }
-          if (callExpr.parent && ts.isCallExpression(callExpr.parent)) {
-            const funcName = callExpr.parent.expression.getText();
-            if (
-              funcName.includes("pattern") ||
-              funcName.includes("handler") ||
-              funcName.includes("lift")
-            ) {
-              return false;
-            }
+          if (isBuilderOwnedFunctionLike(parent)) {
+            return false;
           }
         }
         return true;
@@ -323,20 +313,7 @@ export function isFunctionParameter(
     return true;
   }
 
-  let current: ts.Node = node;
-  let containingFunction: ts.FunctionLikeDeclaration | undefined;
-  while (current.parent) {
-    current = current.parent;
-    if (
-      ts.isFunctionExpression(current) ||
-      ts.isArrowFunction(current) ||
-      ts.isFunctionDeclaration(current) ||
-      ts.isMethodDeclaration(current)
-    ) {
-      containingFunction = current as ts.FunctionLikeDeclaration;
-      break;
-    }
-  }
+  const containingFunction = getEnclosingFunctionLikeDeclaration(node);
 
   if (containingFunction && containingFunction.parameters) {
     for (const param of containingFunction.parameters) {
@@ -344,19 +321,8 @@ export function isFunctionParameter(
         param.name && ts.isIdentifier(param.name) &&
         param.name.text === node.text
       ) {
-        let callExpr: ts.Node = containingFunction;
-        while (callExpr.parent && !ts.isCallExpression(callExpr.parent)) {
-          callExpr = callExpr.parent;
-        }
-        if (callExpr.parent && ts.isCallExpression(callExpr.parent)) {
-          const funcName = callExpr.parent.expression.getText();
-          if (
-            funcName.includes("pattern") ||
-            funcName.includes("handler") ||
-            funcName.includes("lift")
-          ) {
-            return false;
-          }
+        if (isBuilderOwnedFunctionLike(containingFunction)) {
+          return false;
         }
         return true;
       }
@@ -364,6 +330,22 @@ export function isFunctionParameter(
   }
 
   return false;
+}
+
+function isBuilderOwnedFunctionLike(func: ts.FunctionLikeDeclaration): boolean {
+  let callExpr: ts.Node = func;
+  while (callExpr.parent && !ts.isCallExpression(callExpr.parent)) {
+    callExpr = callExpr.parent;
+  }
+
+  if (!callExpr.parent || !ts.isCallExpression(callExpr.parent)) {
+    return false;
+  }
+
+  const funcName = callExpr.parent.expression.getText();
+  return funcName.includes("pattern") ||
+    funcName.includes("handler") ||
+    funcName.includes("lift");
 }
 
 /**
