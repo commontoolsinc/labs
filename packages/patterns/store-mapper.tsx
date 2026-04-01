@@ -18,6 +18,7 @@ import {
   generateObject,
   handler,
   ifElse,
+  ImageData,
   NAME,
   pattern,
   UI,
@@ -91,13 +92,7 @@ type ItemsByPos = Record<
   { depts: Department[]; entrances: Entrance[] }
 >;
 
-// Types for AI photo-based aisle import
-interface ImageData {
-  id: string;
-  name: string;
-  url?: string; // data URL (preferred)
-  data?: string; // data URL (for compatibility)
-}
+// ImageData imported from commontools — matches ct-image-input's FileData schema
 
 interface ExtractedAisle {
   name: string;
@@ -1560,6 +1555,10 @@ export default pattern<Input, Output>(
                               </ct-button>
                             </ct-hstack>
 
+                            {/* Status: pending / error / results
+                                 Uses nested ifElse with static JSX branches.
+                                 Note: computed() returning JSX does not render
+                                 inside ifElse branches within mapWithPattern. */}
                             {ifElse(
                               extraction.pending,
                               <div
@@ -1583,143 +1582,57 @@ export default pattern<Input, Output>(
                                   Error analyzing photo. Please try removing and
                                   re-uploading.
                                 </div>,
-                                computed(() => {
-                                  const extracted: {
-                                    aisles: ExtractedAisle[];
-                                  } = extraction.extractedAisles;
-                                  const currentAisles = aisles.get();
-                                  if (
-                                    !extracted?.aisles ||
-                                    extracted.aisles.length === 0
-                                  ) {
-                                    return (
-                                      <div
-                                        style={{
-                                          fontSize: "12px",
-                                          color: "#999",
-                                        }}
+                                <div>
+                                  <ct-button
+                                    size="sm"
+                                    variant="primary"
+                                    onClick={addAllExtractedAisles({
+                                      aisles,
+                                      extractedList:
+                                        extraction.extractedAisles.aisles,
+                                      hiddenPhotoIds,
+                                      photoId: extraction.photo.id,
+                                    })}
+                                    style="margin-bottom: 0.5rem;"
+                                  >
+                                    + Add Detected Aisles
+                                  </ct-button>
+                                  {extraction.extractedAisles.aisles.map(
+                                    (extractedAisle: ExtractedAisle) => (
+                                      <ct-hstack
+                                        gap="2"
+                                        align="center"
+                                        style="padding: 0.5rem; background: #dcfce7; border-radius: 4px; margin-top: 0.25rem;"
                                       >
-                                        No aisles detected in photo
-                                      </div>
-                                    );
-                                  }
-
-                                  // Helper function to check if aisle exists
-                                  // Uses .some() directly on currentAisles (works with reactive proxies)
-                                  const aisleExists = (name: string) => {
-                                    try {
-                                      return currentAisles.some(
-                                        (existing: Aisle) =>
-                                          existing?.name?.toLowerCase?.() ===
-                                            name.toLowerCase(),
-                                      );
-                                    } catch {
-                                      return false;
-                                    }
-                                  };
-
-                                  // Count new aisles
-                                  const newCount = extracted.aisles.filter(
-                                    (e) => !aisleExists(e.name),
-                                  ).length;
-
-                                  return (
-                                    <ct-vstack gap="1">
-                                      {/* Batch add button */}
-                                      {newCount > 0 && (
+                                        <div style={{ flex: 1 }}>
+                                          <strong>
+                                            Aisle {extractedAisle.name}
+                                          </strong>
+                                          <div
+                                            style={{
+                                              fontSize: "12px",
+                                              color: "#6b7280",
+                                            }}
+                                          >
+                                            {(extractedAisle.products ||
+                                              []).join(", ") ||
+                                              "(no products)"}
+                                          </div>
+                                        </div>
                                         <ct-button
                                           size="sm"
                                           variant="primary"
-                                          onClick={addAllExtractedAisles({
+                                          onClick={addExtractedAisle({
                                             aisles,
-                                            extractedList: extracted.aisles,
-                                            hiddenPhotoIds,
-                                            photoId: extraction.photo.id,
+                                            extracted: extractedAisle,
                                           })}
-                                          style="margin-bottom: 0.5rem;"
                                         >
-                                          + Add All {newCount} New Aisles
+                                          Add
                                         </ct-button>
-                                      )}
-
-                                      {/* Individual aisle results */}
-                                      {extracted.aisles.map(
-                                        (extractedAisle: ExtractedAisle) => {
-                                          const exists = aisleExists(
-                                            extractedAisle.name,
-                                          );
-                                          return (
-                                            <ct-hstack
-                                              gap="2"
-                                              align="center"
-                                              style={`padding: 0.5rem; background: ${
-                                                exists ? "#fef3c7" : "#dcfce7"
-                                              }; border-radius: 4px;`}
-                                            >
-                                              <div style={{ flex: 1 }}>
-                                                <strong>
-                                                  Aisle {extractedAisle.name}
-                                                </strong>
-                                                {exists && (
-                                                  <span
-                                                    style={{
-                                                      color: "#92400e",
-                                                      marginLeft: "0.5rem",
-                                                      fontSize: "11px",
-                                                    }}
-                                                  >
-                                                    (exists)
-                                                  </span>
-                                                )}
-                                                <div
-                                                  style={{
-                                                    fontSize: "12px",
-                                                    color: "#6b7280",
-                                                  }}
-                                                >
-                                                  {(extractedAisle.products ||
-                                                    []).join(", ") ||
-                                                    "(no products)"}
-                                                </div>
-                                              </div>
-                                              {exists
-                                                ? (
-                                                  <ct-button
-                                                    size="sm"
-                                                    variant="secondary"
-                                                    onClick={mergeExtractedAisle(
-                                                      {
-                                                        aisles,
-                                                        extracted:
-                                                          extractedAisle,
-                                                      },
-                                                    )}
-                                                  >
-                                                    Merge
-                                                  </ct-button>
-                                                )
-                                                : (
-                                                  <ct-button
-                                                    size="sm"
-                                                    variant="primary"
-                                                    onClick={addExtractedAisle(
-                                                      {
-                                                        aisles,
-                                                        extracted:
-                                                          extractedAisle,
-                                                      },
-                                                    )}
-                                                  >
-                                                    Add
-                                                  </ct-button>
-                                                )}
-                                            </ct-hstack>
-                                          );
-                                        },
-                                      )}
-                                    </ct-vstack>
-                                  );
-                                }),
+                                      </ct-hstack>
+                                    ),
+                                  )}
+                                </div>,
                               ),
                             )}
                           </div>,
