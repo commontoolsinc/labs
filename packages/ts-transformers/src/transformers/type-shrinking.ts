@@ -110,6 +110,16 @@ function typeIncludesUndefined(type: ts.Type): boolean {
   return false;
 }
 
+function getSymbolTypeAtSource(
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+): ts.Type {
+  const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0] ??
+    sourceFile;
+  return checker.getTypeOfSymbolAtLocation(symbol, declaration);
+}
+
 function isNullishTypeNode(node: ts.TypeNode): boolean {
   return node.kind === ts.SyntaxKind.UndefinedKeyword ||
     node.kind === ts.SyntaxKind.NullKeyword ||
@@ -1113,6 +1123,87 @@ export function applyCapabilityDefaultsToTypeNode(
   return fallback.appliedCount > 0 ? fallback.node : initial.node;
 }
 
+function collectAllPropertyLeafPaths(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  prefix: readonly string[],
+  seen: Set<ts.Type>,
+): readonly (readonly string[])[] {
+  if (seen.has(type) || isArrayLikeType(type, checker)) {
+    return [prefix];
+  }
+  seen.add(type);
+
+  const properties = checker.getPropertiesOfType(type);
+  if (properties.length === 0) {
+    return [prefix];
+  }
+
+  const paths: string[][] = [];
+  for (const property of properties) {
+    const childType = getSymbolTypeAtSource(property, checker, sourceFile);
+    const childPrefix = [...prefix, property.getName()];
+    const childPaths = collectAllPropertyLeafPaths(
+      childType,
+      checker,
+      sourceFile,
+      childPrefix,
+      seen,
+    );
+    for (const path of childPaths) {
+      paths.push([...path]);
+    }
+  }
+  return paths;
+}
+
+function buildDefaultsOnlyFallbackPaths(
+  baseType: ts.Type | undefined,
+  defaults: readonly CapabilityParamDefault[] | undefined,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+): readonly (readonly string[])[] {
+  if (!baseType || !defaults || defaults.length === 0) {
+    return [];
+  }
+
+  const nestedHeads = new Set<string>();
+  for (const entry of defaults) {
+    if (entry.path.length > 1) {
+      const [head] = entry.path;
+      if (head) nestedHeads.add(head);
+    }
+  }
+
+  const fallbackPaths: string[][] = [];
+  for (const property of checker.getPropertiesOfType(baseType)) {
+    const head = property.getName();
+    if (!nestedHeads.has(head)) {
+      fallbackPaths.push([head]);
+      continue;
+    }
+
+    const childType = getSymbolTypeAtSource(property, checker, sourceFile);
+    const leafPaths = collectAllPropertyLeafPaths(
+      childType,
+      checker,
+      sourceFile,
+      [head],
+      new Set<ts.Type>(),
+    );
+    for (const path of leafPaths) {
+      fallbackPaths.push([...path]);
+    }
+  }
+
+  for (const entry of defaults) {
+    fallbackPaths.push([...entry.path]);
+  }
+
+  return uniquePaths(fallbackPaths);
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -1131,6 +1222,8 @@ export function applyShrinkAndWrap(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
+  mode: CapabilitySummaryApplicationMode = "full",
+  wrapCapability: ReactiveCapability = paramSummary.capability,
   context?: TransformationContext,
   fnNode?: ts.Node,
 ): ts.TypeNode {
@@ -1138,6 +1231,42 @@ export function applyShrinkAndWrap(
     ...paramSummary.readPaths,
     ...paramSummary.writePaths,
   ]);
+
+  if (mode === "defaults_only") {
+    if (context && fnNode) {
+      validateShrinkCoverage(
+        paramSummary,
+        baseTypeNode,
+        baseType,
+        paths,
+        undefined,
+        context,
+        fnNode,
+        checker,
+      );
+    }
+
+    const next = applyCapabilityDefaultsToTypeNode(
+      baseTypeNode,
+      paramSummary.defaults,
+      baseType,
+      buildDefaultsOnlyFallbackPaths(
+        baseType,
+        paramSummary.defaults,
+        checker,
+        sourceFile,
+      ),
+      false,
+      checker,
+      sourceFile,
+      factory,
+    );
+
+    if (!shouldWrap) {
+      return next;
+    }
+    return wrapTypeNodeWithCapability(next, wrapCapability, factory);
+  }
 
   let next = baseTypeNode;
   let shrunk: ts.TypeNode | undefined;
@@ -1247,5 +1376,5 @@ export function applyShrinkAndWrap(
   if (!shouldWrap) {
     return next;
   }
-  return wrapTypeNodeWithCapability(next, paramSummary.capability, factory);
+  return wrapTypeNodeWithCapability(next, wrapCapability, factory);
 }

@@ -12,7 +12,6 @@ import {
   inferParameterType,
   inferReturnType,
   isAnyOrUnknownType,
-  isArrayLikeType,
   isFunctionLikeExpression,
   isUnresolvedSchemaType,
   registerSyntheticCallType,
@@ -21,9 +20,7 @@ import {
   unwrapOpaqueLikeType,
   widenLiteralType,
 } from "../ast/mod.ts";
-import { uniquePaths } from "../utils/path-serialization.ts";
 import {
-  type CapabilityParamDefault,
   type CapabilityParamSummary,
   type CapabilitySummaryRegistry,
   HelpersOnlyTransformer,
@@ -32,14 +29,11 @@ import {
 } from "../core/mod.ts";
 import { analyzeFunctionCapabilities } from "../policy/mod.ts";
 import {
-  applyCapabilityDefaultsToTypeNode,
   applyShrinkAndWrap,
   type CapabilitySummaryApplicationMode,
   containsAnyOrUnknownTypeNode,
   isCellLikeTypeNode,
   printTypeNode,
-  validateShrinkCoverage,
-  wrapTypeNodeWithCapability,
 } from "./type-shrinking.ts";
 
 /**
@@ -132,87 +126,6 @@ function getSymbolTypeAtSource(
   return checker.getTypeOfSymbolAtLocation(symbol, declaration);
 }
 
-function collectAllPropertyLeafPaths(
-  type: ts.Type,
-  checker: ts.TypeChecker,
-  sourceFile: ts.SourceFile,
-  prefix: readonly string[],
-  seen: Set<ts.Type>,
-): readonly (readonly string[])[] {
-  if (seen.has(type) || isArrayLikeType(type, checker)) {
-    return [prefix];
-  }
-  seen.add(type);
-
-  const properties = checker.getPropertiesOfType(type);
-  if (properties.length === 0) {
-    return [prefix];
-  }
-
-  const paths: string[][] = [];
-  for (const property of properties) {
-    const childType = getSymbolTypeAtSource(property, checker, sourceFile);
-    const childPrefix = [...prefix, property.getName()];
-    const childPaths = collectAllPropertyLeafPaths(
-      childType,
-      checker,
-      sourceFile,
-      childPrefix,
-      seen,
-    );
-    for (const path of childPaths) {
-      paths.push([...path]);
-    }
-  }
-  return paths;
-}
-
-function buildDefaultsOnlyFallbackPaths(
-  baseType: ts.Type | undefined,
-  defaults: readonly CapabilityParamDefault[] | undefined,
-  checker: ts.TypeChecker,
-  sourceFile: ts.SourceFile,
-): readonly (readonly string[])[] {
-  if (!baseType || !defaults || defaults.length === 0) {
-    return [];
-  }
-
-  const nestedHeads = new Set<string>();
-  for (const entry of defaults) {
-    if (entry.path.length > 1) {
-      const [head] = entry.path;
-      if (head) nestedHeads.add(head);
-    }
-  }
-
-  const fallbackPaths: string[][] = [];
-  for (const property of checker.getPropertiesOfType(baseType)) {
-    const head = property.getName();
-    if (!nestedHeads.has(head)) {
-      fallbackPaths.push([head]);
-      continue;
-    }
-
-    const childType = getSymbolTypeAtSource(property, checker, sourceFile);
-    const leafPaths = collectAllPropertyLeafPaths(
-      childType,
-      checker,
-      sourceFile,
-      [head],
-      new Set<ts.Type>(),
-    );
-    for (const path of leafPaths) {
-      fallbackPaths.push([...path]);
-    }
-  }
-
-  for (const entry of defaults) {
-    fallbackPaths.push([...entry.path]);
-  }
-
-  return uniquePaths(fallbackPaths);
-}
-
 function findCapabilitySummaryForParameter(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   index: number,
@@ -284,48 +197,6 @@ function applyCapabilitySummaryToArgument(
     );
   }
 
-  if (mode === "defaults_only") {
-    // Validate that the base type can support the accessed paths even though
-    // shrinking is skipped in defaults_only mode.
-    if (context && fnNode) {
-      const paths = uniquePaths([
-        ...paramSummary.readPaths,
-        ...paramSummary.writePaths,
-      ]);
-      validateShrinkCoverage(
-        paramSummary,
-        baseTypeNode,
-        baseType,
-        paths,
-        undefined,
-        context,
-        fnNode ?? fn,
-        checker,
-      );
-    }
-
-    const fallbackPaths = buildDefaultsOnlyFallbackPaths(
-      baseType,
-      paramSummary.defaults,
-      checker,
-      sourceFile,
-    );
-    const next = applyCapabilityDefaultsToTypeNode(
-      baseTypeNode,
-      paramSummary.defaults,
-      baseType,
-      fallbackPaths,
-      false,
-      checker,
-      sourceFile,
-      factory,
-    );
-    if (!shouldWrap) {
-      return next;
-    }
-    return wrapTypeNodeWithCapability(next, "opaque", factory);
-  }
-
   return applyShrinkAndWrap(
     paramSummary,
     baseTypeNode,
@@ -334,6 +205,8 @@ function applyCapabilitySummaryToArgument(
     checker,
     sourceFile,
     factory,
+    mode,
+    mode === "defaults_only" ? "opaque" : paramSummary.capability,
     context,
     fnNode ?? fn,
   );
@@ -391,6 +264,8 @@ function applyCapabilitySummaryToParameter(
     checker,
     sourceFile,
     factory,
+    "full",
+    paramSummary.capability,
     context,
     fnNode ?? fn,
   );
