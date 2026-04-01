@@ -1,5 +1,6 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { getLogger } from "@commonfabric/utils/logger";
+import { storableFromNativeValue } from "@commonfabric/memory/storable-value";
 import { patternBreakpoint } from "./pattern-breakpoint.ts";
 import { isRecord, type Mutable } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
@@ -329,7 +330,7 @@ export class Runner {
       argument = mergeObjects<T>(argument as any, defaults);
     }
 
-    processCell.withTx(tx).setRawUntyped({
+    processCell.withTx(tx).setRawUntyped(storableFromNativeValue({
       ...processCell.getRaw({ meta: ignoreReadForScheduling }),
       [TYPE]: patternId || "unknown",
       resultRef: pattern.resultSchema !== undefined
@@ -344,7 +345,7 @@ export class Runner {
         }),
       internal,
       ...(patternId !== undefined) ? { spell: getSpellLink(patternId) } : {},
-    } as FabricValue);
+    }, false));
     if (argument) {
       diffAndUpdate(
         this.runtime,
@@ -368,7 +369,9 @@ export class Runner {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
     if (!deepEqual(result, previousResult)) {
-      resultCell.withTx(tx).setRawUntyped(result as FabricValue);
+      resultCell.withTx(tx).setRawUntyped(
+        storableFromNativeValue(result, false),
+      );
     }
 
     // [unsafe closures:] For patterns from closures, add a materialize factory

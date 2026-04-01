@@ -8,6 +8,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { NAME } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import type { Pattern } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -247,5 +248,69 @@ describe("Pattern Runner - Regressions", () => {
 
     (tx.tx as any).commit = originalCommit;
     tx = runtime.edit();
+  });
+
+  it("normalizes nested toJSON values before raw runner writes in v2", async () => {
+    await tx.commit();
+    await runtime.dispose();
+    await storageManager.close();
+
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+    });
+    tx = runtime.edit();
+
+    const initialRecipe = Object.assign(() => {}, {
+      toJSON() {
+        return { name: "initial recipe" };
+      },
+    });
+    const resultRecipe = Object.assign(() => {}, {
+      toJSON() {
+        return { name: "result recipe" };
+      },
+    });
+
+    const rawValuePattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      initial: {
+        internal: {
+          recipe: initialRecipe as unknown,
+        },
+      },
+      result: {
+        internalRecipe: {
+          $alias: { path: ["internal", "recipe"] },
+        },
+        resultRecipe: resultRecipe as unknown,
+      },
+      nodes: [],
+    } as unknown as Pattern;
+
+    const resultCell = runtime.getCell<{
+      internalRecipe: { name: string };
+      resultRecipe: { name: string };
+    }>(
+      space,
+      "ct-v2-raw-runner-normalization",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, rawValuePattern, {}, resultCell);
+    await tx.commit();
+
+    const value = await result.pull();
+    expect(value).toMatchObject({
+      internalRecipe: { name: "initial recipe" },
+      resultRecipe: { name: "result recipe" },
+    });
   });
 });
