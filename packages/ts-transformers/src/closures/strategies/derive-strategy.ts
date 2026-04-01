@@ -3,7 +3,7 @@ import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   detectCallKind,
-  isFunctionLikeExpression,
+  getCapabilitySummaryCallbackArgument,
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
@@ -103,36 +103,6 @@ export function isDeriveCall(
 ): boolean {
   const callKind = detectCallKind(node, context.checker);
   return callKind?.kind === "derive";
-}
-
-/**
- * Extract the callback function from a derive call.
- * Derive has two signatures:
- * - 2-arg: derive(input, callback)
- * - 4-arg: derive(inputSchema, resultSchema, input, callback)
- */
-function extractDeriveCallback(
-  deriveCall: ts.CallExpression,
-): ts.ArrowFunction | ts.FunctionExpression | undefined {
-  const args = deriveCall.arguments;
-
-  // 2-arg form: callback is at index 1
-  if (args.length === 2) {
-    const callback = args[1];
-    if (callback && isFunctionLikeExpression(callback)) {
-      return callback;
-    }
-  }
-
-  // 4-arg form: callback is at index 3
-  if (args.length === 4) {
-    const callback = args[3];
-    if (callback && isFunctionLikeExpression(callback)) {
-      return callback;
-    }
-  }
-
-  return undefined;
 }
 
 /**
@@ -350,7 +320,7 @@ export function transformDeriveCall(
   const { factory, checker, options } = context;
 
   // Extract callback
-  const callback = extractDeriveCallback(deriveCall);
+  const callback = getCapabilitySummaryCallbackArgument(deriveCall, checker);
   if (!callback) {
     return undefined;
   }
