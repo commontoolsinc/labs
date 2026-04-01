@@ -73,13 +73,13 @@ export interface AnnotationOutput extends AnnotationPiece {
 // ===== Handlers =====
 
 const setKind = handler<Event, { kind: Writable<any> }>((event, { kind }) => {
-  const val = (event.target as HTMLSelectElement)?.value;
+  const val = (event.target as { value?: string })?.value;
   if (val) kind.set(val as AnnotationKind);
 });
 
 const setStatus = handler<Event, { status: Writable<any> }>(
   (event, { status }) => {
-    const val = (event.target as HTMLSelectElement)?.value;
+    const val = (event.target as { value?: string })?.value;
     if (val) status.set(val as AnnotationStatus);
   },
 );
