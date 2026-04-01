@@ -1630,11 +1630,11 @@ version requirements.
 The storage boundary in `space.ts` routes through flag-gated dispatch functions
 that bridge between the storage layer (JSON strings) and the runtime layer
 (`FabricValue`). These functions live in a dedicated dispatch module
-(`packages/data-model/json-encoding-dispatch.ts`) and are reassigned at runtime
+(`packages/data-model/json-encoding.ts`) and are reassigned at runtime
 based on whether unified JSON encoding is enabled.
 
 ```typescript
-// file: packages/data-model/json-encoding-dispatch.ts
+// file: packages/data-model/json-encoding.ts
 
 /**
  * Encode a fabric value to a JSON string. When unified JSON encoding is
@@ -1750,7 +1750,7 @@ In the `Cell` implementation:
 - **Write path:** `Cell.setRaw()` calls `fabricFromNativeValue(value)` to
   wrap native types into fabric form before storing.
 
-> **Config lifecycle.** Both dispatch modules (`json-encoding-dispatch` and
+> **Config lifecycle.** Both dispatch modules (`json-encoding` and
 > `fabric-value`) follow the same lifecycle pattern: the `Runtime`
 > constructor calls the `set*Config()` function to activate the dispatch based
 > on `ExperimentalOptions`, and `Runtime.dispose()` calls `reset*Config()` to
