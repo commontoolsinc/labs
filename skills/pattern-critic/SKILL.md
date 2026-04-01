@@ -89,13 +89,3 @@ export default pattern<Input>(({ deck }) => ({
 return <>{showDetails ? <div>Details content</div> : null}</>;
 return <>{ifElse(showDetails, <div>Details content</div>, null)}</>;
 ```
-
-### Correct Style Syntax
-
-```typescript
-<div style={{ display: "flex", gap: "1rem" }}>
-  <ct-vstack style="flex: 1; padding: 1rem;">
-    Content
-  </ct-vstack>
-</div>;
-```

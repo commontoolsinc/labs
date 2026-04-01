@@ -444,24 +444,6 @@ const mapData = {
 
 ---
 
-## Style Syntax
-
-| Element | Syntax | Example |
-|---------|--------|---------|
-| HTML (`div`, `span`) | Object, camelCase | `style={{ backgroundColor: "#fff" }}` |
-| Custom (`ct-*`) | String, kebab-case | `style="background-color: #fff;"` |
-
-```tsx
-// Mixed usage
-<div style={{ display: "flex", gap: "1rem" }}>
-  <ct-vstack style="flex: 1; padding: 1rem;">
-    <span style={{ color: "#333" }}>Label</span>
-  </ct-vstack>
-</div>
-```
-
----
-
 ## ct-chart
 
 SVG charting components. Compose mark elements inside a `ct-chart` container.
