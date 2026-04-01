@@ -446,6 +446,17 @@ function hasHelpField(schema: JSONSchema): boolean {
   return properties ? "help" in properties : false;
 }
 
+function isSchemaLessHandlerInput(schema: JSONSchema): boolean {
+  if (schema === true) {
+    return true;
+  }
+  if (!isSchemaObject(schema)) {
+    return false;
+  }
+  return schema.asStream === true && schema.type === undefined &&
+    schema.properties === undefined;
+}
+
 export function normalizeCallableInputForExecution(
   spec: ExecCommandSpec,
   input: unknown,
@@ -644,6 +655,10 @@ function fullFlagUsage(flagName: string, schema: JSONSchema): string {
 }
 
 function specificFlagLines(schema: JSONSchema): string[] {
+  if (isSchemaLessHandlerInput(schema)) {
+    return [];
+  }
+
   const properties = objectProperties(schema);
   if (!properties) {
     return [
@@ -820,6 +835,9 @@ function helpUsageLines(
 }
 
 function handlerAllowsInvokeWithoutInputs(schema: JSONSchema): boolean {
+  if (isSchemaLessHandlerInput(schema)) {
+    return true;
+  }
   const properties = objectProperties(schema);
   return properties !== null && requiredFlags(schema).size === 0;
 }
@@ -993,6 +1011,10 @@ function schemaShapeString(
   schema: JSONSchema,
   depth = 0,
 ): string {
+  if (isSchemaLessHandlerInput(schema)) {
+    return "void";
+  }
+
   if (depth >= 4) {
     return "{...}";
   }
@@ -1070,6 +1092,10 @@ function pieceUsageLines(
   return [
     `  ${commandPrefix} --help`,
     `  ${commandPrefix} --help --json`,
+    ...(spec.callableKind === "handler" &&
+        handlerAllowsInvokeWithoutInputs(spec.inputSchema)
+      ? [`  ${commandPrefix}`, `  ${commandPrefix} -- invoke`]
+      : []),
     `  ${pieceJsonUsageLine(commandPrefix)}`,
     `  ${commandPrefix} -- --json-file <path>`,
     `  ${pieceFlagUsageLine(commandPrefix, spec)}`,

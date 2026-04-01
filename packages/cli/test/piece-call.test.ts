@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commontools/api";
+import { CT_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
 import { executePieceCallable } from "../lib/piece.ts";
 
 describe("executePieceCallable", () => {
@@ -454,6 +455,38 @@ describe("executePieceCallable", () => {
     );
     expect(result.helpText).not.toContain("ct exec");
   });
+
+  it("surfaces handler transaction failures as errors", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      handlerFailureMessage: "Bad message payload",
+    });
+
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "of:piece-123",
+          space: "home",
+        },
+        "recordMessage",
+        ["--message", "milk"],
+        {
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+        },
+      ),
+    ).rejects.toThrow(/Handler "recordMessage" failed: Bad message payload/);
+  });
 });
 
 function createPieceCallableHarness(options: {
@@ -466,6 +499,7 @@ function createPieceCallableHarness(options: {
   };
   extraParams?: Record<string, unknown>;
   toolResult?: unknown;
+  handlerFailureMessage?: string;
 }) {
   const tracker = {
     handlerWrites: [] as Array<{
@@ -497,6 +531,39 @@ function createPieceCallableHarness(options: {
       extraParams: options.extraParams ?? {},
     }
     : { $stream: true };
+  const runtimeErrors: Array<{ message: string }> = [];
+  const callableCell = createMockCell(
+    callableValue,
+    callableSchema,
+    options.callableKind === "handler"
+      ? {
+        send: (
+          value: unknown,
+          onCommit?: (
+            tx: { status: () => { status: string; error?: Error } },
+          ) => void,
+        ) => {
+          tracker.handlerWrites.push({
+            cellProp: "result",
+            path: [options.cellKey],
+            value,
+          });
+          if (options.handlerFailureMessage) {
+            runtimeErrors.push({ message: options.handlerFailureMessage });
+          }
+          onCommit?.({
+            status: () =>
+              options.handlerFailureMessage
+                ? {
+                  status: "error",
+                  error: new Error(options.handlerFailureMessage),
+                }
+                : { status: "done" },
+          });
+        },
+      }
+      : undefined,
+  );
   const rootCell = createMockCell(
     {
       [options.cellKey]: callableValue,
@@ -507,6 +574,7 @@ function createPieceCallableHarness(options: {
         [options.cellKey]: callableSchema,
       },
     },
+    { childOverrides: { [options.cellKey]: callableCell } },
   );
 
   const state = { value: options.toolResult };
@@ -545,6 +613,7 @@ function createPieceCallableHarness(options: {
     getSpace: () => "home",
     synced: async () => {},
     runtime: {
+      [CT_RUNTIME_ERROR_LOG]: runtimeErrors,
       edit: () => ({
         commit: async () => {},
       }),
@@ -576,13 +645,26 @@ function createPieceCallableHarness(options: {
 function createMockCell(
   value: unknown,
   schema: JSONSchema | undefined,
+  options?: {
+    childOverrides?: Record<string, ReturnType<typeof createMockCell>>;
+    send?: (
+      value: unknown,
+      onCommit?: (
+        tx: { status: () => { status: string; error?: Error } },
+      ) => void,
+    ) => void;
+  },
 ) {
   const cell = {
     schema,
     get: () => value,
     getRaw: () => value,
     asSchemaFromLinks: () => cell,
+    send: options?.send,
     key: (key: string) => {
+      if (options?.childOverrides?.[key]) {
+        return options.childOverrides[key];
+      }
       const nextValue =
         typeof value === "object" && value !== null && !Array.isArray(value)
           ? (value as Record<string, unknown>)[key]

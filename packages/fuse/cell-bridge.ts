@@ -39,6 +39,27 @@ function getInputSchema(
   >;
   return Object.keys(rest).length > 0 ? rest as JSONSchema : undefined;
 }
+
+function displayCallableInputType(
+  callableKind: CallableKind,
+  schema: JSONSchema | undefined,
+): string {
+  if (callableKind === "handler" && schema === undefined) {
+    return "void (invoke with no args)";
+  }
+
+  if (schema === undefined) {
+    return "void";
+  }
+
+  const defs =
+    typeof schema === "object" && schema !== null && !Array.isArray(schema)
+      ? (schema as Record<string, unknown>).$defs as
+        | Record<string, JSONSchema>
+        | undefined
+      : undefined;
+  return schemaToTypeString(schema, { defs, maxDepth: 3 });
+}
 // Lazy-imported in connectSpace() to avoid pulling in heavy CLI deps at import
 // time (breaks tests that only use CellBridge for tree/symlink logic).
 // import { loadManager } from "../cli/lib/piece.ts";
@@ -1226,15 +1247,7 @@ export class CellBridge {
     cellProp: "input" | "result",
   ): void {
     for (const { key, callableKind, schema } of callables) {
-      const defs =
-        schema && typeof schema === "object" && !Array.isArray(schema)
-          ? (schema as Record<string, unknown>).$defs as
-            | Record<string, JSONSchema>
-            | undefined
-          : undefined;
-      const typeStr = schema !== undefined
-        ? schemaToTypeString(schema, { defs, maxDepth: 3 })
-        : undefined;
+      const typeStr = displayCallableInputType(callableKind, schema);
       const script = buildCallableScript(this.execCli, schema, typeStr);
       this.tree.addCallable(
         propIno,
@@ -1308,15 +1321,7 @@ export class CellBridge {
     if (existingIno !== undefined) this.tree.clear(existingIno);
     if (callables.length === 0) return;
     const lines = callables.map(({ key, callableKind, schema }) => {
-      const defs =
-        schema && typeof schema === "object" && !Array.isArray(schema)
-          ? (schema as Record<string, unknown>).$defs as
-            | Record<string, JSONSchema>
-            | undefined
-          : undefined;
-      const typeStr = schema !== undefined
-        ? schemaToTypeString(schema, { defs, maxDepth: 3 })
-        : "void";
+      const typeStr = displayCallableInputType(callableKind, schema);
       return `${key}.${callableKind}  ${typeStr}`;
     });
     this.tree.addFile(

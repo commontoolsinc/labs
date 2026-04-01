@@ -280,6 +280,51 @@ Deno.test("CellBridge.loadPieceTree creates result/ dir with leaf files", async 
   assertEquals(contentValue, "world");
 });
 
+Deno.test("CellBridge.loadPieceTree labels void handlers as no-arg callables in .handlers", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+
+  const onAddContactCell = makeCell(
+    { $stream: true },
+    { asStream: true },
+    {},
+    { isStream: true },
+  );
+  const resultCell = makeCell(
+    { onAddContact: { $stream: true } },
+    {
+      type: "object",
+      properties: {
+        onAddContact: { asStream: true },
+      },
+    },
+    { onAddContact: onAddContactCell },
+  );
+
+  const piece = {
+    id: "of:entity-void-handler",
+    name: () => "Contact Book",
+    getPatternMeta: () => Promise.resolve({ patternName: "contact-book" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell),
+      get: () => Promise.resolve({ onAddContact: { $stream: true } }),
+    },
+  };
+
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, tree.rootIno, "Contact Book", "home");
+
+  const handlers = getFileContent(tree, pieceIno, ".handlers");
+  assertEquals(
+    handlers.includes("onAddContact.handler  void (invoke with no args)"),
+    true,
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Group 2: addPieceToSpace — name collision
 // ---------------------------------------------------------------------------
