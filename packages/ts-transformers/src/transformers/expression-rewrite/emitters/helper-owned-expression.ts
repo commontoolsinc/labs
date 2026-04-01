@@ -1,11 +1,10 @@
 import ts from "typescript";
 import { getCellKind } from "@commontools/schema-generator/cell-brand";
 
-import { normalizeDataFlows } from "../../../ast/mod.ts";
 import { classifyOpaquePathTerminalCall } from "../../opaque-roots.ts";
 import {
   createReactiveWrapperForExpression,
-  filterRelevantDataFlows,
+  getRelevantDataFlows,
 } from "../rewrite-helpers.ts";
 import {
   assertValidComputeWrapCandidate,
@@ -80,14 +79,7 @@ export function rewriteHelperOwnedExpression(
   }
 
   const analysis = analyze(expression);
-  const relevantDataFlows = filterRelevantDataFlows(
-    normalizeDataFlows(
-      analysis.graph,
-      analysis.dataFlows,
-    ).all,
-    analysis,
-    context,
-  );
+  const relevantDataFlows = getRelevantDataFlows(analysis, context);
 
   const pendingRewrite = relevantDataFlows.length > 0
     ? findPendingComputeWrapCandidate(expression, analyze, context)

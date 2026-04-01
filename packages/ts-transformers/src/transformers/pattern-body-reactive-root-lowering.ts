@@ -5,7 +5,6 @@ import {
   getCapabilitySummaryCallbackArgument,
   getTypeAtLocationWithFallback,
   isWildcardTraversalCall,
-  normalizeDataFlows,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { TransformationContext } from "../core/mod.ts";
@@ -23,7 +22,7 @@ import {
 } from "./destructuring-lowering.ts";
 import {
   createReactiveWrapperForExpression,
-  filterRelevantDataFlows,
+  getRelevantDataFlows,
 } from "./expression-rewrite/rewrite-helpers.ts";
 import {
   addBindingTargetSymbols,
@@ -246,13 +245,9 @@ function rewriteTrackedOpaquePatternBody(
 
   const getRelevantDataFlowsForExpression = (
     expression: ts.Expression,
-  ): ReturnType<typeof normalizeDataFlows>["all"] | undefined => {
+  ) => {
     const analysis = analyze(expression);
-    const relevantDataFlows = filterRelevantDataFlows(
-      normalizeDataFlows(analysis.graph, analysis.dataFlows).all,
-      analysis,
-      context,
-    );
+    const relevantDataFlows = getRelevantDataFlows(analysis, context);
     return relevantDataFlows.length > 0 ? relevantDataFlows : undefined;
   };
 

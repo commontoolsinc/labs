@@ -4,13 +4,12 @@ import type { Emitter } from "../types.ts";
 import { createIfElseCall } from "../../builtins/ifelse.ts";
 import {
   isSimpleReactiveAccessExpression,
-  normalizeDataFlows,
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
 import {
   createReactiveWrapperForExpression,
-  filterRelevantDataFlows,
+  getRelevantDataFlows,
 } from "../rewrite-helpers.ts";
 import {
   assertValidComputeWrapCandidate,
@@ -57,14 +56,7 @@ function processBranch(
   }
 
   const branchAnalysis = analyze(expr);
-  const branchDataFlows = filterRelevantDataFlows(
-    normalizeDataFlows(
-      branchAnalysis.graph,
-      branchAnalysis.dataFlows,
-    ).all,
-    branchAnalysis,
-    context,
-  );
+  const branchDataFlows = getRelevantDataFlows(branchAnalysis, context);
 
   const pendingRewrite = branchDataFlows.length > 0
     ? findPendingComputeWrapCandidate(expr, analyze, context)

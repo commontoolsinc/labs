@@ -5,7 +5,9 @@ import {
   classifyReactiveContext,
   type DataFlowAnalysis,
   detectCallKind,
+  normalizeDataFlows,
   type NormalizedDataFlow,
+  type NormalizedDataFlowSet,
   setParentPointers,
 } from "../../ast/mod.ts";
 import { TransformationContext } from "../../core/mod.ts";
@@ -117,7 +119,7 @@ function isOpaqueCallParameter(
   return false;
 }
 
-export function filterRelevantDataFlows(
+function filterRelevantDataFlows(
   dataFlows: readonly NormalizedDataFlow[],
   analysis: DataFlowAnalysis,
   context: TransformationContext,
@@ -254,6 +256,31 @@ export function filterRelevantDataFlows(
     // Both are OpaqueRefs that may need to be included in derive calls
     return true;
   });
+}
+
+export function getRelevantDataFlowSet(
+  analysis: DataFlowAnalysis,
+  context: TransformationContext,
+): NormalizedDataFlowSet {
+  const normalized = normalizeDataFlows(
+    analysis.graph,
+    analysis.dataFlows,
+  );
+  const all = filterRelevantDataFlows(normalized.all, analysis, context);
+  return {
+    all,
+    byCanonicalKey: new Map(all.map((dataFlow) => [
+      dataFlow.canonicalKey,
+      dataFlow,
+    ])),
+  };
+}
+
+export function getRelevantDataFlows(
+  analysis: DataFlowAnalysis,
+  context: TransformationContext,
+): readonly NormalizedDataFlow[] {
+  return getRelevantDataFlowSet(analysis, context).all;
 }
 
 function getCaptureRootExpression(expression: ts.Expression): ts.Expression {

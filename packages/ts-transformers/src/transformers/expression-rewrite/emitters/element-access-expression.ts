@@ -1,10 +1,7 @@
 import ts from "typescript";
 
 import type { EmitterContext } from "../types.ts";
-import {
-  createReactiveWrapperForExpression,
-  filterRelevantDataFlows,
-} from "../rewrite-helpers.ts";
+import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 
 export const emitElementAccessExpression = ({
   expression,
@@ -21,13 +18,7 @@ export const emitElementAccessExpression = ({
 
   if (dataFlows.all.length === 0) return undefined;
 
-  const relevantDataFlows = filterRelevantDataFlows(
-    dataFlows.all,
-    analysis,
-    context,
-  );
-
-  if (relevantDataFlows.length === 0) return undefined;
+  if (dataFlows.all.length === 0) return undefined;
 
   // Check if this is a static index access
   const argumentExpression = expression.argumentExpression;
@@ -43,7 +34,7 @@ export const emitElementAccessExpression = ({
 
   return createReactiveWrapperForExpression(
     expression,
-    relevantDataFlows,
+    dataFlows.all,
     context,
     {
       preferDeriveWrapper: preferDeriveWrappers,

@@ -11,10 +11,7 @@ import {
   findEnclosingCallbackContext,
 } from "../../../ast/mod.ts";
 import { createDeriveCall } from "../../builtins/derive.ts";
-import {
-  createReactiveWrapperForExpression,
-  filterRelevantDataFlows,
-} from "../rewrite-helpers.ts";
+import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import { rewriteHelperOwnedExpression } from "./helper-owned-expression.ts";
 
 function getConditionalHelperArgLabel(
@@ -230,12 +227,7 @@ export const emitCallExpression: Emitter = ({
     return undefined;
   }
 
-  const relevantDataFlows = filterRelevantDataFlows(
-    dataFlows.all,
-    analysis,
-    context,
-  );
-  if (relevantDataFlows.length === 0) return undefined;
+  if (dataFlows.all.length === 0) return undefined;
 
   if (preferDeriveWrappers) {
     const inlineCaptureRefs = getInlineFunctionReactiveCaptureRefs(
@@ -255,7 +247,7 @@ export const emitCallExpression: Emitter = ({
 
   return createReactiveWrapperForExpression(
     expression,
-    relevantDataFlows,
+    dataFlows.all,
     context,
     {
       filterNestedFunctionLocalCaptures: shouldFilterNestedLocalsForCallWrapper(

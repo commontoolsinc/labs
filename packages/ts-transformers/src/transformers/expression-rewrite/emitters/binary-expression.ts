@@ -1,10 +1,7 @@
 import ts from "typescript";
 
 import type { Emitter } from "../types.ts";
-import {
-  createReactiveWrapperForExpression,
-  filterRelevantDataFlows,
-} from "../rewrite-helpers.ts";
+import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import { shouldDeferFallbackMapReceiverRewrite } from "../fallback-array-method-rewrite.ts";
 import {
   assertValidComputeWrapCandidate,
@@ -22,7 +19,6 @@ import { shouldLowerLogicalExpression } from "../../../policy/mod.ts";
 export const emitBinaryExpression: Emitter = ({
   expression,
   dataFlows,
-  analysis,
   context,
   analyze,
   rewriteSubexpression,
@@ -161,12 +157,7 @@ export const emitBinaryExpression: Emitter = ({
     return undefined;
   }
 
-  const relevantDataFlows = filterRelevantDataFlows(
-    dataFlows.all,
-    analysis,
-    context,
-  );
-  if (relevantDataFlows.length === 0) return undefined;
+  if (dataFlows.all.length === 0) return undefined;
 
   if (
     reactiveContextKind === "pattern" &&
@@ -191,7 +182,7 @@ export const emitBinaryExpression: Emitter = ({
 
   return createReactiveWrapperForExpression(
     expression,
-    relevantDataFlows,
+    dataFlows.all,
     context,
     {
       preferDeriveWrapper: preferDeriveWrappers,

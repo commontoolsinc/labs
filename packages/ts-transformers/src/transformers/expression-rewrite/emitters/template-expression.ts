@@ -1,15 +1,11 @@
 import ts from "typescript";
 
 import type { EmitterContext } from "../types.ts";
-import {
-  createReactiveWrapperForExpression,
-  filterRelevantDataFlows,
-} from "../rewrite-helpers.ts";
+import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 
 export const emitTemplateExpression = ({
   expression,
   dataFlows,
-  analysis,
   context,
   inSafeContext,
   preferDeriveWrappers,
@@ -21,16 +17,11 @@ export const emitTemplateExpression = ({
 
   if (dataFlows.all.length === 0) return undefined;
 
-  const relevantDataFlows = filterRelevantDataFlows(
-    dataFlows.all,
-    analysis,
-    context,
-  );
-  if (relevantDataFlows.length === 0) return undefined;
+  if (dataFlows.all.length === 0) return undefined;
 
   return createReactiveWrapperForExpression(
     expression,
-    relevantDataFlows,
+    dataFlows.all,
     context,
     {
       preferDeriveWrapper: preferDeriveWrappers,

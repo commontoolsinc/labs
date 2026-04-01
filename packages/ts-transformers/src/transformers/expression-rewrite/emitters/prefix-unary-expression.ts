@@ -3,9 +3,8 @@ import ts from "typescript";
 import type { Emitter } from "../types.ts";
 import {
   createReactiveWrapperForExpression,
-  filterRelevantDataFlows,
+  getRelevantDataFlows,
 } from "../rewrite-helpers.ts";
-import { normalizeDataFlows } from "../../../ast/mod.ts";
 
 export const emitPrefixUnaryExpression: Emitter = ({
   expression,
@@ -26,23 +25,11 @@ export const emitPrefixUnaryExpression: Emitter = ({
   }
   if (dataFlows.all.length === 0) return undefined;
 
-  let relevantDataFlows = filterRelevantDataFlows(
-    dataFlows.all,
-    analysis,
-    context,
-  );
+  let relevantDataFlows = dataFlows.all;
 
   if (relevantDataFlows.length === 0 && analysis.containsOpaqueRef) {
     const fallbackAnalysis = analyze(expression.operand);
-    const fallbackDataFlows = normalizeDataFlows(
-      fallbackAnalysis.graph,
-      fallbackAnalysis.dataFlows,
-    );
-    relevantDataFlows = filterRelevantDataFlows(
-      fallbackDataFlows.all,
-      fallbackAnalysis,
-      context,
-    );
+    relevantDataFlows = getRelevantDataFlows(fallbackAnalysis, context);
 
     if (relevantDataFlows.length === 0) return undefined;
   } else if (relevantDataFlows.length === 0) {
