@@ -17,10 +17,8 @@ import {
   classifyReactiveReceiverKind,
   shouldRewriteCollectionMethod,
 } from "../../policy/mod.ts";
-import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
-  createPropertyName,
   normalizeBindingName,
   reserveIdentifier,
 } from "../../utils/identifiers.ts";
@@ -32,6 +30,7 @@ import type { ComputedAliasInfo } from "./array-method-utils.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
+import { buildCaptureParamsObject } from "../utils/capture-scaffold.ts";
 import { unwrapExpression } from "../../utils/expression.ts";
 import {
   cloneKeyExpression,
@@ -71,26 +70,6 @@ export class ArrayMethodStrategy implements ClosureTransformationStrategy {
     }
     return undefined;
   }
-}
-
-/**
- * Build property assignments for captured variables from a capture tree.
- * Used by map, handler, and derive transformations to build params/input objects.
- */
-export function buildCapturePropertyAssignments(
-  captureTree: Map<string, CaptureTreeNode>,
-  factory: ts.NodeFactory,
-): ts.PropertyAssignment[] {
-  const properties: ts.PropertyAssignment[] = [];
-  for (const [rootName, node] of captureTree) {
-    properties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(rootName, factory),
-        buildHierarchicalParamsValue(node, rootName, factory),
-      ),
-    );
-  }
-  return properties;
 }
 
 function hasSharedReactiveCollectionProvenance(
@@ -318,9 +297,6 @@ function lowerMapReceiverMemberAccess(
 /**
  * Create the final pattern call with params object.
  */
-/**
- * Create the final pattern call with params object.
- */
 function createPatternCallWithParams(
   methodCall: ts.CallExpression,
   callback: ts.ArrowFunction | ts.FunctionExpression,
@@ -480,14 +456,7 @@ function createPatternCallWithParams(
   );
 
   // Create params object
-  const paramProperties = buildCapturePropertyAssignments(
-    filteredCaptureTree,
-    factory,
-  );
-  const paramsObject = factory.createObjectLiteralExpression(
-    paramProperties,
-    paramProperties.length > 0,
-  );
+  const paramsObject = buildCaptureParamsObject(filteredCaptureTree, factory);
 
   if (!ts.isPropertyAccessExpression(methodCall.expression)) {
     throw new Error(
