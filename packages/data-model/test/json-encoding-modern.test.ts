@@ -1749,7 +1749,9 @@ describe("json encoding", () => {
 
     // -- Deep checks with FabricNativeObject --
     it("accepts objects containing Error values", () => {
-      expect(isFabricCompatible({ error: new Error("test"), code: 500 })).toBe(true);
+      expect(isFabricCompatible({ error: new Error("test"), code: 500 })).toBe(
+        true,
+      );
     });
 
     it("accepts arrays containing Error values", () => {

@@ -708,7 +708,10 @@ function cloneHelper(
   }
 }
 
-function isFabricCompatibleInternal(value: unknown, seen: Set<object>): boolean {
+function isFabricCompatibleInternal(
+  value: unknown,
+  seen: Set<object>,
+): boolean {
   // Primitives: null, boolean, string, number (finite), bigint, undefined.
   if (value === null || value === undefined) return true;
 

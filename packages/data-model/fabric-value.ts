@@ -25,19 +25,19 @@ import type {
 import { deepEqual } from "@commontools/utils/deep-equal";
 import type { Immutable } from "@commontools/utils/types";
 import {
-  isFabricCompatibleModern,
   cloneIfNecessaryModern,
   type CloneOptions,
   fabricFromNativeValueModern,
+  isFabricCompatibleModern,
   isFabricValueModern,
   nativeFromFabricValueModern,
   shallowFabricFromNativeValueModern,
 } from "./fabric-value-modern.ts";
 export type { CloneOptions } from "./fabric-value-modern.ts";
 import {
-  isFabricCompatibleLegacy,
   cloneIfNecessaryLegacy,
   fabricFromNativeValueLegacy,
+  isFabricCompatibleLegacy,
   isFabricValueLegacy,
   shallowFabricFromNativeValueLegacy,
 } from "./fabric-value-legacy.ts";
