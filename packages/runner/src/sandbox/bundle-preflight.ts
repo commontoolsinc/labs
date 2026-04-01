@@ -13,8 +13,23 @@ const ALLOWED_TSLIB_HELPERS = new Set([
   "__createBinding",
   "__exportStar",
   "__importDefault",
-  "__setModuleDefault",
 ]);
+
+const IDENT = String.raw`([A-Za-z_$][\w$]*)`;
+const CANONICAL_CREATE_BINDING_PATTERN = new RegExp(
+  String
+    .raw`^var__createBinding=\(this&&this\.__createBinding\)\|\|\(Object\.create\?\(function\(${IDENT},${IDENT},${IDENT},${IDENT}\)\{if\(\4===undefined\)\4=\3;var${IDENT}=Object\.getOwnPropertyDescriptor\(\2,\3\);if\(!\5\|\|\("get"in\5\?!\2\.__esModule:\5\.writable\|\|\5\.configurable\)\)\{\5=\{enumerable:true,get:function\(\)\{return\2\[\3\];\}\};\}Object\.defineProperty\(\1,\4,\5\);\}\):\(function\(\1,\2,\3,\4\)\{if\(\4===undefined\)\4=\3;\1\[\4\]=\2\[\3\];\}\)\);?$`,
+);
+const CANONICAL_EXPORT_STAR_PATTERNS = [
+  new RegExp(
+    String
+      .raw`^var__exportStar=\(this&&this\.__exportStar\)\|\|function\(${IDENT},${IDENT}\)\{for\(var${IDENT}in\1\)if\(\3!==("default"|'default')&&!Object\.prototype\.hasOwnProperty\.call\(\2,\3\)\)__createBinding\(\2,\1,\3\);\};?$`,
+  ),
+  new RegExp(
+    String
+      .raw`^var__exportStar=function\(${IDENT},${IDENT}\)\{for\(var${IDENT}in\1\)if\(\3!==("default"|'default')&&!Object\.prototype\.hasOwnProperty\.call\(\2,\3\)\)__createBinding\(\2,\1,\3\);\};?$`,
+  ),
+];
 
 const CANONICAL_LOADER_BINDINGS = [
   normalizeExact(
@@ -177,15 +192,11 @@ function isAllowedTsLibHelperDeclaration(normalized: string): boolean {
       return /^var__importDefault=\(this&&this\.__importDefault\)\|\|function\(\w+\)\{return\(\w+&&\w+\.__esModule\)\?\w+:\{"default":\w+\};\};?$/
         .test(normalized);
     case "__createBinding":
-      return /^var__createBinding=\(this&&this\.__createBinding\)\|\|\(Object\.create\?.+:.+\);?$/
-        .test(normalized);
-    case "__setModuleDefault":
-      return /^var__setModuleDefault=\(this&&this\.__setModuleDefault\)\|\|\(Object\.create\?.+:.+\);?$/
-        .test(normalized);
+      return CANONICAL_CREATE_BINDING_PATTERN.test(normalized);
     case "__exportStar":
-      return /^var__exportStar=\(this&&this\.__exportStar\)\|\|function\(\w+,\w+\)\{.*\};?$/
-        .test(normalized) ||
-        /^var__exportStar=function\(\w+,\w+\)\{.*\};?$/.test(normalized);
+      return CANONICAL_EXPORT_STAR_PATTERNS.some((pattern) =>
+        pattern.test(normalized)
+      );
     default:
       return false;
   }

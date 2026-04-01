@@ -133,6 +133,25 @@ describe("preflightCompiledBundle()", () => {
     );
   });
 
+  it("rejects standalone __setModuleDefault helper initializers", () => {
+    const bundle = bundleWithCanonicalLoader(`
+  var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function (o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+  }) : function (o, v) {
+    o["default"] = v;
+  });
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.default = 42;
+  });
+  return require("main");
+`);
+
+    expect(() => preflightCompiledBundle(bundle)).toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
   it("accepts regex literals inside compiled module factories", () => {
     const bundle = bundleWithCanonicalLoader(`
   define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
@@ -195,6 +214,49 @@ describe("preflightCompiledBundle()", () => {
   it("rejects bootstrap helper declarations with executable initializers", () => {
     const bundle = bundleWithCanonicalLoader(`
   var __importDefault = breakOut();
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.default = 42;
+  });
+  return require("main");
+`);
+
+    expect(() => preflightCompiledBundle(bundle)).toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
+  it("rejects __createBinding helpers with executable injected expressions", () => {
+    const bundle = bundleWithCanonicalLoader(`
+  var __createBinding = (this && this.__createBinding) || (Object.create ? (((() => breakOut())()), function (o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || (("get" in desc ? !m.__esModule : desc.writable || desc.configurable))) {
+      desc = { enumerable: true, get: function () { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+  }) : (function (o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+  }));
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.default = 42;
+  });
+  return require("main");
+`);
+
+    expect(() => preflightCompiledBundle(bundle)).toThrow(
+      "unsupported top-level executable code",
+    );
+  });
+
+  it("rejects __exportStar helpers with executable injected statements", () => {
+    const bundle = bundleWithCanonicalLoader(`
+  var __exportStar = (this && this.__exportStar) || function (m, exports) {
+    breakOut();
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+  };
   define("main", ["require", "exports"], function (require, exports) {
     "use strict";
     exports.default = 42;
