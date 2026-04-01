@@ -329,160 +329,6 @@ export function createDataFlowAnalyzer(
         ts.isNoSubstitutionTemplateLiteral(argumentExpression));
   };
 
-  const analyzeStatement = (
-    statement: ts.Statement,
-    scope: DataFlowScope,
-    context: AnalyzerContext,
-  ): InternalAnalysis => {
-    if (ts.isBlock(statement)) {
-      return mergeAnalyses(
-        ...statement.statements.map((child) =>
-          analyzeStatement(child, scope, context)
-        ),
-      );
-    }
-
-    if (ts.isVariableStatement(statement)) {
-      return mergeAnalyses(
-        ...statement.declarationList.declarations.map((declaration) => {
-          const initializer = declaration.initializer;
-          if (!initializer || isFunctionLikeExpression(initializer)) {
-            return emptyAnalysis();
-          }
-          return analyzeExpression(initializer, scope, context);
-        }),
-      );
-    }
-
-    if (ts.isExpressionStatement(statement)) {
-      return analyzeExpression(statement.expression, scope, context);
-    }
-
-    if (ts.isReturnStatement(statement)) {
-      return statement.expression
-        ? analyzeExpression(statement.expression, scope, context)
-        : emptyAnalysis();
-    }
-
-    if (ts.isIfStatement(statement)) {
-      return mergeAnalyses(
-        analyzeExpression(statement.expression, scope, context),
-        analyzeStatement(statement.thenStatement, scope, context),
-        statement.elseStatement
-          ? analyzeStatement(statement.elseStatement, scope, context)
-          : emptyAnalysis(),
-      );
-    }
-
-    if (ts.isSwitchStatement(statement)) {
-      const clauseAnalyses = statement.caseBlock.clauses.flatMap((clause) => {
-        const analyses: InternalAnalysis[] = [];
-        if (ts.isCaseClause(clause)) {
-          analyses.push(analyzeExpression(clause.expression, scope, context));
-        }
-        analyses.push(
-          ...clause.statements.map((child) =>
-            analyzeStatement(child, scope, context)
-          ),
-        );
-        return analyses;
-      });
-
-      return mergeAnalyses(
-        analyzeExpression(statement.expression, scope, context),
-        ...clauseAnalyses,
-      );
-    }
-
-    if (ts.isForStatement(statement)) {
-      const analyses: InternalAnalysis[] = [];
-      const initializer = statement.initializer;
-      if (initializer) {
-        if (ts.isExpression(initializer)) {
-          analyses.push(analyzeExpression(initializer, scope, context));
-        } else if (ts.isVariableDeclarationList(initializer)) {
-          analyses.push(
-            mergeAnalyses(
-              ...initializer.declarations.map((declaration) => {
-                const init = declaration.initializer;
-                if (!init || isFunctionLikeExpression(init)) {
-                  return emptyAnalysis();
-                }
-                return analyzeExpression(init, scope, context);
-              }),
-            ),
-          );
-        }
-      }
-
-      if (statement.condition) {
-        analyses.push(analyzeExpression(statement.condition, scope, context));
-      }
-
-      if (statement.incrementor) {
-        analyses.push(analyzeExpression(statement.incrementor, scope, context));
-      }
-
-      analyses.push(analyzeStatement(statement.statement, scope, context));
-      return mergeAnalyses(...analyses);
-    }
-
-    if (ts.isForInStatement(statement) || ts.isForOfStatement(statement)) {
-      const analyses: InternalAnalysis[] = [];
-      const initializer = statement.initializer;
-      if (ts.isExpression(initializer)) {
-        analyses.push(analyzeExpression(initializer, scope, context));
-      } else if (ts.isVariableDeclarationList(initializer)) {
-        analyses.push(
-          mergeAnalyses(
-            ...initializer.declarations.map((declaration) => {
-              const init = declaration.initializer;
-              if (!init || isFunctionLikeExpression(init)) {
-                return emptyAnalysis();
-              }
-              return analyzeExpression(init, scope, context);
-            }),
-          ),
-        );
-      }
-
-      analyses.push(analyzeExpression(statement.expression, scope, context));
-      analyses.push(analyzeStatement(statement.statement, scope, context));
-      return mergeAnalyses(...analyses);
-    }
-
-    if (ts.isWhileStatement(statement) || ts.isDoStatement(statement)) {
-      return mergeAnalyses(
-        analyzeExpression(statement.expression, scope, context),
-        analyzeStatement(statement.statement, scope, context),
-      );
-    }
-
-    if (ts.isTryStatement(statement)) {
-      return mergeAnalyses(
-        analyzeStatement(statement.tryBlock, scope, context),
-        statement.catchClause
-          ? analyzeStatement(statement.catchClause.block, scope, context)
-          : emptyAnalysis(),
-        statement.finallyBlock
-          ? analyzeStatement(statement.finallyBlock, scope, context)
-          : emptyAnalysis(),
-      );
-    }
-
-    if (ts.isThrowStatement(statement)) {
-      return statement.expression
-        ? analyzeExpression(statement.expression, scope, context)
-        : emptyAnalysis();
-    }
-
-    if (ts.isLabeledStatement(statement)) {
-      return analyzeStatement(statement.statement, scope, context);
-    }
-
-    return emptyAnalysis();
-  };
-
   const analyzeExpression = (
     expression: ts.Expression,
     scope: DataFlowScope,
@@ -939,13 +785,15 @@ export function createDataFlowAnalyzer(
         if (isFunctionLikeExpression(arg)) {
           const childScope = createScope(context, scope, arg.parameters);
           if (ts.isBlock(arg.body)) {
-            analyses.push(
-              mergeAnalyses(
-                ...arg.body.statements.map((statement) =>
-                  analyzeStatement(statement, childScope, context)
-                ),
-              ),
-            );
+            const blockAnalyses: InternalAnalysis[] = [];
+            for (const statement of arg.body.statements) {
+              if (ts.isReturnStatement(statement) && statement.expression) {
+                blockAnalyses.push(
+                  analyzeExpression(statement.expression, childScope, context),
+                );
+              }
+            }
+            analyses.push(mergeAnalyses(...blockAnalyses));
           } else {
             analyses.push(analyzeExpression(arg.body, childScope, context));
           }
@@ -986,11 +834,15 @@ export function createDataFlowAnalyzer(
     if (isFunctionLikeExpression(expression)) {
       const childScope = createScope(context, scope, expression.parameters);
       if (ts.isBlock(expression.body)) {
-        return mergeAnalyses(
-          ...expression.body.statements.map((statement) =>
-            analyzeStatement(statement, childScope, context)
-          ),
-        );
+        const analyses: InternalAnalysis[] = [];
+        for (const statement of expression.body.statements) {
+          if (ts.isReturnStatement(statement) && statement.expression) {
+            analyses.push(
+              analyzeExpression(statement.expression, childScope, context),
+            );
+          }
+        }
+        return mergeAnalyses(...analyses);
       }
       return analyzeExpression(expression.body, childScope, context);
     }

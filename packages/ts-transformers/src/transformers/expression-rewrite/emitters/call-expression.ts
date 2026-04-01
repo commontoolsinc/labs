@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { CaptureCollector } from "../../../closures/capture-collector.ts";
 
 import type { Emitter } from "../types.ts";
 import {
@@ -8,6 +9,7 @@ import {
   detectCallKind,
   findEnclosingCallbackContext,
 } from "../../../ast/mod.ts";
+import { createDeriveCall } from "../../builtins/derive.ts";
 import {
   createReactiveWrapperForExpression,
   filterRelevantDataFlows,
@@ -36,23 +38,6 @@ function shouldFilterNestedLocalsForCallWrapper(
   context: Parameters<Emitter>[0]["context"],
   analyze: Parameters<Emitter>[0]["analyze"],
 ): boolean {
-  let normalizedCallee: ts.Expression = expression.expression;
-  while (
-    ts.isParenthesizedExpression(normalizedCallee) ||
-    ts.isAsExpression(normalizedCallee) ||
-    ts.isTypeAssertionExpression(normalizedCallee) ||
-    ts.isNonNullExpression(normalizedCallee)
-  ) {
-    normalizedCallee = normalizedCallee.expression;
-  }
-
-  if (
-    ts.isFunctionExpression(normalizedCallee) ||
-    ts.isArrowFunction(normalizedCallee)
-  ) {
-    return true;
-  }
-
   const reactiveContext = classifyReactiveContext(
     expression,
     context.checker,
@@ -110,6 +95,49 @@ function shouldFilterNestedLocalsForCallWrapper(
 
   const receiverAnalysis = analyze(callee.expression);
   return receiverAnalysis.containsOpaqueRef;
+}
+
+function getInlineFunctionCallee(
+  expression: ts.CallExpression,
+): ts.FunctionExpression | ts.ArrowFunction | undefined {
+  let normalizedCallee: ts.Expression = expression.expression;
+  while (
+    ts.isParenthesizedExpression(normalizedCallee) ||
+    ts.isAsExpression(normalizedCallee) ||
+    ts.isTypeAssertionExpression(normalizedCallee) ||
+    ts.isNonNullExpression(normalizedCallee)
+  ) {
+    normalizedCallee = normalizedCallee.expression;
+  }
+
+  if (
+    ts.isFunctionExpression(normalizedCallee) ||
+    ts.isArrowFunction(normalizedCallee)
+  ) {
+    return normalizedCallee;
+  }
+
+  return undefined;
+}
+
+function getInlineFunctionReactiveCaptureRefs(
+  expression: ts.CallExpression,
+  context: Parameters<Emitter>[0]["context"],
+  analyze: Parameters<Emitter>[0]["analyze"],
+): readonly ts.Expression[] | undefined {
+  const callee = getInlineFunctionCallee(expression);
+  if (!callee) {
+    return undefined;
+  }
+
+  const collector = new CaptureCollector(context.checker);
+  const captures = [...collector.analyzeCurrentAndOriginal(callee).captures];
+  const reactiveCaptures = captures.filter((capture) => {
+    const captureAnalysis = analyze(capture);
+    return captureAnalysis.containsOpaqueRef || captureAnalysis.requiresRewrite;
+  });
+
+  return reactiveCaptures.length > 0 ? reactiveCaptures : undefined;
 }
 
 export const emitCallExpression: Emitter = ({
@@ -215,6 +243,22 @@ export const emitCallExpression: Emitter = ({
     context,
   );
   if (relevantDataFlows.length === 0) return undefined;
+
+  if (preferDeriveWrappers) {
+    const inlineCaptureRefs = getInlineFunctionReactiveCaptureRefs(
+      expression,
+      context,
+      analyze,
+    );
+    if (inlineCaptureRefs) {
+      return createDeriveCall(expression, inlineCaptureRefs, {
+        factory: context.factory,
+        tsContext: context.tsContext,
+        ctHelpers: context.ctHelpers,
+        context,
+      });
+    }
+  }
 
   return createReactiveWrapperForExpression(
     expression,
