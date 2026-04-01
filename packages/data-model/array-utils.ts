@@ -75,7 +75,7 @@ export function isArrayIndexPropertyName(name: string): boolean {
 /**
  * Helper which accepts an array and checks to see whether all of its enumerable
  * own properties are numeric indices (that is, it has no named properties).
- * Unlike `isStorableArray`, this returns `true` even for sparse arrays.
+ * This returns `true` for sparse arrays.
  *
  * @param array The array to check.
  * @returns `true` if the array has only numeric properties, `false` otherwise.
