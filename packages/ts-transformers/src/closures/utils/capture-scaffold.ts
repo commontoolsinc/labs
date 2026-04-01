@@ -1,25 +1,10 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
-import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
-import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
-import { createPropertyName } from "../../utils/identifiers.ts";
+import {
+  buildCapturePropertyAssignments,
+  type CaptureTreeNode,
+} from "../../utils/capture-tree.ts";
 import { PatternBuilder } from "./pattern-builder.ts";
-
-export function buildCapturePropertyAssignments(
-  captureTree: Map<string, CaptureTreeNode>,
-  factory: ts.NodeFactory,
-): ts.PropertyAssignment[] {
-  const properties: ts.PropertyAssignment[] = [];
-  for (const [rootName, node] of captureTree) {
-    properties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(rootName, factory),
-        buildHierarchicalParamsValue(node, rootName, factory),
-      ),
-    );
-  }
-  return properties;
-}
 
 export function buildCaptureParamsObject(
   captureTree: Map<string, CaptureTreeNode>,

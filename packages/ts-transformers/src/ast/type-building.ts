@@ -190,3 +190,34 @@ export function buildTypeElementsFromCaptureTree(
 
   return properties;
 }
+
+export function buildCaptureTypeElements(
+  captureTree: Iterable<[string, CaptureTreeNode]>,
+  context: TransformationContext,
+  renameMap?: ReadonlyMap<string, string>,
+): ts.TypeElement[] {
+  const elements = buildTypeElementsFromCaptureTree(captureTree, context);
+  if (!renameMap || renameMap.size === 0) {
+    return elements;
+  }
+
+  return elements.map((element) => {
+    if (
+      !ts.isPropertySignature(element) || !ts.isIdentifier(element.name)
+    ) {
+      return element;
+    }
+
+    const renamedName = renameMap.get(element.name.text);
+    if (!renamedName || renamedName === element.name.text) {
+      return element;
+    }
+
+    return context.factory.createPropertySignature(
+      element.modifiers,
+      context.factory.createIdentifier(renamedName),
+      element.questionToken,
+      element.type,
+    );
+  });
+}

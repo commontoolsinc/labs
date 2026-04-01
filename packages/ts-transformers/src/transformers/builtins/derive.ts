@@ -8,19 +8,18 @@ import {
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
 import {
-  buildHierarchicalParamsValue,
+  buildCapturePropertyAssignments,
   groupCapturesByRoot,
   parseCaptureExpression,
 } from "../../utils/capture-tree.ts";
 import {
   createBindingElementsFromNames,
   createParameterFromBindings,
-  createPropertyName,
   createPropertyParamNames,
   reserveIdentifier,
 } from "../../utils/identifiers.ts";
 import {
-  buildTypeElementsFromCaptureTree,
+  buildCaptureTypeElements,
   expressionToTypeNode,
 } from "../../ast/type-building.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
@@ -162,14 +161,7 @@ function createDeriveArgs(
 ): readonly ts.Expression[] {
   const properties: ts.ObjectLiteralElementLike[] = [];
 
-  for (const [rootName, node] of captureTree) {
-    properties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(rootName, factory),
-        buildHierarchicalParamsValue(node, rootName, factory),
-      ),
-    );
-  }
+  properties.push(...buildCapturePropertyAssignments(captureTree, factory));
 
   for (const entry of fallbackEntries) {
     if (ts.isIdentifier(entry.ref) && entry.propertyName === entry.ref.text) {
@@ -285,7 +277,7 @@ function buildInputTypeNode(
   const typeElements: ts.TypeElement[] = [];
 
   // Add type elements from capture tree (preserves Cell<T>)
-  const captureTypeElements = buildTypeElementsFromCaptureTree(
+  const captureTypeElements = buildCaptureTypeElements(
     captureTree,
     context,
   );

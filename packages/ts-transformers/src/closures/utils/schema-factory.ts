@@ -2,6 +2,7 @@ import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
+  buildCaptureTypeElements,
   buildTypeElementsFromCaptureTree,
   expressionToTypeNode,
 } from "../../ast/type-building.ts";
@@ -195,38 +196,12 @@ export class SchemaFactory {
     }
 
     // Add type elements for captures using the existing helper
-    const captureTypeElements = buildTypeElementsFromCaptureTree(
+    const captureTypeElements = buildCaptureTypeElements(
       captureTree,
       this.context,
+      captureNameMap,
     );
-
-    // Rename the property signatures if there are collisions
-    for (const typeElement of captureTypeElements) {
-      if (
-        ts.isPropertySignature(typeElement) && ts.isIdentifier(typeElement.name)
-      ) {
-        const originalName = typeElement.name.text;
-        const renamedName = captureNameMap.get(originalName) ?? originalName;
-
-        if (renamedName !== originalName) {
-          // Create a new property signature with the renamed identifier
-          typeElements.push(
-            factory.createPropertySignature(
-              typeElement.modifiers,
-              factory.createIdentifier(renamedName),
-              typeElement.questionToken,
-              typeElement.type,
-            ),
-          );
-        } else {
-          // No renaming needed
-          typeElements.push(typeElement);
-        }
-      } else {
-        // Not a simple property signature, keep as-is
-        typeElements.push(typeElement);
-      }
-    }
+    typeElements.push(...captureTypeElements);
 
     // Create object type literal
     const typeNode = factory.createTypeLiteralNode(typeElements);

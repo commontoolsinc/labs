@@ -8,8 +8,8 @@ import {
 } from "../../ast/mod.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
 import { getCellKind } from "../../transformers/opaque-ref/opaque-ref.ts";
-import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
+import { buildCapturePropertyAssignments } from "../../utils/capture-tree.ts";
 import {
   createPropertyName,
   normalizeBindingName,
@@ -176,15 +176,9 @@ function buildDeriveInputObject(
   }
 
   // Add captures with potentially renamed property names
-  for (const [originalName, node] of captureTree) {
-    const propertyName = captureNameMap.get(originalName) ?? originalName;
-    properties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(propertyName, factory),
-        buildHierarchicalParamsValue(node, originalName, factory),
-      ),
-    );
-  }
+  properties.push(
+    ...buildCapturePropertyAssignments(captureTree, factory, captureNameMap),
+  );
 
   return factory.createObjectLiteralExpression(
     properties,

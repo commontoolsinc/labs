@@ -2,14 +2,16 @@ import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
+  buildCapturePropertyAssignments,
+  type CaptureTreeNode,
+} from "../../utils/capture-tree.ts";
+import {
   detectCallKind,
   ensureTypeNodeRegistered,
   isCellLikeType,
   isFunctionLikeExpression,
 } from "../../ast/mod.ts";
-import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import { CaptureCollector } from "../capture-collector.ts";
-import { buildCapturePropertyAssignments } from "../utils/capture-scaffold.ts";
 
 /**
  * PatternToolStrategy transforms patternTool() calls to capture closed-over variables.
