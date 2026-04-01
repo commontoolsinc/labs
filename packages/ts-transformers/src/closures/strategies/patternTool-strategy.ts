@@ -1,24 +1,14 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
-import {
-  buildCapturePropertyAssignments,
-  type CaptureTreeNode,
-} from "../../utils/capture-tree.ts";
-import {
-  createBindingElementsFromNames,
-  extractBindingNames,
-} from "../../utils/identifiers.ts";
+import { buildCapturePropertyAssignments } from "../../utils/capture-tree.ts";
 import {
   detectCallKind,
   isCellLikeType,
   isFunctionLikeExpression,
 } from "../../ast/mod.ts";
-import {
-  createCaptureTypeLiteral,
-  mergeCaptureTypesIntoTypeLiteral,
-} from "../../ast/type-building.ts";
-import { CaptureCollector } from "../capture-collector.ts";
+import { createModuleScopedReactiveCaptureCollector } from "../capture-collector.ts";
+import { buildCallbackWithTopLevelCaptures } from "../utils/pattern-builder.ts";
 
 /**
  * PatternToolStrategy transforms patternTool() calls to capture closed-over variables.
@@ -77,17 +67,6 @@ export class PatternToolStrategy implements ClosureTransformationStrategy {
   }
 }
 
-function createPatternToolCaptureCollector(
-  checker: ts.TypeChecker,
-): CaptureCollector {
-  return new CaptureCollector(checker, {
-    captureNonModuleExternalIdentifiers: false,
-    captureNonModuleExternalPropertyAccesses: false,
-    captureModuleScopedIdentifierWhen: (_identifier, type, checker) =>
-      isCellLikeType(type, checker),
-  });
-}
-
 /**
  * Transform a patternTool call to include captured variables in extraParams.
  */
@@ -107,7 +86,10 @@ function transformPatternToolCall(
   // Collect module-scoped reactive captures from the callback
   // Unlike the default closure strategies, patternTool only wants
   // module-scoped reactive identifier captures in extraParams.
-  const collector = createPatternToolCaptureCollector(context.checker);
+  const collector = createModuleScopedReactiveCaptureCollector(
+    context.checker,
+    (_identifier, type, checker) => isCellLikeType(type, checker),
+  );
   const { captures: captureExpressions, captureTree } = collector.analyze(
     callback,
   );
@@ -173,7 +155,7 @@ function transformPatternToolCall(
 
   // Build the new callback with updated parameter type
   // We need to add the captured variables to the parameter's type
-  const newCallback = buildCallbackWithCaptures(
+  const newCallback = buildCallbackWithTopLevelCaptures(
     callback,
     transformedBody,
     captureTree,
@@ -188,120 +170,4 @@ function transformPatternToolCall(
     patternToolCall.typeArguments,
     newArgs,
   );
-}
-
-/**
- * Build a new callback function with captured variables added to its parameter type.
- *
- * Original: ({ query }: { query: string }) => { ... }
- * With captures: ({ query, content }: { query: string; content: string }) => { ... }
- */
-function buildCallbackWithCaptures(
-  originalCallback: ts.ArrowFunction | ts.FunctionExpression,
-  transformedBody: ts.ConciseBody,
-  captureTree: Map<string, CaptureTreeNode>,
-  context: TransformationContext,
-): ts.ArrowFunction | ts.FunctionExpression {
-  const { factory } = context;
-
-  // Get the original parameter (patternTool callbacks take a single parameter)
-  const originalParam = originalCallback.parameters[0];
-
-  // Build new parameter with captures added
-  let newParam: ts.ParameterDeclaration;
-
-  if (originalParam) {
-    // Get the existing parameter binding pattern
-    const existingBinding = originalParam.name;
-
-    if (ts.isObjectBindingPattern(existingBinding)) {
-      // Add capture bindings to the existing object pattern
-      const newBindingElements = [...existingBinding.elements];
-      const existingBindingNames = new Set(
-        extractBindingNames(existingBinding),
-      );
-
-      for (const captureName of captureTree.keys()) {
-        if (existingBindingNames.has(captureName)) {
-          continue;
-        }
-        newBindingElements.push(
-          ...createBindingElementsFromNames(
-            [captureName],
-            factory,
-            (propertyName) => factory.createIdentifier(propertyName),
-          ),
-        );
-      }
-
-      const newBindingPattern = factory.createObjectBindingPattern(
-        newBindingElements,
-      );
-
-      // Update the type annotation if present
-      let newTypeNode = originalParam.type;
-      if (newTypeNode && ts.isTypeLiteralNode(newTypeNode)) {
-        newTypeNode = mergeCaptureTypesIntoTypeLiteral(
-          newTypeNode,
-          captureTree,
-          context,
-        );
-      }
-
-      newParam = factory.createParameterDeclaration(
-        originalParam.modifiers,
-        originalParam.dotDotDotToken,
-        newBindingPattern,
-        originalParam.questionToken,
-        newTypeNode,
-        originalParam.initializer,
-      );
-    } else {
-      // Parameter is a simple identifier or other binding, keep as-is
-      newParam = originalParam;
-    }
-  } else {
-    // No original parameter, create one with just captures
-    const bindingElements = createBindingElementsFromNames(
-      captureTree.keys(),
-      factory,
-      (captureName) => factory.createIdentifier(captureName),
-    );
-
-    const bindingPattern = factory.createObjectBindingPattern(bindingElements);
-    const captureTypeNode = createCaptureTypeLiteral(captureTree, context);
-
-    newParam = factory.createParameterDeclaration(
-      undefined,
-      undefined,
-      bindingPattern,
-      undefined,
-      captureTypeNode,
-      undefined,
-    );
-  }
-
-  // Create the new callback
-  if (ts.isArrowFunction(originalCallback)) {
-    return factory.createArrowFunction(
-      originalCallback.modifiers,
-      originalCallback.typeParameters,
-      [newParam],
-      originalCallback.type,
-      originalCallback.equalsGreaterThanToken,
-      transformedBody,
-    );
-  } else {
-    return factory.createFunctionExpression(
-      originalCallback.modifiers,
-      originalCallback.asteriskToken,
-      originalCallback.name,
-      originalCallback.typeParameters,
-      [newParam],
-      originalCallback.type,
-      ts.isBlock(transformedBody)
-        ? transformedBody
-        : factory.createBlock([factory.createReturnStatement(transformedBody)]),
-    );
-  }
 }

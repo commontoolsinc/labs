@@ -1,7 +1,10 @@
 import { assertEquals } from "@std/assert";
 import ts from "typescript";
 
-import { CaptureCollector } from "../../src/closures/capture-collector.ts";
+import {
+  CaptureCollector,
+  createModuleScopedReactiveCaptureCollector,
+} from "../../src/closures/capture-collector.ts";
 
 function createProgram(source: string): {
   sourceFile: ts.SourceFile;
@@ -109,12 +112,11 @@ Deno.test(
       [],
     );
 
-    const patternToolCollector = new CaptureCollector(checker, {
-      captureNonModuleExternalIdentifiers: false,
-      captureNonModuleExternalPropertyAccesses: false,
-      captureModuleScopedIdentifierWhen: (_identifier, type, checker) =>
+    const patternToolCollector = createModuleScopedReactiveCaptureCollector(
+      checker,
+      (_identifier, type, checker) =>
         checker.typeToString(type).includes("Cell<"),
-    });
+    );
     const patternToolAnalysis = patternToolCollector.analyze(callback);
 
     assertEquals(

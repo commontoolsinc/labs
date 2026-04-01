@@ -2,8 +2,13 @@ import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
+  createCaptureTypeLiteral,
+  mergeCaptureTypesIntoTypeLiteral,
+} from "../../ast/type-building.ts";
+import {
   createBindingElementsFromNames,
   createParameterFromBindings,
+  extractBindingNames,
   normalizeBindingName,
   reserveIdentifier,
 } from "../../utils/identifiers.ts";
@@ -316,4 +321,96 @@ export class PatternBuilder {
       body,
     );
   }
+}
+
+export function buildCallbackWithTopLevelCaptures(
+  originalCallback: ts.ArrowFunction | ts.FunctionExpression,
+  transformedBody: ts.ConciseBody,
+  captureTree: Map<string, CaptureTreeNode>,
+  context: TransformationContext,
+): ts.ArrowFunction | ts.FunctionExpression {
+  const { factory } = context;
+  const originalParam = originalCallback.parameters[0];
+
+  let newParam: ts.ParameterDeclaration;
+  if (originalParam) {
+    const existingBinding = originalParam.name;
+    if (ts.isObjectBindingPattern(existingBinding)) {
+      const newBindingElements = [...existingBinding.elements];
+      const existingBindingNames = new Set(
+        extractBindingNames(existingBinding),
+      );
+
+      for (const captureName of captureTree.keys()) {
+        if (existingBindingNames.has(captureName)) {
+          continue;
+        }
+        newBindingElements.push(
+          ...createBindingElementsFromNames(
+            [captureName],
+            factory,
+            (propertyName) => factory.createIdentifier(propertyName),
+          ),
+        );
+      }
+
+      let newTypeNode = originalParam.type;
+      if (newTypeNode && ts.isTypeLiteralNode(newTypeNode)) {
+        newTypeNode = mergeCaptureTypesIntoTypeLiteral(
+          newTypeNode,
+          captureTree,
+          context,
+        );
+      }
+
+      newParam = factory.createParameterDeclaration(
+        originalParam.modifiers,
+        originalParam.dotDotDotToken,
+        factory.createObjectBindingPattern(newBindingElements),
+        originalParam.questionToken,
+        newTypeNode,
+        originalParam.initializer,
+      );
+    } else {
+      newParam = originalParam;
+    }
+  } else {
+    const bindingElements = createBindingElementsFromNames(
+      captureTree.keys(),
+      factory,
+      (captureName) => factory.createIdentifier(captureName),
+    );
+
+    newParam = factory.createParameterDeclaration(
+      undefined,
+      undefined,
+      factory.createObjectBindingPattern(bindingElements),
+      undefined,
+      createCaptureTypeLiteral(captureTree, context),
+      undefined,
+    );
+  }
+
+  if (ts.isArrowFunction(originalCallback)) {
+    return factory.createArrowFunction(
+      originalCallback.modifiers,
+      originalCallback.typeParameters,
+      [newParam],
+      originalCallback.type,
+      originalCallback.equalsGreaterThanToken,
+      transformedBody,
+    );
+  }
+
+  return factory.createFunctionExpression(
+    originalCallback.modifiers,
+    originalCallback.asteriskToken,
+    originalCallback.name,
+    originalCallback.typeParameters,
+    [newParam],
+    originalCallback.type,
+    ts.isBlock(transformedBody)
+      ? transformedBody
+      : factory.createBlock([factory.createReturnStatement(transformedBody)]),
+  );
 }
