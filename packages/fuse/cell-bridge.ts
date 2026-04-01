@@ -524,22 +524,24 @@ export class CellBridge {
       spaceName: args.spaceName,
       timer: setTimeout(() => {
         this.pendingPropRebuilds.delete(key);
-        this.rebuildPieceProp({
-          cell: entry.cell,
-          newValue: entry.latestValue,
-          pieceId: entry.pieceId,
-          pieceIno: entry.pieceIno,
-          pieceName: entry.pieceName,
-          propName: entry.propName,
-          resolveLink: entry.resolveLink,
-          spaceName: entry.spaceName,
-        }).catch((e) => {
+        try {
+          this.rebuildPieceProp({
+            cell: entry.cell,
+            newValue: entry.latestValue,
+            pieceId: entry.pieceId,
+            pieceIno: entry.pieceIno,
+            pieceName: entry.pieceName,
+            propName: entry.propName,
+            resolveLink: entry.resolveLink,
+            spaceName: entry.spaceName,
+          });
+        } catch (e) {
           this.rebuildStats.errors++;
           this.updateStatus();
           console.error(
             `[${entry.spaceName}] Error rebuilding ${entry.pieceName}/${entry.propName}: ${e}`,
           );
-        });
+        }
       }, 0),
     };
     this.pendingPropRebuilds.set(key, entry);
@@ -550,7 +552,7 @@ export class CellBridge {
     this.updateStatus();
   }
 
-  private async rebuildPieceProp(args: {
+  private rebuildPieceProp(args: {
     cell: Cell<unknown>;
     newValue: unknown;
     pieceId: string;
@@ -559,7 +561,7 @@ export class CellBridge {
     propName: "input" | "result";
     resolveLink: ResolveLink;
     spaceName: string;
-  }): Promise<void> {
+  }): void {
     const startedAt = Date.now();
     if (this.tree.getNode(args.pieceIno)?.kind !== "dir") {
       return;
