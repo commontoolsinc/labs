@@ -42,8 +42,7 @@ describe("fabric-value-dispatch", () => {
     });
 
     it("fabricFromNativeValue converts Error via legacy path", () => {
-      // fabricFromNativeValue handles Error conversion directly (the old
-      // toDeepStorableValue function has been subsumed).
+      // `fabricFromNativeValue()` handles Error conversion directly.
       const error = new Error("legacy error");
       const stored = fabricFromNativeValue(error as unknown as FabricValue);
       expect(stored).not.toBeInstanceOf(Error);
