@@ -1,10 +1,10 @@
 import {
-  canBeStored,
   cloneIfNecessary,
   fabricFromNativeValue,
   getDataModelConfig,
   isArrayIndexPropertyName,
   isArrayWithOnlyIndexProperties,
+  isFabricCompatible,
   isFabricValue,
   nativeFromFabricValue,
   resetDataModelConfig,
@@ -56,7 +56,6 @@ export function nativeFromStorableValue(
 }
 
 export {
-  canBeStored,
   cloneIfNecessary,
   isArrayIndexPropertyName,
   isArrayWithOnlyIndexProperties,
@@ -67,6 +66,8 @@ export {
 
 export type { FabricNativeObject, FabricValue, FabricValueLayer };
 
+export const canBeStored = isFabricCompatible;
+
 export function isStorableValue(
   value: unknown,
 ): value is FabricValueLayer {
@@ -76,5 +77,5 @@ export function isStorableValue(
 export function canBeStoredStorable(
   value: unknown,
 ): value is FabricValue | FabricNativeObject {
-  return canBeStored(value);
+  return isFabricCompatible(value);
 }
