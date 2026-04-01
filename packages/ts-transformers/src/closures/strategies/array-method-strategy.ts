@@ -3,12 +3,12 @@ import { type TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   classifyArrayMethodCall,
+  detectCallKind,
   getEnclosingFunctionLikeDeclaration,
   getLoweredArrayMethodName,
   getTypeAtLocationWithFallback,
   hasReactiveCollectionProvenance,
   isConsumedByTerminalChainCall,
-  isDeriveCall,
   isFunctionLikeExpression,
   type ReactiveContextInfo,
   registerSyntheticCallType,
@@ -219,7 +219,10 @@ function shouldTransformArrayMethod(
 
   // derive() returns an opaque value at runtime, but checker fallback may see the
   // unwrapped callback result type. Preserve policy by context.
-  if (isDeriveCall(mapTarget)) {
+  if (
+    ts.isCallExpression(mapTarget) &&
+    detectCallKind(mapTarget, context.checker)?.kind === "derive"
+  ) {
     return contextInfo.kind === "pattern";
   }
 

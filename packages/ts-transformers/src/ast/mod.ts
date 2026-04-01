@@ -79,8 +79,6 @@ export {
   isAnyType,
   isArrayLikeType,
   isCellLikeType,
-  isDeriveCall,
-  isReactiveArrayMethodCall,
   isUnknownType,
   isUnresolvedSchemaType,
   registerSyntheticCallType,

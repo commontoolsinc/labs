@@ -563,6 +563,52 @@ function inferSchemaContextualType(
   return checker.getContextualType(node) ?? inferContextualType(node, checker);
 }
 
+interface ResolvedInjectableSchemaType {
+  readonly typeNode?: ts.TypeNode;
+  readonly type?: ts.Type;
+  readonly inferred: boolean;
+}
+
+interface ResolvedDualSchemaBuilderTypes {
+  readonly argumentTypeNode: ts.TypeNode;
+  readonly argumentTypeValue: ts.Type | undefined;
+  readonly resultTypeNode: ts.TypeNode;
+  readonly resultTypeValue: ts.Type | undefined;
+}
+
+function resolveInjectableSchemaType(
+  explicitTypeNode: ts.TypeNode | undefined,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+  typeRegistry: TypeRegistry | undefined,
+  inferType: () => ts.Type | undefined,
+): ResolvedInjectableSchemaType {
+  if (explicitTypeNode) {
+    return {
+      typeNode: explicitTypeNode,
+      type: getTypeFromTypeNodeWithFallback(
+        explicitTypeNode,
+        checker,
+        typeRegistry,
+      ),
+      inferred: false,
+    };
+  }
+
+  const inferredType = inferType();
+  return {
+    typeNode: typeToInjectableSchemaTypeNode(
+      inferredType,
+      checker,
+      sourceFile,
+      factory,
+    ),
+    type: inferredType,
+    inferred: true,
+  };
+}
+
 /**
  * Creates a schema call and transfers TypeRegistry entry if it exists.
  * This is the unified pattern for all transformation paths to preserve
@@ -596,6 +642,37 @@ function createSchemaCallWithRegistryTransfer(
     if (typeFromRegistry) {
       typeRegistry.set(schemaCall, typeFromRegistry);
     }
+  }
+
+  return schemaCall;
+}
+
+function createRegisteredSchemaCallFromResolvedType(
+  context: Pick<TransformationContext, "factory" | "ctHelpers" | "sourceFile">,
+  resolved: ResolvedInjectableSchemaType,
+  checker: ts.TypeChecker,
+  typeRegistry?: TypeRegistry,
+  options?: { widenLiterals?: boolean },
+): ts.CallExpression | undefined {
+  if (!resolved.typeNode) {
+    return undefined;
+  }
+
+  const schemaCall = createSchemaCallWithRegistryTransfer(
+    context,
+    resolved.typeNode,
+    checker,
+    typeRegistry,
+    options,
+  );
+
+  if (
+    resolved.inferred &&
+    typeRegistry &&
+    resolved.type &&
+    !isUnresolvedSchemaType(resolved.type)
+  ) {
+    typeRegistry.set(schemaCall, resolved.type);
   }
 
   return schemaCall;
@@ -684,6 +761,97 @@ function applyCallbackBuilderArgumentCapabilitySummary(
     argumentTypeValue: transformedArgumentType === argumentTypeNode
       ? argumentTypeValue
       : undefined,
+  };
+}
+
+function resolveDualSchemaBuilderTypes(
+  callback: ts.ArrowFunction | ts.FunctionExpression | undefined,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+  typeRegistry: TypeRegistry | undefined,
+  capabilityRegistry: CapabilitySummaryRegistry | undefined,
+  context: TransformationContext,
+  options?: {
+    readonly fallbackArgumentType?: ts.Type;
+    readonly explicitArgumentTypeNode?: ts.TypeNode;
+    readonly explicitArgumentTypeValue?: ts.Type;
+    readonly explicitResultTypeNode?: ts.TypeNode;
+    readonly explicitResultTypeValue?: ts.Type;
+    readonly fallbackArgumentNode?: ts.TypeNode;
+    readonly capabilityMode?: CapabilitySummaryApplicationMode;
+    readonly applyExplicitArgumentCapabilitySummary?: boolean;
+  },
+): ResolvedDualSchemaBuilderTypes | undefined {
+  let argumentTypeNode = options?.explicitArgumentTypeNode;
+  let argumentTypeValue = options?.explicitArgumentTypeValue;
+
+  if (
+    callback &&
+    argumentTypeNode &&
+    options?.applyExplicitArgumentCapabilitySummary !== false
+  ) {
+    ({
+      argumentTypeNode,
+      argumentTypeValue,
+    } = applyCallbackBuilderArgumentCapabilitySummary(
+      callback,
+      argumentTypeNode,
+      argumentTypeValue,
+      checker,
+      sourceFile,
+      factory,
+      capabilityRegistry,
+      context,
+    ));
+  }
+
+  let inferred:
+    | ReturnType<typeof collectFunctionSchemaTypeNodes>
+    | undefined;
+  if (!argumentTypeNode || !options?.explicitResultTypeNode) {
+    if (!callback) {
+      return undefined;
+    }
+    inferred = collectFunctionSchemaTypeNodes(
+      callback,
+      checker,
+      sourceFile,
+      factory,
+      options?.fallbackArgumentType,
+      typeRegistry,
+      capabilityRegistry,
+      options?.capabilityMode ?? "full",
+      context,
+    );
+  }
+
+  if (!argumentTypeNode) {
+    argumentTypeNode = inferred?.argument ??
+      options?.fallbackArgumentNode ??
+      getParameterSchemaType(factory, callback?.parameters[0]);
+    argumentTypeValue = getTypeFromRegistryOrFallback(
+      argumentTypeNode,
+      inferred?.argumentType,
+      typeRegistry,
+    );
+  }
+
+  const resultTypeNode = options?.explicitResultTypeNode ??
+    inferred?.result ??
+    createUnknownSchemaTypeNode(factory);
+  const resultTypeValue = options?.explicitResultTypeValue ??
+    getTypeFromRegistryOrFallback(
+      resultTypeNode,
+      inferred?.resultType,
+      typeRegistry,
+    );
+
+  return {
+    argumentTypeNode,
+    argumentTypeValue,
+    resultTypeNode,
+    resultTypeValue,
   };
 }
 
@@ -1812,26 +1980,31 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           const deriveCallback = isFunctionLikeExpression(node.arguments[1]!)
             ? node.arguments[1]!
             : undefined;
-          const {
-            argumentTypeNode,
-            argumentTypeValue,
-          } = applyCallbackBuilderArgumentCapabilitySummary(
+          const resolved = resolveDualSchemaBuilderTypes(
             deriveCallback,
-            argumentType,
-            typeRegistry?.get(argumentType),
             checker,
             sourceFile,
             factory,
+            typeRegistry,
             capabilityRegistry,
             context,
+            {
+              explicitArgumentTypeNode: argumentType,
+              explicitArgumentTypeValue: typeRegistry?.get(argumentType),
+              explicitResultTypeNode: resultType,
+              explicitResultTypeValue: typeRegistry?.get(resultType),
+            },
           );
+          if (!resolved) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
 
           return visitInjectedDualSchemaBuilderCall(
             node,
-            argumentTypeNode,
-            argumentTypeValue,
-            resultType,
-            typeRegistry?.get(resultType),
+            resolved.argumentTypeNode,
+            resolved.argumentTypeValue,
+            resolved.resultTypeNode,
+            resolved.resultTypeValue,
             context,
             visit,
             transformation,
@@ -1892,35 +2065,35 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             }
           }
 
-          const inferred = collectFunctionSchemaTypeNodes(
+          const resolved = resolveDualSchemaBuilderTypes(
             callback,
             checker,
             sourceFile,
             factory,
-            fallbackArgType,
             typeRegistry,
             capabilityRegistry,
-            "full",
             context,
+            {
+              fallbackArgumentType: fallbackArgType,
+              explicitArgumentTypeNode: argNode,
+              explicitArgumentTypeValue: argType,
+              fallbackArgumentNode: getParameterSchemaType(
+                factory,
+                callback.parameters[0],
+              ),
+              applyExplicitArgumentCapabilitySummary: false,
+            },
           );
-          if (!argNode) {
-            // Use inferred type or fallback to never/unknown refinement
-            argNode = inferred.argument ??
-              getParameterSchemaType(factory, callback.parameters[0]);
-            argType = inferred.argumentType;
+          if (!resolved) {
+            return ts.visitEachChild(node, visit, transformation);
           }
 
-          // Always transform - use unknown for missing types
-          const finalArgNode = argNode ??
-            factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-          const resNode = inferred.result ??
-            factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
           return visitInjectedDualSchemaBuilderCall(
             node,
-            finalArgNode,
-            argType,
-            resNode,
-            inferred.resultType,
+            resolved.argumentTypeNode,
+            resolved.argumentTypeValue,
+            resolved.resultTypeNode,
+            resolved.resultTypeValue,
             context,
             visit,
             transformation,
@@ -1942,26 +2115,31 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           const liftCallback = isFunctionLikeExpression(node.arguments[0]!)
             ? node.arguments[0]!
             : undefined;
-          const {
-            argumentTypeNode,
-            argumentTypeValue,
-          } = applyCallbackBuilderArgumentCapabilitySummary(
+          const resolved = resolveDualSchemaBuilderTypes(
             liftCallback,
-            argumentType,
-            typeRegistry?.get(argumentType),
             checker,
             sourceFile,
             factory,
+            typeRegistry,
             capabilityRegistry,
             context,
+            {
+              explicitArgumentTypeNode: argumentType,
+              explicitArgumentTypeValue: typeRegistry?.get(argumentType),
+              explicitResultTypeNode: resultType,
+              explicitResultTypeValue: typeRegistry?.get(resultType),
+            },
           );
+          if (!resolved) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
 
           return visitInjectedDualSchemaBuilderCall(
             node,
-            argumentTypeNode,
-            argumentTypeValue,
-            resultType,
-            typeRegistry?.get(resultType),
+            resolved.argumentTypeNode,
+            resolved.argumentTypeValue,
+            resolved.resultTypeNode,
+            resolved.resultTypeValue,
             context,
             visit,
             transformation,
@@ -1985,50 +2163,34 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
-          const {
-            argumentTypeNode,
-            argumentTypeValue,
-          } = applyCallbackBuilderArgumentCapabilitySummary(
-            liftCallback,
-            argumentType,
-            typeRegistry?.get(argumentType),
-            checker,
-            sourceFile,
-            factory,
-            capabilityRegistry,
-            context,
-          );
-
-          const fallbackArgType = getTypeFromTypeNodeWithFallback(
-            argumentType,
-            checker,
-            typeRegistry,
-          );
-          const inferred = collectFunctionSchemaTypeNodes(
+          const resolved = resolveDualSchemaBuilderTypes(
             liftCallback,
             checker,
             sourceFile,
             factory,
-            fallbackArgType,
             typeRegistry,
             capabilityRegistry,
-            "full",
             context,
+            {
+              fallbackArgumentType: getTypeFromTypeNodeWithFallback(
+                argumentType,
+                checker,
+                typeRegistry,
+              ),
+              explicitArgumentTypeNode: argumentType,
+              explicitArgumentTypeValue: typeRegistry?.get(argumentType),
+            },
           );
-          const resultTypeNode = inferred.result ??
-            factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-          const resultTypeValue = getTypeFromRegistryOrFallback(
-            resultTypeNode,
-            inferred.resultType,
-            typeRegistry,
-          );
+          if (!resolved) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
 
           return visitInjectedDualSchemaBuilderCall(
             node,
-            argumentTypeNode,
-            argumentTypeValue,
-            resultTypeNode,
-            resultTypeValue,
+            resolved.argumentTypeNode,
+            resolved.argumentTypeValue,
+            resolved.resultTypeNode,
+            resolved.resultTypeValue,
             context,
             visit,
             transformation,
@@ -2044,45 +2206,32 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           const callback = node.arguments[0] as
             | ts.ArrowFunction
             | ts.FunctionExpression;
-          const inferred = collectFunctionSchemaTypeNodes(
+          const resolved = resolveDualSchemaBuilderTypes(
             callback,
             checker,
             sourceFile,
             factory,
-            undefined,
             typeRegistry,
             capabilityRegistry,
-            "full",
             context,
+            {
+              fallbackArgumentNode: getParameterSchemaType(
+                factory,
+                callback.parameters[0],
+              ),
+            },
           );
-
-          // For argument: use inferred type or apply never/unknown refinement
-          const argNode = inferred.argument ??
-            getParameterSchemaType(factory, callback.parameters[0]);
-
-          // For result: use inferred type or default to unknown
-          const resNode = inferred.result ??
-            factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-          // Check TypeRegistry for inferred types (may be synthetic from ClosureTransformer)
-          const argType = getTypeFromRegistryOrFallback(
-            argNode,
-            inferred.argumentType,
-            typeRegistry,
-          );
-          const resType = getTypeFromRegistryOrFallback(
-            resNode,
-            inferred.resultType,
-            typeRegistry,
-          );
+          if (!resolved) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
 
           // Always transform with both schemas
           return visitInjectedDualSchemaBuilderCall(
             node,
-            argNode,
-            argType,
-            resNode,
-            resType,
+            resolved.argumentTypeNode,
+            resolved.argumentTypeValue,
+            resolved.resultTypeNode,
+            resolved.resultTypeValue,
             context,
             visit,
             transformation,
@@ -2102,26 +2251,17 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           return ts.visitEachChild(node, visit, transformation);
         }
 
-        let typeNode: ts.TypeNode | undefined;
-        let type: ts.Type | undefined;
-
-        // Track whether we're using value inference (vs explicit type arg)
-        const isValueInference = !typeArgs || typeArgs.length === 0;
-
-        if (typeArgs && typeArgs.length > 0) {
-          // Use explicit type argument - preserve literal types
-          typeNode = typeArgs[0];
-          if (typeNode) {
-            type = getTypeFromTypeNodeWithFallback(
-              typeNode,
-              checker,
-              typeRegistry,
-            );
-          }
-        } else if (args.length > 0) {
-          // Infer from value argument - widen literal types
-          const valueArg = args[0];
-          if (valueArg) {
+        const resolved = resolveInjectableSchemaType(
+          typeArgs?.[0],
+          checker,
+          sourceFile,
+          factory,
+          typeRegistry,
+          () => {
+            const valueArg = args[0];
+            if (!valueArg) {
+              return undefined;
+            }
             const valueType = inferExpressionTypeWithInitializerFallback(
               valueArg,
               checker,
@@ -2131,39 +2271,21 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               capabilityRegistry,
               context,
             );
-            if (valueType) {
-              type = isUnresolvedSchemaType(valueType)
-                ? valueType
-                : widenLiteralType(valueType, checker);
-              typeNode = typeToInjectableSchemaTypeNode(
-                type,
-                checker,
-                sourceFile,
-                factory,
-              );
-            }
-          }
-        }
+            return valueType && !isUnresolvedSchemaType(valueType)
+              ? widenLiteralType(valueType, checker)
+              : valueType;
+          },
+        );
 
-        if (typeNode) {
-          const schemaCall = createSchemaCallWithRegistryTransfer(
-            context,
-            typeNode,
-            checker,
-            typeRegistry,
-            isValueInference ? { widenLiterals: true } : undefined,
-          );
+        const schemaCall = createRegisteredSchemaCallFromResolvedType(
+          context,
+          resolved,
+          checker,
+          typeRegistry,
+          resolved.inferred ? { widenLiterals: true } : undefined,
+        );
 
-          // If we inferred the type (no explicit type arg), register it
-          if (
-            isValueInference &&
-            type &&
-            !isUnresolvedSchemaType(type) &&
-            typeRegistry
-          ) {
-            typeRegistry.set(schemaCall, type);
-          }
-
+        if (schemaCall) {
           // Schema must always be the second argument. If no value was provided,
           // add undefined as the first argument.
           const newArgs = args.length === 0
@@ -2191,52 +2313,28 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           return ts.visitEachChild(node, visit, transformation);
         }
 
-        let typeNode: ts.TypeNode | undefined;
-        let type: ts.Type | undefined;
+        const resolved = resolveInjectableSchemaType(
+          typeArgs?.[0],
+          checker,
+          sourceFile,
+          factory,
+          typeRegistry,
+          () => {
+            const contextualType = inferSchemaContextualType(node, checker);
+            return contextualType
+              ? unwrapOpaqueLikeType(contextualType, checker)
+              : undefined;
+          },
+        );
 
-        if (typeArgs && typeArgs.length > 0) {
-          typeNode = typeArgs[0];
-          if (typeNode) {
-            type = getTypeFromTypeNodeWithFallback(
-              typeNode,
-              checker,
-              typeRegistry,
-            );
-          }
-        } else {
-          // Infer from contextual type (variable assignment)
-          const contextualType = inferSchemaContextualType(node, checker);
-          if (contextualType) {
-            // We need to unwrap Cell<T> to get T
-            const unwrapped = unwrapOpaqueLikeType(contextualType, checker);
-            if (unwrapped) {
-              type = unwrapped;
-              typeNode = typeToInjectableSchemaTypeNode(
-                unwrapped,
-                checker,
-                sourceFile,
-                factory,
-              );
-            }
-          }
-        }
+        const schemaCall = createRegisteredSchemaCallFromResolvedType(
+          context,
+          resolved,
+          checker,
+          typeRegistry,
+        );
 
-        if (typeNode) {
-          const schemaCall = createSchemaCallWithRegistryTransfer(
-            context,
-            typeNode,
-            checker,
-            typeRegistry,
-          );
-          if (
-            (!typeArgs || typeArgs.length === 0) &&
-            type &&
-            !isUnresolvedSchemaType(type) &&
-            typeRegistry
-          ) {
-            typeRegistry.set(schemaCall, type);
-          }
-
+        if (schemaCall) {
           // Visit the original node's children first to ensure nested transformations happen
           const visitedNode = ts.visitEachChild(node, visit, transformation);
 
@@ -2263,48 +2361,23 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           return ts.visitEachChild(node, visit, transformation);
         }
 
-        let typeNode: ts.TypeNode | undefined;
-        let type: ts.Type | undefined;
+        const resolved = resolveInjectableSchemaType(
+          typeArgs?.[0],
+          checker,
+          sourceFile,
+          factory,
+          typeRegistry,
+          () => inferSchemaContextualType(node, checker),
+        );
 
-        if (typeArgs && typeArgs.length > 0) {
-          typeNode = typeArgs[0];
-          if (typeNode) {
-            type = getTypeFromTypeNodeWithFallback(
-              typeNode,
-              checker,
-              typeRegistry,
-            );
-          }
-        } else {
-          // Infer from contextual type
-          const contextualType = inferSchemaContextualType(node, checker);
-          if (contextualType) {
-            type = contextualType;
-            typeNode = typeToInjectableSchemaTypeNode(
-              contextualType,
-              checker,
-              sourceFile,
-              factory,
-            );
-          }
-        }
+        const schemaCall = createRegisteredSchemaCallFromResolvedType(
+          context,
+          resolved,
+          checker,
+          typeRegistry,
+        );
 
-        if (typeNode) {
-          const schemaCall = createSchemaCallWithRegistryTransfer(
-            context,
-            typeNode,
-            checker,
-            typeRegistry,
-          );
-          if (
-            (!typeArgs || typeArgs.length === 0) &&
-            type &&
-            !isUnresolvedSchemaType(type) &&
-            typeRegistry
-          ) {
-            typeRegistry.set(schemaCall, type);
-          }
-
+        if (schemaCall) {
           const updated = factory.createCallExpression(
             node.expression,
             node.typeArguments,
@@ -2331,57 +2404,29 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           }
         }
 
-        let typeNode: ts.TypeNode | undefined;
-        let type: ts.Type | undefined;
+        const resolved = resolveInjectableSchemaType(
+          typeArgs?.[0],
+          checker,
+          sourceFile,
+          factory,
+          typeRegistry,
+          () => {
+            const contextualType = inferSchemaContextualType(node, checker);
+            const objectProp = contextualType?.getProperty("object");
+            return objectProp
+              ? checker.getTypeOfSymbolAtLocation(objectProp, node)
+              : undefined;
+          },
+        );
 
-        if (typeArgs && typeArgs.length > 0) {
-          typeNode = typeArgs[0];
-          if (typeNode) {
-            type = getTypeFromTypeNodeWithFallback(
-              typeNode,
-              checker,
-              typeRegistry,
-            );
-          }
-        } else {
-          // Infer from contextual type
-          const contextualType = inferSchemaContextualType(node, checker);
-          if (contextualType) {
-            const objectProp = contextualType.getProperty("object");
-            if (objectProp) {
-              const objectType = checker.getTypeOfSymbolAtLocation(
-                objectProp,
-                node,
-              );
-              if (objectType) {
-                type = objectType;
-                typeNode = typeToInjectableSchemaTypeNode(
-                  objectType,
-                  checker,
-                  sourceFile,
-                  factory,
-                );
-              }
-            }
-          }
-        }
+        const schemaCall = createRegisteredSchemaCallFromResolvedType(
+          context,
+          resolved,
+          checker,
+          typeRegistry,
+        );
 
-        if (typeNode) {
-          const schemaCall = createSchemaCallWithRegistryTransfer(
-            context,
-            typeNode,
-            checker,
-            typeRegistry,
-          );
-          if (
-            (!typeArgs || typeArgs.length === 0) &&
-            type &&
-            !isUnresolvedSchemaType(type) &&
-            typeRegistry
-          ) {
-            typeRegistry.set(schemaCall, type);
-          }
-
+        if (schemaCall) {
           let newOptions: ts.Expression;
           if (args.length > 0 && ts.isObjectLiteralExpression(args[0]!)) {
             // Add schema property to existing object literal

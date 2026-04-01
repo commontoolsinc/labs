@@ -3,7 +3,6 @@ import {
   getCellKind,
   isOpaqueRefType,
 } from "../transformers/opaque-ref/opaque-ref.ts";
-import { classifyArrayMethodCall } from "./call-kind.ts";
 import {
   getTypeAtLocationWithFallback,
   isDefaultAliasSymbol,
@@ -1177,67 +1176,3 @@ export function hasArrayTypeArgument(
  * unwrapped callback return type in the type registry. This helper lets
  * us detect derive calls syntactically to work around that limitation.
  */
-export function isDeriveCall(expr: ts.Expression): boolean {
-  if (!ts.isCallExpression(expr)) return false;
-
-  const callee = expr.expression;
-
-  // Check for `derive(...)` direct call
-  if (ts.isIdentifier(callee) && callee.text === "derive") {
-    return true;
-  }
-
-  // Check for `__ctHelpers.derive(...)` qualified call
-  if (
-    ts.isPropertyAccessExpression(callee) &&
-    callee.name.text === "derive"
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-/**
- * Checks if a call expression is a .map()/.filter()/.flatMap() call on a reactive array
- * (OpaqueRef<T[]> or Cell<T[]>). Used to determine if the call will be transformed to
- * mapWithPattern/filterWithPattern/flatMapWithPattern.
- *
- * Used by both:
- * - ClosureTransformer to decide whether to transform to *WithPattern
- * - JsxExpressionSiteRouterTransformer to decide whether to skip derive wrapping
- */
-export function isReactiveArrayMethodCall(
-  node: ts.CallExpression,
-  checker: ts.TypeChecker,
-  typeRegistry?: WeakMap<ts.Node, ts.Type>,
-  logger?: (message: string) => void,
-): boolean {
-  const arrayMethodInfo = classifyArrayMethodCall(node);
-  if (!arrayMethodInfo || arrayMethodInfo.lowered) return false;
-
-  // Get the type of the target (what we're calling .map on)
-  if (!ts.isPropertyAccessExpression(node.expression)) return false;
-  const target = node.expression.expression;
-
-  // Special case: derive() always returns OpaqueRef<T> at runtime.
-  // We can't register OpaqueRef<T> in the type registry (only the unwrapped T),
-  // so detect derive calls syntactically.
-  if (isDeriveCall(target)) {
-    return true;
-  }
-
-  const targetType = getTypeAtLocationWithFallback(
-    target,
-    checker,
-    typeRegistry,
-    logger,
-  );
-  if (!targetType) {
-    return false;
-  }
-
-  // Type-based check: target is OpaqueRef<T[]> or Cell<T[]>
-  return isOpaqueRefType(targetType, checker) &&
-    hasArrayTypeArgument(targetType, checker);
-}
