@@ -737,6 +737,26 @@ function isExpressionSiteLowerable(
     );
 }
 
+function createSharedExpressionSiteDecision(
+  lowerable: boolean,
+  jsxRoute?: "shared-pre-closure" | "shared-post-closure",
+): ExpressionSiteHandlingDecision {
+  return jsxRoute
+    ? { kind: "shared", jsxRoute, lowerable }
+    : { kind: "shared", lowerable };
+}
+
+function createOwnedExpressionSiteDecision(
+  owner:
+    | "helper"
+    | "array-method-callback-jsx"
+    | "array-method-receiver-method"
+    | "jsx-root",
+  lowerable: boolean,
+): ExpressionSiteHandlingDecision {
+  return { kind: "owned", owner, lowerable };
+}
+
 function classifyHelperOwnedExpressionSiteHandling(
   expression: ts.Expression,
   containerKind: ExpressionContainerKind,
@@ -766,11 +786,10 @@ function classifyHelperOwnedExpressionSiteHandling(
     return undefined;
   }
 
-  return {
-    kind: "owned",
-    owner: "helper",
-    lowerable: analysis.containsOpaqueRef && analysis.requiresRewrite,
-  };
+  return createOwnedExpressionSiteDecision(
+    "helper",
+    analysis.containsOpaqueRef && analysis.requiresRewrite,
+  );
 }
 
 export function classifyExpressionSiteHandling(
@@ -797,6 +816,28 @@ export function classifyExpressionSiteHandling(
     analysis ??= analyze(expression);
     return analysis;
   };
+  const jsxOwnedRootLowerable = (): boolean =>
+    getAnalysis().requiresRewrite || isLogicalBinaryExpression(expression);
+  const sharedLowerable = (): boolean =>
+    isExpressionSiteLowerable(
+      expression,
+      containerKind,
+      siteInfo,
+      getAnalysis(),
+    );
+  const sharedDecision = (
+    jsxRoute?: "shared-pre-closure" | "shared-post-closure",
+  ): ExpressionSiteHandlingDecision =>
+    createSharedExpressionSiteDecision(sharedLowerable(), jsxRoute);
+  const ownedDecision = (
+    owner:
+      | "helper"
+      | "array-method-callback-jsx"
+      | "array-method-receiver-method"
+      | "jsx-root",
+    lowerable: boolean,
+  ): ExpressionSiteHandlingDecision =>
+    createOwnedExpressionSiteDecision(owner, lowerable);
 
   const helperOwned = classifyHelperOwnedExpressionSiteHandling(
     expression,
@@ -822,12 +863,10 @@ export function classifyExpressionSiteHandling(
 
   if (containerKind === "jsx-expression") {
     if (siteInfo.arrayMethodOwned) {
-      return {
-        kind: "owned",
-        owner: "array-method-callback-jsx",
-        lowerable: getAnalysis().requiresRewrite ||
-          isLogicalBinaryExpression(expression),
-      };
+      return ownedDecision(
+        "array-method-callback-jsx",
+        jsxOwnedRootLowerable(),
+      );
     }
 
     if (siteInfo.deferredJsxArrayMethod) {
@@ -835,12 +874,7 @@ export function classifyExpressionSiteHandling(
         options?.allowDeferredRootOwner &&
         isOwnedDeferredJsxArrayMethodRoot(expression, context, analyze)
       ) {
-        return {
-          kind: "owned",
-          owner: "jsx-root",
-          lowerable: getAnalysis().requiresRewrite ||
-            isLogicalBinaryExpression(expression),
-        };
+        return ownedDecision("jsx-root", jsxOwnedRootLowerable());
       }
 
       return {
@@ -850,66 +884,38 @@ export function classifyExpressionSiteHandling(
     }
 
     if (isOwnedDynamicElementAccessRoot(expression, context, analyze)) {
-      return {
-        kind: "owned",
-        owner: "jsx-root",
-        lowerable: getAnalysis().requiresRewrite ||
-          isLogicalBinaryExpression(expression),
-      };
+      return ownedDecision("jsx-root", jsxOwnedRootLowerable());
     }
 
     if (siteInfo.callRootKind === "conditional-helper") {
-      return {
-        kind: "owned",
-        owner: "jsx-root",
-        lowerable: getAnalysis().requiresRewrite ||
-          isLogicalBinaryExpression(expression),
-      };
+      return ownedDecision("jsx-root", jsxOwnedRootLowerable());
     }
 
     if (isOwnedObjectLiteralRoot(expression, analyze)) {
-      return {
-        kind: "shared",
-        jsxRoute: "shared-post-closure",
-        lowerable: getAnalysis().requiresRewrite ||
-          isLogicalBinaryExpression(expression),
-      };
+      return createSharedExpressionSiteDecision(
+        jsxOwnedRootLowerable(),
+        "shared-post-closure",
+      );
     }
 
     if (siteInfo.controlFlowRewriteRoot) {
-      return {
-        kind: "shared",
-        jsxRoute: isSharedPreClosureAtomicControlFlowExpression(expression) ||
-            isSharedPreClosureDeferredArrayMethodControlFlowExpression(
-              expression,
-              context,
-              analyze,
-            )
+      return sharedDecision(
+        isSharedPreClosureAtomicControlFlowExpression(expression) ||
+          isSharedPreClosureDeferredArrayMethodControlFlowExpression(
+            expression,
+            context,
+            analyze,
+          )
           ? "shared-pre-closure"
           : "shared-post-closure",
-        lowerable: isExpressionSiteLowerable(
-          expression,
-          containerKind,
-          siteInfo,
-          getAnalysis(),
-        ),
-      };
+      );
     }
 
     if (
       siteInfo.callRootKind === "ordinary-call" ||
       isSharedJsxLocalHelperCallRoot(expression, context, analyze)
     ) {
-      return {
-        kind: "shared",
-        jsxRoute: "shared-post-closure",
-        lowerable: isExpressionSiteLowerable(
-          expression,
-          containerKind,
-          siteInfo,
-          getAnalysis(),
-        ),
-      };
+      return sharedDecision("shared-post-closure");
     }
 
     if (siteInfo.callRootKind === "receiver-method") {
@@ -917,40 +923,17 @@ export function classifyExpressionSiteHandling(
         ts.isCallExpression(expression) &&
         classifyOpaquePathTerminalCall(expression)
       ) {
-        return {
-          kind: "owned",
-          owner: "jsx-root",
-          lowerable: getAnalysis().requiresRewrite ||
-            isLogicalBinaryExpression(expression),
-        };
+        return ownedDecision("jsx-root", jsxOwnedRootLowerable());
       }
 
-      return {
-        kind: "shared",
-        jsxRoute: "shared-post-closure",
-        lowerable: isExpressionSiteLowerable(
-          expression,
-          containerKind,
-          siteInfo,
-          getAnalysis(),
-        ),
-      };
+      return sharedDecision("shared-post-closure");
     }
 
     if (!isPostClosureWrapperRewriteExpression(expression, context)) {
       return { kind: "skip", reason: "not-shared-jsx-root-kind" };
     }
 
-    return {
-      kind: "shared",
-      jsxRoute: "shared-post-closure",
-      lowerable: isExpressionSiteLowerable(
-        expression,
-        containerKind,
-        siteInfo,
-        getAnalysis(),
-      ),
-    };
+    return sharedDecision("shared-post-closure");
   }
 
   if (siteInfo.deferredJsxArrayMethod) {
@@ -963,11 +946,10 @@ export function classifyExpressionSiteHandling(
   if (
     supportedCallRootKind === "array-method-owned-receiver-method"
   ) {
-    return {
-      kind: "owned",
-      owner: "array-method-receiver-method",
-      lowerable: getAnalysis().requiresRewrite,
-    };
+    return ownedDecision(
+      "array-method-receiver-method",
+      getAnalysis().requiresRewrite,
+    );
   }
 
   if (
@@ -976,15 +958,7 @@ export function classifyExpressionSiteHandling(
     !siteInfo.controlFlowRewriteRoot &&
     containerKind === "return-expression"
   ) {
-    return {
-      kind: "shared",
-      lowerable: isExpressionSiteLowerable(
-        expression,
-        containerKind,
-        siteInfo,
-        getAnalysis(),
-      ),
-    };
+    return sharedDecision();
   }
 
   if (siteInfo.arrayMethodOwned && !siteInfo.controlFlowRewriteRoot) {
@@ -1007,15 +981,7 @@ export function classifyExpressionSiteHandling(
     }
   }
 
-  return {
-    kind: "shared",
-    lowerable: isExpressionSiteLowerable(
-      expression,
-      containerKind,
-      siteInfo,
-      getAnalysis(),
-    ),
-  };
+  return sharedDecision();
 }
 
 export function classifyExpressionSiteCallRootPolicy(
