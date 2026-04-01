@@ -4,7 +4,7 @@ import {
   getPatternBuilderCallbackArgument,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
-import { TransformationContext, Transformer } from "../core/mod.ts";
+import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { collectPatternCallbackPreScan } from "./pattern-callback-prescan.ts";
 import {
   registerCapabilitySummary,
@@ -34,11 +34,7 @@ function registerBuilderSummariesInSubtree(
   visit(node);
 }
 
-export class CapabilityLoweringTransformer extends Transformer {
-  override filter(context: TransformationContext): boolean {
-    return context.ctHelpers.sourceHasHelpers();
-  }
-
+export class PatternCallbackLoweringTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const {
       arrayMethodPatternCallNodes,
@@ -96,3 +92,5 @@ export class CapabilityLoweringTransformer extends Transformer {
     ) as ts.SourceFile;
   }
 }
+
+export { PatternCallbackLoweringTransformer as CapabilityLoweringTransformer };

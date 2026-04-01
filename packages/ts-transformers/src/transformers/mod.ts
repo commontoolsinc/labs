@@ -1,5 +1,8 @@
 export { CastValidationTransformer } from "./cast-validation.ts";
-export { CapabilityLoweringTransformer } from "./capability-lowering.ts";
+export {
+  CapabilityLoweringTransformer,
+  PatternCallbackLoweringTransformer,
+} from "./capability-lowering.ts";
 export { EmptyArrayOfValidationTransformer } from "./empty-array-of-validation.ts";
 export { HelperOwnedExpressionSiteLoweringTransformer } from "./helper-owned-expression-site-lowering.ts";
 export { JsxExpressionSiteRouterTransformer } from "./jsx-expression-site-router.ts";

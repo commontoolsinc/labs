@@ -1,10 +1,10 @@
 import {
-  CapabilityLoweringTransformer,
   CastValidationTransformer,
   EmptyArrayOfValidationTransformer,
   HelperOwnedExpressionSiteLoweringTransformer,
   JsxExpressionSiteRouterTransformer,
   OpaqueGetValidationTransformer,
+  PatternCallbackLoweringTransformer,
   PatternContextValidationTransformer,
   PatternOwnedExpressionSiteLoweringTransformer,
   SchemaGeneratorTransformer,
@@ -58,7 +58,7 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       new HelperOwnedExpressionSiteLoweringTransformer(sharedOps),
     );
 
-    transformers.push(new CapabilityLoweringTransformer(sharedOps));
+    transformers.push(new PatternCallbackLoweringTransformer(sharedOps));
 
     transformers.push(
       new SchemaInjectionTransformer(sharedOps),

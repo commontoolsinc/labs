@@ -145,6 +145,12 @@ export abstract class Transformer {
   }
 }
 
+export abstract class HelpersOnlyTransformer extends Transformer {
+  override filter(context: TransformationContext): boolean {
+    return context.ctHelpers.sourceHasHelpers();
+  }
+}
+
 export class Pipeline {
   #transformers: Transformer[];
   constructor(transformers: Transformer[]) {

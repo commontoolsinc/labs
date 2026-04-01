@@ -23,8 +23,8 @@ import {
   type CapabilityParamDefault,
   type CapabilityParamSummary,
   type CapabilitySummaryRegistry,
+  HelpersOnlyTransformer,
   TransformationContext,
-  Transformer,
   type TypeRegistry,
 } from "../core/mod.ts";
 import { analyzeFunctionCapabilities } from "../policy/mod.ts";
@@ -1620,11 +1620,7 @@ function handlePatternSchemaInjection(
   return ts.visitEachChild(updated, visit, transformation);
 }
 
-export class SchemaInjectionTransformer extends Transformer {
-  override filter(context: TransformationContext): boolean {
-    return context.ctHelpers.sourceHasHelpers();
-  }
-
+export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const { sourceFile, tsContext: transformation, checker } = context;
     const typeRegistry = context.options.typeRegistry;

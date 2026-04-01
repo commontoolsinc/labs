@@ -11,6 +11,7 @@ export {
   CapabilityLoweringTransformer,
   CastValidationTransformer,
   JsxExpressionSiteRouterTransformer,
+  PatternCallbackLoweringTransformer,
   PatternContextValidationTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,

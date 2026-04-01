@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { CaptureCollector } from "../../../closures/capture-collector.ts";
+import { unwrapExpression } from "../../../utils/expression.ts";
 
 import type { Emitter } from "../types.ts";
 import {
@@ -100,15 +101,7 @@ function shouldFilterNestedLocalsForCallWrapper(
 function getInlineFunctionCallee(
   expression: ts.CallExpression,
 ): ts.FunctionExpression | ts.ArrowFunction | undefined {
-  let normalizedCallee: ts.Expression = expression.expression;
-  while (
-    ts.isParenthesizedExpression(normalizedCallee) ||
-    ts.isAsExpression(normalizedCallee) ||
-    ts.isTypeAssertionExpression(normalizedCallee) ||
-    ts.isNonNullExpression(normalizedCallee)
-  ) {
-    normalizedCallee = normalizedCallee.expression;
-  }
+  const normalizedCallee = unwrapExpression(expression.expression);
 
   if (
     ts.isFunctionExpression(normalizedCallee) ||

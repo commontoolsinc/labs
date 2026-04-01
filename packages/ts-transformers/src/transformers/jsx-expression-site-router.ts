@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { TransformationContext, Transformer } from "../core/mod.ts";
+import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { createDataFlowAnalyzer, visitEachChildWithJsx } from "../ast/mod.ts";
 import { classifyExpressionSiteHandling } from "./expression-site-policy.ts";
 import {
@@ -7,11 +7,7 @@ import {
   rewriteOwnedPreClosureJsxExpressionSite,
 } from "./expression-site-lowering.ts";
 
-export class JsxExpressionSiteRouterTransformer extends Transformer {
-  override filter(context: TransformationContext): boolean {
-    return context.ctHelpers.sourceHasHelpers();
-  }
-
+export class JsxExpressionSiteRouterTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     return transform(context);
   }

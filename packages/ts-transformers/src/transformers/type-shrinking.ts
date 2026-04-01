@@ -808,7 +808,7 @@ export function validateShrinkCoverage(
   if (paramSummary.name.startsWith("__")) return;
 
   // Collect requested top-level property names, filtering out the reactive
-  // proxy accessor method "key" which is injected by the capability-lowering
+  // proxy accessor method "key" which is injected by the pattern-callback
   // transformer and is not a user-authored property.
   const requestedHeads = new Set<string>();
   for (const p of paths) {

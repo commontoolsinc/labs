@@ -18,7 +18,7 @@
  * mapCallbackRegistry (WeakSet<ts.Node>)
  *   Marks arrow functions created by ClosureTransformer as array method callbacks.
  *   Writers: context.markAsArrayMethodCallback() (called by array-method-strategy)
- *   Readers: context.isArrayMethodCallback() (called by capability-lowering,
+ *   Readers: context.isArrayMethodCallback() (called by pattern-callback lowering,
  *            reactive-context classifier)
  *
  * syntheticComputeCallbackRegistry (WeakSet<ts.Node>)
@@ -40,8 +40,8 @@
  *
  * CapabilitySummaryRegistry (WeakMap<ts.Node, FunctionCapabilitySummary>)
  *   Caches per-function capability summaries (read/write paths, capability
- *   classification) computed by CapabilityLoweringTransformer.
- *   Writers: capability-lowering (registerCapabilitySummary)
+ *   classification) computed by PatternCallbackLoweringTransformer.
+ *   Writers: pattern-callback lowering (registerCapabilitySummary)
  *   Readers: schema-injection (findCapabilitySummaryForParameter)
  */
 export { TransformationContext } from "./context.ts";
@@ -60,7 +60,11 @@ export type {
   TransformMode,
   TypeRegistry,
 } from "./transformers.ts";
-export { Pipeline, Transformer } from "./transformers.ts";
+export {
+  HelpersOnlyTransformer,
+  Pipeline,
+  Transformer,
+} from "./transformers.ts";
 export * from "./common-tools-symbols.ts";
 export {
   CT_HELPERS_IDENTIFIER,

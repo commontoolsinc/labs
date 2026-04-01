@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { TransformationContext, Transformer } from "../core/mod.ts";
+import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { setParentPointers, visitEachChildWithJsx } from "../ast/mod.ts";
 import { ActionStrategy } from "./strategies/action-strategy.ts";
 import { ArrayMethodStrategy } from "./strategies/array-method-strategy.ts";
@@ -8,11 +8,7 @@ import { HandlerStrategy } from "./strategies/handler-strategy.ts";
 import { PatternToolStrategy } from "./strategies/patternTool-strategy.ts";
 import type { ClosureTransformationStrategy } from "./strategies/strategy.ts";
 
-export class ClosureTransformer extends Transformer {
-  override filter(context: TransformationContext): boolean {
-    return context.ctHelpers.sourceHasHelpers();
-  }
-
+export class ClosureTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     return transformClosures(context);
   }
