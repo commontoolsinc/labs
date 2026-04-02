@@ -180,6 +180,10 @@ export function schemaWithoutProperties(
  * Gets the basic `{ type: name }` schema for a given value. Returns `undefined`
  * if there is no well-defined type for the value. The result is always interned
  * (and frozen).
+ *
+ * **Note:** `undefined` (as a value) is in an "intermediate" state in the
+ * codebase as of this writing, and _this_ function treats it as not having a
+ * well-defined type.
  */
 export function schemaForValueType(
   value: FabricValue,
