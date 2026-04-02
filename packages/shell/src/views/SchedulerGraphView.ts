@@ -2401,23 +2401,31 @@ export class XSchedulerGraph extends LitElement {
                 </div>
               </div>
             `
-            : ""} ${node.preview
+            : ""} ${node.preview || this.hasSourceLocation(node.id)
             ? html`
               <div class="detail-section">
-                <div class="detail-section-title">Code Preview</div>
-                <div class="detail-preview">${node.preview}</div>
-                <button
-                  type="button"
-                  class="source-jump-button"
-                  @click="${async () => {
-                    this.viewMode = "source";
-                    await this.debuggerController?.requestPatternSources();
-                    this.requestUpdate();
-                  }}"
-                  title="View in source with context"
-                >
-                  View in Source
-                </button>
+                ${node.preview
+                  ? html`
+                    <div class="detail-section-title">Code Preview</div>
+                    <div class="detail-preview">${node.preview}</div>
+                  `
+                  : ""} ${this.hasSourceLocation(node.id)
+                  ? html`
+                    <button
+                      type="button"
+                      class="source-jump-button"
+                      @click="${async () => {
+                        this.viewMode = "source";
+                        await this.debuggerController
+                          ?.requestPatternSources();
+                        this.requestUpdate();
+                      }}"
+                      title="View in source with context"
+                    >
+                      View in Source
+                    </button>
+                  `
+                  : ""}
               </div>
             `
             : ""} ${node.reads && node.reads.length > 0
@@ -2682,6 +2690,15 @@ export class XSchedulerGraph extends LitElement {
         ? this.renderSourceView()
         : this.renderTable()}
     `;
+  }
+
+  private hasSourceLocation(nodeId: string): boolean {
+    // Check if the node ID contains a parseable source location (file:line:col)
+    const clean = nodeId.replace(/\s*\[via.*\]$/, "");
+    const slashIdx = clean.indexOf("/");
+    if (slashIdx <= 0) return false;
+    const rest = clean.slice(slashIdx);
+    return /^.+:\d+:\d+$/.test(rest);
   }
 
   private renderSourceView(): TemplateResult {
