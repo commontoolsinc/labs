@@ -4,6 +4,7 @@ import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   detectCallKind,
   getCapabilitySummaryCallbackArgument,
+  getDeriveInputAndCallbackArgument,
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
@@ -314,10 +315,11 @@ export function transformDeriveCall(
   const { factory, checker, options } = context;
 
   // Extract callback
-  const callback = getCapabilitySummaryCallbackArgument(deriveCall, checker);
-  if (!callback) {
+  const deriveArgs = getDeriveInputAndCallbackArgument(deriveCall, checker);
+  if (!deriveArgs) {
     return undefined;
   }
+  const { input: originalInput, callback } = deriveArgs;
 
   // Collect captures
   const collector = new CaptureCollector(checker);
@@ -344,26 +346,6 @@ export function transformDeriveCall(
     callback.body,
     visitor,
   ) as ts.ConciseBody;
-
-  // Determine original input and parameter name
-  const args = deriveCall.arguments;
-  let originalInput: ts.Expression | undefined;
-
-  if (args.length === 2) {
-    // 2-arg form: derive(input, callback)
-    originalInput = args[0];
-  } else if (args.length === 4) {
-    // 4-arg form: derive(inputSchema, resultSchema, input, callback)
-    originalInput = args[2];
-  } else {
-    // Invalid number of arguments
-    return undefined;
-  }
-
-  // Ensure we have a valid input expression
-  if (!originalInput) {
-    return undefined;
-  }
 
   // Determine parameter name for the original input
   let originalInputParamName = "input"; // Fallback for complex expressions

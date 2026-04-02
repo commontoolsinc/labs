@@ -296,6 +296,33 @@ export function getCapabilitySummaryCallbackArgument(
   return undefined;
 }
 
+export function getDeriveInputAndCallbackArgument(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): {
+  input: ts.Expression;
+  callback: ts.ArrowFunction | ts.FunctionExpression;
+} | undefined {
+  const callKind = detectCallKind(call, checker);
+  if (callKind?.kind !== "derive") {
+    return undefined;
+  }
+
+  const callback = getCapabilitySummaryCallbackArgument(call, checker);
+  if (!callback) {
+    return undefined;
+  }
+
+  const callbackIndex = call.arguments.indexOf(callback);
+  const inputIndex = callbackIndex === 1 ? 0 : callbackIndex === 3 ? 2 : -1;
+  const input = inputIndex >= 0 ? call.arguments[inputIndex] : undefined;
+  if (!input) {
+    return undefined;
+  }
+
+  return { input, callback };
+}
+
 export function isReactiveOriginCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,

@@ -6,6 +6,7 @@ import {
   classifyArrayMethodCallSite,
   detectCallKind,
   getCapabilitySummaryCallbackArgument,
+  getDeriveInputAndCallbackArgument,
   getPatternBuilderCallbackArgument,
 } from "../../src/ast/mod.ts";
 
@@ -305,4 +306,42 @@ Deno.test("getCapabilitySummaryCallbackArgument recognizes derive and builder ca
   assertEquals(!!getCapabilitySummaryCallbackArgument(second, checker), true);
   assertEquals(!!getCapabilitySummaryCallbackArgument(third, checker), true);
   assertEquals(!!getCapabilitySummaryCallbackArgument(fourth, checker), true);
+});
+
+Deno.test("getDeriveInputAndCallbackArgument recognizes derive input positions", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare function derive<T, U>(input: T, callback: (value: T) => U): U;
+    declare function derive<T, U>(
+      inputSchema: unknown,
+      resultSchema: unknown,
+      input: T,
+      callback: (value: T) => U,
+    ): U;
+
+    const first = derive(1, (value: number) => value + 1);
+    const second = derive({}, {}, 1, (value: number) => value + 2);
+    const third = derive(() => 3);
+  `);
+
+  const first = findInitializer(sourceFile, "first");
+  const second = findInitializer(sourceFile, "second");
+  const third = findInitializer(sourceFile, "third");
+
+  if (
+    !ts.isCallExpression(first) ||
+    !ts.isCallExpression(second) ||
+    !ts.isCallExpression(third)
+  ) {
+    throw new Error("Expected call expression initializers");
+  }
+
+  const firstArgs = getDeriveInputAndCallbackArgument(first, checker);
+  const secondArgs = getDeriveInputAndCallbackArgument(second, checker);
+  const thirdArgs = getDeriveInputAndCallbackArgument(third, checker);
+
+  assertEquals(firstArgs?.input.getText(), "1");
+  assertEquals(firstArgs?.callback.parameters[0]?.name.getText(), "value");
+  assertEquals(secondArgs?.input.getText(), "1");
+  assertEquals(secondArgs?.callback.parameters[0]?.name.getText(), "value");
+  assertEquals(thirdArgs, undefined);
 });

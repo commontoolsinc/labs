@@ -17,6 +17,7 @@ export {
   detectCallKind,
   detectDirectBuilderCall,
   getCapabilitySummaryCallbackArgument,
+  getDeriveInputAndCallbackArgument,
   getLoweredArrayMethodName,
   getPatternBuilderCallbackArgument,
   hasReactiveCollectionProvenance,

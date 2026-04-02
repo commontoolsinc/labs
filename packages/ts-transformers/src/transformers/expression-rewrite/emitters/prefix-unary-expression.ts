@@ -6,8 +6,6 @@ export const emitPrefixUnaryExpression: Emitter = ({
   expression,
   dataFlows,
   context,
-  analysis,
-  analyze,
   inSafeContext,
   preferDeriveWrappers,
 }) => {
@@ -21,22 +19,9 @@ export const emitPrefixUnaryExpression: Emitter = ({
   }
   if (dataFlows.length === 0) return undefined;
 
-  let relevantDataFlows = dataFlows;
-
-  if (relevantDataFlows.length === 0 && analysis.containsOpaqueRef) {
-    const fallbackAnalysis = analyze(expression.operand);
-    relevantDataFlows = context.getRelevantDataFlowsFromAnalysis(
-      fallbackAnalysis,
-    );
-
-    if (relevantDataFlows.length === 0) return undefined;
-  } else if (relevantDataFlows.length === 0) {
-    return undefined;
-  }
-
   return createReactiveWrapperForExpression(
     expression,
-    relevantDataFlows,
+    dataFlows,
     context,
     {
       preferDeriveWrapper: preferDeriveWrappers,

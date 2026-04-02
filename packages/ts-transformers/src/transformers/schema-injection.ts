@@ -5,7 +5,9 @@ import {
   classifyArrayMethodCall,
   detectCallKind,
   ensureTypeNodeRegistered,
+  getCapabilitySummaryCallbackArgument,
   getTypeAtLocationWithFallback,
+  getDeriveInputAndCallbackArgument,
   getTypeFromTypeNodeWithFallback,
   getVariableInitializer,
   inferContextualType,
@@ -1148,11 +1150,11 @@ function inferDeriveResultTypeFromInitializer(
     return undefined;
   }
 
-  const firstArg = initializer.arguments[0];
-  const callback = initializer.arguments[1];
-  if (!firstArg || !callback || !isFunctionLikeExpression(callback)) {
+  const deriveArgs = getDeriveInputAndCallbackArgument(initializer, checker);
+  if (!deriveArgs) {
     return undefined;
   }
+  const { input: firstArg, callback } = deriveArgs;
 
   let argumentType =
     getTypeAtLocationWithFallback(firstArg, checker, typeRegistry) ??
@@ -1977,9 +1979,10 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
-          const deriveCallback = isFunctionLikeExpression(node.arguments[1]!)
-            ? node.arguments[1]!
-            : undefined;
+          const deriveCallback = getCapabilitySummaryCallbackArgument(
+            node,
+            checker,
+          );
           const resolved = resolveDualSchemaBuilderTypes(
             deriveCallback,
             checker,
@@ -2013,14 +2016,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           );
         }
 
-        if (
-          node.arguments.length >= 2 &&
-          isFunctionLikeExpression(node.arguments[1]!)
-        ) {
-          const firstArg = node.arguments[0]!;
-          const callback = node.arguments[1] as
-            | ts.ArrowFunction
-            | ts.FunctionExpression;
+        const deriveArgs = getDeriveInputAndCallbackArgument(node, checker);
+        if (deriveArgs) {
+          const { input: firstArg, callback } = deriveArgs;
 
           // Special case: detect empty object literal {} and generate specific schema
           let argNode: ts.TypeNode | undefined;
