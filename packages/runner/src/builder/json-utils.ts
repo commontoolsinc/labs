@@ -225,12 +225,11 @@ function analyzeType(value: any, state: CreateJsonSchemaState): JSONSchema {
         }
         return finishResult({ type: "array", items });
       } else {
-        const properties: Record<string, JSONSchema> = {};
-        for (
-          const key of new Set([...Object.keys(value)])
-        ) {
-          properties[key] = analyzeType(value[key], state);
-        }
+        const entries: [string, JSONSchema][] =
+          Object.entries(value).map(([key, subValue]) => {
+            return [key, analyzeType(subValue, state)];
+          });
+        const properties = Object.fromEntries(entries);
         // `addDefault = false` because sub-properties will get defaults, if
         // any.
         return finishResult({ type: "object", properties }, false);
