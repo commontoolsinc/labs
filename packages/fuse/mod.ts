@@ -76,7 +76,7 @@ type HandleWriteTarget =
 
 export async function main(argv: string[] = Deno.args) {
   const args = parseArgs(argv, {
-    string: ["api-url", "space", "identity", "exec-cli"],
+    string: ["api-url", "space", "identity", "exec-cli", "log-file"],
     boolean: ["debug"],
     collect: ["space"],
     default: {
@@ -84,9 +84,30 @@ export async function main(argv: string[] = Deno.args) {
       space: [] as string[],
       identity: Deno.env.get("CT_IDENTITY") ?? "",
       "exec-cli": "",
+      "log-file": "",
       debug: false,
     },
   });
+
+  // Redirect console output to a log file when running as a background daemon.
+  const logFilePath = args["log-file"] as string;
+  if (logFilePath) {
+    const logFile = await Deno.open(logFilePath, {
+      create: true,
+      append: true,
+    });
+    const enc = new TextEncoder();
+    const write = (msg: string) => {
+      try {
+        logFile.writeSync(enc.encode(msg + "\n"));
+      } catch {
+        // Ignore write errors (disk full, etc.)
+      }
+    };
+    console.log = (...a: unknown[]) => write(a.map(String).join(" "));
+    console.error = (...a: unknown[]) => write(a.map(String).join(" "));
+    console.warn = (...a: unknown[]) => write(a.map(String).join(" "));
+  }
 
   const debug = args.debug;
 
