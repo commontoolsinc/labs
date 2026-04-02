@@ -14,9 +14,6 @@ export class FunctionCache {
    * @returns The cached function, or undefined if not found
    */
   get(module: Module): ((...args: any[]) => any) | undefined {
-    // Skip cache for string implementations — they are eval'd without source
-    // maps, so cached copies lose source-map-backed stack traces.
-    if (typeof module.implementation === "string") return undefined;
     const key = this.getKey(module);
     return this.cache.get(key);
   }
