@@ -1,9 +1,14 @@
 import { isRecord } from "@commontools/utils/types";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import {
+  schemaWithProperties,
+  toDeepFrozenSchema,
+} from "@commontools/data-model/schema-utils";
 import { type LegacyAlias } from "../sigil-types.ts";
 import {
   isPattern,
   type JSONSchema,
+  type JSONSchemaMutable,
+  type JSONSchemaObj,
   type JSONSchemaObjMutable,
   type JSONSchemaTypes,
   type JSONValue,
@@ -140,9 +145,9 @@ export function toJSONWithLegacyAliases(
 }
 
 type CreateJsonSchemaState = {
-  addDefaults: boolean,
-  runtime: Runtime | undefined,
-  seen: Map<string, JSONSchemaObjMutable>
+  addDefaults: boolean;
+  runtime: Runtime | undefined;
+  seen: Map<string, JSONSchemaObjMutable>;
 };
 
 export function createJsonSchema(
@@ -153,11 +158,10 @@ export function createJsonSchema(
   const state = {
     addDefaults,
     runtime,
-    seen: new Map<string, JSONSchemaObjMutable>()
+    seen: new Map<string, JSONSchemaObjMutable>(),
   };
 
-  const result = analyzeType(example, state);
-  return toDeepFrozenSchema(result, true);
+  return analyzeType(example, state);
 }
 
 /**
@@ -188,56 +192,60 @@ function analyzeType(value: any, state: CreateJsonSchemaState): JSONSchema {
     return schema;
   }
 
+  // Adds the `default` when appropriate and does any other necessary result
+  // processing.
+  const finishResult = (schema: JSONSchema, addDefault = true): JSONSchema => {
+    return (addDefault && state.addDefaults)
+      ? schemaWithProperties(schema, { default: value })
+      : toDeepFrozenSchema(schema, true);
+  };
+
   const type = typeof value;
-  const schema: JSONSchemaObjMutable = {};
 
   switch (type) {
     case "object":
       if (value === null) {
-        schema.type = "null";
+        return finishResult({ type: "null" });
       } else if (Array.isArray(value)) {
-        schema.type = "array";
+        let items: JSONSchema;
         if (value.length === 0) {
-          schema.items = {}; // TODO(seefeld): Should be `true`
+          // TODO(seefeld): should be `true` in this case.
+          items = {};
         } else {
           const schemas = value.map((v) => analyzeType(v, state)).map((s) =>
             JSON.stringify(s)
           );
-          const uniqueSchemas = [...new Set(schemas)].map((s) =>
-            JSON.parse(s)
-          );
+          const uniqueSchemas = [...new Set(schemas)].map((s) => JSON.parse(s));
           if (uniqueSchemas.length === 1) {
-            schema.items = uniqueSchemas[0];
+            items = uniqueSchemas[0];
           } else {
-            schema.items = { anyOf: uniqueSchemas };
+            items = { anyOf: uniqueSchemas };
           }
         }
+        return finishResult({ type: "array", items });
       } else {
-        schema.type = "object";
-        schema.properties = {};
+        const properties: Record<string, JSONSchema> = {};
         for (
           const key of new Set([...Object.keys(value)])
         ) {
-          (schema.properties as any)[key] = analyzeType(value[key], state);
+          properties[key] = analyzeType(value[key], state);
         }
+        // `addDefault = false` because sub-properties will get defaults, if
+        // any.
+        return finishResult({ type: "object", properties }, false);
       }
       break;
     case "number":
-      schema.type = Number.isInteger(value) ? "integer" : "number";
-      break;
+      const numType = Number.isInteger(value) ? "integer" : "number";
+      return finishResult({ type: numType });
     case "undefined":
+      // TODO(danfuzz): This has to start doing something more,  in order for
+      // `undefined` to be accepted as a valid value.
+      return finishResult({}, false);
       break;
     default:
-      schema.type = type as JSONSchemaTypes;
-      break;
+      return finishResult({ type: type as JSONSchemaTypes });
   }
-
-  // Put the defaults on the leaves
-  if (state.addDefaults && value !== undefined && schema.type !== "object") {
-    schema.default = value;
-  }
-
-  return schema;
 }
 
 export function moduleToJSON(module: Module) {
