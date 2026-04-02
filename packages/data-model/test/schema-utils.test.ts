@@ -599,7 +599,7 @@ describe("schemaWithProperties", () => {
 
   it("returns false as-is regardless of overrides", () => {
     const result = schemaWithProperties(false, { type: "string" });
-    assert(!result);
+    assertStrictEquals(result, false);
   });
 });
 
@@ -667,11 +667,11 @@ describe("schemaWithoutProperties", () => {
   });
 
   it("returns boolean true as-is", () => {
-    assert(schemaWithoutProperties(true, "asCell"));
+    assertStrictEquals(schemaWithoutProperties(true, "asCell"), true);
   });
 
   it("returns boolean false as-is", () => {
-    assert(!schemaWithoutProperties(false, "asCell"));
+    assertStrictEquals(schemaWithoutProperties(false, "asCell"), false);
   });
 });
 
