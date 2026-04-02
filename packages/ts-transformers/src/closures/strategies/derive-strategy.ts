@@ -3,7 +3,6 @@ import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   detectCallKind,
-  getCapabilitySummaryCallbackArgument,
   getDeriveInputAndCallbackArgument,
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";

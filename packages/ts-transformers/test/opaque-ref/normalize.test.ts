@@ -35,7 +35,7 @@ describe("normalizeDataFlows", () => {
   });
 
   it("filters ignored params after dropping synthetic map params", () => {
-    const { analysis, checker, sourceFile } = analyzeExpression(
+    const { checker, sourceFile } = analyzeExpression(
       "((_ignored: number) => _ignored)(1)",
     );
 

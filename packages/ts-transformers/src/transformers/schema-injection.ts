@@ -5,9 +5,8 @@ import {
   classifyArrayMethodCall,
   detectCallKind,
   ensureTypeNodeRegistered,
-  getCapabilitySummaryCallbackArgument,
-  getTypeAtLocationWithFallback,
   getDeriveInputAndCallbackArgument,
+  getTypeAtLocationWithFallback,
   getTypeFromTypeNodeWithFallback,
   getVariableInitializer,
   inferContextualType,
@@ -1972,6 +1971,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
 
       if (callKind?.kind === "derive") {
         const factory = transformation.factory;
+        const deriveArgs = getDeriveInputAndCallbackArgument(node, checker);
 
         if (node.typeArguments && node.typeArguments.length >= 2) {
           const [argumentType, resultType] = node.typeArguments;
@@ -1979,12 +1979,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
-          const deriveCallback = getCapabilitySummaryCallbackArgument(
-            node,
-            checker,
-          );
           const resolved = resolveDualSchemaBuilderTypes(
-            deriveCallback,
+            deriveArgs?.callback,
             checker,
             sourceFile,
             factory,
@@ -2016,7 +2012,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           );
         }
 
-        const deriveArgs = getDeriveInputAndCallbackArgument(node, checker);
         if (deriveArgs) {
           const { input: firstArg, callback } = deriveArgs;
 

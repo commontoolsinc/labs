@@ -1,6 +1,6 @@
 import ts from "typescript";
 import {
-  getCapabilitySummaryCallbackArgument,
+  getDeriveInputAndCallbackArgument,
   getTypeAtLocationWithFallback,
   isWildcardTraversalCall,
   visitEachChildWithJsx,
@@ -708,13 +708,13 @@ function rewriteNestedDeriveCallbackBodies(
 
     if (!ts.isCallExpression(visited)) return visited;
 
-    const callbackArg = getCapabilitySummaryCallbackArgument(
+    const deriveArgs = getDeriveInputAndCallbackArgument(
       visited,
       context.checker,
     );
-    if (!callbackArg) return visited;
+    if (!deriveArgs) return visited;
+    const { callback: callbackArg } = deriveArgs;
     const callbackIndex = visited.arguments.indexOf(callbackArg);
-    if (callbackIndex !== 1 && callbackIndex !== 3) return visited;
 
     let processedBody = rewriteNestedDeriveCallbackBodies(
       callbackArg.body,
