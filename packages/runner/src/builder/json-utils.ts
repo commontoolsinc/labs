@@ -139,89 +139,105 @@ export function toJSONWithLegacyAliases(
   return value;
 }
 
+type CreateJsonSchemaState = {
+  addDefaults: boolean,
+  runtime: Runtime | undefined,
+  seen: Map<string, JSONSchemaObjMutable>
+};
+
 export function createJsonSchema(
   example: any,
-  addDefaults = false,
+  addDefaults: boolean = false,
   runtime?: Runtime,
 ): JSONSchema {
-  const seen = new Map<string, JSONSchemaObjMutable>();
+  const state = {
+    addDefaults,
+    runtime,
+    seen: new Map<string, JSONSchemaObjMutable>()
+  };
 
-  function analyzeType(value: any): JSONSchema {
-    if (isCellLink(value)) {
-      const link = parseLink(value);
-      const linkAsStr = JSON.stringify(link);
-      if (seen.has(linkAsStr)) {
-        // Return a copy of the schema to avoid mutating the original.
-        return JSON.parse(JSON.stringify(seen.get(linkAsStr)!));
-      }
+  const result = analyzeType(example, state);
+  return toDeepFrozenSchema(result, true);
+}
 
-      const cell = runtime?.getCellFromLink(link);
-      if (!cell) return {}; // TODO(seefeld): Should be `true`
-
-      let schema = cell.schema;
-      if (schema === undefined) {
-        // If we find pointing back here, assume an empty schema. This is
-        // overwritten below. (TODO(seefeld): This should create `$ref: "#/.."`)
-        seen.set(linkAsStr, {} as JSONSchemaObjMutable);
-        schema = analyzeType(cell.getRaw());
-      }
-      seen.set(linkAsStr, schema as JSONSchemaObjMutable);
-      return schema;
+/**
+ * Helper for `createJsonSchema()` which analyzes a value, calling itself
+ * recursively on subcomponents of the value (if any).
+ */
+function analyzeType(value: any, state: CreateJsonSchemaState): JSONSchema {
+  if (isCellLink(value)) {
+    const seen = state.seen;
+    const link = parseLink(value);
+    const linkAsStr = JSON.stringify(link);
+    if (seen.has(linkAsStr)) {
+      // Return a copy of the schema to avoid mutating the original.
+      return JSON.parse(JSON.stringify(seen.get(linkAsStr)!));
     }
 
-    const type = typeof value;
-    const schema: JSONSchemaObjMutable = {};
+    const cell = state.runtime?.getCellFromLink(link);
+    if (!cell) return {}; // TODO(seefeld): Should be `true`
 
-    switch (type) {
-      case "object":
-        if (value === null) {
-          schema.type = "null";
-        } else if (Array.isArray(value)) {
-          schema.type = "array";
-          if (value.length === 0) {
-            schema.items = {}; // TODO(seefeld): Should be `true`
-          } else {
-            const schemas = value.map((v) => analyzeType(v)).map((s) =>
-              JSON.stringify(s)
-            );
-            const uniqueSchemas = [...new Set(schemas)].map((s) =>
-              JSON.parse(s)
-            );
-            if (uniqueSchemas.length === 1) {
-              schema.items = uniqueSchemas[0];
-            } else {
-              schema.items = { anyOf: uniqueSchemas };
-            }
-          }
-        } else {
-          schema.type = "object";
-          schema.properties = {};
-          for (
-            const key of new Set([...Object.keys(value)])
-          ) {
-            (schema.properties as any)[key] = analyzeType(value[key]);
-          }
-        }
-        break;
-      case "number":
-        schema.type = Number.isInteger(value) ? "integer" : "number";
-        break;
-      case "undefined":
-        break;
-      default:
-        schema.type = type as JSONSchemaTypes;
-        break;
+    let schema = cell.schema;
+    if (schema === undefined) {
+      // If we find pointing back here, assume an empty schema. This is
+      // overwritten below. (TODO(seefeld): This should create `$ref: "#/.."`)
+      seen.set(linkAsStr, {} as JSONSchemaObjMutable);
+      schema = analyzeType(cell.getRaw(), state);
     }
-
-    // Put the defaults on the leaves
-    if (addDefaults && value !== undefined && schema.type !== "object") {
-      schema.default = value;
-    }
-
+    seen.set(linkAsStr, schema as JSONSchemaObjMutable);
     return schema;
   }
 
-  return toDeepFrozenSchema(analyzeType(example), true);
+  const type = typeof value;
+  const schema: JSONSchemaObjMutable = {};
+
+  switch (type) {
+    case "object":
+      if (value === null) {
+        schema.type = "null";
+      } else if (Array.isArray(value)) {
+        schema.type = "array";
+        if (value.length === 0) {
+          schema.items = {}; // TODO(seefeld): Should be `true`
+        } else {
+          const schemas = value.map((v) => analyzeType(v, state)).map((s) =>
+            JSON.stringify(s)
+          );
+          const uniqueSchemas = [...new Set(schemas)].map((s) =>
+            JSON.parse(s)
+          );
+          if (uniqueSchemas.length === 1) {
+            schema.items = uniqueSchemas[0];
+          } else {
+            schema.items = { anyOf: uniqueSchemas };
+          }
+        }
+      } else {
+        schema.type = "object";
+        schema.properties = {};
+        for (
+          const key of new Set([...Object.keys(value)])
+        ) {
+          (schema.properties as any)[key] = analyzeType(value[key], state);
+        }
+      }
+      break;
+    case "number":
+      schema.type = Number.isInteger(value) ? "integer" : "number";
+      break;
+    case "undefined":
+      break;
+    default:
+      schema.type = type as JSONSchemaTypes;
+      break;
+  }
+
+  // Put the defaults on the leaves
+  if (state.addDefaults && value !== undefined && schema.type !== "object") {
+    schema.default = value;
+  }
+
+  return schema;
 }
 
 export function moduleToJSON(module: Module) {
