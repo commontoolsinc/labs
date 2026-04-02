@@ -8,7 +8,10 @@ import {
   createJsonSchema,
   toJSONWithLegacyAliases,
 } from "../src/builder/json-utils.ts";
-import { type JSONSchema } from "../src/builder/types.ts";
+import {
+  type JSONSchema,
+  type JSONSchemaObj,
+} from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 
@@ -578,9 +581,13 @@ describe("json-utils", () => {
           },
         },
       });
+
+      // Appease the TS type system.
+      const schemaObj: JSONSchemaObj = schema as JSONSchemaObj;
+
       // Neither the root nor the nested object should have defaults
-      expect(schema).not.toHaveProperty("default");
-      expect(schema.properties!["user"]).not.toHaveProperty("default");
+      expect(schemaObj).not.toHaveProperty("default");
+      expect(schemaObj.properties!["user"]).not.toHaveProperty("default");
     });
   });
 
