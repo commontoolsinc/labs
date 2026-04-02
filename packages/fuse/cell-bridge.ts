@@ -4,7 +4,7 @@
 // Supports multiple spaces with on-demand connection.
 // Subscribes to cell changes and rebuilds subtrees on updates.
 
-import type { Cell } from "@commontools/runner";
+import type { Cell, PatternMeta } from "@commontools/runner";
 import { schemaToTypeString } from "@commontools/runner";
 import { FsTree } from "./tree.ts";
 import {
@@ -17,6 +17,7 @@ import { parseMountedCallablePath } from "./callable-path.ts";
 import {
   buildFsProjection,
   buildJsonTree,
+  buildJsonTreeAsync,
   type FsValue,
   isSigilLink,
   isVNode,
@@ -38,6 +39,27 @@ function getInputSchema(
     unknown
   >;
   return Object.keys(rest).length > 0 ? rest as JSONSchema : undefined;
+}
+
+function displayCallableInputType(
+  callableKind: CallableKind,
+  schema: JSONSchema | undefined,
+): string {
+  if (callableKind === "handler" && schema === undefined) {
+    return "void (invoke with no args)";
+  }
+
+  if (schema === undefined) {
+    return "void";
+  }
+
+  const defs =
+    typeof schema === "object" && schema !== null && !Array.isArray(schema)
+      ? (schema as Record<string, unknown>).$defs as
+        | Record<string, JSONSchema>
+        | undefined
+      : undefined;
+  return schemaToTypeString(schema, { defs, maxDepth: 3 });
 }
 // Lazy-imported in connectSpace() to avoid pulling in heavy CLI deps at import
 // time (breaks tests that only use CellBridge for tree/symlink logic).
@@ -86,6 +108,8 @@ function parseFrontmatter(
 
 type Cancel = () => void;
 
+type ResolveLink = (value: unknown, depth: number) => string | null;
+
 /** Result of resolving an inode to a writable cell path. */
 export interface WritePath {
   spaceName: string;
@@ -96,6 +120,23 @@ export interface WritePath {
   piece: PieceController;
   /** Set when the file is an [FS] projection index file. */
   fsProjection?: "markdown" | "json";
+}
+
+export interface HandlerTarget {
+  piece: PieceController;
+  cellProp: "input" | "result";
+  cellKey: string;
+}
+
+/** Result of resolving an inode to a writable source file path. */
+export interface SourceWritePath {
+  spaceName: string;
+  pieceName: string;
+  /** Relative path within .src/, e.g. "main.tsx" or "utils/helper.tsx". */
+  relPath: string;
+  piece: PieceController;
+  /** Inode of the .src/ directory (for error.log lookups). */
+  srcIno: bigint;
 }
 
 /** Callback to invalidate kernel cache entries (by name under a parent). */
@@ -112,12 +153,40 @@ export interface SpaceState {
   entitiesIno: bigint;
   pieceMap: Map<string, string>; // name → entity ID
   pieceControllers: Map<string, PieceController>; // name → controller
+  pieceManifest: Map<string, { pattern: string; summary: string }>;
   /** Per-piece subscription cancellers, keyed by piece name. */
   pieceSubs: Map<string, Cancel[]>;
   did: string;
   unsubscribes: Cancel[];
   /** Used names set for collision resolution. */
   usedNames: Set<string>;
+  /** Map from piece name to the inode of its .src/ directory. */
+  srcInos: Map<string, bigint>;
+  /** Map from piece name to the inode of the synthetic error.log file in .src/. */
+  srcErrorLogInos: Map<string, bigint>;
+}
+
+interface ScheduledPropRebuild {
+  cell: Cell<unknown>;
+  latestValue: unknown;
+  pieceId: string;
+  pieceIno: bigint;
+  pieceName: string;
+  propName: "input" | "result";
+  resolveLink: ResolveLink;
+  spaceName: string;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+interface PropRebuildJob {
+  cell: Cell<unknown>;
+  newValue: unknown;
+  pieceId: string;
+  pieceIno: bigint;
+  pieceName: string;
+  propName: "input" | "result";
+  resolveLink: ResolveLink;
+  spaceName: string;
 }
 
 export class CellBridge {
@@ -135,6 +204,22 @@ export class CellBridge {
   private syncing: Set<string> = new Set();
   /** Flag: re-run sync after current pass completes. */
   private syncAgain: Set<string> = new Set();
+  /** Coalesced subtree rebuilds keyed by piece inode + prop name. */
+  private pendingPropRebuilds = new Map<
+    string,
+    ScheduledPropRebuild
+  >();
+  private activePropRebuilds = new Set<string>();
+  private deferredPropRebuilds = new Map<string, PropRebuildJob>();
+  private debug = false;
+  private rebuildStats = {
+    scheduled: 0,
+    coalesced: 0,
+    completed: 0,
+    errors: 0,
+    maxPending: 0,
+    lastDurationMs: 0,
+  };
   private execCli: string;
   /**
    * Tracks root-level entries created by [FS] projections so they can be
@@ -157,6 +242,17 @@ export class CellBridge {
   }): void {
     this.apiUrl = config.apiUrl;
     this.identity = config.identity;
+  }
+
+  setDebug(debug: boolean): void {
+    this.debug = debug;
+    this.updateStatus();
+  }
+
+  private debugLog(message: string): void {
+    if (this.debug) {
+      console.log(message);
+    }
   }
 
   /** Create the .status file at the mount root. Call once after init. */
@@ -190,12 +286,107 @@ export class CellBridge {
     return JSON.stringify(
       {
         apiUrl: this.apiUrl,
+        debug: this.debug,
+        rebuilds: {
+          pending: this.pendingPropRebuilds.size +
+            this.activePropRebuilds.size +
+            this.deferredPropRebuilds.size,
+          scheduled: this.rebuildStats.scheduled,
+          coalesced: this.rebuildStats.coalesced,
+          completed: this.rebuildStats.completed,
+          errors: this.rebuildStats.errors,
+          maxPending: this.rebuildStats.maxPending,
+          lastDurationMs: this.rebuildStats.lastDurationMs,
+        },
         startedAt: this.startedAt,
         spaces,
       },
       null,
       2,
     );
+  }
+
+  private getManifestPatternFromTree(pieceIno: bigint): string {
+    const metaIno = this.tree.lookup(pieceIno, "meta.json");
+    if (metaIno === undefined) return "";
+    const metaNode = this.tree.getNode(metaIno);
+    if (!metaNode || metaNode.kind !== "file") return "";
+    try {
+      const parsed = JSON.parse(
+        new TextDecoder().decode(metaNode.content),
+      ) as Record<string, unknown>;
+      return typeof parsed.patternName === "string" ? parsed.patternName : "";
+    } catch {
+      return "";
+    }
+  }
+
+  private extractSummary(value: unknown): string {
+    if (
+      typeof value !== "object" || value === null || Array.isArray(value)
+    ) {
+      return "";
+    }
+    return typeof (value as Record<string, unknown>).summary === "string"
+      ? (value as Record<string, unknown>).summary as string
+      : "";
+  }
+
+  private getManifestSummaryFromTree(pieceIno: bigint): string {
+    const resultIno = this.tree.lookup(pieceIno, "result");
+    if (resultIno === undefined) return "";
+    const summaryIno = this.tree.lookup(resultIno, "summary");
+    if (summaryIno === undefined) return "";
+    const summaryNode = this.tree.getNode(summaryIno);
+    if (!summaryNode || summaryNode.kind !== "file") return "";
+    return new TextDecoder().decode(summaryNode.content);
+  }
+
+  private updatePieceManifest(
+    state: SpaceState,
+    pieceId: string,
+    updates: Partial<{ pattern: string; summary: string }>,
+  ): boolean {
+    const current = state.pieceManifest.get(pieceId) ??
+      { pattern: "", summary: "" };
+    const next = {
+      pattern: updates.pattern ?? current.pattern,
+      summary: updates.summary ?? current.summary,
+    };
+    const changed = next.pattern !== current.pattern ||
+      next.summary !== current.summary;
+    state.pieceManifest.set(pieceId, next);
+    return changed;
+  }
+
+  private buildPiecesManifestEntries(state: SpaceState): Array<{
+    id: string;
+    name: string;
+    pattern: string;
+    summary: string;
+    entityPath: string;
+  }> {
+    const entries: Array<{
+      id: string;
+      name: string;
+      pattern: string;
+      summary: string;
+      entityPath: string;
+    }> = [];
+
+    for (const [name, id] of state.pieceMap) {
+      const manifest = state.pieceManifest.get(id) ??
+        { pattern: "", summary: "" };
+      entries.push({
+        id,
+        name,
+        pattern: manifest.pattern,
+        summary: manifest.summary,
+        entityPath: `entities/${id}`,
+      });
+    }
+
+    return entries;
   }
 
   /** Connect to a space and populate its tree. */
@@ -341,33 +532,96 @@ export class CellBridge {
     return { spaceName, pieceName, cell, jsonPath, isJsonFile, piece };
   }
 
+  /**
+   * Resolve an inode to a writable source file path under a .src/ directory.
+   *
+   * Returns null if the inode is read-only (error.log) or not a .src/ file.
+   *
+   * Path structure: /<space>/pieces/<piece>/.src/<relPath...>
+   */
+  resolveSourceWritePath(ino: bigint): SourceWritePath | null {
+    // Walk up to root collecting segments
+    const segments: string[] = [];
+    let current = ino;
+    while (current !== this.tree.rootIno) {
+      const name = this.tree.getNameForIno(current);
+      if (name === undefined) return null;
+      segments.unshift(name);
+      const parentIno = this.tree.parents.get(current);
+      if (parentIno === undefined) return null;
+      current = parentIno;
+    }
+
+    // segments: [spaceName, "pieces", pieceName, ".src", ...relSegments]
+    if (segments.length < 5) return null;
+    if (segments[1] !== "pieces") return null;
+    if (segments[3] !== ".src") return null;
+
+    const spaceName = segments[0];
+    const pieceName = segments[2];
+    const relPath = segments.slice(4).join("/");
+
+    const space = this.spaces.get(spaceName);
+    if (!space) return null;
+    const piece = space.pieceControllers.get(pieceName);
+    if (!piece) return null;
+    const srcIno = space.srcInos.get(pieceName);
+    if (srcIno === undefined) return null;
+
+    // Block writes to the synthetic error.log (identified by inode, not name,
+    // so a real source file named error.log remains writable).
+    const errorLogIno = space.srcErrorLogInos.get(pieceName);
+    if (errorLogIno !== undefined && ino === errorLogIno) return null;
+
+    return { spaceName, pieceName, relPath, piece, srcIno };
+  }
+
   /** Send a value to a handler (stream) cell. */
   async sendToHandler(ino: bigint, value: unknown): Promise<void> {
+    const target = this.resolveHandlerTarget(ino);
+    if (!target) {
+      throw new Error("Not a handler node");
+    }
+    await this.sendToHandlerTarget(target, value);
+  }
+
+  resolveHandlerTarget(ino: bigint): HandlerTarget | null {
     const node = this.tree.getNode(ino);
     if (
       !node || node.kind !== "callable" || node.callableKind !== "handler"
     ) {
-      throw new Error("Not a handler node");
+      return null;
     }
 
     const parsed = parseMountedCallablePath(this.tree.getPath(ino));
     if (!parsed || parsed.callableKind !== "handler") {
-      throw new Error("Invalid handler path");
+      return null;
     }
 
     const space = this.spaces.get(parsed.spaceName);
-    if (!space) throw new Error(`Space "${parsed.spaceName}" not found`);
+    if (!space) return null;
 
     const piece = this.resolvePieceController(space, parsed);
-    if (!piece) throw new Error(`Piece "${parsed.rootName}" not found`);
+    if (!piece) return null;
 
-    const rootCell = await piece[parsed.cellProp].getCell();
-    const handlerCell = rootCell.key(parsed.cellKey as keyof unknown) as Cell<
+    return {
+      piece,
+      cellProp: node.cellProp,
+      cellKey: node.cellKey,
+    };
+  }
+
+  async sendToHandlerTarget(
+    target: HandlerTarget,
+    value: unknown,
+  ): Promise<void> {
+    const rootCell = await target.piece[target.cellProp].getCell();
+    const handlerCell = rootCell.key(target.cellKey as keyof unknown) as Cell<
       unknown
     >;
     handlerCell.send(value);
-    await piece.manager().runtime.idle();
-    await piece.manager().synced();
+    await target.piece.manager().runtime.idle();
+    await target.piece.manager().synced();
   }
 
   private resolvePieceController(
@@ -390,6 +644,236 @@ export class CellBridge {
     }
 
     return undefined;
+  }
+
+  private propRebuildKey(
+    pieceIno: bigint,
+    propName: "input" | "result",
+  ): string {
+    return `${pieceIno}:${propName}`;
+  }
+
+  private schedulePropRebuild(args: {
+    cell: Cell<unknown>;
+    newValue: unknown;
+    pieceId: string;
+    pieceIno: bigint;
+    pieceName: string;
+    propName: "input" | "result";
+    resolveLink: ResolveLink;
+    spaceName: string;
+  }): void {
+    const key = this.propRebuildKey(args.pieceIno, args.propName);
+    const pending = this.pendingPropRebuilds.get(key);
+    if (pending) {
+      pending.latestValue = args.newValue;
+      pending.pieceName = args.pieceName;
+      this.rebuildStats.coalesced++;
+      this.updateStatus();
+      return;
+    }
+
+    if (this.activePropRebuilds.has(key)) {
+      this.deferredPropRebuilds.set(key, {
+        cell: args.cell,
+        newValue: args.newValue,
+        pieceId: args.pieceId,
+        pieceIno: args.pieceIno,
+        pieceName: args.pieceName,
+        propName: args.propName,
+        resolveLink: args.resolveLink,
+        spaceName: args.spaceName,
+      });
+      this.rebuildStats.coalesced++;
+      this.rebuildStats.maxPending = Math.max(
+        this.rebuildStats.maxPending,
+        this.pendingPropRebuilds.size +
+          this.activePropRebuilds.size +
+          this.deferredPropRebuilds.size,
+      );
+      this.updateStatus();
+      return;
+    }
+
+    this.rebuildStats.scheduled++;
+    const entry = {
+      cell: args.cell,
+      latestValue: args.newValue,
+      pieceId: args.pieceId,
+      pieceIno: args.pieceIno,
+      pieceName: args.pieceName,
+      propName: args.propName,
+      resolveLink: args.resolveLink,
+      spaceName: args.spaceName,
+      timer: setTimeout(() => {
+        this.pendingPropRebuilds.delete(key);
+        this.activePropRebuilds.add(key);
+        this.updateStatus();
+        void this.rebuildPieceProp({
+          cell: entry.cell,
+          newValue: entry.latestValue,
+          pieceId: entry.pieceId,
+          pieceIno: entry.pieceIno,
+          pieceName: entry.pieceName,
+          propName: entry.propName,
+          resolveLink: entry.resolveLink,
+          spaceName: entry.spaceName,
+        }).catch((e) => {
+          this.rebuildStats.errors++;
+          this.updateStatus();
+          console.error(
+            `[${entry.spaceName}] Error rebuilding ${entry.pieceName}/${entry.propName}: ${e}`,
+          );
+        }).finally(() => {
+          this.activePropRebuilds.delete(key);
+          const deferred = this.deferredPropRebuilds.get(key);
+          this.deferredPropRebuilds.delete(key);
+          this.updateStatus();
+          if (deferred) {
+            this.schedulePropRebuild(deferred);
+          }
+        });
+      }, 0),
+    };
+    this.pendingPropRebuilds.set(key, entry);
+    this.rebuildStats.maxPending = Math.max(
+      this.rebuildStats.maxPending,
+      this.pendingPropRebuilds.size +
+        this.activePropRebuilds.size +
+        this.deferredPropRebuilds.size,
+    );
+    this.updateStatus();
+  }
+
+  private async rebuildPieceProp(args: {
+    cell: Cell<unknown>;
+    newValue: unknown;
+    pieceId: string;
+    pieceIno: bigint;
+    pieceName: string;
+    propName: "input" | "result";
+    resolveLink: ResolveLink;
+    spaceName: string;
+  }): Promise<void> {
+    const startedAt = Date.now();
+    if (this.tree.getNode(args.pieceIno)?.kind !== "dir") {
+      return;
+    }
+
+    const {
+      cell,
+      newValue,
+      pieceId,
+      pieceIno,
+      pieceName,
+      propName,
+      resolveLink,
+      spaceName,
+    } = args;
+
+    const existingIno = this.tree.lookup(pieceIno, propName);
+    if (existingIno !== undefined) {
+      this.tree.clear(existingIno);
+    }
+    const jsonIno = this.tree.lookup(pieceIno, `${propName}.json`);
+    if (jsonIno !== undefined) {
+      this.tree.clear(jsonIno);
+    }
+    if (propName === "result") {
+      this.clearFsProjectionEntries(pieceIno);
+    }
+
+    const treeValue = this.materializeTreeValue(cell, newValue);
+    let callables: Array<
+      { key: string; callableKind: CallableKind; schema?: JSONSchema }
+    > = [];
+    if (treeValue !== undefined && treeValue !== null) {
+      const {
+        callables: discoveredCallables,
+        classifyEntry,
+        skipEntry,
+      } = this.discoverCallableEntries(cell, treeValue);
+      callables = discoveredCallables;
+
+      if (propName === "result") {
+        const fsValue = this.readFsValue(cell, treeValue);
+        if (fsValue !== null) {
+          const indexName = this.buildFsProjectionTree(
+            pieceIno,
+            pieceId,
+            fsValue,
+            treeValue,
+            callables,
+            resolveLink,
+            skipEntry,
+            classifyEntry,
+          );
+          this.buildHandlersFile(pieceIno, callables);
+          const state = this.spaces.get(spaceName);
+          if (state) {
+            const summaryChanged = this.updatePieceManifest(state, pieceId, {
+              summary: this.extractSummary(treeValue),
+            });
+            if (summaryChanged) {
+              this.updatePiecesJson(state);
+              if (this.onInvalidate) {
+                this.onInvalidate(state.piecesIno, ["pieces.json"]);
+              }
+            }
+          }
+          if (this.onInvalidate) {
+            this.onInvalidate(pieceIno, [indexName, ".handlers"]);
+          }
+          this.rebuildStats.completed++;
+          this.rebuildStats.lastDurationMs = Date.now() - startedAt;
+          this.updateStatus();
+          return;
+        }
+      }
+
+      const propIno = await buildJsonTreeAsync(
+        this.tree,
+        pieceIno,
+        propName,
+        treeValue,
+        undefined,
+        resolveLink,
+        0,
+        skipEntry,
+        classifyEntry,
+      );
+      this.addCallableFiles(propIno, callables, propName);
+      if (propName === "result") {
+        this.addVNodeJsonFiles(propIno, treeValue);
+      }
+    }
+    if (propName === "result") {
+      this.buildHandlersFile(pieceIno, callables);
+    }
+
+    if (this.onInvalidate) {
+      this.onInvalidate(pieceIno, [propName, `${propName}.json`]);
+    }
+
+    if (propName === "result") {
+      const state = this.spaces.get(spaceName);
+      if (state) {
+        const summaryChanged = this.updatePieceManifest(state, pieceId, {
+          summary: this.extractSummary(treeValue),
+        });
+        if (summaryChanged) {
+          this.updatePiecesJson(state);
+          if (this.onInvalidate) {
+            this.onInvalidate(state.piecesIno, ["pieces.json"]);
+          }
+        }
+      }
+    }
+
+    this.rebuildStats.completed++;
+    this.rebuildStats.lastDurationMs = Date.now() - startedAt;
+    this.updateStatus();
+    this.debugLog(`[${spaceName}] Updated ${pieceName}/${propName}`);
   }
 
   /**
@@ -612,15 +1096,18 @@ export class CellBridge {
       entitiesIno,
       pieceMap: new Map(),
       pieceControllers: new Map(),
+      pieceManifest: new Map(),
       pieceSubs: new Map(),
       did: spaceDid,
       unsubscribes: [],
       usedNames: new Set(),
+      srcInos: new Map(),
+      srcErrorLogInos: new Map(),
     };
 
     // Fetch all pieces and populate tree
     const allPieces = await pieces.getAllPieces();
-    console.log(`[${spaceName}] Found ${allPieces.length} pieces`);
+    this.debugLog(`[${spaceName}] Found ${allPieces.length} pieces`);
 
     for (const piece of allPieces) {
       await this.addPieceToSpace(state, piece, spaceName);
@@ -628,7 +1115,7 @@ export class CellBridge {
 
     // pieces/.index.json and pieces/pieces.json
     this.updateIndexJson(state);
-    await this.updatePiecesJson(state);
+    this.updatePiecesJson(state);
 
     // Subscribe to piece list changes so new/removed pieces update the tree
     const piecesCell = await manager.getPieces();
@@ -744,6 +1231,11 @@ export class CellBridge {
       name,
       spaceName,
     );
+    await this.buildSourceTree(pieceIno, piece, state, name);
+    this.updatePieceManifest(state, piece.id, {
+      pattern: this.getManifestPatternFromTree(pieceIno),
+      summary: this.getManifestSummaryFromTree(pieceIno),
+    });
 
     const subs = await this.subscribePiece(piece, pieceIno, name, spaceName);
     state.pieceSubs.set(name, subs);
@@ -803,6 +1295,11 @@ export class CellBridge {
 
     state.pieceMap.delete(name);
     state.pieceControllers.delete(name);
+    if (pieceId) {
+      state.pieceManifest.delete(pieceId);
+    }
+    state.srcInos.delete(name);
+    state.srcErrorLogInos.delete(name);
     state.usedNames.delete(name);
   }
 
@@ -866,17 +1363,17 @@ export class CellBridge {
 
     for (const name of toRemove) {
       this.removePieceFromSpace(state, name);
-      console.log(`[${spaceName}] Removed piece: ${name}`);
+      this.debugLog(`[${spaceName}] Removed piece: ${name}`);
     }
 
     for (const piece of toAdd) {
       const name = await this.addPieceToSpace(state, piece, spaceName);
-      console.log(`[${spaceName}] Added piece: ${name}`);
+      this.debugLog(`[${spaceName}] Added piece: ${name}`);
     }
 
     // Update index and invalidate
     this.updateIndexJson(state);
-    await this.updatePiecesJson(state);
+    this.updatePiecesJson(state);
     if (this.onInvalidate) {
       // Invalidate child entries under pieces/
       const invalidNames = [
@@ -912,47 +1409,8 @@ export class CellBridge {
   }
 
   /** Update the pieces/pieces.json manifest for a space. */
-  private async updatePiecesJson(state: SpaceState): Promise<void> {
-    const entries: Array<{
-      id: string;
-      name: string;
-      pattern: string;
-      summary: string;
-      entityPath: string;
-    }> = [];
-
-    for (const [name, id] of state.pieceMap) {
-      const piece = state.pieceControllers.get(name);
-      if (!piece) continue;
-
-      let pattern = "";
-      try {
-        const meta = await piece.getPatternMeta();
-        pattern = meta?.patternName || "";
-      } catch {
-        // Pattern meta not always available
-      }
-
-      let summary = "";
-      try {
-        const result = await piece.result.get() as
-          | Record<string, unknown>
-          | null;
-        const raw = result?.summary;
-        if (typeof raw === "string") summary = raw;
-      } catch {
-        // Summary not always available
-      }
-
-      entries.push({
-        id,
-        name,
-        pattern,
-        summary,
-        entityPath: `entities/${id}`,
-      });
-    }
-
+  private updatePiecesJson(state: SpaceState): void {
+    const entries = this.buildPiecesManifestEntries(state);
     const existingIno = this.tree.lookup(state.piecesIno, "pieces.json");
     if (existingIno !== undefined) {
       this.tree.clear(existingIno);
@@ -1226,15 +1684,7 @@ export class CellBridge {
     cellProp: "input" | "result",
   ): void {
     for (const { key, callableKind, schema } of callables) {
-      const defs =
-        schema && typeof schema === "object" && !Array.isArray(schema)
-          ? (schema as Record<string, unknown>).$defs as
-            | Record<string, JSONSchema>
-            | undefined
-          : undefined;
-      const typeStr = schema !== undefined
-        ? schemaToTypeString(schema, { defs, maxDepth: 3 })
-        : undefined;
+      const typeStr = displayCallableInputType(callableKind, schema);
       const script = buildCallableScript(this.execCli, schema, typeStr);
       this.tree.addCallable(
         propIno,
@@ -1308,15 +1758,7 @@ export class CellBridge {
     if (existingIno !== undefined) this.tree.clear(existingIno);
     if (callables.length === 0) return;
     const lines = callables.map(({ key, callableKind, schema }) => {
-      const defs =
-        schema && typeof schema === "object" && !Array.isArray(schema)
-          ? (schema as Record<string, unknown>).$defs as
-            | Record<string, JSONSchema>
-            | undefined
-          : undefined;
-      const typeStr = schema !== undefined
-        ? schemaToTypeString(schema, { defs, maxDepth: 3 })
-        : "void";
+      const typeStr = displayCallableInputType(callableKind, schema);
       return `${key}.${callableKind}  ${typeStr}`;
     });
     this.tree.addFile(
@@ -1433,102 +1875,21 @@ export class CellBridge {
       try {
         const cell = await piece[propName].getCell();
         const cancel = cell.sink((newValue: unknown) => {
-          // Defer the tree rebuild out of the current execution context.
-          // cell.sink fires synchronously during cell.set(), which may be
-          // called from within a FUSE callback (e.g. flush). Rebuilding
-          // the tree and calling notify_inval_entry from inside a FUSE
-          // callback crashes FUSE-T and invalidates inodes mid-operation.
-          setTimeout(() => {
-            try {
-              // Clear existing subtree for this prop
-              const existingIno = this.tree.lookup(pieceIno, propName);
-              if (existingIno !== undefined) {
-                this.tree.clear(existingIno);
-              }
-              // Also clear the .json sibling
-              const jsonIno = this.tree.lookup(
-                pieceIno,
-                `${propName}.json`,
-              );
-              if (jsonIno !== undefined) {
-                this.tree.clear(jsonIno);
-              }
-              if (propName === "result") {
-                this.clearFsProjectionEntries(pieceIno);
-              }
-
-              // Rebuild
-              const treeValue = this.materializeTreeValue(cell, newValue);
-              let callables: Array<
-                { key: string; callableKind: CallableKind; schema?: JSONSchema }
-              > = [];
-              if (treeValue !== undefined && treeValue !== null) {
-                const {
-                  callables: discoveredCallables,
-                  classifyEntry,
-                  skipEntry,
-                } = this
-                  .discoverCallableEntries(
-                    cell,
-                    treeValue,
-                  );
-                callables = discoveredCallables;
-
-                if (propName === "result") {
-                  const fsValue = this.readFsValue(cell, treeValue);
-                  if (fsValue !== null) {
-                    const indexName = this.buildFsProjectionTree(
-                      pieceIno,
-                      piece.id,
-                      fsValue,
-                      treeValue,
-                      callables,
-                      resolveLink,
-                      skipEntry,
-                      classifyEntry,
-                    );
-                    this.buildHandlersFile(pieceIno, callables);
-                    if (this.onInvalidate) {
-                      this.onInvalidate(pieceIno, [indexName, ".handlers"]);
-                    }
-                    return;
-                  }
-                }
-
-                const propIno = buildJsonTree(
-                  this.tree,
-                  pieceIno,
-                  propName,
-                  treeValue,
-                  undefined,
-                  resolveLink,
-                  0,
-                  skipEntry,
-                  classifyEntry,
-                );
-                this.addCallableFiles(propIno, callables, propName);
-                if (propName === "result") {
-                  this.addVNodeJsonFiles(propIno, treeValue);
-                }
-              }
-              if (propName === "result") {
-                this.buildHandlersFile(pieceIno, callables);
-              }
-
-              // Invalidate kernel cache
-              if (this.onInvalidate) {
-                this.onInvalidate(pieceIno, [propName, `${propName}.json`]);
-              }
-
-              console.log(
-                `[${spaceName}] Updated ${pieceName}/${propName}`,
-              );
-            } catch (e) {
-              console.error(
-                `[${spaceName}] Error rebuilding ${pieceName}/${propName}: ${e}`,
-              );
-            }
-          }, 0);
+          // Defer and coalesce the tree rebuild out of the current execution
+          // context. cell.sink fires synchronously during cell.set(), which may
+          // be called from within a FUSE callback (e.g. flush). Rebuilding the
+          // tree and calling notify_inval_entry from inside a FUSE callback
+          // crashes FUSE-T and invalidates inodes mid-operation.
+          this.schedulePropRebuild({
+            cell,
+            newValue,
+            pieceId: piece.id,
+            pieceIno,
+            pieceName: piece.name() || pieceName,
+            propName,
+            resolveLink,
+            spaceName,
+          });
         });
         cancels.push(cancel);
       } catch (e) {
@@ -1624,7 +1985,7 @@ export class CellBridge {
 
             // Rebuild .index.json and pieces.json.
             this.updateIndexJson(state);
-            this.updatePiecesJson(state).catch(() => {});
+            this.updatePiecesJson(state);
 
             // Invalidate kernel cache.
             if (this.onInvalidate) {
@@ -1643,7 +2004,7 @@ export class CellBridge {
               }
             }
 
-            console.log(
+            this.debugLog(
               `[${spaceName}] Renamed piece: ${currentName} → ${newName}`,
             );
           } catch (e) {
@@ -1770,7 +2131,7 @@ export class CellBridge {
             inputCell,
             input,
           );
-        const inputIno = buildJsonTree(
+        const inputIno = await buildJsonTreeAsync(
           this.tree,
           pieceIno,
           "input",
@@ -1813,7 +2174,7 @@ export class CellBridge {
           );
         } else {
           // Default: exploded result/ directory
-          const resultIno = buildJsonTree(
+          const resultIno = await buildJsonTreeAsync(
             this.tree,
             pieceIno,
             "result",
@@ -1835,5 +2196,66 @@ export class CellBridge {
     }
 
     return pieceIno;
+  }
+
+  /**
+   * Build the .src/ subtree for a piece, containing all source files from
+   * PatternMeta.program.files[]. Skips system pieces that have no program.
+   */
+  private async buildSourceTree(
+    pieceIno: bigint,
+    piece: PieceController,
+    state: SpaceState,
+    pieceName: string,
+  ): Promise<void> {
+    let meta: PatternMeta | undefined;
+    try {
+      meta = await piece.getPatternMeta();
+    } catch {
+      // Pattern meta not always available
+    }
+
+    if (!meta?.program?.files?.length) {
+      // System piece or no source — skip .src/
+      return;
+    }
+
+    // Create or reuse .src/ dir
+    let srcIno = this.tree.lookup(pieceIno, ".src");
+    if (srcIno !== undefined) {
+      this.tree.clear(srcIno);
+    }
+    srcIno = this.tree.addDir(pieceIno, ".src");
+    state.srcInos.set(pieceName, srcIno);
+
+    // Add each source file at its relative path
+    const enc = new TextEncoder();
+    for (const file of meta.program.files) {
+      const relPath = file.name.startsWith("/")
+        ? file.name.slice(1)
+        : file.name;
+      const parts = relPath.split("/");
+      let parentIno = srcIno;
+      // Create intermediate directories
+      for (let i = 0; i < parts.length - 1; i++) {
+        const existing = this.tree.lookup(parentIno, parts[i]);
+        parentIno = existing ?? this.tree.addDir(parentIno, parts[i]);
+      }
+      const fileName = parts[parts.length - 1];
+      this.tree.addFile(
+        parentIno,
+        fileName,
+        enc.encode(file.contents),
+        "string",
+      );
+    }
+
+    // Add synthetic error.log only if no source file already claimed that name.
+    // Track its inode so we can block writes to the synthetic file specifically
+    // (a real source file named error.log must remain writable).
+    if (this.tree.lookup(srcIno, "error.log") === undefined) {
+      const errorLogIno = this.tree.addFile(srcIno, "error.log", "", "string");
+      state.srcErrorLogInos.set(pieceName, errorLogIno);
+    }
   }
 }

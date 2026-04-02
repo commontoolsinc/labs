@@ -1,0 +1,232 @@
+/// <cts-enable />
+/**
+ * Annotation Manager — lists all annotations in the space, grouped by status.
+ *
+ * Wishes for #annotation to collect every annotation piece, then renders
+ * them with quick-action resolve/dismiss buttons and links to both the
+ * annotation itself and the piece it targets.
+ *
+ * Keywords: annotation, manager, todo, wish, overview, agent, graph
+ */
+import {
+  computed,
+  handler,
+  NAME,
+  pattern,
+  UI,
+  wish,
+  Writable,
+} from "commontools";
+import type {
+  AnnotationKind,
+  AnnotationPiece,
+  AnnotationStatus,
+} from "./annotation.tsx";
+
+// ===== Handlers =====
+
+const resolveAnnotation = handler<
+  unknown,
+  { status: Writable<AnnotationStatus> }
+>((_event, { status }) => {
+  status.set("resolved");
+});
+
+const dismissAnnotation = handler<
+  unknown,
+  { status: Writable<AnnotationStatus> }
+>((_event, { status }) => {
+  status.set("dismissed");
+});
+
+const reopenAnnotation = handler<
+  unknown,
+  { status: Writable<AnnotationStatus> }
+>((_event, { status }) => {
+  status.set("open");
+});
+
+const setFilter = handler<unknown, { filter: Writable<string>; value: string }>(
+  (_event, { filter, value }) => {
+    filter.set(value);
+  },
+);
+
+// ===== Helpers =====
+
+const KIND_ICON: Record<AnnotationKind, string> = {
+  note: "📌",
+  todo: "☐",
+  wish: "✨",
+};
+
+const STATUS_STYLE: Record<AnnotationStatus, string> = {
+  open: "background:#dbeafe;color:#1d4ed8",
+  "in-progress": "background:#fef9c3;color:#854d0e",
+  resolved: "background:#dcfce7;color:#166534",
+  dismissed: "background:#f3f4f6;color:#6b7280",
+};
+
+// ===== The Pattern =====
+
+export default pattern<Record<string, never>>((_) => {
+  const filter = Writable.of<string>("open");
+
+  const { candidates: annotations } = wish<AnnotationPiece>({
+    query: "#annotation",
+    scope: [".", "~"],
+  });
+
+  const filtered = computed(() => {
+    const f = filter.get();
+    const all = (annotations ?? []).filter((a) => !!a) as AnnotationPiece[];
+    if (f === "all") return all;
+    return all.filter((a) => (a?.status ?? "open") === f);
+  });
+
+  const counts = computed(() => {
+    const all = (annotations ?? []).filter((a) => !!a) as AnnotationPiece[];
+    return {
+      all: all.length,
+      open: all.filter((a) => (a?.status ?? "open") === "open").length,
+      "in-progress": all.filter((a) => a?.status === "in-progress").length,
+      resolved: all.filter((a) => a?.status === "resolved").length,
+      dismissed: all.filter((a) => a?.status === "dismissed").length,
+    };
+  });
+
+  const filterValue = computed(() => filter.get());
+
+  const TAB_LABELS: Array<{ key: string; label: string }> = [
+    { key: "open", label: "Open" },
+    { key: "in-progress", label: "In progress" },
+    { key: "resolved", label: "Resolved" },
+    { key: "dismissed", label: "Dismissed" },
+    { key: "all", label: "All" },
+  ];
+
+  return {
+    [NAME]: computed(() => {
+      const openCount = counts.open ?? 0;
+      return `🗂 Annotations (${openCount} open)`;
+    }),
+    [UI]: (
+      <ct-vstack gap="3" style={{ padding: "16px" }}>
+        {/* ── Filter tabs ── */}
+        <ct-hstack gap="1" style={{ flexWrap: "wrap" }}>
+          {TAB_LABELS.map(({ key, label }) => (
+            <button
+              type="button"
+              onClick={setFilter({ filter, value: key })}
+              style={{
+                padding: "4px 10px",
+                borderRadius: "16px",
+                border: "1px solid #d1d5db",
+                fontSize: "12px",
+                cursor: "pointer",
+                fontWeight: filterValue === key ? "600" : "400",
+                background: filterValue === key ? "#1d4ed8" : "white",
+                color: filterValue === key ? "white" : "#374151",
+              }}
+            >
+              {label} ({counts[key as keyof typeof counts] ?? 0})
+            </button>
+          ))}
+        </ct-hstack>
+
+        {/* ── Annotation list ── */}
+        <ct-vstack gap="2">
+          {filtered.map(
+            (ann: AnnotationPiece) =>
+              ann && (
+                <ct-cell-context $cell={ann}>
+                  <ct-vstack
+                    gap="1"
+                    style={{
+                      padding: "10px 12px",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: "8px",
+                      background: "white",
+                    }}
+                  >
+                    {/* Row 1: kind icon + link to annotation + status badge */}
+                    <ct-hstack gap="2" style={{ alignItems: "center" }}>
+                      <span style={{ fontSize: "14px" }}>
+                        {KIND_ICON[ann?.kind ?? "note"] ?? "📌"}
+                      </span>
+                      <ct-cell-link $cell={ann} />
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          padding: "2px 6px",
+                          borderRadius: "10px",
+                          ...(STATUS_STYLE[ann?.status ?? "open"]
+                            ? Object.fromEntries(
+                              STATUS_STYLE[ann?.status ?? "open"]
+                                .split(";")
+                                .filter(Boolean)
+                                .map((s) => s.split(":").map((p) => p.trim())),
+                            )
+                            : {}),
+                        }}
+                      >
+                        {ann?.status ?? "open"}
+                      </span>
+                    </ct-hstack>
+
+                    {/* Row 2: target piece link (if set) */}
+                    {ann?.targetPiece && (
+                      <ct-hstack gap="1" style={{ alignItems: "center" }}>
+                        <span style={{ fontSize: "11px", color: "#9ca3af" }}>
+                          on:
+                        </span>
+                        <ct-cell-link $cell={ann.targetPiece} />
+                      </ct-hstack>
+                    )}
+
+                    {/* Row 3: action buttons */}
+                    <ct-hstack gap="1" style={{ marginTop: "4px" }}>
+                      {(ann?.status === "open" ||
+                        ann?.status === "in-progress") && (
+                        <ct-button
+                          size="sm"
+                          onClick={resolveAnnotation({ status: ann.status! })}
+                        >
+                          Resolve
+                        </ct-button>
+                      )}
+                      {(ann?.status === "open" ||
+                        ann?.status === "in-progress") && (
+                        <ct-button
+                          size="sm"
+                          variant="secondary"
+                          onClick={dismissAnnotation({ status: ann.status! })}
+                        >
+                          Dismiss
+                        </ct-button>
+                      )}
+                      {(ann?.status === "resolved" ||
+                        ann?.status === "dismissed") && (
+                        <ct-button
+                          size="sm"
+                          variant="secondary"
+                          onClick={reopenAnnotation({ status: ann.status! })}
+                        >
+                          Reopen
+                        </ct-button>
+                      )}
+                    </ct-hstack>
+                  </ct-vstack>
+                </ct-cell-context>
+              ),
+          )}
+          {filtered.length === 0 && (
+            <ct-text style={{ color: "#9ca3af", fontSize: "14px" }}>
+              No {filterValue === "all" ? "" : filterValue} annotations.
+            </ct-text>
+          )}
+        </ct-vstack>
+      </ct-vstack>
+    ),
+  };
+});

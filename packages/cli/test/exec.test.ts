@@ -16,6 +16,7 @@ import {
   resolveMountedCallableFile,
 } from "../lib/exec.ts";
 import { writeMountState } from "../lib/fuse.ts";
+import { CT_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
 import { ct } from "./utils.ts";
 
 function makeSpec(
@@ -332,6 +333,16 @@ describe("parseExecArgs", () => {
     expect(result.input).toEqual({});
   });
 
+  it("allows schema-less handlers to invoke without arguments", () => {
+    const result = parseExecArgs(
+      makeSpec("handler", { asStream: true } as JSONSchema),
+      [],
+    );
+
+    expect(result.verb).toBe("invoke");
+    expect(result.input).toBeUndefined();
+  });
+
   it("allows invoke alone for handlers whose inputs are all optional", () => {
     const result = parseExecArgs(
       makeSpec("handler", {
@@ -542,6 +553,21 @@ describe("renderExecHelp", () => {
     );
   });
 
+  it("renders schema-less handlers as void no-input callables", () => {
+    const help = renderExecHelp(
+      "./onAddContact.handler",
+      makeSpec("handler", { asStream: true } as JSONSchema),
+      { invocationStyle: "direct" },
+    );
+
+    expect(help).toContain("Input type:");
+    expect(help).toContain("  void");
+    expect(help).toContain("./onAddContact.handler");
+    expect(help).toContain(
+      "Invoke alone will call the handler without any inputs.",
+    );
+  });
+
   it("quotes direct mounted-file usage when the path contains spaces", () => {
     const help = renderExecHelp(
       "/tmp/Fuse Exec Fixture/search.tool",
@@ -666,6 +692,19 @@ describe("renderPieceCallHelp", () => {
     expect(help).toContain("Flags after `--`:");
     expect(help).not.toContain("Read the full input object from stdin.");
     expect(help).not.toContain("ct piece call ... search -- [run] --help");
+  });
+
+  it("renders bare usage for schema-less handler piece-call help", () => {
+    const help = renderPieceCallHelp(
+      "ct piece call ... onAddContact",
+      makeSpec("handler", { asStream: true } as JSONSchema),
+    );
+
+    expect(help).toContain("ct piece call ... onAddContact");
+    expect(help).toContain("ct piece call ... onAddContact -- invoke");
+    expect(help).toContain(
+      "Invoke alone will call the handler without any inputs.",
+    );
   });
 });
 
@@ -1047,6 +1086,40 @@ describe("mounted callable resolution and execution", () => {
         value: { query: "milk" },
       },
     ]);
+  });
+
+  it("surfaces mounted handler transaction failures as errors", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/add.handler",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "handler",
+      cellProp: "result",
+      cellKey: "add",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { message: { type: "string" } },
+        required: ["message"],
+      },
+      handlerFailureMessage: "Mounted handler failed",
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await expect(
+      executeMountedCallableFile(
+        filePath,
+        ["--message", "milk"],
+        {
+          stateDir,
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+        },
+      ),
+    ).rejects.toThrow(/Handler "add" failed: Mounted handler failed/);
   });
 
   it("dispatches tools with extraParams merged into the runtime input and returns JSON output", async () => {
@@ -1594,6 +1667,7 @@ function createExecHarness(options: {
   };
   extraParams?: Record<string, unknown>;
   toolResult?: unknown;
+  handlerFailureMessage?: string;
 }) {
   const tracker = {
     asSchemaFromLinksCalls: 0,
@@ -1620,7 +1694,47 @@ function createExecHarness(options: {
       pattern: options.pattern,
       extraParams: options.extraParams ?? {},
     }
-    : {};
+    : { $stream: true };
+  const runtimeErrors: Array<{ message: string }> = [];
+  const callableCell = createMockCell(
+    callableValue,
+    callableSchema,
+    options.callableKind === "handler"
+      ? {
+        onSchemaFromLinks: () => {
+          tracker.asSchemaFromLinksCalls++;
+        },
+        send: (
+          value: unknown,
+          onCommit?: (
+            tx: { status: () => { status: string; error?: Error } },
+          ) => void,
+        ) => {
+          tracker.handlerWrites.push({
+            cellProp: "result",
+            path: [options.cellKey],
+            value,
+          });
+          if (options.handlerFailureMessage) {
+            runtimeErrors.push({ message: options.handlerFailureMessage });
+          }
+          onCommit?.({
+            status: () =>
+              options.handlerFailureMessage
+                ? {
+                  status: "error",
+                  error: new Error(options.handlerFailureMessage),
+                }
+                : { status: "done" },
+          });
+        },
+      }
+      : {
+        onSchemaFromLinks: () => {
+          tracker.asSchemaFromLinksCalls++;
+        },
+      },
+  );
   const rootCell = createMockCell(
     {
       [options.cellKey]: callableValue,
@@ -1631,8 +1745,8 @@ function createExecHarness(options: {
         [options.cellKey]: callableSchema,
       },
     },
-    () => {
-      tracker.asSchemaFromLinksCalls++;
+    {
+      childOverrides: { [options.cellKey]: callableCell },
     },
   );
 
@@ -1665,6 +1779,7 @@ function createExecHarness(options: {
     getSpace: () => options.managerSpace ?? "home",
     synced: async () => {},
     runtime: {
+      [CT_RUNTIME_ERROR_LOG]: runtimeErrors,
       edit: () => ({
         commit: async () => {},
       }),
@@ -1699,23 +1814,36 @@ function createExecHarness(options: {
 function createMockCell(
   value: unknown,
   schema: JSONSchema | undefined,
-  onSchemaFromLinks?: () => void,
+  options?: {
+    childOverrides?: Record<string, ReturnType<typeof createMockCell>>;
+    onSchemaFromLinks?: () => void;
+    send?: (
+      value: unknown,
+      onCommit?: (
+        tx: { status: () => { status: string; error?: Error } },
+      ) => void,
+    ) => void;
+  },
 ) {
   const cell = {
     schema,
     get: () => value,
     getRaw: () => value,
     asSchemaFromLinks: () => {
-      onSchemaFromLinks?.();
+      options?.onSchemaFromLinks?.();
       return cell;
     },
+    send: options?.send,
     key: (key: string) => {
+      if (options?.childOverrides?.[key]) {
+        return options.childOverrides[key];
+      }
       const nextValue =
         typeof value === "object" && value !== null && !Array.isArray(value)
           ? (value as Record<string, unknown>)[key]
           : undefined;
       const nextSchema = getChildSchema(schema, key);
-      return createMockCell(nextValue, nextSchema, onSchemaFromLinks);
+      return createMockCell(nextValue, nextSchema);
     },
   };
 

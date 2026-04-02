@@ -8,7 +8,12 @@
 // Unknown space names are resolved on-demand via lookup.
 
 import { parseArgs } from "@std/cli/parse-args";
-import { CellBridge } from "./cell-bridge.ts";
+import {
+  CellBridge,
+  type HandlerTarget,
+  type SourceWritePath,
+  type WritePath,
+} from "./cell-bridge.ts";
 import {
   DIR_MODE,
   EACCES,
@@ -27,7 +32,12 @@ import {
   readCString,
 } from "./platform.ts";
 import { FsTree } from "./tree.ts";
-import { HandleMap, type HandleState } from "./handles.ts";
+import {
+  handleHasBufferedContent,
+  handleHasPendingChanges,
+  HandleMap,
+  type HandleState,
+} from "./handles.ts";
 import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
 
 const encoder = new TextEncoder();
@@ -61,9 +71,14 @@ globalThis.addEventListener("error", (e) => {
   e.preventDefault();
 });
 
+type HandleWriteTarget =
+  | { kind: "handler"; target: HandlerTarget }
+  | { kind: "value"; target: WritePath }
+  | { kind: "source"; target: SourceWritePath };
+
 export async function main(argv: string[] = Deno.args) {
   const args = parseArgs(argv, {
-    string: ["api-url", "space", "identity", "exec-cli"],
+    string: ["api-url", "space", "identity", "exec-cli", "log-file"],
     boolean: ["debug"],
     collect: ["space"],
     default: {
@@ -71,9 +86,30 @@ export async function main(argv: string[] = Deno.args) {
       space: [] as string[],
       identity: Deno.env.get("CT_IDENTITY") ?? "",
       "exec-cli": "",
+      "log-file": "",
       debug: false,
     },
   });
+
+  // Redirect console output to a log file when running as a background daemon.
+  const logFilePath = args["log-file"] as string;
+  if (logFilePath) {
+    const logFile = await Deno.open(logFilePath, {
+      create: true,
+      append: true,
+    });
+    const enc = new TextEncoder();
+    const write = (msg: string) => {
+      try {
+        logFile.writeSync(enc.encode(msg + "\n"));
+      } catch {
+        // Ignore write errors (disk full, etc.)
+      }
+    };
+    console.log = (...a: unknown[]) => write(a.map(String).join(" "));
+    console.error = (...a: unknown[]) => write(a.map(String).join(" "));
+    console.warn = (...a: unknown[]) => write(a.map(String).join(" "));
+  }
 
   const debug = args.debug;
 
@@ -127,6 +163,7 @@ export async function main(argv: string[] = Deno.args) {
       apiUrl,
       identity: args.identity || "",
     });
+    bridge.setDebug(debug);
     bridge.initStatus();
 
     // Connect initial spaces (default: "home")
@@ -155,7 +192,9 @@ export async function main(argv: string[] = Deno.args) {
     ino: bigint,
   ) {
     return buildNodeStat(node, ino, {
-      isWritable: Boolean(bridge?.resolveWritePath(ino)),
+      isWritable: Boolean(
+        bridge?.resolveWritePath(ino) || bridge?.resolveSourceWritePath(ino),
+      ),
       ownership: mountOwnership,
     });
   }
@@ -331,6 +370,15 @@ export async function main(argv: string[] = Deno.args) {
           return;
         }
 
+        let writeTarget: HandleWriteTarget | undefined;
+        if (node.callableKind === "handler" && isWriting) {
+          const handlerTarget = bridge?.resolveHandlerTarget(inode);
+          if (!handlerTarget) {
+            fuse.symbols.fuse_reply_err(req, EACCES);
+            return;
+          }
+          writeTarget = { kind: "handler", target: handlerTarget };
+        }
         const truncate = (flags & O_TRUNC) !== 0;
         const initialBuffer = node.callableKind === "handler" && isWriting
           ? new Uint8Array(0)
@@ -341,20 +389,28 @@ export async function main(argv: string[] = Deno.args) {
           inode,
           flags,
           initialBuffer,
+          { writeTarget },
         );
         if (truncate) {
-          handles.get(fh)!.dirty = true;
+          handles.markTruncated(fh);
         }
         writeFileInfo(fi, fh);
         fuse.symbols.fuse_reply_open(req, fi);
         return;
       }
 
+      let writeTarget: HandleWriteTarget | undefined;
       if (isWriting && bridge) {
-        const writePath = bridge.resolveWritePath(inode);
-        if (!writePath) {
-          fuse.symbols.fuse_reply_err(req, EACCES);
-          return;
+        const sourceWritePath = bridge.resolveSourceWritePath(inode);
+        if (sourceWritePath) {
+          writeTarget = { kind: "source", target: sourceWritePath };
+        } else {
+          const writePath = bridge.resolveWritePath(inode);
+          if (!writePath) {
+            fuse.symbols.fuse_reply_err(req, EACCES);
+            return;
+          }
+          writeTarget = { kind: "value", target: writePath };
         }
       }
 
@@ -365,9 +421,10 @@ export async function main(argv: string[] = Deno.args) {
         inode,
         flags,
         truncate ? new Uint8Array(0) : content,
+        { writeTarget },
       );
       if (truncate) {
-        handles.get(fh)!.dirty = true;
+        handles.markTruncated(fh);
       }
       writeFileInfo(fi, fh);
       fuse.symbols.fuse_reply_open(req, fi);
@@ -394,10 +451,10 @@ export async function main(argv: string[] = Deno.args) {
       // If we have an open handle with a buffer, read from it
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
-      if (handle && (handle.buffer.length > 0 || handle.dirty)) {
+      if (handleHasBufferedContent(handle)) {
         const off = Number(offset);
         const sz = Number(size);
-        const data = handle.buffer;
+        const data = handle!.buffer;
         if (off >= data.length) {
           fuse.symbols.fuse_reply_buf(req, null, 0n);
           return;
@@ -555,26 +612,94 @@ export async function main(argv: string[] = Deno.args) {
   async function flushHandle(
     handle: ReturnType<typeof handles.get>,
   ): Promise<number> {
-    if (!handle || !handle.dirty || !bridge || handle.flushing) return 0;
+    if (
+      !handle || !handleHasPendingChanges(handle) || !bridge || handle.flushing
+    ) {
+      return 0;
+    }
     handle.flushing = true;
     const flushVersion = handle.version;
     const buffer = handle.buffer.slice();
+    const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
 
-    // Handler files: parse JSON and send to stream cell
     const callableNode = tree.getNode(handle.ino);
     try {
-      if (
-        callableNode?.kind === "callable" &&
-        callableNode.callableKind === "handler"
-      ) {
+      if (writeTarget?.kind === "handler") {
         const text = new TextDecoder().decode(buffer);
         const value = JSON.parse(text.trim());
-        await bridge.sendToHandler(handle.ino, value);
+        await bridge.sendToHandlerTarget(writeTarget.target, value);
         if (handle.version === flushVersion) {
           handle.dirty = false;
+          handle.truncatePending = false;
           handle.buffer = new Uint8Array(0); // fire-and-forget
         }
         return 0;
+      }
+
+      if (writeTarget?.kind === "source") {
+        const { piece, relPath, srcIno } = writeTarget.target;
+        const text = new TextDecoder().decode(buffer);
+
+        // Optimistically update the file content in the tree
+        let fileIno: bigint | undefined = srcIno;
+        for (const part of relPath.split("/")) {
+          fileIno = fileIno !== undefined
+            ? tree.lookup(fileIno, part)
+            : undefined;
+        }
+        if (fileIno !== undefined) {
+          try {
+            tree.updateFile(fileIno, text);
+          } catch {
+            // Ignore stale inode
+          }
+        }
+
+        // Get current meta to build the updated program
+        let meta: Awaited<ReturnType<typeof piece.getPatternMeta>> | undefined;
+        try {
+          meta = await piece.getPatternMeta();
+        } catch (e) {
+          console.error(`[source] Failed to get pattern meta: ${e}`);
+          return EACCES;
+        }
+
+        if (!meta?.program) {
+          return EACCES;
+        }
+
+        // Replace the written file's content in the files array
+        const updatedFiles = meta.program.files.map((f) => {
+          const fRelPath = f.name.startsWith("/") ? f.name.slice(1) : f.name;
+          return fRelPath === relPath ? { ...f, contents: text } : f;
+        });
+
+        try {
+          await piece.setPattern({
+            main: meta.program.main,
+            mainExport: meta.program.mainExport,
+            files: updatedFiles,
+          });
+          // Clear error.log on success
+          const errorLogIno = tree.lookup(srcIno, "error.log");
+          if (errorLogIno !== undefined) {
+            tree.updateFile(errorLogIno, "");
+          }
+          if (handle.version === flushVersion) {
+            handle.dirty = false;
+            handle.truncatePending = false;
+          }
+          return 0;
+        } catch (e) {
+          // Write compile error to error.log
+          const errorMsg = e instanceof Error ? e.message : String(e);
+          const errorLogIno = tree.lookup(srcIno, "error.log");
+          if (errorLogIno !== undefined) {
+            tree.updateFile(errorLogIno, errorMsg);
+          }
+          console.error(`[source] Compile error in ${relPath}: ${errorMsg}`);
+          return EACCES;
+        }
       }
 
       if (
@@ -584,7 +709,9 @@ export async function main(argv: string[] = Deno.args) {
         return EACCES;
       }
 
-      const writePath = bridge.resolveWritePath(handle.ino);
+      const writePath = writeTarget?.kind === "value"
+        ? writeTarget.target
+        : bridge.resolveWritePath(handle.ino);
       if (!writePath) return EACCES;
 
       const text = new TextDecoder().decode(buffer);
@@ -595,6 +722,7 @@ export async function main(argv: string[] = Deno.args) {
         if (!ok) return EINVAL;
         if (handle.version === flushVersion) {
           handle.dirty = false;
+          handle.truncatePending = false;
         }
         try {
           const node = tree.getNode(handle.ino);
@@ -642,6 +770,7 @@ export async function main(argv: string[] = Deno.args) {
       await bridge.writeValue(writePath, value);
       if (handle.version === flushVersion) {
         handle.dirty = false;
+        handle.truncatePending = false;
       }
 
       // Optimistic tree update: update the file node content immediately.
@@ -659,15 +788,16 @@ export async function main(argv: string[] = Deno.args) {
 
       return 0;
     } catch (e) {
-      const logPrefix = callableNode?.kind === "callable" &&
-          callableNode.callableKind === "handler"
+      const logPrefix = writeTarget?.kind === "handler" ||
+          (callableNode?.kind === "callable" &&
+            callableNode.callableKind === "handler")
         ? "[fuse] handler flush error"
         : "[fuse] flush error";
       console.error(`${logPrefix}: ${e}`);
       return EIO;
     } finally {
       handle.flushing = false;
-      if (handle.dirty && handle.version !== flushVersion) {
+      if (handleHasPendingChanges(handle) && handle.version !== flushVersion) {
         queueMicrotask(() => {
           flushHandle(handle).catch((e) => {
             console.error(`[fuse] flush retry error: ${e}`);
@@ -757,7 +887,7 @@ export async function main(argv: string[] = Deno.args) {
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
 
-      if (!handle || !handle.dirty || handle.flushing) {
+      if (!handle || !handleHasPendingChanges(handle) || handle.flushing) {
         fuse.symbols.fuse_reply_err(req, 0);
         return;
       }
@@ -768,11 +898,15 @@ export async function main(argv: string[] = Deno.args) {
       fuse.symbols.fuse_reply_err(req, 0);
 
       // Fire-and-forget the actual write to the cell
-      const writePath = bridge?.resolveWritePath(handle.ino);
-      if (writePath?.fsProjection === "markdown") {
+      const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+      const shouldDelay = handle.truncatePending ||
+        (writeTarget?.kind === "value" &&
+          writeTarget.target.fsProjection === "markdown");
+      if (shouldDelay) {
         // Markdown saves often arrive as several small writes plus flushes.
-        // Delay slightly so we commit the settled buffer, not a truncated
-        // intermediate body that still parses as valid markdown.
+        // Empty O_TRUNC opens can also flush before the writer sends content.
+        // Delay slightly so we commit settled data instead of an intermediate
+        // empty/truncated buffer.
         scheduleFlush(handle, 25);
       } else {
         flushHandle(handle).catch((e) => {
@@ -848,9 +982,18 @@ export async function main(argv: string[] = Deno.args) {
 
       // Reply immediately and close the handle.
       // Fire-and-forget the write if dirty.
-      if (handle && handle.dirty && bridge) {
-        const writePath = bridge.resolveWritePath(handle.ino);
-        if (writePath?.fsProjection === "markdown") {
+      if (handle && handleHasPendingChanges(handle) && bridge) {
+        const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+        if (
+          handle.truncatePending && !handle.dirty && !handle.flushing
+        ) {
+          flushHandle(handle).catch((e) => {
+            console.error(`[fuse] release flush error: ${e}`);
+          });
+        } else if (
+          writeTarget?.kind === "value" &&
+          writeTarget.target.fsProjection === "markdown"
+        ) {
           scheduleFlush(handle, 0);
         } else if (!handle.flushing) {
           flushHandle(handle).catch((e) => {
@@ -1009,7 +1152,17 @@ export async function main(argv: string[] = Deno.args) {
 
       // Optimistic: create file node and reply immediately, then write to cell.
       const ino = tree.addFile(parent, name, "", "string");
-      const fh = handles.open(ino, O_RDWR, new Uint8Array(0));
+      const fh = handles.open(
+        ino,
+        O_RDWR,
+        new Uint8Array(0),
+        {
+          writeTarget: {
+            kind: "value",
+            target: { ...parentPath, jsonPath: [...parentPath.jsonPath, name] },
+          } satisfies HandleWriteTarget,
+        },
+      );
       writeFileInfo(fi, fh);
 
       const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);

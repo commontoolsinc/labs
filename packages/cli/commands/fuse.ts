@@ -178,6 +178,13 @@ export const fuse = new Command()
     }
 
     if (options.background) {
+      // Derive log file path: /tmp/ct-fuse-<mountname>.log
+      const logFile = `/tmp/ct-fuse-${basename(absMountpoint)}.log`;
+
+      // Pass --log-file so the daemon redirects its own output (including
+      // the ring-buffer crash dump) to disk rather than /dev/null.
+      spawnArgs.push("--log-file", logFile);
+
       // Detached background process
       const cmd = new Deno.Command(spawnCmd, {
         args: spawnArgs,
@@ -197,6 +204,7 @@ export const fuse = new Command()
           apiUrl,
           identity,
           startedAt: new Date().toISOString(),
+          logFile,
         });
         await awaitBackgroundMountStartup(pid, statePath);
       } catch (error) {
@@ -210,6 +218,7 @@ export const fuse = new Command()
 
       console.log(`FUSE mounted in background (PID ${pid})`);
       console.log(`  mountpoint: ${absMountpoint}`);
+      console.log(`  log:        ${logFile}`);
       console.log(
         `Use 'ct fuse status' to check, 'ct fuse unmount ${mountpoint}' to stop.`,
       );
@@ -332,6 +341,7 @@ export const fuse = new Command()
         String(entry.pid),
         "running",
         entry.startedAt,
+        entry.logFile ?? "-",
       ]);
     }
 
@@ -340,7 +350,7 @@ export const fuse = new Command()
       return;
     }
 
-    console.log("MOUNTPOINT\tPID\tSTATUS\tSTARTED");
+    console.log("MOUNTPOINT\tPID\tSTATUS\tSTARTED\tLOG");
     for (const row of rows) {
       console.log(row.join("\t"));
     }

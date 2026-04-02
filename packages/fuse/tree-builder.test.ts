@@ -8,6 +8,7 @@ import {
 } from "./callables.ts";
 import {
   buildJsonTree,
+  buildJsonTreeAsync,
   isHandlerCell,
   isSigilLink,
   isStreamValue,
@@ -124,6 +125,37 @@ Deno.test("buildJsonTree - nested objects", () => {
   assertEquals(getFileContent(tree, userIno, "name"), "Bob");
   assertEquals(getFileContent(tree, addressIno, "city"), "NYC");
   assertEquals(getFileContent(tree, addressIno, "zip"), "10001");
+});
+
+Deno.test("buildJsonTreeAsync matches synchronous nested tree structure", async () => {
+  const tree = new FsTree();
+  const data = {
+    profile: {
+      name: "Ada",
+      stats: {
+        score: 7,
+        enabled: true,
+      },
+    },
+    tags: ["a", "b"],
+  };
+
+  await buildJsonTreeAsync(tree, tree.rootIno, "data", data);
+
+  const dataIno = tree.lookup(tree.rootIno, "data")!;
+  const profileIno = tree.lookup(dataIno, "profile")!;
+  const statsIno = tree.lookup(profileIno, "stats")!;
+  const tagsIno = tree.lookup(dataIno, "tags")!;
+
+  assertEquals(getFileContent(tree, profileIno, "name"), "Ada");
+  assertEquals(getFileContent(tree, statsIno, "score"), "7");
+  assertEquals(getFileContent(tree, statsIno, "enabled"), "true");
+  assertEquals(getFileContent(tree, tagsIno, "0"), "a");
+  assertEquals(getFileContent(tree, tagsIno, "1"), "b");
+  assertEquals(
+    JSON.parse(getFileContent(tree, tree.rootIno, "data.json")),
+    data,
+  );
 });
 
 Deno.test("FsTree - clear removes subtree", () => {
@@ -747,10 +779,13 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
     entitiesIno,
     pieceMap: new Map([["notes", "of:entity-123"]]),
     pieceControllers: new Map([["notes", piece as never]]),
+    pieceManifest: new Map(),
     pieceSubs: new Map(),
     did: "did:key:home",
     unsubscribes: [],
     usedNames: new Set(["notes"]),
+    srcInos: new Map(),
+    srcErrorLogInos: new Map(),
   });
 
   await bridge.sendToHandler(piecesHandlerIno, { count: 1 });
@@ -759,6 +794,80 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
   assertEquals(calls, [
     { channel: "result", value: { count: 1 }, path: ["add"] },
     { channel: "result", value: { count: 2 }, path: ["add"] },
+  ]);
+});
+
+Deno.test("CellBridge.sendToHandlerTarget survives callable inode rebuilds", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree);
+  const calls: Array<{
+    channel: "input" | "result";
+    path: (string | number)[] | undefined;
+    value: unknown;
+  }> = [];
+  const makeChannel = (channel: "input" | "result") => ({
+    key: (key: string) => ({
+      send: (value: unknown) => {
+        calls.push({ channel, value, path: [key] });
+      },
+    }),
+  });
+  const piece = {
+    id: "of:entity-123",
+    input: {
+      getCell: () => Promise.resolve(makeChannel("input")),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeChannel("result")),
+    },
+    manager: () => ({
+      runtime: { idle: () => Promise.resolve() },
+      synced: () => Promise.resolve(),
+    }),
+  };
+
+  const spaceIno = tree.addDir(tree.rootIno, "home");
+  const piecesIno = tree.addDir(spaceIno, "pieces");
+  const entitiesIno = tree.addDir(spaceIno, "entities");
+  const pieceIno = tree.addDir(piecesIno, "notes");
+  const pieceResultIno = tree.addDir(pieceIno, "result", "object");
+  const script = buildCallableScript("/tmp/ct-exec");
+
+  const handlerIno = tree.addCallable(
+    pieceResultIno,
+    "add.handler",
+    "handler",
+    "add",
+    "result",
+    script,
+  );
+
+  bridge.spaces.set("home", {
+    manager: {} as never,
+    pieces: {} as never,
+    spaceIno,
+    piecesIno,
+    entitiesIno,
+    pieceMap: new Map([["notes", "of:entity-123"]]),
+    pieceControllers: new Map([["notes", piece as never]]),
+    pieceManifest: new Map(),
+    pieceSubs: new Map(),
+    did: "did:key:home",
+    unsubscribes: [],
+    usedNames: new Set(["notes"]),
+    srcInos: new Map(),
+    srcErrorLogInos: new Map(),
+  });
+
+  const target = bridge.resolveHandlerTarget(handlerIno);
+  assertEquals(target !== null, true);
+
+  tree.clear(pieceResultIno);
+
+  await bridge.sendToHandlerTarget(target!, { count: 3 });
+
+  assertEquals(calls, [
+    { channel: "result", value: { count: 3 }, path: ["add"] },
   ]);
 });
 

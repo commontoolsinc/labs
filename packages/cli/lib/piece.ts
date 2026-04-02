@@ -15,6 +15,8 @@ import {
   callableCommandSpec,
   type CallableExecutionDeps,
   type CallableResolution,
+  type CliRuntimeErrorRecord,
+  CT_RUNTIME_ERROR_LOG,
   detectCallableKind,
   executeResolvedCallable,
 } from "./callable.ts";
@@ -78,6 +80,7 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
   const session = await makeSession(config);
   // Use a const ref object so we can assign later while keeping const binding
   const pieceManagerRef: { current?: PieceManager } = {};
+  const runtimeErrors: CliRuntimeErrorRecord[] = [];
   const runtime = new Runtime({
     apiUrl: new URL(config.apiUrl),
     experimental: experimentalOptionsFromEnv(),
@@ -86,6 +89,18 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
       address: new URL("/api/storage/memory", config.apiUrl),
       spaceIdentity: session.spaceIdentity,
     }),
+    errorHandlers: [
+      (error) => {
+        runtimeErrors.push({
+          message: error.message,
+          pieceId: error.pieceId,
+          patternId: error.patternId,
+          spellId: error.spellId,
+          space: error.space,
+          stackTrace: error.stack,
+        });
+      },
+    ],
     navigateCallback: (target) => {
       try {
         const id = pieceId(target);
@@ -116,6 +131,9 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
       }
     },
   });
+  (runtime as Runtime & { [CT_RUNTIME_ERROR_LOG]?: CliRuntimeErrorRecord[] })[
+    CT_RUNTIME_ERROR_LOG
+  ] = runtimeErrors;
 
   if (!(await runtime.healthCheck())) {
     throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);

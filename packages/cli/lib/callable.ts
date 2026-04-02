@@ -5,6 +5,17 @@ import {
 } from "../../fuse/callables.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
 
+export const CT_RUNTIME_ERROR_LOG = Symbol.for("ct.cli.runtimeErrorLog");
+
+export interface CliRuntimeErrorRecord {
+  message: string;
+  stackTrace?: string;
+  pieceId?: string;
+  patternId?: string;
+  spellId?: string;
+  space?: string;
+}
+
 export interface CallableResolution {
   callableCell: any;
   callableKind: CallableKind;
@@ -23,6 +34,29 @@ export interface CallableExecutionDeps {
 
 export interface ExecutedCallable {
   outputText?: string;
+}
+
+function runtimeErrorLog(runtime: unknown): CliRuntimeErrorRecord[] {
+  if (typeof runtime !== "object" || runtime === null) {
+    return [];
+  }
+  const log = (runtime as { [CT_RUNTIME_ERROR_LOG]?: unknown })[
+    CT_RUNTIME_ERROR_LOG
+  ];
+  return Array.isArray(log) ? log as CliRuntimeErrorRecord[] : [];
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string") {
+      return message;
+    }
+  }
+  return String(error);
 }
 
 function isSchemaObject(schema: JSONSchema | undefined): schema is Record<
@@ -167,10 +201,34 @@ export async function executeResolvedCallable(
   deps: CallableExecutionDeps = {},
 ): Promise<ExecutedCallable> {
   if (resolved.callableKind === "handler") {
-    await resolved.piece[resolved.cellProp].set(
-      input,
-      [resolved.cellKey],
-    );
+    if (typeof resolved.callableCell?.send === "function") {
+      const runtimeErrors = runtimeErrorLog(resolved.manager.runtime);
+      const errorCountBefore = runtimeErrors.length;
+      const tx = await new Promise<any>((resolve, reject) => {
+        try {
+          resolved.callableCell.send(input, resolve);
+        } catch (error) {
+          reject(error);
+        }
+      });
+      await resolved.manager.runtime.idle();
+      await resolved.manager.synced();
+
+      const txStatus = tx?.status?.();
+      if (txStatus?.status === "error") {
+        const latestRuntimeError = runtimeErrors.slice(errorCountBefore).at(-1)
+          ?.message;
+        throw new Error(
+          `Handler "${resolved.cellKey}" failed: ${
+            latestRuntimeError ?? errorMessage(txStatus.error)
+          }`,
+        );
+      }
+
+      return {};
+    }
+
+    await resolved.piece[resolved.cellProp].set(input, [resolved.cellKey]);
     await resolved.manager.runtime.idle();
     await resolved.manager.synced();
 
