@@ -1,11 +1,14 @@
 import { isRecord } from "@commontools/utils/types";
-import { schemaWithProperties } from "@commontools/data-model/schema-utils";
+import {
+  emptySchemaObject,
+  schemaForValueType,
+  schemaWithProperties,
+} from "@commontools/data-model/schema-utils";
 import { internSchema } from "@commontools/data-model/schema-hash";
 import { type LegacyAlias } from "../sigil-types.ts";
 import {
   isPattern,
   type JSONSchema,
-  type JSONSchemaTypes,
   type JSONValue,
   type Module,
   type Opaque,
@@ -203,41 +206,34 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
     return internSchema(result);
   };
 
-  const type = typeof value;
+  const basicSchema = schemaForValueType(value);
+  if (basicSchema === undefined) {
+    // Unrecognized type. Treat it as "any."
+    return emptySchemaObject();
+  }
 
-  switch (type) {
+  switch (basicSchema.type) {
+    case "array": {
+      const items = itemsSchemaFromArray(value, state);
+      const result = schemaWithProperties(basicSchema, { items });
+      return finishResult(result);
+    }
+
     case "object": {
-      if (value === null) {
-        return finishResult({ type: "null" });
-      } else if (Array.isArray(value)) {
-        const items = itemsSchemaFromArray(value, state);
-        return finishResult({ type: "array", items });
-      } else {
-        const entries: [string, JSONSchema][] = Object.entries(value).map(
-          ([key, subValue]) => {
-            return [key, analyzeType(subValue, state)];
-          },
-        );
-        const properties = Object.fromEntries(entries);
-        // `addDefault = false` because sub-properties will get defaults, if
-        // any.
-        return finishResult({ type: "object", properties }, false);
-      }
-    }
-
-    case "number": {
-      const numType = Number.isInteger(value) ? "integer" : "number";
-      return finishResult({ type: numType });
-    }
-
-    case "undefined": {
-      // TODO(danfuzz): This has to start doing something more,  in order for
-      // `undefined` to be accepted as a valid value.
-      return finishResult({}, false);
+      const entries: [string, JSONSchema][] = Object.entries(value).map(
+        ([key, subValue]) => {
+          return [key, analyzeType(subValue, state)];
+        },
+      );
+      const properties = Object.fromEntries(entries);
+      const result = schemaWithProperties(basicSchema, { properties });
+      // `addDefault = false` because sub-properties will get defaults, if
+      // any.
+      return finishResult(result, false);
     }
 
     default: {
-      return finishResult({ type: type as JSONSchemaTypes });
+      return finishResult(basicSchema);
     }
   }
 }
