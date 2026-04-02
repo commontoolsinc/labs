@@ -449,6 +449,117 @@ describe("json-utils", () => {
         },
       });
     });
+
+    it("should set default on primitive values when addDefaults is true", () => {
+      expect(createJsonSchema("hello", true)).toEqual({
+        type: "string",
+        default: "hello",
+      });
+      expect(createJsonSchema(42, true)).toEqual({
+        type: "integer",
+        default: 42,
+      });
+      expect(createJsonSchema(3.14, true)).toEqual({
+        type: "number",
+        default: 3.14,
+      });
+      expect(createJsonSchema(true, true)).toEqual({
+        type: "boolean",
+        default: true,
+      });
+    });
+
+    it("should set default: null on null values when addDefaults is true", () => {
+      expect(createJsonSchema(null, true)).toEqual({
+        type: "null",
+        default: null,
+      });
+    });
+
+    it("should not set default on object schemas when addDefaults is true", () => {
+      const schema = createJsonSchema({ name: "Alice", age: 30 }, true);
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          name: { type: "string", default: "Alice" },
+          age: { type: "integer", default: 30 },
+        },
+      });
+      // The object itself must not have a default
+      expect(schema).not.toHaveProperty("default");
+    });
+
+    it("should set default on array schemas when addDefaults is true", () => {
+      // Each element gets its own default, so elements with different values
+      // produce different schemas and collapse into anyOf.
+      expect(createJsonSchema([1, 2, 3], true)).toEqual({
+        type: "array",
+        items: {
+          anyOf: [
+            { type: "integer", default: 1 },
+            { type: "integer", default: 2 },
+            { type: "integer", default: 3 },
+          ],
+        },
+        default: [1, 2, 3],
+      });
+
+      // A single-element array produces a single items schema with default.
+      expect(createJsonSchema([42], true)).toEqual({
+        type: "array",
+        items: { type: "integer", default: 42 },
+        default: [42],
+      });
+
+      // Duplicate values in the array deduplicate to one items schema.
+      expect(createJsonSchema(["a", "a", "a"], true)).toEqual({
+        type: "array",
+        items: { type: "string", default: "a" },
+        default: ["a", "a", "a"],
+      });
+    });
+
+    it("should set defaults on leaves but not intermediate objects in nested structures", () => {
+      const schema = createJsonSchema({
+        user: {
+          name: "Bob",
+          active: true,
+        },
+        scores: [10, 20],
+      }, true);
+
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          user: {
+            type: "object",
+            properties: {
+              name: { type: "string", default: "Bob" },
+              active: { type: "boolean", default: true },
+            },
+          },
+          scores: {
+            type: "array",
+            items: {
+              anyOf: [
+                { type: "integer", default: 10 },
+                { type: "integer", default: 20 },
+              ],
+            },
+            default: [10, 20],
+          },
+        },
+      });
+      // Neither the root nor the nested object should have defaults
+      expect(schema).not.toHaveProperty("default");
+      expect(schema.properties!["user"]).not.toHaveProperty("default");
+    });
+
+    it("should not set default for undefined values when addDefaults is true", () => {
+      expect(createJsonSchema(undefined, true)).toEqual({});
+      // Specifically: no `default` property should be present
+      expect(createJsonSchema(undefined, true)).not.toHaveProperty("default");
+    });
   });
 
   describe("toJSONWithLegacyAliases", () => {
