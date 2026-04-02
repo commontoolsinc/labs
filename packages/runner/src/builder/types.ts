@@ -104,6 +104,7 @@ export type {
   IOpaqueCell,
   IsThisObject,
   IStreamable,
+  JSONArray,
   JSONObject,
   JSONSchema,
   JSONSchemaMutable,
