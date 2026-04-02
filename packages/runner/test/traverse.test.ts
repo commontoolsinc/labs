@@ -1209,6 +1209,46 @@ for (const modernHash of [false, true]) {
 
         expect(error).toBeDefined();
       });
+
+      it("does not silently replace a mismatched item with undefined when items schema is a $ref", () => {
+        // Before the isValidType $ref fix, isValidType called with a schema of the
+        // form { $ref: "...", $defs: {...} } would skip $ref resolution and fall
+        // through with all validities undefined, returning TypeValidity.True. This
+        // caused the array element fallback (lines 2632-2634 in traverse.ts) to
+        // accept `undefined` as a replacement for any item that failed traversal —
+        // even when the $ref resolved to a typed schema that excluded undefined.
+        //
+        // schemaAtPath returns the items schema object directly, so when items is
+        // { $ref: "#/$defs/Str", $defs: { Str: { type: "string" } } } the fallback
+        // receives that self-contained schema and must resolve the $ref before
+        // deciding whether undefined is a valid substitute.
+        const docValue = ["hello", true];
+        const { store, docUri, type } = makeArrayDoc(docValue as FabricValue[]);
+
+        const schema = {
+          type: "array",
+          items: {
+            $ref: "#/$defs/Str",
+          },
+          $defs: { Str: { type: "string" } },
+        } as JSONSchema;
+
+        const { error } = getTraverser(store, { path: ["value"], schema })
+          .traverse({
+            address: {
+              space: "did:null:null",
+              id: docUri,
+              type,
+              path: ["value"],
+            },
+            value: docValue as FabricValue[],
+          });
+
+        // After fix: $ref is resolved to { type: "string" }, which does not allow
+        // undefined, so the boolean item cannot be silently replaced and the array
+        // traversal fails instead of returning ["hello", undefined].
+        expect(error).toBeDefined();
+      });
     });
 
     describe("SchemaObjectTraverser oneOf correctness", () => {
