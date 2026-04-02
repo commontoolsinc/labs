@@ -49,7 +49,10 @@ const patternProgram: RuntimeProgram = {
         "import { pattern, lift } from 'commonfabric';",
         "",
         "// Define lifts outside the pattern body",
+        "let computeSumRuns = 0;",
         "const computeSum = lift((data: { values: number[] }) => {",
+        "  computeSumRuns += 1;",
+        "  console.log('[computeSum #' + computeSumRuns + ']', JSON.stringify(data));",
         "  return data.values.reduce((acc: number, v: number) => acc + v, 0);",
         "});",
         "",
@@ -202,9 +205,10 @@ async function phase2LoadAndVerify(
     resultCell,
   );
   await tx.commit();
-  await runResult.pull();
+  const pulled = await runResult.pull();
 
   const output = runResult.getAsQueryResult();
+  console.log(`Pulled result: ${JSON.stringify(pulled)}`);
   console.log(`Computed result: ${JSON.stringify(output)}`);
 
   // Verify
