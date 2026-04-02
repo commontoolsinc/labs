@@ -3,7 +3,7 @@ import {
   assert,
   assertEquals,
   assertStrictEquals,
-  assertThrows
+  assertThrows,
 } from "@std/assert";
 import type { FabricValue, JSONSchemaObj } from "@commontools/api";
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
