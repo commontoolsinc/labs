@@ -1,10 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
 import type { JSONSchemaObj } from "@commontools/api";
-import { deepFreeze } from "../deep-freeze.ts";
+import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 import {
   cloneSchemaMutable,
+  emptySchemaObject,
   isNontrivialSchema,
+  schemaForValueType,
   schemaWithoutProperties,
   schemaWithProperties,
   toDeepFrozenSchema,
@@ -664,5 +666,69 @@ describe("schemaWithoutProperties", () => {
 
   it("returns boolean false as-is", () => {
     assertEquals(schemaWithoutProperties(false, "asCell"), false);
+  });
+});
+
+describe("schemaForValueType", () => {
+  function testType(
+    typeName: string,
+    example: unknown,
+  ) {
+    describe(typeName, () => {
+      it(`should return { type: "${typeName}" }`, () => {
+        assertEquals(schemaForValueType(example), { type: typeName });
+      });
+
+      it("should return an interned result", () => {
+        assertStrictEquals(
+          schemaForValueType(example),
+          schemaForValueType(example),
+        );
+      });
+
+      it("should return a frozen result", () => {
+        assertEquals(isDeepFrozen(schemaForValueType(example)), true);
+      });
+    });
+  }
+
+  testType("string", "hello");
+  testType("integer", 42);
+  testType("number", 3.14);
+  testType("boolean", true);
+  testType("null", null);
+  testType("array", [1, 2, 3]);
+  testType("object", { a: 1 });
+
+  describe("undefined", () => {
+    it("should return undefined", () => {
+      assertEquals(schemaForValueType(undefined), undefined);
+    });
+  });
+
+  describe("bigint", () => {
+    it("should return undefined", () => {
+      assertEquals(schemaForValueType(BigInt(42)), undefined);
+    });
+  });
+
+  describe("symbol", () => {
+    it("should return undefined", () => {
+      assertEquals(schemaForValueType(Symbol("test")), undefined);
+    });
+  });
+});
+
+describe("emptySchemaObject", () => {
+  it("should return {}", () => {
+    assertEquals(emptySchemaObject(), {});
+  });
+
+  it("should return an interned result", () => {
+    assertStrictEquals(emptySchemaObject(), emptySchemaObject());
+  });
+
+  it("should return a frozen result", () => {
+    assertEquals(isDeepFrozen(emptySchemaObject()), true);
   });
 });
