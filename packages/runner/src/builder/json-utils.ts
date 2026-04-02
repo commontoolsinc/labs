@@ -227,10 +227,11 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
         }
         return finishResult({ type: "array", items });
       } else {
-        const entries: [string, JSONSchema][] =
-          Object.entries(value).map(([key, subValue]) => {
+        const entries: [string, JSONSchema][] = Object.entries(value).map(
+          ([key, subValue]) => {
             return [key, analyzeType(subValue, state)];
-          });
+          },
+        );
         const properties = Object.fromEntries(entries);
         // `addDefault = false` because sub-properties will get defaults, if
         // any.
