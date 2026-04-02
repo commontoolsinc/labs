@@ -175,13 +175,21 @@ export class XSchedulerSource extends LitElement {
     }
 
     .line-bp {
-      padding: 0 0.125rem;
-      width: 16px;
-      min-width: 16px;
+      padding: 0;
+      width: 20px;
+      min-width: 20px;
       text-align: center;
       vertical-align: middle;
       cursor: pointer;
       user-select: none;
+      position: relative;
+    }
+
+    /* Invisible expanded hit area covers the full cell */
+    .line-bp::after {
+      content: "";
+      position: absolute;
+      inset: 0;
     }
 
     .bp-indicator {
@@ -221,6 +229,7 @@ export class XSchedulerSource extends LitElement {
       white-space: nowrap;
       vertical-align: top;
       width: 1px;
+      cursor: pointer;
     }
 
     .line-markers {
@@ -630,7 +639,17 @@ export class XSchedulerSource extends LitElement {
                         : ""}"
                     ></span>
                   </td>
-                  <td class="line-gutter">${lineNum}</td>
+                  <td
+                    class="line-gutter"
+                    @click="${hasAction
+                      ? (e: Event) => {
+                        e.stopPropagation();
+                        this.handleBreakpointToggle(ann!.entries);
+                      }
+                      : undefined}"
+                  >
+                    ${lineNum}
+                  </td>
                   <td class="line-markers">
                     ${ann
                       ? ann.entries.map(
