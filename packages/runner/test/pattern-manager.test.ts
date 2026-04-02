@@ -10,6 +10,7 @@ import {
   CachedCompiler,
   MemoryCompilationCache,
 } from "../src/compilation-cache/mod.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -215,6 +216,32 @@ describe("PatternManager.compileOrGetPattern", () => {
 
     // Should be the exact same object instance (cache hit)
     expect(second).toBe(first);
+  });
+
+  it("does not overwrite a cached pattern's verified load id on re-registration", async () => {
+    const compiled = await runtime.patternManager.compilePattern(simpleProgram);
+    const patternId = runtime.patternManager.registerPattern(
+      compiled,
+      simpleProgram,
+    );
+
+    const initialLoadId = runtime.harness.getVerifiedLoadId?.(
+      "__missing__",
+      patternId,
+    );
+    expect(initialLoadId).toBeDefined();
+
+    const frame = pushFrame({ verifiedLoadId: "wrong-load-id" });
+    try {
+      expect(runtime.patternManager.registerPattern(compiled)).toEqual(
+        patternId,
+      );
+    } finally {
+      popFrame(frame);
+    }
+
+    expect(runtime.harness.getVerifiedLoadId?.("__missing__", patternId))
+      .toEqual(initialLoadId);
   });
 
   it("compiles different patterns for different programs", async () => {

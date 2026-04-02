@@ -217,7 +217,9 @@ export class PatternManager {
     // Walk up derivation copies to original
     pattern = this.findOriginalPattern(pattern as Pattern);
     const verifiedLoadId = getTopFrame()?.verifiedLoadId;
-    if (verifiedLoadId) {
+    if (
+      verifiedLoadId && !this.patternToVerifiedLoadId.has(pattern as Pattern)
+    ) {
       this.patternToVerifiedLoadId.set(pattern as Pattern, verifiedLoadId);
     }
 
