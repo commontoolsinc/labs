@@ -156,90 +156,91 @@ export function getSemanticSpacing(
  * Default theme values with SwiftUI-style adaptive colors
  */
 export const defaultTheme: CTTheme = {
-  fontFamily: "system-ui, -apple-system, sans-serif",
+  fontFamily:
+    "'DM Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
   monoFontFamily:
-    "ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace",
+    "'DM Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace",
   fontSize: "1rem",
-  borderRadius: "0.5rem",
+  borderRadius: "0.75rem",
   density: "comfortable",
   colorScheme: "light",
   animationSpeed: "normal",
   colors: {
     primary: {
-      light: "#3b82f6",
-      dark: "#60a5fa",
+      light: "#2D8C3C",
+      dark: "#4ABA5A",
     },
     primaryForeground: {
       light: "#ffffff",
-      dark: "#1e3a8a",
+      dark: "#0D2E13",
     },
     secondary: {
-      light: "#6b7280",
-      dark: "#9ca3af",
+      light: "#F0EDE6",
+      dark: "#2A2822",
     },
     secondaryForeground: {
-      light: "#ffffff",
-      dark: "#374151",
+      light: "#2C3227",
+      dark: "#F0EDE6",
     },
     background: {
-      light: "#ffffff",
-      dark: "#0f172a",
+      light: "#FDFCF9",
+      dark: "#1A1A17",
     },
     surface: {
-      light: "#f1f5f9",
-      dark: "#1e293b",
+      light: "#F3F1EB",
+      dark: "#242420",
     },
     surfaceHover: {
-      light: "#e2e8f0",
-      dark: "#334155",
+      light: "#E8E6DD",
+      dark: "#2E2E28",
     },
     text: {
-      light: "#111827",
-      dark: "#f1f5f9",
+      light: "#2C3227",
+      dark: "#E8E6DD",
     },
     textMuted: {
-      light: "#6b7280",
-      dark: "#94a3b8",
+      light: "#7A7D72",
+      dark: "#8E9185",
     },
     border: {
-      light: "#e5e7eb",
-      dark: "#475569",
+      light: "#D4D2C8",
+      dark: "#3D3B34",
     },
     borderMuted: {
-      light: "#f3f4f6",
-      dark: "#334155",
+      light: "#E8E7E0",
+      dark: "#2E2E28",
     },
     success: {
-      light: "#16a34a",
-      dark: "#22c55e",
+      light: "#3A8F47",
+      dark: "#4FC261",
     },
     successForeground: {
       light: "#ffffff",
-      dark: "#14532d",
+      dark: "#0D2E13",
     },
     error: {
-      light: "#dc2626",
-      dark: "#ef4444",
+      light: "#C44536",
+      dark: "#E05A4B",
     },
     errorForeground: {
       light: "#ffffff",
-      dark: "#7f1d1d",
+      dark: "#2E0F0B",
     },
     warning: {
-      light: "#d97706",
-      dark: "#f59e0b",
+      light: "#D4940A",
+      dark: "#EAA81F",
     },
     warningForeground: {
       light: "#ffffff",
-      dark: "#451a03",
+      dark: "#2E2106",
     },
     accent: {
-      light: "#8b5cf6",
-      dark: "#a78bfa",
+      light: "#C87137",
+      dark: "#E08A4F",
     },
     accentForeground: {
       light: "#ffffff",
-      dark: "#4c1d95",
+      dark: "#2E1A0B",
     },
   },
 };

@@ -18,50 +18,29 @@ export const styles = css`
     --ct-button-spacing-x-lg: 2rem;
     --ct-button-icon-size: 2.5rem;
     --ct-button-icon-padding: 0;
-    --ct-button-color-primary: var(
-      --ct-theme-color-primary,
-      var(--ct-colors-primary-500, #2d8c3c)
-    );
+    --ct-button-color-primary: var(--ct-theme-color-primary, #2d8c3c);
     --ct-button-color-primary-foreground: var(
       --ct-theme-color-primary-foreground,
       #ffffff
     );
-    --ct-button-color-secondary: var(
-      --ct-theme-color-secondary,
-      var(--ct-colors-gray-100, #f0ede6)
-    );
+    --ct-button-color-secondary: var(--ct-theme-color-secondary, #f0ede6);
     --ct-button-color-secondary-foreground: var(
       --ct-theme-color-secondary-foreground,
-      var(--ct-colors-gray-900, #2c3227)
+      #2c3227
     );
-    --ct-button-color-error: var(
-      --ct-theme-color-error,
-      var(--ct-colors-error, #c44536)
-    );
+    --ct-button-color-error: var(--ct-theme-color-error, #c44536);
     --ct-button-color-error-foreground: var(
       --ct-theme-color-error-foreground,
       #ffffff
     );
-    --ct-button-color-border: var(
-      --ct-theme-color-border,
-      var(--ct-colors-gray-300, #d4d2c8)
-    );
-    --ct-button-color-surface: var(
-      --ct-theme-color-surface,
-      var(--ct-colors-gray-50, #f3f1eb)
-    );
+    --ct-button-color-border: var(--ct-theme-color-border, #d4d2c8);
+    --ct-button-color-surface: var(--ct-theme-color-surface, #f3f1eb);
     --ct-button-color-surface-hover: var(
       --ct-theme-color-surface-hover,
-      var(--ct-colors-gray-200, #e8e6dd)
+      #e8e6dd
     );
-    --ct-button-color-text: var(
-      --ct-theme-color-text,
-      var(--ct-colors-gray-900, #2c3227)
-    );
-    --ct-button-color-text-muted: var(
-      --ct-theme-color-text-muted,
-      var(--ct-colors-gray-500, #7a7d72)
-    );
+    --ct-button-color-text: var(--ct-theme-color-text, #2c3227);
+    --ct-button-color-text-muted: var(--ct-theme-color-text-muted, #7a7d72);
 
     display: inline-block;
     outline: none;
