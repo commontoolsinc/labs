@@ -413,7 +413,8 @@ export class SpaceSession {
     if (
       outstanding !== undefined &&
       this.client.isConnected() &&
-      this.#readyOnConnection
+      this.#readyOnConnection &&
+      !this.#restoring
     ) {
       this.sendOutstandingCommit(commit.localSeq, outstanding);
     } else {
@@ -548,6 +549,7 @@ export class SpaceSession {
     }
     this.#restoring = true;
     this.#readyOnConnection = false;
+    let replayedThroughLocalSeq = 0;
     try {
       let restored: SessionOpenResult;
       try {
@@ -563,7 +565,17 @@ export class SpaceSession {
         return;
       }
       this.#readyOnConnection = true;
-      this.replayOutstandingCommits();
+      replayedThroughLocalSeq = Math.max(
+        0,
+        ...this.#outstandingCommits.keys(),
+      );
+      const replayTasks = [...this.#outstandingCommits.entries()].map((
+        [localSeq, pendingCommit],
+      ) =>
+        this.sendOutstandingCommit(localSeq, pendingCommit, {
+          throwOnConnectionError: true,
+        })
+      );
       if (restored.sync) {
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(restored.sync);
@@ -583,8 +595,12 @@ export class SpaceSession {
           view.emit(sync);
         }
       }
+      await Promise.all(replayTasks);
     } finally {
       this.#restoring = false;
+      if (!this.#closed && this.#outstandingCommits.size > 0) {
+        this.replayOutstandingCommits(replayedThroughLocalSeq);
+      }
     }
   }
 
@@ -737,7 +753,7 @@ export class SpaceSession {
     return restored;
   }
 
-  private replayOutstandingCommits(): void {
+  private replayOutstandingCommits(minLocalSeqExclusive = 0): void {
     if (
       this.#outstandingCommits.size === 0 ||
       !this.#readyOnConnection ||
@@ -748,6 +764,9 @@ export class SpaceSession {
     for (
       const [localSeq, pendingCommit] of this.#outstandingCommits.entries()
     ) {
+      if (localSeq <= minLocalSeqExclusive) {
+        continue;
+      }
       this.sendOutstandingCommit(localSeq, pendingCommit);
     }
   }
@@ -758,8 +777,11 @@ export class SpaceSession {
       commit: ClientCommit;
       pending: PromiseWithResolvers<AppliedCommit>;
     },
-  ): void {
-    this.queueBackground((async () => {
+    options: {
+      throwOnConnectionError?: boolean;
+    } = {},
+  ): Promise<void> {
+    const task = (async () => {
       if (
         this.#closed ||
         !this.#readyOnConnection ||
@@ -786,6 +808,9 @@ export class SpaceSession {
         }
       } catch (error) {
         if (isConnectionError(error) || isSessionRevokedError(error)) {
+          if (options.throwOnConnectionError) {
+            throw error;
+          }
           return;
         }
         if (this.#outstandingCommits.get(localSeq) === pendingCommit) {
@@ -795,7 +820,9 @@ export class SpaceSession {
           error instanceof Error ? error : new Error(String(error)),
         );
       }
-    })());
+    })();
+    this.queueBackground(task);
+    return task;
   }
 }
 
