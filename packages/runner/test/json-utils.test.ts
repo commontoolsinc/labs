@@ -38,7 +38,7 @@ describe("json-utils", () => {
 
   describe("createJsonSchema", () => {
     function testSchemaForType(typeName: string, example: unknown) {
-      describe(typeName, () => {
+      describe(`basics for type \`${typeName}\``, () => {
         it("should create schema for direct value", () => {
           expect(createJsonSchema(example)).toEqual({ type: typeName });
         });
@@ -72,7 +72,7 @@ describe("json-utils", () => {
     testSchemaForType("boolean", true);
     testSchemaForType("null", null);
 
-    describe("undefined", () => {
+    describe("basics for type `undefined`", () => {
       it("should create schema for direct value", () => {
         expect(createJsonSchema(undefined)).toEqual({});
       });
