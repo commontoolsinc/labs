@@ -150,6 +150,46 @@ export interface BuildJsonTreeOpts {
   depth?: number;
 }
 
+const ASYNC_BUILD_BATCH_SIZE = 200;
+
+interface BuildJsonTreeTask {
+  parentIno: bigint;
+  name: string;
+  value: unknown;
+  seen?: WeakSet<object>;
+  depth: number;
+  onBuilt?: (ino: bigint) => void;
+}
+
+function buildJsonLeaf(
+  tree: FsTree,
+  parentIno: bigint,
+  name: string,
+  value: unknown,
+): bigint {
+  if (value === null || value === undefined) {
+    return tree.addFile(parentIno, name, "", "null");
+  }
+
+  if (typeof value === "boolean") {
+    return tree.addFile(parentIno, name, String(value), "boolean");
+  }
+
+  if (typeof value === "number") {
+    return tree.addFile(parentIno, name, String(value), "number");
+  }
+
+  if (typeof value === "string") {
+    return tree.addFile(parentIno, name, value, "string");
+  }
+
+  return tree.addFile(parentIno, name, String(value), "string");
+}
+
+async function yieldToEventLoop(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
 /**
  * Build a filesystem subtree from a JSON value.
  *
@@ -304,4 +344,121 @@ export function buildJsonTree(
     String(value),
     "string",
   );
+}
+
+export async function buildJsonTreeAsync(
+  tree: FsTree,
+  parentIno: bigint,
+  name: string,
+  value: unknown,
+  seen?: WeakSet<object>,
+  resolveLink?: (value: unknown, depth: number) => string | null,
+  depth?: number,
+  skipEntry?: (value: unknown) => boolean,
+  classifyCallableEntry?: (key: string, value: unknown) => CallableKind | null,
+): Promise<bigint> {
+  const queue: BuildJsonTreeTask[] = [{
+    parentIno,
+    name,
+    value,
+    seen,
+    depth: depth ?? 0,
+  }];
+  let nextIndex = 0;
+  let processed = 0;
+  let rootIno: bigint | undefined;
+
+  queue[0].onBuilt = (ino) => {
+    rootIno = ino;
+  };
+
+  while (nextIndex < queue.length) {
+    const task = queue[nextIndex++];
+    const d = task.depth;
+    const candidate = task.value;
+
+    let builtIno: bigint | undefined;
+
+    if (candidate === null || candidate === undefined) {
+      builtIno = buildJsonLeaf(tree, task.parentIno, task.name, candidate);
+    } else if (typeof candidate === "object") {
+      const objectValue = candidate as object;
+      const taskSeen = task.seen ?? new WeakSet<object>();
+      if (taskSeen.has(objectValue)) {
+        builtIno = tree.addFile(
+          task.parentIno,
+          task.name,
+          "[Circular]",
+          "string",
+        );
+      } else {
+        taskSeen.add(objectValue);
+
+        if (isSigilLink(candidate) && resolveLink) {
+          const target = resolveLink(candidate, d);
+          if (target) {
+            builtIno = tree.addSymlink(task.parentIno, task.name, target);
+          }
+        }
+
+        if (builtIno === undefined) {
+          if (Array.isArray(candidate)) {
+            builtIno = tree.addDir(task.parentIno, task.name, "array");
+            tree.addFile(
+              task.parentIno,
+              `${task.name}.json`,
+              safeStringify(candidate),
+              "array",
+            );
+
+            for (let i = 0; i < candidate.length; i++) {
+              queue.push({
+                parentIno: builtIno,
+                name: String(i),
+                value: candidate[i],
+                seen: taskSeen,
+                depth: d + 1,
+              });
+            }
+          } else {
+            const obj = candidate as Record<string, unknown>;
+            builtIno = tree.addDir(task.parentIno, task.name, "object");
+            const jsonValue = d === 0
+              ? classifyCallableEntry
+                ? transformCallableValues(candidate, classifyCallableEntry)
+                : transformStreamValues(candidate)
+              : candidate;
+            tree.addFile(
+              task.parentIno,
+              `${task.name}.json`,
+              safeStringify(jsonValue),
+              "object",
+            );
+
+            for (const [key, val] of Object.entries(obj)) {
+              if (isStreamValue(val) || isHandlerCell(val)) continue;
+              if (skipEntry?.(val)) continue;
+              queue.push({
+                parentIno: builtIno,
+                name: key,
+                value: val,
+                seen: taskSeen,
+                depth: d + 1,
+              });
+            }
+          }
+        }
+      }
+    } else {
+      builtIno = buildJsonLeaf(tree, task.parentIno, task.name, candidate);
+    }
+
+    task.onBuilt?.(builtIno!);
+    processed++;
+    if (processed % ASYNC_BUILD_BATCH_SIZE === 0) {
+      await yieldToEventLoop();
+    }
+  }
+
+  return rootIno!;
 }

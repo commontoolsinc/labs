@@ -8,6 +8,7 @@ import {
 } from "./callables.ts";
 import {
   buildJsonTree,
+  buildJsonTreeAsync,
   isHandlerCell,
   isSigilLink,
   isStreamValue,
@@ -124,6 +125,37 @@ Deno.test("buildJsonTree - nested objects", () => {
   assertEquals(getFileContent(tree, userIno, "name"), "Bob");
   assertEquals(getFileContent(tree, addressIno, "city"), "NYC");
   assertEquals(getFileContent(tree, addressIno, "zip"), "10001");
+});
+
+Deno.test("buildJsonTreeAsync matches synchronous nested tree structure", async () => {
+  const tree = new FsTree();
+  const data = {
+    profile: {
+      name: "Ada",
+      stats: {
+        score: 7,
+        enabled: true,
+      },
+    },
+    tags: ["a", "b"],
+  };
+
+  await buildJsonTreeAsync(tree, tree.rootIno, "data", data);
+
+  const dataIno = tree.lookup(tree.rootIno, "data")!;
+  const profileIno = tree.lookup(dataIno, "profile")!;
+  const statsIno = tree.lookup(profileIno, "stats")!;
+  const tagsIno = tree.lookup(dataIno, "tags")!;
+
+  assertEquals(getFileContent(tree, profileIno, "name"), "Ada");
+  assertEquals(getFileContent(tree, statsIno, "score"), "7");
+  assertEquals(getFileContent(tree, statsIno, "enabled"), "true");
+  assertEquals(getFileContent(tree, tagsIno, "0"), "a");
+  assertEquals(getFileContent(tree, tagsIno, "1"), "b");
+  assertEquals(
+    JSON.parse(getFileContent(tree, tree.rootIno, "data.json")),
+    data,
+  );
 });
 
 Deno.test("FsTree - clear removes subtree", () => {
@@ -747,6 +779,7 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
     entitiesIno,
     pieceMap: new Map([["notes", "of:entity-123"]]),
     pieceControllers: new Map([["notes", piece as never]]),
+    pieceManifest: new Map(),
     pieceSubs: new Map(),
     did: "did:key:home",
     unsubscribes: [],
@@ -815,6 +848,7 @@ Deno.test("CellBridge.sendToHandlerTarget survives callable inode rebuilds", asy
     entitiesIno,
     pieceMap: new Map([["notes", "of:entity-123"]]),
     pieceControllers: new Map([["notes", piece as never]]),
+    pieceManifest: new Map(),
     pieceSubs: new Map(),
     did: "did:key:home",
     unsubscribes: [],

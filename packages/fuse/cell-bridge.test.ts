@@ -136,6 +136,7 @@ function buildTestSpace(
     entitiesIno,
     pieceMap: new Map(),
     pieceControllers: new Map(),
+    pieceManifest: new Map(),
     pieceSubs: new Map(),
     did: "did:key:zTest",
     unsubscribes: [],
@@ -163,7 +164,7 @@ type LoadPieceTree = (
 
 type UpdateIndexJson = (state: SpaceState) => void;
 
-type UpdatePiecesJson = (state: SpaceState) => Promise<void>;
+type UpdatePiecesJson = (state: SpaceState) => void;
 
 type SyncPieceListOnce = (
   state: SpaceState,
@@ -458,6 +459,84 @@ Deno.test("CellBridge.updateIndexJson writes .index.json mapping names to entity
 
   assertEquals(indexJson["Alpha"], "of:alpha");
   assertEquals(indexJson["Beta"], "of:beta");
+});
+
+Deno.test("CellBridge.updatePiecesJson writes cached manifest data without piece reads", () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  state.pieceMap.set("Alpha", "of:alpha");
+  state.pieceMap.set("Beta", "of:beta");
+  state.pieceManifest.set("of:alpha", {
+    pattern: "alpha-pattern",
+    summary: "alpha summary",
+  });
+  state.pieceManifest.set("of:beta", {
+    pattern: "beta-pattern",
+    summary: "beta summary",
+  });
+
+  (bridge as unknown as { updatePiecesJson: UpdatePiecesJson }).updatePiecesJson
+    .call(bridge, state);
+
+  const piecesJson = JSON.parse(
+    getFileContent(tree, state.piecesIno, "pieces.json"),
+  );
+  assertEquals(piecesJson, [
+    {
+      id: "of:alpha",
+      name: "Alpha",
+      pattern: "alpha-pattern",
+      summary: "alpha summary",
+      entityPath: "entities/of:alpha",
+    },
+    {
+      id: "of:beta",
+      name: "Beta",
+      pattern: "beta-pattern",
+      summary: "beta summary",
+      entityPath: "entities/of:beta",
+    },
+  ]);
+});
+
+Deno.test("CellBridge result rebuild updates pieces.json summary from cached manifest", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  const resultCell = new SinkableCell({ summary: "before" });
+
+  const piece = {
+    id: "of:summary-piece",
+    name: () => "Summary Piece",
+    getPatternMeta: () => Promise.resolve({ patternName: "summary-pattern" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+      get: () => Promise.resolve({ summary: "before" }),
+    },
+  };
+
+  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace.bind(bridge);
+  await addPiece(state, piece, "home");
+
+  (bridge as unknown as { updatePiecesJson: UpdatePiecesJson }).updatePiecesJson
+    .call(bridge, state);
+  let piecesJson = JSON.parse(
+    getFileContent(tree, state.piecesIno, "pieces.json"),
+  );
+  assertEquals(piecesJson[0].summary, "before");
+
+  resultCell.set({ summary: "after" });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  piecesJson = JSON.parse(getFileContent(tree, state.piecesIno, "pieces.json"));
+  assertEquals(piecesJson[0].summary, "after");
 });
 
 Deno.test("CellBridge.writeFsFile writes markdown frontmatter and body to FS paths", async () => {
