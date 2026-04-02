@@ -254,8 +254,6 @@ export interface TransactRequest {
   space: string;
   sessionId: SessionId;
   commit: ClientCommit;
-  invocation?: Record<string, unknown>;
-  authorization?: FabricValue;
 }
 
 export interface GraphQueryRequest {

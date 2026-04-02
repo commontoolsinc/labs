@@ -807,14 +807,8 @@ export class Server {
 
     try {
       const engine = await this.openEngine(message.space);
-      const invocation = toInvocationRecord(message);
       const commit = Engine.applyCommit(engine, {
         sessionId: message.sessionId,
-        invocation,
-        invocationPayload: isRecord(message.invocation)
-          ? message.invocation
-          : invocation,
-        authorization: message.authorization ?? {},
         commit: message.commit,
       });
       this.markSpaceDirty(
@@ -1463,31 +1457,6 @@ export class Server {
   }
 }
 
-const toInvocationRecord = (message: TransactRequest) => {
-  const invocation = message.invocation;
-  if (isRecord(invocation)) {
-    return {
-      ...invocation,
-      iss: typeof invocation.iss === "string" ? invocation.iss : message.space,
-      aud: typeof invocation.aud === "string" ? invocation.aud : null,
-      cmd: typeof invocation.cmd === "string"
-        ? invocation.cmd
-        : "/memory/transact",
-      sub: typeof invocation.sub === "string" ? invocation.sub : message.space,
-    };
-  }
-
-  return {
-    iss: message.space,
-    aud: null,
-    cmd: "/memory/transact",
-    sub: message.space,
-    args: {
-      localSeq: message.commit.localSeq,
-    },
-  };
-};
-
 export const parseClientMessage = (
   payload: string,
 ): ClientMessage | null => {
@@ -1554,8 +1523,6 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       commit: parsed.commit as unknown as TransactRequest["commit"],
-      invocation: isRecord(parsed.invocation) ? parsed.invocation : undefined,
-      authorization: parsed.authorization as TransactRequest["authorization"],
     };
   }
 

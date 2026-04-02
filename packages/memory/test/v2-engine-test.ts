@@ -121,8 +121,8 @@ Deno.test("memory v2 engine persists set and delete commits as seq revisions", a
         branch: string;
         session_id: string;
         local_seq: number;
-        invocation_ref: string;
-        authorization_ref: string;
+        invocation_ref: string | null;
+        authorization_ref: string | null;
         original: string;
         resolution: string;
       }
@@ -132,6 +132,8 @@ Deno.test("memory v2 engine persists set and delete commits as seq revisions", a
     assertEquals(commitRow.branch, DEFAULT_BRANCH);
     assertEquals(commitRow.session_id, "session:1");
     assertEquals(commitRow.local_seq, 1);
+    assertEquals(commitRow.invocation_ref, null);
+    assertEquals(commitRow.authorization_ref, null);
     assertEquals(decodeStored(commitRow.original), {
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
@@ -166,24 +168,17 @@ Deno.test("memory v2 engine persists set and delete commits as seq revisions", a
     assertEquals(revisionRow.op, "set");
     assertEquals(decodeStored(revisionRow.data), document);
     assertEquals(revisionRow.commit_seq, 1);
-
-    const invocationRow = engine.database.prepare(
-      "SELECT invocation FROM invocation WHERE ref = ?",
-    ).get([commitRow.invocation_ref]) as
-      | { invocation: string }
-      | undefined;
-    const authorizationRow = engine.database.prepare(
-      "SELECT authorization FROM authorization WHERE ref = ?",
-    ).get([commitRow.authorization_ref]) as
-      | { authorization: string }
-      | undefined;
     assertEquals(
-      decodeStored(invocationRow?.invocation),
-      invocationFor(1),
+      engine.database.prepare(
+        "SELECT COUNT(*) AS count FROM invocation",
+      ).get() as { count: number },
+      { count: 0 },
     );
     assertEquals(
-      decodeStored(authorizationRow?.authorization),
-      authorization,
+      engine.database.prepare(
+        "SELECT COUNT(*) AS count FROM authorization",
+      ).get() as { count: number },
+      { count: 0 },
     );
 
     const deleteResult = applyCommit(engine, {
@@ -265,7 +260,7 @@ Deno.test("memory v2 engine preserves source-only entity documents", async () =>
   }
 });
 
-Deno.test("memory v2 engine stores normalized invocation fields separately from raw payload", async () => {
+Deno.test("memory v2 engine ignores supplied transact invocation metadata", async () => {
   const { engine, path } = await createEngine();
 
   try {
@@ -305,25 +300,18 @@ Deno.test("memory v2 engine stores normalized invocation fields separately from 
     });
 
     const row = engine.database.prepare(
-      `SELECT i.iss, i.aud, i.cmd, i.sub, i.invocation
-       FROM "commit" c
-       JOIN invocation i ON i.ref = c.invocation_ref
-       WHERE c.session_id = ? AND c.local_seq = ?`,
+      `SELECT invocation_ref, authorization_ref
+       FROM "commit"
+       WHERE session_id = ? AND local_seq = ?`,
     ).get(["session:raw-invocation", 1]) as
       | {
-        iss: string;
-        aud: string | null;
-        cmd: string;
-        sub: string;
-        invocation: string;
+        invocation_ref: string | null;
+        authorization_ref: string | null;
       }
       | undefined;
     assertExists(row);
-    assertEquals(row.iss, "did:key:space");
-    assertEquals(row.aud, null);
-    assertEquals(row.cmd, "/memory/transact");
-    assertEquals(row.sub, "did:key:space");
-    assertEquals(decodeStored(row.invocation), rawInvocation);
+    assertEquals(row.invocation_ref, null);
+    assertEquals(row.authorization_ref, null);
   } finally {
     close(engine);
     await Deno.remove(path);

@@ -73,7 +73,8 @@ Properties:
 
 - Ordered by canonical commit order on the branch where the write was accepted.
 - Payload is preserved exactly as submitted.
-- Readers can join it back to commit / invocation / authorization records.
+- Readers can join it back to commit records and, when present,
+  invocation / authorization records.
 - Submitted ops are not assumed to be directly replayable on top of the current
   document state.
 

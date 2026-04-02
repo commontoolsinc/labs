@@ -15,11 +15,9 @@ target. In particular:
 - the current wire protocol uses memory-v2 JSON envelopes encoded at the
   boundary with the shared flag-dispatched value codec, not UCAN-framed
   transport
-- write-class commands may persist `invocation` / `authorization` payloads, but
-  transport-level UCAN verification remains deferred
-- persisted `invocation` / `authorization` blobs in this pass are unverified
-  caller-supplied audit data; do not treat them as verified authorization
-  evidence
+- plain `transact` requests do not currently carry or persist per-commit
+  `invocation` / `authorization` payloads; signed-write metadata remains
+  deferred to a later pass
 - the toolshed v2 websocket currently authenticates `session.open` by
   verifying a signature from the requested space DID against the requested
   session descriptor
@@ -75,9 +73,9 @@ codebase. The target wire messages are:
 - `response`
 - `session/effect`
 
-Do not switch this pass to full UCAN message framing. Persist invocation/auth
-data for write-class commands only. None of the current wire messages are
-transport-level signed UCAN invocations.
+Do not switch this pass to full UCAN message framing. None of the current wire
+messages are transport-level signed UCAN invocations beyond the current
+`session.open` authentication step.
 
 ## 4. Session Model
 

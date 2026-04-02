@@ -69,7 +69,8 @@ memory route.
   `hello`, `session.open`, `transact`, `graph.query`, `session.watch.set`,
   `session.ack`, `response`, and `session/effect`.
 - Do not switch this pass to full UCAN transport framing.
-- Keep invocation/auth persistence for write-class commands only.
+- Keep `session.open` as the authenticated edge; defer per-commit signed write
+  metadata.
 - Session resume may keep using caller-provided `sessionId` values for now.
   Session-id hardening is deferred.
 - Keep blob payload storage content-addressed. The seq rewrite applies to JSON

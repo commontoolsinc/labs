@@ -316,13 +316,13 @@ interface CommitLogEntry {
       seq: number;
     }>;
   };
-  invocationRef: Reference;
-  authorizationRef: Reference;
+  invocationRef: Reference | null;
+  authorizationRef: Reference | null;
 }
 ```
 
 The semantic JSON write path is keyed by `seq`, not by commit hash. The
-content-addressed UCAN envelope is preserved separately for audit.
+content-addressed UCAN envelope is reserved for a later signed-write pass.
 
 ### 3.7.3 Seq Assignment
 
@@ -346,8 +346,8 @@ Each committed write-class operation has identifiers with different roles:
 - `(sessionId, localSeq)` is the optimistic identity used before acceptance and
   the idempotence key for replay
 - `seq` is the canonical committed identity used after acceptance
-- `invocationRef` is the content-addressed UCAN invocation reference
-- `authorizationRef` is the content-addressed authorization reference
+- `invocationRef` and `authorizationRef`, when present, point at separately
+  persisted signed-write metadata
 
 On replay after reconnect:
 

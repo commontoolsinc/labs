@@ -198,8 +198,8 @@ interface Commit {
     seq: number;
     resolvedPendingReads?: Array<{ localSeq: number; seq: number }>;
   };
-  invocationRef: Reference;
-  authorizationRef: Reference;
+  invocationRef: Reference | null;
+  authorizationRef: Reference | null;
   revisions: StoredRevision[];
   createdAt: string;
 }
@@ -233,19 +233,13 @@ interface SessionSync {
 }
 ```
 
-Successful write-class commands (`/memory/transact`, `/memory/branch/create`,
-`/memory/branch/delete`) preserve the current transport payloads as
-content-addressed audit data:
-
-- `invocationRef` points to the persisted invocation payload
-- `authorizationRef` points to the persisted authorization payload
-
 Current implementation note:
 
-- these payload blobs are stored verbatim for audit/debugging
-- transport-level UCAN verification remains deferred in this pass
-- treat persisted invocation/authorization JSON as untrusted input until
-  verification lands
+- plain `/memory/transact` commits leave `invocationRef` /
+  `authorizationRef` unset
+- `session.open` remains the authenticated edge in this pass
+- signed per-commit invocation / authorization metadata remains deferred until
+  transport-level verification lands
 
 The semantic JSON write path itself is seq-addressed rather than hash-addressed.
 

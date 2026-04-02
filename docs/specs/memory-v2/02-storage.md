@@ -12,7 +12,8 @@ content-addressed. Instead, committed JSON state is represented by:
 - a `head` table for current branch-local pointers
 - periodic `snapshot` rows storing full materialized entity documents
 
-UCAN invocation/auth blobs and raw binary blobs remain content-addressed.
+When present, invocation/auth blobs and raw binary blobs remain
+content-addressed.
 
 ## 1. Database-per-Space
 
@@ -117,8 +118,8 @@ CREATE TABLE commit (
   branch             TEXT    NOT NULL DEFAULT '',
   session_id         TEXT    NOT NULL,
   local_seq          INTEGER NOT NULL,
-  invocation_ref     TEXT    NOT NULL,
-  authorization_ref  TEXT    NOT NULL,
+  invocation_ref     TEXT,
+  authorization_ref  TEXT,
   original           JSON    NOT NULL,
   resolution         JSON    NOT NULL,
   created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -130,7 +131,7 @@ CREATE TABLE commit (
 CREATE INDEX idx_commit_branch ON commit (branch);
 CREATE UNIQUE INDEX idx_commit_session_local_seq
   ON commit (session_id, local_seq);
-CREATE UNIQUE INDEX idx_commit_invocation_ref ON commit (invocation_ref);
+CREATE INDEX idx_commit_invocation_ref ON commit (invocation_ref);
 ```
 
 `original` stores the canonical semantic payload:
@@ -149,6 +150,13 @@ CREATE UNIQUE INDEX idx_commit_invocation_ref ON commit (invocation_ref);
   ]
 }
 ```
+
+Current implementation note:
+
+- plain `/memory/transact` commits leave `invocation_ref` /
+  `authorization_ref` unset
+- those columns are reserved for a later signed-write pass or for legacy rows
+  carried forward from earlier builds
 
 ### 3.4 `snapshot` — Materialized Entity Values
 
@@ -189,9 +197,10 @@ CREATE INDEX idx_branch_status ON branch (status);
 CREATE INDEX idx_branch_parent ON branch (parent_branch);
 ```
 
-### 3.6 `invocation` — Persisted Invocation Payloads
+### 3.6 `invocation` — Reserved Persisted Invocation Payloads
 
-Stores the persisted invocation payload for successful write-class commands.
+Reserved for a future pass that persists signed write envelopes. Current plain
+`/memory/transact` commits do not populate this table.
 
 ```sql
 CREATE TABLE invocation (
@@ -211,17 +220,14 @@ CREATE INDEX idx_invocation_iss ON invocation (iss);
 
 Current implementation note:
 
-- the JSON blob is persisted verbatim from the current transport payload
-- `iss` / `aud` / `cmd` / `sub` columns store the normalized fields extracted by
-  the server for indexing
-- because transport-level verification is deferred in this pass, treat the blob
-  and extracted fields as untrusted audit data, not as verified authorization
-  proof
+- existing rows may remain from earlier experimental builds
+- treat any stored blob and extracted fields as untrusted audit data, not as
+  verified authorization proof
 
-### 3.7 `authorization` — Persisted Authorization Payloads
+### 3.7 `authorization` — Reserved Persisted Authorization Payloads
 
-Stores the persisted authorization payload that accompanied one or more
-invocations.
+Reserved for a future pass that persists signed write envelopes. Current plain
+`/memory/transact` commits do not populate this table.
 
 ```sql
 CREATE TABLE authorization (
@@ -311,7 +317,7 @@ INSERT INTO commit (
 )
 VALUES (
   :seq, :branch, :session_id, :local_seq,
-  :invocation_ref, :authorization_ref,
+  NULL, NULL,
   :original_json, :resolution_json
 );
 

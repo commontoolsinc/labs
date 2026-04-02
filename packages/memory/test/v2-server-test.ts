@@ -1,6 +1,6 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
-import { Server, SessionRegistry } from "../v2/server.ts";
+import { parseClientMessage, Server, SessionRegistry } from "../v2/server.ts";
 import {
   encodeMemoryV2Boundary,
   getMemoryV2Flags,
@@ -54,6 +54,43 @@ const createServer = (store: string, refreshDelayMs = 0) =>
     store: new URL(store),
     subscriptionRefreshDelayMs: refreshDelayMs,
   });
+
+Deno.test("memory v2 server parser ignores transact invocation and authorization payloads", () => {
+  assertEquals(
+    parseClientMessage(encodeMemoryV2Boundary({
+      type: "transact",
+      requestId: "tx-1",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { ok: true } },
+        }],
+      },
+      invocation: { iss: "did:key:alice" },
+      authorization: { signature: "sig:alice" },
+    })),
+    {
+      type: "transact",
+      requestId: "tx-1",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { ok: true } },
+        }],
+      },
+    },
+  );
+});
 
 Deno.test("memory v2 session registry scopes session ids by space", () => {
   const sessions = new SessionRegistry();

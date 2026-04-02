@@ -134,9 +134,9 @@ Rules:
 The current wire protocol uses JSON message envelopes serialized at the wire
 boundary with the shared flag-dispatched value codec. The advertised `flags`
 reflect the active runtime/storage configuration and the connection MUST fail
-loudly if the client and server disagree. Write-class requests may carry
-`invocation` / `authorization` payloads for persistence, but the transport does
-not yet require signed UCAN envelopes.
+loudly if the client and server disagree. `session.open` currently carries the
+only signed authorization material in this pass; `transact` carries just the
+semantic commit body. Per-commit signed UCAN envelopes remain deferred.
 
 ```typescript
 interface HelloMessage {
@@ -164,9 +164,7 @@ interface RequestMessage {
 }
 ```
 
-Successful write-class commands currently preserve whatever invocation /
-authorization payload the caller provided; verification remains deferred in this
-pass.
+Per-commit invocation / authorization persistence is deferred in this pass.
 
 ### 4.2.2 Server → Client: Response and Session Effect
 
@@ -246,8 +244,6 @@ interface TransactRequest {
   space: SpaceId;
   sessionId: SessionId;
   commit: ClientCommit;
-  invocation?: Record<string, unknown>;
-  authorization?: FabricValue;
 }
 
 interface Commit {
@@ -260,8 +256,8 @@ interface Commit {
     seq: number;
     resolvedPendingReads?: Array<{ localSeq: number; seq: number }>;
   };
-  invocationRef: Reference;
-  authorizationRef: Reference;
+  invocationRef: Reference | null;
+  authorizationRef: Reference | null;
   revisions: StoredRevision[];
   createdAt: string;
 }

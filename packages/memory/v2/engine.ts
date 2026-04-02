@@ -2,7 +2,6 @@ import { Database } from "@db/sqlite";
 import { fromDigest } from "merkle-reference";
 import { sha256 } from "@commontools/data-model/sha256-impl";
 import type { FabricValue } from "../interface.ts";
-import { refer } from "../reference.ts";
 import { applyPatch } from "./patch.ts";
 import { parentPath, parsePointer, pathsOverlap } from "./path.ts";
 import {
@@ -62,8 +61,8 @@ CREATE TABLE IF NOT EXISTS "commit" (
   branch             TEXT    NOT NULL DEFAULT '',
   session_id         TEXT    NOT NULL,
   local_seq          INTEGER NOT NULL,
-  invocation_ref     TEXT    NOT NULL,
-  authorization_ref  TEXT    NOT NULL,
+  invocation_ref     TEXT,
+  authorization_ref  TEXT,
   original           JSON    NOT NULL,
   resolution         JSON    NOT NULL,
   created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -457,6 +456,7 @@ export interface Engine {
   database: Database;
   snapshotInterval: number;
   snapshotRetention: number;
+  legacyCommitMetadataRefsRequired: boolean;
   statements: PreparedStatements;
 }
 
@@ -493,9 +493,9 @@ export type AuthorizationRecord = FabricValue;
 
 export interface ApplyCommitOptions {
   sessionId: SessionId;
-  invocation: InvocationRecord;
+  invocation?: InvocationRecord;
   invocationPayload?: FabricValue;
-  authorization: AuthorizationRecord;
+  authorization?: AuthorizationRecord;
   commit: ClientCommit;
 }
 
@@ -646,6 +646,7 @@ export const open = async (
     database,
     snapshotInterval,
     snapshotRetention,
+    legacyCommitMetadataRefsRequired: commitMetadataRefsRequired(database),
     statements: prepareStatements(database),
   };
 };
@@ -803,9 +804,6 @@ const applyCommitTransaction = (
   engine: Engine,
   {
     sessionId,
-    invocation,
-    invocationPayload,
-    authorization,
     commit,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
@@ -842,26 +840,31 @@ const applyCommitTransaction = (
   );
 
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
-  const storedInvocation = invocationPayload ?? invocation;
-  const invocationRef = toReference(storedInvocation);
-  const authorizationRef = toReference(authorization);
+  const invocationRef = engine.legacyCommitMetadataRefsRequired
+    ? LEGACY_EMPTY_INVOCATION_REF
+    : null;
+  const authorizationRef = engine.legacyCommitMetadataRefsRequired
+    ? LEGACY_EMPTY_AUTHORIZATION_REF
+    : null;
   const original = encodeMemoryV2Boundary(commit);
   const resolution = encodeMemoryV2Boundary(
     resolvedPendingReads.length > 0 ? { seq, resolvedPendingReads } : { seq },
   );
 
-  engine.statements.insertAuthorization.run({
-    ref: authorizationRef,
-    authorization: encodeMemoryV2Boundary(authorization),
-  });
-  engine.statements.insertInvocation.run({
-    ref: invocationRef,
-    iss: invocation.iss,
-    aud: invocation.aud ?? null,
-    cmd: invocation.cmd,
-    sub: invocation.sub,
-    invocation: encodeMemoryV2Boundary(storedInvocation),
-  });
+  if (engine.legacyCommitMetadataRefsRequired) {
+    engine.statements.insertAuthorization.run({
+      ref: LEGACY_EMPTY_AUTHORIZATION_REF,
+      authorization: encodeMemoryV2Boundary(LEGACY_EMPTY_AUTHORIZATION),
+    });
+    engine.statements.insertInvocation.run({
+      ref: LEGACY_EMPTY_INVOCATION_REF,
+      iss: LEGACY_EMPTY_INVOCATION.iss,
+      aud: LEGACY_EMPTY_INVOCATION.aud ?? null,
+      cmd: LEGACY_EMPTY_INVOCATION.cmd,
+      sub: LEGACY_EMPTY_INVOCATION.sub,
+      invocation: encodeMemoryV2Boundary(LEGACY_EMPTY_INVOCATION),
+    });
+  }
   engine.statements.insertCommit.run({
     seq,
     branch,
@@ -1419,8 +1422,26 @@ const sameStoredOriginal = (
 const revisionKey = (branch: BranchName, id: EntityId): string =>
   `${branch}\0${id}`;
 
-const toReference = (value: unknown): Reference => {
-  return refer(value as NonNullable<unknown> | null).toString() as Reference;
+const LEGACY_EMPTY_INVOCATION_REF =
+  "memory-v2:legacy-empty-invocation" as Reference;
+const LEGACY_EMPTY_AUTHORIZATION_REF =
+  "memory-v2:legacy-empty-authorization" as Reference;
+const LEGACY_EMPTY_INVOCATION: InvocationRecord = {
+  iss: "did:key:memory-v2-legacy-placeholder",
+  aud: null,
+  cmd: "/memory/transact/legacy-placeholder",
+  sub: "did:key:memory-v2-legacy-placeholder",
+};
+const LEGACY_EMPTY_AUTHORIZATION: AuthorizationRecord = {};
+
+const commitMetadataRefsRequired = (database: Database): boolean => {
+  const rows = database.prepare(`PRAGMA table_info("commit")`).all() as Array<{
+    name: string;
+    notnull: number;
+  }>;
+  const byName = new Map(rows.map((row) => [row.name, row.notnull] as const));
+  return byName.get("invocation_ref") === 1 ||
+    byName.get("authorization_ref") === 1;
 };
 
 export const hashBlobBytes = (value: Uint8Array): Reference => {
