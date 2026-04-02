@@ -697,6 +697,44 @@ describe("Engine.evaluate()", () => {
     expect(main?.default).toBe(25);
   });
 
+  it("compiles mixed CTS and non-CTS files with snapshot helpers through __ctHelpers", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/helpers.ts",
+          contents: [
+            "/// <cts-enable />",
+            'import { lift } from "commontools";',
+            "export const increment = lift((value: number) => value + 1);",
+          ].join("\n"),
+        },
+        {
+          name: "/math.ts",
+          contents: [
+            "export function pow(x: number): number {",
+            "  return x * x;",
+            "}",
+          ].join("\n"),
+        },
+        {
+          name: "/main.ts",
+          contents: [
+            'import "./helpers.ts";',
+            'import { pow } from "./math.ts";',
+            "export default pow(5);",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    expect(jsScript.js).toContain("__ctHelpers.__ct_data(");
+
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    expect(main?.default).toBe(25);
+  });
+
   it("throws when handler() relies on CTS inference without CTS", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
