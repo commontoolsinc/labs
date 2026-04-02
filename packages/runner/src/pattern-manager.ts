@@ -12,6 +12,7 @@ import { createRef } from "./create-ref.ts";
 import type { CompileResult } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import { getTopFrame } from "./builder/pattern.ts";
 
 const logger = getLogger("pattern-manager");
 
@@ -66,6 +67,7 @@ export class PatternManager {
   private patternIdMap = new Map<string, Pattern>();
   // Map from pattern object instance to patternId
   private patternToIdMap = new WeakMap<Pattern, string>();
+  private patternToVerifiedLoadId = new WeakMap<Pattern, string>();
   // Pending metadata set before the meta cell exists (e.g., spec, parents)
   private pendingMetaById = new Map<string, Partial<PatternMeta>>();
 
@@ -214,6 +216,10 @@ export class PatternManager {
   ): string {
     // Walk up derivation copies to original
     pattern = this.findOriginalPattern(pattern as Pattern);
+    const verifiedLoadId = getTopFrame()?.verifiedLoadId;
+    if (verifiedLoadId) {
+      this.patternToVerifiedLoadId.set(pattern as Pattern, verifiedLoadId);
+    }
 
     if (src && !pattern.program) {
       if (typeof src === "string") {
@@ -367,7 +373,7 @@ export class PatternManager {
     { id, jsScript }: CompileResult,
     program: RuntimeProgram,
   ): Promise<Pattern> {
-    const { main } = await this.runtime.harness.evaluate(
+    const { main, loadId } = await this.runtime.harness.evaluate(
       id,
       jsScript,
       program.files,
@@ -383,6 +389,12 @@ export class PatternManager {
     }
     const pattern = main[exportName] as Pattern;
     pattern.program = program;
+    if (loadId) {
+      this.patternToVerifiedLoadId.set(
+        this.findOriginalPattern(pattern),
+        loadId,
+      );
+    }
     return pattern;
   }
 
@@ -532,9 +544,14 @@ export class PatternManager {
       & {
         program?: RuntimeProgram;
       };
-    if (!originalPattern.program) {
+    const verifiedLoadId = this.patternToVerifiedLoadId.get(originalPattern);
+    if (!originalPattern.program && !verifiedLoadId) {
       return;
     }
-    this.runtime.harness.associatePattern(patternId, value);
+    this.runtime.harness.associatePattern(
+      patternId,
+      value,
+      verifiedLoadId,
+    );
   }
 }

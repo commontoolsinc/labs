@@ -24,7 +24,10 @@ import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { createRef } from "../create-ref.ts";
-import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
+import {
+  hardenVerifiedFunction,
+  registerVerifiedFunctionImplementation,
+} from "../sandbox/function-hardening.ts";
 
 const sourceLocationLogger = getLogger("builder.source-location", {
   enabled: false,
@@ -628,27 +631,37 @@ function ensureImplementationRef(
   implementation: (...args: any[]) => unknown,
   kind: "fn" | "handler",
 ): string {
+  const frame = getTopFrame();
   const existing = (implementation as { implementationRef?: string })
     .implementationRef;
-  if (existing) {
-    return existing;
+  const implementationRef = existing ?? (() => {
+    const source = (implementation as { src?: string }).src ??
+      implementation.name;
+    const minted = createRef({
+      kind,
+      source,
+      preview: implementation.toString(),
+      ...(frame ? { ordinal: frame.generatedIdCounter++ } : {}),
+    }, "verified implementation").toString();
+
+    if (Object.isExtensible(implementation)) {
+      Object.defineProperty(implementation, "implementationRef", {
+        value: minted,
+        configurable: true,
+        writable: true,
+      });
+    }
+
+    return minted;
+  })();
+
+  if (frame?.verifiedLoadId) {
+    frame.runtime?.harness.registerVerifiedFunction?.(
+      frame.verifiedLoadId,
+      implementationRef,
+      implementation,
+    );
   }
-
-  const source = (implementation as { src?: string }).src ??
-    implementation.name;
-  const implementationRef = createRef({
-    kind,
-    source,
-    preview: implementation.toString(),
-  }, "verified implementation").toString();
-
-  if (Object.isExtensible(implementation)) {
-    Object.defineProperty(implementation, "implementationRef", {
-      value: implementationRef,
-      configurable: true,
-      writable: true,
-    });
-  }
-
+  registerVerifiedFunctionImplementation(implementationRef, implementation);
   return implementationRef;
 }

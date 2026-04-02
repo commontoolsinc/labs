@@ -40,6 +40,12 @@ export interface CompileResult {
   jsScript: JsScript;
 }
 
+export interface EvaluateResult {
+  main?: Exports;
+  exportMap?: Record<string, Exports>;
+  loadId?: string;
+}
+
 // A `Harness` wraps a flow of compiling, bundling, and executing typescript.
 export interface Harness extends EventTarget {
   // Compiles `source` to JS without evaluation.
@@ -55,7 +61,7 @@ export interface Harness extends EventTarget {
     id: string,
     jsScript: JsScript,
     files: Source[],
-  ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }>;
+  ): Promise<EvaluateResult>;
 
   // Resolves a `ProgramResolver` into a `Program` using the engine's
   // configuration.
@@ -66,6 +72,17 @@ export interface Harness extends EventTarget {
   invoke(fn: () => any): any;
 
   getInvocation(source: string): HarnessedFunction;
+
+  getVerifiedLoadId?(
+    implementationRef: string,
+    patternId?: string,
+  ): string | undefined;
+
+  registerVerifiedFunction?(
+    loadId: string,
+    implementationRef: string,
+    implementation: HarnessedFunction,
+  ): void;
 
   unsafeTrustHostValue(
     value: unknown,

@@ -241,6 +241,7 @@ export type Frame = {
   parent?: Frame;
   cause?: unknown;
   generatedIdCounter: number;
+  verifiedLoadId?: string;
   runtime?: Runtime;
   tx?: IExtendedStorageTransaction;
   space?: MemorySpace;

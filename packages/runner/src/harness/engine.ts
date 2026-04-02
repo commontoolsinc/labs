@@ -39,7 +39,10 @@ import {
   createModuleCompartmentGlobals,
   createSafeConsoleGlobal,
 } from "../sandbox/compartment-globals.ts";
-import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
+import {
+  hardenVerifiedFunction,
+  setVerifiedFunctionRegistrar,
+} from "../sandbox/function-hardening.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import {
   BundlePreflightError,
@@ -118,10 +121,12 @@ export class Engine extends EventTarget implements Harness {
     Map<string, HarnessedFunction>
   >();
   private readonly verifiedFunctionIndex = new Map<string, HarnessedFunction>();
+  private readonly verifiedFunctionLoadIds = new Map<string, string>();
   private readonly verifiedPatternFunctions = new Map<
     string,
     Map<string, HarnessedFunction>
   >();
+  private readonly verifiedPatternLoadIds = new Map<string, string>();
   private readonly trustedHostFunctionIndex = new Map<
     string,
     HarnessedFunction
@@ -223,7 +228,9 @@ export class Engine extends EventTarget implements Harness {
     id: string,
     jsScript: JsScript,
     files: Source[],
-  ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
+  ): Promise<
+    { main?: Exports; exportMap?: Record<string, Exports>; loadId?: string }
+  > {
     logger.timeStart("evaluate");
     try {
       this.verifyCompiledBundle(jsScript, `${id}.js`);
@@ -234,6 +241,7 @@ export class Engine extends EventTarget implements Harness {
       const runtimeDeps = this.createRuntimeDeps(runtimeExports ?? {});
       const sourceLocationFrame = pushFrame({
         runtime: this.ctRuntime,
+        verifiedLoadId: loadId,
         sourceLocationContext: {
           script: jsScript.js,
           filename: jsScript.filename ?? `${loadId}.js`,
@@ -242,8 +250,16 @@ export class Engine extends EventTarget implements Harness {
       });
       let result;
       try {
+        setVerifiedFunctionRegistrar((implementationRef, implementation) => {
+          this.registerVerifiedFunction(
+            loadId,
+            implementationRef,
+            implementation,
+          );
+        });
         result = isolate.execute(jsScript).invoke(runtimeDeps).inner();
       } finally {
+        setVerifiedFunctionRegistrar(undefined);
         popFrame(sourceLocationFrame);
       }
       if (
@@ -277,9 +293,9 @@ export class Engine extends EventTarget implements Harness {
         }
         exportsCallback(exportsByValue);
 
-        return { main, exportMap };
+        return { main, exportMap, loadId };
       }
-      return {};
+      return { loadId };
     } finally {
       logger.timeEnd("evaluate");
     }
@@ -304,6 +320,21 @@ export class Engine extends EventTarget implements Harness {
     return this.getSESRuntime().evaluateCallback(source) as HarnessedFunction;
   }
 
+  registerVerifiedFunction(
+    loadId: string,
+    implementationRef: string,
+    implementation: HarnessedFunction,
+  ): void {
+    let registry = this.verifiedFunctions.get(loadId);
+    if (!registry) {
+      registry = new Map();
+      this.verifiedFunctions.set(loadId, registry);
+    }
+    registry.set(implementationRef, implementation);
+    this.verifiedFunctionIndex.set(implementationRef, implementation);
+    this.verifiedFunctionLoadIds.set(implementationRef, loadId);
+  }
+
   getVerifiedFunction(
     implementationRef: string,
     patternId?: string,
@@ -315,6 +346,14 @@ export class Engine extends EventTarget implements Harness {
       }
     }
     return this.verifiedFunctionIndex.get(implementationRef);
+  }
+
+  getVerifiedLoadId(
+    implementationRef: string,
+    patternId?: string,
+  ): string | undefined {
+    return this.verifiedFunctionLoadIds.get(implementationRef) ??
+      (patternId ? this.verifiedPatternLoadIds.get(patternId) : undefined);
   }
 
   getTrustedHostFunction(
@@ -331,7 +370,7 @@ export class Engine extends EventTarget implements Harness {
       this.getTrustedHostFunction(implementationRef);
   }
 
-  associatePattern(patternId: string, value: unknown): void {
+  associatePattern(patternId: string, value: unknown, loadId?: string): void {
     const registry = new Map<string, HarnessedFunction>();
     this.collectAssociatedFunctions(
       value,
@@ -340,6 +379,9 @@ export class Engine extends EventTarget implements Harness {
       (implementationRef) => this.getVerifiedFunction(implementationRef),
     );
     this.verifiedPatternFunctions.set(patternId, registry);
+    if (loadId) {
+      this.verifiedPatternLoadIds.set(patternId, loadId);
+    }
   }
 
   unsafeTrustHostValue(
@@ -416,7 +458,9 @@ export class Engine extends EventTarget implements Harness {
     this.internals = undefined;
     this.verifiedFunctions.clear();
     this.verifiedFunctionIndex.clear();
+    this.verifiedFunctionLoadIds.clear();
     this.verifiedPatternFunctions.clear();
+    this.verifiedPatternLoadIds.clear();
     this.trustedHostFunctionIndex.clear();
     this.verifiedBundleHashes.clear();
   }
@@ -545,6 +589,7 @@ export class Engine extends EventTarget implements Harness {
         .implementation as HarnessedFunction;
       registry.set(implementationRef, implementation);
       this.verifiedFunctionIndex.set(implementationRef, implementation);
+      this.verifiedFunctionLoadIds.set(implementationRef, loadId);
     }
 
     if (typeof value === "function") {
@@ -561,6 +606,7 @@ export class Engine extends EventTarget implements Harness {
           implementationRef,
           value as HarnessedFunction,
         );
+        this.verifiedFunctionLoadIds.set(implementationRef, loadId);
       }
     }
 
@@ -582,9 +628,17 @@ export class Engine extends EventTarget implements Harness {
           implementationRef,
         );
         if (replacement) {
-          this.verifiedFunctionIndex.set(implementationRef, replacement);
+          this.verifiedFunctionIndex.set(
+            implementationRef,
+            replacement.implementation,
+          );
+          this.verifiedFunctionLoadIds.set(
+            implementationRef,
+            replacement.loadId,
+          );
         } else {
           this.verifiedFunctionIndex.delete(implementationRef);
+          this.verifiedFunctionLoadIds.delete(implementationRef);
         }
       }
     }
@@ -594,15 +648,20 @@ export class Engine extends EventTarget implements Harness {
   private findVerifiedFunctionInOtherLoads(
     loadId: string,
     implementationRef: string,
-  ): HarnessedFunction | undefined {
-    let replacement: HarnessedFunction | undefined;
+  ): { implementation: HarnessedFunction; loadId: string } | undefined {
+    let replacement:
+      | { implementation: HarnessedFunction; loadId: string }
+      | undefined;
     for (const [otherLoadId, registry] of this.verifiedFunctions) {
       if (otherLoadId === loadId) {
         continue;
       }
       const candidate = registry.get(implementationRef);
       if (candidate) {
-        replacement = candidate;
+        replacement = {
+          implementation: candidate,
+          loadId: otherLoadId,
+        };
       }
     }
     return replacement;

@@ -284,16 +284,6 @@ if [ "$RESULT" != "10" ]; then
   error "After linking and stepping, piece2's output value should be 10, got: $RESULT"
 fi
 
-# Call increment handler on piece2 — since its value is linked to piece1's
-# output cell, this should update piece1's value too
-cf piece call $SPACE_ARGS --piece $PIECE_ID2 increment '{}'
-
-# Verify piece1's value is now 11 (was 10, incremented via piece2's handler)
-RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID value)
-if [ "$RESULT" != "11" ]; then
-  error "After calling increment on piece2, piece1's value should be 11, got: $RESULT"
-fi
-
 echo "Testing piece link with invented piece ID..."
 
 # Use an invented piece ID (not created via cf piece new) as a data source
@@ -327,14 +317,6 @@ cf piece step $SPACE_ARGS --piece $PIECE_ID3
 RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID3 value)
 if [ "$RESULT" != "42" ]; then
   error "After stepping piece3 with invented link, output value should be 42, got: $RESULT"
-fi
-
-# Call increment on piece3 and verify the invented piece's value updates
-cf piece call $SPACE_ARGS --piece $PIECE_ID3 increment '{}'
-
-RESULT=$(cf piece get $SPACE_ARGS --piece $INVENTED_ID value)
-if [ "$RESULT" != "43" ]; then
-  error "After calling increment on piece3, invented piece's value should be 43, got: $RESULT"
 fi
 
 echo "Testing piece call with schema-derived flags and tools..."

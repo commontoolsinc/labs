@@ -175,42 +175,15 @@ describe("shell piece tests", () => {
                 value?: {
                   activePattern?: {
                     id(): string;
-                    cell(): {
-                      key(name: string): {
-                        sync(): Promise<unknown>;
-                      };
-                    };
                   };
                 };
               };
             }
             | null;
           const activePattern = appView?._patterns?.value?.activePattern;
-          if (!activePattern || activePattern.id() !== expectedPieceId) {
-            return false;
-          }
-          const decrement = activePattern.cell().key("decrement");
-          return decrement.sync().then(() => true, () => false);
+          return activePattern?.id() === expectedPieceId;
         }, { args: [pieceId] });
       });
-    };
-
-    const clickDecrement = async (fromValue: number) => {
-      await waitFor(async () =>
-        (await piece.result.get(["value"])) === fromValue
-      );
-
-      await waitFor(async () => {
-        try {
-          await pierce(page, "#counter-decrement", 500);
-          return true;
-        } catch {
-          return false;
-        }
-      });
-
-      const decrementButton = await pierce(page, "#counter-decrement");
-      await decrementButton.click();
     };
 
     try {
@@ -221,12 +194,37 @@ describe("shell piece tests", () => {
     }
     await waitFor(async () => (await piece.result.get(["value"])) === 0);
 
-    await clickDecrement(0);
+    await clickPieceButton(page, "#counter-decrement");
     try {
       await waitFor(async () => (await piece.result.get(["value"])) === -1);
     } catch (error) {
       await logDebugSnapshot("shell piece decrement debug");
       throw error;
     }
+
+    await clickPieceButton(page, "#counter-decrement");
+    try {
+      await waitFor(async () => (await piece.result.get(["value"])) === -2);
+    } catch (error) {
+      await logDebugSnapshot("shell piece decrement debug");
+      throw error;
+    }
   });
 });
+
+function clickPieceButton(
+  page: ReturnType<ShellIntegration["page"]>,
+  selector: string,
+) {
+  return waitFor(async () => {
+    try {
+      const button = await page.waitForSelector(selector, {
+        strategy: "pierce",
+      });
+      await button.click();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  });
+}

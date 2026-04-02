@@ -1,3 +1,23 @@
+type VerifiedFunctionRegistrar = (
+  implementationRef: string,
+  fn: (...args: any[]) => unknown,
+) => void;
+
+let verifiedFunctionRegistrar: VerifiedFunctionRegistrar | undefined;
+
+export function setVerifiedFunctionRegistrar(
+  registrar: VerifiedFunctionRegistrar | undefined,
+): void {
+  verifiedFunctionRegistrar = registrar;
+}
+
+export function registerVerifiedFunctionImplementation(
+  implementationRef: string,
+  fn: (...args: any[]) => unknown,
+): void {
+  verifiedFunctionRegistrar?.(implementationRef, fn);
+}
+
 export function hardenVerifiedFunction<T extends (...args: any[]) => unknown>(
   fn: T,
 ): T {

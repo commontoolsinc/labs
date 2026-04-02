@@ -1257,6 +1257,7 @@ export class Runner {
 
     let fn: (inputs: any) => any;
     const patternId = this.runtime.patternManager.getPatternId(pattern);
+    let verifiedLoadId: string | undefined;
 
     if (module.implementationRef) {
       const cached = this.functionCache.get(module) ??
@@ -1271,6 +1272,10 @@ export class Runner {
       }
       this.functionCache.set(module, cached as (inputs: any) => any);
       fn = cached as (inputs: any) => any;
+      verifiedLoadId = this.runtime.harness.getVerifiedLoadId?.(
+        module.implementationRef,
+        patternId,
+      );
     } else if (typeof module.implementation === "string") {
       const cached = this.functionCache.get(module);
       if (cached) {
@@ -1356,6 +1361,7 @@ export class Runner {
             runtime: this.runtime,
             space: processCell.space,
             tx,
+            ...(verifiedLoadId ? { verifiedLoadId } : {}),
           },
         );
 
@@ -1602,6 +1608,7 @@ export class Runner {
             runtime: this.runtime,
             space: processCell.space,
             tx,
+            ...(verifiedLoadId ? { verifiedLoadId } : {}),
           },
         );
         // Store the frame on the action so the scheduler can attach it to

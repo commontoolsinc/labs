@@ -388,6 +388,7 @@ export function pushFrame(frame: Partial<Frame> = {}): Frame {
     parent,
     opaqueRefs: new Set(),
     generatedIdCounter: 0,
+    ...(parent?.verifiedLoadId && { verifiedLoadId: parent.verifiedLoadId }),
     ...(parent?.runtime && { runtime: parent.runtime }),
     ...(parent?.tx && { tx: parent.tx }),
     ...(parent?.space && { space: parent.space }),
@@ -406,13 +407,15 @@ export function pushFrameFromCause(
   props: {
     unsafe_binding?: UnsafeBinding;
     inHandler?: boolean;
+    verifiedLoadId?: string;
     runtime?: Runtime;
     tx?: IExtendedStorageTransaction;
     space?: MemorySpace;
   },
 ): Frame {
   const parent = getTopFrame();
-  const { unsafe_binding, inHandler, runtime, tx, space } = props;
+  const { unsafe_binding, inHandler, runtime, tx, space, verifiedLoadId } =
+    props;
 
   // If no runtime provided, try to inherit from parent (may be undefined during construction)
   const frameRuntime = runtime ?? parent?.runtime;
@@ -424,6 +427,8 @@ export function pushFrameFromCause(
     cause,
     generatedIdCounter: 0,
     opaqueRefs: new Set(),
+    ...(parent?.verifiedLoadId && { verifiedLoadId: parent.verifiedLoadId }),
+    ...(verifiedLoadId && { verifiedLoadId }),
     ...(frameRuntime && { runtime: frameRuntime }),
     ...(frameSpace && { space: frameSpace }),
     ...(frameTx && { tx: frameTx }),
