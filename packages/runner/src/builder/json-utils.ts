@@ -174,7 +174,7 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
     const linkAsStr = JSON.stringify(link);
 
     const found = seen.get(linkAsStr);
-    if (found) {
+    if (found !== undefined) {
       return found;
     }
 
