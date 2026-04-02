@@ -181,7 +181,9 @@ export function schemaWithoutProperties(
  * if there is no well-defined type for the value. The result is always interned
  * (and frozen).
  */
-export function schemaForValueType(value: FabricValue): JSONSchemaObj | undefined {
+export function schemaForValueType(
+  value: FabricValue,
+): JSONSchemaObj | undefined {
   // TODO(danfuzz): This is a place that will need to get smarter once we
   // actually want to accept values beyond what's strictly allowed in JSON. This
   // notably includes `undefined` and all the other non-plain-object
@@ -226,8 +228,7 @@ export function emptySchemaObject() {
   if (found) {
     return found;
   } else {
-    const result = BASIC_SCHEMAS[key] =
-      internSchema({}) as JSONSchemaObj;
+    const result = BASIC_SCHEMAS[key] = internSchema({}) as JSONSchemaObj;
     return result;
   }
 }
@@ -242,8 +243,9 @@ function getBasicSchema(key: string) {
   if (found) {
     return found;
   } else {
-    const result = BASIC_SCHEMAS[key] =
-      internSchema({ type: key as JSONSchemaTypes }) as JSONSchemaObj;
+    const result = BASIC_SCHEMAS[key] = internSchema({
+      type: key as JSONSchemaTypes,
+    }) as JSONSchemaObj;
     return result;
   }
 }
