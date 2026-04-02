@@ -311,3 +311,16 @@ export function findInternedSchema(
   const resultSah = schemaToSah.get(schema);
   return wantSchemaAndHash ? resultSah : resultSah!.schema;
 }
+
+/**
+ * Indicates whether or not the given `schema` is already interned. This returns
+ * `false` even if there is already a schema in the intern cache that is
+ * equivalent to the given one.
+ */
+export function isInternedSchema(schema: JSONSchema): boolean {
+  if (typeof schema === "boolean") {
+    return true;
+  }
+
+  return schemaToSah.has(schema);
+}
