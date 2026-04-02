@@ -3,6 +3,7 @@ import ts from "typescript";
 
 import {
   classifyArrayCallbackContainerCall,
+  classifyArrayMethodCall,
   classifyArrayMethodCallSite,
   detectCallKind,
   getCapabilitySummaryCallbackArgument,
@@ -209,6 +210,29 @@ Deno.test("classifyArrayMethodCallSite does not mark custom lowered *WithPattern
     classifyArrayCallbackContainerCall(expression, checker),
     undefined,
   );
+});
+
+Deno.test("array method classification ignores prototype-key names", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare function derive<T>(value: T): T;
+
+    const propertyAccess = derive([1, 2, 3]).constructor((n: number) => n + 1);
+    const elementAccess = derive([1, 2, 3])["constructor"]((n: number) => n + 1);
+  `);
+
+  const propertyAccess = findInitializer(sourceFile, "propertyAccess");
+  const elementAccess = findInitializer(sourceFile, "elementAccess");
+  if (
+    !ts.isCallExpression(propertyAccess) ||
+    !ts.isCallExpression(elementAccess)
+  ) {
+    throw new Error("Expected call expression initializers");
+  }
+
+  assertEquals(classifyArrayMethodCall(propertyAccess), undefined);
+  assertEquals(classifyArrayMethodCall(elementAccess), undefined);
+  assertEquals(detectCallKind(propertyAccess, checker), undefined);
+  assertEquals(detectCallKind(elementAccess, checker), undefined);
 });
 
 Deno.test("classifyArrayCallbackContainerCall recognizes plain value-returning non-map array callbacks", () => {

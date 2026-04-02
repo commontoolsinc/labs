@@ -80,16 +80,24 @@ export interface ArrayMethodAccessKind {
   readonly lowered: boolean;
 }
 
-const ARRAY_METHOD_ACCESS_BY_NAME: Readonly<
-  Record<string, ArrayMethodAccessKind | undefined>
-> = {
-  map: { family: "map", lowered: false },
-  mapWithPattern: { family: "map", lowered: true },
-  filter: { family: "filter", lowered: false },
-  filterWithPattern: { family: "filter", lowered: true },
-  flatMap: { family: "flatMap", lowered: false },
-  flatMapWithPattern: { family: "flatMap", lowered: true },
-};
+const ARRAY_METHOD_ACCESS_BY_NAME = new Map<string, ArrayMethodAccessKind>([
+  ["map", { family: "map", lowered: false }],
+  ["mapWithPattern", { family: "map", lowered: true }],
+  ["filter", { family: "filter", lowered: false }],
+  ["filterWithPattern", { family: "filter", lowered: true }],
+  ["flatMap", { family: "flatMap", lowered: false }],
+  ["flatMapWithPattern", { family: "flatMap", lowered: true }],
+]);
+
+function getArrayMethodAccessKindByName(
+  name: string,
+): ArrayMethodAccessKind | undefined {
+  return ARRAY_METHOD_ACCESS_BY_NAME.get(name);
+}
+
+function isKnownArrayMethodName(name: string): boolean {
+  return ARRAY_METHOD_ACCESS_BY_NAME.has(name);
+}
 
 export type ArrayMethodOwnership = "plain" | "reactive";
 
@@ -417,7 +425,7 @@ export function classifyArrayMethodAccess(
     }
   }
 
-  return methodName ? ARRAY_METHOD_ACCESS_BY_NAME[methodName] : undefined;
+  return methodName ? getArrayMethodAccessKindByName(methodName) : undefined;
 }
 
 export function classifyArrayMethodCall(
@@ -951,7 +959,7 @@ function resolveExpressionKind(
 
   if (ts.isPropertyAccessExpression(target)) {
     const name = target.name.text;
-    if (ARRAY_METHOD_ACCESS_BY_NAME[name]) {
+    if (isKnownArrayMethodName(name)) {
       // Fallback path: when symbol resolution doesn't already identify the
       // array-method family, only treat it as such for reactive receivers.
       if (isReactiveArrayMethodReceiverExpression(target.expression, checker)) {
@@ -1043,7 +1051,7 @@ export function isConsumedByTerminalChainCall(
       ts.isPropertyAccessExpression(parent) && parent.expression === current
     ) {
       const memberName = parent.name.text;
-      if (ARRAY_METHOD_ACCESS_BY_NAME[memberName]) {
+      if (isKnownArrayMethodName(memberName)) {
         const callParent = parent.parent;
         if (
           callParent &&
@@ -1619,7 +1627,7 @@ function detectCellMethodFromDeclaration(
 function isArrayMethodDeclaration(declaration: ts.Declaration): boolean {
   return isMethodDeclarationOwnedBy(
     declaration,
-    (name) => !!ARRAY_METHOD_ACCESS_BY_NAME[name],
+    isKnownArrayMethodName,
     ARRAY_OWNER_NAMES,
   );
 }
@@ -1627,7 +1635,7 @@ function isArrayMethodDeclaration(declaration: ts.Declaration): boolean {
 function isOpaqueRefMethodDeclaration(declaration: ts.Declaration): boolean {
   return isMethodDeclarationOwnedBy(
     declaration,
-    (name) => !!ARRAY_METHOD_ACCESS_BY_NAME[name],
+    isKnownArrayMethodName,
     OPAQUE_REF_OWNER_NAMES,
   );
 }
