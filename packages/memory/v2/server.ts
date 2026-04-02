@@ -51,6 +51,7 @@ import {
 } from "./query.ts";
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
+const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
 type SessionCacheEntry = SessionSyncUpsert;
 
 type SessionState = {
@@ -373,6 +374,8 @@ class Connection {
   #closed = false;
   #sessions = new Map<string, SessionHandle>();
   #receiving: Promise<void> = Promise.resolve();
+  #pendingReceives = 0;
+  #receiveIdle: PromiseWithResolvers<void> | null = null;
 
   constructor(
     readonly id: string,
@@ -410,12 +413,45 @@ class Connection {
   }
 
   async receive(payload: string): Promise<void> {
-    const previous = this.#receiving;
-    const current = previous.catch(() => undefined).then(() =>
-      this.receiveOrdered(payload)
-    );
-    this.#receiving = current.then(() => undefined, () => undefined);
-    return await current;
+    this.#pendingReceives += 1;
+    try {
+      const previous = this.#receiving;
+      const current = previous.catch(() => undefined).then(() =>
+        this.receiveOrdered(payload)
+      );
+      this.#receiving = current.then(() => undefined, () => undefined);
+      return await current;
+    } finally {
+      this.#pendingReceives = Math.max(0, this.#pendingReceives - 1);
+      if (this.#pendingReceives === 0) {
+        this.#receiveIdle?.resolve();
+        this.#receiveIdle = null;
+      }
+    }
+  }
+
+  hasPendingReceives(): boolean {
+    return this.#pendingReceives > 0;
+  }
+
+  async waitForReceiveQueueToDrain(deadlineMs: number): Promise<boolean> {
+    while (this.#pendingReceives > 0) {
+      const remainingMs = deadlineMs - Date.now();
+      if (remainingMs <= 0) {
+        return false;
+      }
+      if (this.#receiveIdle === null) {
+        this.#receiveIdle = Promise.withResolvers<void>();
+      }
+      const idle = this.#receiveIdle.promise.then(() => true);
+      const timeout = new Promise<boolean>((resolve) => {
+        setTimeout(() => resolve(false), remainingMs);
+      });
+      if (!await Promise.race([idle, timeout])) {
+        return this.#pendingReceives === 0;
+      }
+    }
+    return true;
   }
 
   private requireSession(
@@ -623,6 +659,7 @@ export class Server {
   #dirtyDocsBySpace = new Map<string, Set<string>>();
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
+  #lastRefreshDurationMs = 0;
   #store?: URL;
 
   constructor(
@@ -1236,11 +1273,19 @@ export class Server {
   async flushSessions(spaces?: Iterable<string>): Promise<void> {
     this.cancelScheduledRefresh();
     const run = async () => {
-      await this.refreshLoop(
-        spaces === undefined ? undefined : new Set(spaces),
-      );
-      if (spaces !== undefined && this.#dirtySpaces.size > 0) {
-        this.scheduleRefresh();
+      const refreshStart = Date.now();
+      try {
+        await this.refreshLoop(
+          spaces === undefined ? undefined : new Set(spaces),
+        );
+      } finally {
+        this.#lastRefreshDurationMs = Math.max(
+          0,
+          Date.now() - refreshStart,
+        );
+        if (spaces !== undefined && this.#dirtySpaces.size > 0) {
+          this.scheduleRefresh();
+        }
       }
     };
 
@@ -1260,10 +1305,48 @@ export class Server {
     this.#refreshTimer = setTimeout(
       () => {
         this.#refreshTimer = null;
-        void this.flushSessions();
+        void this.flushScheduledSessions();
       },
       this.options.subscriptionRefreshDelayMs ?? SUBSCRIPTION_REFRESH_DELAY_MS,
     );
+  }
+
+  private async flushScheduledSessions(): Promise<void> {
+    await this.waitForConnectionQueuesToDrain(
+      Math.max(
+        MIN_REFRESH_QUEUE_DRAIN_WAIT_MS,
+        this.#lastRefreshDurationMs * 2,
+      ),
+    );
+    await this.flushSessions();
+  }
+
+  private async waitForConnectionQueuesToDrain(
+    maxWaitMs: number,
+  ): Promise<void> {
+    const deadlineMs = Date.now() + maxWaitMs;
+    while (true) {
+      const pending = [...this.#connections.values()].filter((connection) =>
+        connection.hasPendingReceives()
+      );
+      if (pending.length === 0) {
+        return;
+      }
+      if (Date.now() >= deadlineMs) {
+        return;
+      }
+      const drained = await Promise.all(
+        pending.map((connection) =>
+          connection.waitForReceiveQueueToDrain(deadlineMs)
+        ),
+      );
+      if (drained.every(Boolean)) {
+        return;
+      }
+      if (Date.now() >= deadlineMs) {
+        return;
+      }
+    }
   }
 
   private cancelScheduledRefresh(): void {
@@ -1280,6 +1363,14 @@ export class Server {
   private async refreshLoop(initial?: Set<string>): Promise<void> {
     let pending = initial;
     while (true) {
+      if (initial === undefined && this.#dirtySpaces.size > 0) {
+        await this.waitForConnectionQueuesToDrain(
+          Math.max(
+            MIN_REFRESH_QUEUE_DRAIN_WAIT_MS,
+            this.#lastRefreshDurationMs * 2,
+          ),
+        );
+      }
       const spaces = pending ? [...pending] : [...this.#dirtySpaces];
       if (spaces.length === 0) {
         return;

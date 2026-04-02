@@ -1886,3 +1886,374 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
     await server.close();
   }
 });
+
+Deno.test("memory v2 server waits for queued receives before rerunning scheduled watch refresh", async () => {
+  const time = new FakeTime();
+  const server = createServer(
+    "memory://memory-v2-server-refresh-after-queue-drain",
+    1,
+  );
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-server-refresh-after-queue-drain";
+  const originalSync = server.syncSessionForConnection.bind(server);
+  const originalTransact = server.transact.bind(server);
+  const releaseFirstRefresh = Promise.withResolvers<void>();
+  const releaseTx3 = Promise.withResolvers<void>();
+  let syncCalls = 0;
+
+  (server as unknown as {
+    syncSessionForConnection(
+      ...args: Parameters<Server["syncSessionForConnection"]>
+    ): ReturnType<Server["syncSessionForConnection"]>;
+  }).syncSessionForConnection = async (...args) => {
+    syncCalls += 1;
+    if (syncCalls === 1) {
+      await releaseFirstRefresh.promise;
+    }
+    return await originalSync(...args);
+  };
+
+  (server as unknown as {
+    transact(
+      message: Parameters<Server["transact"]>[0],
+    ): ReturnType<Server["transact"]>;
+  }).transact = async (message) => {
+    if (message.requestId === "tx-3") {
+      await releaseTx3.promise;
+    }
+    return await originalTransact(message);
+  };
+
+  try {
+    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    shiftMessage(messages);
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+    }));
+    const opened = assertResponse<{ sessionId: string }>(
+      shiftMessage(messages),
+    );
+    const sessionId = opened.ok!.sessionId;
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "session.watch.set",
+      requestId: "watch-1",
+      space,
+      sessionId,
+      watches: [
+        {
+          id: "root-1",
+          kind: "graph",
+          query: {
+            roots: [{
+              id: "of:doc:1",
+              selector: {
+                path: [],
+                schema: false,
+              },
+            }],
+          },
+        },
+        {
+          id: "root-2",
+          kind: "graph",
+          query: {
+            roots: [{
+              id: "of:doc:2",
+              selector: {
+                path: [],
+                schema: false,
+              },
+            }],
+          },
+        },
+      ],
+    }));
+    shiftMessage(messages);
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "transact",
+      requestId: "tx-1",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { version: 1 } },
+        }],
+      },
+    }));
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-1");
+
+    await time.tickAsync(1);
+    await time.tickAsync(0);
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "transact",
+      requestId: "tx-2",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:2",
+          value: { value: { version: 2 } },
+        }],
+      },
+    }));
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-2");
+
+    const tx3 = connection.receive(encodeMemoryV2Boundary({
+      type: "transact",
+      requestId: "tx-3",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { version: 3 } },
+        }],
+      },
+    }));
+
+    await time.tickAsync(0);
+    releaseFirstRefresh.resolve();
+    await time.tickAsync(0);
+
+    const firstEffect = assertEffect(shiftMessage(messages));
+    assertEquals(firstEffect.effect.toSeq, 2);
+    assertEquals(firstEffect.effect.upserts, [{
+      branch: "",
+      id: "of:doc:1",
+      seq: 1,
+      doc: {
+        value: { version: 1 },
+      },
+    }]);
+    assertEquals(messages, []);
+
+    releaseTx3.resolve();
+    await tx3;
+    await time.tickAsync(0);
+
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-3");
+    const secondEffect = assertEffect(shiftMessage(messages));
+    assertEquals(secondEffect.effect.toSeq, 3);
+    assertEquals(secondEffect.effect.upserts, [{
+      branch: "",
+      id: "of:doc:1",
+      seq: 3,
+      doc: {
+        value: { version: 3 },
+      },
+    }, {
+      branch: "",
+      id: "of:doc:2",
+      seq: 2,
+      doc: {
+        value: { version: 2 },
+      },
+    }]);
+    assertEquals(messages, []);
+  } finally {
+    await server.close();
+    time.restore();
+  }
+});
+
+Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", async () => {
+  const time = new FakeTime();
+  const server = createServer(
+    "memory://memory-v2-server-refresh-max-deferral",
+    1,
+  );
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-server-refresh-max-deferral";
+  const originalSync = server.syncSessionForConnection.bind(server);
+  const originalTransact = server.transact.bind(server);
+  const releaseFirstRefresh = Promise.withResolvers<void>();
+  const releaseTx3 = Promise.withResolvers<void>();
+  let syncCalls = 0;
+
+  (server as unknown as {
+    syncSessionForConnection(
+      ...args: Parameters<Server["syncSessionForConnection"]>
+    ): ReturnType<Server["syncSessionForConnection"]>;
+  }).syncSessionForConnection = async (...args) => {
+    syncCalls += 1;
+    if (syncCalls === 1) {
+      await releaseFirstRefresh.promise;
+    }
+    return await originalSync(...args);
+  };
+
+  (server as unknown as {
+    transact(
+      message: Parameters<Server["transact"]>[0],
+    ): ReturnType<Server["transact"]>;
+  }).transact = async (message) => {
+    if (message.requestId === "tx-3") {
+      await releaseTx3.promise;
+    }
+    return await originalTransact(message);
+  };
+
+  try {
+    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    shiftMessage(messages);
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+    }));
+    const opened = assertResponse<{ sessionId: string }>(
+      shiftMessage(messages),
+    );
+    const sessionId = opened.ok!.sessionId;
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "session.watch.set",
+      requestId: "watch-1",
+      space,
+      sessionId,
+      watches: [
+        {
+          id: "root-1",
+          kind: "graph",
+          query: {
+            roots: [{
+              id: "of:doc:1",
+              selector: {
+                path: [],
+                schema: false,
+              },
+            }],
+          },
+        },
+        {
+          id: "root-2",
+          kind: "graph",
+          query: {
+            roots: [{
+              id: "of:doc:2",
+              selector: {
+                path: [],
+                schema: false,
+              },
+            }],
+          },
+        },
+      ],
+    }));
+    shiftMessage(messages);
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "transact",
+      requestId: "tx-1",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { version: 1 } },
+        }],
+      },
+    }));
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-1");
+
+    await time.tickAsync(1);
+    await time.tickAsync(0);
+
+    await connection.receive(encodeMemoryV2Boundary({
+      type: "transact",
+      requestId: "tx-2",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:2",
+          value: { value: { version: 2 } },
+        }],
+      },
+    }));
+    assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-2");
+
+    const tx3 = connection.receive(encodeMemoryV2Boundary({
+      type: "transact",
+      requestId: "tx-3",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { version: 3 } },
+        }],
+      },
+    }));
+
+    await time.tickAsync(0);
+    releaseFirstRefresh.resolve();
+    await time.tickAsync(0);
+
+    const firstEffect = assertEffect(shiftMessage(messages));
+    assertEquals(firstEffect.effect.toSeq, 2);
+    assertEquals(firstEffect.effect.upserts, [{
+      branch: "",
+      id: "of:doc:1",
+      seq: 1,
+      doc: {
+        value: { version: 1 },
+      },
+    }]);
+    assertEquals(messages, []);
+
+    await time.tickAsync(499);
+    await time.tickAsync(0);
+    assertEquals(messages, []);
+
+    await time.tickAsync(1);
+    await time.tickAsync(0);
+    const secondEffect = assertEffect(shiftMessage(messages));
+    assertEquals(secondEffect.effect.toSeq, 2);
+    assertEquals(secondEffect.effect.upserts, [{
+      branch: "",
+      id: "of:doc:2",
+      seq: 2,
+      doc: {
+        value: { version: 2 },
+      },
+    }]);
+    assertEquals(messages, []);
+
+    releaseTx3.resolve();
+    await tx3;
+  } finally {
+    await server.close();
+    time.restore();
+  }
+});
