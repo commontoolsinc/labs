@@ -640,7 +640,7 @@ describe("schemaWithoutProperties", () => {
     const schema: JSONSchemaObj = { type: "object", asCell: true };
     schemaWithoutProperties(schema, "asCell");
 
-    assert(schema.asCell);
+    assertStrictEquals(schema.asCell, true);
   });
 
   it("is a no-op (deep-frozen clone) when the named property is absent from a mutable schema", () => {
