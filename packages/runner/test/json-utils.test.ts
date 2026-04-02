@@ -34,13 +34,79 @@ describe("json-utils", () => {
   });
 
   describe("createJsonSchema", () => {
-    it("should create schema for primitive types", () => {
+    it("should create schema for string", () => {
       expect(createJsonSchema("test")).toEqual({ type: "string" });
+      expect(createJsonSchema(["test"])).toEqual({
+        type: "array",
+        items: { type: "string" },
+      });
+      expect(createJsonSchema({ prop: "test" })).toEqual({
+        type: "object",
+        properties: { prop: { type: "string" } },
+      });
+    });
+
+    it("should create schema for integer", () => {
       expect(createJsonSchema(42)).toEqual({ type: "integer" });
+      expect(createJsonSchema([42])).toEqual({
+        type: "array",
+        items: { type: "integer" },
+      });
+      expect(createJsonSchema({ prop: 42 })).toEqual({
+        type: "object",
+        properties: { prop: { type: "integer" } },
+      });
+    });
+
+    it("should create schema for number", () => {
       expect(createJsonSchema(3.14)).toEqual({ type: "number" });
+      expect(createJsonSchema([3.14])).toEqual({
+        type: "array",
+        items: { type: "number" },
+      });
+      expect(createJsonSchema({ prop: 3.14 })).toEqual({
+        type: "object",
+        properties: { prop: { type: "number" } },
+      });
+    });
+
+    it("should create schema for boolean", () => {
       expect(createJsonSchema(true)).toEqual({ type: "boolean" });
+      expect(createJsonSchema([true])).toEqual({
+        type: "array",
+        items: { type: "boolean" },
+      });
+      expect(createJsonSchema({ prop: true })).toEqual({
+        type: "object",
+        properties: { prop: { type: "boolean" } },
+      });
+    });
+
+    it("should create schema for null", () => {
       expect(createJsonSchema(null)).toEqual({ type: "null" });
+      expect(createJsonSchema([null])).toEqual({
+        type: "array",
+        items: { type: "null" },
+      });
+      expect(createJsonSchema({ prop: null })).toEqual({
+        type: "object",
+        properties: { prop: { type: "null" } },
+      });
+    });
+
+    it("should create schema for undefined", () => {
       expect(createJsonSchema(undefined)).toEqual({});
+      // undefined array element produces an empty schema for items
+      expect(createJsonSchema([undefined])).toEqual({
+        type: "array",
+        items: {},
+      });
+      // undefined property value still has its key enumerated, but
+      // analyzeType(undefined) produces an empty schema
+      expect(createJsonSchema({ prop: undefined })).toEqual({
+        type: "object",
+        properties: { prop: {} },
+      });
     });
 
     it("should create schema for arrays", () => {
