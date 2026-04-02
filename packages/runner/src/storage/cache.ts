@@ -1928,7 +1928,7 @@ export class Provider implements IStorageProvider {
     const facts: Fact[] = [];
     for (const { uri, value } of batch) {
       const newValue = value.value !== undefined
-        ? storableFromNativeValue({ value: value.value, source: value.source })
+        ? fabricFromNativeValue({ value: value.value, source: value.source })
         : undefined;
 
       const current = workspace.get({ id: uri, type: this.the });

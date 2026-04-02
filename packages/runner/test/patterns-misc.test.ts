@@ -166,8 +166,16 @@ describe("Pattern Runner - Miscellaneous", () => {
     const recurse = ({ items }: { items: { items: any[] }[] }): any =>
       items.map((item) => recurse(item));
 
-    // Now test that we catch infinite recursion
-    expect(() => recurse(value as any)).toThrow();
+    // `toThrow()` mis-classifies stack overflows in @std/expect here, and the
+    // test harness may surface the overflow as either an Error or a string.
+    // Assert on the behavior we care about: recursion does not complete.
+    let error: unknown;
+    try {
+      recurse(value as any);
+    } catch (thrown) {
+      error = thrown;
+    }
+    expect(error).not.toBeUndefined();
   });
 
   it("should allow sending cells to an event handler", async () => {

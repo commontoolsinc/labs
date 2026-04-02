@@ -1,4 +1,7 @@
-import { cloneIfNecessary } from "@commontools/data-model/fabric-value";
+import {
+  cloneIfNecessary,
+  getDataModelConfig,
+} from "@commontools/data-model/fabric-value";
 import {
   getJsonEncodingConfig,
   jsonFromValue,
@@ -9,7 +12,6 @@ import { getModernHashConfig } from "@commontools/data-model/value-hash";
 import type { FabricValue, SchemaPathSelector } from "./interface.ts";
 import type { ReconstructionContext } from "@commontools/data-model/interface";
 import { isObject, isRecord } from "@commontools/utils/types";
-import { getExperimentalStorableConfig } from "./storable-value.ts";
 
 export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
 export const MEMORY_V2_CONTENT_TYPE = "merkle-reference/json" as const;
@@ -348,7 +350,7 @@ const memoryV2ReconstructionContext: ReconstructionContext = {
 };
 
 export const getMemoryV2Flags = (): MemoryV2Flags => ({
-  richStorableValues: getExperimentalStorableConfig().richStorableValues,
+  richStorableValues: getDataModelConfig(),
   unifiedJsonEncoding: getJsonEncodingConfig(),
   canonicalHashing: getModernHashConfig(),
   modernSchemaHash: getSchemaHashConfig(),

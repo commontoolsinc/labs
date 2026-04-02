@@ -1,5 +1,9 @@
 import { assert, assertEquals, assertFalse } from "@std/assert";
 import {
+  resetDataModelConfig,
+  setDataModelConfig,
+} from "@commontools/data-model/fabric-value";
+import {
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
 } from "@commontools/data-model/json-encoding";
@@ -11,10 +15,6 @@ import {
   resetModernHashConfig,
   setModernHashConfig,
 } from "@commontools/data-model/value-hash";
-import {
-  resetStorableValueConfig,
-  setStorableValueConfig,
-} from "../storable-value.ts";
 import {
   decodeMemoryV2Boundary,
   DEFAULT_BRANCH,
@@ -100,7 +100,7 @@ Deno.test("memory v2 builds explicit logical documents", () => {
 });
 
 Deno.test("memory v2 reflects the active runtime storage flags", () => {
-  resetStorableValueConfig();
+  resetDataModelConfig();
   resetJsonEncodingConfig();
   resetModernHashConfig();
   resetSchemaHashConfig();
@@ -109,10 +109,10 @@ Deno.test("memory v2 reflects the active runtime storage flags", () => {
     richStorableValues: false,
     unifiedJsonEncoding: false,
     canonicalHashing: false,
-    modernSchemaHash: false,
+    modernSchemaHash: true,
   });
 
-  setStorableValueConfig({ richStorableValues: true });
+  setDataModelConfig(true);
   setJsonEncodingConfig(true);
   setModernHashConfig(true);
   setSchemaHashConfig(true);
@@ -124,7 +124,7 @@ Deno.test("memory v2 reflects the active runtime storage flags", () => {
     modernSchemaHash: true,
   });
 
-  resetStorableValueConfig();
+  resetDataModelConfig();
   resetJsonEncodingConfig();
   resetModernHashConfig();
   resetSchemaHashConfig();

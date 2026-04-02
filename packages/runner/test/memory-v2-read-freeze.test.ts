@@ -1,4 +1,8 @@
 import {
+  resetDataModelConfig,
+  setDataModelConfig,
+} from "@commontools/data-model/fabric-value";
+import {
   assert,
   assertEquals,
   assertNotStrictEquals,
@@ -6,10 +10,6 @@ import {
   assertThrows,
 } from "@std/assert";
 import { Identity } from "@commontools/identity";
-import {
-  resetStorableValueConfig,
-  setStorableValueConfig,
-} from "@commontools/memory/storable-value";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-read-freeze");
@@ -17,7 +17,7 @@ const space = signer.did();
 const type = "application/json" as const;
 
 Deno.test("memory v2 raw reads freeze the returned subtree without exposing mutable state", async () => {
-  setStorableValueConfig({ richStorableValues: true });
+  setDataModelConfig(true);
   const storage = StorageManager.emulate({
     as: signer,
     memoryVersion: "v2",
@@ -68,12 +68,12 @@ Deno.test("memory v2 raw reads freeze the returned subtree without exposing muta
     assertEquals(full.stats.visits, 3);
   } finally {
     await storage.close();
-    resetStorableValueConfig();
+    resetDataModelConfig();
   }
 });
 
 Deno.test("memory v2 raw reads reuse frozen snapshots until the document changes", async () => {
-  setStorableValueConfig({ richStorableValues: true });
+  setDataModelConfig(true);
   const storage = StorageManager.emulate({
     as: signer,
     memoryVersion: "v2",
@@ -149,12 +149,12 @@ Deno.test("memory v2 raw reads reuse frozen snapshots until the document changes
     assert(Object.isFrozen(afterWrite));
   } finally {
     await storage.close();
-    resetStorableValueConfig();
+    resetDataModelConfig();
   }
 });
 
 Deno.test("memory v2 raw reads keep prior frozen snapshots stable after sibling writes", async () => {
-  setStorableValueConfig({ richStorableValues: true });
+  setDataModelConfig(true);
   const storage = StorageManager.emulate({
     as: signer,
     memoryVersion: "v2",
@@ -214,6 +214,6 @@ Deno.test("memory v2 raw reads keep prior frozen snapshots stable after sibling 
     assert(Object.isFrozen(second.stats));
   } finally {
     await storage.close();
-    resetStorableValueConfig();
+    resetDataModelConfig();
   }
 });

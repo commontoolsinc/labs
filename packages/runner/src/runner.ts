@@ -330,7 +330,7 @@ export class Runner {
       argument = mergeObjects<T>(argument as any, defaults);
     }
 
-    processCell.withTx(tx).setRawUntyped(storableFromNativeValue({
+    processCell.withTx(tx).setRawUntyped(fabricFromNativeValue({
       ...processCell.getRaw({ meta: ignoreReadForScheduling }),
       [TYPE]: patternId || "unknown",
       resultRef: pattern.resultSchema !== undefined
@@ -370,7 +370,7 @@ export class Runner {
     }
     if (!deepEqual(result, previousResult)) {
       resultCell.withTx(tx).setRawUntyped(
-        storableFromNativeValue(result, false),
+        fabricFromNativeValue(result, false),
       );
     }
 

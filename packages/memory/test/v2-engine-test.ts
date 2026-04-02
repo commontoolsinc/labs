@@ -1,14 +1,14 @@
 import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
+import {
+  resetDataModelConfig,
+  setDataModelConfig,
+} from "@commontools/data-model/fabric-value";
 import { setJsonEncodingConfig } from "@commontools/data-model/json-encoding";
 import {
   resetModernHashConfig,
   setModernHashConfig,
 } from "@commontools/data-model/value-hash";
-import {
-  resetStorableValueConfig,
-  setStorableValueConfig,
-} from "../storable-value.ts";
 import {
   applyCommit,
   close,
@@ -1140,7 +1140,7 @@ Deno.test("memory v2 engine rejects branch reads before createdSeq", async () =>
 });
 
 Deno.test("memory v2 engine persists rich patch values at the storage boundary", async () => {
-  setStorableValueConfig({ richStorableValues: true });
+  setDataModelConfig(true);
   setJsonEncodingConfig(true);
   setModernHashConfig(true);
   try {
@@ -1201,7 +1201,7 @@ Deno.test("memory v2 engine persists rich patch values at the storage boundary",
       await Deno.remove(path);
     }
   } finally {
-    resetStorableValueConfig();
+    resetDataModelConfig();
     setJsonEncodingConfig(false);
     resetModernHashConfig();
   }

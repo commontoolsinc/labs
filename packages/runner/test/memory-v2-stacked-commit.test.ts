@@ -5,6 +5,10 @@ import {
   assertStrictEquals,
 } from "@std/assert";
 import {
+  resetDataModelConfig,
+  setDataModelConfig,
+} from "@commontools/data-model/fabric-value";
+import {
   jsonFromValue,
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
@@ -13,10 +17,6 @@ import {
 import { FabricEpochNsec } from "@commontools/data-model/fabric-epoch";
 import { Identity } from "@commontools/identity";
 import type { FabricValue, MIME, URI } from "@commontools/memory/interface";
-import {
-  resetStorableValueConfig,
-  setStorableValueConfig,
-} from "@commontools/memory/storable-value";
 import {
   type EntityDocument,
   getMemoryV2Flags,
@@ -1655,7 +1655,7 @@ Deno.test("memory v2 stacked commits: pending-read compaction keeps localSeq bou
 });
 
 Deno.test("memory v2 stacked commits: pending visibility preserves rich fabric values", async () => {
-  setStorableValueConfig({ richStorableValues: true });
+  setDataModelConfig(true);
   setJsonEncodingConfig(true);
   const harness = await createHarness();
   let commitPromise: Promise<any> | undefined;
@@ -1676,7 +1676,7 @@ Deno.test("memory v2 stacked commits: pending visibility preserves rich fabric v
   } finally {
     await commitPromise?.catch(() => {});
     await harness.close();
-    resetStorableValueConfig();
+    resetDataModelConfig();
     resetJsonEncodingConfig();
   }
 });

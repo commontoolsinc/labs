@@ -1,8 +1,8 @@
-import { Identity } from "@commontools/identity";
 import {
-  resetStorableValueConfig,
-  setStorableValueConfig,
-} from "@commontools/memory/storable-value";
+  resetDataModelConfig,
+  setDataModelConfig,
+} from "@commontools/data-model/fabric-value";
+import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { IAttestation } from "../src/storage/interface.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
@@ -212,7 +212,7 @@ Deno.bench(
 Deno.bench(
   "Storage tx internals - v1 storage tx rich warm root read x10000",
   async () => {
-    setStorableValueConfig({ richStorableValues: true });
+    setDataModelConfig(true);
     const storage = await seedV1Storage();
     try {
       const tx = createStorageTransaction(storage);
@@ -223,7 +223,7 @@ Deno.bench(
       }
     } finally {
       await storage.close();
-      resetStorableValueConfig();
+      resetDataModelConfig();
     }
   },
 );
@@ -231,7 +231,7 @@ Deno.bench(
 Deno.bench(
   "Storage tx internals - v2 transaction rich warm root read x10000",
   async () => {
-    setStorableValueConfig({ richStorableValues: true });
+    setDataModelConfig(true);
     const storage = await seedV2Storage();
     try {
       const tx = new V2StorageTransaction(storage);
@@ -242,7 +242,7 @@ Deno.bench(
       }
     } finally {
       await storage.close();
-      resetStorableValueConfig();
+      resetDataModelConfig();
     }
   },
 );

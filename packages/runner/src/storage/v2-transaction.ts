@@ -1,11 +1,11 @@
 import { deepFreeze } from "@commontools/data-model/deep-freeze";
+import {
+  getDataModelConfig,
+  isArrayIndexPropertyName,
+} from "@commontools/data-model/fabric-value";
 import { unclaimed } from "@commontools/memory/fact";
 import type { PatchOp } from "@commontools/memory/v2";
 import { encodePointer, pathsOverlap } from "../../../memory/v2/path.ts";
-import {
-  getExperimentalStorableConfig,
-  isArrayIndexPropertyName,
-} from "@commontools/memory/storable-value";
 import type { FabricValue } from "@commontools/memory/interface";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
@@ -1099,7 +1099,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
       return { ok: { address, value: undefined } };
     }
-    if (!getExperimentalStorableConfig().richStorableValues) {
+    if (!getDataModelConfig()) {
       const inspected = inspectPath(current.value, memoryAddress.path);
       if (
         !address.id.startsWith("data:") &&

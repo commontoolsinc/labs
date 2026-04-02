@@ -297,8 +297,8 @@ export class Chronicle {
         edit.claim(loaded);
       } else {
         // Normalize both values for comparison and potential storage.
-        const normalizedMerged = storableFromNativeValue(merged.value);
-        const normalizedLoaded = storableFromNativeValue(loaded.is);
+        const normalizedMerged = fabricFromNativeValue(merged.value);
+        const normalizedLoaded = fabricFromNativeValue(loaded.is);
 
         const alignedMerged = alignRootWriteWithLoadedShape(
           changes.address.type,
