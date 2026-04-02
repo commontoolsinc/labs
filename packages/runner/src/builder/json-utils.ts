@@ -147,7 +147,7 @@ export function toJSONWithLegacyAliases(
 type CreateJsonSchemaState = {
   addDefaults: boolean;
   runtime: Runtime | undefined;
-  seen: Map<string, JSONSchemaObjMutable>;
+  seen: Map<string, JSONSchema>;
 };
 
 export function createJsonSchema(
@@ -158,7 +158,7 @@ export function createJsonSchema(
   const state = {
     addDefaults,
     runtime,
-    seen: new Map<string, JSONSchemaObjMutable>(),
+    seen: new Map<string, JSONSchema>(),
   };
 
   return analyzeType(example, state);
@@ -173,9 +173,10 @@ function analyzeType(value: any, state: CreateJsonSchemaState): JSONSchema {
     const seen = state.seen;
     const link = parseLink(value);
     const linkAsStr = JSON.stringify(link);
-    if (seen.has(linkAsStr)) {
-      // Return a copy of the schema to avoid mutating the original.
-      return JSON.parse(JSON.stringify(seen.get(linkAsStr)!));
+
+    const found = seen.get(linkAsStr);
+    if (found) {
+      return found;
     }
 
     const cell = state.runtime?.getCellFromLink(link);
@@ -185,10 +186,10 @@ function analyzeType(value: any, state: CreateJsonSchemaState): JSONSchema {
     if (schema === undefined) {
       // If we find pointing back here, assume an empty schema. This is
       // overwritten below. (TODO(seefeld): This should create `$ref: "#/.."`)
-      seen.set(linkAsStr, {} as JSONSchemaObjMutable);
+      seen.set(linkAsStr, {});
       schema = analyzeType(cell.getRaw(), state);
     }
-    seen.set(linkAsStr, schema as JSONSchemaObjMutable);
+    seen.set(linkAsStr, schema);
     return schema;
   }
 
