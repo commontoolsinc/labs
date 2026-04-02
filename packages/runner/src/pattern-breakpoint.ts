@@ -25,6 +25,7 @@ export function patternBreakpoint(
       fn,
     },
   );
+  // deno-lint-ignore no-debugger
   debugger;
   return isValidArgument ? fn(argument) : undefined;
 }
