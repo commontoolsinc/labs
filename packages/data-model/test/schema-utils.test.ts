@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
-import type { JSONSchemaObj } from "@commontools/api";
+import type { JSONSchemaObj, FabricValue } from "@commontools/api";
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 import {
   cloneSchemaMutable,
@@ -672,7 +672,7 @@ describe("schemaWithoutProperties", () => {
 describe("schemaForValueType", () => {
   function testType(
     typeName: string,
-    example: unknown,
+    example: FabricValue,
   ) {
     describe(typeName, () => {
       it(`should return { type: "${typeName}" }`, () => {
