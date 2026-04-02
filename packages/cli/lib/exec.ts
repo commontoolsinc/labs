@@ -8,6 +8,7 @@ import { callableCommandSpec } from "./callable.ts";
 import { executeCallableCommand } from "./callable-command.ts";
 import {
   type ExecCommandSpec,
+  type ParsedExecArgs,
   renderExecHelp,
   renderExecHelpJson,
 } from "./exec-schema.ts";

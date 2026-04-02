@@ -6,7 +6,7 @@ function __ctHardenFn(fn: Function) {
     }
     return fn;
 }
-import * as __cfHelpers from "commonfabric";
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 /**
  * Test case for unless() with a reactive array map as the fallback.
  *

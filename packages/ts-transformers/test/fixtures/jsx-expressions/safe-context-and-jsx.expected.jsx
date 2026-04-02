@@ -6,7 +6,7 @@ function __ctHardenFn(fn: Function) {
     }
     return fn;
 }
-import * as __cfHelpers from "commonfabric";
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 // deno-lint-ignore-file no-unused-vars
 import { handler, computed } from "commonfabric";
 const define = undefined;

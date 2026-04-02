@@ -6,7 +6,7 @@ function __ctHardenFn(fn: Function) {
     }
     return fn;
 }
-import * as __cfHelpers from "commonfabric";
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 /**
  * computed() result used as derive capture should use .key("count"),
  * not plain property access. The computed() return value is an

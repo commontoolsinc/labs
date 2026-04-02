@@ -6,7 +6,7 @@ function __ctHardenFn(fn: Function) {
     }
     return fn;
 }
-import * as __cfHelpers from "commonfabric";
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 /**
  * FIXTURE: helper-owned-compute-branches
  * Verifies: helper-owned branches inside computed() can mix compute-owned array

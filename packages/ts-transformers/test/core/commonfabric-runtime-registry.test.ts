@@ -22,6 +22,19 @@ function getPropertyNameText(name: ts.PropertyName): string | undefined {
   return undefined;
 }
 
+function unwrapExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isParenthesizedExpression(current) ||
+    ts.isSatisfiesExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
 function extractInjectedCallableExports(sourceText: string): string[] {
   const sourceFile = ts.createSourceFile(
     FACTORY_URL.pathname,
@@ -32,6 +45,7 @@ function extractInjectedCallableExports(sourceText: string): string[] {
   );
 
   const importedIdentifiers = new Map<string, string>();
+  const localBindings = new Map<string, ts.Expression>();
   for (const statement of sourceFile.statements) {
     if (
       !ts.isImportDeclaration(statement) ||
@@ -48,62 +62,124 @@ function extractInjectedCallableExports(sourceText: string): string[] {
     }
   }
 
-  const objectBindings = new Map<string, ts.ObjectLiteralExpression>();
-  ts.forEachChild(sourceFile, function collectBindings(node) {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
-      const initializer = node.initializer;
-      if (initializer && ts.isObjectLiteralExpression(initializer)) {
-        objectBindings.set(node.name.text, initializer);
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (
+        ts.isIdentifier(declaration.name) &&
+        declaration.initializer
+      ) {
+        localBindings.set(declaration.name.text, declaration.initializer);
       }
     }
-    ts.forEachChild(node, collectBindings);
-  });
+  }
 
-  let commonfabricObject: ts.ObjectLiteralExpression | undefined;
+  let commontoolsObject: ts.ObjectLiteralExpression | undefined;
   ts.forEachChild(sourceFile, function visit(node) {
     if (
-      ts.isPropertyAssignment(node) &&
-      getPropertyNameText(node.name) === "commonfabric" &&
-      (
-        ts.isObjectLiteralExpression(node.initializer) ||
-        ts.isIdentifier(node.initializer)
-      )
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === "commontools" &&
+      node.initializer
     ) {
-      commonfabricObject = ts.isObjectLiteralExpression(node.initializer)
-        ? node.initializer
-        : objectBindings.get(node.initializer.text);
+      const initializer = unwrapExpression(node.initializer);
+      if (ts.isObjectLiteralExpression(initializer)) {
+        commontoolsObject = initializer;
+        return;
+      }
+    }
+
+    if (
+      ts.isPropertyAssignment(node) &&
+      getPropertyNameText(node.name) === "commontools"
+    ) {
+      const initializer = unwrapExpression(node.initializer);
+      if (ts.isObjectLiteralExpression(initializer)) {
+        commontoolsObject = initializer;
+        return;
+      }
       return;
     }
     ts.forEachChild(node, visit);
   });
 
   assert(
-    commonfabricObject,
-    "Failed to locate createBuilder().commonfabric object in runner builder factory",
+    commontoolsObject,
+    "Failed to locate createBuilder().commontools object in runner builder factory",
   );
 
   const injectedExports = new Set<string>();
-  for (const property of commonfabricObject.properties) {
-    if (ts.isShorthandPropertyAssignment(property)) {
-      const importSource = importedIdentifiers.get(property.name.text);
-      if (TRACKED_IMPORT_SOURCES.has(importSource ?? "")) {
-        injectedExports.add(property.name.text);
+  for (const property of commontoolsObject.properties) {
+    const exportName = ts.isShorthandPropertyAssignment(property)
+      ? property.name.text
+      : ts.isPropertyAssignment(property)
+      ? getPropertyNameText(property.name)
+      : undefined;
+    const valueIdentifier = ts.isShorthandPropertyAssignment(property)
+      ? property.name.text
+      : ts.isPropertyAssignment(property) &&
+          ts.isIdentifier(property.initializer)
+      ? property.initializer.text
+      : undefined;
+    if (!exportName || !valueIdentifier) continue;
+
+    for (
+      const importSource of collectReferencedImportSources(
+        valueIdentifier,
+        importedIdentifiers,
+        localBindings,
+      )
+    ) {
+      if (TRACKED_IMPORT_SOURCES.has(importSource)) {
+        injectedExports.add(exportName);
+        break;
       }
-      continue;
-    }
-
-    if (!ts.isPropertyAssignment(property)) continue;
-
-    const exportName = getPropertyNameText(property.name);
-    if (!exportName || !ts.isIdentifier(property.initializer)) continue;
-
-    const importSource = importedIdentifiers.get(property.initializer.text);
-    if (TRACKED_IMPORT_SOURCES.has(importSource ?? "")) {
-      injectedExports.add(exportName);
     }
   }
 
   return [...injectedExports].sort();
+}
+
+function collectReferencedImportSources(
+  identifier: string,
+  importedIdentifiers: ReadonlyMap<string, string>,
+  localBindings: ReadonlyMap<string, ts.Expression>,
+  visiting = new Set<string>(),
+): Set<string> {
+  const directImportSource = importedIdentifiers.get(identifier);
+  if (directImportSource) {
+    return new Set([directImportSource]);
+  }
+
+  if (visiting.has(identifier)) {
+    return new Set();
+  }
+
+  const initializer = localBindings.get(identifier);
+  if (!initializer) {
+    return new Set();
+  }
+
+  visiting.add(identifier);
+  const referencedSources = new Set<string>();
+  ts.forEachChild(initializer, function visit(node) {
+    if (ts.isIdentifier(node)) {
+      for (
+        const source of collectReferencedImportSources(
+          node.text,
+          importedIdentifiers,
+          localBindings,
+          visiting,
+        )
+      ) {
+        referencedSources.add(source);
+      }
+      return;
+    }
+    ts.forEachChild(node, visit);
+  });
+  visiting.delete(identifier);
+  return referencedSources;
 }
 
 describe("COMMONFABRIC_RUNTIME_EXPORT_REGISTRY", () => {

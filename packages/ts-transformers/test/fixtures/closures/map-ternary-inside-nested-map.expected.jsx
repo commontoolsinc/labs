@@ -6,7 +6,7 @@ function __ctHardenFn(fn: Function) {
     }
     return fn;
 }
-import * as __cfHelpers from "commonfabric";
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 /**
  * Test case for ternary transformation inside nested Cell.map callbacks.
  *

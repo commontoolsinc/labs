@@ -82,6 +82,12 @@ async function waitFor(
   throw new Error(`Timed out waiting ${timeoutMs}ms`);
 }
 
+function trustPattern(runtime: Runtime, pattern: Pattern): Pattern {
+  return runtime.unsafeTrustPattern(pattern, {
+    reason: "piece pull materialization test fixture",
+  });
+}
+
 describe("piece pull materialization", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -110,7 +116,7 @@ describe("piece pull materialization", () => {
 
   it("pulls before reading result values", async () => {
     const piece = await manager.runPersistent(
-      doublePattern(),
+      trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
       undefined,
@@ -128,7 +134,7 @@ describe("piece pull materialization", () => {
 
   it("materializes piece results before setInput returns", async () => {
     const piece = await manager.runPersistent(
-      doublePattern(),
+      trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
       undefined,
@@ -143,7 +149,7 @@ describe("piece pull materialization", () => {
 
   it("materializes piece results before runWithPattern returns", async () => {
     const piece = await manager.runPersistent(
-      doublePattern(),
+      trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
       undefined,
@@ -153,7 +159,7 @@ describe("piece pull materialization", () => {
     expect(manager.getResult(piece).get()).toEqual({ output: 10 });
 
     await manager.runWithPattern(
-      tenfoldPattern(),
+      trustPattern(runtime, tenfoldPattern()),
       piece.entityId!["/"] as string,
       { input: 5 },
       { start: true },
@@ -212,7 +218,7 @@ describe("piece pull materialization", () => {
 
   it("restarts stopped pieces when runWithPattern is called with start", async () => {
     const piece = await manager.runPersistent(
-      doublePattern(),
+      trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
       undefined,
@@ -226,7 +232,7 @@ describe("piece pull materialization", () => {
     expect(runtime.runner.cancels.size).toBe(0);
 
     await manager.runWithPattern(
-      tenfoldPattern(),
+      trustPattern(runtime, tenfoldPattern()),
       piece.entityId!["/"] as string,
       { input: 5 },
       { start: true },

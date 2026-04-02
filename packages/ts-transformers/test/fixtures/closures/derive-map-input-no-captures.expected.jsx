@@ -6,7 +6,7 @@ function __ctHardenFn(fn: Function) {
     }
     return fn;
 }
-import * as __cfHelpers from "commonfabric";
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 /**
  * Edge case: derive with a .map() result as input, NO captures in derive callback,
  * and NO explicit type annotation on the callback parameter.

@@ -6,7 +6,7 @@ function __ctHardenFn(fn: Function) {
     }
     return fn;
 }
-import * as __cfHelpers from "commonfabric";
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 /**
  * Regression: .map() on a destructured property from a computed result
  * inside another computed() should NOT be transformed to .mapWithPattern().

@@ -6,7 +6,7 @@ function __ctHardenFn(fn: Function) {
     }
     return fn;
 }
-import * as __cfHelpers from "commonfabric";
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { lift, Cell, toSchema } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;

@@ -6,7 +6,7 @@ function __ctHardenFn(fn: Function) {
     }
     return fn;
 }
-import * as __cfHelpers from "commonfabric";
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 /**
  * FIXTURE: nested-writable-pattern-branches
  * Verifies: pattern-owned maps on explicit Writable inputs stay pattern-lowered

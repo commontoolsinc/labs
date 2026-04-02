@@ -6,7 +6,7 @@ function __ctHardenFn(fn: Function) {
     }
     return fn;
 }
-import * as __cfHelpers from "commonfabric";
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 /**
  * Writable.of() result accessed via .get()/.set() in action
  * callbacks. These are terminal methods handled correctly regardless

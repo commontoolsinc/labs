@@ -6,7 +6,7 @@ function __ctHardenFn(fn: Function) {
     }
     return fn;
 }
-import * as __cfHelpers from "commonfabric";
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 /**
  * FIXTURE: nested-computed-output-maps
  * Verifies: nested computed outputs can flow back into later pattern-owned
