@@ -785,6 +785,7 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
     unsubscribes: [],
     usedNames: new Set(["notes"]),
     srcInos: new Map(),
+    srcErrorLogInos: new Map(),
   });
 
   await bridge.sendToHandler(piecesHandlerIno, { count: 1 });
@@ -855,6 +856,7 @@ Deno.test("CellBridge.sendToHandlerTarget survives callable inode rebuilds", asy
     unsubscribes: [],
     usedNames: new Set(["notes"]),
     srcInos: new Map(),
+    srcErrorLogInos: new Map(),
   });
 
   const target = bridge.resolveHandlerTarget(handlerIno);

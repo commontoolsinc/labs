@@ -162,6 +162,8 @@ export interface SpaceState {
   usedNames: Set<string>;
   /** Map from piece name to the inode of its .src/ directory. */
   srcInos: Map<string, bigint>;
+  /** Map from piece name to the inode of the synthetic error.log file in .src/. */
+  srcErrorLogInos: Map<string, bigint>;
 }
 
 interface ScheduledPropRebuild {
@@ -559,15 +561,17 @@ export class CellBridge {
     const pieceName = segments[2];
     const relPath = segments.slice(4).join("/");
 
-    // Block writes to error.log
-    if (relPath === "error.log") return null;
-
     const space = this.spaces.get(spaceName);
     if (!space) return null;
     const piece = space.pieceControllers.get(pieceName);
     if (!piece) return null;
     const srcIno = space.srcInos.get(pieceName);
     if (srcIno === undefined) return null;
+
+    // Block writes to the synthetic error.log (identified by inode, not name,
+    // so a real source file named error.log remains writable).
+    const errorLogIno = space.srcErrorLogInos.get(pieceName);
+    if (errorLogIno !== undefined && ino === errorLogIno) return null;
 
     return { spaceName, pieceName, relPath, piece, srcIno };
   }
@@ -1098,6 +1102,7 @@ export class CellBridge {
       unsubscribes: [],
       usedNames: new Set(),
       srcInos: new Map(),
+      srcErrorLogInos: new Map(),
     };
 
     // Fetch all pieces and populate tree
@@ -1294,6 +1299,7 @@ export class CellBridge {
       state.pieceManifest.delete(pieceId);
     }
     state.srcInos.delete(name);
+    state.srcErrorLogInos.delete(name);
     state.usedNames.delete(name);
   }
 
@@ -2244,7 +2250,12 @@ export class CellBridge {
       );
     }
 
-    // Add empty error.log
-    this.tree.addFile(srcIno, "error.log", "", "string");
+    // Add synthetic error.log only if no source file already claimed that name.
+    // Track its inode so we can block writes to the synthetic file specifically
+    // (a real source file named error.log must remain writable).
+    if (this.tree.lookup(srcIno, "error.log") === undefined) {
+      const errorLogIno = this.tree.addFile(srcIno, "error.log", "", "string");
+      state.srcErrorLogInos.set(pieceName, errorLogIno);
+    }
   }
 }

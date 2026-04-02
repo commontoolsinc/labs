@@ -142,6 +142,7 @@ function buildTestSpace(
     unsubscribes: [],
     usedNames: new Set(),
     srcInos: new Map(),
+    srcErrorLogInos: new Map(),
   };
 
   bridge.spaces.set(spaceName, state);
