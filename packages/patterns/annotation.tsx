@@ -58,6 +58,7 @@ export interface AnnotationInput {
   isHidden: Default<boolean, false>;
 }
 
+/** An #annotation pointing at an existing cell, optionally blocked by other annotations. */
 export interface AnnotationOutput extends AnnotationPiece {
   [NAME]: string;
   [UI]: VNode;
@@ -148,18 +149,20 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
     const showBlockerPicker = Writable.of<boolean>(false);
 
     // Discover all mentionable pieces for target picker
-    const mentionable =
-      wish<MentionablePiece[]>({ query: "#mentionable" }).result;
+    const mentionable = wish<MentionablePiece[]>({
+      query: "#mentionable",
+    }).result;
 
     // Discover other annotations for blocked-by picker
-    const allAnnotations =
-      wish<AnnotationPiece[]>({ query: "#annotation" }).result;
+    const allAnnotations = wish<AnnotationPiece[]>({
+      query: "#annotation",
+    }).result;
 
     // Filtered mentionable list for target picker
     const filteredMentionable = computed(() => {
       const query = targetSearch.get().toLowerCase();
-      const items = (mentionable ?? []).filter((p) =>
-        !!p
+      const items = (mentionable ?? []).filter(
+        (p) => !!p,
       ) as MentionablePiece[];
       if (!query) return items.slice(0, 10);
       return items
@@ -262,16 +265,10 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
               >
                 In Progress
               </option>
-              <option
-                value="resolved"
-                selected={statusValue === "resolved"}
-              >
+              <option value="resolved" selected={statusValue === "resolved"}>
                 Resolved
               </option>
-              <option
-                value="dismissed"
-                selected={statusValue === "dismissed"}
-              >
+              <option value="dismissed" selected={statusValue === "dismissed"}>
                 Dismissed
               </option>
             </select>
@@ -352,30 +349,31 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
                     borderRadius: "6px",
                   }}
                 >
-                  {filteredMentionable.map((piece: MentionablePiece) =>
-                    piece && (
-                      <button
-                        type="button"
-                        onClick={selectTarget({
-                          piece,
-                          targetPiece: targetPiece,
-                          targetSearch,
-                        })}
-                        style={{
-                          display: "block",
-                          width: "100%",
-                          textAlign: "left",
-                          padding: "6px 10px",
-                          fontSize: "13px",
-                          background: "none",
-                          border: "none",
-                          borderBottom: "1px solid #f3f4f6",
-                          cursor: "pointer",
-                        }}
-                      >
-                        {piece?.[NAME] ?? "(unnamed)"}
-                      </button>
-                    )
+                  {filteredMentionable.map(
+                    (piece: MentionablePiece) =>
+                      piece && (
+                        <button
+                          type="button"
+                          onClick={selectTarget({
+                            piece,
+                            targetPiece: targetPiece,
+                            targetSearch,
+                          })}
+                          style={{
+                            display: "block",
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "6px 10px",
+                            fontSize: "13px",
+                            background: "none",
+                            border: "none",
+                            borderBottom: "1px solid #f3f4f6",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {piece?.[NAME] ?? "(unnamed)"}
+                        </button>
+                      ),
                   )}
                 </ct-vstack>
               </ct-vstack>,
@@ -398,11 +396,7 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
             {/* Current blockers */}
             <ct-vstack gap="1">
               {blockedByList.map((blocker: AnnotationPiece, index: number) => (
-                <ct-hstack
-                  key={index}
-                  gap="2"
-                  style={{ alignItems: "center" }}
-                >
+                <ct-hstack key={index} gap="2" style={{ alignItems: "center" }}>
                   <ct-cell-link $cell={blocker} />
                   <ct-button
                     onClick={removeBlocker({
@@ -443,31 +437,33 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
                     borderRadius: "6px",
                   }}
                 >
-                  {filteredAnnotations.map((ann: AnnotationPiece) =>
-                    ann && (
-                      <button
-                        type="button"
-                        onClick={addBlocker({
-                          blocker: ann,
-                          blockedBy: blockedBy,
-                          blockerSearch,
-                        })}
-                        style={{
-                          display: "block",
-                          width: "100%",
-                          textAlign: "left",
-                          padding: "6px 10px",
-                          fontSize: "13px",
-                          background: "none",
-                          border: "none",
-                          borderBottom: "1px solid #f3f4f6",
-                          cursor: "pointer",
-                        }}
-                      >
-                        {ann?.[NAME] ?? ann?.content?.slice(0, 40) ??
-                          "(unnamed)"}
-                      </button>
-                    )
+                  {filteredAnnotations.map(
+                    (ann: AnnotationPiece) =>
+                      ann && (
+                        <button
+                          type="button"
+                          onClick={addBlocker({
+                            blocker: ann,
+                            blockedBy: blockedBy,
+                            blockerSearch,
+                          })}
+                          style={{
+                            display: "block",
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "6px 10px",
+                            fontSize: "13px",
+                            background: "none",
+                            border: "none",
+                            borderBottom: "1px solid #f3f4f6",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {ann?.[NAME] ??
+                            ann?.content?.slice(0, 40) ??
+                            "(unnamed)"}
+                        </button>
+                      ),
                   )}
                 </ct-vstack>
               </ct-vstack>,
