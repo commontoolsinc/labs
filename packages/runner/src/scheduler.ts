@@ -1193,13 +1193,6 @@ export class Scheduler {
         // Track executing action for parent-child relationship tracking
         this.executingAction = action;
         this.currentActionId = actionId;
-        // Trigger debugger breakpoint if set for this action
-        if (this.breakpoints.has(actionId)) {
-          console.log(
-            `[Scheduler] Breakpoint hit: ${actionId}`,
-          );
-          debugger;
-        }
         logger.timeStart("scheduler", "run", "action");
         Promise.resolve(action(tx))
           .then((actionResult) => {
@@ -2019,6 +2012,13 @@ export class Scheduler {
    */
   getBreakpoints(): string[] {
     return Array.from(this.breakpoints);
+  }
+
+  /**
+   * Check if an action ID has a breakpoint set.
+   */
+  hasBreakpoint(actionId: string): boolean {
+    return this.breakpoints.has(actionId);
   }
 
   /**

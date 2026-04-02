@@ -194,22 +194,23 @@ export class XSchedulerSource extends LitElement {
     }
 
     .source-line:not(.has-action) .bp-indicator {
-      opacity: 0;
+      visibility: hidden;
     }
 
     .source-line.has-action .bp-indicator {
-      border: 1.5px solid rgba(239, 68, 68, 0.3);
+      border: 2px solid #94a3b8;
       background: transparent;
     }
 
     .source-line.has-action:hover .bp-indicator {
-      border-color: rgba(239, 68, 68, 0.7);
-      background: rgba(239, 68, 68, 0.2);
+      border-color: #ef4444;
+      background: rgba(239, 68, 68, 0.3);
     }
 
     .bp-indicator.active {
       border-color: #ef4444 !important;
       background: #ef4444 !important;
+      box-shadow: 0 0 4px rgba(239, 68, 68, 0.6);
     }
 
     .line-gutter {

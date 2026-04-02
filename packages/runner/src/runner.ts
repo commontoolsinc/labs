@@ -1374,6 +1374,16 @@ export class Runner {
           }
           // We only run the action if we have a valid argument, or the function's schema
           // is false (like an input of `never`).
+
+          // Check for debugger breakpoint before invoking handler
+          if (
+            isValidArgument && name &&
+            this.runtime.scheduler.hasBreakpoint(`handler:${name}`)
+          ) {
+            console.log(`[Runner] Breakpoint hit: handler:${name}`);
+            debugger; // Open DevTools to pause here
+          }
+
           const result = isValidArgument ? fn(argument) : undefined;
 
           const postRun = (result: any) => {
@@ -1631,6 +1641,16 @@ export class Runner {
 
           // We only run the action if we have a valid argument, or the function's schema
           // is false (like an input of `never`).
+
+          // Check for debugger breakpoint before invoking
+          if (
+            isValidArgument && name &&
+            this.runtime.scheduler.hasBreakpoint(`action:${name}`)
+          ) {
+            console.log(`[Runner] Breakpoint hit: action:${name}`);
+            debugger; // Open DevTools to pause here
+          }
+
           const result = isValidArgument ? fn(argument) : undefined;
 
           const postRun = (result: any) => {
