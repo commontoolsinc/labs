@@ -336,7 +336,18 @@ export function buildCallbackWithTopLevelCaptures(
   if (originalParam) {
     const existingBinding = originalParam.name;
     if (ts.isObjectBindingPattern(existingBinding)) {
-      const newBindingElements = [...existingBinding.elements];
+      const restElementIndex = existingBinding.elements.findIndex((element) =>
+        !!element.dotDotDotToken
+      );
+      const restElement = restElementIndex === -1
+        ? undefined
+        : existingBinding.elements[restElementIndex];
+      const newBindingElements = restElementIndex === -1
+        ? [...existingBinding.elements]
+        : [
+          ...existingBinding.elements.slice(0, restElementIndex),
+          ...existingBinding.elements.slice(restElementIndex + 1),
+        ];
       const existingBindingNames = new Set(
         extractBindingNames(existingBinding),
       );
@@ -352,6 +363,9 @@ export function buildCallbackWithTopLevelCaptures(
             (propertyName) => factory.createIdentifier(propertyName),
           ),
         );
+      }
+      if (restElement) {
+        newBindingElements.push(restElement);
       }
 
       let newTypeNode = originalParam.type;
