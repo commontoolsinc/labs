@@ -106,6 +106,7 @@ export type {
   IStreamable,
   JSONObject,
   JSONSchema,
+  JSONSchemaMutable,
   JSONSchemaObj,
   JSONSchemaObjMutable,
   JSONSchemaTypes,
