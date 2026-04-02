@@ -1,5 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
-import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertStrictEquals,
+  assertThrows
+} from "@std/assert";
 import type { FabricValue, JSONSchemaObj } from "@commontools/api";
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 import {
@@ -11,6 +16,7 @@ import {
   schemaWithProperties,
   toDeepFrozenSchema,
 } from "../schema-utils.ts";
+import { isInternedSchema } from "../schema-hash.ts";
 
 describe("toDeepFrozenSchema", () => {
   describe("boolean schemas", () => {
@@ -38,13 +44,13 @@ describe("toDeepFrozenSchema", () => {
       const result = toDeepFrozenSchema(schema, true);
 
       // Top-level should be the same reference — frozen in place.
-      assertEquals(result === schema, true);
-      assertEquals(Object.isFrozen(schema), true);
+      assert(result === schema);
+      assert(Object.isFrozen(schema));
 
       // Property values are replaced with frozen clones (not the originals).
-      assertEquals(Object.isFrozen(schema.properties), true);
-      assertEquals(schema.properties !== originalProperties, true);
-      assertEquals(Object.isFrozen(schema.properties!.name), true);
+      assert(Object.isFrozen(schema.properties));
+      assert(schema.properties !== originalProperties);
+      assert(Object.isFrozen(schema.properties!.name));
     });
 
     it("unfrozen schema is frozen in place (same reference)", () => {
@@ -57,8 +63,8 @@ describe("toDeepFrozenSchema", () => {
       const result = toDeepFrozenSchema(schema, true);
 
       // Same reference — frozen in place, not cloned.
-      assertEquals(result === schema, true);
-      assertEquals(Object.isFrozen(result), true);
+      assert(result === schema);
+      assert(Object.isFrozen(result));
     });
   });
 
@@ -724,11 +730,15 @@ describe("emptySchemaObject", () => {
     assertEquals(emptySchemaObject(), {});
   });
 
-  it("should return an interned result", () => {
+  it("should return the same object every time", () => {
     assertStrictEquals(emptySchemaObject(), emptySchemaObject());
   });
 
+  it("should return an interned result", () => {
+    assert(isInternedSchema(emptySchemaObject()));
+  });
+
   it("should return a frozen result", () => {
-    assertEquals(isDeepFrozen(emptySchemaObject()), true);
+    assert(isDeepFrozen(emptySchemaObject()));
   });
 });
