@@ -282,6 +282,9 @@ export class Client {
       return;
     }
     this.#connected = false;
+    for (const session of this.#spaces) {
+      session.handleDisconnect();
+    }
     this.rejectPending(toConnectionError(error));
     void this.reconnect().catch(() => undefined);
   }
@@ -345,7 +348,6 @@ export class SpaceSession {
     commit: ClientCommit;
     pending: PromiseWithResolvers<AppliedCommit>;
   }>();
-  #flushing: Promise<void> | null = null;
   #watchSpecs: WatchSpec[] = [];
   #watchView: WatchView | null = null;
   #sessionId: string;
@@ -359,6 +361,7 @@ export class SpaceSession {
   #watchMutation: Promise<void> = Promise.resolve();
   #closed = false;
   #closeError: Error | null = null;
+  #readyOnConnection = true;
   #restoring = false;
 
   constructor(
@@ -406,16 +409,18 @@ export class SpaceSession {
       pending,
     });
 
-    if (this.client.isConnected()) {
-      void this.flushOutstandingCommits();
+    const outstanding = this.#outstandingCommits.get(commit.localSeq);
+    if (
+      outstanding !== undefined &&
+      this.client.isConnected() &&
+      this.#readyOnConnection
+    ) {
+      this.sendOutstandingCommit(commit.localSeq, outstanding);
     } else {
       void this.client.restoreConnection();
     }
 
-    const applied = await pending.promise;
-    await this.#flushing;
-    void this.client.restoreConnection().catch(() => undefined);
-    return applied;
+    return await pending.promise;
   }
 
   async queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
@@ -542,6 +547,7 @@ export class SpaceSession {
       return;
     }
     this.#restoring = true;
+    this.#readyOnConnection = false;
     try {
       let restored: SessionOpenResult;
       try {
@@ -556,7 +562,8 @@ export class SpaceSession {
       if (this.#closed) {
         return;
       }
-      await this.replayOutstandingCommits();
+      this.#readyOnConnection = true;
+      this.replayOutstandingCommits();
       if (restored.sync) {
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(restored.sync);
@@ -578,17 +585,6 @@ export class SpaceSession {
       }
     } finally {
       this.#restoring = false;
-      // Commits may have been enqueued by transact() while restoring.
-      // The flushOutstandingCommits .finally() guard skips re-flush when
-      // #restoring is true, so we must drain any remaining commits now.
-      if (
-        !this.#closed &&
-        this.client.isConnected() &&
-        this.#outstandingCommits.size > 0 &&
-        this.#flushing === null
-      ) {
-        void this.flushOutstandingCommits();
-      }
     }
   }
 
@@ -598,8 +594,11 @@ export class SpaceSession {
     }
     this.#closed = true;
     this.#closeError = new Error("memory/v2 session closed");
+    this.#readyOnConnection = false;
     this.client.forgetSession(this);
-    await this.#flushing;
+    const background = [...this.#background];
+    this.#background.clear();
+    await Promise.allSettled(background);
     for (const pending of this.#outstandingCommits.values()) {
       pending.pending.reject(new Error("memory/v2 session closed"));
     }
@@ -607,9 +606,6 @@ export class SpaceSession {
     this.#watchSpecs = [];
     this.#watchView?.close();
     this.#watchView = null;
-    const background = [...this.#background];
-    this.#background.clear();
-    await Promise.allSettled(background);
   }
 
   handleRevoked(reason: SessionRevokedMessage["reason"]): void {
@@ -620,6 +616,7 @@ export class SpaceSession {
     error.name = "SessionRevokedError";
     this.#closed = true;
     this.#closeError = error;
+    this.#readyOnConnection = false;
     this.client.forgetSession(this);
     for (const pending of this.#outstandingCommits.values()) {
       pending.pending.reject(error);
@@ -628,6 +625,13 @@ export class SpaceSession {
     this.#watchSpecs = [];
     this.#watchView?.close();
     this.#watchView = null;
+  }
+
+  handleDisconnect(): void {
+    if (this.#closed) {
+      return;
+    }
+    this.#readyOnConnection = false;
   }
 
   private queueBackground(task: Promise<void>): void {
@@ -733,80 +737,65 @@ export class SpaceSession {
     return restored;
   }
 
-  private async replayOutstandingCommits(): Promise<void> {
-    if (this.#outstandingCommits.size === 0) {
+  private replayOutstandingCommits(): void {
+    if (
+      this.#outstandingCommits.size === 0 ||
+      !this.#readyOnConnection ||
+      !this.client.isConnected()
+    ) {
       return;
     }
-    await this.flushOutstandingCommits();
+    for (
+      const [localSeq, pendingCommit] of this.#outstandingCommits.entries()
+    ) {
+      this.sendOutstandingCommit(localSeq, pendingCommit);
+    }
   }
 
-  private async flushOutstandingCommits(): Promise<void> {
-    if (this.#flushing) {
-      return await this.#flushing;
-    }
-    if (this.#closed || !this.client.isConnected()) {
-      return;
-    }
-
-    const flush = (async () => {
-      while (
-        !this.#closed &&
-        this.client.isConnected() &&
-        this.#outstandingCommits.size > 0
+  private sendOutstandingCommit(
+    localSeq: number,
+    pendingCommit: {
+      commit: ClientCommit;
+      pending: PromiseWithResolvers<AppliedCommit>;
+    },
+  ): void {
+    this.queueBackground((async () => {
+      if (
+        this.#closed ||
+        !this.#readyOnConnection ||
+        !this.client.isConnected()
       ) {
-        // localSeq values are monotonic, so Map insertion order already matches
-        // replay order for retained commits.
-        const next = this.#outstandingCommits.entries().next().value;
-        if (!next) {
+        return;
+      }
+
+      try {
+        const applied = await this.client.request<AppliedCommit>({
+          type: "transact",
+          requestId: crypto.randomUUID(),
+          space: this.space,
+          sessionId: this.#sessionId,
+          commit: pendingCommit.commit,
+        });
+        this.noteResult(applied.seq);
+        if (this.#outstandingCommits.get(localSeq) === pendingCommit) {
+          this.#outstandingCommits.delete(localSeq);
+        }
+        pendingCommit.pending.resolve(applied);
+        if (!this.#closed) {
+          void this.ack(applied.seq).catch(() => undefined);
+        }
+      } catch (error) {
+        if (isConnectionError(error) || isSessionRevokedError(error)) {
           return;
         }
-
-        const [localSeq, pendingCommit] = next;
-        try {
-          const applied = await this.client.request<AppliedCommit>({
-            type: "transact",
-            requestId: crypto.randomUUID(),
-            space: this.space,
-            sessionId: this.#sessionId,
-            commit: pendingCommit.commit,
-          });
-          this.noteResult(applied.seq);
-          if (this.#outstandingCommits.get(localSeq) === pendingCommit) {
-            this.#outstandingCommits.delete(localSeq);
-          }
-          pendingCommit.pending.resolve(applied);
-          void this.ack(applied.seq).catch(() => undefined);
-        } catch (error) {
-          if (isConnectionError(error)) {
-            return;
-          }
-          if (this.#outstandingCommits.get(localSeq) === pendingCommit) {
-            this.#outstandingCommits.delete(localSeq);
-          }
-          pendingCommit.pending.reject(
-            error instanceof Error ? error : new Error(String(error)),
-          );
+        if (this.#outstandingCommits.get(localSeq) === pendingCommit) {
+          this.#outstandingCommits.delete(localSeq);
         }
+        pendingCommit.pending.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        );
       }
-    })();
-
-    const flushing = flush.finally(() => {
-      if (this.#flushing === flushing) {
-        this.#flushing = null;
-      }
-      if (
-        !this.#closed &&
-        this.client.isConnected() &&
-        this.#outstandingCommits.size > 0 &&
-        this.#flushing === null &&
-        !this.#restoring
-      ) {
-        void this.flushOutstandingCommits();
-      }
-    });
-    this.#flushing = flushing;
-
-    return await this.#flushing;
+    })());
   }
 }
 

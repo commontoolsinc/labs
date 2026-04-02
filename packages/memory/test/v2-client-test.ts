@@ -527,6 +527,90 @@ class ScriptedReconnectTransport implements Transport {
   }
 }
 
+class DelayedTransactTransport implements Transport {
+  transactLocalSeqs: number[] = [];
+  #receiver: (payload: string) => void = () => {};
+  #heldResponses: Array<() => void> = [];
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(): void {}
+
+  send(payload: string): Promise<void> {
+    const message = JSON.parse(payload) as {
+      type: string;
+      requestId?: string;
+      commit?: { localSeq?: number };
+    };
+
+    switch (message.type) {
+      case "hello":
+        this.#respond(HELLO_OK);
+        return Promise.resolve();
+      case "session.open":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: "session:delayed-transact",
+            sessionToken: "token:delayed-transact",
+            serverSeq: 0,
+          },
+        });
+        return Promise.resolve();
+      case "session.ack":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: 0,
+          },
+        });
+        return Promise.resolve();
+      case "transact": {
+        const localSeq = message.commit?.localSeq ?? -1;
+        this.transactLocalSeqs.push(localSeq);
+        this.#heldResponses.push(() =>
+          this.#respond({
+            type: "response",
+            requestId: message.requestId!,
+            ok: {
+              seq: localSeq,
+              branch: "",
+              revisions: [{
+                id: `of:doc:${localSeq}`,
+                branch: "",
+                seq: localSeq,
+                opIndex: 0,
+                commitSeq: localSeq,
+                op: "set",
+              }],
+            },
+          })
+        );
+        return Promise.resolve();
+      }
+      default:
+        throw new Error(`Unhandled delayed message: ${message.type}`);
+    }
+  }
+
+  releaseNext(): void {
+    const next = this.#heldResponses.shift();
+    next?.();
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  #respond(message: unknown): void {
+    this.#receiver(JSON.stringify(message));
+  }
+}
+
 class AckCountingTransport implements Transport {
   ackCount = 0;
   #watchSeq = 0;
@@ -1190,11 +1274,76 @@ Deno.test("memory v2 client replays retained commits in localSeq order after rec
     const [applied1, applied2] = await Promise.all([first, second]);
 
     assertEquals(transport.connectionCount, 2);
-    assertEquals(transport.transactLocalSeqs, [1, 1, 2]);
+    assertEquals(transport.transactLocalSeqs, [1, 2, 1, 2]);
     assertEquals(applied1.seq, 1);
     assertEquals(applied2.seq, 2);
   } finally {
     await client.close();
+  }
+});
+
+Deno.test("memory v2 client sends later transacts before earlier responses settle", async () => {
+  const transport = new DelayedTransactTransport();
+  const client = await connect({ transport });
+  const space = await client.mount(
+    "did:key:z6Mk-memory-v2-client-send-order",
+  );
+  let first: Promise<{ seq: number }> | undefined;
+  let second: Promise<{ seq: number }> | undefined;
+
+  try {
+    first = space.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            count: 1,
+          },
+        },
+      }],
+    });
+    second = space.transact({
+      localSeq: 2,
+      reads: {
+        confirmed: [],
+        pending: [{
+          id: "of:doc:1",
+          path: toDocumentPath(["value"]),
+          localSeq: 1,
+        }],
+      },
+      operations: [{
+        op: "set",
+        id: "of:doc:1",
+        value: {
+          value: {
+            count: 2,
+          },
+        },
+      }],
+    });
+
+    try {
+      await waitFor(() => transport.transactLocalSeqs.length === 2);
+      assertEquals(transport.transactLocalSeqs, [1, 2]);
+    } finally {
+      transport.releaseNext();
+      transport.releaseNext();
+    }
+
+    const [applied1, applied2] = await Promise.all([first, second]);
+    assertEquals(applied1.seq, 1);
+    assertEquals(applied2.seq, 2);
+  } finally {
+    transport.releaseNext();
+    transport.releaseNext();
+    await client.close();
+    await Promise.allSettled(
+      [first, second].filter((value) => value !== undefined),
+    );
   }
 });
 

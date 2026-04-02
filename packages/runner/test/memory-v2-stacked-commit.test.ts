@@ -1568,7 +1568,7 @@ Deno.test("memory v2 stacked commits: dropped receipt for C1 replays, later stac
 
     await assertResultOk(c1.promise);
     await assertResultOk(c2.promise);
-    assertEquals(harness.transport.model.transactLocalSeqs, [1, 1, 2]);
+    assertEquals(harness.transport.model.transactLocalSeqs, [1, 2, 1, 2]);
     assertEquals(harness.transport.model.connectionCount >= 2, true);
     expectVisible(harness, { A: valueFor("c1"), B: valueFor("c2") });
   } finally {
@@ -1589,7 +1589,7 @@ Deno.test("memory v2 stacked commits: replayed C1 conflicts, later independent C
 
     await assertConflict(c1.promise, "replayed conflict");
     await assertResultOk(c2.promise);
-    assertEquals(harness.transport.model.transactLocalSeqs, [1, 1, 2]);
+    assertEquals(harness.transport.model.transactLocalSeqs, [1, 2, 1, 2]);
     expectVisible(harness, { A: undefined, B: valueFor("c2") });
   } finally {
     await harness.close();
