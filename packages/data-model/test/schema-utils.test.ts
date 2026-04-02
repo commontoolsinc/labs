@@ -22,12 +22,12 @@ describe("toDeepFrozenSchema", () => {
   describe("boolean schemas", () => {
     it("boolean true is returned as-is", () => {
       const result = toDeepFrozenSchema(true, false);
-      assert(result);
+      assertStrictEquals(result, true);
     });
 
     it("boolean false is returned as-is", () => {
       const result = toDeepFrozenSchema(false, true);
-      assertEquals(result, false);
+      assertStrictEquals(result, false);
     });
   });
 
@@ -83,7 +83,7 @@ describe("toDeepFrozenSchema", () => {
       assert(result !== schema);
 
       // Original should NOT be frozen.
-      assertEquals(Object.isFrozen(schema), false);
+      assert(!Object.isFrozen(schema));
 
       // Result should be deeply frozen.
       assert(Object.isFrozen(result));
@@ -102,8 +102,8 @@ describe("toDeepFrozenSchema", () => {
       toDeepFrozenSchema(schema, false);
 
       // Original should still be mutable.
-      assertEquals(Object.isFrozen(schema), false);
-      assertEquals(Object.isFrozen(inner), false);
+      assert(!Object.isFrozen(schema));
+      assert(!Object.isFrozen(inner));
 
       // Prove mutability by actually mutating.
       (inner as Record<string, unknown>).type = "number";
@@ -120,7 +120,7 @@ describe("toDeepFrozenSchema", () => {
       toDeepFrozenSchema(schema, false);
 
       // Original property value should not be frozen.
-      assertEquals(Object.isFrozen(innerProp), false);
+      assert(!Object.isFrozen(innerProp));
     });
   });
 
@@ -297,27 +297,27 @@ describe("toDeepFrozenSchema", () => {
 describe("isNontrivialSchema", () => {
   describe("nullish inputs", () => {
     it("returns false for undefined", () => {
-      assertEquals(isNontrivialSchema(undefined), false);
+      assert(!isNontrivialSchema(undefined));
     });
 
     it("returns false for null", () => {
-      assertEquals(isNontrivialSchema(null), false);
+      assert(!isNontrivialSchema(null));
     });
   });
 
   describe("boolean schemas", () => {
     it("returns false for true", () => {
-      assertEquals(isNontrivialSchema(true), false);
+      assert(!isNontrivialSchema(true));
     });
 
     it("returns false for false", () => {
-      assertEquals(isNontrivialSchema(false), false);
+      assert(!isNontrivialSchema(false));
     });
   });
 
   describe("empty object schema", () => {
     it("returns false for {}", () => {
-      assertEquals(isNontrivialSchema({}), false);
+      assert(!isNontrivialSchema({}));
     });
   });
 
@@ -432,16 +432,16 @@ describe("cloneSchemaMutable", () => {
     };
 
     const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
-    assertEquals(Object.isFrozen(result), false);
+    assert(!Object.isFrozen(result));
 
     // Top-level mutation should work.
     (result as Record<string, unknown>).type = "array";
     assertEquals(result.type, "array");
 
     // Nested mutation should also work.
-    assertEquals(Object.isFrozen(result.properties), false);
+    assert(!Object.isFrozen(result.properties));
     const xProp = result.properties!.x as Record<string, unknown>;
-    assertEquals(Object.isFrozen(xProp), false);
+    assert(!Object.isFrozen(xProp));
     xProp.type = "string";
     assertEquals((result.properties!.x as JSONSchemaObj).type, "string");
   });
@@ -466,7 +466,7 @@ describe("cloneSchemaMutable", () => {
 
     const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
 
-    assertEquals(Object.isFrozen(result), false);
+    assert(!Object.isFrozen(result));
     assertEquals(result.type, "object");
     // Nested properties should also be mutable.
     assertEquals(
@@ -569,7 +569,7 @@ describe("schemaWithProperties", () => {
   it("distinguishes undefined-valued key from absent key", () => {
     // A schema with no `description` key at all.
     const schema: JSONSchemaObj = { type: "string" };
-    assertEquals("description" in schema, false);
+    assert(!("description" in schema));
 
     // Setting description to undefined: key is present but value is undefined.
     const withUndefined = schemaWithProperties(schema, {
@@ -582,7 +582,7 @@ describe("schemaWithProperties", () => {
     const withoutOverride = schemaWithProperties(schema, {
       type: "number",
     }) as JSONSchemaObj;
-    assertEquals("description" in withoutOverride, false);
+    assert(!("description" in withoutOverride));
   });
 
   it("treats undefined as {} and applies overrides", () => {
@@ -599,7 +599,7 @@ describe("schemaWithProperties", () => {
 
   it("returns false as-is regardless of overrides", () => {
     const result = schemaWithProperties(false, { type: "string" });
-    assertEquals(result, false);
+    assert(!result);
   });
 });
 
@@ -609,7 +609,7 @@ describe("schemaWithoutProperties", () => {
     const result = schemaWithoutProperties(schema, "asCell") as JSONSchemaObj;
 
     assertEquals(result, { type: "object" });
-    assertEquals("asCell" in result, false);
+    assert(!("asCell" in result));
   });
 
   it("removes multiple named properties", () => {
@@ -625,8 +625,8 @@ describe("schemaWithoutProperties", () => {
     ) as JSONSchemaObj;
 
     assertEquals(result, { type: "object" });
-    assertEquals("asCell" in result, false);
-    assertEquals("asStream" in result, false);
+    assert(!("asCell" in result));
+    assert(!("asStream" in result));
   });
 
   it("returns a frozen result", () => {
@@ -671,7 +671,7 @@ describe("schemaWithoutProperties", () => {
   });
 
   it("returns boolean false as-is", () => {
-    assertEquals(schemaWithoutProperties(false, "asCell"), false);
+    assert(!schemaWithoutProperties(false, "asCell"));
   });
 });
 
