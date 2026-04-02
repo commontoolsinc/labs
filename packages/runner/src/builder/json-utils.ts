@@ -145,6 +145,9 @@ export function toJSONWithLegacyAliases(
 /**
  * Creates a schema based on an `example` piece of data. The result is always an
  * interned schema. Note that interned schemas are necessarily frozen.
+ *
+ * **Note:** Though the intention is to treat `undefined` as an acceptable
+ * value, this function doesn't in fact represent it as a proper schema.
  */
 export function createJsonSchema(
   example: any,
