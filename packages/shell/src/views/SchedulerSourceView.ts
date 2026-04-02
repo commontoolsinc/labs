@@ -175,35 +175,41 @@ export class XSchedulerSource extends LitElement {
     }
 
     .line-bp {
-      padding: 0 0 0 0.25rem;
-      width: 1px;
-      vertical-align: top;
+      padding: 0 0.125rem;
+      width: 16px;
+      min-width: 16px;
+      text-align: center;
+      vertical-align: middle;
       cursor: pointer;
       user-select: none;
     }
 
     .bp-indicator {
       display: inline-block;
-      width: 10px;
-      height: 10px;
+      width: 12px;
+      height: 12px;
       border-radius: 50%;
       vertical-align: middle;
+      pointer-events: none;
+    }
+
+    .source-line:not(.has-action) .bp-indicator {
       opacity: 0;
-      transition: opacity 0.1s;
     }
 
     .source-line.has-action .bp-indicator {
-      opacity: 0.15;
-      background: #ef4444;
+      border: 1.5px solid rgba(239, 68, 68, 0.3);
+      background: transparent;
     }
 
     .source-line.has-action:hover .bp-indicator {
-      opacity: 0.5;
+      border-color: rgba(239, 68, 68, 0.7);
+      background: rgba(239, 68, 68, 0.2);
     }
 
     .bp-indicator.active {
-      opacity: 1 !important;
-      background: #ef4444;
+      border-color: #ef4444 !important;
+      background: #ef4444 !important;
     }
 
     .line-gutter {
