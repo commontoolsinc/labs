@@ -627,6 +627,35 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "errors when lift accesses .length on numeric index signature object",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "type Indexed = { [index: number]: string };",
+        "const hasItems = lift<Indexed, boolean>(",
+        "  (items) => items.length > 0,",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:path-not-in-type",
+      );
+      assertGreater(
+        shrinkErrors.length,
+        0,
+        `Expected schema:path-not-in-type for numeric index signature .length access but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
     "no error when handler without type args has SomeType | undefined param",
     async () => {
       // Reproduces pattern-ingredient-scaler: handler() without type args

@@ -78,7 +78,6 @@ export {
   inferWidenedTypeFromExpression,
   isAnyOrUnknownType,
   isAnyType,
-  isArrayLikeType,
   isCellLikeType,
   isUnknownType,
   isUnresolvedSchemaType,

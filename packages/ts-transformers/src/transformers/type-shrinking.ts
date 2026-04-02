@@ -13,7 +13,6 @@ import {
   ensureTypeNodeRegistered,
   getTypeFromTypeNodeWithFallback,
   isAnyOrUnknownType,
-  isArrayLikeType,
   typeToSchemaTypeNode,
 } from "../ast/mod.ts";
 
@@ -157,6 +156,39 @@ function isSyntheticTypeNode(node: ts.TypeNode): boolean {
   return node.pos < 0 || node.end < 0;
 }
 
+function isArrayShapeType(type: ts.Type, checker: ts.TypeChecker): boolean {
+  const typeChecker = checker as ts.TypeChecker & {
+    isArrayType?: (type: ts.Type) => boolean;
+    isTupleType?: (type: ts.Type) => boolean;
+  };
+  return !!(typeChecker.isArrayType?.(type) || typeChecker.isTupleType?.(type));
+}
+
+function isHomogeneousArrayType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  const typeChecker = checker as ts.TypeChecker & {
+    isArrayType?: (type: ts.Type) => boolean;
+    isTupleType?: (type: ts.Type) => boolean;
+  };
+  if (typeChecker.isTupleType?.(type)) {
+    return false;
+  }
+  if (typeChecker.isArrayType?.(type)) {
+    return true;
+  }
+  return type.getSymbol()?.getName() === "ReadonlyArray";
+}
+
+function isNumericIndexableType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  return isArrayShapeType(type, checker) ||
+    !!checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+}
+
 export function isCellLikeTypeNode(node: ts.TypeNode): boolean {
   if (!ts.isTypeReferenceNode(node)) return false;
   const name = ts.isIdentifier(node.typeName)
@@ -206,13 +238,13 @@ function buildShrunkTypeNodeFromType(
   // However, when only array-intrinsic properties like `length` are accessed
   // (no item-level access), shrink the item type to `unknown` to avoid
   // fetching full item schemas unnecessarily.
-  if (isArrayLikeType(type, checker)) {
+  if (isArrayShapeType(type, checker)) {
     const allNonItem = normalized.every(
       (path) =>
         path.length === 1 && path[0] !== undefined &&
         NON_ITEM_PROPS.has(path[0]),
     );
-    if (allNonItem) {
+    if (allNonItem && isHomogeneousArrayType(type, checker)) {
       // No item access — emit unknown[] to avoid fetching item schemas.
       return factory.createArrayTypeNode(
         factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
@@ -721,7 +753,7 @@ function typeHasHead(
 
   // Numeric heads are valid on array-like types (index access)
   if (Number.isFinite(Number(head))) {
-    if (isArrayLikeType(type, checker)) {
+    if (isNumericIndexableType(type, checker)) {
       return true;
     }
   }
@@ -1130,10 +1162,11 @@ function collectAllPropertyLeafPaths(
   prefix: readonly string[],
   seen: Set<ts.Type>,
 ): readonly (readonly string[])[] {
-  if (seen.has(type) || isArrayLikeType(type, checker)) {
+  if (seen.has(type) || isNumericIndexableType(type, checker)) {
     return [prefix];
   }
-  seen.add(type);
+  const nextSeen = new Set(seen);
+  nextSeen.add(type);
 
   const properties = checker.getPropertiesOfType(type);
   if (properties.length === 0) {
@@ -1149,7 +1182,7 @@ function collectAllPropertyLeafPaths(
       checker,
       sourceFile,
       childPrefix,
-      seen,
+      nextSeen,
     );
     for (const path of childPaths) {
       paths.push([...path]);

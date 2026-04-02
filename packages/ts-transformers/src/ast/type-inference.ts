@@ -259,19 +259,6 @@ export function getTypeReferenceArgument(type: ts.Type): ts.Type | undefined {
   return undefined;
 }
 
-export function isArrayLikeType(
-  type: ts.Type,
-  checker: ts.TypeChecker,
-): boolean {
-  const typeChecker = checker as ts.TypeChecker & {
-    isArrayType?: (type: ts.Type) => boolean;
-    isTupleType?: (type: ts.Type) => boolean;
-  };
-  return !!(typeChecker.isArrayType?.(type) ||
-    typeChecker.isTupleType?.(type) ||
-    checker.getIndexTypeOfType(type, ts.IndexKind.Number));
-}
-
 export function isCellLikeType(
   type: ts.Type | undefined,
   checker: ts.TypeChecker,
