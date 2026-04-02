@@ -663,7 +663,7 @@ describe("schemaWithoutProperties", () => {
   });
 
   it("treats undefined as true (accept everything)", () => {
-    assert(schemaWithoutProperties(undefined, "asCell"));
+    assertStrictEquals(schemaWithoutProperties(undefined, "asCell"), true);
   });
 
   it("returns boolean true as-is", () => {
