@@ -267,6 +267,111 @@ describe("createJsonSchema", () => {
     });
   });
 
+  it("should return cached schema when the same cell link appears twice", () => {
+    const cell = runtime.getImmutableCell(
+      space,
+      { x: 1, y: 2 },
+    );
+
+    // The same cell link in two object properties. The second encounter should
+    // hit the `seen.has(linkAsStr)` branch and return a deep copy.
+    const schema = createJsonSchema(
+      { first: cell, second: cell },
+      false,
+      runtime,
+    );
+
+    const expectedCellSchema = {
+      type: "object",
+      properties: {
+        x: { type: "integer" },
+        y: { type: "integer" },
+      },
+    };
+
+    expect(schema).toEqual({
+      type: "object",
+      properties: {
+        first: expectedCellSchema,
+        second: expectedCellSchema,
+      },
+    });
+  });
+
+  it("should deduplicate array items that are identical cell links", () => {
+    const cell = runtime.getImmutableCell(
+      space,
+      { name: "Alice" },
+    );
+
+    // An array where every element is the same cell link. All elements produce
+    // the same schema, so deduplication should yield a single `items` schema.
+    const schema = createJsonSchema([cell, cell], false, runtime);
+
+    expect(schema).toEqual({
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+        },
+      },
+    });
+  });
+
+  it("should produce anyOf for arrays with different cell links", () => {
+    const cellA = runtime.getImmutableCell(
+      space,
+      { name: "Alice" },
+    );
+    const cellB = runtime.getImmutableCell(
+      space,
+      { count: 42 },
+    );
+
+    const schema = createJsonSchema([cellA, cellB], false, runtime);
+
+    expect(schema).toEqual({
+      type: "array",
+      items: {
+        anyOf: [
+          {
+            type: "object",
+            properties: { name: { type: "string" } },
+          },
+          {
+            type: "object",
+            properties: { count: { type: "integer" } },
+          },
+        ],
+      },
+    });
+  });
+
+  it("should analyze object properties that mix plain values and cell links", () => {
+    const cell = runtime.getImmutableCell(
+      space,
+      [10, 20, 30],
+    );
+
+    const schema = createJsonSchema(
+      { label: "stats", data: cell },
+      false,
+      runtime,
+    );
+
+    expect(schema).toEqual({
+      type: "object",
+      properties: {
+        label: { type: "string" },
+        data: {
+          type: "array",
+          items: { type: "integer" },
+        },
+      },
+    });
+  });
+
   it("should handle multidimensional array of numbers", () => {
     const data = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
     expect(createJsonSchema(data)).toEqual({
