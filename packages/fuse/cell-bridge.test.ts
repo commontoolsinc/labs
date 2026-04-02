@@ -141,6 +141,7 @@ function buildTestSpace(
     did: "did:key:zTest",
     unsubscribes: [],
     usedNames: new Set(),
+    srcInos: new Map(),
   };
 
   bridge.spaces.set(spaceName, state);

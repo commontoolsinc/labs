@@ -4,7 +4,7 @@
 // Supports multiple spaces with on-demand connection.
 // Subscribes to cell changes and rebuilds subtrees on updates.
 
-import type { Cell } from "@commontools/runner";
+import type { Cell, PatternMeta } from "@commontools/runner";
 import { schemaToTypeString } from "@commontools/runner";
 import { FsTree } from "./tree.ts";
 import {
@@ -128,6 +128,17 @@ export interface HandlerTarget {
   cellKey: string;
 }
 
+/** Result of resolving an inode to a writable source file path. */
+export interface SourceWritePath {
+  spaceName: string;
+  pieceName: string;
+  /** Relative path within .src/, e.g. "main.tsx" or "utils/helper.tsx". */
+  relPath: string;
+  piece: PieceController;
+  /** Inode of the .src/ directory (for error.log lookups). */
+  srcIno: bigint;
+}
+
 /** Callback to invalidate kernel cache entries (by name under a parent). */
 export type InvalidateCallback = (parentIno: bigint, names: string[]) => void;
 /** Callback to invalidate cached attrs/data for an inode (forces readdir refresh). */
@@ -149,6 +160,8 @@ export interface SpaceState {
   unsubscribes: Cancel[];
   /** Used names set for collision resolution. */
   usedNames: Set<string>;
+  /** Map from piece name to the inode of its .src/ directory. */
+  srcInos: Map<string, bigint>;
 }
 
 interface ScheduledPropRebuild {
@@ -515,6 +528,48 @@ export class CellBridge {
     }
 
     return { spaceName, pieceName, cell, jsonPath, isJsonFile, piece };
+  }
+
+  /**
+   * Resolve an inode to a writable source file path under a .src/ directory.
+   *
+   * Returns null if the inode is read-only (error.log) or not a .src/ file.
+   *
+   * Path structure: /<space>/pieces/<piece>/.src/<relPath...>
+   */
+  resolveSourceWritePath(ino: bigint): SourceWritePath | null {
+    // Walk up to root collecting segments
+    const segments: string[] = [];
+    let current = ino;
+    while (current !== this.tree.rootIno) {
+      const name = this.tree.getNameForIno(current);
+      if (name === undefined) return null;
+      segments.unshift(name);
+      const parentIno = this.tree.parents.get(current);
+      if (parentIno === undefined) return null;
+      current = parentIno;
+    }
+
+    // segments: [spaceName, "pieces", pieceName, ".src", ...relSegments]
+    if (segments.length < 5) return null;
+    if (segments[1] !== "pieces") return null;
+    if (segments[3] !== ".src") return null;
+
+    const spaceName = segments[0];
+    const pieceName = segments[2];
+    const relPath = segments.slice(4).join("/");
+
+    // Block writes to error.log
+    if (relPath === "error.log") return null;
+
+    const space = this.spaces.get(spaceName);
+    if (!space) return null;
+    const piece = space.pieceControllers.get(pieceName);
+    if (!piece) return null;
+    const srcIno = space.srcInos.get(pieceName);
+    if (srcIno === undefined) return null;
+
+    return { spaceName, pieceName, relPath, piece, srcIno };
   }
 
   /** Send a value to a handler (stream) cell. */
@@ -1042,6 +1097,7 @@ export class CellBridge {
       did: spaceDid,
       unsubscribes: [],
       usedNames: new Set(),
+      srcInos: new Map(),
     };
 
     // Fetch all pieces and populate tree
@@ -1170,6 +1226,7 @@ export class CellBridge {
       name,
       spaceName,
     );
+    await this.buildSourceTree(pieceIno, piece, state, name);
     this.updatePieceManifest(state, piece.id, {
       pattern: this.getManifestPatternFromTree(pieceIno),
       summary: this.getManifestSummaryFromTree(pieceIno),
@@ -1236,6 +1293,7 @@ export class CellBridge {
     if (pieceId) {
       state.pieceManifest.delete(pieceId);
     }
+    state.srcInos.delete(name);
     state.usedNames.delete(name);
   }
 
@@ -2132,5 +2190,61 @@ export class CellBridge {
     }
 
     return pieceIno;
+  }
+
+  /**
+   * Build the .src/ subtree for a piece, containing all source files from
+   * PatternMeta.program.files[]. Skips system pieces that have no program.
+   */
+  private async buildSourceTree(
+    pieceIno: bigint,
+    piece: PieceController,
+    state: SpaceState,
+    pieceName: string,
+  ): Promise<void> {
+    let meta: PatternMeta | undefined;
+    try {
+      meta = await piece.getPatternMeta();
+    } catch {
+      // Pattern meta not always available
+    }
+
+    if (!meta?.program?.files?.length) {
+      // System piece or no source — skip .src/
+      return;
+    }
+
+    // Create or reuse .src/ dir
+    let srcIno = this.tree.lookup(pieceIno, ".src");
+    if (srcIno !== undefined) {
+      this.tree.clear(srcIno);
+    }
+    srcIno = this.tree.addDir(pieceIno, ".src");
+    state.srcInos.set(pieceName, srcIno);
+
+    // Add each source file at its relative path
+    const enc = new TextEncoder();
+    for (const file of meta.program.files) {
+      const relPath = file.name.startsWith("/")
+        ? file.name.slice(1)
+        : file.name;
+      const parts = relPath.split("/");
+      let parentIno = srcIno;
+      // Create intermediate directories
+      for (let i = 0; i < parts.length - 1; i++) {
+        const existing = this.tree.lookup(parentIno, parts[i]);
+        parentIno = existing ?? this.tree.addDir(parentIno, parts[i]);
+      }
+      const fileName = parts[parts.length - 1];
+      this.tree.addFile(
+        parentIno,
+        fileName,
+        enc.encode(file.contents),
+        "string",
+      );
+    }
+
+    // Add empty error.log
+    this.tree.addFile(srcIno, "error.log", "", "string");
   }
 }

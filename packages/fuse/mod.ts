@@ -11,6 +11,7 @@ import { parseArgs } from "@std/cli/parse-args";
 import {
   CellBridge,
   type HandlerTarget,
+  type SourceWritePath,
   type WritePath,
 } from "./cell-bridge.ts";
 import {
@@ -72,7 +73,8 @@ globalThis.addEventListener("error", (e) => {
 
 type HandleWriteTarget =
   | { kind: "handler"; target: HandlerTarget }
-  | { kind: "value"; target: WritePath };
+  | { kind: "value"; target: WritePath }
+  | { kind: "source"; target: SourceWritePath };
 
 export async function main(argv: string[] = Deno.args) {
   const args = parseArgs(argv, {
@@ -190,7 +192,9 @@ export async function main(argv: string[] = Deno.args) {
     ino: bigint,
   ) {
     return buildNodeStat(node, ino, {
-      isWritable: Boolean(bridge?.resolveWritePath(ino)),
+      isWritable: Boolean(
+        bridge?.resolveWritePath(ino) || bridge?.resolveSourceWritePath(ino),
+      ),
       ownership: mountOwnership,
     });
   }
@@ -397,12 +401,17 @@ export async function main(argv: string[] = Deno.args) {
 
       let writeTarget: HandleWriteTarget | undefined;
       if (isWriting && bridge) {
-        const writePath = bridge.resolveWritePath(inode);
-        if (!writePath) {
-          fuse.symbols.fuse_reply_err(req, EACCES);
-          return;
+        const sourceWritePath = bridge.resolveSourceWritePath(inode);
+        if (sourceWritePath) {
+          writeTarget = { kind: "source", target: sourceWritePath };
+        } else {
+          const writePath = bridge.resolveWritePath(inode);
+          if (!writePath) {
+            fuse.symbols.fuse_reply_err(req, EACCES);
+            return;
+          }
+          writeTarget = { kind: "value", target: writePath };
         }
-        writeTarget = { kind: "value", target: writePath };
       }
 
       // Get current content for the handle buffer
@@ -625,6 +634,72 @@ export async function main(argv: string[] = Deno.args) {
           handle.buffer = new Uint8Array(0); // fire-and-forget
         }
         return 0;
+      }
+
+      if (writeTarget?.kind === "source") {
+        const { piece, relPath, srcIno } = writeTarget.target;
+        const text = new TextDecoder().decode(buffer);
+
+        // Optimistically update the file content in the tree
+        let fileIno: bigint | undefined = srcIno;
+        for (const part of relPath.split("/")) {
+          fileIno = fileIno !== undefined
+            ? tree.lookup(fileIno, part)
+            : undefined;
+        }
+        if (fileIno !== undefined) {
+          try {
+            tree.updateFile(fileIno, text);
+          } catch {
+            // Ignore stale inode
+          }
+        }
+
+        // Get current meta to build the updated program
+        let meta: Awaited<ReturnType<typeof piece.getPatternMeta>> | undefined;
+        try {
+          meta = await piece.getPatternMeta();
+        } catch (e) {
+          console.error(`[source] Failed to get pattern meta: ${e}`);
+          return EACCES;
+        }
+
+        if (!meta?.program) {
+          return EACCES;
+        }
+
+        // Replace the written file's content in the files array
+        const updatedFiles = meta.program.files.map((f) => {
+          const fRelPath = f.name.startsWith("/") ? f.name.slice(1) : f.name;
+          return fRelPath === relPath ? { ...f, contents: text } : f;
+        });
+
+        try {
+          await piece.setPattern({
+            main: meta.program.main,
+            mainExport: meta.program.mainExport,
+            files: updatedFiles,
+          });
+          // Clear error.log on success
+          const errorLogIno = tree.lookup(srcIno, "error.log");
+          if (errorLogIno !== undefined) {
+            tree.updateFile(errorLogIno, "");
+          }
+          if (handle.version === flushVersion) {
+            handle.dirty = false;
+            handle.truncatePending = false;
+          }
+          return 0;
+        } catch (e) {
+          // Write compile error to error.log
+          const errorMsg = e instanceof Error ? e.message : String(e);
+          const errorLogIno = tree.lookup(srcIno, "error.log");
+          if (errorLogIno !== undefined) {
+            tree.updateFile(errorLogIno, errorMsg);
+          }
+          console.error(`[source] Compile error in ${relPath}: ${errorMsg}`);
+          return EACCES;
+        }
       }
 
       if (
