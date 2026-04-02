@@ -4,6 +4,8 @@ import { property, query, state } from "lit/decorators.js";
 import dagre from "dagre";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
 import type { SchedulerGraphNode } from "@commontools/runtime-client";
+import "./SchedulerSourceView.ts";
+import type { SourceViewNode } from "./SchedulerSourceView.ts";
 
 interface LayoutNode {
   id: string;
@@ -25,6 +27,7 @@ interface LayoutNode {
   writes?: string[]; // Diagnostic: cell paths this action writes
   debounceMs?: number; // Current debounce delay in ms
   throttleMs?: number; // Current throttle period in ms
+  patternId?: string; // Pattern this action belongs to
 }
 
 interface LayoutEdge {
@@ -779,6 +782,24 @@ export class XSchedulerGraph extends LitElement {
       overflow-y: auto;
     }
 
+    .source-jump-button {
+      margin-top: 0.375rem;
+      padding: 0.25rem 0.5rem;
+      background: #334155;
+      border: 1px solid #475569;
+      color: #93c5fd;
+      font-size: 0.7rem;
+      font-family: monospace;
+      border-radius: 0.25rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .source-jump-button:hover {
+      background: #475569;
+      color: #bfdbfe;
+    }
+
     .detail-cell-list {
       display: flex;
       flex-direction: column;
@@ -1075,7 +1096,7 @@ export class XSchedulerGraph extends LitElement {
   private collapsedParents = new Set<string>();
 
   @state()
-  private viewMode: "graph" | "table" | "flags" = "table";
+  private viewMode: "graph" | "table" | "flags" | "source" = "table";
 
   @state()
   private tableSortColumn: "totalTime" | "runCount" | "avgTime" | "lastTime" =
@@ -1267,6 +1288,7 @@ export class XSchedulerGraph extends LitElement {
           writes: originalNode?.writes,
           debounceMs: originalNode?.debounceMs,
           throttleMs: originalNode?.throttleMs,
+          patternId: originalNode?.patternId,
         });
       }
     }
@@ -1788,6 +1810,17 @@ export class XSchedulerGraph extends LitElement {
             title="Actions with invalid/pending inputs"
           >
             Data pending
+          </button>
+          <button
+            type="button"
+            class="toggle-button ${this.viewMode === "source" ? "active" : ""}"
+            @click="${() => {
+              this.viewMode = "source";
+              this.debuggerController?.requestPatternSources();
+            }}"
+            title="View pattern source code with action heat map"
+          >
+            Source
           </button>
         </div>
 
@@ -2360,6 +2393,17 @@ export class XSchedulerGraph extends LitElement {
               <div class="detail-section">
                 <div class="detail-section-title">Code Preview</div>
                 <div class="detail-preview">${node.preview}</div>
+                <button
+                  type="button"
+                  class="source-jump-button"
+                  @click="${() => {
+                    this.viewMode = "source";
+                    this.debuggerController?.requestPatternSources();
+                  }}"
+                  title="View in source with context"
+                >
+                  View in Source
+                </button>
               </div>
             `
             : ""} ${node.reads && node.reads.length > 0
@@ -2620,7 +2664,47 @@ export class XSchedulerGraph extends LitElement {
         `
         : this.viewMode === "flags"
         ? this.renderFlagsView()
+        : this.viewMode === "source"
+        ? this.renderSourceView()
         : this.renderTable()}
+    `;
+  }
+
+  private renderSourceView(): TemplateResult {
+    const sources = this.debuggerController?.getPatternSources() ?? [];
+    // Build SourceViewNode map from layoutNodes
+    const sourceNodes = new Map<string, SourceViewNode>();
+    for (const [id, node] of this.layoutNodes) {
+      sourceNodes.set(id, {
+        id,
+        type: node.type,
+        label: node.label,
+        stats: node.stats
+          ? {
+            totalTime: node.stats.totalTime,
+            runCount: node.stats.runCount,
+          }
+          : undefined,
+        patternId: node.patternId,
+      });
+    }
+
+    return html`
+      <div class="table-wrapper">
+        <x-scheduler-source
+          .patternSources="${sources}"
+          .nodes="${sourceNodes}"
+          .selectedNodeId="${this.selectedNode?.id ?? null}"
+          @node-selected="${(e: CustomEvent) => {
+            const node = this.layoutNodes.get(e.detail.nodeId);
+            if (node) {
+              this.selectedNode = node;
+              this.selectedEdge = null;
+            }
+          }}"
+        ></x-scheduler-source>
+        ${this.renderDetailPane()}
+      </div>
     `;
   }
 

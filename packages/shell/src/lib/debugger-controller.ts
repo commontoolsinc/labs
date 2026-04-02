@@ -4,6 +4,7 @@ import type {
   CellHandle,
   CellRef,
   LoggerFlagsData,
+  PatternSourceInfo,
   RuntimeTelemetryMarkerResult,
   SchedulerDiagnosisResult,
   SchedulerGraphEdge,
@@ -85,6 +86,10 @@ export class DebuggerController implements ReactiveController {
     { runCount: number; totalTime: number }
   >();
   private schedulerBaselineVersion = 0;
+
+  // Pattern source files for source browser
+  private patternSources: PatternSourceInfo[] = [];
+  private patternSourcesVersion = 0;
 
   constructor(host: ReactiveControllerHost & HTMLElement) {
     this.host = host;
@@ -463,6 +468,40 @@ export class DebuggerController implements ReactiveController {
    */
   getSchedulerBaselineVersion(): number {
     return this.schedulerBaselineVersion;
+  }
+
+  /**
+   * Request pattern source files for the source browser
+   */
+  async requestPatternSources(): Promise<void> {
+    if (!this.runtime) return;
+    const rt = this.runtime.runtime();
+    if (!rt) return;
+    try {
+      const response = await rt.getPatternSources();
+      this.patternSources = response.patterns;
+      this.patternSourcesVersion++;
+      this.host.requestUpdate();
+    } catch (e) {
+      console.error(
+        "[DebuggerController] Failed to request pattern sources:",
+        e,
+      );
+    }
+  }
+
+  /**
+   * Get cached pattern sources
+   */
+  getPatternSources(): PatternSourceInfo[] {
+    return this.patternSources;
+  }
+
+  /**
+   * Get pattern sources version for change detection
+   */
+  getPatternSourcesVersion(): number {
+    return this.patternSourcesVersion;
   }
 
   /**

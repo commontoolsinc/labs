@@ -2027,6 +2027,12 @@ export class Scheduler {
       const debounceMs = this.actionDebounce.get(action);
       const throttleMs = this.actionThrottle.get(action);
 
+      // Get pattern association
+      const annotated = action as Partial<TelemetryAnnotations>;
+      const patternId = annotated.pattern
+        ? this.runtime.patternManager.getPatternId(annotated.pattern)
+        : undefined;
+
       nodes.push({
         id,
         type: this.effects.has(action) ? "effect" : "computation",
@@ -2042,6 +2048,7 @@ export class Scheduler {
         writes,
         debounceMs: debounceMs && debounceMs > 0 ? debounceMs : undefined,
         throttleMs: throttleMs && throttleMs > 0 ? throttleMs : undefined,
+        patternId,
       });
     }
 
