@@ -1,0 +1,52 @@
+import { assert, assertMatch } from "@std/assert";
+import { StaticCacheFS } from "@commontools/static";
+import { transformSource } from "../utils.ts";
+
+const staticCache = new StaticCacheFS();
+const commontools = await staticCache.getText("types/commontools.d.ts");
+const commontoolsSchema = await staticCache.getText(
+  "types/commontools-schema.d.ts",
+);
+const options = {
+  types: {
+    "commontools.d.ts": commontools,
+    "commontools-schema.d.ts": commontoolsSchema,
+  },
+};
+
+Deno.test("Closure Transformer hoists nested derive callbacks that close over module-scoped helpers", async () => {
+  const source = `/// <cts-enable />
+    import { derive, pattern, UI } from "commontools";
+
+    const formatDateShort = (dateStr: string) => dateStr.toUpperCase();
+
+    export default pattern<{ values: string[] }>((state) => ({
+      [UI]: (
+        <div>
+          {state.values.map((dateStr) => (
+            <span>
+              {derive({ dateStr }, ({ dateStr }) => formatDateShort(dateStr))}
+            </span>
+          ))}
+        </div>
+      ),
+    }));
+`;
+
+  const output = await transformSource(source, options);
+  const normalized = output.replace(/\s+/g, " ");
+
+  const hoistedMatch = normalized.match(
+    /const (\S+) = __ctHardenFn\(\(\{ dateStr \}\) => formatDateShort\(dateStr\)\);/,
+  );
+
+  assert(hoistedMatch, `expected hoisted helper in output:\n${output}`);
+
+  const hoistedName = hoistedMatch[1]!;
+  assertMatch(
+    normalized,
+    new RegExp(
+      `derive\\(\\{ dateStr \\}, ${hoistedName}\\)`,
+    ),
+  );
+});

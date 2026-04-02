@@ -88,7 +88,7 @@ export function createNodeFactory<T = any, R = any>(
   // Attach source location and preview to function implementations for debugging
   if (typeof moduleSpec.implementation === "function") {
     annotateFunctionDebugMetadata(moduleSpec.implementation);
-    moduleSpec.implementationRef ??= ensureImplementationRef(
+    moduleSpec.implementationRef = ensureImplementationRef(
       moduleSpec.implementation,
       "fn",
     );
@@ -655,13 +655,6 @@ function ensureImplementationRef(
     return minted;
   })();
 
-  if (frame?.verifiedLoadId) {
-    frame.runtime?.harness.registerVerifiedFunction?.(
-      frame.verifiedLoadId,
-      implementationRef,
-      implementation,
-    );
-  }
   registerVerifiedFunctionImplementation(implementationRef, implementation);
   return implementationRef;
 }

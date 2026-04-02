@@ -554,6 +554,11 @@ If the post-transform derive callback is self-contained, it stays inline.
 
 If the post-transform derive callback still references imports or module scope,
 the transformer must hoist the builder factory, not the fully applied call.
+This applies equally to nested builder callbacks introduced by helpers such as
+`map(...)`, `mapWithPattern(...)`, or inline sub-`pattern(...)` creation. If
+the post-transform callback still sees module-scoped bindings, it must be
+lifted to module scope so verified evaluation can mint and register a stable
+`implementationRef` for the real executable body.
 
 Concretely:
 
@@ -597,6 +602,10 @@ If the post-transform handler callback is self-contained, the inline
 
 If the post-transform handler callback still references imports or module scope,
 the transformer must hoist the builder factory, not the final bound result.
+Any remaining nested handler-like callback with module-scoped free variables is
+therefore a transformer bug. The runtime may rehydrate such a callback from
+source as a fail-closed fallback, but verified execution must rely on the
+hoisted, module-scoped callback form.
 
 Concretely:
 
@@ -1835,7 +1844,11 @@ builder implementations are hardened in the runtime builder layer as soon as
 `lift(...)`, `handler(...)`, `pattern(...)`, or related constructors receive
 them, but runner execution must still resolve those callbacks through the
 verified or trusted-host registries rather than by invoking raw function
-objects from the host graph.
+objects from the host graph. If a `javascript` module carries a function
+implementation that has not been admitted into either registry, the runtime may
+only execute it by re-evaluating its source inside the dedicated SES callback
+Compartment described in Section 4.2. That fallback is not a blessing path and
+must intentionally discard host closure state.
 
 The compiled-bundle verifier also treats TypeScript's canonical default-import
 normalization rebinding as part of the accepted grammar:
@@ -1921,23 +1934,16 @@ private instantiateJavaScriptNode(
       patternId,
     );
     if (!fn) {
-      throw new Error(
-        `Unknown executable implementationRef: ${module.implementationRef}`,
-      );
+      fn = rehydrateJavaScriptImplementationInCallbackCompartment(module);
     }
-  } else if (typeof module.implementation === "string") {
-    // String-backed implementations may be rehydrated lazily, but only inside
-    // the dedicated SES callback compartment with the approved compatibility
-    // globals and no runtime-module injection.
-    fn = evaluateInCallbackCompartment(module.implementation);
   } else {
-    throw new Error(
-      "Refused to execute JavaScript function implementation without " +
-        "verified or explicitly trusted implementationRef",
-    );
+    fn = rehydrateJavaScriptImplementationInCallbackCompartment(module);
   }
 
-  // ... rest of existing logic ...
+  const result =
+    module.wrapper === "handler"
+      ? fn(argument.$event, argument.$ctx)
+      : fn(argument);
 }
 ```
 
@@ -1946,10 +1952,30 @@ The runner must distinguish executable JavaScript implementations by origin:
 - verified callbacks: produced by compiled-bundle verification plus SES module
   evaluation
 - trusted-host callbacks: admitted explicitly through the unsafe host trust API
-- all other raw host function objects: rejected
+- SES-rehydrated callbacks: created lazily from string source or from
+  `Function.prototype.toString.call(module.implementation)` inside the smaller
+  callback Compartment
+- all other raw host function execution on the host: forbidden
 
 “Hardened” is not a third category. Freezing a host callback prevents mutation;
 it does not prove provenance.
+
+`implementationRef` is an identity token, not a blessing. Blessing happens only
+when the runtime admits callbacks into an execution registry by traversing an
+already-approved graph:
+
+- after compiled SES evaluation, the harness walks exported values / pattern
+  graphs and registers the `implementationRef -> function` pairs it finds
+- when a previously verified pattern is registered into a different active
+  harness, that harness must re-admit the discovered `implementationRef ->
+  function` pairs into its verified-load registry for the associated
+  `verifiedLoadId`, not only into a pattern-local side table
+- during `unsafeTrustPattern(...)`, `unsafeTrustModule(...)`, or
+  `createBuilder({ unsafeHostTrust })`, the runtime walks the trusted host graph
+  and registers those callbacks into the trusted-host registry
+
+Ambient construction context must not register callbacks into either registry.
+Being created while a verified load is active is not sufficient.
 
 **Files to modify:**
 - `packages/runner/src/runner.ts`
@@ -1989,7 +2015,9 @@ The unsafe host trust contract is:
 
 This API exists only to admit already-trusted host fixtures. It must not become
 an implicit fallback path when normal runner execution cannot find a verified
-implementation reference.
+implementation reference. Without explicit trust, unblessed host callbacks may
+still run only through SES source rehydration, which intentionally drops host
+closure state and therefore fails closed for non-self-contained functions.
 
 #### 4.2 Remove Legacy UnsafeEvalIsolate Usage
 
@@ -2002,6 +2030,12 @@ The runtime routes either:
 - verified module load through the main SES module path, or
 - lazy string-backed callback rehydration through the smaller SES callback
   Compartment described above.
+
+For function-backed `javascript` modules that are not blessed through either
+registry, the runner stringifies the function with
+`Function.prototype.toString.call(...)` and rehydrates that source in the same
+callback Compartment. Any missing lexical capture must therefore fail closed at
+runtime rather than silently preserving host state.
 
 ```typescript
 // Before

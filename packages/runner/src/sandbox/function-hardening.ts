@@ -7,8 +7,12 @@ let verifiedFunctionRegistrar: VerifiedFunctionRegistrar | undefined;
 
 export function setVerifiedFunctionRegistrar(
   registrar: VerifiedFunctionRegistrar | undefined,
-): void {
+): () => void {
+  const previous = verifiedFunctionRegistrar;
   verifiedFunctionRegistrar = registrar;
+  return () => {
+    verifiedFunctionRegistrar = previous;
+  };
 }
 
 export function registerVerifiedFunctionImplementation(

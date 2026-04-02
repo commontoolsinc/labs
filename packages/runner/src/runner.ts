@@ -65,6 +65,7 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
+import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
 const triggerFlowLogger = getLogger("runner.trigger-flow", {
@@ -1255,46 +1256,39 @@ export class Runner {
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
     const writes = findAllWriteRedirectCells(outputs, processCell);
 
-    let fn: (inputs: any) => any;
+    let fn: (...args: any[]) => any;
     const patternId = this.runtime.patternManager.getPatternId(pattern);
-    let verifiedLoadId: string | undefined;
+    const verifiedLoadId = module.implementationRef
+      ? this.runtime.harness.getVerifiedLoadId?.(
+        module.implementationRef,
+        patternId,
+      )
+      : undefined;
 
     if (module.implementationRef) {
-      const cached = this.functionCache.get(module) ??
-        this.runtime.harness.getExecutableFunction(
+      const cached = this.functionCache.get(module);
+      if (cached) {
+        fn = cached;
+      } else {
+        const executable = this.runtime.harness.getExecutableFunction(
           module.implementationRef,
           patternId,
         );
-      if (!cached) {
-        throw new Error(
-          `Unknown executable implementationRef: ${module.implementationRef}`,
-        );
-      }
-      this.functionCache.set(module, cached as (inputs: any) => any);
-      fn = cached as (inputs: any) => any;
-      verifiedLoadId = this.runtime.harness.getVerifiedLoadId?.(
-        module.implementationRef,
-        patternId,
-      );
-    } else if (typeof module.implementation === "string") {
-      const cached = this.functionCache.get(module);
-      if (cached) {
-        fn = cached as (inputs: any) => any;
-      } else {
-        fn = this.runtime.harness.getInvocation(module.implementation) as (
-          inputs: any,
-        ) => any;
+        if (executable) {
+          fn = executable as (...args: any[]) => any;
+        } else {
+          fn = this.getFallbackJavaScriptImplementation(module);
+        }
         this.functionCache.set(module, fn);
       }
-    } else if (typeof module.implementation === "function") {
-      throw new Error(
-        "Refused to execute JavaScript function implementation without " +
-          "verified implementationRef",
-      );
     } else {
-      throw new Error(
-        "JavaScript module is missing an executable implementation",
-      );
+      const cached = this.functionCache.get(module);
+      if (cached) {
+        fn = cached;
+      } else {
+        fn = this.getFallbackJavaScriptImplementation(module);
+        this.functionCache.set(module, fn);
+      }
     }
 
     // Prefer .src (backup) over .name since name can be finicky
@@ -1309,10 +1303,6 @@ export class Runner {
         name,
         ...namedFn.sourceLocationSample,
       });
-    }
-
-    if (module.wrapper && module.wrapper in moduleWrappers) {
-      fn = moduleWrappers[module.wrapper](fn);
     }
 
     // Check if $event is a stream alias
@@ -1440,18 +1430,13 @@ export class Runner {
           }
           // We only run the action if we have a valid argument, or the function's schema
           // is false (like an input of `never`).
-          const result = name &&
-              this.runtime.scheduler.hasBreakpoint(`handler:${name}`)
-            ? patternBreakpoint(
+          const result = isValidArgument
+            ? this.invokeJavaScriptImplementation(
+              module,
               fn,
-              isValidArgument,
               argument,
-              module.argumentSchema,
-              module.resultSchema,
-              inputsCell,
+              verifiedLoadId,
             )
-            : isValidArgument
-            ? fn(argument)
             : undefined;
 
           const postRun = (result: any) => {
@@ -1709,18 +1694,13 @@ export class Runner {
 
           // We only run the action if we have a valid argument, or the function's schema
           // is false (like an input of `never`).
-          const result = name &&
-              this.runtime.scheduler.hasBreakpoint(`action:${name}`)
-            ? patternBreakpoint(
+          const result = isValidArgument
+            ? this.invokeJavaScriptImplementation(
+              module,
               fn,
-              isValidArgument,
               argument,
-              module.argumentSchema,
-              module.resultSchema,
-              inputsCell,
+              verifiedLoadId,
             )
-            : isValidArgument
-            ? fn(argument)
             : undefined;
 
           const postRun = (result: any) => {
@@ -1878,6 +1858,64 @@ export class Runner {
       addCancel(
         this.runtime.scheduler.subscribe(wrappedAction, populateDependencies),
       );
+    }
+  }
+
+  private getFallbackJavaScriptImplementation(
+    module: Module,
+  ): (...args: any[]) => any {
+    if (typeof module.implementation === "function") {
+      return this.runtime.harness.getInvocation(
+        Function.prototype.toString.call(module.implementation),
+      ) as (...args: any[]) => any;
+    }
+    if (typeof module.implementation === "string") {
+      return this.runtime.harness.getInvocation(module.implementation) as (
+        ...args: any[]
+      ) => any;
+    }
+    throw new Error(
+      "JavaScript module is missing an executable implementation",
+    );
+  }
+
+  private invokeJavaScriptImplementation(
+    module: Module,
+    fn: (...args: any[]) => any,
+    argument: unknown,
+    verifiedLoadId?: string,
+  ): unknown {
+    const invoke = () => {
+      if (module.wrapper === "handler") {
+        const event = isRecord(argument) && "$event" in argument
+          ? argument.$event
+          : undefined;
+        const context = isRecord(argument) && "$ctx" in argument
+          ? argument.$ctx
+          : undefined;
+        return fn(event, context);
+      }
+
+      return fn(argument);
+    };
+
+    if (!verifiedLoadId || !this.runtime.harness.registerVerifiedFunction) {
+      return invoke();
+    }
+
+    const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
+      (implementationRef, implementation) => {
+        this.runtime.harness.registerVerifiedFunction!(
+          verifiedLoadId,
+          implementationRef,
+          implementation as (input: any) => void,
+        );
+      },
+    );
+    try {
+      return invoke();
+    } finally {
+      restoreVerifiedFunctionRegistrar();
     }
   }
 
@@ -2343,8 +2381,3 @@ function describePatternOrModule(
 
   return `pattern:nodes=${patternOrModule.nodes.length}`;
 }
-
-const moduleWrappers = {
-  handler: (fn: (event: any, ...props: any[]) => any) => (props: any) =>
-    fn(props.$event, props.$ctx),
-};

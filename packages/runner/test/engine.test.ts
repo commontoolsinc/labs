@@ -756,6 +756,56 @@ describe("Engine.evaluate()", () => {
       "Handler requires schemas or CTS transformer",
     );
   });
+
+  it("keeps handler implementation refs bound to the handler callback", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { handler, pattern, schema } from "commontools";',
+            'import "commontools/schema";',
+            "const model = schema({",
+            '  type: "object",',
+            "  properties: {",
+            '    value: { type: "number", default: 0, asCell: true },',
+            "  },",
+            "  default: { value: 0 },",
+            "});",
+            "const increment = handler({}, model, (_, state) => {",
+            "  state.value.set(state.value.get() + 1);",
+            "});",
+            "export { increment };",
+            "export default pattern(",
+            "  (cell) => ({",
+            "    increment: increment(cell),",
+            "    value: cell.value,",
+            "  }),",
+            "  model,",
+            "  model,",
+            ");",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const handlerNode = main?.default?.nodes?.find((node: {
+      module?: { wrapper?: string };
+    }) => node.module?.wrapper === "handler");
+    const module = handlerNode?.module as {
+      implementation?: unknown;
+      implementationRef?: string;
+    } | undefined;
+
+    expect(typeof module?.implementation).toBe("function");
+    expect(typeof module?.implementationRef).toBe("string");
+    expect(
+      engine.getExecutableFunction(module!.implementationRef!),
+    ).toBe(module?.implementation);
+  });
 });
 
 describe("Engine in SES mode", () => {

@@ -195,30 +195,59 @@ describe("SES security regressions", () => {
     });
   });
 
-  it("refuses to execute direct builder callbacks that were never verified by SES", async () => {
+  it("runs untrusted self-contained direct builder callbacks through the SES fallback", async () => {
     const { commontools } = createBuilder();
-    const double = commontools.lift((value: number) => value * 2);
+    const probe = commontools.lift((_value: number) => typeof Proxy);
     const testPattern = commontools.pattern<{ value: number }>(({ value }) => ({
-      total: double(value),
+      environment: probe(value),
     }));
 
-    const resultCell = runtime.getCell<{ total: number }>(
+    const resultCell = runtime.getCell<{ environment: string }>(
       signer.did(),
-      "reject direct builder callbacks",
+      "untrusted direct builder callbacks use SES fallback",
       testPattern.resultSchema,
     );
 
-    await expect(runtime.runSynced(resultCell, testPattern, { value: 2 }))
-      .rejects.toThrow("Unknown executable implementationRef");
+    const result = await runtime.runSynced(resultCell, testPattern, {
+      value: 2,
+    });
+    await expect(result.pull()).resolves.toEqual({ environment: "undefined" });
   });
 
-  it("allows direct builder callbacks only when explicitly trusted", async () => {
+  it("fails closed when untrusted direct builder callbacks capture host state", async () => {
+    const { commontools } = createBuilder();
+    const secret = { factor: 2 };
+    const double = commontools.lift((value: number) => value * secret.factor);
+    const testPattern = commontools.pattern<{ value: number }>(({ value }) => ({
+      total: double(value),
+    }));
+    const errors: Error[] = [];
+    runtime.scheduler.onError((error) => {
+      errors.push(error);
+    });
+
+    const resultCell = runtime.getCell<{ total: number }>(
+      signer.did(),
+      "untrusted closureful direct builder callbacks",
+      testPattern.resultSchema,
+    );
+
+    const result = await runtime.runSynced(resultCell, testPattern, {
+      value: 2,
+    });
+    await result.pull();
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0])).toMatch(/factor|TypeError|ReferenceError/);
+  });
+
+  it("allows explicitly trusted direct builder callbacks to preserve host closures", async () => {
     const { commontools } = createBuilder({
       unsafeHostTrust: runtime.createUnsafeHostTrust({
         reason: "security regression fixture",
       }),
     });
-    const double = commontools.lift((value: number) => value * 2);
+    const factor = 2;
+    const double = commontools.lift((value: number) => value * factor);
     const testPattern = commontools.pattern<{ value: number }>(({ value }) => ({
       total: double(value),
     }));
@@ -233,6 +262,113 @@ describe("SES security regressions", () => {
       value: 2,
     });
     await expect(result.pull()).resolves.toEqual({ total: 4 });
+  });
+
+  it("blesses module-scope handlers referenced only through verified callbacks", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            'import { type Cell, computed, Default, handler, pattern } from "commontools";',
+            "",
+            "interface Args {",
+            "  values: Default<number[], []>;",
+            "}",
+            "",
+            "const toInteger = (value: unknown): number =>",
+            '  typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 0;',
+            "",
+            "const adjustFirst = handler(",
+            "  (",
+            "    event: { amount?: number } | undefined,",
+            "    context: { values: Cell<number[]> },",
+            "  ) => {",
+            "    const target = context.values.key(0) as Cell<number>;",
+            "    target.set(toInteger(target.get()) + toInteger(event?.amount));",
+            "  },",
+            ");",
+            "",
+            "export default pattern<Args>(({ values }) => ({",
+            "  values,",
+            "  handlers: computed(() => [adjustFirst({ values })]),",
+            "}));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await runtime.patternManager.compilePattern(program);
+    const tx = runtime.edit();
+    const resultCell = runtime.getCell<any>(
+      signer.did(),
+      "verified callbacks bless hidden handlers",
+      compiled.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, compiled, { values: [2] }, resultCell);
+    tx.commit();
+
+    const cancel = result.sink(() => {});
+    await runtime.idle();
+    await runtime.editWithRetry((tx) =>
+      result.key("handlers").key(0).withTx(tx).send({ amount: 3 })
+    );
+    await runtime.idle();
+
+    await expect(result.key("values").pull()).resolves.toEqual([5]);
+    cancel();
+  });
+
+  it("blesses nested callbacks created during verified callback execution", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            'import { computed, handler } from "commontools";',
+            "",
+            "const format = (value: string): string => value.toUpperCase();",
+            "",
+            "export const makeNested = handler(",
+            "  (_event, _state) => [computed(() => format('a'))][0],",
+            ");",
+            "export default makeNested;",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main, loadId } = await engine.evaluate(id, jsScript, program.files);
+    const verifiedRegistry = ((engine as unknown as {
+      verifiedFunctions: Map<string, Map<string, unknown>>;
+    }).verifiedFunctions.get(loadId!)?.size) ?? 0;
+
+    (runtime.runner as unknown as {
+      invokeJavaScriptImplementation(
+        module: { wrapper?: string },
+        fn: (...args: any[]) => unknown,
+        argument: unknown,
+        verifiedLoadId?: string,
+      ): unknown;
+    }).invokeJavaScriptImplementation(
+      main?.makeNested as { wrapper?: string },
+      (main?.makeNested as { implementation: (...args: any[]) => unknown })
+        .implementation,
+      { $event: undefined, $ctx: undefined },
+      loadId,
+    );
+
+    const updatedRegistry = ((engine as unknown as {
+      verifiedFunctions: Map<string, Map<string, unknown>>;
+    }).verifiedFunctions.get(loadId!)?.size) ?? 0;
+
+    expect(updatedRegistry).toBeGreaterThan(verifiedRegistry);
   });
 
   it("freezes callback compartment globalThis bindings", () => {

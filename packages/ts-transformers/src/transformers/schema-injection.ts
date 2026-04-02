@@ -968,8 +968,11 @@ function inferLiftFactoryResultType(
     return undefined;
   }
 
-  const callback = factoryInitializer.arguments[0];
-  if (!callback || !isFunctionLikeExpression(callback)) {
+  const callback = resolveFunctionLikeExpression(
+    factoryInitializer.arguments[0],
+    checker,
+  );
+  if (!callback) {
     return undefined;
   }
 
@@ -1450,17 +1453,36 @@ function prependSchemaArguments(
  */
 function findFunctionArgument(
   argsArray: readonly ts.Expression[],
-): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  checker: ts.TypeChecker,
+): {
+  expression: ts.Expression;
+  callback: ts.ArrowFunction | ts.FunctionExpression;
+} | undefined {
   for (let i = argsArray.length - 1; i >= 0; i--) {
     const arg = argsArray[i];
-    if (
-      arg &&
-      (ts.isFunctionExpression(arg) || ts.isArrowFunction(arg))
-    ) {
-      return arg;
+    const callback = arg && resolveFunctionLikeExpression(arg, checker);
+    if (arg && callback) {
+      return { expression: arg, callback };
     }
   }
   return undefined;
+}
+
+function resolveFunctionLikeExpression(
+  expression: ts.Expression | undefined,
+  checker: ts.TypeChecker,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  if (!expression) {
+    return undefined;
+  }
+  if (isFunctionLikeExpression(expression)) {
+    return expression;
+  }
+
+  const initializer = getVariableInitializer(expression, checker);
+  return initializer && isFunctionLikeExpression(initializer)
+    ? initializer
+    : undefined;
 }
 
 /**
@@ -1559,10 +1581,11 @@ function handlePatternSchemaInjection(
   const argsArray = Array.from(node.arguments);
 
   // Find the function argument
-  const builderFunction = findFunctionArgument(argsArray);
-  if (!builderFunction) {
+  const builderFunctionArg = findFunctionArgument(argsArray, checker);
+  if (!builderFunctionArg) {
     return undefined; // No function found - skip transformation
   }
+  const builderFunction = builderFunctionArg.callback;
 
   const argumentCapabilityMode: CapabilitySummaryApplicationMode =
     context.isArrayMethodCallback(builderFunction) ||
@@ -1576,7 +1599,7 @@ function handlePatternSchemaInjection(
     resultSchema: ts.Expression,
   ): ts.CallExpression => {
     return factory.createCallExpression(node.expression, undefined, [
-      builderFunction,
+      builderFunctionArg.expression,
       inputSchema,
       resultSchema,
     ]);
@@ -1651,7 +1674,10 @@ function handlePatternSchemaInjection(
     );
   } else {
     // Case 3: No type arguments - check for schema arguments
-    const schemaArgs = detectSchemaArguments(argsArray, builderFunction);
+    const schemaArgs = detectSchemaArguments(
+      argsArray,
+      builderFunctionArg.expression,
+    );
 
     if (schemaArgs.length >= 2) {
       // Already has two schemas (input + result) - skip transformation
@@ -1811,12 +1837,11 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           let eventTypeNode: ts.TypeNode = eventType;
           let stateTypeNode: ts.TypeNode = stateType;
           const handlerCandidate = node.arguments[0];
-          if (
-            handlerCandidate &&
-            (ts.isFunctionExpression(handlerCandidate) ||
-              ts.isArrowFunction(handlerCandidate))
-          ) {
-            const handlerFn = handlerCandidate;
+          const handlerFn = resolveFunctionLikeExpression(
+            handlerCandidate,
+            checker,
+          );
+          if (handlerCandidate && handlerFn) {
             const eventTypeValue = getTypeFromTypeNodeWithFallback(
               eventType,
               checker,
@@ -1879,13 +1904,11 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
 
         if (node.arguments.length === 1) {
           const handlerCandidate = node.arguments[0];
-          if (
-            handlerCandidate &&
-            (ts.isFunctionExpression(handlerCandidate) ||
-              ts.isArrowFunction(handlerCandidate))
-          ) {
-            const handlerFn = handlerCandidate;
-
+          const handlerFn = resolveFunctionLikeExpression(
+            handlerCandidate,
+            checker,
+          );
+          if (handlerCandidate && handlerFn) {
             // Infer types from the handler function for both parameters
             const inferred = collectFunctionSchemaTypeNodes(
               handlerFn,
@@ -1961,7 +1984,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             const updated = factory.createCallExpression(
               node.expression,
               undefined,
-              [toSchemaEvent, toSchemaState, handlerFn],
+              [toSchemaEvent, toSchemaState, handlerCandidate],
             );
 
             return ts.visitEachChild(updated, visit, transformation);
@@ -2105,9 +2128,10 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
-          const liftCallback = isFunctionLikeExpression(node.arguments[0]!)
-            ? node.arguments[0]!
-            : undefined;
+          const liftCallback = resolveFunctionLikeExpression(
+            node.arguments[0],
+            checker,
+          );
           const resolved = resolveDualSchemaBuilderTypes(
             liftCallback,
             checker,
@@ -2147,12 +2171,11 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
-          const liftCallback = node.arguments[0];
-          if (
-            !liftCallback ||
-            (!ts.isArrowFunction(liftCallback) &&
-              !ts.isFunctionExpression(liftCallback))
-          ) {
+          const liftCallback = resolveFunctionLikeExpression(
+            node.arguments[0],
+            checker,
+          );
+          if (!liftCallback) {
             return ts.visitEachChild(node, visit, transformation);
           }
 
@@ -2193,12 +2216,15 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         }
 
         if (
-          node.arguments.length === 1 &&
-          isFunctionLikeExpression(node.arguments[0]!)
+          node.arguments.length === 1
         ) {
-          const callback = node.arguments[0] as
-            | ts.ArrowFunction
-            | ts.FunctionExpression;
+          const callback = resolveFunctionLikeExpression(
+            node.arguments[0],
+            checker,
+          );
+          if (!callback) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
           const resolved = resolveDualSchemaBuilderTypes(
             callback,
             checker,

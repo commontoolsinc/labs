@@ -302,6 +302,7 @@ function itemsSchemaFromArray(
 }
 
 export function moduleToJSON(module: Module) {
+  const frame = getTopFrame();
   const {
     implementation: _implementation,
     toJSON: _,
@@ -339,11 +340,38 @@ export function moduleToJSON(module: Module) {
   }
 
   if (typeof implementation === "function") {
+    if (
+      module.type === "javascript" &&
+      typeof module.implementationRef !== "string"
+    ) {
+      throw new Error(
+        "JavaScript function modules must carry implementationRef before serialization",
+      );
+    }
     const preview = (implementation as { preview?: string }).preview ??
       implementation.toString().slice(0, 200);
     const location = (implementation as { src?: string }).src;
+    const admittedImplementation = module.type === "javascript" &&
+        typeof module.implementationRef === "string"
+      ? frame?.verifiedLoadId
+        ? frame.runtime?.harness?.getVerifiedFunctionInLoad(
+          frame.verifiedLoadId,
+          module.implementationRef,
+        ) ?? frame.runtime?.harness?.getExecutableFunction(
+          module.implementationRef,
+        )
+        : frame?.runtime?.harness?.getExecutableFunction(
+          module.implementationRef,
+        )
+      : undefined;
     return {
       ...rest,
+      ...(module.type === "javascript" &&
+          admittedImplementation !== implementation
+        ? {
+          implementation: Function.prototype.toString.call(implementation),
+        }
+        : {}),
       ...(preview ? { preview } : {}),
       ...(location ? { location } : {}),
     };

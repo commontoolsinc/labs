@@ -1,9 +1,11 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import {
+  isPattern,
   Module,
   Pattern,
   Schema,
   unsafe_originalPattern,
+  unsafe_verifiedLoadId,
 } from "./builder/types.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { Cell } from "./cell.ts";
@@ -157,6 +159,48 @@ export class PatternManager {
     return pattern;
   }
 
+  private seedVerifiedLoadIds(
+    value: unknown,
+    verifiedLoadId: string,
+    seen = new Set<unknown>(),
+  ): void {
+    if (!value || (typeof value !== "object" && typeof value !== "function")) {
+      return;
+    }
+    if (seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+
+    if (isPattern(value)) {
+      const originalPattern = this.findOriginalPattern(value);
+      if (!this.patternToVerifiedLoadId.has(originalPattern)) {
+        this.patternToVerifiedLoadId.set(originalPattern, verifiedLoadId);
+      }
+      if (
+        Object.isExtensible(value) &&
+        (value as Pattern)[unsafe_verifiedLoadId] !== verifiedLoadId
+      ) {
+        Object.defineProperty(value, unsafe_verifiedLoadId, {
+          value: verifiedLoadId,
+          configurable: true,
+        });
+      }
+    }
+
+    for (const key of Reflect.ownKeys(value as object)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
+      if (!descriptor || !("value" in descriptor)) {
+        continue;
+      }
+      this.seedVerifiedLoadIds(
+        descriptor.value,
+        verifiedLoadId,
+        seen,
+      );
+    }
+  }
+
   async loadPatternMeta(
     patternId: string,
     space: MemorySpace,
@@ -216,11 +260,11 @@ export class PatternManager {
   ): string {
     // Walk up derivation copies to original
     pattern = this.findOriginalPattern(pattern as Pattern);
-    const verifiedLoadId = getTopFrame()?.verifiedLoadId;
-    if (
-      verifiedLoadId && !this.patternToVerifiedLoadId.has(pattern as Pattern)
-    ) {
-      this.patternToVerifiedLoadId.set(pattern as Pattern, verifiedLoadId);
+    const verifiedLoadId = getTopFrame()?.verifiedLoadId ??
+      this.patternToVerifiedLoadId.get(pattern as Pattern) ??
+      (pattern as Pattern)[unsafe_verifiedLoadId];
+    if (verifiedLoadId) {
+      this.seedVerifiedLoadIds(pattern as Pattern, verifiedLoadId);
     }
 
     if (src && !pattern.program) {
@@ -392,10 +436,7 @@ export class PatternManager {
     const pattern = main[exportName] as Pattern;
     pattern.program = program;
     if (loadId) {
-      this.patternToVerifiedLoadId.set(
-        this.findOriginalPattern(pattern),
-        loadId,
-      );
+      this.seedVerifiedLoadIds(pattern, loadId);
     }
     return pattern;
   }

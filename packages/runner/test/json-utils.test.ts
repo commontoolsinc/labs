@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 
 import {
   createJsonSchema,
@@ -15,8 +16,10 @@ import {
   type JSONSchemaObj,
 } from "../src/builder/types.ts";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
+import { Engine } from "../src/harness/engine.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -776,7 +779,23 @@ describe("json-utils", () => {
 });
 
 describe("moduleToJSON", () => {
-  it("serializes javascript modules by implementationRef instead of executable source", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("serializes unblessed javascript modules with executable source fallback", () => {
     const implementation = Object.assign(
       (value: number) => value * 2,
       {
@@ -793,10 +812,10 @@ describe("moduleToJSON", () => {
     expect(serialized).toMatchObject({
       type: "javascript",
       implementationRef: "main.tsx#000:doubled",
+      implementation: Function.prototype.toString.call(implementation),
       preview: "(value) => value * 2",
       location: "main.tsx:1:1",
     });
-    expect("implementation" in serialized).toBe(false);
   });
 
   it("serializes non-javascript function-backed modules without leaking implementations", () => {
@@ -818,6 +837,92 @@ describe("moduleToJSON", () => {
       implementationRef: "main.tsx#001:raw",
       preview: "() => 'ok'",
       location: "main.tsx:2:1",
+    });
+    expect("implementation" in serialized).toBe(false);
+  });
+
+  it("does not stringify verified compiled callbacks after standalone-engine registration", async () => {
+    const compileEngine = new Engine(runtime);
+    const program = await compileEngine.resolve(
+      new FileSystemProgramResolver(
+        "packages/patterns/factory-outputs/parking-coordinator/main.test.tsx",
+        "packages/patterns",
+      ),
+    );
+    const { jsScript, id } = await compileEngine.compile(program);
+    const { main } = await compileEngine.evaluate(id, jsScript, program.files);
+    const pattern = main?.default as any;
+
+    const seen = new Set<unknown>();
+    let targetModule: any;
+    const visit = (value: unknown) => {
+      if (
+        !value ||
+        (typeof value !== "object" && typeof value !== "function") ||
+        seen.has(value)
+      ) {
+        return;
+      }
+      seen.add(value);
+      if (
+        !targetModule &&
+        typeof (value as { type?: unknown }).type === "string" &&
+        (value as { type?: string }).type === "javascript" &&
+        typeof (value as { implementation?: unknown }).implementation ===
+          "function"
+      ) {
+        const implementation =
+          (value as { implementation: (...args: unknown[]) => unknown })
+            .implementation;
+        if (
+          Function.prototype.toString.call(implementation).includes(
+            "formatDateShort(dateStr).shortName",
+          )
+        ) {
+          targetModule = value;
+          return;
+        }
+      }
+      for (const key of Reflect.ownKeys(value as object)) {
+        const descriptor = Object.getOwnPropertyDescriptor(
+          value as object,
+          key,
+        );
+        if (descriptor && "value" in descriptor) {
+          visit(descriptor.value);
+        }
+      }
+    };
+    visit(pattern);
+
+    expect(targetModule).toBeDefined();
+
+    runtime.patternManager.registerPattern(pattern);
+    const patternId = runtime.patternManager.getPatternId(pattern);
+
+    expect(
+      runtime.harness.getExecutableFunction(
+        targetModule.implementationRef,
+        patternId,
+      ),
+    ).toBe(targetModule.implementation);
+
+    const frame = pushFrame({
+      runtime,
+      verifiedLoadId: runtime.harness.getVerifiedLoadId(
+        targetModule.implementationRef,
+        patternId,
+      ),
+    });
+    let serialized: ReturnType<typeof moduleToJSON>;
+    try {
+      serialized = moduleToJSON(targetModule);
+    } finally {
+      popFrame(frame);
+    }
+    expect(serialized).toMatchObject({
+      type: "javascript",
+      implementationRef: targetModule.implementationRef,
     });
     expect("implementation" in serialized).toBe(false);
   });

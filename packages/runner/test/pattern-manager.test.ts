@@ -4,6 +4,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
@@ -241,6 +242,53 @@ describe("PatternManager.compileOrGetPattern", () => {
     }
 
     expect(runtime.harness.getVerifiedLoadId?.("__missing__", patternId))
+      .toEqual(initialLoadId);
+  });
+
+  it("propagates verified load ids to nested compiled subpatterns", async () => {
+    const nestedProgram: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import { Default, pattern } from 'commontools';",
+            "export default pattern<{ values: Default<number[], []> }>(({ values }) => ({",
+            "  doubled: values.map((value) => ({ next: value })),",
+            "}));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const externalEngine = new Engine(runtime);
+    const { jsScript, id } = await externalEngine.compile(nestedProgram);
+    const { main } = await externalEngine.evaluate(
+      id,
+      jsScript,
+      nestedProgram.files,
+    );
+    const compiled = main?.default as any;
+    const patternId = runtime.patternManager.registerPattern(
+      compiled,
+      nestedProgram,
+    );
+    const initialLoadId = runtime.harness.getVerifiedLoadId?.(
+      "__missing__",
+      patternId,
+    );
+    expect(initialLoadId).toBeDefined();
+
+    const nestedPattern = (compiled.nodes.find((node: any) => node.inputs?.op)
+      ?.inputs as { op?: unknown }).op;
+    expect(nestedPattern).toBeDefined();
+
+    const nestedPatternId = runtime.patternManager.registerPattern(
+      nestedPattern as any,
+    );
+
+    expect(runtime.harness.getVerifiedLoadId?.("__missing__", nestedPatternId))
       .toEqual(initialLoadId);
   });
 
