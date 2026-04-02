@@ -151,6 +151,109 @@ class CountingWatchSetTransport implements MemoryV2Client.Transport {
   }
 }
 
+class DelayedWatchAddTransport implements MemoryV2Client.Transport {
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+  readonly firstWatchAddSent = Promise.withResolvers<void>();
+  readonly releaseFirstWatchAdd = Promise.withResolvers<
+    SessionSyncUpsert["doc"]
+  >();
+  watchAddCount = 0;
+  rootCounts: number[] = [];
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  send(payload: string): Promise<void> {
+    const message = JSON.parse(payload) as {
+      type: string;
+      requestId?: string;
+      watches?: Array<{
+        query?: { roots?: Array<{ id: string }> };
+      }>;
+    };
+
+    switch (message.type) {
+      case "hello":
+        this.#respond(HELLO_OK);
+        return Promise.resolve();
+      case "session.open":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: "session:delayed-watch-add",
+            serverSeq: 0,
+          },
+        });
+        return Promise.resolve();
+      case "session.ack":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: 10,
+          },
+        });
+        return Promise.resolve();
+      case "session.watch.add": {
+        this.watchAddCount += 1;
+        const roots =
+          message.watches?.flatMap((watch) =>
+            watch.query?.roots?.map((root) => root.id as URI) ?? []
+          ) ?? [];
+        this.rootCounts.push(roots.length);
+
+        if (this.watchAddCount === 1) {
+          this.firstWatchAddSent.resolve();
+          void this.releaseFirstWatchAdd.promise.then((docValue) => {
+            this.#respond({
+              type: "response",
+              requestId: message.requestId!,
+              ok: {
+                serverSeq: 1,
+                sync: fullSync(1, [doc(roots[0], 1, docValue)]),
+              },
+            });
+          });
+          return Promise.resolve();
+        }
+
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: roots.length + 1,
+            sync: fullSync(
+              roots.length + 1,
+              roots.map((id, index) =>
+                doc(id, index + 2, { value: { label: id } })
+              ),
+            ),
+          },
+        });
+        return Promise.resolve();
+      }
+      default:
+        throw new Error(`Unhandled scripted message: ${message.type}`);
+    }
+  }
+
+  close(): Promise<void> {
+    this.#closeReceiver();
+    return Promise.resolve();
+  }
+
+  #respond(message: unknown): void {
+    this.#receiver(JSON.stringify(message));
+  }
+}
+
 class IncrementalEffectTransport implements MemoryV2Client.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
@@ -409,6 +512,36 @@ Deno.test("memory v2 runner incrementally adds later watches after the initial s
     await provider.sync(docB, { path: [], schema: false });
 
     assertEquals(transport.watchSetCount, 0);
+    assertEquals(transport.watchAddCount, 2);
+    assertEquals(transport.rootCounts, [1, 1]);
+    assertEquals(getObjectValue(provider, docA), { label: docA });
+    assertEquals(getObjectValue(provider, docB), { label: docB });
+  } finally {
+    await storageManager.close();
+  }
+});
+
+Deno.test("memory v2 runner does not resend prior pending watches in later batches", async () => {
+  const docA = `of:watch-delta-a-${crypto.randomUUID()}` as URI;
+  const docB = `of:watch-delta-b-${crypto.randomUUID()}` as URI;
+  const transport = new DelayedWatchAddTransport();
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    address: new URL("memory://runner-v2-watch-add-delta"),
+    memoryVersion: "v2",
+  }, sessionFactory);
+  const provider = storageManager.open(space) as TestProvider;
+
+  try {
+    const firstSync = provider.sync(docA, { path: [], schema: false });
+    await transport.firstWatchAddSent.promise;
+
+    const secondSync = provider.sync(docB, { path: [], schema: false });
+    transport.releaseFirstWatchAdd.resolve({ value: { label: docA } });
+
+    await Promise.all([firstSync, secondSync]);
+
     assertEquals(transport.watchAddCount, 2);
     assertEquals(transport.rootCounts, [1, 1]);
     assertEquals(getObjectValue(provider, docA), { label: docA });

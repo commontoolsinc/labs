@@ -1,6 +1,6 @@
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
-import { hashSchema } from "@commontools/data-model/schema-hash";
+import { hashSchema, internSchema } from "@commontools/data-model/schema-hash";
 import { resolveSpaceStoreUrl } from "../memory.ts";
 import type { Protocol, Provider } from "../provider.ts";
 import {
@@ -186,7 +186,7 @@ const watchRootIdentity = (root: GraphQuery["roots"][number]): string =>
     root.selector.path,
     root.selector.schema === undefined
       ? ""
-      : hashSchema(root.selector.schema).toString(),
+      : hashSchema(internSchema(root.selector.schema)).toString(),
   ]);
 
 const watchQueryIdentity = (watch: WatchSpec): string =>

@@ -159,4 +159,42 @@ describe("SelectorTracker", () => {
       expect(existingSelector1).toEqual(standardInitialSelector);
     });
   });
+
+  describe("getStandardSchema", () => {
+    it("interns standardized structurally equal schemas", () => {
+      const first = {
+        type: "object",
+        asCell: true,
+        properties: {
+          child: {
+            type: "string",
+            asStream: true,
+          },
+        },
+      } as const satisfies JSONSchema;
+      const second = {
+        properties: {
+          child: {
+            asStream: true,
+            type: "string",
+          },
+        },
+        asCell: true,
+        type: "object",
+      } as const satisfies JSONSchema;
+
+      const standardizedFirst = SelectorTracker.getStandardSchema(first);
+      const standardizedSecond = SelectorTracker.getStandardSchema(second);
+
+      expect(standardizedFirst).toBe(standardizedSecond);
+      expect(standardizedFirst).toEqual({
+        properties: {
+          child: {
+            type: "string",
+          },
+        },
+        type: "object",
+      });
+    });
+  });
 });

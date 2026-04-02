@@ -1,5 +1,6 @@
-import { hashSchema } from "@commontools/data-model/schema-hash";
+import { hashSchema, internSchema } from "@commontools/data-model/schema-hash";
 import { cloneIfNecessary } from "@commontools/data-model/fabric-value";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -992,6 +993,7 @@ type SyncTask = {
 
 type WatchRefreshBatch = {
   type: "pull" | "integrate";
+  entries: Map<string, [{ id: URI; type: MIME }, SchemaPathSelector]>;
   pending: PromiseWithResolvers<Result<Unit, PullError>>;
 };
 
@@ -999,7 +1001,16 @@ const normalizeSyncSelector = (
   selector: SchemaPathSelector | undefined,
 ): SchemaPathSelector => {
   if (selector !== undefined && selector.schema !== false) {
-    return selector;
+    const schema = selector.schema === undefined
+      ? undefined
+      : internSchema(toDeepFrozenSchema(selector.schema, false));
+    if (schema === selector.schema) {
+      return selector;
+    }
+    return {
+      path: selector.path,
+      schema,
+    };
   }
   return { path: [], schema: false };
 };
@@ -1233,7 +1244,7 @@ class SpaceReplica implements ISpaceReplica {
     }
     task.entries = newEntries;
     this.#syncTasks.set(key, task);
-    const promise = this.enqueueWatchRefresh("pull");
+    const promise = this.enqueueWatchRefresh("pull", newEntries);
     task.promise = promise;
     for (const [address, selector] of newEntries) {
       this.#watchSelectorTracker.add(
@@ -1302,21 +1313,12 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private async refreshWatchSet(
+    entries: Iterable<[{ id: URI; type: MIME }, SchemaPathSelector]>,
     type: "pull" | "integrate" = "pull",
   ): Promise<Result<Unit, PullError>> {
     try {
       const { session } = await this.sessionHandle();
-      const pendingEntries = new Map<
-        string,
-        [{ id: URI; type: MIME }, SchemaPathSelector]
-      >();
-      for (const task of this.#syncTasks.values()) {
-        for (const entry of task.entries) {
-          const [address, selector] = entry;
-          pendingEntries.set(watchIdForEntry(address, selector, ""), entry);
-        }
-      }
-      const rawEntries = [...pendingEntries.values()];
+      const rawEntries = [...entries];
       const watchEntries = compactWatchEntries(rawEntries);
       if (watchEntries.length === 0) {
         return { ok: {} };
@@ -1350,13 +1352,24 @@ class SpaceReplica implements ISpaceReplica {
 
   private enqueueWatchRefresh(
     type: "pull" | "integrate",
+    entries: [{ id: URI; type: MIME }, SchemaPathSelector][],
   ): Promise<Result<Unit, PullError>> {
     if (this.#queuedWatchRefresh !== null) {
+      for (const [address, selector] of entries) {
+        this.#queuedWatchRefresh.entries.set(
+          watchIdForEntry(address, selector, ""),
+          [address, selector],
+        );
+      }
       return this.#queuedWatchRefresh.pending.promise;
     }
 
     const batch: WatchRefreshBatch = {
       type,
+      entries: new Map(entries.map(([address, selector]) => [
+        watchIdForEntry(address, selector, ""),
+        [address, selector] as [{ id: URI; type: MIME }, SchemaPathSelector],
+      ])),
       pending: Promise.withResolvers<Result<Unit, PullError>>(),
     };
     this.#queuedWatchRefresh = batch;
@@ -1376,7 +1389,9 @@ class SpaceReplica implements ISpaceReplica {
     batch: WatchRefreshBatch,
   ): Promise<void> {
     try {
-      batch.pending.resolve(await this.refreshWatchSet(batch.type));
+      batch.pending.resolve(
+        await this.refreshWatchSet(batch.entries.values(), batch.type),
+      );
     } catch (error) {
       batch.pending.resolve({ error: toConnectionError(error) });
     }

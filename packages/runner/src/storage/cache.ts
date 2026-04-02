@@ -1,7 +1,7 @@
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import {
   hashObjectFromString,
 } from "@commonfabric/data-model/value-hash";
-import { refer } from "@commonfabric/memory/reference";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import type {
   CauseString,
@@ -37,8 +37,14 @@ import { isObject, isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { hashSchema } from "@commonfabric/data-model/schema-hash";
-import { schemaWithProperties } from "@commonfabric/data-model/schema-utils";
+import {
+  hashSchema,
+  internSchema,
+} from "@commonfabric/data-model/schema-hash";
+import {
+  schemaWithProperties,
+  toDeepFrozenSchema,
+} from "@commonfabric/data-model/schema-utils";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import {
@@ -75,7 +81,6 @@ import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";
 import * as Address from "./transaction/address.ts";
 import { ACL_TYPE, ANYONE_USER } from "@commonfabric/memory/acl";
-import { storableFromNativeValue } from "@commonfabric/memory/storable-value";
 import * as V2Storage from "./v2.ts";
 
 export type { Result, Unit };
@@ -358,6 +363,16 @@ class PullQueue {
   }
 }
 
+const standardizedSchemaCache = new WeakMap<object, JSONSchema>();
+
+const selectorRefFor = (selector: SchemaPathSelector): string =>
+  JSON.stringify([
+    selector.path,
+    selector.schema === undefined
+      ? ""
+      : hashSchema(SelectorTracker.getStandardSchema(selector.schema)),
+  ]);
+
 // This class helps us maintain a client model of our server side subscriptions
 export class SelectorTracker<T = Result<Unit, Error>> {
   // Map from BaseMemoryAddress key string to set of selectorRef strings
@@ -377,7 +392,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     if (selector === undefined || selector.schema === undefined) {
       return;
     }
-    const selectorRef = refer(JSON.stringify(selector)).toString();
+    const selectorRef = selectorRefFor(selector);
     this.refTracker.add(toKey(address), selectorRef);
     this.selectors.set(selectorRef, selector);
     this.standardizedSelector.set(selectorRef, {
@@ -398,7 +413,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   ): boolean {
     const selectorRefs = this.refTracker.get(toKey(address));
     if (selectorRefs !== undefined) {
-      const selectorRef = refer(JSON.stringify(selector)).toString();
+      const selectorRef = selectorRefFor(selector);
       return selectorRefs.has(selectorRef);
     }
     return false;
@@ -414,7 +429,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     if (selectorRefs === undefined) {
       return noMatch;
     }
-    const newSelectorRef = refer(JSON.stringify(selector)).toString();
+    const newSelectorRef = selectorRefFor(selector);
     // A selector is its own superset
     if (selectorRefs.has(newSelectorRef)) {
       const promiseKey = `${toKey(address)}?${newSelectorRef}`;
@@ -427,7 +442,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     const newSchema = selector.schema
       ? SelectorTracker.getStandardSchema(selector.schema)
       : false;
-    const newSchemaString = JSON.stringify(newSchema);
+    const newSchemaHash = newSchema === false ? false : hashSchema(newSchema);
     for (const selectorRef of selectorRefs) {
       const existingSelector = this.standardizedSelector.get(selectorRef)!;
       const existingAddress = { ...address, path: existingSelector.path };
@@ -447,6 +462,9 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           false,
         );
         const sortedSubSchema = SelectorTracker.getStandardSchema(subSchema);
+        const sortedSubSchemaHash = typeof sortedSubSchema === "boolean"
+          ? sortedSubSchema
+          : hashSchema(sortedSubSchema);
         // Basic matching -- we may not recognize some supersets
         // If the subSchema has ifc flags, but the new schema does not, the
         // existing selector can still be a superset.
@@ -456,8 +474,8 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         // is not a subset of the original query, but we treat it as such.
         if (
           ContextualFlowControl.isTrueSchema(subSchema) ||
-          JSON.stringify(sortedSubSchema) === newSchemaString ||
-          SelectorTracker.checkAnyOf(subSchema, newSchemaString) ||
+          sortedSubSchemaHash === newSchemaHash ||
+          SelectorTracker.checkAnyOf(subSchema, newSchemaHash) ||
           newSchema === false
         ) {
           const promiseKey = `${toKey(address)}?${selectorRef}`;
@@ -477,8 +495,10 @@ export class SelectorTracker<T = Result<Unit, Error>> {
             const { $defs: _defs1, ...newSchemaNoDefs } = newSchemaObj;
             const { $defs: _defs2, ...subSchemaNoDefs } = sortedSubSchemaObj;
             if (
-              JSON.stringify(subSchemaNoDefs) ===
-                JSON.stringify(newSchemaNoDefs)
+              hashSchema(
+                SelectorTracker.getStandardSchema(subSchemaNoDefs),
+              ) ===
+                hashSchema(SelectorTracker.getStandardSchema(newSchemaNoDefs))
             ) {
               const promiseKey = `${toKey(address)}?${selectorRef}`;
               return [existingSelector, this.selectorPromises.get(promiseKey)!];
@@ -501,13 +521,13 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     address: BaseMemoryAddress,
     selector: SchemaPathSelector,
   ): Promise<T> | undefined {
-    const selectorRef = refer(JSON.stringify(selector)).toString();
+    const selectorRef = selectorRefFor(selector);
     const promiseKey = `${toKey(address)}?${selectorRef}`;
     return this.selectorPromises.get(promiseKey);
   }
 
   delete(address: BaseMemoryAddress, selector: SchemaPathSelector): void {
-    const selectorRef = refer(JSON.stringify(selector)).toString();
+    const selectorRef = selectorRefFor(selector);
     this.refTracker.deleteValue(toKey(address), selectorRef);
     const promiseKey = `${toKey(address)}?${selectorRef}`;
     this.selectorPromises.delete(promiseKey);
@@ -549,7 +569,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   // If the anyOf items are `$ref` items, resolve them, then check.
   static checkAnyOf(
     schema: JSONSchema,
-    schemaString: string,
+    schemaHash: string | false,
   ): boolean {
     return isRecord(schema) && Array.isArray(schema.anyOf) &&
       (schema.anyOf.some((item) => {
@@ -557,7 +577,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         // in the parent of the anyOf, but this is just an optimization.
         item = SelectorTracker.getStandardSchema(item);
         // We might match before resolving the `$ref`
-        if (JSON.stringify(item) === schemaString) {
+        if (hashSchema(item) === schemaHash) {
           return true;
         }
         // Include $defs and compare again
@@ -566,7 +586,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
             $defs: schema.$defs,
           });
           item = SelectorTracker.getStandardSchema(item);
-          if (JSON.stringify(item) === schemaString) {
+          if (hashSchema(item) === schemaHash) {
             return true;
           }
         }
@@ -574,7 +594,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           item = ContextualFlowControl.resolveSchemaRefs(item, schema);
           item = SelectorTracker.getStandardSchema(item);
           // We might match after resolving the `$ref`
-          return JSON.stringify(item) === schemaString;
+          return hashSchema(item) === schemaHash;
         }
         return false;
       }));
@@ -592,6 +612,10 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   static getStandardSchema(schema: JSONSchema): JSONSchema {
     if (typeof schema === "boolean") {
       return schema;
+    }
+    const cached = standardizedSchemaCache.get(schema);
+    if (cached !== undefined) {
+      return cached;
     }
     const traverse = (
       value: Readonly<any>,
@@ -613,7 +637,11 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         }
       } else return value;
     };
-    return traverse(schema) as JSONSchema;
+    const standardized = internSchema(
+      toDeepFrozenSchema(traverse(schema) as JSONSchema, true),
+    );
+    standardizedSchemaCache.set(schema, standardized);
+    return standardized;
   }
 }
 
