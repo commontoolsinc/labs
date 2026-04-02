@@ -31,6 +31,7 @@ export type ExpressionSiteHelperBoundaryKind =
 export type ExpressionSiteCallRootKind =
   | "conditional-helper"
   | "ordinary-call"
+  | "parameterized-inline-call"
   | "receiver-method"
   | "optional-call"
   | "other";

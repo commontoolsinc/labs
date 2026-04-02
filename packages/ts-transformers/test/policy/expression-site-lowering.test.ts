@@ -1183,6 +1183,63 @@ Deno.test(
 );
 
 Deno.test(
+  "Expression site policy: JSX parameterized inline-function call roots join the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>{((value: string) => state.prefix + value)(state.count)}</div>
+      ));
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isParenthesizedExpression(node.expression) &&
+        ts.isArrowFunction(node.expression.expression),
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
+      route: "shared-post-closure",
+    });
+  },
+);
+
+Deno.test(
+  "Expression site policy: parameterized inline-function call roots join the shared non-JSX slice",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => ({
+        label: ((value: string) => state.prefix + value)(state.count),
+      }));
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isParenthesizedExpression(node.expression) &&
+        ts.isArrowFunction(node.expression.expression),
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    assertEquals(
+      canRewriteExpressionSite(call, "object-property", context, analyze),
+      true,
+    );
+  },
+);
+
+Deno.test(
   "Expression site policy: wildcard traversal calls stay out of the shared free-function slice",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`

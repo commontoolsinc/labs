@@ -184,10 +184,6 @@ function filterRelevantDataFlows(
         !hasSyntheticRoot(df.expression)
       );
 
-      if (nonSyntheticDataFlows.length === 0) {
-        return filterIgnoredParams(dataFlows);
-      }
-
       const isInMarkedCallback = !!lookup?.isArrayMethodCallback &&
         dataFlows.some((df) => {
           const scope = analysis.graph.scopes.find((s) => s.id === df.scopeId);
@@ -206,11 +202,11 @@ function filterRelevantDataFlows(
           return false;
         });
 
-      if (isInMarkedCallback) {
-        return filterIgnoredParams(dataFlows);
-      }
-
-      return nonSyntheticDataFlows;
+      return filterIgnoredParams(
+        nonSyntheticDataFlows.length === 0 || isInMarkedCallback
+          ? dataFlows
+          : nonSyntheticDataFlows,
+      );
     }
   }
 

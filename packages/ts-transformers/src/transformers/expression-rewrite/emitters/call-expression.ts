@@ -1,6 +1,4 @@
 import ts from "typescript";
-import { CaptureCollector } from "../../../closures/capture-collector.ts";
-import { unwrapExpression } from "../../../utils/expression.ts";
 
 import type { Emitter } from "../types.ts";
 import {
@@ -8,7 +6,6 @@ import {
   classifyArrayMethodResultSinkReceiverChainCall,
   detectCallKind,
 } from "../../../ast/mod.ts";
-import { createDeriveCall } from "../../builtins/derive.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import { rewriteHelperOwnedExpression } from "./helper-owned-expression.ts";
 
@@ -87,41 +84,6 @@ function shouldFilterNestedLocalsForCallWrapper(
 
   const receiverAnalysis = analyze(callee.expression);
   return receiverAnalysis.containsOpaqueRef;
-}
-
-function getInlineFunctionCallee(
-  expression: ts.CallExpression,
-): ts.FunctionExpression | ts.ArrowFunction | undefined {
-  const normalizedCallee = unwrapExpression(expression.expression);
-
-  if (
-    ts.isFunctionExpression(normalizedCallee) ||
-    ts.isArrowFunction(normalizedCallee)
-  ) {
-    return normalizedCallee;
-  }
-
-  return undefined;
-}
-
-function getInlineFunctionReactiveCaptureRefs(
-  expression: ts.CallExpression,
-  context: Parameters<Emitter>[0]["context"],
-  analyze: Parameters<Emitter>[0]["analyze"],
-): readonly ts.Expression[] | undefined {
-  const callee = getInlineFunctionCallee(expression);
-  if (!callee) {
-    return undefined;
-  }
-
-  const collector = new CaptureCollector(context.checker);
-  const captures = [...collector.analyzeCurrentAndOriginal(callee).captures];
-  const reactiveCaptures = captures.filter((capture) => {
-    const captureAnalysis = analyze(capture);
-    return captureAnalysis.containsOpaqueRef || captureAnalysis.requiresRewrite;
-  });
-
-  return reactiveCaptures.length > 0 ? reactiveCaptures : undefined;
 }
 
 export const emitCallExpression: Emitter = ({
@@ -222,22 +184,6 @@ export const emitCallExpression: Emitter = ({
   }
 
   if (dataFlows.length === 0) return undefined;
-
-  if (preferDeriveWrappers) {
-    const inlineCaptureRefs = getInlineFunctionReactiveCaptureRefs(
-      expression,
-      context,
-      analyze,
-    );
-    if (inlineCaptureRefs) {
-      return createDeriveCall(expression, inlineCaptureRefs, {
-        factory: context.factory,
-        tsContext: context.tsContext,
-        ctHelpers: context.ctHelpers,
-        context,
-      });
-    }
-  }
 
   return createReactiveWrapperForExpression(
     expression,

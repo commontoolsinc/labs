@@ -242,6 +242,14 @@ function classifyCallExpressionRoot(
       return "other";
   }
 
+  const directCallee = unwrapExpression(expression.expression);
+  if (
+    expression.arguments.length > 0 &&
+    (ts.isArrowFunction(directCallee) || ts.isFunctionExpression(directCallee))
+  ) {
+    return "parameterized-inline-call";
+  }
+
   const callee = expression.expression;
   if (ts.isIdentifier(callee)) {
     return "ordinary-call";
@@ -284,6 +292,12 @@ function isSharedJsxLocalHelperCallRoot(
   }
 
   return analyze(expression).containsOpaqueRef;
+}
+
+function isSharedPostClosureCallRootKind(
+  kind: ExpressionSiteCallRootKind | undefined,
+): boolean {
+  return kind === "ordinary-call" || kind === "parameterized-inline-call";
 }
 
 function isEligiblePatternOwnedWrapperCallbackSite(
@@ -912,7 +926,7 @@ export function classifyExpressionSiteHandling(
     }
 
     if (
-      siteInfo.callRootKind === "ordinary-call" ||
+      isSharedPostClosureCallRootKind(siteInfo.callRootKind) ||
       isSharedJsxLocalHelperCallRoot(expression, context, analyze)
     ) {
       return sharedDecision("shared-post-closure");
@@ -954,7 +968,7 @@ export function classifyExpressionSiteHandling(
 
   if (
     siteInfo.arrayMethodOwned &&
-    siteInfo.callRootKind === "ordinary-call" &&
+    isSharedPostClosureCallRootKind(siteInfo.callRootKind) &&
     !siteInfo.controlFlowRewriteRoot &&
     containerKind === "return-expression"
   ) {
@@ -966,8 +980,9 @@ export function classifyExpressionSiteHandling(
   }
 
   if (!siteInfo.controlFlowRewriteRoot) {
-    const sharedPostClosureCallRoot = siteInfo.callRootKind ===
-      "ordinary-call";
+    const sharedPostClosureCallRoot = isSharedPostClosureCallRootKind(
+      siteInfo.callRootKind,
+    );
     const patternOwnedReceiverMethod = supportedCallRootKind ===
       "pattern-owned-receiver-method";
     if (!sharedPostClosureCallRoot && !patternOwnedReceiverMethod) {
