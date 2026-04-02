@@ -28,12 +28,18 @@ export interface SourceViewNode {
 
 /**
  * Parse an action ID into a source location.
- * IDs look like "/main.tsx:42:15" or "/main.tsx:42:15 [via ...]"
+ * IDs look like "action:HASH/api/patterns/file.tsx:42:15"
+ * or "/main.tsx:42:15 [via ...]"
  */
 export function parseActionLocation(
   actionId: string,
 ): ActionLocation | null {
-  const clean = actionId.replace(/\s*\[via.*\]$/, "");
+  let clean = actionId.replace(/\s*\[via.*\]$/, "");
+  // Strip "action:HASH" prefix — the file path starts at the first "/"
+  const slashIdx = clean.indexOf("/");
+  if (slashIdx > 0) {
+    clean = clean.slice(slashIdx);
+  }
   const match = clean.match(/^(.+):(\d+):(\d+)$/);
   if (!match) return null;
   return {
@@ -311,17 +317,52 @@ export class XSchedulerSource extends LitElement {
     );
   }
 
+  /** Navigate to the correct pattern, file, and line for the selected node */
+  private navigateToSelectedNode() {
+    if (!this.selectedNodeId || this.patternSources.length === 0) return;
+
+    const loc = parseActionLocation(this.selectedNodeId);
+    if (!loc) return;
+
+    // Find the node to get its patternId
+    const node = this.nodes.get(this.selectedNodeId);
+    if (node?.patternId) {
+      const patternIdx = this.patternSources.findIndex(
+        (p) => p.patternId === node.patternId,
+      );
+      if (patternIdx >= 0 && patternIdx !== this.selectedPatternIdx) {
+        this.selectedPatternIdx = patternIdx;
+      }
+    }
+
+    // Switch to the correct file tab
+    const pattern = this.patternSources[this.selectedPatternIdx];
+    if (pattern) {
+      const fileIdx = pattern.files.findIndex(
+        (f) => f.name === loc.file,
+      );
+      if (fileIdx >= 0 && fileIdx !== this.selectedFileIdx) {
+        this.selectedFileIdx = fileIdx;
+      }
+    }
+
+    // Scroll to the selected line after rendering
+    this.updateComplete.then(() => {
+      const row = this.shadowRoot?.querySelector(
+        `.source-line[data-line="${loc.line}"]`,
+      );
+      row?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }
+
   override updated(changedProperties: Map<string, unknown>) {
     super.updated(changedProperties);
-    // Auto-scroll to selected node
-    if (changedProperties.has("selectedNodeId") && this.selectedNodeId) {
-      const loc = parseActionLocation(this.selectedNodeId);
-      if (loc) {
-        const row = this.shadowRoot?.querySelector(
-          `.source-line[data-line="${loc.line}"]`,
-        );
-        row?.scrollIntoView({ block: "center", behavior: "smooth" });
-      }
+    // Navigate when selectedNodeId changes or when patternSources arrive
+    if (
+      changedProperties.has("selectedNodeId") ||
+      changedProperties.has("patternSources")
+    ) {
+      this.navigateToSelectedNode();
     }
   }
 

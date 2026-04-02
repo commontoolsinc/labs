@@ -1062,6 +1062,10 @@ export class XSchedulerGraph extends LitElement {
   @property({ attribute: false })
   debuggerController?: DebuggerController;
 
+  /** Bumped when pattern sources arrive; forces re-render of source view */
+  @property({ type: Number })
+  patternSourcesVersion = 0;
+
   @state()
   private layoutNodes = new Map<string, LayoutNode>();
 
@@ -1116,6 +1120,7 @@ export class XSchedulerGraph extends LitElement {
   private graphContainer?: HTMLElement;
 
   private lastGraphVersion = -1;
+  private lastPatternSourcesVersion = -1;
   private hasInitialZoom = false;
 
   /**
@@ -1154,6 +1159,13 @@ export class XSchedulerGraph extends LitElement {
           this.hasInitialZoom = true;
           requestAnimationFrame(() => this.zoomToFit());
         }
+      }
+
+      // Re-render when pattern sources arrive (for source view)
+      const sourcesVersion = this.debuggerController.getPatternSourcesVersion();
+      if (sourcesVersion !== this.lastPatternSourcesVersion) {
+        this.lastPatternSourcesVersion = sourcesVersion;
+        this.requestUpdate();
       }
     }
   }
@@ -1814,9 +1826,10 @@ export class XSchedulerGraph extends LitElement {
           <button
             type="button"
             class="toggle-button ${this.viewMode === "source" ? "active" : ""}"
-            @click="${() => {
+            @click="${async () => {
               this.viewMode = "source";
-              this.debuggerController?.requestPatternSources();
+              await this.debuggerController?.requestPatternSources();
+              this.requestUpdate();
             }}"
             title="View pattern source code with action heat map"
           >
@@ -2396,9 +2409,10 @@ export class XSchedulerGraph extends LitElement {
                 <button
                   type="button"
                   class="source-jump-button"
-                  @click="${() => {
+                  @click="${async () => {
                     this.viewMode = "source";
-                    this.debuggerController?.requestPatternSources();
+                    await this.debuggerController?.requestPatternSources();
+                    this.requestUpdate();
                   }}"
                   title="View in source with context"
                 >
