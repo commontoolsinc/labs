@@ -158,11 +158,13 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
     // Filtered mentionable list for target picker
     const filteredMentionable = computed(() => {
       const query = targetSearch.get().toLowerCase();
-      const items = mentionable ?? [];
+      const items = (mentionable ?? []).filter((p) =>
+        !!p
+      ) as MentionablePiece[];
       if (!query) return items.slice(0, 10);
       return items
         .filter((p) => {
-          const name = (p[NAME] ?? "").toLowerCase();
+          const name = (p?.[NAME] ?? "").toLowerCase();
           return name.includes(query);
         })
         .slice(0, 10);
@@ -172,14 +174,14 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
     const filteredAnnotations = computed(() => {
       const query = blockerSearch.get().toLowerCase();
       const current = blockedBy.get() ?? [];
-      const items = (allAnnotations ?? []).filter(
-        (a) => !current.includes(a as AnnotationPiece),
-      ) as AnnotationPiece[];
+      const items = (allAnnotations ?? [])
+        .filter((a) => !!a)
+        .filter((a) => !current.some((b) => b === a)) as AnnotationPiece[];
       if (!query) return items.slice(0, 10);
       return items
         .filter((a) => {
-          const name = (a[NAME] ?? "").toLowerCase();
-          const c = (a.content ?? "").toLowerCase();
+          const name = (a?.[NAME] ?? "").toLowerCase();
+          const c = (a?.content ?? "").toLowerCase();
           return name.includes(query) || c.includes(query);
         })
         .slice(0, 10);
@@ -350,29 +352,31 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
                     borderRadius: "6px",
                   }}
                 >
-                  {filteredMentionable.map((piece: MentionablePiece) => (
-                    <button
-                      type="button"
-                      onClick={selectTarget({
-                        piece,
-                        targetPiece: targetPiece,
-                        targetSearch,
-                      })}
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        textAlign: "left",
-                        padding: "6px 10px",
-                        fontSize: "13px",
-                        background: "none",
-                        border: "none",
-                        borderBottom: "1px solid #f3f4f6",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {piece[NAME] ?? "(unnamed)"}
-                    </button>
-                  ))}
+                  {filteredMentionable.map((piece: MentionablePiece) =>
+                    piece && (
+                      <button
+                        type="button"
+                        onClick={selectTarget({
+                          piece,
+                          targetPiece: targetPiece,
+                          targetSearch,
+                        })}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "6px 10px",
+                          fontSize: "13px",
+                          background: "none",
+                          border: "none",
+                          borderBottom: "1px solid #f3f4f6",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {piece?.[NAME] ?? "(unnamed)"}
+                      </button>
+                    )
+                  )}
                 </ct-vstack>
               </ct-vstack>,
             )}
@@ -439,29 +443,32 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
                     borderRadius: "6px",
                   }}
                 >
-                  {filteredAnnotations.map((ann: AnnotationPiece) => (
-                    <button
-                      type="button"
-                      onClick={addBlocker({
-                        blocker: ann,
-                        blockedBy: blockedBy,
-                        blockerSearch,
-                      })}
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        textAlign: "left",
-                        padding: "6px 10px",
-                        fontSize: "13px",
-                        background: "none",
-                        border: "none",
-                        borderBottom: "1px solid #f3f4f6",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {ann[NAME] ?? ann.content?.slice(0, 40) ?? "(unnamed)"}
-                    </button>
-                  ))}
+                  {filteredAnnotations.map((ann: AnnotationPiece) =>
+                    ann && (
+                      <button
+                        type="button"
+                        onClick={addBlocker({
+                          blocker: ann,
+                          blockedBy: blockedBy,
+                          blockerSearch,
+                        })}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "6px 10px",
+                          fontSize: "13px",
+                          background: "none",
+                          border: "none",
+                          borderBottom: "1px solid #f3f4f6",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {ann?.[NAME] ?? ann?.content?.slice(0, 40) ??
+                          "(unnamed)"}
+                      </button>
+                    )
+                  )}
                 </ct-vstack>
               </ct-vstack>,
               <span />,
