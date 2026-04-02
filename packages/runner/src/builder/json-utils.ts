@@ -185,13 +185,13 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
     }
 
     const cell = state.runtime?.getCellFromLink(link);
-    if (!cell) return {}; // TODO(seefeld): Should be `true`
+    if (!cell) return emptySchemaObject(); // TODO(seefeld): Should be `true`.
 
     let schema = cell.schema;
     if (schema === undefined) {
       // If we find pointing back here, assume an empty schema. This is
       // overwritten below. (TODO(seefeld): This should create `$ref: "#/.."`)
-      seen.set(linkAsStr, {});
+      seen.set(linkAsStr, emptySchemaObject());
       schema = analyzeType(cell.getRaw(), state);
     }
     seen.set(linkAsStr, schema);
