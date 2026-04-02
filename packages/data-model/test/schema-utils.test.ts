@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
-import type { JSONSchemaObj, FabricValue } from "@commontools/api";
+import type { FabricValue, JSONSchemaObj } from "@commontools/api";
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 import {
   cloneSchemaMutable,
