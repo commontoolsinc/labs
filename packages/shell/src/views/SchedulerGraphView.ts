@@ -2736,12 +2736,13 @@ export class XSchedulerGraph extends LitElement {
               this.selectedEdge = null;
             }
           }}"
-          @breakpoint-toggle="${(e: CustomEvent) => {
+          @breakpoint-toggle="${async (e: CustomEvent) => {
             const { actionIds, enabled } = e.detail;
-            this.debuggerController?.setBreakpointsForActions(
+            await this.debuggerController?.setBreakpointsForActions(
               actionIds,
               enabled,
             );
+            this.requestUpdate();
           }}"
         ></x-scheduler-source>
         ${this.renderDetailPane()}

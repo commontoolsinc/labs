@@ -613,50 +613,12 @@ export class XSchedulerSource extends LitElement {
                 ? () => this.handleLineClick(ann!.entries)
                 : undefined;
 
-              return html`
-                <tr
-                  class="source-line ${hasAction
-                    ? "has-action"
-                    : ""} ${isSelected ? "selected" : ""}"
-                  data-line="${lineNum}"
-                  style="background-color: ${bgColor}"
-                >
-                  <td class="line-bp" @click="${bpToggle}">
-                    <span
-                      class="bp-indicator ${ann &&
-                          this.hasAnyBreakpoint(ann.entries)
-                        ? "active"
-                        : ""}"
-                    ></span>
-                  </td>
-                  <td class="line-gutter" @click="${bpToggle}">
-                    ${lineNum}
-                  </td>
-                  <td class="line-markers" @click="${nodeSelect}">
-                    ${ann
-                      ? ann.entries.map(
-                        (entry: ActionEntry) =>
-                          html`
-                            <span
-                              class="marker-dot ${entry.type} ${entry
-                                  .nodeId === this.selectedNodeId
-                                ? "selected-entry"
-                                : ""}"
-                              title="col ${entry.col}: ${entry.type} ${this
-                                .formatTime(entry.totalTime)}"
-                            ></span>
-                          `,
-                      )
-                      : ""}
-                  </td>
-                  <td class="line-code" @click="${nodeSelect}">
-                    ${lineText}
-                  </td>
-                  <td class="line-stats" @click="${nodeSelect}">
-                    ${ann ? this.renderLineStats(ann, hasBaseline) : ""}
-                  </td>
-                </tr>
-              `;
+              const bpClass = ann && this.hasAnyBreakpoint(ann.entries)
+                ? "active"
+                : "";
+
+              // deno-fmt-ignore
+              return html`<tr class="source-line ${hasAction ? "has-action" : ""} ${isSelected ? "selected" : ""}" data-line="${lineNum}" style="background-color: ${bgColor}"><td class="line-bp" @click=${bpToggle}><span class="bp-indicator ${bpClass}"></span></td><td class="line-gutter" @click=${bpToggle}>${lineNum}</td><td class="line-markers" @click=${nodeSelect}>${ann ? ann.entries.map((entry: ActionEntry) => html`<span class="marker-dot ${entry.type} ${entry.nodeId === this.selectedNodeId ? "selected-entry" : ""}" title="col ${entry.col}: ${entry.type} ${this.formatTime(entry.totalTime)}"></span>`) : ""}</td><td class="line-code" @click=${nodeSelect}>${lineText}</td><td class="line-stats" @click=${nodeSelect}>${ann ? this.renderLineStats(ann, hasBaseline) : ""}</td></tr>`;
             })}
           </tbody>
         </table>
