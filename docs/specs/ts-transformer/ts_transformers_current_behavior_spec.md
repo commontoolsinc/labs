@@ -510,9 +510,11 @@ Primary behaviors:
   access in pattern contexts
 - preserves terminal path methods (`get`, `set`, `update`, etc.) and rewrites
   only the receiver path portion when needed
-- treats dynamic key access, wildcard traversals (`Object.keys/values/entries`,
-  `JSON.stringify`, spread), and optional-call forms as non-lowerable in pattern
-  context with diagnostics
+- treats dynamic key access, spread, and optional-call forms as non-lowerable in
+  pattern context with diagnostics
+- treats wildcard traversals (`Object.keys/values/entries`, `JSON.stringify`) as
+  broad/full-shape access for capability analysis, but allows whole-call
+  lowering when they appear in supported expression-root positions
 - classifies map captures as reactive vs non-reactive and avoids `.key(...)`
   rewrites for non-reactive captures
 - recursively rewrites derive callback bodies so locally-declared

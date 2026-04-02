@@ -156,7 +156,7 @@ over:
 This is especially important for:
 
 - optional-call
-- non-lowerable wildcard traversal
+- wildcard traversal outside supported whole-call expression-root positions
 - foreign callback-container roots in pattern-facing contexts
 - direct top-level eager `.get()` reads on reactive or cell-like values
 - imperative statement-boundary constructs in top-level pattern context
