@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { NAME, type Pattern } from "../src/builder/types.ts";
+import { type Module, NAME, type Pattern } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
 import {
@@ -13,9 +13,40 @@ import {
   type MediaType,
   type URI,
 } from "../src/storage/interface.ts";
+import { trustExecutable } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+function runTrusted(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction | undefined,
+  executable: Pattern | Module,
+  argument: unknown,
+  resultCell: unknown,
+) {
+  return runtime.run(
+    tx,
+    trustExecutable(runtime, executable),
+    argument as never,
+    resultCell as never,
+  );
+}
+
+function setupTrusted(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction | undefined,
+  executable: Pattern | Module | undefined,
+  argument: unknown,
+  resultCell: unknown,
+) {
+  return runtime.setup(
+    tx,
+    trustExecutable(runtime, executable),
+    argument as never,
+    resultCell as never,
+  );
+}
 
 describe("runPattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -64,7 +95,8 @@ describe("runPattern", () => {
       space,
       "should work with passthrough",
     );
-    const result = runtime.run(
+    const result = runTrusted(
+      runtime,
       undefined,
       pattern,
       { input: 1 },
@@ -138,7 +170,8 @@ describe("runPattern", () => {
       space,
       "should work with nested patterns",
     );
-    const result = runtime.run(
+    const result = runTrusted(
+      runtime,
       undefined,
       outerPattern,
       { value: 5 },
@@ -173,7 +206,8 @@ describe("runPattern", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(
+    const result = runTrusted(
+      runtime,
       tx,
       mockPattern,
       { value: 1 },
@@ -212,9 +246,13 @@ describe("runPattern", () => {
       space,
       "should run a simple module with no outputs",
     );
-    const result = await runtime.runSynced(resultCell, mockPattern, {
-      value: 1,
-    });
+    const result = await runtime.runSynced(
+      resultCell,
+      trustExecutable(runtime, mockPattern),
+      {
+        value: 1,
+      },
+    );
     const resultValue = await result.pull();
     expect(resultValue).toEqual({ result: undefined });
     expect(ran).toBe(true);
@@ -245,9 +283,13 @@ describe("runPattern", () => {
       space,
       "should handle incorrect inputs gracefully",
     );
-    const result = await runtime.runSynced(resultCell, mockPattern, {
-      value: 1,
-    });
+    const result = await runtime.runSynced(
+      resultCell,
+      trustExecutable(runtime, mockPattern),
+      {
+        value: 1,
+      },
+    );
     const resultValue2 = await result.pull();
     expect(resultValue2).toEqual({ result: undefined });
     // We don't run the action if the arguments fail to validate
@@ -288,7 +330,8 @@ describe("runPattern", () => {
       space,
       "should handle nested patterns",
     );
-    const result = runtime.run(
+    const result = runTrusted(
+      runtime,
       undefined,
       mockPattern,
       { value: 1 },
@@ -330,7 +373,8 @@ describe("runPattern", () => {
       "should allow passing a cell as a binding",
     );
 
-    const result = runtime.run(
+    const result = runTrusted(
+      runtime,
       undefined,
       pattern,
       inputCell,
@@ -389,7 +433,8 @@ describe("runPattern", () => {
     // Commit the initial values before running the pattern
     await tx.commit();
 
-    const result = runtime.run(
+    const result = runTrusted(
+      runtime,
       undefined,
       pattern,
       inputCell,
@@ -417,12 +462,7 @@ describe("runPattern", () => {
     expect(inputCellValue).toMatchObject({ input: 40, output: 40 });
 
     // Restart the pattern
-    runtime.run(
-      undefined,
-      pattern,
-      undefined,
-      result,
-    );
+    runTrusted(runtime, undefined, pattern, undefined, result);
 
     inputCellValue = await inputCell.pull();
     expect(inputCellValue).toMatchObject({ input: 40, output: 80 });
@@ -459,12 +499,9 @@ describe("runPattern", () => {
       "default values test - partial",
     );
 
-    const resultWithPartial = runtime.run(
-      undefined,
-      pattern,
-      { input: 10 },
-      resultWithPartialCell,
-    );
+    const resultWithPartial = runTrusted(runtime, undefined, pattern, {
+      input: 10,
+    }, resultWithPartialCell);
     const partialValue = await resultWithPartial.pull();
     expect(partialValue).toEqual({ result: 20 });
 
@@ -474,7 +511,8 @@ describe("runPattern", () => {
       "default values test - all defaults",
     );
 
-    const resultWithDefaults = runtime.run(
+    const resultWithDefaults = runTrusted(
+      runtime,
       undefined,
       pattern,
       {},
@@ -537,22 +575,16 @@ describe("runPattern", () => {
       space,
       "complex schema test",
     );
-    const result = runtime.run(
-      undefined,
-      pattern,
-      { config: { values: [10, 20, 30, 40], operation: "avg" } },
-      resultCell,
-    );
+    const result = runTrusted(runtime, undefined, pattern, {
+      config: { values: [10, 20, 30, 40], operation: "avg" },
+    }, resultCell);
     const resultValue = await result.pull();
     expect(resultValue).toEqual({ result: 25 });
 
     // Test with a different operation
-    const result2 = runtime.run(
-      undefined,
-      pattern,
-      { config: { values: [10, 20, 30, 40], operation: "max" } },
-      resultCell,
-    );
+    const result2 = runTrusted(runtime, undefined, pattern, {
+      config: { values: [10, 20, 30, 40], operation: "max" },
+    }, resultCell);
     const result2Value = await result2.pull();
     expect(result2Value).toEqual({ result: 40 });
   });
@@ -597,12 +629,10 @@ describe("runPattern", () => {
       space,
       "merge defaults test",
     );
-    const result = runtime.run(
-      undefined,
-      pattern,
-      { options: { value: 10 }, input: 5 },
-      resultCell,
-    );
+    const result = runTrusted(runtime, undefined, pattern, {
+      options: { value: 10 },
+      input: 5,
+    }, resultCell);
 
     const resultValue = await result.pull() as any;
     expect(resultValue.options).toEqual({
@@ -642,12 +672,7 @@ describe("runPattern", () => {
     );
 
     // First run
-    runtime.run(
-      undefined,
-      pattern,
-      { value: 1 },
-      resultCell,
-    );
+    runTrusted(runtime, undefined, pattern, { value: 1 }, resultCell);
     let cellValue = await resultCell.pull();
     expect(cellValue?.[NAME]).toEqual("counter");
     expect(cellValue?.counter).toEqual(1);
@@ -658,12 +683,7 @@ describe("runPattern", () => {
     await tx.commit();
 
     // Second run with same pattern but different argument
-    runtime.run(
-      undefined,
-      pattern,
-      { value: 2 },
-      resultCell,
-    );
+    runTrusted(runtime, undefined, pattern, { value: 2 }, resultCell);
     cellValue = await resultCell.pull();
     expect(cellValue?.[NAME]).toEqual("my counter");
     expect(cellValue?.counter).toEqual(2);
@@ -718,7 +738,8 @@ describe("runPattern", () => {
       space,
       "should create separate copies of initial values 1",
     );
-    const result1 = localRuntime.run(
+    const result1 = runTrusted(
+      localRuntime,
       undefined,
       pattern,
       { input: 5 },
@@ -731,7 +752,8 @@ describe("runPattern", () => {
       space,
       "should create separate copies of initial values 2",
     );
-    const result2 = localRuntime.run(
+    const result2 = runTrusted(
+      localRuntime,
       undefined,
       pattern,
       { input: 10 },
@@ -810,7 +832,8 @@ describe("runPattern", () => {
       space,
       "separate copies modern 1",
     );
-    const result1 = localRuntime.run(
+    const result1 = runTrusted(
+      localRuntime,
       undefined,
       pattern,
       { input: 5 },
@@ -823,7 +846,8 @@ describe("runPattern", () => {
       space,
       "separate copies modern 2",
     );
-    const result2 = localRuntime.run(
+    const result2 = runTrusted(
+      localRuntime,
       undefined,
       pattern,
       { input: 10 },
@@ -943,7 +967,7 @@ describe("setup/start", () => {
     const resultCell = runtime.getCell(space, "setup does not schedule");
 
     // Only setup – should not run the node yet
-    runtime.setup(undefined, pattern, { input: 1 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 1 }, resultCell);
 
     // Output hasn't been computed yet
     let cellValue = await resultCell.pull();
@@ -1034,13 +1058,13 @@ describe("setup/start", () => {
     };
 
     const resultCell = runtime.getCell(space, "setup updates argument");
-    runtime.setup(undefined, pattern, { input: 1 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 1 }, resultCell);
     runtime.start(resultCell);
     let cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 1 });
 
     // Update only via setup; scheduler should react to argument change
-    runtime.setup(undefined, pattern, { input: 2 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 2 }, resultCell);
     cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 2 });
   });
@@ -1066,7 +1090,7 @@ describe("setup/start", () => {
     };
 
     const resultCell = runtime.getCell(space, "start idempotent");
-    runtime.setup(undefined, pattern, { input: 7 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 7 }, resultCell);
     runtime.start(resultCell);
     runtime.start(resultCell);
 
@@ -1074,7 +1098,7 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 7 });
 
     // Change input and ensure only a single recomputation occurs in effect
-    runtime.setup(undefined, pattern, { input: 9 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 9 }, resultCell);
     cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 9 });
   });
@@ -1100,7 +1124,7 @@ describe("setup/start", () => {
     };
 
     const resultCell = runtime.getCell(space, "stop and restart");
-    runtime.setup(undefined, pattern, { input: 1 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 1 }, resultCell);
     runtime.start(resultCell);
     let cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 1 });
@@ -1109,7 +1133,7 @@ describe("setup/start", () => {
     runtime.runner.stop(resultCell);
 
     // Change argument via setup; without start nothing should recompute yet
-    runtime.setup(undefined, pattern, { input: 5 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 5 }, resultCell);
     cellValue = await resultCell.pull();
     // Still the old output
     expect(cellValue).toEqual({ output: 1 });
@@ -1127,7 +1151,13 @@ describe("setup/start", () => {
     };
 
     const resultCell = runtime.getCell(space, "setup with module");
-    runtime.setup(undefined, mod as any, { input: 2 } as any, resultCell);
+    setupTrusted(
+      runtime,
+      undefined,
+      mod as any,
+      { input: 2 } as any,
+      resultCell,
+    );
 
     // Not started yet; no output
     let cellValue = await resultCell.pull();
@@ -1156,14 +1186,15 @@ describe("setup/start", () => {
     };
 
     const resultCell = runtime.getCell(space, "setup reuse previous pattern");
-    runtime.setup(undefined, pattern, { input: 5 }, resultCell);
+    setupTrusted(runtime, undefined, pattern, { input: 5 }, resultCell);
     runtime.start(resultCell);
     const cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 5 });
 
     // Stop and setup without specifying pattern; should reuse stored one
     runtime.runner.stop(resultCell);
-    runtime.setup(
+    setupTrusted(
+      runtime,
       undefined,
       undefined as any,
       { input: 10 } as any,
@@ -1220,7 +1251,7 @@ describe("setup/start", () => {
     await tx.commit();
 
     const resultCell = runtime.getCell(space, "setup with cell arg");
-    runtime.setup(undefined, pattern, inputCell, resultCell);
+    setupTrusted(runtime, undefined, pattern, inputCell, resultCell);
     runtime.start(resultCell);
     let cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 6 });
@@ -1361,7 +1392,7 @@ describe("runner utils", () => {
       };
 
       const resultCell = runtime.getCell(space, "start returns promise");
-      runtime.setup(undefined, pattern, { input: 5 }, resultCell);
+      setupTrusted(runtime, undefined, pattern, { input: 5 }, resultCell);
       const result = await runtime.start(resultCell);
       expect(result).toBe(true);
       await runtime.idle();
@@ -1389,7 +1420,7 @@ describe("runner utils", () => {
       };
 
       const resultCell = runtime.getCell(space, "start idempotent");
-      runtime.setup(undefined, pattern, { input: 1 }, resultCell);
+      setupTrusted(runtime, undefined, pattern, { input: 1 }, resultCell);
       await runtime.start(resultCell);
       await runtime.idle();
 
@@ -1419,7 +1450,7 @@ describe("runner utils", () => {
       };
 
       const resultCell = runtime.getCell(space, "start sync behavior");
-      runtime.setup(undefined, pattern, { input: 4 }, resultCell);
+      setupTrusted(runtime, undefined, pattern, { input: 4 }, resultCell);
 
       // start() should execute synchronously when data is available
       // The piece should be registered in cancels map immediately
@@ -1458,7 +1489,7 @@ describe("runner utils", () => {
       };
 
       const resultCell = runtime.getCell(space, "start subpath cell");
-      runtime.setup(undefined, pattern, { input: 5 }, resultCell);
+      setupTrusted(runtime, undefined, pattern, { input: 5 }, resultCell);
 
       // Get a subpath cell
       const subpathCell = resultCell.key("nested").key("value");
@@ -1518,12 +1549,18 @@ describe("runner utils", () => {
       const resultCell = runtime.getCell(space, "pattern change restart");
 
       // Run with first pattern
-      runtime.run(undefined, pattern1, { input: 5 }, resultCell);
+      runTrusted(runtime, undefined, pattern1, { input: 5 }, resultCell);
       expect(await resultCell.pull()).toEqual({ output: 10 }); // 5 * 2
 
       // Change pattern via setup (not run or start)
       // The $TYPE sink should detect the change and restart once the result is pulled.
-      await runtime.setup(undefined, pattern2, { input: 5 }, resultCell);
+      await setupTrusted(
+        runtime,
+        undefined,
+        pattern2,
+        { input: 5 },
+        resultCell,
+      );
       expect(await resultCell.pull()).toEqual({ output: 50 }); // 5 * 10
     });
   });

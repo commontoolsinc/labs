@@ -39,6 +39,7 @@ import {
   createModuleCompartmentGlobals,
   createSafeConsoleGlobal,
 } from "../sandbox/compartment-globals.ts";
+import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import {
   BundlePreflightError,
@@ -125,6 +126,11 @@ export class Engine extends EventTarget implements Harness {
     string,
     HarnessedFunction
   >();
+  private readonly trustedHostFunctionRefs = new WeakMap<
+    HarnessedFunction,
+    string
+  >();
+  private nextTrustedHostFunctionId = 0;
   private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
 
   constructor(ctRuntime: Runtime) {
@@ -346,7 +352,13 @@ export class Engine extends EventTarget implements Harness {
       throw new Error("unsafe host trust requires a non-empty reason");
     }
     const registry = new Map<string, HarnessedFunction>();
-    this.collectAssociatedFunctions(value, registry, new Set());
+    this.collectAssociatedFunctions(
+      value,
+      registry,
+      new Set(),
+      undefined,
+      true,
+    );
     for (const [implementationRef, implementation] of registry) {
       this.trustedHostFunctionIndex.set(implementationRef, implementation);
     }
@@ -603,6 +615,7 @@ export class Engine extends EventTarget implements Harness {
     fallbackLookup?: (
       implementationRef: string,
     ) => HarnessedFunction | undefined,
+    allowMintMissingRefs = false,
   ): void {
     if (!value || (typeof value !== "object" && typeof value !== "function")) {
       return;
@@ -612,7 +625,11 @@ export class Engine extends EventTarget implements Harness {
     }
     seen.add(value);
 
-    const associated = this.extractAssociatedFunction(value, fallbackLookup);
+    const associated = this.extractAssociatedFunction(
+      value,
+      fallbackLookup,
+      allowMintMissingRefs,
+    );
     if (associated) {
       registry.set(associated.implementationRef, associated.implementation);
     }
@@ -627,6 +644,7 @@ export class Engine extends EventTarget implements Harness {
         registry,
         seen,
         fallbackLookup,
+        allowMintMissingRefs,
       );
     }
   }
@@ -636,14 +654,17 @@ export class Engine extends EventTarget implements Harness {
     fallbackLookup?: (
       implementationRef: string,
     ) => HarnessedFunction | undefined,
+    allowMintMissingRefs = false,
   ): { implementationRef: string; implementation: HarnessedFunction } | null {
     if (typeof value === "function") {
-      const implementationRef = (value as { implementationRef?: string })
-        .implementationRef;
+      const implementation = value as HarnessedFunction;
+      const implementationRef = allowMintMissingRefs
+        ? this.ensureTrustedHostImplementationRef(implementation)
+        : (value as { implementationRef?: string }).implementationRef;
       return implementationRef
         ? {
           implementationRef,
-          implementation: value as HarnessedFunction,
+          implementation,
         }
         : null;
     }
@@ -652,20 +673,61 @@ export class Engine extends EventTarget implements Harness {
       implementationRef?: string;
       implementation?: unknown;
     };
+    if (typeof record.implementation === "function") {
+      const implementation = record.implementation as HarnessedFunction;
+      const implementationRef = typeof record.implementationRef === "string"
+        ? record.implementationRef
+        : allowMintMissingRefs
+        ? this.ensureTrustedHostImplementationRef(implementation)
+        : undefined;
+      if (!implementationRef) {
+        return null;
+      }
+      record.implementationRef ??= implementationRef;
+      return {
+        implementationRef,
+        implementation,
+      };
+    }
     if (typeof record.implementationRef !== "string") {
       return null;
-    }
-    if (typeof record.implementation === "function") {
-      return {
-        implementationRef: record.implementationRef,
-        implementation: record.implementation as HarnessedFunction,
-      };
     }
 
     const rebound = fallbackLookup?.(record.implementationRef);
     return rebound
       ? { implementationRef: record.implementationRef, implementation: rebound }
       : null;
+  }
+
+  private ensureTrustedHostImplementationRef(
+    implementation: HarnessedFunction,
+  ): string {
+    const existing = this.trustedHostFunctionRefs.get(implementation) ??
+      (typeof (implementation as { implementationRef?: string })
+          .implementationRef ===
+          "string"
+        ? (implementation as { implementationRef?: string }).implementationRef
+        : undefined);
+    if (existing) {
+      hardenVerifiedFunction(implementation as (...args: any[]) => unknown);
+      return existing;
+    }
+
+    const implementationRef = `unsafe-host:${this.nextTrustedHostFunctionId++}`;
+    this.trustedHostFunctionRefs.set(implementation, implementationRef);
+    if (
+      Object.isExtensible(implementation) &&
+      typeof (implementation as { implementationRef?: string })
+          .implementationRef !==
+        "string"
+    ) {
+      Object.defineProperty(implementation, "implementationRef", {
+        value: implementationRef,
+        configurable: true,
+      });
+    }
+    hardenVerifiedFunction(implementation as (...args: any[]) => unknown);
+    return implementationRef;
   }
 }
 

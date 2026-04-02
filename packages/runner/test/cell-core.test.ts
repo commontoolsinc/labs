@@ -20,6 +20,7 @@ import {
 import { isPrimitiveCellLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { trustPattern } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -516,7 +517,7 @@ describe("Cell", () => {
 
   it("should update pattern output when argument is changed via getArgumentCell", async () => {
     // Create a simple doubling pattern
-    const doublePattern: Pattern = {
+    const doublePattern = trustPattern(runtime, {
       argumentSchema: {
         type: "object",
         properties: { input: { type: "number" } },
@@ -537,7 +538,7 @@ describe("Cell", () => {
           outputs: { $alias: { path: ["internal", "doubled"] } },
         },
       ],
-    };
+    } as Pattern);
 
     // Instantiate the pattern with initial argument
     const resultCell = runtime.getCell(space, "doubling pattern instance");

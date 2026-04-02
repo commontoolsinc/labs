@@ -55,11 +55,14 @@ export class ModuleRegistry {
   }
 
   addModuleByRef(ref: string, module: Module): void {
-    Object.defineProperty(module, "debugName", {
+    const target = Object.isExtensible(module)
+      ? module
+      : cloneModuleRecord(module);
+    Object.defineProperty(target, "debugName", {
       value: ref,
       configurable: true,
     });
-    this.moduleMap.set(ref, module);
+    this.moduleMap.set(ref, target);
   }
 
   getModule(ref: string): Module {
@@ -72,6 +75,18 @@ export class ModuleRegistry {
   clear(): void {
     this.moduleMap.clear();
   }
+}
+
+function cloneModuleRecord(module: Module): Module {
+  const clone: Record<PropertyKey, unknown> = {};
+  for (const key of Reflect.ownKeys(module as object)) {
+    const descriptor = Object.getOwnPropertyDescriptor(module as object, key);
+    if (!descriptor) {
+      continue;
+    }
+    Object.defineProperty(clone, key, descriptor);
+  }
+  return clone as unknown as Module;
 }
 
 export interface RawModuleOptions {

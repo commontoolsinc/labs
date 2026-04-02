@@ -6,6 +6,7 @@ import { type Pattern, TYPE } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { ensurePieceRunning } from "../src/ensure-piece-running.ts";
+import { trustPattern } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -99,7 +100,9 @@ describe("ensurePieceRunning", () => {
       nodes: [],
     };
 
-    const patternId = runtime.patternManager.registerPattern(pattern);
+    const patternId = runtime.patternManager.registerPattern(
+      trustPattern(runtime, pattern),
+    );
 
     // Create a result cell that points to a process cell without resultRef
     const resultCell = runtime.getCell(
@@ -168,7 +171,9 @@ describe("ensurePieceRunning", () => {
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(pattern);
+    const patternId = runtime.patternManager.registerPattern(
+      trustPattern(runtime, pattern),
+    );
 
     // Create result cell
     const resultCell = runtime.getCell(
@@ -239,7 +244,9 @@ describe("ensurePieceRunning", () => {
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(pattern);
+    const patternId = runtime.patternManager.registerPattern(
+      trustPattern(runtime, pattern),
+    );
 
     const resultCell = runtime.getCell(
       space,
@@ -310,7 +317,9 @@ describe("ensurePieceRunning", () => {
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(pattern);
+    const patternId = runtime.patternManager.registerPattern(
+      trustPattern(runtime, pattern),
+    );
 
     const resultCell = runtime.getCell(
       space,
@@ -458,7 +467,9 @@ describe("queueEvent with auto-start", () => {
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(pattern);
+    const patternId = runtime.patternManager.registerPattern(
+      trustPattern(runtime, pattern),
+    );
 
     // Create result cell
     const resultCell = runtime.getCell(
@@ -603,7 +614,9 @@ describe("queueEvent with auto-start", () => {
       ],
     };
 
-    const patternId = runtime.patternManager.registerPattern(pattern);
+    const patternId = runtime.patternManager.registerPattern(
+      trustPattern(runtime, pattern),
+    );
 
     // Create result cell
     const resultCell = runtime.getCell(
