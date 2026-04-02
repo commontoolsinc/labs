@@ -9,12 +9,25 @@ interface ActionLocation {
   col: number;
 }
 
+/** Individual action entry on a source line */
+interface ActionEntry {
+  nodeId: string;
+  col: number;
+  type: string; // "effect" | "computation" | "inactive"
+  totalTime: number;
+  runCount: number;
+  deltaTime: number; // time since baseline
+  deltaRuns: number; // runs since baseline
+}
+
 /** Aggregated info for all actions on a single source line */
 interface LineAnnotation {
-  nodeIds: string[];
+  entries: ActionEntry[];
   types: Set<string>; // "effect" | "computation"
   totalTime: number; // sum of all actions' totalTime on this line
   runCount: number; // sum of all actions' runCount on this line
+  deltaTime: number; // sum of delta times since baseline
+  deltaRuns: number; // sum of delta runs since baseline
 }
 
 /** Minimal node info passed from parent */
@@ -194,6 +207,14 @@ export class XSchedulerSource extends LitElement {
       background: #a78bfa;
     }
 
+    .marker-dot.inactive {
+      background: #64748b;
+    }
+
+    .marker-dot.selected-entry {
+      outline: 1px solid white;
+    }
+
     .line-code {
       padding: 0 1rem 0 0.5rem;
       white-space: pre;
@@ -208,6 +229,15 @@ export class XSchedulerSource extends LitElement {
       white-space: nowrap;
       vertical-align: top;
       width: 1px;
+    }
+
+    .delta-time {
+      color: #fbbf24;
+    }
+
+    .entry-count {
+      color: #64748b;
+      margin-left: 0.25rem;
     }
 
     .empty-state {
@@ -230,11 +260,19 @@ export class XSchedulerSource extends LitElement {
   @property({ attribute: false })
   selectedNodeId: string | null = null;
 
+  @property({ attribute: false })
+  baselineStats: Map<string, { runCount: number; totalTime: number }> =
+    new Map();
+
   @state()
   private selectedPatternIdx = 0;
 
   @state()
   private selectedFileIdx = 0;
+
+  /** Index into the current line's entries for cycling through actions */
+  @state()
+  private selectedEntryIdx = 0;
 
   /** Build lookup: file -> line -> LineAnnotation */
   private buildAnnotations(): Map<string, Map<number, LineAnnotation>> {
@@ -262,18 +300,43 @@ export class XSchedulerSource extends LitElement {
       let annotation = fileMap.get(loc.line);
       if (!annotation) {
         annotation = {
-          nodeIds: [],
+          entries: [],
           types: new Set(),
           totalTime: 0,
           runCount: 0,
+          deltaTime: 0,
+          deltaRuns: 0,
         };
         fileMap.set(loc.line, annotation);
       }
 
-      annotation.nodeIds.push(nodeId);
+      const totalTime = node.stats?.totalTime ?? 0;
+      const runCount = node.stats?.runCount ?? 0;
+      const baseline = this.baselineStats.get(nodeId);
+      const deltaTime = totalTime - (baseline?.totalTime ?? 0);
+      const deltaRuns = runCount - (baseline?.runCount ?? 0);
+
+      annotation.entries.push({
+        nodeId,
+        col: loc.col,
+        type: node.type,
+        totalTime,
+        runCount,
+        deltaTime,
+        deltaRuns,
+      });
       annotation.types.add(node.type);
-      annotation.totalTime += node.stats?.totalTime ?? 0;
-      annotation.runCount += node.stats?.runCount ?? 0;
+      annotation.totalTime += totalTime;
+      annotation.runCount += runCount;
+      annotation.deltaTime += deltaTime;
+      annotation.deltaRuns += deltaRuns;
+    }
+
+    // Sort entries within each line by column position
+    for (const fileMap of result.values()) {
+      for (const ann of fileMap.values()) {
+        ann.entries.sort((a, b) => a.col - b.col);
+      }
     }
 
     return result;
@@ -305,12 +368,21 @@ export class XSchedulerSource extends LitElement {
     return `${(ms / 1000).toFixed(2)}s`;
   }
 
-  private handleLineClick(nodeIds: string[]) {
-    if (nodeIds.length === 0) return;
-    // Select the first node; user can cycle through via detail pane
+  private handleLineClick(entries: ActionEntry[]) {
+    if (entries.length === 0) return;
+
+    // If clicking the same line again, cycle to next entry
+    const currentId = this.selectedNodeId;
+    const currentIdx = entries.findIndex((e) => e.nodeId === currentId);
+    const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % entries.length : 0;
+    this.selectedEntryIdx = nextIdx;
+
     this.dispatchEvent(
       new CustomEvent("node-selected", {
-        detail: { nodeId: nodeIds[0], allNodeIds: nodeIds },
+        detail: {
+          nodeId: entries[nextIdx].nodeId,
+          allNodeIds: entries.map((e) => e.nodeId),
+        },
         bubbles: true,
         composed: true,
       }),
@@ -395,10 +467,12 @@ export class XSchedulerSource extends LitElement {
     const annotations = this.buildAnnotations();
     const fileAnnotations = annotations.get(file.name) ?? new Map();
 
-    // Find max totalTime across all annotations for heat scaling
+    // Use delta time for heat scaling when baseline exists, else total
+    const hasBaseline = this.baselineStats.size > 0;
     let maxTime = 0;
     for (const ann of fileAnnotations.values()) {
-      if (ann.totalTime > maxTime) maxTime = ann.totalTime;
+      const t = hasBaseline ? ann.deltaTime : ann.totalTime;
+      if (t > maxTime) maxTime = t;
     }
 
     // Find which line the selected node is on
@@ -463,8 +537,11 @@ export class XSchedulerSource extends LitElement {
               const hasAction = !!ann;
               const isSelected = selectedLoc?.file === file.name &&
                 selectedLoc?.line === lineNum;
+              const heatTime = ann
+                ? (hasBaseline ? ann.deltaTime : ann.totalTime)
+                : 0;
               const bgColor = ann
-                ? this.heatColor(ann.totalTime, maxTime, ann.types)
+                ? this.heatColor(heatTime, maxTime, ann.types)
                 : "transparent";
 
               return html`
@@ -475,29 +552,30 @@ export class XSchedulerSource extends LitElement {
                   data-line="${lineNum}"
                   style="background-color: ${bgColor}"
                   @click="${hasAction
-                    ? () => this.handleLineClick(ann!.nodeIds)
+                    ? () => this.handleLineClick(ann!.entries)
                     : undefined}"
                 >
                   <td class="line-gutter">${lineNum}</td>
                   <td class="line-markers">
                     ${ann
-                      ? Array.from(ann.types).map(
-                        (t) =>
+                      ? ann.entries.map(
+                        (entry: ActionEntry) =>
                           html`
-                            <span class="marker-dot ${t}"></span>
+                            <span
+                              class="marker-dot ${entry.type} ${entry
+                                  .nodeId === this.selectedNodeId
+                                ? "selected-entry"
+                                : ""}"
+                              title="col ${entry.col}: ${entry.type} ${this
+                                .formatTime(entry.totalTime)}"
+                            ></span>
                           `,
                       )
                       : ""}
                   </td>
                   <td class="line-code">${lineText}</td>
                   <td class="line-stats">
-                    ${ann
-                      ? html`
-                        ${this.formatTime(ann.totalTime)} ${ann.runCount > 0
-                          ? `(${ann.runCount}x)`
-                          : ""}
-                      `
-                      : ""}
+                    ${ann ? this.renderLineStats(ann, hasBaseline) : ""}
                   </td>
                 </tr>
               `;
@@ -505,6 +583,38 @@ export class XSchedulerSource extends LitElement {
           </tbody>
         </table>
       </div>
+    `;
+  }
+
+  private renderLineStats(
+    ann: LineAnnotation,
+    hasBaseline: boolean,
+  ): TemplateResult {
+    if (hasBaseline) {
+      // Show delta time prominently
+      if (ann.deltaRuns === 0) {
+        return html`
+          <span style="color:#475569">idle</span>
+        `;
+      }
+      return html`
+        <span class="delta-time">+${this.formatTime(ann.deltaTime)}</span>
+        (${ann.deltaRuns}x)${ann.entries.length > 1
+          ? html`
+            <span class="entry-count">[${ann.entries.length}]</span>
+          `
+          : ""}
+      `;
+    }
+    // No baseline — show totals
+    return html`
+      ${this.formatTime(ann.totalTime)} ${ann.runCount > 0
+        ? `(${ann.runCount}x)`
+        : ""}${ann.entries.length > 1
+        ? html`
+          <span class="entry-count">[${ann.entries.length}]</span>
+        `
+        : ""}
     `;
   }
 }

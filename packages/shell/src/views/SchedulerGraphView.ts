@@ -2709,6 +2709,7 @@ export class XSchedulerGraph extends LitElement {
           .patternSources="${sources}"
           .nodes="${sourceNodes}"
           .selectedNodeId="${this.selectedNode?.id ?? null}"
+          .baselineStats="${this.baselineStats}"
           @node-selected="${(e: CustomEvent) => {
             const node = this.layoutNodes.get(e.detail.nodeId);
             if (node) {
