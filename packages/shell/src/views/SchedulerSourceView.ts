@@ -165,7 +165,9 @@ export class XSchedulerSource extends LitElement {
       filter: brightness(1.2);
     }
 
-    .source-line.has-action {
+    .source-line.has-action .line-code,
+    .source-line.has-action .line-stats,
+    .source-line.has-action .line-markers {
       cursor: pointer;
     }
 
@@ -182,14 +184,6 @@ export class XSchedulerSource extends LitElement {
       vertical-align: middle;
       cursor: pointer;
       user-select: none;
-      position: relative;
-    }
-
-    /* Invisible expanded hit area covers the full cell */
-    .line-bp::after {
-      content: "";
-      position: absolute;
-      inset: 0;
     }
 
     .bp-indicator {
@@ -612,6 +606,13 @@ export class XSchedulerSource extends LitElement {
                 ? this.heatColor(heatTime, maxTime, ann.types)
                 : "transparent";
 
+              const bpToggle = hasAction
+                ? () => this.handleBreakpointToggle(ann!.entries)
+                : undefined;
+              const nodeSelect = hasAction
+                ? () => this.handleLineClick(ann!.entries)
+                : undefined;
+
               return html`
                 <tr
                   class="source-line ${hasAction
@@ -619,19 +620,8 @@ export class XSchedulerSource extends LitElement {
                     : ""} ${isSelected ? "selected" : ""}"
                   data-line="${lineNum}"
                   style="background-color: ${bgColor}"
-                  @click="${hasAction
-                    ? () => this.handleLineClick(ann!.entries)
-                    : undefined}"
                 >
-                  <td
-                    class="line-bp"
-                    @click="${hasAction
-                      ? (e: Event) => {
-                        e.stopPropagation();
-                        this.handleBreakpointToggle(ann!.entries);
-                      }
-                      : undefined}"
-                  >
+                  <td class="line-bp" @click="${bpToggle}">
                     <span
                       class="bp-indicator ${ann &&
                           this.hasAnyBreakpoint(ann.entries)
@@ -639,18 +629,10 @@ export class XSchedulerSource extends LitElement {
                         : ""}"
                     ></span>
                   </td>
-                  <td
-                    class="line-gutter"
-                    @click="${hasAction
-                      ? (e: Event) => {
-                        e.stopPropagation();
-                        this.handleBreakpointToggle(ann!.entries);
-                      }
-                      : undefined}"
-                  >
+                  <td class="line-gutter" @click="${bpToggle}">
                     ${lineNum}
                   </td>
-                  <td class="line-markers">
+                  <td class="line-markers" @click="${nodeSelect}">
                     ${ann
                       ? ann.entries.map(
                         (entry: ActionEntry) =>
@@ -667,8 +649,10 @@ export class XSchedulerSource extends LitElement {
                       )
                       : ""}
                   </td>
-                  <td class="line-code">${lineText}</td>
-                  <td class="line-stats">
+                  <td class="line-code" @click="${nodeSelect}">
+                    ${lineText}
+                  </td>
+                  <td class="line-stats" @click="${nodeSelect}">
                     ${ann ? this.renderLineStats(ann, hasBaseline) : ""}
                   </td>
                 </tr>
