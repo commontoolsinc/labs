@@ -80,6 +80,27 @@ describe("json-utils", () => {
       );
     });
 
+    it("should handle single-element array", () => {
+      expect(createJsonSchema([42])).toEqual({
+        type: "array",
+        items: { type: "integer" },
+      });
+    });
+
+    it("should deduplicate mixed types with repeats in arrays", () => {
+      const schema = createJsonSchema(["hello", 1, "world", 2, true]);
+      expect(schema).toEqual({
+        type: "array",
+        items: {
+          anyOf: [
+            { type: "string" },
+            { type: "integer" },
+            { type: "boolean" },
+          ],
+        },
+      });
+    });
+
     it("should create schema for objects", () => {
       const objectSchema = createJsonSchema({
         string: "text",
