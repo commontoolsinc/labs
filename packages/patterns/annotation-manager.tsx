@@ -10,7 +10,6 @@
  */
 import {
   computed,
-  type Default,
   handler,
   NAME,
   pattern,
@@ -47,12 +46,11 @@ const reopenAnnotation = handler<
   status.set("open");
 });
 
-const setFilter = handler<
-  unknown,
-  { filter: Writable<string>; value: string }
->((_event, { filter, value }) => {
-  filter.set(value);
-});
+const setFilter = handler<unknown, { filter: Writable<string>; value: string }>(
+  (_event, { filter, value }) => {
+    filter.set(value);
+  },
+);
 
 // ===== Helpers =====
 
@@ -63,10 +61,10 @@ const KIND_ICON: Record<AnnotationKind, string> = {
 };
 
 const STATUS_STYLE: Record<AnnotationStatus, string> = {
-  "open": "background:#dbeafe;color:#1d4ed8",
+  open: "background:#dbeafe;color:#1d4ed8",
   "in-progress": "background:#fef9c3;color:#854d0e",
-  "resolved": "background:#dcfce7;color:#166534",
-  "dismissed": "background:#f3f4f6;color:#6b7280",
+  resolved: "background:#dcfce7;color:#166534",
+  dismissed: "background:#f3f4f6;color:#6b7280",
 };
 
 // ===== The Pattern =====
@@ -74,8 +72,9 @@ const STATUS_STYLE: Record<AnnotationStatus, string> = {
 export default pattern<Record<string, never>>((_) => {
   const filter = Writable.of<string>("open");
 
-  const { result: annotations } = wish<Default<AnnotationPiece[], []>>({
+  const { candidates: annotations } = wish<AnnotationPiece>({
     query: "#annotation",
+    scope: [".", "~"],
   });
 
   const filtered = computed(() => {
@@ -137,88 +136,89 @@ export default pattern<Record<string, never>>((_) => {
 
         {/* ── Annotation list ── */}
         <ct-vstack gap="2">
-          {filtered.map((ann: AnnotationPiece) =>
-            ann && (
-              <ct-cell-context $cell={ann}>
-                <ct-vstack
-                  gap="1"
-                  style={{
-                    padding: "10px 12px",
-                    border: "1px solid #e5e7eb",
-                    borderRadius: "8px",
-                    background: "white",
-                  }}
-                >
-                  {/* Row 1: kind icon + link to annotation + status badge */}
-                  <ct-hstack gap="2" style={{ alignItems: "center" }}>
-                    <span style={{ fontSize: "14px" }}>
-                      {KIND_ICON[ann?.kind ?? "note"] ?? "📌"}
-                    </span>
-                    <ct-cell-link $cell={ann} />
-                    <span
-                      style={{
-                        fontSize: "11px",
-                        padding: "2px 6px",
-                        borderRadius: "10px",
-                        ...(STATUS_STYLE[ann?.status ?? "open"]
-                          ? Object.fromEntries(
-                            STATUS_STYLE[ann?.status ?? "open"]
-                              .split(";")
-                              .filter(Boolean)
-                              .map((s) => s.split(":").map((p) => p.trim())),
-                          )
-                          : {}),
-                      }}
-                    >
-                      {ann?.status ?? "open"}
-                    </span>
-                  </ct-hstack>
-
-                  {/* Row 2: target piece link (if set) */}
-                  {ann?.targetPiece && (
-                    <ct-hstack gap="1" style={{ alignItems: "center" }}>
-                      <span style={{ fontSize: "11px", color: "#9ca3af" }}>
-                        on:
+          {filtered.map(
+            (ann: AnnotationPiece) =>
+              ann && (
+                <ct-cell-context $cell={ann}>
+                  <ct-vstack
+                    gap="1"
+                    style={{
+                      padding: "10px 12px",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: "8px",
+                      background: "white",
+                    }}
+                  >
+                    {/* Row 1: kind icon + link to annotation + status badge */}
+                    <ct-hstack gap="2" style={{ alignItems: "center" }}>
+                      <span style={{ fontSize: "14px" }}>
+                        {KIND_ICON[ann?.kind ?? "note"] ?? "📌"}
                       </span>
-                      <ct-cell-link $cell={ann.targetPiece} />
+                      <ct-cell-link $cell={ann} />
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          padding: "2px 6px",
+                          borderRadius: "10px",
+                          ...(STATUS_STYLE[ann?.status ?? "open"]
+                            ? Object.fromEntries(
+                              STATUS_STYLE[ann?.status ?? "open"]
+                                .split(";")
+                                .filter(Boolean)
+                                .map((s) => s.split(":").map((p) => p.trim())),
+                            )
+                            : {}),
+                        }}
+                      >
+                        {ann?.status ?? "open"}
+                      </span>
                     </ct-hstack>
-                  )}
 
-                  {/* Row 3: action buttons */}
-                  <ct-hstack gap="1" style={{ marginTop: "4px" }}>
-                    {(ann?.status === "open" ||
-                      ann?.status === "in-progress") && (
-                      <ct-button
-                        size="sm"
-                        onClick={resolveAnnotation({ status: ann.status! })}
-                      >
-                        Resolve
-                      </ct-button>
+                    {/* Row 2: target piece link (if set) */}
+                    {ann?.targetPiece && (
+                      <ct-hstack gap="1" style={{ alignItems: "center" }}>
+                        <span style={{ fontSize: "11px", color: "#9ca3af" }}>
+                          on:
+                        </span>
+                        <ct-cell-link $cell={ann.targetPiece} />
+                      </ct-hstack>
                     )}
-                    {(ann?.status === "open" ||
-                      ann?.status === "in-progress") && (
-                      <ct-button
-                        size="sm"
-                        variant="secondary"
-                        onClick={dismissAnnotation({ status: ann.status! })}
-                      >
-                        Dismiss
-                      </ct-button>
-                    )}
-                    {(ann?.status === "resolved" ||
-                      ann?.status === "dismissed") && (
-                      <ct-button
-                        size="sm"
-                        variant="secondary"
-                        onClick={reopenAnnotation({ status: ann.status! })}
-                      >
-                        Reopen
-                      </ct-button>
-                    )}
-                  </ct-hstack>
-                </ct-vstack>
-              </ct-cell-context>
-            )
+
+                    {/* Row 3: action buttons */}
+                    <ct-hstack gap="1" style={{ marginTop: "4px" }}>
+                      {(ann?.status === "open" ||
+                        ann?.status === "in-progress") && (
+                        <ct-button
+                          size="sm"
+                          onClick={resolveAnnotation({ status: ann.status! })}
+                        >
+                          Resolve
+                        </ct-button>
+                      )}
+                      {(ann?.status === "open" ||
+                        ann?.status === "in-progress") && (
+                        <ct-button
+                          size="sm"
+                          variant="secondary"
+                          onClick={dismissAnnotation({ status: ann.status! })}
+                        >
+                          Dismiss
+                        </ct-button>
+                      )}
+                      {(ann?.status === "resolved" ||
+                        ann?.status === "dismissed") && (
+                        <ct-button
+                          size="sm"
+                          variant="secondary"
+                          onClick={reopenAnnotation({ status: ann.status! })}
+                        >
+                          Reopen
+                        </ct-button>
+                      )}
+                    </ct-hstack>
+                  </ct-vstack>
+                </ct-cell-context>
+              ),
           )}
           {filtered.length === 0 && (
             <ct-text style={{ color: "#9ca3af", fontSize: "14px" }}>
