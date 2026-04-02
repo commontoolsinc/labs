@@ -1,8 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
-import {
-  schemaWithProperties,
-  toDeepFrozenSchema,
-} from "@commontools/data-model/schema-utils";
+import { schemaWithProperties } from "@commontools/data-model/schema-utils";
+import { internSchema } from "@commontools/data-model/schema-hash";
 import { type LegacyAlias } from "../sigil-types.ts";
 import {
   isPattern,
@@ -141,12 +139,10 @@ export function toJSONWithLegacyAliases(
   return value;
 }
 
-type CreateJsonSchemaState = {
-  addDefaults: boolean;
-  runtime: Runtime | undefined;
-  seen: Map<string, JSONSchema>;
-};
-
+/**
+ * Creates a schema based on an `example` piece of data. The result is always an
+ * interned schema. Note that interned schemas are necessarily frozen.
+ */
 export function createJsonSchema(
   example: any,
   addDefaults: boolean = false,
@@ -161,11 +157,17 @@ export function createJsonSchema(
   return analyzeType(example, state);
 }
 
+type AnalyzeTypeState = {
+  addDefaults: boolean;
+  runtime: Runtime | undefined;
+  seen: Map<string, JSONSchema>;
+};
+
 /**
  * Helper for `createJsonSchema()` which analyzes a value, calling itself
  * recursively on subcomponents of the value (if any).
  */
-function analyzeType(value: any, state: CreateJsonSchemaState): JSONSchema {
+function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
   if (isCellLink(value)) {
     const seen = state.seen;
     const link = parseLink(value);
@@ -190,12 +192,15 @@ function analyzeType(value: any, state: CreateJsonSchemaState): JSONSchema {
     return schema;
   }
 
-  // Adds the `default` when appropriate and does any other necessary result
-  // processing.
+  // Adds the `default` when appropriate and does any final result processing.
+  // **Note:** The interning here is necessary so that the array analysis can
+  // do its object-identity-based uniquing. (That is, this isn't merely to
+  // get the outer return value of `createJsonSchema()` to be interned.)
   const finishResult = (schema: JSONSchema, addDefault = true): JSONSchema => {
-    return (addDefault && state.addDefaults)
+    const result = (addDefault && state.addDefaults)
       ? schemaWithProperties(schema, { default: value })
-      : toDeepFrozenSchema(schema, true);
+      : schema;
+    return internSchema(result);
   };
 
   const type = typeof value;
@@ -210,10 +215,10 @@ function analyzeType(value: any, state: CreateJsonSchemaState): JSONSchema {
           // TODO(seefeld): should be `true` in this case.
           items = {};
         } else {
-          const schemas = value.map((v) => analyzeType(v, state)).map((s) =>
-            JSON.stringify(s)
-          );
-          const uniqueSchemas = [...new Set(schemas)].map((s) => JSON.parse(s));
+          const schemas = value.map((v) => analyzeType(v, state));
+          const uniqueSchemas = (schemas.length === 1)
+            ? schemas
+            : [...new Set(schemas)];
           if (uniqueSchemas.length === 1) {
             items = uniqueSchemas[0];
           } else {
