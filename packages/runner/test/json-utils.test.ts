@@ -8,10 +8,7 @@ import {
   createJsonSchema,
   toJSONWithLegacyAliases,
 } from "../src/builder/json-utils.ts";
-import {
-  type JSONSchema,
-  type JSONSchemaObj,
-} from "../src/builder/types.ts";
+import { type JSONSchema, type JSONSchemaObj } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 
