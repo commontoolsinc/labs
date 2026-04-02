@@ -6,7 +6,6 @@ import {
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
   isInRestrictedReactiveContext,
-  isWildcardTraversalCall,
   type ReactiveContextInfo,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
@@ -218,10 +217,6 @@ function classifyCallExpressionRoot(
 ): ExpressionSiteCallRootKind {
   if (expression.questionDotToken) {
     return "optional-call";
-  }
-
-  if (isWildcardTraversalCall(expression, context.checker)) {
-    return "other";
   }
 
   const callKind = detectCallKind(expression, context.checker);

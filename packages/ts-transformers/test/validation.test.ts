@@ -531,22 +531,25 @@ Deno.test(
       assertGreater(computationErrors.length, 0);
     });
 
-    await t.step("errors on JSON.stringify over pattern input", async () => {
-      const source = `/// <cts-enable />
+    await t.step(
+      "allows JSON.stringify over pattern input in return position",
+      async () => {
+        const source = `/// <cts-enable />
       import { pattern } from "commontools";
 
       const p = pattern((input) => JSON.stringify(input));
     `;
-      const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
-      });
-      const errors = getErrors(diagnostics);
-      const computationErrors = errors.filter((error) =>
-        error.type === "pattern-context:computation"
-      );
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        const computationErrors = errors.filter((error) =>
+          error.type === "pattern-context:computation"
+        );
 
-      assertGreater(computationErrors.length, 0);
-    });
+        assertEquals(computationErrors.length, 0);
+      },
+    );
   },
 );
 

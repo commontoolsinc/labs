@@ -1240,7 +1240,7 @@ Deno.test(
 );
 
 Deno.test(
-  "Expression site policy: wildcard traversal calls stay out of the shared free-function slice",
+  "Expression site policy: wildcard traversal calls share the ordinary-call lowering slice",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare function pattern<T>(fn: (state: any) => T): T;
@@ -1262,8 +1262,44 @@ Deno.test(
     const analyze = createDataFlowAnalyzer(checker);
     assertEquals(
       canRewriteExpressionSite(call, "object-property", context, analyze),
-      false,
+      true,
     );
+  },
+);
+
+Deno.test(
+  "Expression site policy: JSX wildcard traversal call roots defer to the shared post-closure path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare namespace JSX {
+        interface IntrinsicElements {
+          div: any;
+          p: any;
+        }
+      }
+
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => (
+        <div>
+          <p>{JSON.stringify(state.wishes[1])}</p>
+        </div>
+      ));
+    `);
+
+    const call = findFirstNode(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        node.expression.expression.text === "JSON" &&
+        node.expression.name.text === "stringify",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    assertEquals(classifyJsxExpressionSiteRoute(call, context, analyze), {
+      route: "shared-post-closure",
+    });
   },
 );
 
