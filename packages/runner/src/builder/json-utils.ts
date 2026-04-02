@@ -201,7 +201,7 @@ function analyzeType(value: any, state: CreateJsonSchemaState): JSONSchema {
   const type = typeof value;
 
   switch (type) {
-    case "object":
+    case "object": {
       if (value === null) {
         return finishResult({ type: "null" });
       } else if (Array.isArray(value)) {
@@ -231,17 +231,22 @@ function analyzeType(value: any, state: CreateJsonSchemaState): JSONSchema {
         // any.
         return finishResult({ type: "object", properties }, false);
       }
-      break;
-    case "number":
+    }
+
+    case "number": {
       const numType = Number.isInteger(value) ? "integer" : "number";
       return finishResult({ type: numType });
-    case "undefined":
+    }
+
+    case "undefined": {
       // TODO(danfuzz): This has to start doing something more,  in order for
       // `undefined` to be accepted as a valid value.
       return finishResult({}, false);
-      break;
-    default:
+    }
+
+    default: {
       return finishResult({ type: type as JSONSchemaTypes });
+    }
   }
 }
 
