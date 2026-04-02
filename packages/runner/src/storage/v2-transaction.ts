@@ -64,6 +64,11 @@ import {
   isReadIgnoredForScheduling,
   isReadMarkedAsPotentialWrite,
 } from "./reactivity-log.ts";
+import {
+  createPathContainer,
+  ensureParentContainers,
+  readValueAtPath,
+} from "./v2-path.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
 
 type RootAttestation = IAttestation;
@@ -184,47 +189,6 @@ const ensureWritableDocument = (
   return doc as WritableDocumentEntry;
 };
 
-const createMissingContainer = (
-  nextKey: string,
-): FabricValue => isArrayIndexPropertyName(nextKey) ? [] : {};
-
-const ensureParentContainers = (
-  root: FabricValue,
-  path: readonly string[],
-  lastKey: string,
-): FabricValue => {
-  if (path.length === 0) {
-    return root;
-  }
-
-  let current = root as Record<string, FabricValue> | FabricValue[];
-  for (let index = 0; index < path.length; index += 1) {
-    const key = path[index]!;
-    const nextKey = path[index + 1] ?? lastKey;
-    const container = createMissingContainer(nextKey);
-
-    if (Array.isArray(current)) {
-      const slot = Number(key);
-      const existing = current[slot];
-      if (!isRecord(existing) && !Array.isArray(existing)) {
-        current[slot] = container;
-      }
-      current = current[slot] as
-        | Record<string, FabricValue>
-        | FabricValue[];
-      continue;
-    }
-
-    const existing = current[key];
-    if (!isRecord(existing) && !Array.isArray(existing)) {
-      current[key] = container;
-    }
-    current = current[key] as Record<string, FabricValue> | FabricValue[];
-  }
-
-  return root;
-};
-
 const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   if (
     value === undefined || value === null ||
@@ -255,31 +219,6 @@ const EMPTY_META = Object.freeze({});
 
 const normalizeReactivityPath = (path: readonly string[]): string[] =>
   path[0] === "value" ? [...path.slice(1)] : [...path];
-
-const readPathValue = (
-  value: FabricValue | undefined,
-  path: readonly string[],
-): FabricValue | undefined => {
-  let current: unknown = value;
-  for (const segment of path) {
-    if (Array.isArray(current)) {
-      if (segment === "length") {
-        current = current.length;
-        continue;
-      }
-      if (!isArrayIndexPropertyName(segment)) {
-        return undefined;
-      }
-      current = current[Number(segment)];
-      continue;
-    }
-    if (!isRecord(current)) {
-      return undefined;
-    }
-    current = current[segment];
-  }
-  return current as FabricValue | undefined;
-};
 
 type PathInspection =
   | {
@@ -395,7 +334,7 @@ const applyMutablePathWrite = (
         },
       };
     }
-    currentRoot = createMissingContainer(address.path[0]!);
+    currentRoot = createPathContainer(address.path[0]!);
   } else if (!isContainerValue(currentRoot)) {
     return {
       error: TypeMismatchError(
@@ -496,7 +435,7 @@ const applyMutablePathWrite = (
       parentKey = slot;
       let next = current[slot];
       if (next === undefined) {
-        next = createMissingContainer(address.path[index + 1]!);
+        next = createPathContainer(address.path[index + 1]!);
         current[slot] = next;
       } else if (!isContainerValue(next)) {
         return {
@@ -534,7 +473,7 @@ const applyMutablePathWrite = (
     parentKey = key;
     let next = current[key];
     if (next === undefined) {
-      next = createMissingContainer(address.path[index + 1]!);
+      next = createPathContainer(address.path[index + 1]!);
       current[key] = next;
     } else if (!isContainerValue(next)) {
       return {
@@ -616,8 +555,12 @@ const findDeepestArrayPath = (
 
   for (let index = 0; index < path.length; index += 1) {
     const prefix = path.slice(0, index);
-    const beforeValue = readPathValue(before, prefix);
-    const afterValue = readPathValue(after, prefix);
+    const beforeValue = readValueAtPath(before, prefix, {
+      allowArrayLength: true,
+    });
+    const afterValue = readValueAtPath(after, prefix, {
+      allowArrayLength: true,
+    });
     if (Array.isArray(beforeValue) || Array.isArray(afterValue)) {
       deepestArrayPath = prefix;
     }
@@ -828,8 +771,12 @@ const buildReactivityPathsForChange = (
   afterRoot: FabricValue | undefined,
   path: readonly string[],
 ): readonly (readonly string[])[] => {
-  const beforeValue = readPathValue(beforeRoot, path);
-  const afterValue = readPathValue(afterRoot, path);
+  const beforeValue = readValueAtPath(beforeRoot, path, {
+    allowArrayLength: true,
+  });
+  const afterValue = readValueAtPath(afterRoot, path, {
+    allowArrayLength: true,
+  });
   if (deepEqual(beforeValue, afterValue)) {
     return [];
   }
@@ -844,8 +791,12 @@ const buildReactivityPathsForChange = (
     const prefix = path.slice(0, prefixLength);
     if (
       !shallowStructureChanged(
-        readPathValue(beforeRoot, prefix),
-        readPathValue(afterRoot, prefix),
+        readValueAtPath(beforeRoot, prefix, {
+          allowArrayLength: true,
+        }),
+        readValueAtPath(afterRoot, prefix, {
+          allowArrayLength: true,
+        }),
       )
     ) {
       continue;
@@ -1142,7 +1093,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       return {
         ok: {
           address: memoryAddress,
-          value: readPathValue(current.value, memoryAddress.path),
+          value: readValueAtPath(current.value, memoryAddress.path, {
+            allowArrayLength: true,
+          }),
         },
       };
     }
@@ -1279,7 +1232,9 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.recordPatchIntent(
       space,
       address,
-      readPathValue(collapsedNext.value, address.path),
+      readValueAtPath(collapsedNext.value, address.path, {
+        allowArrayLength: true,
+      }),
       previous.kind === "ok"
         ? isolateTransactionValue(previous.value) as FabricValue | undefined
         : undefined,
@@ -1380,7 +1335,9 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const previousActivityValue = isolateTransactionValue(
-      readPathValue(doc.current.value, lastExistingPath),
+      readValueAtPath(doc.current.value, lastExistingPath, {
+        allowArrayLength: true,
+      }),
     ) as FabricValue | undefined;
 
     doc.current = collapsedNext;
@@ -1388,14 +1345,18 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.recordPatchIntent(
       space,
       address,
-      readPathValue(collapsedNext.value, address.path),
+      readValueAtPath(collapsedNext.value, address.path, {
+        allowArrayLength: true,
+      }),
       undefined,
       doc,
     );
     this.recordWriteActivity(
       space,
       { ...address, path: lastExistingPath },
-      readPathValue(collapsedNext.value, lastExistingPath),
+      readValueAtPath(collapsedNext.value, lastExistingPath, {
+        allowArrayLength: true,
+      }),
       previousActivityValue,
       doc,
     );
@@ -1436,7 +1397,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       const isolatedValue = value === undefined
         ? undefined
         : isolateTransactionValue(value) as FabricValue;
-      const previousValue = readPathValue(nextRoot, address.path);
+      const previousValue = readValueAtPath(nextRoot, address.path, {
+        allowArrayLength: true,
+      });
       if (deepEqual(previousValue, isolatedValue)) {
         continue;
       }
@@ -1446,7 +1409,9 @@ export class V2StorageTransaction implements IStorageTransaction {
         isolatedValue,
       ) ?? address.path;
       const previousActivityValue = isolateTransactionValue(
-        readPathValue(nextRoot, activityPath),
+        readValueAtPath(nextRoot, activityPath, {
+          allowArrayLength: true,
+        }),
       ) as FabricValue | undefined;
       if (
         !hasMutableRoot && address.path.length > 0 && nextRoot !== undefined
@@ -1476,14 +1441,18 @@ export class V2StorageTransaction implements IStorageTransaction {
       this.recordPatchIntent(
         space,
         address,
-        readPathValue(result.ok.root, address.path),
+        readValueAtPath(result.ok.root, address.path, {
+          allowArrayLength: true,
+        }),
         isolateTransactionValue(previousValue) as FabricValue | undefined,
         doc,
       );
       this.recordWriteActivity(
         space,
         { ...address, path: activityPath },
-        readPathValue(result.ok.root, activityPath),
+        readValueAtPath(result.ok.root, activityPath, {
+          allowArrayLength: true,
+        }),
         previousActivityValue,
         doc,
       );
@@ -1911,13 +1880,15 @@ export class V2StorageTransaction implements IStorageTransaction {
     }>();
     const arrayGroups = new Map<string, readonly string[]>();
     for (const detail of details) {
-      const value = readPathValue(
+      const value = readValueAtPath(
         doc.current.value,
         detail.address.path,
+        { allowArrayLength: true },
       );
-      const previousValue = readPathValue(
+      const previousValue = readValueAtPath(
         doc.initial.value,
         detail.address.path,
+        { allowArrayLength: true },
       );
       if (deepEqual(value, previousValue)) {
         continue;
@@ -1954,8 +1925,12 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const nonCoverCandidates: PatchDraftCandidate[] = [];
     for (const arrayPath of arrayGroups.values()) {
-      const beforeValue = readPathValue(doc.initial.value, arrayPath);
-      const afterValue = readPathValue(doc.current.value, arrayPath);
+      const beforeValue = readValueAtPath(doc.initial.value, arrayPath, {
+        allowArrayLength: true,
+      });
+      const afterValue = readValueAtPath(doc.current.value, arrayPath, {
+        allowArrayLength: true,
+      });
       for (
         const candidate of buildArrayPatchCandidates(
           arrayPath,

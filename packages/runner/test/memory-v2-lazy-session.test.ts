@@ -4,28 +4,13 @@ import { Identity } from "@commontools/identity";
 import * as MemoryV2Server from "@commontools/memory/v2/server";
 import type { AppliedCommit } from "@commontools/memory/v2/engine";
 import type { MemorySpace, URI } from "@commontools/memory/interface";
-import {
-  type Options as V2StorageOptions,
-  type SessionFactory,
-  StorageManager as V2StorageManager,
-} from "../src/storage/v2.ts";
+import { type Options as V2StorageOptions } from "../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import { TestStorageManager } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-lazy-session");
 const space = signer.did();
 const type = "application/json" as const;
-
-class TestStorageManager extends V2StorageManager {
-  constructor(sessionFactory: SessionFactory) {
-    super(
-      {
-        as: signer,
-        address: new URL("memory://"),
-      },
-      sessionFactory,
-    );
-  }
-}
 
 class TestEmulatedStorageManager extends EmulatedStorageManager {
   static emulateWithServerFactory(
@@ -65,7 +50,10 @@ const appliedCommitFor = (ids: URI[]): AppliedCommit => ({
 describe("Memory v2 lazy session creation", () => {
   it("does not create a session for open or local transaction reads and writes", async () => {
     let sessionCreates = 0;
-    const storage = new TestStorageManager({
+    const storage = TestStorageManager.create({
+      as: signer,
+      address: new URL("memory://"),
+    }, {
       create(_space: MemorySpace) {
         sessionCreates += 1;
         return Promise.resolve({
@@ -106,7 +94,10 @@ describe("Memory v2 lazy session creation", () => {
     let sessionCreates = 0;
     let commits = 0;
     let closes = 0;
-    const storage = new TestStorageManager({
+    const storage = TestStorageManager.create({
+      as: signer,
+      address: new URL("memory://"),
+    }, {
       create(_space: MemorySpace) {
         sessionCreates += 1;
         return Promise.resolve({
@@ -153,7 +144,10 @@ describe("Memory v2 lazy session creation", () => {
     let sessionCreates = 0;
     let commits = 0;
     let closes = 0;
-    const storage = new TestStorageManager({
+    const storage = TestStorageManager.create({
+      as: signer,
+      address: new URL("memory://"),
+    }, {
       create(_space: MemorySpace) {
         sessionCreates += 1;
         if (sessionCreates === 1) {

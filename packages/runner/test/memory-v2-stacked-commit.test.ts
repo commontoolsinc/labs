@@ -38,15 +38,14 @@ import { applyPatch } from "../../memory/v2/patch.ts";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import type { AppliedCommit } from "@commontools/memory/v2/engine";
 import type {
-  IStorageNotification,
   IStorageProviderWithReplica,
   StorageNotification,
 } from "../src/storage/interface.ts";
 import {
-  type Options as V2Options,
-  type SessionFactory,
-  StorageManager as V2StorageManager,
-} from "../src/storage/v2.ts";
+  NotificationRecorder,
+  SingleSessionFactory,
+  TestStorageManager,
+} from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-stacked-commit");
 const space = signer.did();
@@ -127,47 +126,6 @@ type ResultRecord = {
   status: "ok" | "error";
   message?: string;
 };
-
-class NotificationRecorder implements IStorageNotification {
-  notifications: StorageNotification[] = [];
-
-  next(notification: StorageNotification) {
-    this.notifications.push(notification);
-    return { done: false };
-  }
-
-  clear(): void {
-    this.notifications = [];
-  }
-}
-
-class SingleSessionFactory implements SessionFactory {
-  client: MemoryV2Client.Client | null = null;
-
-  constructor(private readonly transport: MemoryV2Client.Transport) {}
-
-  async create(space: string) {
-    if (this.client !== null) {
-      throw new Error(`Session already created for ${space}`);
-    }
-    const client = await MemoryV2Client.connect({
-      transport: this.transport,
-    });
-    const session = await client.mount(space);
-    this.client = client;
-    return { client, session };
-  }
-}
-
-class TestStorageManager extends V2StorageManager {
-  static create(options: V2Options, sessionFactory: SessionFactory) {
-    return new TestStorageManager(options, sessionFactory);
-  }
-
-  private constructor(options: V2Options, sessionFactory: SessionFactory) {
-    super(options, sessionFactory);
-  }
-}
 
 class ScriptedServerModel {
   connectionCount = 0;

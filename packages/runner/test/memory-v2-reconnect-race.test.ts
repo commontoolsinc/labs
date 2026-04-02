@@ -5,16 +5,15 @@ import { type EntityDocument, getMemoryV2Flags } from "@commontools/memory/v2";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import * as MemoryV2Server from "@commontools/memory/v2/server";
 import { StorageManager as CutoverStorageManager } from "../src/storage/cache.deno.ts";
-import {
-  type IStorageNotification,
-  type IStorageProviderWithReplica,
-  type StorageNotification,
+import type {
+  IStorageProviderWithReplica,
+  StorageNotification,
 } from "../src/storage/interface.ts";
 import {
-  type Options as V2Options,
-  type SessionFactory,
-  StorageManager as V2StorageManager,
-} from "../src/storage/v2.ts";
+  NotificationRecorder,
+  SingleSessionFactory,
+  TestStorageManager,
+} from "./memory-v2-test-utils.ts";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-reconnect-race");
@@ -41,19 +40,6 @@ type TestProvider = IStorageProviderWithReplica & {
     selector?: { path: string[]; schema: unknown },
   ): Promise<unknown>;
 };
-
-class NotificationRecorder implements IStorageNotification {
-  notifications: StorageNotification[] = [];
-
-  next(notification: StorageNotification) {
-    this.notifications.push(notification);
-    return { done: false };
-  }
-
-  clear(): void {
-    this.notifications = [];
-  }
-}
 
 class SabotagedReconnectTransport implements MemoryV2Client.Transport {
   connectionCount = 0;
@@ -126,24 +112,6 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
       });
     }
     return this.#connection;
-  }
-}
-
-class SingleSessionFactory implements SessionFactory {
-  client: MemoryV2Client.Client | null = null;
-
-  constructor(private readonly transport: MemoryV2Client.Transport) {}
-
-  async create(space: string) {
-    if (this.client !== null) {
-      throw new Error(`Session already created for ${space}`);
-    }
-    const client = await MemoryV2Client.connect({
-      transport: this.transport,
-    });
-    const session = await client.mount(space);
-    this.client = client;
-    return { client, session };
   }
 }
 
@@ -249,16 +217,6 @@ class RejectThenSucceedTransport implements MemoryV2Client.Transport {
 
   #respond(message: unknown): void {
     this.#receiver(JSON.stringify(message));
-  }
-}
-
-class TestStorageManager extends V2StorageManager {
-  static create(options: V2Options, sessionFactory: SessionFactory) {
-    return new TestStorageManager(options, sessionFactory);
-  }
-
-  private constructor(options: V2Options, sessionFactory: SessionFactory) {
-    super(options, sessionFactory);
   }
 }
 

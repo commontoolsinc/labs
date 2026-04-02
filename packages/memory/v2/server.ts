@@ -1,6 +1,5 @@
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
-import { hashSchema, internSchema } from "@commontools/data-model/schema-hash";
 import { resolveSpaceStoreUrl } from "../memory.ts";
 import type { Protocol, Provider } from "../provider.ts";
 import {
@@ -9,28 +8,20 @@ import {
   type ClientMessage,
   decodeMemoryV2Boundary,
   encodeMemoryV2Boundary,
-  type EntitySnapshot,
-  getMemoryV2Flags,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
   isMemoryV2Flags,
-  MEMORY_V2_PROTOCOL,
   type Reference,
   type ResponseMessage,
-  sameMemoryV2Flags,
   type ServerMessage,
   type SessionAckRequest,
   type SessionAckResult,
-  type SessionDescriptor,
   type SessionEffectMessage,
   type SessionOpenRequest,
   type SessionOpenResult,
   type SessionRevokedMessage,
-  type SessionSync,
-  type SessionSyncUpsert,
-  type SessionToken,
   type TransactRequest,
   type V2Error,
   type WatchAddRequest,
@@ -49,29 +40,26 @@ import {
   type TrackedGraphState,
   trackGraph,
 } from "./query.ts";
+import { respondToHello } from "./handshake.ts";
+import {
+  buildDiffSync,
+  buildFullSync,
+  cacheKeyForEntity,
+  groupedQueries,
+  isEmptySync,
+  mergeWatchesById,
+  sameSnapshot,
+  sameWatchSpec,
+  type SessionCacheEntry,
+  toCacheEntry,
+  trackedIdsFromEntries,
+} from "./server-sync.ts";
+import { SessionRegistry } from "./session-registry.ts";
+
+export { SessionRegistry } from "./session-registry.ts";
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
-type SessionCacheEntry = SessionSyncUpsert;
-
-type SessionState = {
-  id: string;
-  space: string;
-  sessionToken: SessionToken;
-  seenSeq: number;
-  lastSyncedSeq: number;
-  watches: WatchSpec[];
-  graphs: Map<string, TrackedGraphState>;
-  entities: Map<string, SessionCacheEntry>;
-  trackedIds: Set<string>;
-  expiresAt: number | null;
-  ownerConnectionId: string | null;
-  principal?: string;
-};
-
-type OpenSessionState = SessionOpenResult & {
-  revokedConnectionId?: string;
-};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -90,277 +78,8 @@ const respondTypedError = <Result>(
   error,
 });
 
-const cacheKeyForEntity = (branch: string, id: string): string =>
-  `${branch}\0${id}`;
-
-const sameSnapshot = (
-  left: SessionCacheEntry | undefined,
-  right: SessionCacheEntry | undefined,
-): boolean => {
-  if (left === undefined || right === undefined) {
-    return left === right;
-  }
-  return left.branch === right.branch &&
-    left.id === right.id &&
-    left.seq === right.seq &&
-    left.deleted === right.deleted;
-};
-
-const isEmptySync = (sync: SessionSync): boolean =>
-  sync.upserts.length === 0 && sync.removes.length === 0;
-
 const sessionKey = (space: string, sessionId: string): string =>
   `${space}\0${sessionId}`;
-
-const authorizationError = (message: string): Error =>
-  Object.assign(new Error(message), { name: "AuthorizationError" });
-
-const revokedError = (message: string): Error =>
-  Object.assign(new Error(message), { name: "SessionRevokedError" });
-
-const nextSessionToken = (): SessionToken =>
-  crypto.randomUUID() as SessionToken;
-
-const toCacheEntry = (
-  entity: EntitySnapshot,
-): SessionCacheEntry => {
-  if (entity.document === null) {
-    return {
-      branch: entity.branch,
-      id: entity.id,
-      seq: entity.seq,
-      deleted: true,
-    };
-  }
-  return {
-    branch: entity.branch,
-    id: entity.id,
-    seq: entity.seq,
-    doc: entity.document,
-  };
-};
-
-const trackedIdsFromEntries = (
-  entries: Iterable<SessionCacheEntry>,
-): Set<string> => {
-  const ids = new Set<string>();
-  for (const entry of entries) {
-    ids.add(entry.id);
-  }
-  return ids;
-};
-
-const groupedQueries = (
-  watches: readonly WatchSpec[],
-): Map<string, GraphQuery> => {
-  const grouped = new Map<string, GraphQuery>();
-  for (const watch of watches) {
-    const branch = watch.query.branch ?? "";
-    const existing = grouped.get(branch);
-    if (existing === undefined) {
-      grouped.set(branch, {
-        branch,
-        roots: [...watch.query.roots],
-      });
-      continue;
-    }
-    existing.roots.push(...watch.query.roots);
-  }
-  return grouped;
-};
-
-const mergeWatchesById = (
-  current: readonly WatchSpec[],
-  added: readonly WatchSpec[],
-): WatchSpec[] => {
-  const merged = new Map(current.map((watch) => [watch.id, watch] as const));
-  for (const watch of added) {
-    merged.set(watch.id, watch);
-  }
-  return [...merged.values()];
-};
-
-const watchRootIdentity = (root: GraphQuery["roots"][number]): string =>
-  JSON.stringify([
-    root.id,
-    root.selector.path,
-    root.selector.schema === undefined
-      ? ""
-      : hashSchema(internSchema(root.selector.schema)).toString(),
-  ]);
-
-const watchQueryIdentity = (watch: WatchSpec): string =>
-  JSON.stringify({
-    branch: watch.query.branch ?? "",
-    atSeq: watch.query.atSeq ?? null,
-    excludeSent: watch.query.excludeSent === true,
-    roots: watch.query.roots.map(watchRootIdentity).toSorted(),
-  });
-
-const sameWatchSpec = (
-  left: WatchSpec,
-  right: WatchSpec,
-): boolean =>
-  left.id === right.id &&
-  left.kind === right.kind &&
-  watchQueryIdentity(left) === watchQueryIdentity(right);
-
-const buildFullSync = (
-  previous: ReadonlyMap<string, SessionCacheEntry>,
-  next: ReadonlyMap<string, SessionCacheEntry>,
-  fromSeq: number,
-  toSeq: number,
-): SessionSync => {
-  const removes = [...previous.values()]
-    .filter((entry) => !next.has(cacheKeyForEntity(entry.branch, entry.id)))
-    .map((entry) => ({ branch: entry.branch, id: entry.id }))
-    .sort((left, right) =>
-      left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id)
-    );
-  const upserts = [...next.values()].sort((left, right) =>
-    left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id)
-  );
-  return {
-    type: "sync",
-    fromSeq,
-    toSeq,
-    upserts,
-    removes,
-  };
-};
-
-const buildDiffSync = (
-  previous: ReadonlyMap<string, SessionCacheEntry>,
-  next: ReadonlyMap<string, SessionCacheEntry>,
-  fromSeq: number,
-  toSeq: number,
-): SessionSync => {
-  const upserts: SessionCacheEntry[] = [];
-  for (const [key, current] of next.entries()) {
-    if (!sameSnapshot(previous.get(key), current)) {
-      upserts.push(current);
-    }
-  }
-  const removes = [...previous.entries()]
-    .filter(([key]) => !next.has(key))
-    .map(([, entry]) => ({ branch: entry.branch, id: entry.id }))
-    .sort((left, right) =>
-      left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id)
-    );
-  return {
-    type: "sync",
-    fromSeq,
-    toSeq,
-    upserts: upserts.toSorted((left, right) =>
-      left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id)
-    ),
-    removes,
-  };
-};
-
-export class SessionRegistry {
-  readonly #ttlMs: number;
-  #sessions = new Map<string, SessionState>();
-
-  constructor(options: { ttlMs?: number } = {}) {
-    this.#ttlMs = options.ttlMs ?? 30_000;
-  }
-
-  #prune(now = Date.now()): void {
-    for (const [key, session] of this.#sessions) {
-      if (session.expiresAt !== null && session.expiresAt <= now) {
-        this.#sessions.delete(key);
-      }
-    }
-  }
-
-  open(
-    space: string,
-    session: SessionDescriptor,
-    serverSeq: number,
-    ownerConnectionId = "session-registry",
-    principal?: string,
-  ): OpenSessionState {
-    this.#prune();
-    const sessionId = session.sessionId ?? crypto.randomUUID();
-    const key = sessionKey(space, sessionId);
-    const existing = this.#sessions.get(key);
-    if (
-      existing?.principal !== undefined &&
-      principal !== existing.principal
-    ) {
-      throw authorizationError(
-        `session ${sessionId} is already bound to ${existing.principal}`,
-      );
-    }
-    if (
-      existing !== undefined &&
-      session.sessionToken !== existing.sessionToken
-    ) {
-      throw revokedError(
-        `session ${sessionId} resume token is no longer valid`,
-      );
-    }
-    const seenSeq = Math.max(
-      existing?.seenSeq ?? 0,
-      session.seenSeq ?? 0,
-    );
-    const sessionToken = nextSessionToken();
-    const revokedConnectionId = existing?.ownerConnectionId !== undefined &&
-        existing.ownerConnectionId !== null &&
-        existing.ownerConnectionId !== ownerConnectionId
-      ? existing.ownerConnectionId
-      : undefined;
-    this.#sessions.set(key, {
-      id: sessionId,
-      space,
-      sessionToken,
-      seenSeq,
-      lastSyncedSeq: existing?.lastSyncedSeq ?? seenSeq,
-      watches: existing?.watches ?? [],
-      graphs: existing?.graphs ?? new Map(),
-      entities: existing?.entities ?? new Map(),
-      trackedIds: existing?.trackedIds ??
-        trackedIdsFromEntries(existing?.entities?.values() ?? []),
-      expiresAt: null,
-      ownerConnectionId,
-      principal: existing?.principal ?? principal,
-    });
-    return {
-      sessionId,
-      sessionToken,
-      serverSeq,
-      ...(existing !== undefined ? { resumed: true } : {}),
-      ...(revokedConnectionId ? { revokedConnectionId } : {}),
-    };
-  }
-
-  get(space: string, sessionId: string): SessionState | null {
-    this.#prune();
-    return this.#sessions.get(sessionKey(space, sessionId)) ?? null;
-  }
-
-  updateSeenSeq(
-    space: string,
-    sessionId: string,
-    seenSeq: number,
-  ): SessionState | null {
-    const session = this.get(space, sessionId);
-    if (session === null) {
-      return null;
-    }
-    session.seenSeq = Math.max(session.seenSeq, seenSeq);
-    return session;
-  }
-
-  detach(space: string, sessionId: string, ownerConnectionId: string): void {
-    const session = this.#sessions.get(sessionKey(space, sessionId));
-    if (session?.ownerConnectionId === ownerConnectionId) {
-      session.ownerConnectionId = null;
-      session.expiresAt = Date.now() + this.#ttlMs;
-    }
-  }
-}
 
 type Send = (message: ServerMessage) => void;
 
@@ -500,37 +219,12 @@ class Connection {
         });
         return;
       }
-      if (parsed.protocol !== MEMORY_V2_PROTOCOL) {
-        this.send({
-          type: "response",
-          requestId: "handshake",
-          error: toError(
-            "UnsupportedProtocol",
-            `Unsupported protocol: ${parsed.protocol}`,
-          ),
-        });
-        return;
-      }
-      const expectedFlags = getMemoryV2Flags();
-      if (!sameMemoryV2Flags(parsed.flags, expectedFlags)) {
-        this.send({
-          type: "response",
-          requestId: "handshake",
-          error: toError(
-            "ProtocolError",
-            `memory/v2 flag mismatch: client=${
-              JSON.stringify(parsed.flags)
-            } server=${JSON.stringify(expectedFlags)}`,
-          ),
-        });
+      const response = respondToHello(parsed);
+      this.send(response);
+      if (response.type !== "hello.ok") {
         return;
       }
       this.#ready = true;
-      this.send({
-        type: "hello.ok",
-        protocol: MEMORY_V2_PROTOCOL,
-        flags: expectedFlags,
-      });
       return;
     }
 
@@ -1394,40 +1088,7 @@ export class Server {
   respond(payload: string): Promise<string | null> {
     const parsed = parseClientMessage(payload);
     if (parsed?.type === "hello") {
-      const expectedFlags = getMemoryV2Flags();
-      if (parsed.protocol !== MEMORY_V2_PROTOCOL) {
-        return Promise.resolve(encodeMemoryV2Boundary(
-          {
-            type: "response",
-            requestId: "handshake",
-            error: toError(
-              "UnsupportedProtocol",
-              `Unsupported protocol: ${parsed.protocol}`,
-            ),
-          } satisfies ResponseMessage<never>,
-        ));
-      }
-      if (!sameMemoryV2Flags(parsed.flags, expectedFlags)) {
-        return Promise.resolve(encodeMemoryV2Boundary(
-          {
-            type: "response",
-            requestId: "handshake",
-            error: toError(
-              "ProtocolError",
-              `memory/v2 flag mismatch: client=${
-                JSON.stringify(parsed.flags)
-              } server=${JSON.stringify(expectedFlags)}`,
-            ),
-          } satisfies ResponseMessage<never>,
-        ));
-      }
-      return Promise.resolve(encodeMemoryV2Boundary(
-        {
-          type: "hello.ok",
-          protocol: MEMORY_V2_PROTOCOL,
-          flags: expectedFlags,
-        } satisfies ServerMessage,
-      ));
+      return Promise.resolve(encodeMemoryV2Boundary(respondToHello(parsed)));
     }
     return Promise.resolve(null);
   }

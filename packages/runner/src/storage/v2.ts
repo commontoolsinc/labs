@@ -1,6 +1,4 @@
-import { hashSchema, internSchema } from "@commontools/data-model/schema-hash";
 import { cloneIfNecessary } from "@commontools/data-model/fabric-value";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -12,13 +10,11 @@ import {
   type TransactionError,
   type URI,
 } from "@commontools/memory/interface";
-import { hashOf } from "@commontools/data-model/value-hash";
 import { assert, unclaimed } from "@commontools/memory/fact";
 import * as MemoryV2Client from "@commontools/memory/v2/client";
 import {
   type DocumentPath,
   type EntityDocument,
-  MEMORY_V2_PROTOCOL,
   type PatchOp,
   type SessionSync,
   toDocumentPath,
@@ -64,7 +60,25 @@ import { SelectorTracker } from "./cache.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import { getDirectTransactionReadActivities } from "./transaction-inspection.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
+import {
+  cloneWithoutPath,
+  cloneWithValueAtPath,
+  hasValueAtPath,
+  readValueAtPath,
+} from "./v2-path.ts";
+import {
+  compactWatchEntries,
+  normalizeSyncEntries,
+  watchIdForEntry,
+} from "./v2-watch.ts";
+import {
+  RemoteSessionFactory,
+  type SessionFactory,
+} from "./v2-remote-session.ts";
 import * as V2Transaction from "./v2-transaction.ts";
+
+export { watchIdForEntry } from "./v2-watch.ts";
+export type { SessionFactory } from "./v2-remote-session.ts";
 
 const logger = getLogger("storage.v2", {
   enabled: true,
@@ -165,155 +179,6 @@ const isPathPrefix = (
   prefix.length <= path.length &&
   prefix.every((segment, index) => segment === path[index]);
 
-const isArrayIndex = (segment: string): boolean =>
-  `${Number.parseInt(segment, 10)}` === segment &&
-  Number.parseInt(segment, 10) >= 0;
-
-const createContainer = (nextSegment: string): FabricValue =>
-  isArrayIndex(nextSegment) ? [] : {};
-
-const hasDocumentPath = (
-  root: FabricValue | undefined,
-  path: readonly string[],
-): boolean => {
-  let current: unknown = root;
-  for (const segment of path) {
-    if (Array.isArray(current)) {
-      if (!isArrayIndex(segment)) {
-        return false;
-      }
-      const index = Number(segment);
-      if (!(index in current)) {
-        return false;
-      }
-      current = current[index];
-      continue;
-    }
-    if (!isRecord(current) || !(segment in current)) {
-      return false;
-    }
-    current = current[segment];
-  }
-  return true;
-};
-
-const readDocumentPath = (
-  root: FabricValue | undefined,
-  path: readonly string[],
-): FabricValue | undefined => {
-  let current: unknown = root;
-  for (const segment of path) {
-    if (Array.isArray(current)) {
-      if (!isArrayIndex(segment)) {
-        return undefined;
-      }
-      current = current[Number(segment)];
-      continue;
-    }
-    if (!isRecord(current)) {
-      return undefined;
-    }
-    current = current[segment];
-  }
-  return current as FabricValue | undefined;
-};
-
-const setDocumentPath = (
-  root: EntityDocument | undefined,
-  path: readonly string[],
-  value: FabricValue | undefined,
-): EntityDocument | undefined => {
-  if (path.length === 0) {
-    return value === undefined
-      ? undefined
-      : cloneIfNecessary(value as FabricValue, {
-        frozen: false,
-      }) as EntityDocument;
-  }
-
-  const nextRoot = cloneIfNecessary((root ?? {}) as FabricValue, {
-    frozen: false,
-  }) as Record<string, unknown>;
-  let current: Record<string, unknown> | unknown[] = nextRoot;
-  for (let index = 0; index < path.length - 1; index += 1) {
-    const segment = path[index]!;
-    const nextSegment = path[index + 1]!;
-    if (Array.isArray(current)) {
-      const slot = Number(segment);
-      const existing = current[slot];
-      if (!isRecord(existing) && !Array.isArray(existing)) {
-        current[slot] = createContainer(nextSegment);
-      }
-      current = current[slot] as Record<string, unknown> | unknown[];
-      continue;
-    }
-
-    const existing = current[segment];
-    if (!isRecord(existing) && !Array.isArray(existing)) {
-      current[segment] = createContainer(nextSegment);
-    }
-    current = current[segment] as Record<string, unknown> | unknown[];
-  }
-
-  const last = path[path.length - 1]!;
-  if (Array.isArray(current)) {
-    current[Number(last)] = value === undefined
-      ? undefined
-      : cloneIfNecessary(value as FabricValue, { frozen: false });
-  } else {
-    current[last] = value === undefined
-      ? undefined
-      : cloneIfNecessary(value as FabricValue, { frozen: false });
-  }
-  return nextRoot as EntityDocument;
-};
-
-const removeDocumentPath = (
-  root: EntityDocument | undefined,
-  path: readonly string[],
-): EntityDocument | undefined => {
-  if (root === undefined) {
-    return undefined;
-  }
-  if (path.length === 0) {
-    return undefined;
-  }
-
-  const nextRoot = cloneIfNecessary(root as FabricValue, {
-    frozen: false,
-  }) as Record<string, unknown>;
-  let current: Record<string, unknown> | unknown[] = nextRoot;
-  for (let index = 0; index < path.length - 1; index += 1) {
-    const segment = path[index]!;
-    if (Array.isArray(current)) {
-      const slot = Number(segment);
-      const next = current[slot];
-      if (!isRecord(next) && !Array.isArray(next)) {
-        return nextRoot as EntityDocument;
-      }
-      current = next as Record<string, unknown> | unknown[];
-      continue;
-    }
-
-    const next = current[segment];
-    if (!isRecord(next) && !Array.isArray(next)) {
-      return nextRoot as EntityDocument;
-    }
-    current = next as Record<string, unknown> | unknown[];
-  }
-
-  const last = path[path.length - 1]!;
-  if (Array.isArray(current)) {
-    const slot = Number(last);
-    if (slot >= 0 && slot < current.length) {
-      current.splice(slot, 1);
-    }
-  } else {
-    delete current[last];
-  }
-  return nextRoot as EntityDocument;
-};
-
 const replayPathForPendingPatchTarget = (
   base: EntityDocument | undefined,
   pendingValue: EntityDocument,
@@ -324,8 +189,8 @@ const replayPathForPendingPatchTarget = (
   }
   const parent = parentPath(path);
   if (
-    Array.isArray(readDocumentPath(base, parent)) ||
-    Array.isArray(readDocumentPath(pendingValue, parent))
+    Array.isArray(readValueAtPath(base, parent)) ||
+    Array.isArray(readValueAtPath(pendingValue, parent))
   ) {
     return parent;
   }
@@ -388,15 +253,15 @@ const applyPendingVersion = (
           changedPathsForPendingPatch(base, pending.value, pending.patches),
         )
       ) {
-        if (hasDocumentPath(pending.value, path)) {
-          next = setDocumentPath(
+        if (hasValueAtPath(pending.value, path)) {
+          next = cloneWithValueAtPath(
             next,
             path,
-            readDocumentPath(pending.value, path),
+            readValueAtPath(pending.value, path),
           );
           continue;
         }
-        next = removeDocumentPath(next, path);
+        next = cloneWithoutPath(next, path);
       }
       return next;
     }
@@ -416,13 +281,6 @@ export const defaultSettings: IRemoteStorageProviderSettings = {
   maxSubscriptionsPerSpace: 50_000,
   connectionTimeout: 30_000,
 };
-
-export interface SessionFactory {
-  create(space: MemorySpace, signer?: Signer): Promise<{
-    client: MemoryV2Client.Client;
-    session: MemoryV2Client.SpaceSession;
-  }>;
-}
 
 const comparePath = (left: readonly string[], right: readonly string[]) => {
   if (left.length !== right.length) {
@@ -543,131 +401,6 @@ const compactCommitReads = <
 const toCommitReadPath = (
   path: readonly (string | number)[],
 ): DocumentPath => toDocumentPath(path.map(String));
-
-class WebSocketTransport implements MemoryV2Client.Transport {
-  #receiver: (payload: string) => void = () => {};
-  #closeReceiver: (error?: Error) => void = () => {};
-  #socket: WebSocket | null = null;
-  #opening: Promise<WebSocket> | null = null;
-
-  constructor(private readonly address: URL) {}
-
-  setReceiver(receiver: (payload: string) => void): void {
-    this.#receiver = receiver;
-  }
-
-  setCloseReceiver(receiver: (error?: Error) => void): void {
-    this.#closeReceiver = receiver;
-  }
-
-  async send(payload: string): Promise<void> {
-    const socket = await this.open();
-    socket.send(payload);
-  }
-
-  async close(): Promise<void> {
-    const socket = this.#socket;
-    this.#socket = null;
-    this.#opening = null;
-    if (!socket || socket.readyState === WebSocket.CLOSED) {
-      return;
-    }
-    socket.close();
-    await new Promise<void>((resolve) => {
-      socket.addEventListener("close", () => resolve(), { once: true });
-      socket.addEventListener("error", () => resolve(), { once: true });
-    });
-  }
-
-  private async open(): Promise<WebSocket> {
-    if (this.#socket?.readyState === WebSocket.OPEN) {
-      return this.#socket;
-    }
-    if (this.#opening) {
-      return await this.#opening;
-    }
-    const address = new URL(this.address);
-    address.protocol = address.protocol === "https:" ? "wss:" : "ws:";
-    this.#opening = new Promise<WebSocket>((resolve, reject) => {
-      const socket = new WebSocket(address);
-      socket.addEventListener("open", () => {
-        this.#socket = socket;
-        resolve(socket);
-      }, { once: true });
-      socket.addEventListener("message", (event) => {
-        if (typeof event.data === "string") {
-          this.#receiver(event.data);
-        }
-      });
-      socket.addEventListener("close", () => {
-        this.#socket = null;
-        this.#opening = null;
-        this.#closeReceiver();
-      });
-      socket.addEventListener("error", (event) => {
-        this.#socket = null;
-        this.#opening = null;
-        this.#closeReceiver(
-          event instanceof ErrorEvent && event.error instanceof Error
-            ? event.error
-            : new Error("memory/v2 websocket transport error"),
-        );
-        reject(event);
-      }, { once: true });
-    });
-    return await this.#opening;
-  }
-}
-
-class RemoteSessionFactory implements SessionFactory {
-  constructor(
-    private readonly address: URL,
-    private readonly defaultSigner: Signer,
-  ) {}
-
-  async #createSessionOpenAuth(
-    signer: Signer,
-    space: MemorySpace,
-    session: MemoryV2Client.MountOptions,
-  ): Promise<MemoryV2Client.SessionOpenAuth> {
-    const invocation = {
-      iss: signer.did(),
-      cmd: "session.open",
-      sub: space,
-      args: {
-        protocol: MEMORY_V2_PROTOCOL,
-        session,
-      },
-    };
-    const signature = await signer.sign(hashOf(invocation).bytes);
-    if (signature.error) {
-      throw signature.error;
-    }
-    return {
-      invocation,
-      authorization: {
-        signature: signature.ok,
-      },
-    };
-  }
-
-  async create(space: MemorySpace, signer = this.defaultSigner) {
-    const client = await MemoryV2Client.connect({
-      transport: new WebSocketTransport(this.address),
-    });
-    const session = await client.mount(
-      space,
-      {},
-      (targetSpace, descriptor) =>
-        this.#createSessionOpenAuth(
-          signer,
-          targetSpace as MemorySpace,
-          descriptor,
-        ),
-    );
-    return { client, session };
-  }
-}
 
 export class StorageManager implements IStorageManager {
   readonly memoryVersion: MemoryVersion = "v2";
@@ -996,82 +729,6 @@ type WatchRefreshBatch = {
   entries: Map<string, [{ id: URI; type: MIME }, SchemaPathSelector]>;
   pending: PromiseWithResolvers<Result<Unit, PullError>>;
 };
-
-const normalizeSyncSelector = (
-  selector: SchemaPathSelector | undefined,
-): SchemaPathSelector => {
-  if (selector !== undefined && selector.schema !== false) {
-    const schema = selector.schema === undefined
-      ? undefined
-      : internSchema(toDeepFrozenSchema(selector.schema, false));
-    if (schema === selector.schema) {
-      return selector;
-    }
-    return {
-      path: selector.path,
-      schema,
-    };
-  }
-  return { path: [], schema: false };
-};
-
-const normalizeSyncEntries = (
-  entries: [{ id: URI; type: MIME }, SchemaPathSelector | undefined][],
-): [{ id: URI; type: MIME }, SchemaPathSelector][] =>
-  entries.map((
-    [address, selector],
-  ) => [address, normalizeSyncSelector(selector)]);
-
-const compactWatchEntries = (
-  entries: [{ id: URI; type: MIME }, SchemaPathSelector][],
-): [{ id: URI; type: MIME }, SchemaPathSelector][] => {
-  const tracker = new SelectorTracker<Result<Unit, PullError>>();
-  const cfc = new ContextualFlowControl();
-  const compacted: [{ id: URI; type: MIME }, SchemaPathSelector][] = [];
-
-  for (const entry of entries) {
-    const [address, selector] = entry;
-    const baseAddress = { id: address.id, type: address.type, path: [] };
-    const [superset] = tracker.getSupersetSelector(
-      baseAddress,
-      selector,
-      cfc,
-    );
-    if (superset !== undefined) {
-      continue;
-    }
-    tracker.add(
-      baseAddress,
-      selector,
-      Promise.resolve({ ok: {} } as Result<Unit, PullError>),
-    );
-    compacted.push(entry);
-  }
-
-  return compacted;
-};
-
-const selectorIdentity = (selector: SchemaPathSelector): string =>
-  stableHash({
-    path: selector.path,
-    schemaHash: selector.schema === undefined
-      ? ""
-      : hashSchema(selector.schema).toString(),
-  });
-
-export const watchIdForEntry = (
-  address: { id: URI; type: MIME },
-  selector: SchemaPathSelector,
-  branch = "",
-): string =>
-  `replica:${
-    stableHash({
-      branch,
-      id: address.id,
-      type: address.type,
-      selector: selectorIdentity(selector),
-    })
-  }`;
 
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;

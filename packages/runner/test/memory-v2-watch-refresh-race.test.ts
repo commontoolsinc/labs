@@ -11,10 +11,9 @@ import {
 } from "@commontools/memory/v2";
 import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 import {
-  type Options as V2Options,
-  type SessionFactory,
-  StorageManager as V2StorageManager,
-} from "../src/storage/v2.ts";
+  SingleSessionFactory,
+  TestStorageManager,
+} from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-watch-refresh-race");
 const space = signer.did();
@@ -31,34 +30,6 @@ type TestProvider = IStorageProviderWithReplica & {
     selector?: { path: string[]; schema: unknown },
   ): Promise<unknown>;
 };
-
-class SingleSessionFactory implements SessionFactory {
-  client: MemoryV2Client.Client | null = null;
-
-  constructor(private readonly transport: MemoryV2Client.Transport) {}
-
-  async create(space: string) {
-    if (this.client !== null) {
-      throw new Error(`Session already created for ${space}`);
-    }
-    const client = await MemoryV2Client.connect({
-      transport: this.transport,
-    });
-    const session = await client.mount(space);
-    this.client = client;
-    return { client, session };
-  }
-}
-
-class TestStorageManager extends V2StorageManager {
-  static create(options: V2Options, sessionFactory: SessionFactory) {
-    return new TestStorageManager(options, sessionFactory);
-  }
-
-  private constructor(options: V2Options, sessionFactory: SessionFactory) {
-    super(options, sessionFactory);
-  }
-}
 
 class CountingWatchSetTransport implements MemoryV2Client.Transport {
   #receiver: (payload: string) => void = () => {};
