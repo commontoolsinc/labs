@@ -5,7 +5,11 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
-import type { FabricValue, JSONSchemaObj } from "@commontools/api";
+import type {
+  FabricValue,
+  JSONSchemaObj,
+  JSONSchemaTypes,
+} from "@commontools/api";
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 import {
   cloneSchemaMutable,
@@ -677,7 +681,7 @@ describe("schemaWithoutProperties", () => {
 
 describe("schemaForValueType", () => {
   function testType(
-    typeName: string,
+    typeName: JSONSchemaTypes,
     example: FabricValue,
   ) {
     describe(typeName, () => {
