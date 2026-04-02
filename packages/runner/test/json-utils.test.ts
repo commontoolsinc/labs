@@ -34,13 +34,67 @@ describe("json-utils", () => {
   });
 
   describe("createJsonSchema", () => {
-    it("should create schema for primitive types", () => {
-      expect(createJsonSchema("test")).toEqual({ type: "string" });
-      expect(createJsonSchema(42)).toEqual({ type: "integer" });
-      expect(createJsonSchema(3.14)).toEqual({ type: "number" });
-      expect(createJsonSchema(true)).toEqual({ type: "boolean" });
-      expect(createJsonSchema(null)).toEqual({ type: "null" });
-      expect(createJsonSchema(undefined)).toEqual({});
+    function testSchemaForType(typeName: string, example: unknown) {
+      describe(typeName, () => {
+        it("should create schema for direct value", () => {
+          expect(createJsonSchema(example)).toEqual({ type: typeName });
+        });
+
+        it("should create schema for single-element array", () => {
+          expect(createJsonSchema([example])).toEqual({
+            type: "array",
+            items: { type: typeName },
+          });
+        });
+
+        it("should create schema for single-property object", () => {
+          expect(createJsonSchema({ prop: example })).toEqual({
+            type: "object",
+            properties: { prop: { type: typeName } },
+          });
+        });
+
+        it("should set default with addDefaults", () => {
+          expect(createJsonSchema(example, true)).toEqual({
+            type: typeName,
+            default: example,
+          });
+        });
+      });
+    }
+
+    testSchemaForType("string", "test");
+    testSchemaForType("integer", 42);
+    testSchemaForType("number", 3.14);
+    testSchemaForType("boolean", true);
+    testSchemaForType("null", null);
+
+    describe("undefined", () => {
+      it("should create schema for direct value", () => {
+        expect(createJsonSchema(undefined)).toEqual({});
+      });
+
+      it("should create schema for single-element array", () => {
+        expect(createJsonSchema([undefined])).toEqual({
+          type: "array",
+          items: {},
+        });
+      });
+
+      it("should create schema for single-property object", () => {
+        // The key is still enumerated, but analyzeType(undefined)
+        // produces an empty schema
+        expect(createJsonSchema({ prop: undefined })).toEqual({
+          type: "object",
+          properties: { prop: {} },
+        });
+      });
+
+      it("should not set default with addDefaults", () => {
+        const schema = createJsonSchema(undefined, true);
+        expect(schema).toEqual({});
+        expect(schema).not.toHaveProperty("default");
+      });
     });
 
     it("should create schema for arrays", () => {
@@ -448,6 +502,85 @@ describe("json-utils", () => {
           },
         },
       });
+    });
+
+    it("should not set default on object schemas when addDefaults is true", () => {
+      const schema = createJsonSchema({ name: "Alice", age: 30 }, true);
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          name: { type: "string", default: "Alice" },
+          age: { type: "integer", default: 30 },
+        },
+      });
+      // The object itself must not have a default
+      expect(schema).not.toHaveProperty("default");
+    });
+
+    it("should set default on array schemas when addDefaults is true", () => {
+      // Each element gets its own default, so elements with different values
+      // produce different schemas and collapse into anyOf.
+      expect(createJsonSchema([1, 2, 3], true)).toEqual({
+        type: "array",
+        items: {
+          anyOf: [
+            { type: "integer", default: 1 },
+            { type: "integer", default: 2 },
+            { type: "integer", default: 3 },
+          ],
+        },
+        default: [1, 2, 3],
+      });
+
+      // A single-element array produces a single items schema with default.
+      expect(createJsonSchema([42], true)).toEqual({
+        type: "array",
+        items: { type: "integer", default: 42 },
+        default: [42],
+      });
+
+      // Duplicate values in the array deduplicate to one items schema.
+      expect(createJsonSchema(["a", "a", "a"], true)).toEqual({
+        type: "array",
+        items: { type: "string", default: "a" },
+        default: ["a", "a", "a"],
+      });
+    });
+
+    it("should set defaults on leaves but not intermediate objects in nested structures", () => {
+      const schema = createJsonSchema({
+        user: {
+          name: "Bob",
+          active: true,
+        },
+        scores: [10, 20],
+      }, true);
+
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          user: {
+            type: "object",
+            properties: {
+              name: { type: "string", default: "Bob" },
+              active: { type: "boolean", default: true },
+            },
+          },
+          scores: {
+            type: "array",
+            items: {
+              anyOf: [
+                { type: "integer", default: 10 },
+                { type: "integer", default: 20 },
+              ],
+            },
+            default: [10, 20],
+          },
+        },
+      });
+      // Neither the root nor the nested object should have defaults
+      expect(schema).not.toHaveProperty("default");
+      expect(schema.properties!["user"]).not.toHaveProperty("default");
     });
   });
 
