@@ -195,9 +195,9 @@ export function createJsonSchema(
           schema.type = "object";
           schema.properties = {};
           for (
-            const key of new Set([...Object.keys(value ?? {})])
+            const key of new Set([...Object.keys(value)])
           ) {
-            (schema.properties as any)[key] = analyzeType(value?.[key]);
+            (schema.properties as any)[key] = analyzeType(value[key]);
           }
         } else {
           schema.type = "null";
