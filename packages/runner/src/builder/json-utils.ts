@@ -210,21 +210,7 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
       if (value === null) {
         return finishResult({ type: "null" });
       } else if (Array.isArray(value)) {
-        let items: JSONSchema;
-        if (value.length === 0) {
-          // TODO(seefeld): should be `true` in this case.
-          items = {};
-        } else {
-          const schemas = value.map((v) => analyzeType(v, state));
-          const uniqueSchemas = (schemas.length === 1)
-            ? schemas
-            : [...new Set(schemas)];
-          if (uniqueSchemas.length === 1) {
-            items = uniqueSchemas[0];
-          } else {
-            items = { anyOf: uniqueSchemas };
-          }
-        }
+        const items = itemsSchemaFromArray(value, state);
         return finishResult({ type: "array", items });
       } else {
         const entries: [string, JSONSchema][] = Object.entries(value).map(
@@ -254,6 +240,30 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
       return finishResult({ type: type as JSONSchemaTypes });
     }
   }
+}
+
+/**
+ * Helper for `analyzeType()` which derives an `items` schema property from an
+ * array value.
+ */
+function itemsSchemaFromArray(
+  value: JSONValue[],
+  state: AnalyzeTypeState,
+): JSONSchema {
+  if (value.length === 0) {
+    // TODO(seefeld): should be `true` in this case.
+    return {};
+  }
+
+  const schemas = value.map((v) => analyzeType(v, state));
+  if (schemas.length === 1) {
+    return schemas[0];
+  }
+
+  const uniqueSchemas = [...new Set(schemas)];
+  return (uniqueSchemas.length === 1)
+    ? uniqueSchemas[0]
+    : { anyOf: uniqueSchemas };
 }
 
 export function moduleToJSON(module: Module) {
