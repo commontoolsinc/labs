@@ -212,7 +212,7 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
   const basicSchema = schemaForValueType(value);
   if (basicSchema === undefined) {
     // Unrecognized type. Treat it as "any."
-    return emptySchemaObject();
+    return finishResult(emptySchemaObject());
   }
 
   switch (basicSchema.type) {
