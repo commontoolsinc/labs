@@ -174,7 +174,9 @@ export function createJsonSchema(
 
     switch (type) {
       case "object":
-        if (Array.isArray(value)) {
+        if (value === null) {
+          schema.type = "null";
+        } else if (Array.isArray(value)) {
           schema.type = "array";
           if (value.length === 0) {
             schema.items = {}; // TODO(seefeld): Should be `true`
@@ -191,7 +193,7 @@ export function createJsonSchema(
               schema.items = { anyOf: uniqueSchemas };
             }
           }
-        } else if (value !== null) {
+        } else {
           schema.type = "object";
           schema.properties = {};
           for (
@@ -199,8 +201,6 @@ export function createJsonSchema(
           ) {
             (schema.properties as any)[key] = analyzeType(value[key]);
           }
-        } else {
-          schema.type = "null";
         }
         break;
       case "number":
