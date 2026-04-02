@@ -2710,12 +2710,21 @@ export class XSchedulerGraph extends LitElement {
           .nodes="${sourceNodes}"
           .selectedNodeId="${this.selectedNode?.id ?? null}"
           .baselineStats="${this.baselineStats}"
+          .breakpoints="${this.debuggerController?.getBreakpoints() ??
+            new Set()}"
           @node-selected="${(e: CustomEvent) => {
             const node = this.layoutNodes.get(e.detail.nodeId);
             if (node) {
               this.selectedNode = node;
               this.selectedEdge = null;
             }
+          }}"
+          @breakpoint-toggle="${(e: CustomEvent) => {
+            const { actionIds, enabled } = e.detail;
+            this.debuggerController?.setBreakpointsForActions(
+              actionIds,
+              enabled,
+            );
           }}"
         ></x-scheduler-source>
         ${this.renderDetailPane()}

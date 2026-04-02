@@ -91,6 +91,10 @@ export class DebuggerController implements ReactiveController {
   private patternSources: PatternSourceInfo[] = [];
   private patternSourcesVersion = 0;
 
+  // Debugger breakpoints: action IDs
+  private breakpointIds = new Set<string>();
+  private breakpointsVersion = 0;
+
   constructor(host: ReactiveControllerHost & HTMLElement) {
     this.host = host;
     this.host.addController(this);
@@ -502,6 +506,76 @@ export class DebuggerController implements ReactiveController {
    */
   getPatternSourcesVersion(): number {
     return this.patternSourcesVersion;
+  }
+
+  /**
+   * Toggle a breakpoint for an action ID. Sends updated set to worker.
+   */
+  async toggleBreakpoint(actionId: string): Promise<void> {
+    if (this.breakpointIds.has(actionId)) {
+      this.breakpointIds.delete(actionId);
+    } else {
+      this.breakpointIds.add(actionId);
+    }
+    this.breakpointsVersion++;
+    this.host.requestUpdate();
+    await this.syncBreakpoints();
+  }
+
+  /**
+   * Set breakpoints for multiple action IDs at once.
+   */
+  async setBreakpointsForActions(
+    actionIds: string[],
+    enabled: boolean,
+  ): Promise<void> {
+    for (const id of actionIds) {
+      if (enabled) {
+        this.breakpointIds.add(id);
+      } else {
+        this.breakpointIds.delete(id);
+      }
+    }
+    this.breakpointsVersion++;
+    this.host.requestUpdate();
+    await this.syncBreakpoints();
+  }
+
+  /**
+   * Send current breakpoints to the worker.
+   */
+  private async syncBreakpoints(): Promise<void> {
+    const rt = this.runtime?.runtime();
+    if (!rt) return;
+    try {
+      await rt.setBreakpoints(Array.from(this.breakpointIds));
+    } catch (e) {
+      console.error(
+        "[DebuggerController] Failed to set breakpoints:",
+        e,
+      );
+    }
+  }
+
+  /**
+   * Check if an action ID has a breakpoint set.
+   */
+  hasBreakpoint(actionId: string): boolean {
+    return this.breakpointIds.has(actionId);
+  }
+
+  /**
+   * Get all breakpoint action IDs.
+   */
+  getBreakpoints(): Set<string> {
+    return this.breakpointIds;
+  }
+
+  /**
+   * Get breakpoints version for change detection.
+   */
+  getBreakpointsVersion(): number {
+    return this.breakpointsVersion;
   }
 
   /**

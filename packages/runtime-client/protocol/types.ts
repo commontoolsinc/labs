@@ -60,6 +60,7 @@ export enum RequestType {
   SetWriteStackTraceMatchers = "runtime:setWriteStackTraceMatchers",
   DetectNonIdempotent = "runtime:detectNonIdempotent",
   GetPatternSources = "runtime:getPatternSources",
+  SetBreakpoints = "runtime:setBreakpoints",
 
   // Page operations (main -> worker)
   GetSpaceRootPattern = "pattern:getSpaceRoot",
@@ -317,6 +318,11 @@ export interface PatternSourcesResponse {
   patterns: PatternSourceInfo[];
 }
 
+export interface SetBreakpointsRequest extends BaseRequest {
+  type: RequestType.SetBreakpoints;
+  actionIds: string[];
+}
+
 // Logger count types for IPC (matches @commontools/utils/logger types)
 export interface LogCounts {
   debug: number;
@@ -541,7 +547,8 @@ export type IPCClientRequest =
   | VDomMountRequest
   | VDomUnmountRequest
   | DetectNonIdempotentRequest
-  | GetPatternSourcesRequest;
+  | GetPatternSourcesRequest
+  | SetBreakpointsRequest;
 
 export type NullResponse = null;
 
@@ -834,6 +841,10 @@ export type Commands = {
   [RequestType.GetPatternSources]: {
     request: GetPatternSourcesRequest;
     response: PatternSourcesResponse;
+  };
+  [RequestType.SetBreakpoints]: {
+    request: SetBreakpointsRequest;
+    response: EmptyResponse;
   };
   // VDOM requests
   [RequestType.VDomEvent]: {

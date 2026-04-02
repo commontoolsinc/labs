@@ -313,6 +313,9 @@ export class Scheduler {
   private dirty = new Set<Action>();
   private pullMode = false;
 
+  // Debugger breakpoints: action IDs that should trigger `debugger` before execution
+  private breakpoints = new Set<string>();
+
   // Compute time tracking for cycle-aware scheduling
   // Keyed by action ID (source location) to persist stats across action recreation
   private actionStats = new Map<string, ActionStats>();
@@ -1190,6 +1193,13 @@ export class Scheduler {
         // Track executing action for parent-child relationship tracking
         this.executingAction = action;
         this.currentActionId = actionId;
+        // Trigger debugger breakpoint if set for this action
+        if (this.breakpoints.has(actionId)) {
+          console.log(
+            `[Scheduler] Breakpoint hit: ${actionId}`,
+          );
+          debugger;
+        }
         logger.timeStart("scheduler", "run", "action");
         Promise.resolve(action(tx))
           .then((actionResult) => {
@@ -1992,6 +2002,23 @@ export class Scheduler {
       computations: this.computations.size,
       pending: this.pending.size,
     };
+  }
+
+  /**
+   * Set action IDs that should trigger a debugger breakpoint before execution.
+   */
+  setBreakpoints(actionIds: string[]): void {
+    this.breakpoints.clear();
+    for (const id of actionIds) {
+      this.breakpoints.add(id);
+    }
+  }
+
+  /**
+   * Get currently set breakpoint action IDs.
+   */
+  getBreakpoints(): string[] {
+    return Array.from(this.breakpoints);
   }
 
   /**

@@ -78,6 +78,7 @@ import {
   type RecreateSpaceRootPatternRequest,
   RequestType,
   type SetActionRunTraceEnabledRequest,
+  type SetBreakpointsRequest,
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
   type SetPullModeRequest,
@@ -828,6 +829,10 @@ export class RuntimeProcessor {
     return { patterns };
   }
 
+  setBreakpoints(request: SetBreakpointsRequest): void {
+    this.runtime.scheduler.setBreakpoints(request.actionIds);
+  }
+
   async detectNonIdempotent(
     request: DetectNonIdempotentRequest,
   ): Promise<DetectNonIdempotentResponse> {
@@ -987,6 +992,8 @@ export class RuntimeProcessor {
         return await this.detectNonIdempotent(request);
       case RequestType.GetPatternSources:
         return this.getPatternSources(request);
+      case RequestType.SetBreakpoints:
+        return this.setBreakpoints(request);
       case RequestType.VDomEvent:
         return this.handleVDomEvent(request);
       case RequestType.VDomMount:

@@ -174,8 +174,40 @@ export class XSchedulerSource extends LitElement {
       outline-offset: -1px;
     }
 
+    .line-bp {
+      padding: 0 0 0 0.25rem;
+      width: 1px;
+      vertical-align: top;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .bp-indicator {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      vertical-align: middle;
+      opacity: 0;
+      transition: opacity 0.1s;
+    }
+
+    .source-line.has-action .bp-indicator {
+      opacity: 0.15;
+      background: #ef4444;
+    }
+
+    .source-line.has-action:hover .bp-indicator {
+      opacity: 0.5;
+    }
+
+    .bp-indicator.active {
+      opacity: 1 !important;
+      background: #ef4444;
+    }
+
     .line-gutter {
-      padding: 0 0.5rem 0 0.75rem;
+      padding: 0 0.5rem 0 0.25rem;
       text-align: right;
       color: #475569;
       user-select: none;
@@ -263,6 +295,9 @@ export class XSchedulerSource extends LitElement {
   @property({ attribute: false })
   baselineStats: Map<string, { runCount: number; totalTime: number }> =
     new Map();
+
+  @property({ attribute: false })
+  breakpoints: Set<string> = new Set();
 
   @state()
   private selectedPatternIdx = 0;
@@ -366,6 +401,23 @@ export class XSchedulerSource extends LitElement {
     if (ms < 1) return `${(ms * 1000).toFixed(0)}us`;
     if (ms < 1000) return `${ms.toFixed(1)}ms`;
     return `${(ms / 1000).toFixed(2)}s`;
+  }
+
+  private hasAnyBreakpoint(entries: ActionEntry[]): boolean {
+    return entries.some((e) => this.breakpoints.has(e.nodeId));
+  }
+
+  private handleBreakpointToggle(entries: ActionEntry[]) {
+    // If all are set, disable all; otherwise enable all
+    const allSet = entries.every((e) => this.breakpoints.has(e.nodeId));
+    const actionIds = entries.map((e) => e.nodeId);
+    this.dispatchEvent(
+      new CustomEvent("breakpoint-toggle", {
+        detail: { actionIds, enabled: !allSet },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   private handleLineClick(entries: ActionEntry[]) {
@@ -555,6 +607,22 @@ export class XSchedulerSource extends LitElement {
                     ? () => this.handleLineClick(ann!.entries)
                     : undefined}"
                 >
+                  <td
+                    class="line-bp"
+                    @click="${hasAction
+                      ? (e: Event) => {
+                        e.stopPropagation();
+                        this.handleBreakpointToggle(ann!.entries);
+                      }
+                      : undefined}"
+                  >
+                    <span
+                      class="bp-indicator ${ann &&
+                          this.hasAnyBreakpoint(ann.entries)
+                        ? "active"
+                        : ""}"
+                    ></span>
+                  </td>
                   <td class="line-gutter">${lineNum}</td>
                   <td class="line-markers">
                     ${ann

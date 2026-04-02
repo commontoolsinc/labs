@@ -426,6 +426,13 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  async setBreakpoints(actionIds: string[]): Promise<void> {
+    await this.#conn.request<RequestType.SetBreakpoints>({
+      type: RequestType.SetBreakpoints,
+      actionIds,
+    });
+  }
+
   async detectNonIdempotent(
     durationMs?: number,
   ): Promise<SchedulerDiagnosisResult> {
