@@ -328,7 +328,11 @@ export class XSchedulerSource extends LitElement {
       if (!loc) continue;
 
       // Only include nodes belonging to the current pattern
-      const currentPattern = this.patternSources[this.selectedPatternIdx];
+      const patternIdx = Math.min(
+        this.selectedPatternIdx,
+        this.patternSources.length - 1,
+      );
+      const currentPattern = this.patternSources[patternIdx];
       if (
         currentPattern && node.patternId &&
         node.patternId !== currentPattern.patternId
@@ -428,6 +432,8 @@ export class XSchedulerSource extends LitElement {
         composed: true,
       }),
     );
+    // Force local re-render since breakpoints Set is mutated in place upstream
+    this.requestUpdate();
   }
 
   private handleLineClick(entries: ActionEntry[]) {

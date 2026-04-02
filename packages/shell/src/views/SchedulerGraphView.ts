@@ -5,7 +5,10 @@ import dagre from "dagre";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
 import type { SchedulerGraphNode } from "@commontools/runtime-client";
 import "./SchedulerSourceView.ts";
-import type { SourceViewNode } from "./SchedulerSourceView.ts";
+import {
+  parseActionLocation,
+  type SourceViewNode,
+} from "./SchedulerSourceView.ts";
 
 interface LayoutNode {
   id: string;
@@ -2693,12 +2696,7 @@ export class XSchedulerGraph extends LitElement {
   }
 
   private hasSourceLocation(nodeId: string): boolean {
-    // Check if the node ID contains a parseable source location (file:line:col)
-    const clean = nodeId.replace(/\s*\[via.*\]$/, "");
-    const slashIdx = clean.indexOf("/");
-    if (slashIdx <= 0) return false;
-    const rest = clean.slice(slashIdx);
-    return /^.+:\d+:\d+$/.test(rest);
+    return parseActionLocation(nodeId) !== null;
   }
 
   private renderSourceView(): TemplateResult {

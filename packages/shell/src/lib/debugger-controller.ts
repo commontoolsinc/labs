@@ -158,6 +158,13 @@ export class DebuggerController implements ReactiveController {
         );
       });
 
+      // Clear stale pattern sources from previous runtime
+      this.patternSources = [];
+      this.patternSourcesVersion++;
+
+      // Re-sync breakpoints to new runtime
+      this.syncBreakpoints().catch(() => {});
+
       // Load existing telemetry markers
       this.telemetryMarkers = this.runtime.telemetry().slice(
         -MAX_TELEMETRY_EVENTS,
@@ -568,7 +575,7 @@ export class DebuggerController implements ReactiveController {
    * Get all breakpoint action IDs.
    */
   getBreakpoints(): Set<string> {
-    return this.breakpointIds;
+    return new Set(this.breakpointIds);
   }
 
   /**
