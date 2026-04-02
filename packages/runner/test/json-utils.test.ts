@@ -9,6 +9,7 @@ import {
   toJSONWithLegacyAliases,
 } from "../src/builder/json-utils.ts";
 import { type JSONSchema, type JSONSchemaObj } from "../src/builder/types.ts";
+import { isInternedSchema } from "@commontools/data-model/schema-hash";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 
@@ -37,28 +38,36 @@ describe("json-utils", () => {
     function testSchemaForType(typeName: string, example: unknown) {
       describe(`basics for type \`${typeName}\``, () => {
         it("should create schema for direct value", () => {
-          expect(createJsonSchema(example)).toEqual({ type: typeName });
+          const schema = createJsonSchema(example);
+          expect(schema).toEqual({ type: typeName });
+          expect(isInternedSchema(schema)).toBe(true);
         });
 
         it("should create schema for single-element array", () => {
-          expect(createJsonSchema([example])).toEqual({
+          const schema = createJsonSchema([example]);
+          expect(schema).toEqual({
             type: "array",
             items: { type: typeName },
           });
+          expect(isInternedSchema(schema)).toBe(true);
         });
 
         it("should create schema for single-property object", () => {
-          expect(createJsonSchema({ prop: example })).toEqual({
+          const schema = createJsonSchema({ prop: example });
+          expect(schema).toEqual({
             type: "object",
             properties: { prop: { type: typeName } },
           });
+          expect(isInternedSchema(schema)).toBe(true);
         });
 
         it("should set default with addDefaults", () => {
-          expect(createJsonSchema(example, true)).toEqual({
+          const schema = createJsonSchema(example, true);
+          expect(schema).toEqual({
             type: typeName,
             default: example,
           });
+          expect(isInternedSchema(schema)).toBe(true);
         });
       });
     }
@@ -71,29 +80,36 @@ describe("json-utils", () => {
 
     describe("basics for type `undefined`", () => {
       it("should create schema for direct value", () => {
-        expect(createJsonSchema(undefined)).toEqual({});
+        const schema = createJsonSchema(undefined);
+        expect(schema).toEqual({});
+        expect(isInternedSchema(schema)).toBe(true);
       });
 
       it("should create schema for single-element array", () => {
-        expect(createJsonSchema([undefined])).toEqual({
+        const schema = createJsonSchema([undefined]);
+        expect(schema).toEqual({
           type: "array",
           items: {},
         });
+        expect(isInternedSchema(schema)).toBe(true);
       });
 
       it("should create schema for single-property object", () => {
         // The key is still enumerated, but analyzeType(undefined)
         // produces an empty schema
-        expect(createJsonSchema({ prop: undefined })).toEqual({
+        const schema = createJsonSchema({ prop: undefined });
+        expect(schema).toEqual({
           type: "object",
           properties: { prop: {} },
         });
+        expect(isInternedSchema(schema)).toBe(true);
       });
 
       it("should not set default with addDefaults", () => {
         const schema = createJsonSchema(undefined, true);
         expect(schema).toEqual({});
         expect(schema).not.toHaveProperty("default");
+        expect(isInternedSchema(schema)).toBe(true);
       });
     });
 
@@ -105,6 +121,7 @@ describe("json-utils", () => {
           type: "string",
         },
       });
+      expect(isInternedSchema(arraySchema)).toBe(true);
 
       const mixedArraySchema = createJsonSchema([{ name: "item1" }, {
         name: "item2",
@@ -132,6 +149,7 @@ describe("json-utils", () => {
           },
         } satisfies JSONSchema,
       );
+      expect(isInternedSchema(mixedArraySchema)).toBe(true);
     });
 
     it("should handle single-element array", () => {
@@ -186,6 +204,7 @@ describe("json-utils", () => {
           },
         },
       });
+      expect(isInternedSchema(objectSchema)).toBe(true);
     });
 
     it("should handle empty objects and arrays", () => {
@@ -246,6 +265,8 @@ describe("json-utils", () => {
           },
         },
       });
+
+      expect(isInternedSchema(schema)).toBe(true);
     });
 
     it("should use cell schema when available", () => {
@@ -278,6 +299,7 @@ describe("json-utils", () => {
           isActive: { type: "boolean" },
         },
       });
+      expect(isInternedSchema(schema)).toBe(true);
     });
 
     it("should handle array cell without schema", () => {
