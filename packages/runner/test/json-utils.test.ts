@@ -53,6 +53,13 @@ describe("json-utils", () => {
             properties: { prop: { type: typeName } },
           });
         });
+
+        it("should set default with addDefaults", () => {
+          expect(createJsonSchema(example, true)).toEqual({
+            type: typeName,
+            default: example,
+          });
+        });
       });
     }
 
@@ -81,6 +88,12 @@ describe("json-utils", () => {
           type: "object",
           properties: { prop: {} },
         });
+      });
+
+      it("should not set default with addDefaults", () => {
+        const schema = createJsonSchema(undefined, true);
+        expect(schema).toEqual({});
+        expect(schema).not.toHaveProperty("default");
       });
     });
 
@@ -491,32 +504,6 @@ describe("json-utils", () => {
       });
     });
 
-    it("should set default on primitive values when addDefaults is true", () => {
-      expect(createJsonSchema("hello", true)).toEqual({
-        type: "string",
-        default: "hello",
-      });
-      expect(createJsonSchema(42, true)).toEqual({
-        type: "integer",
-        default: 42,
-      });
-      expect(createJsonSchema(3.14, true)).toEqual({
-        type: "number",
-        default: 3.14,
-      });
-      expect(createJsonSchema(true, true)).toEqual({
-        type: "boolean",
-        default: true,
-      });
-    });
-
-    it("should set default: null on null values when addDefaults is true", () => {
-      expect(createJsonSchema(null, true)).toEqual({
-        type: "null",
-        default: null,
-      });
-    });
-
     it("should not set default on object schemas when addDefaults is true", () => {
       const schema = createJsonSchema({ name: "Alice", age: 30 }, true);
       expect(schema).toEqual({
@@ -594,12 +581,6 @@ describe("json-utils", () => {
       // Neither the root nor the nested object should have defaults
       expect(schema).not.toHaveProperty("default");
       expect(schema.properties!["user"]).not.toHaveProperty("default");
-    });
-
-    it("should not set default for undefined values when addDefaults is true", () => {
-      expect(createJsonSchema(undefined, true)).toEqual({});
-      // Specifically: no `default` property should be present
-      expect(createJsonSchema(undefined, true)).not.toHaveProperty("default");
     });
   });
 
