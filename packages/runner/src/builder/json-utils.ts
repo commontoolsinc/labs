@@ -7,9 +7,6 @@ import { type LegacyAlias } from "../sigil-types.ts";
 import {
   isPattern,
   type JSONSchema,
-  type JSONSchemaMutable,
-  type JSONSchemaObj,
-  type JSONSchemaObjMutable,
   type JSONSchemaTypes,
   type JSONValue,
   type Module,
