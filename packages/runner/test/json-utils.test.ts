@@ -13,7 +13,7 @@ import {
   type JSONSchema,
   type JSONSchemaObj,
 } from "../src/builder/types.ts";
-import { isInternedSchema } from "@commontools/data-model/schema-hash";
+import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 
