@@ -457,7 +457,7 @@ describe("json-utils", () => {
       };
       const expectSchema = {
         type: "array",
-        items: itemsSchema
+        items: itemsSchema,
       };
 
       const nonCell = { name: "Zamboni" };
@@ -472,11 +472,12 @@ describe("json-utils", () => {
           type: "object",
           properties: {
             name: { type: "string" },
-          }
-        }
+          },
+        },
       );
 
-      const create = (value: FabricValue) => createJsonSchema(value, false, runtime);
+      const create = (value: FabricValue) =>
+        createJsonSchema(value, false, runtime);
 
       // Preflight expectations.
       const schema1 = create(nonCell);
