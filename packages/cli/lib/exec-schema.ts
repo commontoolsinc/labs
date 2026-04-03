@@ -1,4 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
+import { cliCommand } from "./cli-name.ts";
 
 export interface ExecCommandSpec {
   callableKind: "handler" | "tool";
@@ -767,7 +768,7 @@ function usageCommandPrefix(
   const displayedPath = displayCommandPath(mountedFilePath);
   return invocationStyle === "direct"
     ? displayedPath
-    : `cf exec ${displayedPath}`;
+    : cliCommand(["exec", displayedPath]);
 }
 
 function optionalVerbUsage(spec: ExecCommandSpec): string {

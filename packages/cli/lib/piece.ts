@@ -15,8 +15,8 @@ import {
   callableCommandSpec,
   type CallableExecutionDeps,
   type CallableResolution,
-  type CliRuntimeErrorRecord,
   CF_RUNTIME_ERROR_LOG,
+  type CliRuntimeErrorRecord,
   detectCallableKind,
   executeResolvedCallable,
 } from "./callable.ts";
@@ -28,6 +28,7 @@ import {
   renderPieceCallHelp,
   resolveExecInvocation,
 } from "./exec-schema.ts";
+import { cliCommand } from "./cli-name.ts";
 
 export interface EntryConfig {
   mainPath: string;
@@ -475,7 +476,8 @@ export async function executePieceCallable(
       helpText: parsed.showHelpJson
         ? renderExecHelpJson(resolved.commandSpec)
         : renderPieceCallHelp(
-          deps.helpCommandPrefix ?? `cf piece call ... ${callableName}`,
+          deps.helpCommandPrefix ??
+            cliCommand(["piece", "call", "...", callableName]),
           resolved.commandSpec,
         ),
       parsed,

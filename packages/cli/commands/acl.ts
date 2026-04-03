@@ -6,6 +6,7 @@ import {
   setAclEntry,
   SpaceConfig,
 } from "../lib/acl.ts";
+import { cliText } from "../lib/cli-name.ts";
 import { render } from "../lib/render.ts";
 import { isCapability } from "@commonfabric/memory";
 
@@ -29,7 +30,9 @@ export const acl = new Command()
   .command("ls", "List all ACL entries for a space.")
   .usage(spaceUsage)
   .example(
-    "cf acl ls --identity ./my.key --api-url https://api.example.com --space my-space",
+    cliText(
+      "cf acl ls --identity ./my.key --api-url https://api.example.com --space my-space",
+    ),
     "List all ACL entries for my-space",
   )
   .action(async (options) => {
@@ -56,7 +59,9 @@ export const acl = new Command()
   )
   .usage(`${spaceUsage} <did> <capability>`)
   .example(
-    "cf acl set did:key:z6Mkk... WRITE --identity ./my.key --api-url https://api.example.com --space my-space",
+    cliText(
+      "cf acl set did:key:z6Mkk... WRITE --identity ./my.key --api-url https://api.example.com --space my-space",
+    ),
     "Grant WRITE capability to a DID",
   )
   .action(async (options, did, capability) => {
@@ -80,7 +85,9 @@ export const acl = new Command()
   .command("remove <did:string>", "Remove a DID from the space ACL.")
   .usage(`${spaceUsage} <did>`)
   .example(
-    "cf acl remove did:key:z6Mkk... --identity ./my.key --api-url https://api.example.com --space my-space",
+    cliText(
+      "cf acl remove did:key:z6Mkk... --identity ./my.key --api-url https://api.example.com --space my-space",
+    ),
     "Remove a DID from the ACL",
   )
   .action(async (options, did) => {

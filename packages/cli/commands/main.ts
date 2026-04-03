@@ -9,6 +9,7 @@ import { piece } from "./piece.ts";
 import { identity } from "./identity.ts";
 import { test } from "./test.ts";
 import ports from "@commontools/ports" with { type: "json" };
+import { cliName, cliText } from "../lib/cli-name.ts";
 
 function envStatus(): string {
   const identity = Deno.env.get("CF_IDENTITY");
@@ -24,7 +25,7 @@ function envStatus(): string {
   return lines.join("\n");
 }
 
-const mainDescription = `Tool for running programs on common fabric.
+const mainDescription = cliText(`Tool for running programs on common fabric.
 
 QUICK START:
   cf check ./pattern.tsx            # Type-check and test locally
@@ -46,10 +47,10 @@ LOGGING:
     CF_LOG_LEVEL=debug cf piece ls
   Valid levels: debug, info, warn, error (default), silent
 
-Run 'cf <command> --help' for command-specific help.`;
+Run 'cf <command> --help' for command-specific help.`);
 
 export const main = new Command()
-  .name("cf")
+  .name(cliName())
   .description(mainDescription)
   .version("0.0.1")
   // Add global help subcommand to all commands
@@ -92,11 +93,13 @@ export const main = new Command()
   .command(
     "deploy",
     new Command()
-      .description("Use 'cf piece new' instead.")
+      .description(cliText("Use 'cf piece new' instead."))
       .hidden()
       .action(() => {
         console.log(
-          "The 'deploy' command does not exist. Use 'cf piece new' to deploy a pattern.",
+          cliText(
+            "The 'deploy' command does not exist. Use 'cf piece new' to deploy a pattern.",
+          ),
         );
       }),
   );

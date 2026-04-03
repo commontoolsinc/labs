@@ -8,6 +8,7 @@ import {
   resolve,
   SEPARATOR,
 } from "@std/path";
+import { cliName } from "./cli-name.ts";
 
 export interface MountStateEntry {
   pid: number;
@@ -236,6 +237,7 @@ export async function ensureExecShim(
   await Deno.mkdir(stateDir, { recursive: true });
 
   const compiled = isCompiledBinary();
+  const displayCliName = cliName();
   const stateScopedShimPath = join(
     stateDir,
     `cf-exec-${await hashMountLookupKey(
@@ -250,10 +252,12 @@ export async function ensureExecShim(
   const script = compiled
     ? `#!/usr/bin/env bash
 export CF_EXEC_SHEBANG=1
+export CF_CLI_NAME=${JSON.stringify(displayCliName)}
 exec "${Deno.execPath()}" "$@"
 `
     : `#!/usr/bin/env bash
 export CF_EXEC_SHEBANG=1
+export CF_CLI_NAME=${JSON.stringify(displayCliName)}
 exec "${Deno.execPath()}" run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run "${
       cliMod(importMetaUrl)
     }" "$@"

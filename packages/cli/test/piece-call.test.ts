@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
 import { executePieceCallable } from "../lib/piece.ts";
+import { withEnv } from "./utils.ts";
 
 describe("executePieceCallable", () => {
   it("invokes handlers from schema-derived flags", async () => {
@@ -454,6 +455,49 @@ describe("executePieceCallable", () => {
       "cf piece call ... search -- [run] --help",
     );
     expect(result.helpText).not.toContain("cf exec");
+  });
+
+  it("renders ct piece-call help when the compatibility alias is active", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "tool",
+      cellKey: "search",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+      },
+    });
+
+    await withEnv("CF_CLI_NAME", "ct", async () => {
+      const result = await executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "of:piece-123",
+          space: "home",
+        },
+        "search",
+        ["--help"],
+        {
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+        },
+      );
+
+      expect(result.helpText).toContain("ct piece call ... search --help");
+      expect(result.helpText).not.toContain("cf piece call ... search --help");
+    });
   });
 
   it("surfaces handler transaction failures as errors", async () => {

@@ -16,6 +16,7 @@ import {
   readMountState,
   writeMountState,
 } from "../lib/fuse.ts";
+import { withEnv } from "./utils.ts";
 
 describe("mountpointHash", () => {
   it("returns a 16-char hex string", async () => {
@@ -330,13 +331,19 @@ describe("mount state operations", () => {
     const repoRoot = join(tmpDir, "repo");
     const importMetaUrl = toFileUrl(join(repoRoot, "packages/cli/lib/fuse.ts"))
       .href;
-    const shimPath = await ensureExecShim(stateDir, importMetaUrl);
-    const shim = await Deno.readTextFile(shimPath);
+    let shimPath = "";
+    let shim = "";
+
+    await withEnv("CF_CLI_NAME", "ct", async () => {
+      shimPath = await ensureExecShim(stateDir, importMetaUrl);
+      shim = await Deno.readTextFile(shimPath);
+    });
 
     expect(shimPath).toBe(join(repoRoot, ".cf", "fuse", "cf-exec"));
     expect(shimPath).not.toBe(join(stateDir, "cf-exec"));
     expect(shim).toContain("#!/usr/bin/env bash");
     expect(shim).toContain("export CF_EXEC_SHEBANG=1");
+    expect(shim).toContain('export CF_CLI_NAME="ct"');
     expect(shim).toContain('" run --allow-net');
     expect(shim).toContain(join(repoRoot, "packages/cli/mod.ts"));
     expect(shim).toContain('"$@"');

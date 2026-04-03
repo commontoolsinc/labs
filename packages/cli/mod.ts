@@ -1,6 +1,7 @@
 import { parse } from "./commands/mod.ts";
 import { CompilerError, TransformerError } from "@commonfabric/js-compiler";
 import { type LogLevel, setGlobalLogFloor } from "@commonfabric/utils/logger";
+import { cliName } from "./lib/cli-name.ts";
 
 const VALID_LOG_LEVELS = new Set([
   "debug",
@@ -36,6 +37,7 @@ function extractLogLevel(
 export async function main(args: string[]) {
   // Extract --log-level before Cliffy parses
   const { level, args: cleanArgs } = extractLogLevel(args);
+  Deno.env.set("CF_CLI_NAME", cliName());
 
   if (level) {
     setGlobalLogFloor(level as LogLevel);

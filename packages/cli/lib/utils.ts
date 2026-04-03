@@ -1,5 +1,6 @@
 import { isAbsolute, join } from "@std/path";
 import type { ExperimentalOptions } from "@commonfabric/runner";
+import { cliName } from "./cli-name.ts";
 
 export function absPath(relpath: string, cwd = Deno.cwd()): string {
   // TODO(js): homedir check is not cross platform
@@ -26,7 +27,7 @@ export function experimentalOptionsFromEnv(): ExperimentalOptions {
   const active = Object.entries(opts).filter(([, v]) => v);
   if (active.length > 0) {
     console.error(
-      `[cf] Experimental flags: ${active.map(([k]) => k).join(", ")}`,
+      `[${cliName()}] Experimental flags: ${active.map(([k]) => k).join(", ")}`,
     );
   }
   return opts;

@@ -37,7 +37,8 @@
   ],
   "tasks": {
     "check": "./tasks/check.sh",
-    "cf": "ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && deno run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\"",
+    "cf": "bash -lc 'ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && CF_CLI_NAME=cf deno run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\" \"$@\"' --",
+    "ct": "bash -lc 'ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && CF_CLI_NAME=ct deno run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\" \"$@\"' --",
     "test": "./tasks/test.ts",
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
     "build-binaries": "./tasks/build-binaries.ts",
@@ -45,14 +46,12 @@
     "initialize-db": "./tasks/initialize-db.sh",
     "integration": "./tasks/integration.ts",
     "profile": "./scripts/restart-local-dev.sh --inspect-brk",
-    "cf-profile": "ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && deno run --inspect-brk --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\""
+    "cf-profile": "bash -lc 'ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && CF_CLI_NAME=cf deno run --inspect-brk --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\" \"$@\"' --",
+    "ct-profile": "bash -lc 'ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && CF_CLI_NAME=ct deno run --inspect-brk --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\" \"$@\"' --"
   },
   "compilerOptions": {
     "jsx": "react-jsx",
     "jsxImportSource": "@commonfabric/html",
-    "types": [
-      "./packages/html/src/jsx.d.ts"
-    ],
     "lib": [
       "deno.ns",
       "dom",

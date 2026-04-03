@@ -27,6 +27,7 @@ import { PiecesController } from "@commonfabric/piece/ops";
 import { renderPiece } from "../lib/piece-render.ts";
 import { render, safeStringify } from "../lib/render.ts";
 import { decode } from "@commonfabric/utils/encoding";
+import { cliText } from "../lib/cli-name.ts";
 import { absPath } from "../lib/utils.ts";
 import { parsePath } from "@commonfabric/piece/ops";
 import { UI } from "@commonfabric/runner";
@@ -135,7 +136,7 @@ function pieceEnvStatus(): string {
   return lines.join("\n");
 }
 
-const pieceDescription = `Interact with pieces running on a server.
+const pieceDescription = cliText(`Interact with pieces running on a server.
 
 COMMON WORKFLOWS:
   Deploy:    cf piece new ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
@@ -147,7 +148,7 @@ TIPS:
   • Use 'setsrc' for iteration, not repeated 'new' (avoids clutter)
   • After 'set', run 'step' to trigger computed value updates
   • Path format: forward slashes only (items/0/name, not items[0].name)
-  • JSON values: strings need quotes: echo '"hello"' | cf piece set ...`;
+  • JSON values: strings need quotes: echo '"hello"' | cf piece set ...`);
 
 export const piece = new Command()
   .name("piece")
@@ -171,11 +172,11 @@ export const piece = new Command()
   .command("ls", "List pieces in space.")
   .usage(spaceUsage)
   .example(
-    `cf piece ls ${EX_ID} ${EX_COMP}`,
+    cliText(`cf piece ls ${EX_ID} ${EX_COMP}`),
     `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
   )
   .example(
-    `cf piece ls ${EX_ID} ${EX_URL}`,
+    cliText(`cf piece ls ${EX_ID} ${EX_URL}`),
     `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
   )
   .option("--json", "Output machine-readable JSON.")
@@ -214,15 +215,17 @@ export const piece = new Command()
   .command("new", "Create a new piece with a pattern.")
   .usage(spaceUsage)
   .example(
-    `cf piece new ${EX_ID} ${EX_COMP} ./main.tsx`,
+    cliText(`cf piece new ${EX_ID} ${EX_COMP} ./main.tsx`),
     `Create a new piece, using ./main.tsx as source.`,
   )
   .example(
-    `cf piece new ${EX_ID} ${EX_URL} ./main.tsx`,
+    cliText(`cf piece new ${EX_ID} ${EX_URL} ./main.tsx`),
     `Create a new piece, using ./main.tsx as source.`,
   )
   .example(
-    `cf piece new ${EX_ID} ${EX_COMP} --root ./patterns ./patterns/wip/main.tsx`,
+    cliText(
+      `cf piece new ${EX_ID} ${EX_COMP} --root ./patterns ./patterns/wip/main.tsx`,
+    ),
     `Create a piece that can import from parent directories within ./patterns.`,
   )
   .arguments("<main:string>")
@@ -248,17 +251,17 @@ export const piece = new Command()
       { start: options.start },
     );
     render(pieceId);
-    hint(`NEXT STEPS:
+    hint(cliText(`NEXT STEPS:
   → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
   → Update code:     cf piece setsrc --piece ${pieceId} ${main} ...
   → Test a callable: cf piece call --piece ${pieceId} <callableName> ...
-  → Inspect state:   cf piece inspect --piece ${pieceId} ...`);
+  → Inspect state:   cf piece inspect --piece ${pieceId} ...`));
   })
   /* piece step */
   .command("step", "Run a single scheduling step: start → idle → synced → stop")
   .usage(pieceUsage)
   .example(
-    `cf piece step ${EX_ID} ${EX_COMP_PIECE}`,
+    cliText(`cf piece step ${EX_ID} ${EX_COMP_PIECE}`),
     `Start, wait for idle+synced, then stop piece "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -277,11 +280,11 @@ export const piece = new Command()
   .command("apply", "Pass in new inputs to the target piece")
   .usage(pieceUsage)
   .example(
-    `echo '{"foo":5}' | cf piece apply ${EX_ID} ${EX_COMP_PIECE}`,
+    cliText(`echo '{"foo":5}' | cf piece apply ${EX_ID} ${EX_COMP_PIECE}`),
     `Applies the input '{"foo":5}' to piece "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `echo '{"foo":5}' | cf piece apply ${EX_ID} ${EX_URL}`,
+    cliText(`echo '{"foo":5}' | cf piece apply ${EX_ID} ${EX_URL}`),
     `Applies the input '{"foo":5}' to piece "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -292,11 +295,11 @@ export const piece = new Command()
   .command("getsrc", "Retrieve the pattern source for the given piece.")
   .usage(pieceUsage)
   .example(
-    `cf piece getsrc ${EX_ID} ${EX_COMP_PIECE} ./out`,
+    cliText(`cf piece getsrc ${EX_ID} ${EX_COMP_PIECE} ./out`),
     `Retrieve the source for "${RAW_EX_COMP.piece!}" and place in ./out`,
   )
   .example(
-    `cf piece getsrc ${EX_ID} ${EX_URL} ./out`,
+    cliText(`cf piece getsrc ${EX_ID} ${EX_URL} ./out`),
     `Retrieve the source for "${RAW_EX_COMP.piece!}" and place in ./out`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -308,11 +311,11 @@ export const piece = new Command()
   .command("setsrc", "Update the pattern source for the given piece.")
   .usage(pieceUsage)
   .example(
-    `cf piece setsrc ${EX_ID} ${EX_COMP_PIECE} ./main.tsx`,
+    cliText(`cf piece setsrc ${EX_ID} ${EX_COMP_PIECE} ./main.tsx`),
     `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
   )
   .example(
-    `cf piece setsrc ${EX_ID} ${EX_URL} ./main.tsx`,
+    cliText(`cf piece setsrc ${EX_ID} ${EX_URL} ./main.tsx`),
     `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -334,20 +337,20 @@ export const piece = new Command()
       rootPath: options.root ? absPath(options.root) : undefined,
     });
     render(`Updated source for piece ${pieceConfig.piece}`);
-    hint(`NEXT STEPS:
+    hint(cliText(`NEXT STEPS:
   → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
   → Test a callable: cf piece call --piece ${pieceConfig.piece} <callableName> ...
-  → Check state:     cf piece inspect --piece ${pieceConfig.piece} ...`);
+  → Check state:     cf piece inspect --piece ${pieceConfig.piece} ...`));
   })
   /* piece inspect */
   .command("inspect", "Inspect detailed information about a piece")
   .usage(pieceUsage)
   .example(
-    `cf piece inspect ${EX_ID} ${EX_COMP_PIECE}`,
+    cliText(`cf piece inspect ${EX_ID} ${EX_COMP_PIECE}`),
     `Inspect detailed information about piece "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `cf piece inspect ${EX_ID} ${EX_URL}`,
+    cliText(`cf piece inspect ${EX_ID} ${EX_URL}`),
     `Inspect detailed information about piece "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -433,11 +436,11 @@ Pattern: ${pieceData.patternName || "<no pattern name>"}
   .command("view", "Display the rendered view for a piece")
   .usage(pieceUsage)
   .example(
-    `cf piece view ${EX_ID} ${EX_COMP_PIECE}`,
+    cliText(`cf piece view ${EX_ID} ${EX_COMP_PIECE}`),
     `Display the view for piece "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `cf piece view ${EX_ID} ${EX_URL}`,
+    cliText(`cf piece view ${EX_ID} ${EX_URL}`),
     `Display the view for piece "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -460,15 +463,15 @@ Pattern: ${pieceData.patternName || "<no pattern name>"}
   .command("render", "Render a piece's UI to HTML")
   .usage(pieceUsage)
   .example(
-    `cf piece render ${EX_ID} ${EX_COMP_PIECE}`,
+    cliText(`cf piece render ${EX_ID} ${EX_COMP_PIECE}`),
     `Render the UI for piece "${RAW_EX_COMP.piece!}" to HTML.`,
   )
   .example(
-    `cf piece render ${EX_ID} ${EX_URL}`,
+    cliText(`cf piece render ${EX_ID} ${EX_URL}`),
     `Render the UI for piece "${RAW_EX_COMP.piece!}" to HTML.`,
   )
   .example(
-    `cf piece render ${EX_ID} ${EX_COMP_PIECE} --watch`,
+    cliText(`cf piece render ${EX_ID} ${EX_COMP_PIECE} --watch`),
     `Watch and re-render piece "${RAW_EX_COMP.piece!}" when UI changes.`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -541,15 +544,21 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   )
   .usage(spaceUsage)
   .example(
-    `cf piece link ${EX_ID} ${EX_COMP} bafypiece1/outputEmails bafypiece2/emails`,
+    cliText(
+      `cf piece link ${EX_ID} ${EX_COMP} bafypiece1/outputEmails bafypiece2/emails`,
+    ),
     `Link outputEmails field from piece "bafypiece1" to emails field in piece "bafypiece2".`,
   )
   .example(
-    `cf piece link ${EX_ID} ${EX_COMP} bafypiece1/data/users/0/email bafypiece2/config/primaryEmail`,
+    cliText(
+      `cf piece link ${EX_ID} ${EX_COMP} bafypiece1/data/users/0/email bafypiece2/config/primaryEmail`,
+    ),
     `Link deep nested field including array access.`,
   )
   .example(
-    `cf piece link ${EX_ID} ${EX_COMP} baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye bafypiece1/allPieces`,
+    cliText(
+      `cf piece link ${EX_ID} ${EX_COMP} baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye bafypiece1/allPieces`,
+    ),
     `Link well-known "allPieces" list to a piece field.`,
   )
   .arguments("<source:string> <target:string>")
@@ -598,9 +607,9 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     }
 
     render(`Linked ${sourceRef} to ${targetRef}`);
-    hint(`NEXT STEPS:
+    hint(cliText(`NEXT STEPS:
   → Visualize connections: cf piece map -i ... -a ... -s ...
-  → Inspect target piece:  cf piece inspect --piece ${target.pieceId} ...`);
+  → Inspect target piece:  cf piece inspect --piece ${target.pieceId} ...`));
   })
   /* piece get */
   .command(
@@ -612,15 +621,17 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   )
   .usage(pieceUsage)
   .example(
-    `cf piece get ${EX_ID} ${EX_COMP_PIECE} name`,
+    cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE} name`),
     `Get the "name" field from piece result "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `cf piece get ${EX_ID} ${EX_COMP_PIECE} data/users/0/email --input`,
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} data/users/0/email --input`,
+    ),
     `Get a nested field value from piece input "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `ct piece get ${EX_ID} ${EX_COMP_PIECE}`,
+    cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE}`),
     `Get the full result of piece "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -646,20 +657,22 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   /* piece set */
   .command(
     "set",
-    `Set a value in a piece at a specific path. Reads JSON from stdin.
+    cliText(`Set a value in a piece at a specific path. Reads JSON from stdin.
 
 PATH FORMAT: Use forward slashes and numeric indices for arrays.
   ✓ items/0/name    ✓ config/db/host    ✗ items[0].name
 
-JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`,
+JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
   )
   .usage(pieceUsage)
   .example(
-    `echo '"New Name"' | cf piece set ${EX_ID} ${EX_COMP_PIECE} name`,
+    cliText(`echo '"New Name"' | cf piece set ${EX_ID} ${EX_COMP_PIECE} name`),
     `Set the "name" field in piece result "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `echo '{"foo": "bar"}' | cf piece set ${EX_ID} ${EX_COMP_PIECE} config --input`,
+    cliText(
+      `echo '{"foo": "bar"}' | cf piece set ${EX_ID} ${EX_COMP_PIECE} config --input`,
+    ),
     `Set a nested object value in piece input "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -675,18 +688,20 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`,
     });
     render(`Set value at path: ${pathString}`);
     hint(
-      `TIP: Computed values may be stale. Run 'cf piece step --piece ${pieceConfig.piece} ...' to trigger recomputation.`,
+      cliText(
+        `TIP: Computed values may be stale. Run 'cf piece step --piece ${pieceConfig.piece} ...' to trigger recomputation.`,
+      ),
     );
   })
   /* piece map */
   .command("map", "Display a visual map of all pieces and their connections")
   .usage(spaceUsage)
   .example(
-    `cf piece map ${EX_ID} ${EX_COMP}`,
+    cliText(`cf piece map ${EX_ID} ${EX_COMP}`),
     `Display a map of all pieces and connections in "${RAW_EX_COMP.space}".`,
   )
   .example(
-    `cf piece map ${EX_ID} ${EX_COMP} --format dot`,
+    cliText(`cf piece map ${EX_ID} ${EX_COMP} --format dot`),
     `Output Graphviz DOT format for the space.`,
   )
   .option(
@@ -705,16 +720,18 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`,
   .command("call", "Invoke a callable within a piece")
   .usage(pieceUsage)
   .example(
-    `cf piece call ${EX_ID} ${EX_COMP_PIECE} increment`,
+    cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} increment`),
     `Call the "increment" handler on piece "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `cf piece call ${EX_ID} ${EX_COMP_PIECE} setName '{"value":"My Name"}'`,
+    cliText(
+      `cf piece call ${EX_ID} ${EX_COMP_PIECE} setName '{"value":"My Name"}'`,
+    ),
     `Call the "setName" handler with JSON arguments on piece "${RAW_EX_COMP
       .piece!}".`,
   )
   .example(
-    `cf piece call ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`,
+    cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`),
     `Run the "search" tool using schema-derived flags after "--".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -742,20 +759,20 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`,
       return;
     }
     render(`Called handler "${callableName}" on piece ${pieceConfig.piece}`);
-    hint(`NEXT STEPS:
+    hint(cliText(`NEXT STEPS:
   → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
-  → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`);
+  → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
   })
   /* piece rm */
   .command("rm", "Remove a piece")
   .alias("remove")
   .usage(pieceUsage)
   .example(
-    `cf piece rm ${EX_ID} ${EX_COMP_PIECE}`,
+    cliText(`cf piece rm ${EX_ID} ${EX_COMP_PIECE}`),
     `Remove piece "${RAW_EX_COMP.piece!}".`,
   )
   .example(
-    `cf piece rm ${EX_ID} ${EX_URL}`,
+    cliText(`cf piece rm ${EX_ID} ${EX_URL}`),
     `Remove piece "${RAW_EX_COMP.piece!}".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
@@ -770,11 +787,15 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`,
     "Deploy a custom home pattern or reset to system default.",
   )
   .example(
-    `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} ./my-home.tsx`,
+    cliText(
+      `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} ./my-home.tsx`,
+    ),
     `Deploy a custom home pattern.`,
   )
   .example(
-    `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} --reset`,
+    cliText(
+      `cf piece set-home ${EX_ID} -a http://localhost:${ports.toolshed} --reset`,
+    ),
     `Reset to the system default home pattern.`,
   )
   .option("--reset", "Reset to the system default home pattern")
@@ -817,9 +838,9 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`,
       render("Deployed custom home pattern.");
     }
 
-    hint(`NEXT STEPS:
+    hint(cliText(`NEXT STEPS:
   → Open home in browser: ${baseConfig.apiUrl}
-  → Reset to default:     cf piece set-home --reset ...`);
+  → Reset to default:     cf piece set-home --reset ...`));
   });
 
 interface PieceCLIOptions {

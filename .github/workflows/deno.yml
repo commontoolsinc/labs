@@ -97,6 +97,7 @@ jobs:
             ./dist/toolshed
             ./dist/bg-charm-service
             ./dist/cf
+            ./dist/ct
 
   generated-patterns-integration-test:
     name: "Generated Patterns Integration Tests"

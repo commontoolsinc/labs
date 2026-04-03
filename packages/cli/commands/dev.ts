@@ -3,9 +3,10 @@ import { isAbsolute, join } from "@std/path";
 import { render } from "../lib/render.ts";
 import { process } from "../lib/dev.ts";
 import { isRecord } from "@commonfabric/utils/types";
+import { cliText } from "../lib/cli-name.ts";
 
 const createDescription = (cmdName: string) =>
-  `Compile and execute patterns for debugging.
+  cliText(`Compile and execute patterns for debugging.
 
 The pattern is processed through ts-transformers, which converts reactive
 constructs (computed, handler, JSX) into runtime-compatible code.
@@ -25,7 +26,7 @@ TIPS:
   • Use --show-transformed to debug transformation issues - shows how
     ts-transformers converts your code (e.g., .map() → .mapWithPattern())
   • Transformation errors often stem from reactive constructs the compiler
-    doesn't recognize; inspecting transformed output helps identify these`;
+    doesn't recognize; inspecting transformed output helps identify these`);
 
 async function devAction(
   options: {
@@ -106,23 +107,23 @@ function createDevCommand(cmdName: string): Command<any> {
     .name(cmdName)
     .description(createDescription(cmdName))
     .example(
-      `cf ${cmdName} ./pattern.tsx`,
+      cliText(`cf ${cmdName} ./pattern.tsx`),
       "Compile and evaluate a pattern (quiet on success).",
     )
     .example(
-      `cf ${cmdName} ./a.tsx ./b.tsx ./c.tsx`,
+      cliText(`cf ${cmdName} ./a.tsx ./b.tsx ./c.tsx`),
       "Compile and evaluate multiple patterns.",
     )
     .example(
-      `cf ${cmdName} ./pattern.tsx --pattern-json`,
+      cliText(`cf ${cmdName} ./pattern.tsx --pattern-json`),
       "Compile and evaluate a pattern, printing export default as JSON.",
     )
     .example(
-      `cf ${cmdName} ./pattern.tsx --no-run --output out.js`,
+      cliText(`cf ${cmdName} ./pattern.tsx --no-run --output out.js`),
       "Compile a pattern, storing the translated and bundled JavaScript to out.js without evaluating.",
     )
     .example(
-      `cf ${cmdName} ./pattern.tsx --no-check`,
+      cliText(`cf ${cmdName} ./pattern.tsx --no-check`),
       "Compile and evaluate pattern without typechecking.",
     )
     .option("--no-run", "Do not execute input, only type check.")
