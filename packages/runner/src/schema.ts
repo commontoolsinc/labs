@@ -672,6 +672,7 @@ export function generateHandlerSchema(
       "$event": eventSchema ?? true,
       "$ctx": stateSchema ?? true,
     },
+    required: ["$ctx"],
     ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
     ...(Object.keys(mergedDefinitions).length &&
       { definitions: mergedDefinitions }),
