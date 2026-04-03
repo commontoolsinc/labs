@@ -29,12 +29,17 @@ export function experimentalOptionsFromEnv(): ExperimentalOptions {
     modernHash: read("EXPERIMENTAL_MODERN_HASH"),
     modernSchemaHash: read("EXPERIMENTAL_MODERN_SCHEMA_HASH"),
   };
-  const active = Object.entries(opts).filter(([, v]) => v);
-  if (active.length > 0) {
+
+  // Log any overridden experimental flags.
+  const overrideFlags = Object.entries(opts)
+    .filter(([_, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${v}`);
+  if (overrideFlags.length > 0) {
     console.error(
-      `[ct] Experimental flags: ${active.map(([k]) => k).join(", ")}`,
+      `[ct] Experimental flag overrides: ${overrideFlags.join(", ")}`,
     );
   }
+
   return opts;
 }
 
