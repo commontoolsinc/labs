@@ -6,7 +6,7 @@
  * the nested computed expression should still lower locally in JSX without forcing
  * the whole JSX branch through an extra derive wrapper.
  */
-import { action, Cell, computed, pattern, UI } from "commonfabric";
+import { action, Cell, computed, pattern, UI } from "commontools";
 
 interface Card {
   title: string;
@@ -37,7 +37,7 @@ export default pattern<Input>(({ card }) => {
 
   return {
     [UI]: (
-      <cf-card>
+      <ct-card>
         {isEditing ? (
           <div>Editing</div>
         ) : (
@@ -46,10 +46,10 @@ export default pattern<Input>(({ card }) => {
             {/* Nested ternary with computed - lowers locally inside JSX */}
             {hasDescription ? <span>{card.description}</span> : null}
             {/* Action in SAME branch stays direct while JSX-local rewrites handle the computed value */}
-            <cf-button onClick={startEditing}>Edit</cf-button>
+            <ct-button onClick={startEditing}>Edit</ct-button>
           </div>
         )}
-      </cf-card>
+      </ct-card>
     ),
     card,
   };

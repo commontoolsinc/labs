@@ -1,5 +1,5 @@
 import { Schema, Validator } from "jsonschema";
-import { isRecord } from "@commonfabric/utils/types";
+import { isRecord } from "@commontools/utils/types";
 
 function checkSubtrees(
   obj: unknown,

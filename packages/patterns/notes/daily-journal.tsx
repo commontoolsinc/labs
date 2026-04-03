@@ -16,7 +16,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import Note from "./note.tsx";
 import Suggestion from "../system/suggestion.tsx";
 import { type MentionablePiece, type NotePiece } from "./schemas.tsx";
@@ -352,7 +352,7 @@ ${notesXml}
     return {
       [NAME]: computed(() => `📅 ${title.get()}`),
       [UI]: (
-        <cf-screen>
+        <ct-screen>
           <div
             style={{
               flex: 1,
@@ -371,9 +371,9 @@ ${notesXml}
             >
               {/* Column 1: Calendar + Entries */}
               <div style={{ width: "320px", flexShrink: "0" }}>
-                <cf-vstack gap="4">
+                <ct-vstack gap="4">
                   {/* Go to Today */}
-                  <cf-button
+                  <ct-button
                     variant="primary"
                     onClick={handleGoToToday({
                       entries,
@@ -389,24 +389,24 @@ ${notesXml}
                     }}
                   >
                     Go to Today's Note
-                  </cf-button>
+                  </ct-button>
 
                   {/* Mini calendar */}
-                  <cf-card>
-                    <cf-calendar
+                  <ct-card>
+                    <ct-calendar
                       $value={selectedDate}
                       markedDates={datesWithNotes}
-                      oncf-change={handleCalendarChange({
+                      onct-change={handleCalendarChange({
                         entries,
                         template,
                         selectedDate,
                         addPiece,
                       })}
                     />
-                  </cf-card>
+                  </ct-card>
 
                   {/* Entries list */}
-                  <cf-vstack gap="2">
+                  <ct-vstack gap="2">
                     <div
                       style={{
                         display: "flex",
@@ -415,23 +415,23 @@ ${notesXml}
                       }}
                     >
                       <h3 style={{ margin: 0, fontSize: "16px" }}>Entries</h3>
-                      <cf-button variant="ghost" onClick={toggleSettings}>
+                      <ct-button variant="ghost" onClick={toggleSettings}>
                         Settings
-                      </cf-button>
+                      </ct-button>
                     </div>
                     {sortedEntries.map((entry: any) => (
-                      <cf-cell-link $cell={entry} />
+                      <ct-cell-link $cell={entry} />
                     ))}
-                  </cf-vstack>
-                </cf-vstack>
+                  </ct-vstack>
+                </ct-vstack>
               </div>
 
               {/* Column 2: Weekly Rollup */}
               <div style={{ flex: "1", minWidth: "0" }}>
                 {ifElse(
                   hasRecentNotes,
-                  <cf-card>
-                    <cf-vstack gap="3" padding="4">
+                  <ct-card>
+                    <ct-vstack gap="3" padding="4">
                       <div
                         style={{
                           display: "flex",
@@ -442,7 +442,7 @@ ${notesXml}
                         <h3 style={{ margin: 0, fontSize: "14px" }}>
                           Weekly Rollup
                         </h3>
-                        <cf-button
+                        <ct-button
                           variant="ghost"
                           size="sm"
                           onClick={triggerRollup({
@@ -450,10 +450,10 @@ ${notesXml}
                           })}
                         >
                           Refresh
-                        </cf-button>
+                        </ct-button>
                       </div>
 
-                      <cf-autostart
+                      <ct-autostart
                         onstart={triggerRollup({
                           addMessage: rollupAddMessage,
                         })}
@@ -461,7 +461,7 @@ ${notesXml}
 
                       {ifElse(
                         hasRollup,
-                        <cf-vstack gap="3">
+                        <ct-vstack gap="3">
                           <p
                             style={{
                               fontSize: "15px",
@@ -473,12 +473,12 @@ ${notesXml}
                             {weeklyRollup?.headline}
                           </p>
 
-                          <cf-vstack gap="1">
+                          <ct-vstack gap="1">
                             <span
                               style={{
                                 fontSize: "11px",
                                 fontWeight: "500",
-                                color: "var(--cf-color-gray-500)",
+                                color: "var(--ct-color-gray-500)",
                                 textTransform: "uppercase",
                                 letterSpacing: "0.05em",
                               }}
@@ -491,7 +491,7 @@ ${notesXml}
                                   style={{
                                     padding: "6px 8px",
                                     borderRadius: "6px",
-                                    background: "var(--cf-color-gray-50)",
+                                    background: "var(--ct-color-gray-50)",
                                     fontSize: "13px",
                                   }}
                                 >
@@ -499,7 +499,7 @@ ${notesXml}
                                   {" — "}
                                   <span
                                     style={{
-                                      color: "var(--cf-color-gray-600)",
+                                      color: "var(--ct-color-gray-600)",
                                     }}
                                   >
                                     {theme.detail}
@@ -507,7 +507,7 @@ ${notesXml}
                                 </div>
                               ),
                             )}
-                          </cf-vstack>
+                          </ct-vstack>
 
                           {ifElse(
                             computed(
@@ -515,12 +515,12 @@ ${notesXml}
                                 (weeklyRollup?.accomplishments?.length ?? 0) >
                                   0,
                             ),
-                            <cf-vstack gap="1">
+                            <ct-vstack gap="1">
                               <span
                                 style={{
                                   fontSize: "11px",
                                   fontWeight: "500",
-                                  color: "var(--cf-color-gray-500)",
+                                  color: "var(--ct-color-gray-500)",
                                   textTransform: "uppercase",
                                   letterSpacing: "0.05em",
                                 }}
@@ -539,7 +539,7 @@ ${notesXml}
                                   (item: string) => <li>{item}</li>,
                                 )}
                               </ul>
-                            </cf-vstack>,
+                            </ct-vstack>,
                             <span />,
                           )}
 
@@ -548,12 +548,12 @@ ${notesXml}
                               () =>
                                 (weeklyRollup?.openThreads?.length ?? 0) > 0,
                             ),
-                            <cf-vstack gap="1">
+                            <ct-vstack gap="1">
                               <span
                                 style={{
                                   fontSize: "11px",
                                   fontWeight: "500",
-                                  color: "var(--cf-color-gray-500)",
+                                  color: "var(--ct-color-gray-500)",
                                   textTransform: "uppercase",
                                   letterSpacing: "0.05em",
                                 }}
@@ -572,7 +572,7 @@ ${notesXml}
                                   (item: string) => <li>{item}</li>,
                                 )}
                               </ul>
-                            </cf-vstack>,
+                            </ct-vstack>,
                             <span />,
                           )}
 
@@ -581,16 +581,16 @@ ${notesXml}
                               margin: 0,
                               fontSize: "13px",
                               fontStyle: "italic",
-                              color: "var(--cf-color-gray-600)",
+                              color: "var(--ct-color-gray-600)",
                             }}
                           >
                             {weeklyRollup?.mood}
                           </p>
-                        </cf-vstack>,
+                        </ct-vstack>,
                         <div
                           style={{
                             textAlign: "center",
-                            color: "var(--cf-color-gray-500)",
+                            color: "var(--ct-color-gray-500)",
                             padding: "0.5rem",
                             fontSize: "13px",
                           }}
@@ -602,21 +602,21 @@ ${notesXml}
                           )}
                         </div>,
                       )}
-                    </cf-vstack>
-                  </cf-card>,
+                    </ct-vstack>
+                  </ct-card>,
                   <span />,
                 )}
 
                 {/* Suggestion based on weekly context */}
                 {ifElse(
                   hasRollup,
-                  <cf-card style={{ marginTop: "16px" }}>
-                    <cf-vstack gap="2" padding="4">
+                  <ct-card style={{ marginTop: "16px" }}>
+                    <ct-vstack gap="2" padding="4">
                       <span
                         style={{
                           fontSize: "11px",
                           fontWeight: "500",
-                          color: "var(--cf-color-gray-500)",
+                          color: "var(--ct-color-gray-500)",
                           textTransform: "uppercase",
                           letterSpacing: "0.05em",
                         }}
@@ -628,15 +628,15 @@ ${notesXml}
                         context={suggestionContext}
                         initialResults={[]}
                       />
-                    </cf-vstack>
-                  </cf-card>,
+                    </ct-vstack>
+                  </ct-card>,
                   <span />,
                 )}
               </div>
             </div>
 
             {/* Settings view */}
-            <cf-vstack
+            <ct-vstack
               gap="4"
               padding="6"
               style={{
@@ -648,24 +648,24 @@ ${notesXml}
                 style={{
                   margin: 0,
                   fontSize: "13px",
-                  color: "var(--cf-color-text-secondary)",
+                  color: "var(--ct-color-text-secondary)",
                 }}
               >
                 Available variables: {"{{date}}"}, {"{{dayOfWeek}}"},
                 {"{{month}}"}, {"{{year}}"}
               </p>
-              <cf-code-editor
+              <ct-code-editor
                 $value={template}
                 language="text/markdown"
                 wordWrap
                 style={{ minHeight: "300px" }}
               />
-              <cf-button variant="primary" onClick={toggleSettings}>
+              <ct-button variant="primary" onClick={toggleSettings}>
                 Done
-              </cf-button>
-            </cf-vstack>
+              </ct-button>
+            </ct-vstack>
           </div>
-        </cf-screen>
+        </ct-screen>
       ),
       title,
       entries,

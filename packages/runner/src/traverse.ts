@@ -1,22 +1,22 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commontools/data-model/value-hash";
 import {
   hashSchema,
   hashSchemaItem,
-} from "@commonfabric/data-model/schema-hash";
-import { MIME } from "@commonfabric/memory/interface";
-import type { JSONSchemaObj } from "@commonfabric/api";
+} from "@commontools/data-model/schema-hash";
+import { MIME } from "@commontools/memory/interface";
+import type { JSONSchemaObj } from "@commontools/api";
 import type {
   MemorySpace,
   Result,
   SchemaPathSelector,
   Unit,
-} from "@commonfabric/memory/interface";
+} from "@commontools/memory/interface";
 import {
   type FabricValue,
   isArrayIndexPropertyName,
-} from "@commonfabric/data-model/fabric-value";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-// TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
+} from "@commontools/data-model/fabric-value";
+import { deepEqual } from "@commontools/utils/deep-equal";
+// TODO(@ubik2): Ideally this would import from "@commontools/utils/types",
 // but rollup has issues
 import {
   type Immutable,
@@ -31,7 +31,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import {
   schemaWithProperties,
   toDeepFrozenSchema,
-} from "@commonfabric/data-model/schema-utils";
+} from "@commontools/data-model/schema-utils";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   addressKey,

@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { computed, pattern } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { computed, pattern } from "commontools";
 // FIXTURE: computed-in-computed-property-access
 // Verifies: property access on a computed() result declared INSIDE another computed()
 //   gets transformed to .key() access
@@ -8,16 +8,16 @@ import { computed, pattern } from "commonfabric";
 //   inside a derive callback need .key() rewriting even though they are not
 //   captured from an outer scope.
 export default pattern(() => {
-    const outer = __cfHelpers.derive({
+    const outer = __ctHelpers.derive({
         type: "object",
         properties: {}
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {}, () => {
-        const foo = __cfHelpers.derive({
+    } as const satisfies __ctHelpers.JSONSchema, {}, () => {
+        const foo = __ctHelpers.derive({
             type: "object",
             properties: {}
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
             properties: {
                 bar: {
@@ -25,14 +25,14 @@ export default pattern(() => {
                 }
             },
             required: ["bar"]
-        } as const satisfies __cfHelpers.JSONSchema, {}, () => ({ bar: 1 }));
+        } as const satisfies __ctHelpers.JSONSchema, {}, () => ({ bar: 1 }));
         return foo.key("bar");
     });
     return outer;
-}, false as const satisfies __cfHelpers.JSONSchema, {
+}, false as const satisfies __ctHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

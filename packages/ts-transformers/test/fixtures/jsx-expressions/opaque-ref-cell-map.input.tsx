@@ -9,7 +9,7 @@ import {
   navigateTo,
   pattern,
   UI,
-} from "commonfabric";
+} from "commontools";
 
 // the simple charm (to which we'll store references within a cell)
 const SimplePattern = pattern(() => ({
@@ -124,22 +124,22 @@ export default pattern(() => {
           <ul>
             {cellRef.map((charm: any, index: number) => (
               <li>
-                <cf-button
+                <ct-button
                   onClick={goToCharm({ charm })}
                 >
                   Go to Charm {index + 1}
-                </cf-button>
+                </ct-button>
                 <span>Charm {index + 1}: {charm[NAME] || "Unnamed"}</span>
               </li>
             ))}
           </ul>,
         )}
 
-        <cf-button
+        <ct-button
           onClick={createSimplePattern({ cellRef })}
         >
           Create New Charm
-        </cf-button>
+        </ct-button>
       </div>
     ),
     cellRef,

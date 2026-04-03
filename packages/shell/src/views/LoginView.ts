@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { state } from "lit/decorators.js";
 
-import { Identity, KeyStore, PassKey } from "@commonfabric/identity";
+import { Identity, KeyStore, PassKey } from "@commontools/identity";
 
 import { BaseView } from "./BaseView.ts";
 import {
@@ -299,8 +299,8 @@ export class XLoginView extends BaseView {
 
     try {
       const passkey = await PassKey.create(
-        "Common Fabric User",
-        "commonfabricuser",
+        "Common Tools User",
+        "commontoolsuser",
       );
       const identity = await passkey.createRootKey();
 
@@ -673,12 +673,12 @@ export class XLoginView extends BaseView {
     return html`
       <div class="login-container">
         <div class="logo-container">
-          <cf-logo
+          <ct-logo
             background-color="black"
             shape-color="white"
             width="100"
             height="100"
-          ></cf-logo>
+          ></ct-logo>
         </div>
 
         <div class="auth-action-container">

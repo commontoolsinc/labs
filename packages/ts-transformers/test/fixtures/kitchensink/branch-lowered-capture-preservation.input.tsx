@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, handler, ifElse, pattern, UI, Writable } from "commonfabric";
+import { computed, handler, ifElse, pattern, UI, Writable } from "commontools";
 
 const openNoteEditor = handler<unknown, {
   subPieces: string[];

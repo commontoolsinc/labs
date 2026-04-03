@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { SELF, pattern } from "commonfabric";
+import { SELF, pattern } from "commontools";
 
 interface Input {
   value: string;

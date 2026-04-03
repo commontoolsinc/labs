@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, derive, pattern } from "commontools";
 
 // FIXTURE: derive-array-element-access
 // Verifies: an array variable accessed by index inside derive is captured as a whole array

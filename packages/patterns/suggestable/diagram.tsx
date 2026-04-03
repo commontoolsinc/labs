@@ -8,7 +8,7 @@ import {
   pattern,
   UI,
   type VNode,
-} from "commonfabric";
+} from "commontools";
 
 // ===== Types =====
 
@@ -48,25 +48,25 @@ const Diagram = pattern<DiagramInput, DiagramOutput>(({ topic, context }) => {
   return {
     [NAME]: computed(() => (topic ? `Diagram: ${topic}` : "Diagram")),
     [UI]: (
-      <cf-screen>
-        <cf-vstack slot="header" gap="1">
-          <cf-heading level={4}>
+      <ct-screen>
+        <ct-vstack slot="header" gap="1">
+          <ct-heading level={4}>
             {computed(() => topic || "Diagram")}
-          </cf-heading>
-        </cf-vstack>
+          </ct-heading>
+        </ct-vstack>
 
-        <cf-vstack gap="3" style="padding: 1.5rem;">
+        <ct-vstack gap="3" style="padding: 1.5rem;">
           {ifElse(
             response.pending,
-            <div style="color: var(--cf-color-text-secondary);">
-              <cf-loader show-elapsed /> Generating diagram...
+            <div style="color: var(--ct-color-text-secondary);">
+              <ct-loader show-elapsed /> Generating diagram...
             </div>,
-            <pre style="font-family: monospace; font-size: 0.85rem; line-height: 1.4; overflow-x: auto; white-space: pre; background: var(--cf-color-surface-secondary, #f5f5f5); padding: 1rem; border-radius: 0.5rem;">
+            <pre style="font-family: monospace; font-size: 0.85rem; line-height: 1.4; overflow-x: auto; white-space: pre; background: var(--ct-color-surface-secondary, #f5f5f5); padding: 1rem; border-radius: 0.5rem;">
               {response.result}
             </pre>,
           )}
-        </cf-vstack>
-      </cf-screen>
+        </ct-vstack>
+      </ct-screen>
     ),
     topic,
     diagram: computed(() => response.result || ""),

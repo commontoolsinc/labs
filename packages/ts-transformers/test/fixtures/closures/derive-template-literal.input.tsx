@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, derive, pattern } from "commontools";
 
 // FIXTURE: derive-template-literal
 // Verifies: a captured cell used inside a template literal expression is extracted

@@ -10,7 +10,7 @@ import {
   isRecord,
   isString,
   Mutable,
-} from "@commonfabric/utils/types";
+} from "@commontools/utils/types";
 
 type ImmutableObj<T> = {
   readonly prop: T;

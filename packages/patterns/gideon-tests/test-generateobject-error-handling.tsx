@@ -28,7 +28,7 @@ import {
   NAME,
   pattern,
   UI,
-} from "commonfabric";
+} from "commontools";
 
 interface ProductIdea {
   name: string;
@@ -68,7 +68,7 @@ export default pattern<Input, Input>(({ userInput }) => {
 
         <div style={{ marginBottom: "1rem" }}>
           <label>Product idea prompt:</label>
-          <cf-input $value={userInput} placeholder="Enter a product idea..." />
+          <ct-input $value={userInput} placeholder="Enter a product idea..." />
         </div>
 
         <h3>Result (with proper error handling):</h3>
@@ -84,7 +84,7 @@ export default pattern<Input, Input>(({ userInput }) => {
           {ifElse(
             idea.pending,
             <span>
-              <cf-loader size="sm" /> Generating...
+              <ct-loader size="sm" /> Generating...
             </span>,
             ifElse(
               idea.error,

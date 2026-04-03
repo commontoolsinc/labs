@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, OpaqueRef } from "commonfabric";
+import { pattern, OpaqueRef } from "commontools";
 
 interface Email {
   id: string;

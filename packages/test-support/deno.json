@@ -1,5 +1,5 @@
 {
-  "name": "@commonfabric/test-support",
+  "name": "@commontools/test-support",
   "version": "0.1.0",
   "exports": {
     ".": "./src/mod.ts",

@@ -11,11 +11,11 @@ import type {
   RuntimeClient,
   RuntimeConnection,
   VDomBatchNotification,
-} from "@commonfabric/runtime-client";
+} from "@commontools/runtime-client";
 import type { DomEventMessage } from "./events.ts";
 import { DomApplicator } from "./applicator.ts";
 import type { SetPropHandler } from "../render-utils.ts";
-import { getLogger } from "@commonfabric/utils/logger";
+import { getLogger } from "@commontools/utils/logger";
 
 const logger = getLogger("vdom-renderer", { enabled: false, level: "debug" });
 

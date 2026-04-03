@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-} from "commonfabric";
+} from "commontools";
 
 interface EntryDetails {
   note: string;

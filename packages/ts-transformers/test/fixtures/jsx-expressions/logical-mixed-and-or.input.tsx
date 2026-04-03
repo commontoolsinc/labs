@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commonfabric";
+import { cell, pattern, UI } from "commontools";
 
 // Tests mixed && and || operators: (a && b) || c
 // The && should use when, the || should use unless

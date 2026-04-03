@@ -1,18 +1,18 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import {
   addMockResponse,
   clearMockResponses,
   enableMockMode,
   loadConversationFixture,
-} from "@commonfabric/llm/client";
+} from "@commontools/llm/client";
 import type {
   BuiltInLLMMessage,
   BuiltInLLMTool,
   JSONSchema,
-} from "@commonfabric/api";
+} from "@commontools/api";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -28,12 +28,12 @@ describe("llmDialog", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
+  let Cell: ReturnType<typeof createBuilder>["commontools"]["Cell"];
   let patternTool: ReturnType<
     typeof createBuilder
-  >["commonfabric"]["patternTool"];
-  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
-  let llmDialog: ReturnType<typeof createBuilder>["commonfabric"]["llmDialog"];
+  >["commontools"]["patternTool"];
+  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let llmDialog: ReturnType<typeof createBuilder>["commontools"]["llmDialog"];
 
   beforeEach(() => {
     clearMockResponses();
@@ -44,8 +44,8 @@ describe("llmDialog", () => {
     });
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
-    ({ pattern, llmDialog, Cell, patternTool } = commonfabric);
+    const { commontools } = createBuilder();
+    ({ pattern, llmDialog, Cell, patternTool } = commontools);
   });
 
   afterEach(async () => {

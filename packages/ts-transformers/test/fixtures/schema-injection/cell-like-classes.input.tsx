@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, ComparableCell, ReadonlyCell, WriteonlyCell } from "commonfabric";
+import { cell, ComparableCell, ReadonlyCell, WriteonlyCell } from "commontools";
 
 // FIXTURE: cell-like-classes
 // Verifies: schema injection works for cell(), ComparableCell.of(), ReadonlyCell.of(), and WriteonlyCell.of()

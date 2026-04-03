@@ -8,7 +8,7 @@ import {
   lift,
   pattern,
   str,
-} from "commonfabric";
+} from "commontools";
 
 type StepStatus = "pending" | "in_progress" | "blocked" | "complete";
 

@@ -10,7 +10,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 // ===== Types =====
 
@@ -79,31 +79,31 @@ const Question = pattern<QuestionInput, QuestionOutput>(
     return {
       [NAME]: computed(() => (topic ? `Question: ${topic}` : "Question")),
       [UI]: (
-        <cf-screen>
-          <cf-vstack slot="header" gap="1">
-            <cf-heading level={4}>
+        <ct-screen>
+          <ct-vstack slot="header" gap="1">
+            <ct-heading level={4}>
               {computed(() => topic || "Question")}
-            </cf-heading>
-          </cf-vstack>
+            </ct-heading>
+          </ct-vstack>
 
-          <cf-vstack gap="3" style="padding: 1.5rem;">
+          <ct-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
               response.pending,
-              <div style="color: var(--cf-color-text-secondary);">
-                <cf-loader show-elapsed /> Generating question...
+              <div style="color: var(--ct-color-text-secondary);">
+                <ct-loader show-elapsed /> Generating question...
               </div>,
-              <cf-question
+              <ct-question
                 question={computed(
                   () => response.result?.question || "",
                 )}
                 options={computed(
                   () => response.result?.options || [],
                 )}
-                oncf-answer={onAnswer({ answer })}
+                onct-answer={onAnswer({ answer })}
               />,
             )}
-          </cf-vstack>
-        </cf-screen>
+          </ct-vstack>
+        </ct-screen>
       ),
       topic,
       question: computed(() => response.result?.question || ""),

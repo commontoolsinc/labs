@@ -1,9 +1,9 @@
 import { App } from "../shared/mod.ts";
-import { type RuntimeClient } from "@commonfabric/runtime-client";
+import { type RuntimeClient } from "@commontools/runtime-client";
 
 declare global {
   var app: App;
-  var commonfabric: {
+  var commontools: {
     rt?: RuntimeClient;
     detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
     watchWrites?: (

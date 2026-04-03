@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell } from "commonfabric";
+import { cell } from "commontools";
 
 // FIXTURE: literal-widen-mixed-values
 // Verifies: schema injection works for literals, variable references, and expressions alike

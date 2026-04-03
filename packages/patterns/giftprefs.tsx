@@ -13,7 +13,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -129,31 +129,31 @@ export const GiftPrefsModule = pattern<
         `${MODULE_METADATA.icon} Gift Prefs: ${displayText}`
       ),
       [UI]: (
-        <cf-vstack style={{ gap: "16px" }}>
+        <ct-vstack style={{ gap: "16px" }}>
           {/* Gift tier */}
-          <cf-vstack style={{ gap: "4px" }}>
+          <ct-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Gift Giving Tier
             </label>
-            <cf-select $value={giftTier} items={TIER_OPTIONS} />
-          </cf-vstack>
+            <ct-select $value={giftTier} items={TIER_OPTIONS} />
+          </ct-vstack>
 
           {/* Favorites */}
-          <cf-vstack style={{ gap: "8px" }}>
+          <ct-vstack style={{ gap: "8px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Favorites / Likes
             </label>
-            <cf-hstack style={{ gap: "8px" }}>
-              <cf-input
+            <ct-hstack style={{ gap: "8px" }}>
+              <ct-input
                 $value={favoriteInput}
                 placeholder="Add favorite..."
                 style={{ flex: "1" }}
               />
-              <cf-button onClick={addFavorite({ favorites, favoriteInput })}>
+              <ct-button onClick={addFavorite({ favorites, favoriteInput })}>
                 +
-              </cf-button>
-            </cf-hstack>
-            <cf-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
+              </ct-button>
+            </ct-hstack>
+            <ct-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
               {favorites.map((item: string, index: number) => (
                 <span
                   key={index}
@@ -184,23 +184,23 @@ export const GiftPrefsModule = pattern<
                   </button>
                 </span>
               ))}
-            </cf-hstack>
-          </cf-vstack>
+            </ct-hstack>
+          </ct-vstack>
 
           {/* Avoid */}
-          <cf-vstack style={{ gap: "8px" }}>
+          <ct-vstack style={{ gap: "8px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Avoid / Dislikes
             </label>
-            <cf-hstack style={{ gap: "8px" }}>
-              <cf-input
+            <ct-hstack style={{ gap: "8px" }}>
+              <ct-input
                 $value={avoidInput}
                 placeholder="Add item to avoid..."
                 style={{ flex: "1" }}
               />
-              <cf-button onClick={addAvoid({ avoid, avoidInput })}>+</cf-button>
-            </cf-hstack>
-            <cf-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
+              <ct-button onClick={addAvoid({ avoid, avoidInput })}>+</ct-button>
+            </ct-hstack>
+            <ct-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
               {avoid.map((item: string, index: number) => (
                 <span
                   key={index}
@@ -231,9 +231,9 @@ export const GiftPrefsModule = pattern<
                   </button>
                 </span>
               ))}
-            </cf-hstack>
-          </cf-vstack>
-        </cf-vstack>
+            </ct-hstack>
+          </ct-vstack>
+        </ct-vstack>
       ),
       giftTier,
       favorites,

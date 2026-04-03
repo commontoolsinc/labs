@@ -16,29 +16,29 @@ Only do this AFTER all logic is verified and tests pass.
 
 ## Available Components
 
-Layout: `cf-screen`, `cf-vstack`, `cf-hstack` Input: `cf-input`, `cf-textarea`,
-`cf-checkbox`, `cf-select` Action: `cf-button` Display: `cf-label`,
-`cf-heading`, `cf-badge`, `cf-alert`
+Layout: `ct-screen`, `ct-vstack`, `ct-hstack`, `ct-box` Input: `ct-input`,
+`ct-textarea`, `ct-checkbox`, `ct-select` Action: `ct-button` Display:
+`ct-text`, `ct-status-pill`
 
 ## Key Patterns
 
 **Two-way binding:**
 
 ```tsx
-<cf-input $value={field} />
-<cf-checkbox $checked={done} />
+<ct-input $value={field} />
+<ct-checkbox $checked={done} />
 ```
 
 **Layout structure:**
 
 ```tsx
-<cf-screen title="My Pattern">
-  <cf-vstack gap="md">
-    <cf-hstack gap="sm">
+<ct-screen title="My Pattern">
+  <ct-vstack gap="md">
+    <ct-hstack gap="sm">
       {/* horizontal items */}
-    </cf-hstack>
-  </cf-vstack>
-</cf-screen>;
+    </ct-hstack>
+  </ct-vstack>
+</ct-screen>;
 ```
 
 ## Reference Existing Patterns

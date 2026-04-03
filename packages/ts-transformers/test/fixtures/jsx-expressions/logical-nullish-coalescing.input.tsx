@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commonfabric";
+import { cell, pattern, UI } from "commontools";
 
 // Tests nullish coalescing (??) interaction with && and ||
 // ?? should NOT be transformed to when/unless (different semantics)

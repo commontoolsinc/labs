@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commonfabric";
+import { cell, pattern, UI } from "commontools";
 
 // FIXTURE: map-single-capture
 // Verifies: .map() with length guard is transformed to when() + mapWithPattern()

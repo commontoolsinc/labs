@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Stores location name, address, and optional coordinates.
  */
-import { computed, type Default, NAME, pattern, UI } from "commonfabric";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -43,36 +43,36 @@ export const LocationModule = pattern<LocationModuleInput, LocationModuleInput>(
         `${MODULE_METADATA.icon} Location: ${displayText}`
       ),
       [UI]: (
-        <cf-vstack style={{ gap: "12px" }}>
-          <cf-vstack style={{ gap: "4px" }}>
+        <ct-vstack style={{ gap: "12px" }}>
+          <ct-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Location Name
             </label>
-            <cf-input
+            <ct-input
               $value={locationName}
               placeholder="e.g., Home, Office, Cafe"
             />
-          </cf-vstack>
-          <cf-vstack style={{ gap: "4px" }}>
+          </ct-vstack>
+          <ct-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Address
             </label>
-            <cf-textarea
+            <ct-textarea
               $value={locationAddress}
               placeholder="Full address..."
               rows={2}
             />
-          </cf-vstack>
-          <cf-vstack style={{ gap: "4px" }}>
+          </ct-vstack>
+          <ct-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Coordinates (optional)
             </label>
-            <cf-input
+            <ct-input
               $value={coordinates}
               placeholder="lat,lng (e.g., 37.7749,-122.4194)"
             />
-          </cf-vstack>
-        </cf-vstack>
+          </ct-vstack>
+        </ct-vstack>
       ),
       locationName,
       locationAddress,

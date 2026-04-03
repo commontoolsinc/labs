@@ -14,7 +14,7 @@ import {
   UI,
   VNode,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 interface Entry {
   id: string;

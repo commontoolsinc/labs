@@ -5,9 +5,9 @@ import {
   PatternMeta,
   RuntimeProgram,
   TYPE,
-} from "@commonfabric/runner";
+} from "@commontools/runner";
 import { pieceId, PieceManager } from "../manager.ts";
-import { nameSchema, processSchema } from "@commonfabric/runner/schemas";
+import { nameSchema, processSchema } from "@commontools/runner/schemas";
 import { CellPath, compileProgram, resolveCellPath } from "./utils.ts";
 import { injectUserCode } from "../iframe/static.ts";
 import {

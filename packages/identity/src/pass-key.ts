@@ -1,7 +1,7 @@
 import { Identity } from "./identity.ts";
 import { bufferSourceToArrayBuffer, random } from "./utils.ts";
 
-const RP = "Common Fabric";
+const RP = "Common Tools";
 const PRF_SALT = new TextEncoder().encode("PRF_SALT");
 const TIMEOUT = 60_000;
 const RP_ID = () => new URL(globalThis.location.href).host;

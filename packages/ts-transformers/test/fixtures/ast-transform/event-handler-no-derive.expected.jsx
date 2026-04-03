@@ -1,15 +1,15 @@
-import * as __cfHelpers from "commonfabric";
-import { Cell, Default, handler, pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { Cell, Default, handler, pattern, UI } from "commontools";
 declare global {
     namespace JSX {
         interface IntrinsicElements {
-            "cf-button": any;
+            "ct-button": any;
         }
     }
 }
 const handleClick = handler({
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         count: {
@@ -18,12 +18,12 @@ const handleClick = handler({
         }
     },
     required: ["count"]
-} as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
+} as const satisfies __ctHelpers.JSONSchema, (_, { count }) => {
     count.set(count.get() + 1);
 });
 // FIXTURE: event-handler-no-derive
 // Verifies: handler invocations in JSX are NOT wrapped in derive(), while expressions are
-//   count + 1 (in JSX <span>)                → __cfHelpers.derive(...schemas, { count }, ({ count }) => count + 1)
+//   count + 1 (in JSX <span>)                → __ctHelpers.derive(...schemas, { count }, ({ count }) => count + 1)
 //   handleClick({ count }) (onClick attr)     → left as-is (not wrapped in derive)
 //   handleClick({ count }) (inside .map())    → left as-is (not wrapped in derive)
 //   pattern<{ count: Default<number, 0> }>    → pattern(fn, inputSchema, outputSchema)
@@ -33,7 +33,7 @@ export default pattern((__ct_pattern_input) => {
     return {
         [UI]: (<div>
           {/* Regular JSX expression - should be wrapped in derive */}
-          <span>Count: {__cfHelpers.derive({
+          <span>Count: {__ctHelpers.derive({
             type: "object",
             properties: {
                 count: {
@@ -41,19 +41,19 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["count"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count + 1)}</span>
+        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count + 1)}</span>
 
           {/* Event handler with OpaqueRef - should NOT be wrapped in derive */}
-          <cf-button onClick={handleClick({ count })}>
+          <ct-button onClick={handleClick({ count })}>
             Click me
-          </cf-button>
+          </ct-button>
 
           {/* Event handler inside map - should NOT be wrapped in derive */}
-          {[1, 2, 3].map((n) => (<cf-button key={n} onClick={handleClick({ count })}>
+          {[1, 2, 3].map((n) => (<ct-button key={n} onClick={handleClick({ count })}>
               Button {n}
-            </cf-button>))}
+            </ct-button>))}
         </div>),
         count,
     };
@@ -66,7 +66,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["count"]
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -98,8 +98,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

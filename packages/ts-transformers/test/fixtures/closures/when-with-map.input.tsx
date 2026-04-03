@@ -6,7 +6,7 @@
  * When value is items.map(...), the map gets transformed to mapWithPattern.
  * Schema injection needs to know the type of the mapWithPattern result.
  */
-import { Cell, Default, pattern, UI } from "commonfabric";
+import { Cell, Default, pattern, UI } from "commontools";
 
 interface Item {
   label: string;

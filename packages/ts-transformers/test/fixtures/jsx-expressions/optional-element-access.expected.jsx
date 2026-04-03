@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { cell, NAME, pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { cell, NAME, pattern, UI } from "commontools";
 // FIXTURE: optional-element-access
 // Verifies: optional element access (?.[0]) in a negated && guard is transformed to when(derive(...))
 //   !list.get()?.[0] && <span> → when(derive({list}, ({list}) => !list.get()?.[0]), <span>)
@@ -14,25 +14,25 @@ export default pattern(() => {
                     type: "string"
                 }
             }]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [NAME]: "Optional element access",
         [UI]: (<div>
-        {__cfHelpers.when({
+        {__ctHelpers.when({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean"
                 }, {}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 list: {
@@ -48,12 +48,12 @@ export default pattern(() => {
                 }
             },
             required: ["list"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { list: list }, ({ list }) => !list.get()?.[0]), <span>No first entry</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => !list.get()?.[0]), <span>No first entry</span>)}
       </div>),
     };
-}, false as const satisfies __cfHelpers.JSONSchema, {
+}, false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -85,8 +85,8 @@ export default pattern(() => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

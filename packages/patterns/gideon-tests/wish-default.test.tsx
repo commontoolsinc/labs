@@ -5,9 +5,9 @@
  * Verifies that the test runner sets up a defaultPattern with allPieces
  * so that patterns using wish({ query: "#default" }) can read/write allPieces.
  *
- * Run: deno task cf test packages/patterns/gideon-tests/wish-default.test.tsx --verbose
+ * Run: deno task ct test packages/patterns/gideon-tests/wish-default.test.tsx --verbose
  */
-import { action, computed, NAME, pattern, wish, Writable } from "commonfabric";
+import { action, computed, NAME, pattern, wish, Writable } from "commontools";
 
 interface MinimalPiece {
   [NAME]?: string;

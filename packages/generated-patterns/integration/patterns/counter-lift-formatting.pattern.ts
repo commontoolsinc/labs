@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, pattern } from "commonfabric";
+import { Cell, Default, handler, lift, pattern } from "commontools";
 
 interface LiftFormattingArgs {
   value: Default<number, 0>;

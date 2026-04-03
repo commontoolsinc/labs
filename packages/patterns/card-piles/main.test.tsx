@@ -13,9 +13,9 @@
  * - Move card back to restore both piles
  * - Multiple shuffles preserve card count
  *
- * Run: deno task cf test packages/patterns/card-piles/main.test.tsx --verbose
+ * Run: deno task ct test packages/patterns/card-piles/main.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, computed, pattern } from "commontools";
 import CardPiles, { defaultPile1, defaultPile2 } from "./main.tsx";
 
 export default pattern(() => {

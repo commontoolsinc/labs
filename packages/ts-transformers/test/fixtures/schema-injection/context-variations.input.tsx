@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, handler } from "commonfabric";
+import { cell, pattern, handler } from "commontools";
 
 // 1. Top-level
 const _topLevel = cell(10);

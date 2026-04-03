@@ -1,4 +1,4 @@
-import { getLogger } from "@commonfabric/utils/logger";
+import { getLogger } from "@commontools/utils/logger";
 import {
   DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_MODEL_NAME,
@@ -7,15 +7,15 @@ import {
   LLMGenerateObjectRequest,
   LLMRequest,
   LLMResponse,
-} from "@commonfabric/llm";
+} from "@commontools/llm";
 import {
   BuiltInGenerateObjectParams,
   BuiltInGenerateTextParams,
   BuiltInLLMMessage,
   BuiltInLLMParams,
-} from "@commonfabric/api";
-import type { Schema } from "@commonfabric/api/schema";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+} from "@commontools/api";
+import type { Schema } from "@commontools/api/schema";
+import { hashOf } from "@commontools/data-model/value-hash";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
@@ -30,7 +30,7 @@ import {
   LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { isObject } from "@commonfabric/utils/types";
+import { isObject } from "@commontools/utils/types";
 
 const logger = getLogger("llm", {
   enabled: true,

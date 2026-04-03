@@ -16,7 +16,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -295,9 +295,9 @@ export const OccurrenceTrackerModule = pattern<
   return {
     [NAME]: displayName,
     [UI]: (
-      <cf-vstack gap="3">
+      <ct-vstack gap="3">
         {/* Label input */}
-        <cf-input
+        <ct-input
           $value={label}
           placeholder="What are you tracking? (e.g., Headache, Coffee)"
           style={{
@@ -306,7 +306,7 @@ export const OccurrenceTrackerModule = pattern<
         />
 
         {/* Big Record Button */}
-        <cf-button
+        <ct-button
           variant="primary"
           onClick={recordNow({ occurrences })}
           style={{
@@ -316,7 +316,7 @@ export const OccurrenceTrackerModule = pattern<
           }}
         >
           Record Now
-        </cf-button>
+        </ct-button>
 
         {/* Last occurrence display */}
         {computed(() => {
@@ -328,7 +328,7 @@ export const OccurrenceTrackerModule = pattern<
               <span
                 style={{
                   textAlign: "center",
-                  color: "var(--cf-color-gray-400)",
+                  color: "var(--ct-color-gray-400)",
                   padding: "1rem 0",
                 }}
               >
@@ -337,7 +337,7 @@ export const OccurrenceTrackerModule = pattern<
             );
           }
           return (
-            <cf-vstack
+            <ct-vstack
               gap="1"
               style={{
                 textAlign: "center",
@@ -347,7 +347,7 @@ export const OccurrenceTrackerModule = pattern<
               <span
                 style={{
                   fontSize: "0.875rem",
-                  color: "var(--cf-color-gray-500)",
+                  color: "var(--ct-color-gray-500)",
                 }}
               >
                 Last recorded:
@@ -362,14 +362,14 @@ export const OccurrenceTrackerModule = pattern<
                 {formatAbsoluteTime(last.timestamp)}
               </span>
               {/* Note for last occurrence */}
-              <cf-input
+              <ct-input
                 value={last.note || ""}
                 placeholder="Add note..."
                 style={{
                   fontSize: "0.875rem",
                   marginTop: "0.5rem",
                 }}
-                oncf-input={(e: { detail?: { value?: string } }) => {
+                onct-input={(e: { detail?: { value?: string } }) => {
                   const newNote = e.detail?.value?.trim() || "";
                   const current = occurrences.get() || [];
                   const idx = current.findIndex(
@@ -382,21 +382,21 @@ export const OccurrenceTrackerModule = pattern<
                   }
                 }}
               />
-            </cf-vstack>
+            </ct-vstack>
           );
         })}
 
         {/* Stats Section - using component attributes for layout */}
-        <cf-hstack
+        <ct-hstack
           gap="4"
           justify="around"
           style={{
             padding: "0.75rem",
-            background: "var(--cf-color-gray-50)",
+            background: "var(--ct-color-gray-50)",
             borderRadius: "8px",
           }}
         >
-          <cf-vstack gap="0" align="center">
+          <ct-vstack gap="0" align="center">
             <span
               style={{
                 fontSize: "1.5rem",
@@ -408,13 +408,13 @@ export const OccurrenceTrackerModule = pattern<
             <span
               style={{
                 fontSize: "0.75rem",
-                color: "var(--cf-color-gray-500)",
+                color: "var(--ct-color-gray-500)",
               }}
             >
               Total
             </span>
-          </cf-vstack>
-          <cf-vstack gap="0" align="center">
+          </ct-vstack>
+          <ct-vstack gap="0" align="center">
             <span
               style={{
                 fontSize: "1rem",
@@ -426,13 +426,13 @@ export const OccurrenceTrackerModule = pattern<
             <span
               style={{
                 fontSize: "0.75rem",
-                color: "var(--cf-color-gray-500)",
+                color: "var(--ct-color-gray-500)",
               }}
             >
               Avg frequency
             </span>
-          </cf-vstack>
-        </cf-hstack>
+          </ct-vstack>
+        </ct-hstack>
 
         {/* Expandable History - using ifElse to preserve details state */}
         {ifElse(
@@ -442,13 +442,13 @@ export const OccurrenceTrackerModule = pattern<
               style={{
                 cursor: "pointer",
                 fontSize: "0.875rem",
-                color: "var(--cf-color-gray-600)",
+                color: "var(--ct-color-gray-600)",
                 padding: "0.5rem 0",
               }}
             >
               History ({totalCount})
             </summary>
-            <cf-vstack
+            <ct-vstack
               gap="1"
               style={{
                 marginTop: "0.5rem",
@@ -457,16 +457,16 @@ export const OccurrenceTrackerModule = pattern<
               }}
             >
               {occurrences.map((occ) => (
-                <cf-hstack
+                <ct-hstack
                   gap="2"
                   align="center"
                   style={{
                     padding: "0.5rem",
-                    background: "var(--cf-color-gray-50)",
+                    background: "var(--ct-color-gray-50)",
                     borderRadius: "6px",
                   }}
                 >
-                  <cf-vstack gap="0" style={{ flex: "1" }}>
+                  <ct-vstack gap="0" style={{ flex: "1" }}>
                     <span style={{ fontSize: "0.875rem" }}>
                       {computed(() =>
                         `${formatRelativeTime(occ.timestamp)} · ${
@@ -474,7 +474,7 @@ export const OccurrenceTrackerModule = pattern<
                         }`
                       )}
                     </span>
-                    <cf-input
+                    <ct-input
                       $value={occ.note}
                       placeholder="Add note..."
                       style={{
@@ -483,8 +483,8 @@ export const OccurrenceTrackerModule = pattern<
                         flex: "1",
                       }}
                     />
-                  </cf-vstack>
-                  <cf-button
+                  </ct-vstack>
+                  <ct-button
                     variant="ghost"
                     onClick={deleteOccurrence({
                       occurrences,
@@ -493,20 +493,20 @@ export const OccurrenceTrackerModule = pattern<
                     style={{
                       padding: "0.25rem 0.5rem",
                       fontSize: "1rem",
-                      color: "var(--cf-color-gray-400)",
+                      color: "var(--ct-color-gray-400)",
                       minWidth: "auto",
                     }}
                     title="Delete"
                   >
                     ×
-                  </cf-button>
-                </cf-hstack>
+                  </ct-button>
+                </ct-hstack>
               ))}
-            </cf-vstack>
+            </ct-vstack>
           </details>,
           null,
         )}
-      </cf-vstack>
+      </ct-vstack>
     ),
     label,
     occurrences,

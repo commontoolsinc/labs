@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, derive, pattern } from "commontools";
 
 // Test that all literal types are widened in closure captures
 // FIXTURE: derive-all-literal-types

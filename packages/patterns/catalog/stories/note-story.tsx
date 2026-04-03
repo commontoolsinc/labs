@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, type VNode } from "commonfabric";
+import { NAME, pattern, UI, type VNode } from "commontools";
 
 import Note from "../../notes/note.tsx";
 

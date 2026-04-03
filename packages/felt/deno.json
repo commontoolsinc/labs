@@ -1,5 +1,5 @@
 {
-  "name": "@commonfabric/felt",
+  "name": "@commontools/felt",
   "tasks": {
     "cli": "deno run ./cli.ts",
     "test": "echo 'No tests defined.'"

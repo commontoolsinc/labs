@@ -53,7 +53,7 @@ function createComputedToDeriveVisitor(
       return ts.visitEachChild(node, visitor, tsContext);
     }
 
-    // Check if this is a computed() call from commonfabric
+    // Check if this is a computed() call from commontools
     const callKind = detectCallKind(node, checker);
     if (callKind?.kind !== "builder" || callKind.builderName !== "computed") {
       // Not a computed call, continue traversing
@@ -74,8 +74,8 @@ function createComputedToDeriveVisitor(
 
     // Transform: computed(() => expr) → derive({}, () => expr)
     // Keep the zero-parameter callback as-is
-    // Always use __cfHelpers.derive for safety (it's always available via cts-enable)
-    const preservedDeriveCall = context.cfHelpers.createHelperCall(
+    // Always use __ctHelpers.derive for safety (it's always available via cts-enable)
+    const preservedDeriveCall = context.ctHelpers.createHelperCall(
       "derive",
       node,
       node.typeArguments,

@@ -3,7 +3,8 @@ import {
   action,
   computed,
   type Default,
-  equals,
+  FS,
+  type FsProjection,
   generateText,
   handler,
   NAME,
@@ -17,7 +18,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import NoteMd from "./note-md.tsx";
 import {
   type MentionablePiece,
@@ -35,6 +36,7 @@ export { NotePiece };
 interface NoteOutput extends NotePiece {
   [NAME]: string;
   [UI]: VNode;
+  [FS]: FsProjection;
   title: string;
   content: string;
   summary: string;
@@ -49,7 +51,7 @@ interface NoteOutput extends NotePiece {
   createNewNote: Stream<void>;
   /** Parent notebook reference, null if not in a notebook */
   parentNotebook: NotebookPiece | null;
-  /** Minimal UI for embedding in containers like Record. Use via cf-render variant="embedded". */
+  /** Minimal UI for embedding in containers like Record. Use via ct-render variant="embedded". */
   embeddedUI: VNode;
   // Test-accessible state
   menuOpen: boolean;
@@ -63,7 +65,7 @@ interface NoteOutput extends NotePiece {
 
 // ===== Module-scope handlers (reused with different bindings) =====
 
-// Used in cf-code-editor - binds mentionable and allPieces
+// Used in ct-code-editor - binds mentionable and allPieces
 const handleNewBacklink = handler<
   {
     detail: {
@@ -297,22 +299,6 @@ const Note = pattern<NoteInput, NoteOutput>(
       },
     );
 
-    // LAZY: Only compute which notebooks contain this note when menu is open
-    const containingNotebooks = computed(() => {
-      if (!menuOpen.get()) return [];
-
-      const result: NotebookPiece[] = [];
-      for (const nb of notebooks) {
-        for (const n of nb?.notes ?? []) {
-          if (equals(n, self)) {
-            result.push(nb);
-            break;
-          }
-        }
-      }
-      return result;
-    });
-
     // Link pattern for wiki-links
     const patternJson = computed(() => {
       const lpValue = (linkPattern as any)?.get?.() ?? linkPattern;
@@ -358,7 +344,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     // ===== UI =====
 
     const editorUI = (
-      <cf-code-editor
+      <ct-code-editor
         $value={content}
         $mentionable={mentionable!}
         $mentioned={mentioned}
@@ -378,18 +364,23 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     return {
       [NAME]: computed(() => `📝 ${title.get()}`),
+      [FS]: {
+        type: "text/markdown",
+        frontmatter: { title },
+        content,
+      },
       [UI]: (
-        <cf-screen>
-          <cf-vstack
+        <ct-screen>
+          <ct-vstack
             slot="header"
             gap="2"
             padding="4"
             style={{
-              borderBottom: "1px solid var(--cf-color-border, #e5e5e7)",
+              borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
             }}
           >
             {/* Parent notebook chip */}
-            <cf-hstack
+            <ct-hstack
               gap="2"
               align="center"
               style={{
@@ -400,19 +391,19 @@ const Note = pattern<NoteInput, NoteOutput>(
               <span
                 style={{
                   fontSize: "13px",
-                  color: "var(--cf-color-text-secondary)",
+                  color: "var(--ct-color-text-secondary)",
                 }}
               >
                 In:
               </span>
-              <cf-chip
+              <ct-chip
                 label={parentNotebookLabel}
                 interactive
-                oncf-click={goToParent}
+                onct-click={goToParent}
               />
-            </cf-hstack>
+            </ct-hstack>
 
-            <cf-hstack gap="3" style={{ alignItems: "center" }}>
+            <ct-hstack gap="3" style={{ alignItems: "center" }}>
               {/* Editable Title - click to edit */}
               <div
                 style={{
@@ -437,42 +428,42 @@ const Note = pattern<NoteInput, NoteOutput>(
                   marginRight: "12px",
                 }}
               >
-                <cf-input
+                <ct-input
                   $value={title}
                   placeholder="Note title..."
                   style={{ flex: 1 }}
-                  oncf-blur={stopEditingTitle}
-                  oncf-keydown={handleTitleKeydown}
+                  onct-blur={stopEditingTitle}
+                  onct-keydown={handleTitleKeydown}
                 />
               </div>
 
               {/* View Mode button */}
-              <cf-button
+              <ct-button
                 variant="ghost"
                 onClick={goToViewer}
                 style={headerButtonStyle}
                 title="View as markdown"
               >
                 View
-              </cf-button>
+              </ct-button>
 
               {/* New Note button */}
-              <cf-button
+              <ct-button
                 variant="ghost"
                 onClick={createNewNote}
                 style={{ ...headerButtonStyle, gap: "4px" }}
                 title="Create new note"
               >
                 📝 New
-              </cf-button>
+              </ct-button>
 
-              <cf-button
+              <ct-button
                 variant="ghost"
                 onClick={toggleMenu}
                 style={{ ...headerButtonStyle, padding: "8px 16px" }}
               >
                 Notebooks ▾
-              </cf-button>
+              </ct-button>
 
               {/* Backdrop to close menu */}
               <div
@@ -486,15 +477,15 @@ const Note = pattern<NoteInput, NoteOutput>(
               />
 
               {/* Dropdown Menu */}
-              <cf-vstack
+              <ct-vstack
                 gap="0"
                 style={{
                   display: menuDisplayStyle,
                   position: "fixed",
                   top: "112px",
                   right: "16px",
-                  background: "var(--cf-color-bg, white)",
-                  border: "1px solid var(--cf-color-border, #e5e5e7)",
+                  background: "var(--ct-color-bg, white)",
+                  border: "1px solid var(--ct-color-border, #e5e5e7)",
                   borderRadius: "12px",
                   boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
                   minWidth: "180px",
@@ -503,20 +494,14 @@ const Note = pattern<NoteInput, NoteOutput>(
                 }}
               >
                 {notebooks.map((notebook) => (
-                  <cf-button
+                  <ct-button
                     variant="ghost"
                     onClick={menuGoToNotebook({ menuOpen, notebook })}
                     style={{ justifyContent: "flex-start" }}
                   >
                     {"  "}
                     {notebook?.[NAME] ?? "Untitled"}
-                    {computed(() => {
-                      return containingNotebooks
-                          .find((nb) => equals(nb, notebook))
-                        ? " ✓"
-                        : "";
-                    })}
-                  </cf-button>
+                  </ct-button>
                 ))}
 
                 {/* Divider + All Notes - only show if All Notes piece exists */}
@@ -524,12 +509,12 @@ const Note = pattern<NoteInput, NoteOutput>(
                   style={{
                     display: allNotesDividerDisplay,
                     height: "1px",
-                    background: "var(--cf-color-border, #e5e5e7)",
+                    background: "var(--ct-color-border, #e5e5e7)",
                     margin: "4px 8px",
                   }}
                 />
 
-                <cf-button
+                <ct-button
                   variant="ghost"
                   onClick={menuAllNotebooks}
                   style={{
@@ -538,21 +523,21 @@ const Note = pattern<NoteInput, NoteOutput>(
                   }}
                 >
                   {"  "}📁 All Notes
-                </cf-button>
-              </cf-vstack>
-            </cf-hstack>
-          </cf-vstack>
+                </ct-button>
+              </ct-vstack>
+            </ct-hstack>
+          </ct-vstack>
 
           {editorUI}
 
-          <cf-hstack slot="footer">
+          <ct-hstack slot="footer">
             {backlinks?.map((piece) => (
-              <cf-button onClick={handleBacklinkClick({ piece })}>
+              <ct-button onClick={handleBacklinkClick({ piece })}>
                 {piece?.[NAME]}
-              </cf-button>
+              </ct-button>
             ))}
-          </cf-hstack>
-        </cf-screen>
+          </ct-hstack>
+        </ct-screen>
       ),
       title,
       content,

@@ -1,11 +1,11 @@
 
-## CTS (Common Fabric TypeScript)
+## CTS (CommonTools TypeScript)
 
 TypeScript types are automatically processed at runtime. Enable with:
 
 ```typescript
 /// <cts-enable />
-import { pattern, UI, NAME } from "commonfabric";
+import { pattern, UI, NAME } from "commontools";
 ```
 
 CTS provides:

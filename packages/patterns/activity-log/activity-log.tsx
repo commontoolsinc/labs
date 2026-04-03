@@ -9,7 +9,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 // ===== Types =====
 
@@ -111,92 +111,92 @@ export default pattern<ActivityLogInput, ActivityLogOutput>(
     return {
       [NAME]: computed(() => `Activity Log (${events.get().length})`),
       [UI]: (
-        <cf-screen>
-          <cf-hstack
+        <ct-screen>
+          <ct-hstack
             slot="header"
             gap="2"
             style="padding: 0.75rem 1rem; align-items: center;"
           >
-            <cf-label style="font-weight: 600; flex: 1;">Activity Log</cf-label>
-            <cf-button variant="ghost" size="sm" onClick={clearLog}>
+            <ct-label style="font-weight: 600; flex: 1;">Activity Log</ct-label>
+            <ct-button variant="ghost" size="sm" onClick={clearLog}>
               Clear
-            </cf-button>
-          </cf-hstack>
+            </ct-button>
+          </ct-hstack>
 
-          <cf-vscroll flex showScrollbar fadeEdges>
-            <cf-vstack gap="3" style="padding: 0.75rem 1rem;">
+          <ct-vscroll flex showScrollbar fadeEdges>
+            <ct-vstack gap="3" style="padding: 0.75rem 1rem;">
               {/* Agent filter chips */}
-              <cf-hstack gap="1" style="flex-wrap: wrap;">
-                <cf-button
+              <ct-hstack gap="1" style="flex-wrap: wrap;">
+                <ct-button
                   variant={filterAgent.get() === null ? "primary" : "ghost"}
                   size="sm"
                   onClick={() => setFilter.send({ agent: null })}
                 >
                   All
-                </cf-button>
+                </ct-button>
                 {agents.map((agent: string) => (
-                  <cf-button
+                  <ct-button
                     variant={filterAgent.get() === agent ? "primary" : "ghost"}
                     size="sm"
                     onClick={() => setFilter.send({ agent })}
                   >
                     {agent}
-                  </cf-button>
+                  </ct-button>
                 ))}
-              </cf-hstack>
+              </ct-hstack>
 
               {/* Event list */}
               {filtered.map((event: ActivityEvent) => (
-                <cf-hstack
+                <ct-hstack
                   gap="2"
-                  style="align-items: flex-start; border-bottom: 1px solid var(--cf-color-gray-100); padding-bottom: 0.5rem;"
+                  style="align-items: flex-start; border-bottom: 1px solid var(--ct-color-gray-100); padding-bottom: 0.5rem;"
                 >
-                  <cf-vstack gap="0" style="flex: 1; min-width: 0;">
-                    <cf-hstack
+                  <ct-vstack gap="0" style="flex: 1; min-width: 0;">
+                    <ct-hstack
                       gap="2"
                       style="align-items: center; flex-wrap: wrap;"
                     >
-                      <cf-badge>{event.agent}</cf-badge>
-                      <cf-label style="font-weight: 500;">
+                      <ct-badge>{event.agent}</ct-badge>
+                      <ct-label style="font-weight: 500;">
                         {event.action}
-                      </cf-label>
+                      </ct-label>
                       {event.pieceName
                         ? (
-                          <cf-label style="color: var(--cf-color-gray-500);">
+                          <ct-label style="color: var(--ct-color-gray-500);">
                             {event.pieceName}
-                          </cf-label>
+                          </ct-label>
                         )
                         : null}
                       {event.pieceRef
-                        ? <cf-cell-link $cell={event.pieceRef} />
+                        ? <ct-cell-link $cell={event.pieceRef} />
                         : null}
-                    </cf-hstack>
+                    </ct-hstack>
                     {event.note
                       ? (
-                        <cf-label style="color: var(--cf-color-gray-600); font-size: 0.875em;">
+                        <ct-label style="color: var(--ct-color-gray-600); font-size: 0.875em;">
                           {event.note}
-                        </cf-label>
+                        </ct-label>
                       )
                       : null}
-                  </cf-vstack>
-                  <cf-label style="color: var(--cf-color-gray-400); font-size: 0.75em; white-space: nowrap; flex-shrink: 0;">
+                  </ct-vstack>
+                  <ct-label style="color: var(--ct-color-gray-400); font-size: 0.75em; white-space: nowrap; flex-shrink: 0;">
                     {new Date(event.timestamp).toLocaleTimeString()}
-                  </cf-label>
-                </cf-hstack>
+                  </ct-label>
+                </ct-hstack>
               ))}
 
               {computed(() =>
                 filtered.length === 0
                   ? (
-                    <cf-label style="color: var(--cf-color-gray-400); text-align: center; padding: 2rem 0;">
+                    <ct-label style="color: var(--ct-color-gray-400); text-align: center; padding: 2rem 0;">
                       No events yet
-                    </cf-label>
+                    </ct-label>
                   )
                   : null
               )}
-            </cf-vstack>
-          </cf-vscroll>
-        </cf-screen>
+            </ct-vstack>
+          </ct-vscroll>
+        </ct-screen>
       ),
       logEvent,
       clearLog,

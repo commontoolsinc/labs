@@ -16,7 +16,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import type {
   AnnotationKind,
   AnnotationPiece,
@@ -111,9 +111,9 @@ export default pattern<Record<string, never>>((_) => {
       return `🗂 Annotations (${openCount} open)`;
     }),
     [UI]: (
-      <cf-vstack gap="3" style={{ padding: "16px" }}>
+      <ct-vstack gap="3" style={{ padding: "16px" }}>
         {/* ── Filter tabs ── */}
-        <cf-hstack gap="1" style={{ flexWrap: "wrap" }}>
+        <ct-hstack gap="1" style={{ flexWrap: "wrap" }}>
           {TAB_LABELS.map(({ key, label }) => (
             <button
               type="button"
@@ -132,15 +132,15 @@ export default pattern<Record<string, never>>((_) => {
               {label} ({counts[key as keyof typeof counts] ?? 0})
             </button>
           ))}
-        </cf-hstack>
+        </ct-hstack>
 
         {/* ── Annotation list ── */}
-        <cf-vstack gap="2">
+        <ct-vstack gap="2">
           {filtered.map(
             (ann: AnnotationPiece) =>
               ann && (
-                <cf-cell-context $cell={ann}>
-                  <cf-vstack
+                <ct-cell-context $cell={ann}>
+                  <ct-vstack
                     gap="1"
                     style={{
                       padding: "10px 12px",
@@ -150,11 +150,11 @@ export default pattern<Record<string, never>>((_) => {
                     }}
                   >
                     {/* Row 1: kind icon + link to annotation + status badge */}
-                    <cf-hstack gap="2" style={{ alignItems: "center" }}>
+                    <ct-hstack gap="2" style={{ alignItems: "center" }}>
                       <span style={{ fontSize: "14px" }}>
                         {KIND_ICON[ann?.kind ?? "note"] ?? "📌"}
                       </span>
-                      <cf-cell-link $cell={ann} />
+                      <ct-cell-link $cell={ann} />
                       <span
                         style={{
                           fontSize: "11px",
@@ -172,61 +172,61 @@ export default pattern<Record<string, never>>((_) => {
                       >
                         {ann?.status ?? "open"}
                       </span>
-                    </cf-hstack>
+                    </ct-hstack>
 
                     {/* Row 2: target piece link (if set) */}
                     {ann?.targetPiece && (
-                      <cf-hstack gap="1" style={{ alignItems: "center" }}>
+                      <ct-hstack gap="1" style={{ alignItems: "center" }}>
                         <span style={{ fontSize: "11px", color: "#9ca3af" }}>
                           on:
                         </span>
-                        <cf-cell-link $cell={ann.targetPiece} />
-                      </cf-hstack>
+                        <ct-cell-link $cell={ann.targetPiece} />
+                      </ct-hstack>
                     )}
 
                     {/* Row 3: action buttons */}
-                    <cf-hstack gap="1" style={{ marginTop: "4px" }}>
+                    <ct-hstack gap="1" style={{ marginTop: "4px" }}>
                       {(ann?.status === "open" ||
                         ann?.status === "in-progress") && (
-                        <cf-button
+                        <ct-button
                           size="sm"
                           onClick={resolveAnnotation({ status: ann.status! })}
                         >
                           Resolve
-                        </cf-button>
+                        </ct-button>
                       )}
                       {(ann?.status === "open" ||
                         ann?.status === "in-progress") && (
-                        <cf-button
+                        <ct-button
                           size="sm"
                           variant="secondary"
                           onClick={dismissAnnotation({ status: ann.status! })}
                         >
                           Dismiss
-                        </cf-button>
+                        </ct-button>
                       )}
                       {(ann?.status === "resolved" ||
                         ann?.status === "dismissed") && (
-                        <cf-button
+                        <ct-button
                           size="sm"
                           variant="secondary"
                           onClick={reopenAnnotation({ status: ann.status! })}
                         >
                           Reopen
-                        </cf-button>
+                        </ct-button>
                       )}
-                    </cf-hstack>
-                  </cf-vstack>
-                </cf-cell-context>
+                    </ct-hstack>
+                  </ct-vstack>
+                </ct-cell-context>
               ),
           )}
           {filtered.length === 0 && (
-            <span style={{ color: "#9ca3af", fontSize: "14px" }}>
+            <ct-text style={{ color: "#9ca3af", fontSize: "14px" }}>
               No {filterValue === "all" ? "" : filterValue} annotations.
-            </span>
+            </ct-text>
           )}
-        </cf-vstack>
-      </cf-vstack>
+        </ct-vstack>
+      </ct-vstack>
     ),
   };
 });

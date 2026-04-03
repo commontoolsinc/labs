@@ -6,13 +6,13 @@ import {
   SourceMapParser,
   TypeScriptCompiler,
 } from "../mod.ts";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCacheFS } from "@commontools/static";
 import { SourceMapConsumer } from "source-map-js";
 
 const staticCache = new StaticCacheFS();
 const types = await getTypeScriptEnvironmentTypes(staticCache);
-types["commonfabric.d.ts"] = await staticCache.getText(
-  "types/commonfabric.d.ts",
+types["commontools.d.ts"] = await staticCache.getText(
+  "types/commontools.d.ts",
 );
 
 describe("SourceMap", () => {

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, NAME, pattern, UI } from "commonfabric";
+import { Default, NAME, pattern, UI } from "commontools";
 
 type CFC<T, C extends string> = T;
 type Secret<T> = CFC<T, "secret">;
@@ -84,7 +84,7 @@ export default pattern<Input, Output>(
               )}
           </div>
 
-          <cf-google-oauth
+          <ct-google-oauth
             $auth={auth}
             scopes={[
               "email",

@@ -17,7 +17,7 @@ declare const state: { count: number };
 
 // Custom component with typed callback prop
 interface CustomButtonProps {
-  // Function props (all treated as handlers in Common Fabric JSX)
+  // Function props (all treated as handlers in Common Tools JSX)
   callback: () => void;
   asyncCallback: () => Promise<void>;
   toggle: () => boolean;

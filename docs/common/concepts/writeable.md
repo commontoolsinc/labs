@@ -3,7 +3,7 @@ Only declare `Writable<>` when you need to mutate.
 Everything is reactive by default. `Writable<>` in type signatures indicates you'll call `.set()`, `.push()`, or `.update()`:
 
 ```typescript
-import { Writable } from 'commonfabric';
+import { Writable } from 'commontools';
 
 interface Item {}
 

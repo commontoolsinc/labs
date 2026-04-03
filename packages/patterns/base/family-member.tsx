@@ -17,7 +17,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 import type {
   ContactPiece,
@@ -85,7 +85,7 @@ interface Output {
 // Handlers
 // ============================================================================
 
-// Handler for cf-tags change event
+// Handler for ct-tags change event
 const updateDietaryRestrictions = handler<
   { detail: { tags: string[] } },
   { member: Writable<FamilyMember> }
@@ -169,7 +169,7 @@ function buildSectionHeaderLabel(
 
 function sectionHeader(labelContent: any, expanded: Writable<boolean>) {
   return (
-    <cf-hstack
+    <ct-hstack
       style={{
         justifyContent: "space-between",
         alignItems: "center",
@@ -182,7 +182,7 @@ function sectionHeader(labelContent: any, expanded: Writable<boolean>) {
       <label style={{ fontSize: "12px", color: "#6b7280", fontWeight: "600" }}>
         {labelContent}
       </label>
-    </cf-hstack>
+    </ct-hstack>
   );
 }
 
@@ -288,38 +288,38 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
   return {
     [NAME]: displayName,
     [UI]: (
-      <cf-screen>
-        <cf-vstack style={{ gap: "16px", padding: "16px" }}>
+      <ct-screen>
+        <ct-vstack style={{ gap: "16px", padding: "16px" }}>
           {/* Basic Info - always visible */}
-          <cf-hstack style={{ gap: "8px" }}>
-            <cf-vstack style={{ gap: "4px", flex: 1 }}>
+          <ct-hstack style={{ gap: "8px" }}>
+            <ct-vstack style={{ gap: "4px", flex: 1 }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 First Name
               </label>
-              <cf-input
+              <ct-input
                 $value={member.key("firstName")}
                 placeholder="First name"
               />
-            </cf-vstack>
-            <cf-vstack style={{ gap: "4px", flex: 1 }}>
+            </ct-vstack>
+            <ct-vstack style={{ gap: "4px", flex: 1 }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 Last Name
               </label>
-              <cf-input
+              <ct-input
                 $value={member.key("lastName")}
                 placeholder="Last name"
               />
-            </cf-vstack>
-          </cf-hstack>
+            </ct-vstack>
+          </ct-hstack>
 
           {/* Tags */}
-          <cf-vstack style={{ gap: "4px" }}>
+          <ct-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Tags</label>
-            <cf-tags
+            <ct-tags
               tags={member.key("tags")}
-              oncf-change={updateTags({ member })}
+              onct-change={updateTags({ member })}
             />
-          </cf-vstack>
+          </ct-vstack>
 
           {
             /* Family Info Section
@@ -333,23 +333,23 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
             {computed(() => {
               if (!showFamilyInfo.get()) return null;
               return (
-                <cf-vstack style={{ gap: "8px" }}>
-                  <cf-vstack style={{ gap: "4px" }}>
+                <ct-vstack style={{ gap: "8px" }}>
+                  <ct-vstack style={{ gap: "4px" }}>
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Relationship
                     </label>
-                    <cf-select
+                    <ct-select
                       $value={member.key("relationship")}
                       items={RELATIONSHIP_OPTIONS}
                     />
-                  </cf-vstack>
-                  <cf-vstack style={{ gap: "4px" }}>
+                  </ct-vstack>
+                  <ct-vstack style={{ gap: "4px" }}>
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Birthday
                     </label>
-                    <cf-input $value={member.key("birthday")} type="date" />
-                  </cf-vstack>
-                </cf-vstack>
+                    <ct-input $value={member.key("birthday")} type="date" />
+                  </ct-vstack>
+                </ct-vstack>
               );
             })}
           </div>
@@ -360,26 +360,26 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
             {computed(() => {
               if (!showHealth.get()) return null;
               return (
-                <cf-vstack style={{ gap: "8px" }}>
-                  <cf-vstack style={{ gap: "4px" }}>
+                <ct-vstack style={{ gap: "8px" }}>
+                  <ct-vstack style={{ gap: "4px" }}>
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Dietary Restrictions
                     </label>
-                    <cf-tags
+                    <ct-tags
                       tags={member.key("dietaryRestrictions")}
-                      oncf-change={updateDietaryRestrictions({ member })}
+                      onct-change={updateDietaryRestrictions({ member })}
                     />
-                  </cf-vstack>
-                  <cf-vstack style={{ gap: "4px" }}>
+                  </ct-vstack>
+                  <ct-vstack style={{ gap: "4px" }}>
                     <label style={{ fontSize: "12px", color: "#6b7280" }}>
                       Allergies
                     </label>
-                    <cf-tags
+                    <ct-tags
                       tags={member.key("allergies")}
-                      oncf-change={updateAllergies({ member })}
+                      onct-change={updateAllergies({ member })}
                     />
-                  </cf-vstack>
-                </cf-vstack>
+                  </ct-vstack>
+                </ct-vstack>
               );
             })}
           </div>
@@ -390,12 +390,12 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
             {computed(() => {
               if (!showGifts.get()) return null;
               return (
-                <cf-vstack style={{ gap: "4px" }}>
-                  <cf-tags
+                <ct-vstack style={{ gap: "4px" }}>
+                  <ct-tags
                     tags={member.key("giftIdeas")}
-                    oncf-change={updateGiftIdeas({ member })}
+                    onct-change={updateGiftIdeas({ member })}
                   />
-                </cf-vstack>
+                </ct-vstack>
               );
             })}
           </div>
@@ -406,13 +406,13 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
             {computed(() => {
               if (!showNotes.get()) return null;
               return (
-                <cf-vstack style={{ gap: "4px" }}>
-                  <cf-input
+                <ct-vstack style={{ gap: "4px" }}>
+                  <ct-input
                     $value={member.key("notes")}
                     placeholder="Notes about this family member..."
                     multiple
                   />
-                </cf-vstack>
+                </ct-vstack>
               );
             })}
           </div>
@@ -452,44 +452,44 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
               // If picker is open, show autocomplete
               if (showPicker.get()) {
                 return (
-                  <cf-vstack
+                  <ct-vstack
                     style={{
                       gap: "4px",
                       paddingTop: "8px",
                       borderTop: "1px solid #e5e7eb",
                     }}
                   >
-                    <cf-autocomplete
+                    <ct-autocomplete
                       items={sameAsItems}
                       placeholder="Search contacts..."
-                      oncf-select={selectSameAs({ member, showPicker })}
+                      onct-select={selectSameAs({ member, showPicker })}
                     />
-                  </cf-vstack>
+                  </ct-vstack>
                 );
               }
 
               // Collapsed: small link to expand
               return (
-                <cf-hstack
+                <ct-hstack
                   style={{
                     paddingTop: "8px",
                     borderTop: "1px solid #e5e7eb",
                   }}
                 >
-                  <cf-button
+                  <ct-button
                     variant="ghost"
                     size="sm"
                     onClick={togglePicker({ showPicker })}
                     style={{ fontSize: "12px", color: "#6b7280" }}
                   >
                     Link to another contact...
-                  </cf-button>
-                </cf-hstack>
+                  </ct-button>
+                </ct-hstack>
               );
             })}
           </div>
-        </cf-vstack>
-      </cf-screen>
+        </ct-vstack>
+      </ct-screen>
     ),
     member,
   };

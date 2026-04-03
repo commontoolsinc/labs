@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { Writable, derive, pattern } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { Writable, derive, pattern } from "commontools";
 interface Point {
     x: number;
     y: number;
@@ -20,12 +20,12 @@ export default pattern(() => {
             }
         },
         required: ["x", "y"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __ctHelpers.JSONSchema);
     const multiplier = Writable.of(2, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __ctHelpers.JSONSchema);
     // Destructuring requires .get() first since derive doesn't unwrap Cell
-    const result = __cfHelpers.derive({
+    const result = __ctHelpers.derive({
         type: "object",
         properties: {
             point: {
@@ -52,9 +52,9 @@ export default pattern(() => {
                 required: ["x", "y"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         point,
         multiplier: multiplier
     }, ({ point: p, multiplier }) => {
@@ -62,10 +62,10 @@ export default pattern(() => {
         return (x + y) * multiplier.get();
     });
     return result;
-}, false as const satisfies __cfHelpers.JSONSchema, {
+}, false as const satisfies __ctHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

@@ -9,7 +9,7 @@ import {
   pattern,
   str,
   type Writable,
-} from "commonfabric";
+} from "commontools";
 
 interface SummaryArgs {
   value: Default<number, 0>;

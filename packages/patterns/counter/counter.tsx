@@ -10,7 +10,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 // ===== Types =====
 
@@ -70,12 +70,12 @@ const Counter = pattern<CounterInput, CounterOutput>(({ value }) => {
   return {
     [NAME]: displayName,
     [UI]: (
-      <cf-screen>
-        <cf-vstack slot="header" gap="1">
-          <cf-heading level={4}>Simple Counter</cf-heading>
-        </cf-vstack>
+      <ct-screen>
+        <ct-vstack slot="header" gap="1">
+          <ct-heading level={4}>Simple Counter</ct-heading>
+        </ct-vstack>
 
-        <cf-vstack gap="3" style="padding: 2rem; align-items: center;">
+        <ct-vstack gap="3" style="padding: 2rem; align-items: center;">
           <div
             style={{
               fontSize: "3rem",
@@ -88,31 +88,31 @@ const Counter = pattern<CounterInput, CounterOutput>(({ value }) => {
 
           <div
             id="counter-result"
-            style={{ color: "var(--cf-color-gray-500)" }}
+            style={{ color: "var(--ct-color-gray-500)" }}
           >
             Counter is the {ordinalDisplay} number
           </div>
 
-          <cf-hstack gap="2">
+          <ct-hstack gap="2">
             {/* onClick can take a Stream directly - runtime calls .send() */}
-            <cf-button
+            <ct-button
               id="counter-decrement"
               variant="secondary"
               onClick={decrement}
             >
               - Decrement
-            </cf-button>
+            </ct-button>
             {/* onClick can also take a function that calls .send() explicitly */}
-            <cf-button
+            <ct-button
               id="counter-increment"
               variant="primary"
               onClick={() => boundIncrement.send()}
             >
               + Increment
-            </cf-button>
-          </cf-hstack>
-        </cf-vstack>
-      </cf-screen>
+            </ct-button>
+          </ct-hstack>
+        </ct-vstack>
+      </ct-screen>
     ),
     value,
     // Both approaches can be exported and tested via the `ct` CLI

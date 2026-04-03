@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { Cell, lift } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { Cell, lift } from "commontools";
 interface CharmEntry {
     id: string;
     name: string;
@@ -36,7 +36,7 @@ const logCharmsList = lift({
             required: ["id", "name"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "array",
     items: {
         $ref: "#/$defs/CharmEntry"
@@ -56,12 +56,12 @@ const logCharmsList = lift({
             required: ["id", "name"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ charmsList }) => {
+} as const satisfies __ctHelpers.JSONSchema, ({ charmsList }) => {
     console.log("logCharmsList: ", charmsList.get());
     return charmsList;
 });
 export default logCharmsList;
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

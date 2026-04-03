@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, pattern, UI } from "commonfabric";
+import { type Cell, Default, handler, pattern, UI } from "commontools";
 
 interface FriendListState {
   names: Default<string[], ["Alice", "Bob", "Charlie", "Diana", "Evan"]>;
@@ -66,19 +66,19 @@ export default pattern<FriendListState>(
           <h2>My Friends</h2>
           <p>Click to select, Ctrl+Up/Down to reorder</p>
 
-          <cf-keybind
+          <ct-keybind
             ctrl
             key="ArrowUp"
-            oncf-keybind={moveItem({
+            onct-keybind={moveItem({
               names: state.names,
               selectedIndex: state.selectedIndex,
               direction: "UP",
             })}
           />
-          <cf-keybind
+          <ct-keybind
             ctrl
             key="ArrowDown"
-            oncf-keybind={moveItem({
+            onct-keybind={moveItem({
               names: state.names,
               selectedIndex: state.selectedIndex,
               direction: "DOWN",
@@ -86,7 +86,7 @@ export default pattern<FriendListState>(
           />
 
           <ul>
-            {/* Note: key is not needed for Common Fabric but linters require it */}
+            {/* Note: key is not needed for Common Tools but linters require it */}
             {state.names.map((name, index) => (
               <li
                 key={index}

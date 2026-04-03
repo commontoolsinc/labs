@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, derive, pattern } from "commontools";
 
 // FIXTURE: derive-type-assertion
 // Verifies: a type assertion (`as number`) in the callback body is preserved after capture extraction

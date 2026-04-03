@@ -8,7 +8,7 @@ import {
   TypeScriptCompilerOptions,
 } from "../mod.ts";
 import { getCompilerOptions } from "../typescript/mod.ts";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCacheFS } from "@commontools/static";
 
 type TestDef =
   & { name: string; source: string; expectedError?: string }
@@ -45,8 +45,8 @@ const TESTS: TestDef[] = [
 
 const staticCache = new StaticCacheFS();
 const types = await getTypeScriptEnvironmentTypes(staticCache);
-types["commonfabric.d.ts"] = await staticCache.getText(
-  "types/commonfabric.d.ts",
+types["commontools.d.ts"] = await staticCache.getText(
+  "types/commontools.d.ts",
 );
 
 describe("TypeScriptCompiler", () => {

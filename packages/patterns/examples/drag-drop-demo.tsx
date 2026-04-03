@@ -9,7 +9,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import Counter from "../counter/counter.tsx";
 
 interface Item {
@@ -86,7 +86,7 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
               }}
             >
               {items.map((item) => (
-                <cf-drag-source $cell={item} type="item">
+                <ct-drag-source $cell={item} type="item">
                   <div
                     style={{
                       padding: "0.75rem",
@@ -98,15 +98,15 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
                   >
                     {item.title}
                   </div>
-                </cf-drag-source>
+                </ct-drag-source>
               ))}
-              <cf-cell-link $cell={counter} />
+              <ct-cell-link $cell={counter} />
             </div>
           </div>
 
-          <cf-drop-zone
+          <ct-drop-zone
             accept="item,cell-link"
-            oncf-drop={dropItem({ droppedItems })}
+            onct-drop={dropItem({ droppedItems })}
           >
             <div
               style={{
@@ -145,15 +145,15 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
                       }}
                     >
                       <span>{item.title}</span>
-                      <cf-button onClick={removeItem({ droppedItems, item })}>
+                      <ct-button onClick={removeItem({ droppedItems, item })}>
                         ×
-                      </cf-button>
+                      </ct-button>
                     </div>
                   ))}
                 </div>,
               )}
             </div>
-          </cf-drop-zone>
+          </ct-drop-zone>
         </div>
       ),
       availableItems,

@@ -8,12 +8,12 @@
  * - Spaces: user's managed spaces list
  *
  * This package exists to break the circular dependency between
- * @commonfabric/runner and @commonfabric/piece. Both packages can
+ * @commontools/runner and @commontools/piece. Both packages can
  * safely import schemas from here.
  */
 
-import { JSONSchema } from "@commonfabric/api";
-import { Schema } from "@commonfabric/api/schema";
+import { JSONSchema } from "@commontools/api";
+import { Schema } from "@commontools/api/schema";
 
 export {
   type FavoriteEntry,

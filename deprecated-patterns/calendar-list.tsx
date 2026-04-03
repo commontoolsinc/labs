@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, JSONSchema, NAME, pattern, str, UI } from "commonfabric";
+import { derive, JSONSchema, NAME, pattern, str, UI } from "commontools";
 
 // Reuse calendar event schema from gcal.tsx
 const CalendarEventSchema = {

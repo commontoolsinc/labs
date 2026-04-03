@@ -1,10 +1,10 @@
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import {
   CellHandle,
   isCellHandle,
   UI,
   type VNode,
-} from "@commonfabric/runtime-client";
+} from "@commontools/runtime-client";
 
 export type SetPropHandler = <T>(
   target: T,
@@ -180,9 +180,9 @@ export const sanitizeNode = (node: VNode): VNode | null => {
     return null;
   }
   // Fragments (`<></>`) appear as VNodes with
-  // no name property. Rewrite to `cf-fragment`.
+  // no name property. Rewrite to `ct-fragment`.
   if (!node.name) {
-    node.name = "cf-fragment";
+    node.name = "ct-fragment";
   }
   if (!isCellHandle(node.props) && !isObject(node.props)) {
     node = { ...node, props: {} };

@@ -9,7 +9,7 @@ import {
   navigateTo,
   pattern,
   UI,
-} from "commonfabric";
+} from "commontools";
 
 // Import Google Auth utility
 import {
@@ -254,12 +254,12 @@ export default pattern<Input, Output>(
     return {
       [NAME]: pieceName,
       [UI]: (
-        <cf-screen>
+        <ct-screen>
           {/* Header */}
-          <cf-vstack slot="header" gap={1}>
-            <cf-hstack align="center" justify="between">
-              <cf-heading level={4}>Google Docs Markdown Importer</cf-heading>
-              <cf-hstack align="center" gap={1}>
+          <ct-vstack slot="header" gap={1}>
+            <ct-hstack align="center" justify="between">
+              <ct-heading level={4}>Google Docs Markdown Importer</ct-heading>
+              <ct-hstack align="center" gap={1}>
                 <span
                   style={{
                     width: "8px",
@@ -271,30 +271,30 @@ export default pattern<Input, Output>(
                 <span style={{ fontSize: "12px", color: "#666" }}>
                   {authInfo.statusText}
                 </span>
-              </cf-hstack>
-            </cf-hstack>
-          </cf-vstack>
+              </ct-hstack>
+            </ct-hstack>
+          </ct-vstack>
 
           {/* Main content */}
-          <cf-vstack gap="1" style="padding: 16px;">
+          <ct-vstack gap="1" style="padding: 16px;">
             {/* Auth UI */}
             {authFullUI}
 
             {/* Document URL input */}
-            <cf-card>
-              <cf-vstack gap={1}>
+            <ct-card>
+              <ct-vstack gap={1}>
                 <label style={{ fontSize: "13px", fontWeight: 500 }}>
                   Google Doc URL
                 </label>
-                <cf-hstack gap={1}>
-                  <cf-input
+                <ct-hstack gap={1}>
+                  <ct-input
                     $value={docUrl}
                     placeholder="https://docs.google.com/document/d/..."
                     style="flex: 1;"
                   />
                   {ifElse(
                     isAuthenticated,
-                    <cf-button
+                    <ct-button
                       variant="primary"
                       type="button"
                       disabled={isFetchingCell}
@@ -311,19 +311,19 @@ export default pattern<Input, Output>(
                     >
                       {ifElse(
                         isFetchingCell,
-                        <cf-hstack align="center" gap={1}>
-                          <cf-loader />
+                        <ct-hstack align="center" gap={1}>
+                          <ct-loader />
                           <span>Importing...</span>
-                        </cf-hstack>,
+                        </ct-hstack>,
                         "Import",
                       )}
-                    </cf-button>,
+                    </ct-button>,
                     null,
                   )}
-                </cf-hstack>
+                </ct-hstack>
 
                 {/* Options */}
-                <cf-hstack gap={3} style={{ marginTop: "8px" }}>
+                <ct-hstack gap={3} style={{ marginTop: "8px" }}>
                   <label
                     style={{
                       display: "flex",
@@ -362,7 +362,7 @@ export default pattern<Input, Output>(
                     />
                     Embed images as base64
                   </label>
-                </cf-hstack>
+                </ct-hstack>
 
                 {/* Error display */}
                 {ifElse(
@@ -371,11 +371,11 @@ export default pattern<Input, Output>(
                     style={{
                       marginTop: "8px",
                       padding: "8px 12px",
-                      backgroundColor: "var(--cf-color-red-50, #fef2f2)",
-                      border: "1px solid var(--cf-color-red-200, #fecaca)",
+                      backgroundColor: "var(--ct-color-red-50, #fef2f2)",
+                      border: "1px solid var(--ct-color-red-200, #fecaca)",
                       borderRadius: "6px",
                       fontSize: "12px",
-                      color: "var(--cf-color-red-700, #b91c1c)",
+                      color: "var(--ct-color-red-700, #b91c1c)",
                       whiteSpace: "pre-wrap",
                     }}
                   >
@@ -383,14 +383,14 @@ export default pattern<Input, Output>(
                   </div>,
                   null,
                 )}
-              </cf-vstack>
-            </cf-card>
+              </ct-vstack>
+            </ct-card>
 
             {/* Markdown preview */}
             {ifElse(
               hasMarkdown,
-              <cf-card style="flex: 1; display: flex; flex-direction: column;">
-                <cf-hstack
+              <ct-card style="flex: 1; display: flex; flex-direction: column;">
+                <ct-hstack
                   align="center"
                   justify="between"
                   style={{ marginBottom: "12px" }}
@@ -398,11 +398,11 @@ export default pattern<Input, Output>(
                   <span style={{ fontWeight: 600 }}>
                     Preview: {docTitleCell}
                   </span>
-                  <cf-hstack gap={1}>
-                    <cf-copy-button text={markdownCell} variant="secondary">
+                  <ct-hstack gap={1}>
+                    <ct-copy-button text={markdownCell} variant="secondary">
                       Copy to Clipboard
-                    </cf-copy-button>
-                    <cf-button
+                    </ct-copy-button>
+                    <ct-button
                       variant="primary"
                       type="button"
                       onClick={saveAsNote({
@@ -411,16 +411,16 @@ export default pattern<Input, Output>(
                       })}
                     >
                       Save as Note
-                    </cf-button>
-                  </cf-hstack>
-                </cf-hstack>
+                    </ct-button>
+                  </ct-hstack>
+                </ct-hstack>
 
-                <cf-vscroll flex showScrollbar fadeEdges>
+                <ct-vscroll flex showScrollbar fadeEdges>
                   <div
                     style={{
                       padding: "16px",
                       backgroundColor:
-                        "var(--cf-color-surface-secondary, #f9fafb)",
+                        "var(--ct-color-surface-secondary, #f9fafb)",
                       borderRadius: "8px",
                       fontFamily: "monospace",
                       fontSize: "13px",
@@ -430,9 +430,9 @@ export default pattern<Input, Output>(
                   >
                     {markdownCell}
                   </div>
-                </cf-vscroll>
-              </cf-card>,
-              <cf-card>
+                </ct-vscroll>
+              </ct-card>,
+              <ct-card>
                 <div
                   style={{
                     padding: "32px",
@@ -447,10 +447,10 @@ export default pattern<Input, Output>(
                     "Please authenticate with Google to import documents",
                   )}
                 </div>
-              </cf-card>,
+              </ct-card>,
             )}
-          </cf-vstack>
-        </cf-screen>
+          </ct-vstack>
+        </ct-screen>
       ),
       docUrl,
       markdown,

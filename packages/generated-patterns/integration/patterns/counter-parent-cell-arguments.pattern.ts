@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, pattern, str } from "commonfabric";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 const sanitizeCount = (value: number | undefined): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;

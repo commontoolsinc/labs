@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, ifElse, pattern, UI } from "commonfabric";
+import { Cell, ifElse, pattern, UI } from "commontools";
 
 // Reproduction of bug: .get() called on Cell inside ifElse predicate
 // The transformer wraps predicates in derive(), which unwraps Cells,

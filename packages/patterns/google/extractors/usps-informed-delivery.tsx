@@ -15,7 +15,7 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: cf piece link google-auth/auth usps/overrideAuth
+ * 3. Link: ct piece link google-auth/auth usps/overrideAuth
  */
 import {
   computed,
@@ -27,8 +27,8 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
-import type { Schema } from "commonfabric/schema";
+} from "commontools";
+import type { Schema } from "commontools/schema";
 import GmailExtractor, { type Auth } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
 
@@ -265,7 +265,7 @@ const deleteMember = handler<
 interface PatternInput {
   householdMembers?: Default<HouseholdMember[], []>;
   // Optional: Link auth directly from a Google Auth piece
-  // Use: cf piece link googleAuthPiece/auth uspsPiece/overrideAuth
+  // Use: ct piece link googleAuthPiece/auth uspsPiece/overrideAuth
   overrideAuth?: Auth;
 }
 
@@ -587,13 +587,13 @@ If you cannot read the image clearly, make your best guess based on what you can
       previewUI,
 
       [UI]: (
-        <cf-screen>
+        <ct-screen>
           <div slot="header">
-            <cf-heading level={3}>USPS Informed Delivery</cf-heading>
+            <ct-heading level={3}>USPS Informed Delivery</ct-heading>
           </div>
 
-          <cf-vscroll flex showScrollbar>
-            <cf-vstack padding="6" gap="4">
+          <ct-vscroll flex showScrollbar>
+            <ct-vstack padding="6" gap="4">
               {/* Auth UI from embedded GmailExtractor */}
               {extractor.ui.authStatusUI}
 
@@ -678,7 +678,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                             color: "#2563eb",
                           }}
                         >
-                          <cf-loader size="sm" />
+                          <ct-loader size="sm" />
                           {pendingCount} analyzing...
                         </span>
                       )}
@@ -897,7 +897,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                       : null}
                   </summary>
 
-                  <cf-vstack gap="2">
+                  <ct-vstack gap="2">
                     {!householdMembers?.length
                       ? (
                         <div style={{ color: "#666", fontSize: "14px" }}>
@@ -968,7 +968,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                         </button>
                       </div>
                     ))}
-                  </cf-vstack>
+                  </ct-vstack>
                 </details>
               )}
 
@@ -1093,7 +1093,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                   Mail Pieces (Live Analysis)
                 </summary>
 
-                <cf-vstack gap="2">
+                <ct-vstack gap="2">
                   {imageCount === 0
                     ? (
                       <div style={{ color: "#666", fontSize: "14px" }}>
@@ -1147,7 +1147,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                                 gap: "8px",
                               }}
                             >
-                              <cf-loader size="sm" />
+                              <ct-loader size="sm" />
                               <span style={{ color: "#6b7280" }}>
                                 Analyzing...
                               </span>
@@ -1236,11 +1236,11 @@ If you cannot read the image clearly, make your best guess based on what you can
                       </div>
                     </div>
                   ))}
-                </cf-vstack>
+                </ct-vstack>
               </details>
-            </cf-vstack>
-          </cf-vscroll>
-        </cf-screen>
+            </ct-vstack>
+          </ct-vscroll>
+        </ct-screen>
       ),
     };
   }) as any,

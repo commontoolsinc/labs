@@ -13,7 +13,7 @@ import {
   when,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import Chatbot from "../chatbot.tsx";
 import {
   bash,
@@ -25,7 +25,7 @@ import {
   readWebpage,
   searchWeb,
   updateProfile,
-} from "./common-fabric.tsx";
+} from "./common-tools.tsx";
 import { MentionablePiece } from "./backlinks-index.tsx";
 import {
   searchPattern as summarySearchPattern,
@@ -245,15 +245,15 @@ Be matter-of-fact. Prefer action to explanation.`;
       [NAME]: "OmniboxFAB",
       messages: omnibot.messages,
       [UI]: (
-        <cf-drop-zone
+        <ct-drop-zone
           accept="cell-link"
           style="position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); z-index: 997;"
-          oncf-drop={handleDropToPin({
+          onct-drop={handleDropToPin({
             pinToChat: omnibot.pinToChat,
             fabExpanded,
           })}
         >
-          <cf-fab
+          <ct-fab
             expanded={fabExpanded}
             variant="primary"
             position="bottom-center"
@@ -262,8 +262,8 @@ Be matter-of-fact. Prefer action to explanation.`;
             $messages={omnibot.messages}
             $previewMessage={latestAssistantMessage}
             placeholder="Ask about anything..."
-            oncf-fab-backdrop-click={closeFab({ fabExpanded })}
-            oncf-fab-escape={closeFab({ fabExpanded })}
+            onct-fab-backdrop-click={closeFab({ fabExpanded })}
+            onct-fab-escape={closeFab({ fabExpanded })}
             onClick={toggle({ value: fabExpanded })}
           >
             {ifElse(
@@ -271,10 +271,10 @@ Be matter-of-fact. Prefer action to explanation.`;
               <div style="width: 100%; display: flex; flex-direction: column; max-height: 580px;">
                 {/* Chevron to expand chat history */}
                 <div style="display: flex; justify-content: center; flex-shrink: 0;">
-                  <cf-chevron-button
+                  <ct-chevron-button
                     expanded={showHistory}
                     loading={omnibot.pending}
-                    oncf-toggle={toggle({ value: showHistory })}
+                    onct-toggle={toggle({ value: showHistory })}
                   />
                 </div>
 
@@ -299,9 +299,9 @@ Be matter-of-fact. Prefer action to explanation.`;
                   })}
                 >
                   <div style="flex: 1; overflow-y: auto; min-height: 0;">
-                    <cf-cell-context $cell={omnibot}>
+                    <ct-cell-context $cell={omnibot}>
                       {omnibot.ui.chatLog}
-                    </cf-cell-context>
+                    </ct-cell-context>
                   </div>
                 </div>
 
@@ -313,7 +313,7 @@ Be matter-of-fact. Prefer action to explanation.`;
                       assistantMessageCount !== dismissedIdx;
                   }),
                   <div style="margin: 4px 8px 0; padding: 0; flex-shrink: 0; position: relative;">
-                    <cf-button
+                    <ct-button
                       variant="ghost"
                       size="icon"
                       onClick={dismissPeek({
@@ -324,19 +324,19 @@ Be matter-of-fact. Prefer action to explanation.`;
                       title="Dismiss"
                     >
                       ×
-                    </cf-button>
+                    </ct-button>
                     <div
                       onClick={toggle({ value: showHistory })}
                       style="cursor: pointer;"
                     >
-                      <cf-cell-context $cell={latestAssistantMessage}>
-                        <cf-chat-message
+                      <ct-cell-context $cell={latestAssistantMessage}>
+                        <ct-chat-message
                           role="assistant"
                           compact
                           content={latestAssistantMessage ?? ""}
                           pending={omnibot.pending}
                         />
-                      </cf-cell-context>
+                      </ct-cell-context>
                     </div>
                   </div>,
                   null,
@@ -349,8 +349,8 @@ Be matter-of-fact. Prefer action to explanation.`;
               </div>,
               null,
             )}
-          </cf-fab>
-        </cf-drop-zone>
+          </ct-fab>
+        </ct-drop-zone>
       ),
       fabExpanded,
       pinToChat: handleExternalPin({

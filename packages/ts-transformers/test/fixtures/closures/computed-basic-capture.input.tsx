@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, computed, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commontools";
 
 // FIXTURE: computed-basic-capture
 // Verifies: computed(() => expr) with two cell captures is closure-extracted into derive()

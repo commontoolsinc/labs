@@ -8,7 +8,6 @@ import {
   resolve,
   SEPARATOR,
 } from "@std/path";
-import { cliName } from "./cli-name.ts";
 
 export interface MountStateEntry {
   pid: number;
@@ -221,7 +220,7 @@ export function isAlive(pid: number): boolean {
 
 /** Default state directory for FUSE mount state. */
 export function defaultStateDir(): string {
-  return resolve(Deno.env.get("HOME") ?? "/tmp", ".cf", "fuse");
+  return resolve(Deno.env.get("HOME") ?? "/tmp", ".ct", "fuse");
 }
 
 /** Resolve path to packages/fuse/mod.ts relative to the CLI commands dir. */
@@ -237,27 +236,24 @@ export async function ensureExecShim(
   await Deno.mkdir(stateDir, { recursive: true });
 
   const compiled = isCompiledBinary();
-  const displayCliName = cliName();
   const stateScopedShimPath = join(
     stateDir,
-    `cf-exec-${await hashMountLookupKey(
+    `ct-exec-${await hashMountLookupKey(
       compiled ? Deno.execPath() : cliMod(importMetaUrl),
     )}`,
   );
   const preferredShimPath = compiled
     ? stateScopedShimPath
-    : join(repoRoot(importMetaUrl), ".cf", "fuse", "cf-exec");
+    : join(repoRoot(importMetaUrl), ".ct", "fuse", "ct-exec");
   const fallbackShimPath = stateScopedShimPath;
 
   const script = compiled
     ? `#!/usr/bin/env bash
-export CF_EXEC_SHEBANG=1
-export CF_CLI_NAME=${displayCliName}
+export CT_EXEC_SHEBANG=1
 exec "${Deno.execPath()}" "$@"
 `
     : `#!/usr/bin/env bash
-export CF_EXEC_SHEBANG=1
-export CF_CLI_NAME=${displayCliName}
+export CT_EXEC_SHEBANG=1
 exec "${Deno.execPath()}" run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run "${
       cliMod(importMetaUrl)
     }" "$@"

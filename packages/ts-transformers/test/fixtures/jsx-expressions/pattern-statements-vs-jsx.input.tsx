@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, handler, NAME, pattern, str, UI } from "commonfabric";
+import { Cell, handler, NAME, pattern, str, UI } from "commontools";
 
 interface PatternState {
   value: number;
@@ -26,7 +26,7 @@ export default pattern<PatternState>((state) => {
 
     [UI]: (
       <div>
-        <cf-button onClick={decrement(state)}>-</cf-button>
+        <ct-button onClick={decrement(state)}>-</ct-button>
         <p>
           {/* These SHOULD be transformed (JSX expression context) */}
           Current: {state.value}
@@ -39,7 +39,7 @@ export default pattern<PatternState>((state) => {
           <br />
           Status: {state.value > 10 ? "High" : "Low"}
         </p>
-        <cf-button onClick={increment({ value: state.value })}>+</cf-button>
+        <ct-button onClick={increment({ value: state.value })}>+</ct-button>
       </div>
     ),
 

@@ -6,9 +6,8 @@ import {
   setAclEntry,
   SpaceConfig,
 } from "../lib/acl.ts";
-import { cliText } from "../lib/cli-name.ts";
 import { render } from "../lib/render.ts";
-import { isCapability } from "@commonfabric/memory";
+import { isCapability } from "@commontools/memory";
 
 // Usage patterns for examples
 const spaceUsage = `--identity <identity> --api-url <api-url> --space <space>`;
@@ -17,12 +16,12 @@ export const acl = new Command()
   .name("acl")
   .description("Manage Access Control Lists for spaces.")
   .default("help")
-  .globalEnv("CF_API_URL=<url:string>", "URL of the fabric instance.", {
-    prefix: "CF_",
+  .globalEnv("CT_API_URL=<url:string>", "URL of the fabric instance.", {
+    prefix: "CT_",
   })
   .globalOption("-a,--api-url <url:string>", "URL of the fabric instance.")
-  .globalEnv("CF_IDENTITY=<path:string>", "Path to an identity keyfile.", {
-    prefix: "CF_",
+  .globalEnv("CT_IDENTITY=<path:string>", "Path to an identity keyfile.", {
+    prefix: "CT_",
   })
   .globalOption("-i,--identity <path:string>", "Path to an identity keyfile.")
   .globalOption("-s,--space <space:string>", "The space name or DID")
@@ -30,9 +29,7 @@ export const acl = new Command()
   .command("ls", "List all ACL entries for a space.")
   .usage(spaceUsage)
   .example(
-    cliText(
-      "cf acl ls --identity ./my.key --api-url https://api.example.com --space my-space",
-    ),
+    "ct acl ls --identity ./my.key --api-url https://api.example.com --space my-space",
     "List all ACL entries for my-space",
   )
   .action(async (options) => {
@@ -59,9 +56,7 @@ export const acl = new Command()
   )
   .usage(`${spaceUsage} <did> <capability>`)
   .example(
-    cliText(
-      "cf acl set did:key:z6Mkk... WRITE --identity ./my.key --api-url https://api.example.com --space my-space",
-    ),
+    "ct acl set did:key:z6Mkk... WRITE --identity ./my.key --api-url https://api.example.com --space my-space",
     "Grant WRITE capability to a DID",
   )
   .action(async (options, did, capability) => {
@@ -85,9 +80,7 @@ export const acl = new Command()
   .command("remove <did:string>", "Remove a DID from the space ACL.")
   .usage(`${spaceUsage} <did>`)
   .example(
-    cliText(
-      "cf acl remove did:key:z6Mkk... --identity ./my.key --api-url https://api.example.com --space my-space",
-    ),
+    "ct acl remove did:key:z6Mkk... --identity ./my.key --api-url https://api.example.com --space my-space",
     "Remove a DID from the ACL",
   )
   .action(async (options, did) => {
@@ -102,20 +95,20 @@ export const acl = new Command()
 function parseSpaceOptions(
   options: Record<string, string | undefined>,
 ): SpaceConfig {
-  const apiUrl = options.apiUrl || Deno.env.get("CF_API_URL");
-  const identity = options.identity || Deno.env.get("CF_IDENTITY");
+  const apiUrl = options.apiUrl || Deno.env.get("CT_API_URL");
+  const identity = options.identity || Deno.env.get("CT_IDENTITY");
   const space = options.space;
 
   if (!apiUrl) {
     render(
-      "Error: --api-url is required or set CF_API_URL environment variable",
+      "Error: --api-url is required or set CT_API_URL environment variable",
     );
     Deno.exit(1);
   }
 
   if (!identity) {
     render(
-      "Error: --identity is required or set CF_IDENTITY environment variable",
+      "Error: --identity is required or set CT_IDENTITY environment variable",
     );
     Deno.exit(1);
   }

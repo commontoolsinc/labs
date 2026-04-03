@@ -10,7 +10,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 // ===== Types =====
 
@@ -49,19 +49,19 @@ export const TodoItemPiece = pattern<
     [NAME]: computed(() => item.title),
     summary: computed(() => item.title),
     [UI]: (
-      <cf-card>
-        <cf-hstack gap="2" align="center">
-          <cf-checkbox $checked={item.done} />
-          <cf-input
+      <ct-card>
+        <ct-hstack gap="2" align="center">
+          <ct-checkbox $checked={item.done} />
+          <ct-input
             $value={item.title}
             style="flex: 1;"
             placeholder="Todo item..."
           />
-          <cf-button variant="ghost" onClick={() => removeItem.send({ item })}>
+          <ct-button variant="ghost" onClick={() => removeItem.send({ item })}>
             x
-          </cf-button>
-        </cf-hstack>
-      </cf-card>
+          </ct-button>
+        </ct-hstack>
+      </ct-card>
     ),
   };
 });
@@ -74,14 +74,14 @@ const CompletedTodoItem = pattern<
     [NAME]: computed(() => item.title),
     summary: computed(() => item.title),
     [UI]: (
-      <cf-card style="opacity: 0.7;">
-        <cf-hstack gap="2" align="center">
-          <cf-checkbox $checked={item.done} />
-          <span style="text-decoration: line-through; flex: 1; color: var(--cf-color-gray-500);">
+      <ct-card style="opacity: 0.7;">
+        <ct-hstack gap="2" align="center">
+          <ct-checkbox $checked={item.done} />
+          <span style="text-decoration: line-through; flex: 1; color: var(--ct-color-gray-500);">
             {item.title}
           </span>
-        </cf-hstack>
-      </cf-card>
+        </ct-hstack>
+      </ct-card>
     ),
   };
 });
@@ -129,23 +129,23 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
   return {
     [NAME]: computed(() => `Todo List (${items.get().length})`),
     [UI]: (
-      <cf-screen>
-        <cf-vstack slot="header" gap="1">
-          <cf-hstack justify="between" align="center">
-            <cf-heading level={4}>Todo List</cf-heading>
-            <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+      <ct-screen>
+        <ct-vstack slot="header" gap="1">
+          <ct-hstack justify="between" align="center">
+            <ct-heading level={4}>Todo List</ct-heading>
+            <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
               {computed(() => activeItems.length)} items
             </span>
-          </cf-hstack>
-        </cf-vstack>
+          </ct-hstack>
+        </ct-vstack>
 
-        <cf-vscroll flex showScrollbar fadeEdges>
-          <cf-vstack gap="2" style="padding: 1rem;">
+        <ct-vscroll flex showScrollbar fadeEdges>
+          <ct-vstack gap="2" style="padding: 1rem;">
             {itemCards}
 
             {hasNoItems
               ? (
-                <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
+                <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
                   No items yet. Add one below!
                 </div>
               )
@@ -154,41 +154,41 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
             {ifElse(
               hasCompleted,
               <details style="margin-top: 1rem;">
-                <summary style="cursor: pointer; font-size: 0.875rem; color: var(--cf-color-gray-500); padding: 0.5rem 0;">
+                <summary style="cursor: pointer; font-size: 0.875rem; color: var(--ct-color-gray-500); padding: 0.5rem 0;">
                   Completed ({computed(() => completedItems.length)})
                 </summary>
-                <cf-vstack gap="2" style="padding-top: 0.5rem;">
+                <ct-vstack gap="2" style="padding-top: 0.5rem;">
                   {completedCards}
-                  <cf-hstack justify="end">
-                    <cf-button
+                  <ct-hstack justify="end">
+                    <ct-button
                       variant="ghost"
                       size="sm"
-                      style="font-size: 0.8rem; color: var(--cf-color-gray-500);"
+                      style="font-size: 0.8rem; color: var(--ct-color-gray-500);"
                       onClick={() => archiveCompleted.send()}
                     >
                       Archive all
-                    </cf-button>
-                  </cf-hstack>
-                </cf-vstack>
+                    </ct-button>
+                  </ct-hstack>
+                </ct-vstack>
               </details>,
               null,
             )}
-          </cf-vstack>
-        </cf-vscroll>
+          </ct-vstack>
+        </ct-vscroll>
 
-        <cf-hstack slot="footer" gap="2" style="padding: 1rem;">
-          <cf-message-input
+        <ct-hstack slot="footer" gap="2" style="padding: 1rem;">
+          <ct-message-input
             placeholder="Add a todo item..."
             style="flex: 1;"
-            oncf-send={(e: { detail?: { message?: string } }) => {
+            onct-send={(e: { detail?: { message?: string } }) => {
               const title = e.detail?.message?.trim();
               if (title) {
                 addItem.send({ title });
               }
             }}
           />
-        </cf-hstack>
-      </cf-screen>
+        </ct-hstack>
+      </ct-screen>
     ),
     items,
     mentionable: itemCards,

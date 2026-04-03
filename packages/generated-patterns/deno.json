@@ -1,5 +1,5 @@
 {
-  "name": "@commonfabric/generated-patterns",
+  "name": "@commontools/generated-patterns",
   "tasks": {
     "integration": "LOG_LEVEL=warn deno test --trace-leaks -A --parallel $INTEGRATION_TEST_FLAGS ./integration/patterns/*.test.ts",
     "test": "echo 'No tests defined.'"

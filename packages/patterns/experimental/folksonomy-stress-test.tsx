@@ -6,7 +6,7 @@
  * and lets you feel the typing latency firsthand, while displaying
  * timing instrumentation.
  *
- * Deploy: deno task cf deploy packages/patterns/experimental/folksonomy-stress-test.tsx
+ * Deploy: deno task ct deploy packages/patterns/experimental/folksonomy-stress-test.tsx
  *
  * HOW TO USE:
  * 1. Click a scale button (100, 500, 1K, 5K, 10K) to load synthetic events
@@ -22,7 +22,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import AggregatorPattern from "./folksonomy-aggregator.tsx";
 import { FolksonomyTags } from "./folksonomy-tags.tsx";
 
@@ -579,17 +579,17 @@ export default pattern(() => {
   return {
     [NAME]: "Folksonomy Stress Test",
     [UI]: (
-      <cf-vstack gap="4" style={{ padding: "16px", maxWidth: "800px" }}>
-        <cf-vstack gap="1">
+      <ct-vstack gap="4" style={{ padding: "16px", maxWidth: "800px" }}>
+        <ct-vstack gap="1">
           <h2 style={{ margin: "0" }}>Folksonomy Performance Test</h2>
           <p style={{ color: "#6b7280", margin: "0", fontSize: "13px" }}>
             Load synthetic events at scale and test typing latency in the
             autocomplete below.
           </p>
-        </cf-vstack>
+        </ct-vstack>
 
         {/* Scale buttons */}
-        <cf-vstack gap="2">
+        <ct-vstack gap="2">
           <span
             style={{
               fontWeight: "600",
@@ -600,7 +600,7 @@ export default pattern(() => {
           >
             Load Scale
           </span>
-          <cf-hstack gap="2" wrap>
+          <ct-hstack gap="2" wrap>
             {scales.map((s, i) => (
               <button
                 key={i}
@@ -634,11 +634,11 @@ export default pattern(() => {
             >
               Clear
             </button>
-          </cf-hstack>
-        </cf-vstack>
+          </ct-hstack>
+        </ct-vstack>
 
         {/* Status + timing */}
-        <cf-vstack
+        <ct-vstack
           gap="2"
           style={{
             padding: "12px",
@@ -649,8 +649,8 @@ export default pattern(() => {
           <span style={{ fontWeight: "600", fontSize: "14px" }}>
             {statusText}
           </span>
-          <cf-hstack gap="3" wrap>
-            <cf-vstack style={metricStyle}>
+          <ct-hstack gap="3" wrap>
+            <ct-vstack style={metricStyle}>
               <span style={metricValue}>
                 {genMs}
                 <span style={{ fontSize: "12px", fontWeight: "normal" }}>
@@ -658,8 +658,8 @@ export default pattern(() => {
                 </span>
               </span>
               <span style={metricLabel}>Event generation</span>
-            </cf-vstack>
-            <cf-vstack style={metricStyle}>
+            </ct-vstack>
+            <ct-vstack style={metricStyle}>
               <span style={metricValue}>
                 {loadMs}
                 <span style={{ fontSize: "12px", fontWeight: "normal" }}>
@@ -667,16 +667,16 @@ export default pattern(() => {
                 </span>
               </span>
               <span style={metricLabel}>Cell set (load)</span>
-            </cf-vstack>
-            <cf-vstack style={metricStyle}>
+            </ct-vstack>
+            <ct-vstack style={metricStyle}>
               <span style={metricValue}>{loadedCount}</span>
               <span style={metricLabel}>Events loaded</span>
-            </cf-vstack>
-          </cf-hstack>
-        </cf-vstack>
+            </ct-vstack>
+          </ct-hstack>
+        </ct-vstack>
 
         {/* Aggregator output stats */}
-        <cf-vstack
+        <ct-vstack
           gap="2"
           style={{
             padding: "12px",
@@ -694,32 +694,32 @@ export default pattern(() => {
           >
             Aggregator Output
           </span>
-          <cf-hstack gap="3" wrap>
-            <cf-vstack style={metricStyle}>
+          <ct-hstack gap="3" wrap>
+            <ct-vstack style={metricStyle}>
               <span style={metricValue}>{scopesWithSuggestions}</span>
               <span style={metricLabel}>Scopes</span>
-            </cf-vstack>
-            <cf-vstack style={metricStyle}>
+            </ct-vstack>
+            <ct-vstack style={metricStyle}>
               <span style={metricValue}>{totalSuggestions}</span>
               <span style={metricLabel}>Total suggestions</span>
-            </cf-vstack>
-            <cf-vstack style={metricStyle}>
+            </ct-vstack>
+            <ct-vstack style={metricStyle}>
               <span style={metricValue}>{uniqueTagCount}</span>
               <span style={metricLabel}>Unique tags</span>
-            </cf-vstack>
-            <cf-vstack style={metricStyle}>
+            </ct-vstack>
+            <ct-vstack style={metricStyle}>
               <span style={metricValue}>{maxSuggestionsPerScope}</span>
               <span style={metricLabel}>Max / scope</span>
-            </cf-vstack>
-            <cf-vstack style={metricStyle}>
+            </ct-vstack>
+            <ct-vstack style={metricStyle}>
               <span style={metricValue}>{avgSuggestionsPerScope}</span>
               <span style={metricLabel}>Avg / scope</span>
-            </cf-vstack>
-          </cf-hstack>
-        </cf-vstack>
+            </ct-vstack>
+          </ct-hstack>
+        </ct-vstack>
 
         {/* Interactive typing test */}
-        <cf-vstack
+        <ct-vstack
           gap="2"
           style={{
             padding: "12px",
@@ -742,8 +742,8 @@ export default pattern(() => {
             Load events above, then type here to feel the autocomplete latency.
             Community suggestions from the aggregator appear as you type.
           </p>
-          <cf-render $cell={tagsInstance} />
-        </cf-vstack>
+          <ct-render $cell={tagsInstance} />
+        </ct-vstack>
 
         {/* Explanation */}
         <div
@@ -763,7 +763,7 @@ export default pattern(() => {
           notice lag when the autocomplete items list updates. The autocomplete
           typing itself is purely internal Lit state and should remain fast.
         </div>
-      </cf-vstack>
+      </ct-vstack>
     ),
     loadedCount,
     genMs,

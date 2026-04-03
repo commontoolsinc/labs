@@ -1,8 +1,8 @@
-import * as __cfHelpers from "commonfabric";
-import { cell, derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { cell, derive, pattern, patternTool, type PatternToolResult } from "commontools";
 const content = cell("Hello world\nGoodbye world", {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 type Output = {
     grepTool: PatternToolResult<{
         content: string;
@@ -19,7 +19,7 @@ export default pattern(() => {
         query: string;
         content: string;
     }) => {
-        return __cfHelpers.derive({
+        return __ctHelpers.derive({
             type: "object",
             properties: {
                 input: {
@@ -36,12 +36,12 @@ export default pattern(() => {
                 }
             },
             required: ["input", "content"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "array",
             items: {
                 type: "string"
             }
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             input: { query },
             content: content
         }, ({ input: { query }, content }) => {
@@ -53,7 +53,7 @@ export default pattern(() => {
     type: "object",
     properties: {},
     additionalProperties: false
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         grepTool: {
@@ -86,8 +86,8 @@ export default pattern(() => {
             required: ["argumentSchema", "resultSchema"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

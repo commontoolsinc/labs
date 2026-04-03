@@ -4,9 +4,9 @@ import { Task } from "@lit/task";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import "../components/OmniLayout.ts";
-import { CellHandle, PageHandle, VNode } from "@commonfabric/runtime-client";
-import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import type { JSONSchema } from "@commonfabric/runner/shared";
+import { CellHandle, PageHandle, VNode } from "@commontools/runtime-client";
+import { rendererVDOMSchema } from "@commontools/runner/schemas";
+import type { JSONSchema } from "@commontools/runner/shared";
 
 type SubPages = {
   sidebarUI?: VNode;
@@ -46,8 +46,8 @@ export class XBodyView extends BaseView {
       flex: 1;
     }
 
-    cf-piece,
-    cf-render[slot="main"] {
+    ct-piece,
+    ct-render[slot="main"] {
       display: flex;
       flex-direction: column;
       height: 100%;
@@ -98,12 +98,12 @@ export class XBodyView extends BaseView {
 
   override connectedCallback() {
     super.connectedCallback();
-    this.addEventListener("cf-cell-pin", this._handleCellPin);
+    this.addEventListener("ct-cell-pin", this._handleCellPin);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    this.removeEventListener("cf-cell-pin", this._handleCellPin);
+    this.removeEventListener("ct-cell-pin", this._handleCellPin);
   }
 
   private _handleCellPin = async (e: Event) => {
@@ -174,9 +174,9 @@ export class XBodyView extends BaseView {
       `
       : this.activePattern
       ? html`
-        <cf-piece slot="main" .pieceId="${this.activePattern.id()}">
-          <cf-render .cell="${this.activePattern.cell()}"></cf-render>
-        </cf-piece>
+        <ct-piece slot="main" .pieceId="${this.activePattern.id()}">
+          <ct-render .cell="${this.activePattern.cell()}"></ct-render>
+        </ct-piece>
       `
       : null;
 
@@ -188,11 +188,11 @@ export class XBodyView extends BaseView {
         <x-omni-layout .sidebarOpen="${this.showSidebar}">
           ${mainContent} ${sidebar
             ? html`
-              <cf-render slot="sidebar" .cell="${sidebar}"></cf-render>
+              <ct-render slot="sidebar" .cell="${sidebar}"></ct-render>
             `
             : null} ${fab
             ? html`
-              <cf-render slot="fab" .cell="${fab}"></cf-render>
+              <ct-render slot="fab" .cell="${fab}"></ct-render>
             `
             : null}
         </x-omni-layout>

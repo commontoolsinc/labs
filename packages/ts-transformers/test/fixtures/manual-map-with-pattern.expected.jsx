@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { pattern, UI } from "commontools";
 
 interface Item {
   price: number;
@@ -35,13 +35,13 @@ export default pattern({
       required: ["price"]
     }
   }
-} as const satisfies __cfHelpers.JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
   return {
     [UI]: (
       <div>
         {state.items.mapWithPattern(
           pattern(({ element, params }: { element: Item; params: { discount: number } }) => (
-            <span>{__cfHelpers.derive({ element_price: element.price, params_discount: params.discount }, ({ element_price, params_discount }) => element_price * params_discount)}</span>
+            <span>{__ctHelpers.derive({ element_price: element.price, params_discount: params.discount }, ({ element_price, params_discount }) => element_price * params_discount)}</span>
           )),
           { discount: state.discount }
         )}
@@ -51,6 +51,6 @@ export default pattern({
 });
 
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

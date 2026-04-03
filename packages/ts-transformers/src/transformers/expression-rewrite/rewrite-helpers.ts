@@ -113,7 +113,7 @@ export function createReactiveWrapperForExpression(
     return createDeriveCall(expression, refs, {
       factory: context.factory,
       tsContext: context.tsContext,
-      cfHelpers: context.cfHelpers,
+      ctHelpers: context.ctHelpers,
       context,
     });
   }
@@ -150,7 +150,7 @@ export function createReactiveWrapperForExpression(
   );
   context.markAsSyntheticComputeCallback(arrowFunction);
 
-  const computedCall = context.cfHelpers.createHelperCall(
+  const computedCall = context.ctHelpers.createHelperCall(
     "computed",
     expression,
     undefined,

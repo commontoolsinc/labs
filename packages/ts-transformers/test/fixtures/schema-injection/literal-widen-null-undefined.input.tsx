@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell } from "commonfabric";
+import { cell } from "commontools";
 
 // FIXTURE: literal-widen-null-undefined
 // Verifies: null and undefined literals produce their respective type schemas

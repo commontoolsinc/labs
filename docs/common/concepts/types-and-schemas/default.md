@@ -5,7 +5,7 @@
 Specify default values in schemas:
 
 ```typescript
-import { Default } from 'commonfabric';
+import { Default } from 'commontools';
 
 interface TodoItem {
   title: string;                      // Required
@@ -23,7 +23,7 @@ interface Input {
 When you need **both** a default value **and** write access (`.push()`, `.set()`, `.get()`), wrap `Default<>` inside `Writable<>`:
 
 ```typescript
-import { Default, Writable } from 'commonfabric';
+import { Default, Writable } from 'commontools';
 
 interface Board {
   title: Default<string, "My Board">;

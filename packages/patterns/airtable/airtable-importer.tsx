@@ -8,7 +8,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 import {
   AirtableAuthManager,

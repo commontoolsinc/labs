@@ -8,7 +8,7 @@ import {
   type UIRenderable,
   type VNode,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 export interface RouteContext {
   path: string;
@@ -88,9 +88,9 @@ export const Router = pattern<RouterInput, RouterOutput>(
     });
 
     const Pattern = (
-      <cf-router $path={path}>
+      <ct-router $path={path}>
         {Route}
-      </cf-router>
+      </ct-router>
     );
 
     return {

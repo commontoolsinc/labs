@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, derive, pattern } from "commontools";
 
 // FIXTURE: derive-basic-capture
 // Verifies: a single closed-over cell is extracted into the derive capture object

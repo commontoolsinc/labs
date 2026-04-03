@@ -1,5 +1,5 @@
-import { BuiltInLLMDialogState } from "@commonfabric/api";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { BuiltInLLMDialogState } from "@commontools/api";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import { createNodeFactory, lift } from "./module.ts";
 import { pattern } from "./pattern.ts";
 import { isPattern } from "./types.ts";
@@ -28,8 +28,8 @@ import type {
   PatternToolResult,
   WishParams,
   WishState,
-} from "commonfabric";
-import { isRecord } from "@commonfabric/utils/types";
+} from "commontools";
+import { isRecord } from "@commontools/utils/types";
 import { isCell } from "../cell.ts";
 
 const WISH_ARGUMENT_SCHEMA = toDeepFrozenSchema({
@@ -382,7 +382,7 @@ export type { createCell };
  *
  * @example
  * ```ts
- * import { patternTool } from "commonfabric";
+ * import { patternTool } from "commontools";
  *
  * const content = cell("Hello world");
  *

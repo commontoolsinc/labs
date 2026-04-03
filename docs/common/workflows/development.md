@@ -2,19 +2,19 @@
 
 ```bash
 # Check syntax (fast)
-deno task cf check pattern.tsx --no-run
+deno task ct check pattern.tsx --no-run
 
 # Test locally
-deno task cf check pattern.tsx
+deno task ct check pattern.tsx
 
 # Deploy
-deno task cf piece new ... pattern.tsx
+deno task ct piece new ... pattern.tsx
 
 # Update existing (faster iteration)
-deno task cf piece setsrc ... --piece PIECE_ID pattern.tsx
+deno task ct piece setsrc ... --piece PIECE_ID pattern.tsx
 
 # Inspect data
-deno task cf piece inspect ... --piece PIECE_ID
+deno task ct piece inspect ... --piece PIECE_ID
 ```
 
 **Tips:**

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, pattern, UI } from "commonfabric";
+import { type Cell, Default, handler, pattern, UI } from "commontools";
 
 interface CounterState {
   count: Default<number, 100>;

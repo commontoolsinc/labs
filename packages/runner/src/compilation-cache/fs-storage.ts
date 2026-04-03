@@ -1,4 +1,4 @@
-import { getLogger } from "@commonfabric/utils/logger";
+import { getLogger } from "@commontools/utils/logger";
 import type {
   CompilationCacheEntry,
   CompilationCacheStorage,

@@ -7,7 +7,7 @@ import {
   SELF,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 type Piece = Writable<{ [NAME]?: string }>;
 
@@ -25,11 +25,11 @@ export default pattern<Input>(({ pieces, [SELF]: self }) => {
   return {
     [NAME]: "Grid View",
     [UI]: (
-      <cf-grid columns="3" gap="4" padding="4">
+      <ct-grid columns="3" gap="4" padding="4">
         {filtered.map((piece: Piece) => (
           <div
             style={{
-              border: "1px solid var(--cf-color-border, #e5e5e7)",
+              border: "1px solid var(--ct-color-border, #e5e5e7)",
               borderRadius: "12px",
               overflow: "hidden",
             }}
@@ -51,15 +51,15 @@ export default pattern<Input>(({ pieces, [SELF]: self }) => {
                   pointerEvents: "none",
                 }}
               >
-                <cf-render $cell={piece} />
+                <ct-render $cell={piece} />
               </div>
             </div>
             <div style={{ padding: "8px" }}>
-              <cf-cell-link $cell={piece} />
+              <ct-cell-link $cell={piece} />
             </div>
           </div>
         ))}
-      </cf-grid>
+      </ct-grid>
     ),
   };
 });

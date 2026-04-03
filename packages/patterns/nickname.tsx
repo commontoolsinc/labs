@@ -6,7 +6,7 @@
  * like Record. Stores a nickname that can optionally be displayed as an alias
  * in the parent Record's display name.
  */
-import { computed, type Default, NAME, pattern, UI } from "commonfabric";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -41,13 +41,13 @@ export const NicknameModule = pattern<NicknameModuleInput, NicknameModuleInput>(
         `${MODULE_METADATA.icon} Nickname: ${displayText}`
       ),
       [UI]: (
-        <cf-vstack style={{ gap: "4px" }}>
+        <ct-vstack style={{ gap: "4px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>Nickname</label>
-          <cf-input
+          <ct-input
             $value={nickname}
             placeholder="Enter nickname..."
           />
-        </cf-vstack>
+        </ct-vstack>
       ),
       nickname,
     };

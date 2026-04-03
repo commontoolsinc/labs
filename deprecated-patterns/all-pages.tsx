@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, JSONSchema, NAME, pattern } from "commonfabric";
+import { derive, JSONSchema, NAME, pattern } from "commontools";
 
 const ExtractPagesInputSchema = {
   type: "object",

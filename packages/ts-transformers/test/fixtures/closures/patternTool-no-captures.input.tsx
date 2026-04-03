@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
+import { derive, pattern, patternTool, type PatternToolResult } from "commontools";
 
 type Output = {
   tool: PatternToolResult<Record<string, never>>;

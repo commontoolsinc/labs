@@ -5,5 +5,5 @@
 <div style={{ flex: 1 }} />
 
 // ✅ Custom elements - String syntax
-<cf-card style="flex: 1;" />
+<ct-card style="flex: 1;" />
 ```

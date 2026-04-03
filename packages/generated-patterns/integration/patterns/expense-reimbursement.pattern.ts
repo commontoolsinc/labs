@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-} from "commonfabric";
+} from "commontools";
 
 type ClaimStatus = "submitted" | "approved" | "rejected" | "paid";
 

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, derive, handler, pattern } from "commonfabric";
+import { Cell, Default, derive, handler, pattern } from "commontools";
 
 interface DelayedCounterArgs {
   value: Default<number, 0>;

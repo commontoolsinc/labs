@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed } from "commonfabric";
+import { computed } from "commontools";
 
 // FIXTURE: computed-alias-const-rewrite
 // Verifies: stable const aliases to `computed()` still lower to `derive()`.

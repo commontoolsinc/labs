@@ -256,7 +256,7 @@ function createDerivedAliasExpression(
   elementIdentifier: ts.Identifier,
   context: TransformationContext,
 ): ts.Expression {
-  const { factory, cfHelpers, tsContext, checker } = context;
+  const { factory, ctHelpers, tsContext, checker } = context;
   const keyIdent = factory.createIdentifier(info.keyIdentifier.text);
 
   const accessBase = createCaptureAccessExpression(
@@ -290,7 +290,7 @@ function createDerivedAliasExpression(
     {
       factory,
       tsContext,
-      cfHelpers,
+      ctHelpers,
       context,
     },
   );

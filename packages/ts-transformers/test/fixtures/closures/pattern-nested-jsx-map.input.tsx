@@ -10,7 +10,7 @@
  * `mapWithPattern` because `item` comes from a mapWithPattern element,
  * NOT from the derive's captures.
  */
-import { Cell, computed, Default, pattern, UI } from "commonfabric";
+import { Cell, computed, Default, pattern, UI } from "commontools";
 
 interface Tag {
   name: string;

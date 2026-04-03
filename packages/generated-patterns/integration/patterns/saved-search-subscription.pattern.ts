@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-} from "commonfabric";
+} from "commontools";
 
 type Frequency = "daily" | "weekly" | "monthly";
 

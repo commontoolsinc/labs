@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, JSONSchema, NAME, pattern, UI } from "commonfabric";
+import { handler, JSONSchema, NAME, pattern, UI } from "commontools";
 
 const InputSchema = {
   type: "object",
@@ -57,10 +57,10 @@ export default pattern(
     [NAME]: superCoolField,
     [UI]: (
       <div>
-        <cf-input
+        <ct-input
           value={superCoolField}
           placeholder="List title"
-          oncf-input={updateValue({ value: superCoolField })}
+          onct-input={updateValue({ value: superCoolField })}
         />
         <common-google-oauth $auth={auth} />
       </div>

@@ -1,6 +1,5 @@
 /// <cts-enable />
-// Teaching example: CTS (Common Fabric TypeScript) generates JSON Schemas from
-// the
+// Teaching example: CTS (CommonTools TypeScript) generates JSON Schemas from the
 // TypeScript types below. Patterns use typed inputs/outputs, and handlers take
 // explicit `Cell<T>` parameters; the transform emits the correct asCell schema
 // automatically where mutation is required.
@@ -15,7 +14,7 @@ import {
   pattern,
   str,
   UI,
-} from "commonfabric";
+} from "commontools";
 
 // User object for better data modeling
 interface User {
@@ -47,7 +46,7 @@ type UserSessionResult = {
   user: User;
 };
 
-// Event payload type for cf-message-input's cf-send event
+// Event payload type for ct-message-input's ct-send event
 type InputEventType = {
   detail: {
     message: string;
@@ -111,11 +110,11 @@ export const UserSession = pattern<
           </div>
           <div>
             <h4>Set your display name</h4>
-            <cf-message-input
+            <ct-message-input
               name="Set"
               placeholder="Choose a display name"
               appearance="rounded"
-              oncf-send={setUsername({
+              onct-send={setUsername({
                 user,
               })}
             />
@@ -141,11 +140,11 @@ export const UserSession = pattern<
             </div>
           </div>
           <div>
-            <cf-message-input
+            <ct-message-input
               name="Send"
               placeholder="Type your message..."
               appearance="rounded"
-              oncf-send={sendMessage({
+              onct-send={sendMessage({
                 messages,
                 user,
               })}
@@ -188,9 +187,9 @@ export default pattern<MainPatternInput>(
           <p>This charm stores the shared chat state.</p>
           <p>Messages: {messages.length}</p>
           <p>Click below to create your personal chat session:</p>
-          <cf-button onClick={createUserSession({ messages })}>
+          <ct-button onClick={createUserSession({ messages })}>
             Generate User Session
-          </cf-button>
+          </ct-button>
         </div>
       ),
       messages,

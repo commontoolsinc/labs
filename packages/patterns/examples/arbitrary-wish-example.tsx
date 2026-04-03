@@ -8,7 +8,7 @@ import {
   VNode,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 export default pattern<Record<string, never>>((_) => {
   const wishText = Writable.of("#note");
@@ -32,11 +32,11 @@ export default pattern<Record<string, never>>((_) => {
     [NAME]: "Wish tester",
     [UI]: (
       <div>
-        <cf-checkbox $checked={searchHome}>Search Home</cf-checkbox>
-        <cf-checkbox $checked={searchSpace}>Search Space</cf-checkbox>
-        <cf-input $value={arbitraryDID} placeholder="did:key:..." />
+        <ct-checkbox $checked={searchHome}>Search Home</ct-checkbox>
+        <ct-checkbox $checked={searchSpace}>Search Space</ct-checkbox>
+        <ct-input $value={arbitraryDID} placeholder="did:key:..." />
         <hr />
-        <cf-textarea $value={wishText} />
+        <ct-textarea $value={wishText} />
         <hr />
         {wishResult[UI]}
       </div>

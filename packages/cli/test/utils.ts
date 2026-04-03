@@ -1,4 +1,4 @@
-import { decode } from "@commonfabric/utils/encoding";
+import { decode } from "@commontools/utils/encoding";
 import { join } from "@std/path";
 import { expect } from "@std/expect/expect";
 
@@ -18,8 +18,9 @@ export function checkStderr(stderr: string[]) {
   expect(stderr[1]).toMatch(/experimentalDecorators compiler option/);
 }
 
-async function runCliTask(
-  task: "cli-no-pwd-override" | "ct-no-pwd-override",
+// Executes the `ct` command via CLI
+// `const { stdout, stderr, code } = ct("dev --no-run ./pattern.tsx")`
+export async function ct(
   command: string,
 ): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
   // Use a regex to split up spaces outside of quotes.
@@ -39,7 +40,7 @@ async function runCliTask(
       // As these tests run within a test task, we can't override that PWD.
       // For tests, use a version of the cli task that does *not* override
       // user/deno's PWD.
-      task,
+      "cli-no-pwd-override",
       ...args,
     ],
   }).output();
@@ -48,41 +49,4 @@ async function runCliTask(
     stdout: bytesToLines(stdout),
     stderr: bytesToLines(stderr),
   };
-}
-
-// Executes the `cf` command via CLI
-// `const { stdout, stderr, code } = cf("dev --no-run ./pattern.tsx")`
-export async function cf(
-  command: string,
-): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
-  return await runCliTask("cli-no-pwd-override", command);
-}
-
-export async function ct(
-  command: string,
-): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
-  return await runCliTask("ct-no-pwd-override", command);
-}
-
-export async function withEnv(
-  name: string,
-  value: string | undefined,
-  fn: () => Promise<void> | void,
-): Promise<void> {
-  const previous = Deno.env.get(name);
-  if (value === undefined) {
-    Deno.env.delete(name);
-  } else {
-    Deno.env.set(name, value);
-  }
-
-  try {
-    await fn();
-  } finally {
-    if (previous === undefined) {
-      Deno.env.delete(name);
-    } else {
-      Deno.env.set(name, previous);
-    }
-  }
 }

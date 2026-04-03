@@ -12,7 +12,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import Suggestion from "../system/suggestion.tsx";
 
 // ===== Types =====
@@ -274,51 +274,51 @@ const DoItemCard = pattern<
     [NAME]: computed(() => item.title),
     summary: computed(() => item.title),
     [UI]: (
-      <cf-drop-zone
+      <ct-drop-zone
         accept="cell-link"
-        oncf-drop={addAttachment({ item, items })}
+        onct-drop={addAttachment({ item, items })}
       >
-        <cf-card style={`margin-left: ${(item.indent ?? 0) * 24}px;`}>
-          <cf-hstack gap="2" align="center">
-            <cf-checkbox $checked={item.done} />
-            <cf-input
+        <ct-card style={`margin-left: ${(item.indent ?? 0) * 24}px;`}>
+          <ct-hstack gap="2" align="center">
+            <ct-checkbox $checked={item.done} />
+            <ct-input
               $value={item.title}
               style="flex: 1;"
               placeholder="Item..."
             />
-            <cf-button
+            <ct-button
               variant="ghost"
               onClick={() => removeItem.send({ item })}
             >
               x
-            </cf-button>
-          </cf-hstack>
+            </ct-button>
+          </ct-hstack>
 
           {ifElse(
             hasAttachments,
-            <cf-hstack
+            <ct-hstack
               gap="1"
               style="margin-top: 4px; margin-left: 24px; flex-wrap: wrap;"
             >
               {attachments.map((att: any) => (
-                <cf-hstack gap="0" align="center">
-                  <cf-cell-link $cell={att} />
-                  <cf-button
+                <ct-hstack gap="0" align="center">
+                  <ct-cell-link $cell={att} />
+                  <ct-button
                     variant="ghost"
                     size="sm"
                     style="font-size: 0.7rem; padding: 0 2px;"
                     onClick={removeAttachment({ item, attachment: att, items })}
                   >
                     ×
-                  </cf-button>
-                </cf-hstack>
+                  </ct-button>
+                </ct-hstack>
               ))}
-            </cf-hstack>,
+            </ct-hstack>,
             null,
           )}
 
           <details style="margin-top: 8px; margin-left: 24px;">
-            <summary style="cursor: pointer; font-size: 0.8rem; color: var(--cf-color-gray-500);">
+            <summary style="cursor: pointer; font-size: 0.8rem; color: var(--ct-color-gray-500);">
               AI Suggestions
             </summary>
             <Suggestion
@@ -329,8 +329,8 @@ const DoItemCard = pattern<
               initialResults={[]}
             />
           </details>
-        </cf-card>
-      </cf-drop-zone>
+        </ct-card>
+      </ct-drop-zone>
     ),
   };
 });
@@ -345,16 +345,16 @@ const CompletedItemCard = pattern<
     [NAME]: computed(() => item.title),
     summary: computed(() => item.title),
     [UI]: (
-      <cf-card
+      <ct-card
         style={`margin-left: ${(item.indent ?? 0) * 24}px; opacity: 0.7;`}
       >
-        <cf-hstack gap="2" align="center">
-          <cf-checkbox $checked={item.done} />
-          <span style="text-decoration: line-through; flex: 1; color: var(--cf-color-gray-500);">
+        <ct-hstack gap="2" align="center">
+          <ct-checkbox $checked={item.done} />
+          <span style="text-decoration: line-through; flex: 1; color: var(--ct-color-gray-500);">
             {item.title}
           </span>
-        </cf-hstack>
-      </cf-card>
+        </ct-hstack>
+      </ct-card>
     ),
   };
 });
@@ -394,68 +394,68 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
     <CompletedItemCard item={item} />
   ));
 
-  // Compact UI - embeddable widget without cf-screen wrapper
+  // Compact UI - embeddable widget without ct-screen wrapper
   const compactUI = (
-    <cf-vstack gap="2">
-      <cf-vstack gap="2">
+    <ct-vstack gap="2">
+      <ct-vstack gap="2">
         {itemCards}
 
         {hasNoItems
           ? (
-            <div style="text-align: center; color: var(--cf-color-gray-500); padding: 1rem;">
+            <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
               No items yet. Add one below!
             </div>
           )
           : null}
-      </cf-vstack>
+      </ct-vstack>
 
       {ifElse(
         hasCompleted,
-        <cf-hstack justify="end" style="padding: 0 0.5rem;">
-          <cf-button
+        <ct-hstack justify="end" style="padding: 0 0.5rem;">
+          <ct-button
             variant="ghost"
             size="sm"
-            style="font-size: 0.8rem; color: var(--cf-color-gray-500);"
+            style="font-size: 0.8rem; color: var(--ct-color-gray-500);"
             onClick={() => archiveCompleted.send({})}
           >
             Archive completed
-          </cf-button>
-        </cf-hstack>,
+          </ct-button>
+        </ct-hstack>,
         null,
       )}
 
-      <cf-message-input
+      <ct-message-input
         placeholder="Add an item..."
-        oncf-send={(e: { detail?: { message?: string } }) => {
+        onct-send={(e: { detail?: { message?: string } }) => {
           const title = e.detail?.message?.trim();
           if (title) {
             addItem.send({ title });
           }
         }}
       />
-    </cf-vstack>
+    </ct-vstack>
   );
 
   return {
     [NAME]: computed(() => `Do List (${items.get().length})`),
     [UI]: (
-      <cf-screen>
-        <cf-vstack slot="header" gap="1">
-          <cf-hstack justify="between" align="center">
-            <cf-heading level={4}>Do List</cf-heading>
-            <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+      <ct-screen>
+        <ct-vstack slot="header" gap="1">
+          <ct-hstack justify="between" align="center">
+            <ct-heading level={4}>Do List</ct-heading>
+            <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
               {computed(() => activeItems.length)} items
             </span>
-          </cf-hstack>
-        </cf-vstack>
+          </ct-hstack>
+        </ct-vstack>
 
-        <cf-vscroll flex showScrollbar fadeEdges>
-          <cf-vstack gap="2" style="padding: 1rem;">
+        <ct-vscroll flex showScrollbar fadeEdges>
+          <ct-vstack gap="2" style="padding: 1rem;">
             {itemCards}
 
             {hasNoItems
               ? (
-                <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
+                <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
                   No items yet. Add one below!
                 </div>
               )
@@ -464,41 +464,41 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
             {ifElse(
               hasCompleted,
               <details style="margin-top: 1rem;">
-                <summary style="cursor: pointer; font-size: 0.875rem; color: var(--cf-color-gray-500); padding: 0.5rem 0;">
+                <summary style="cursor: pointer; font-size: 0.875rem; color: var(--ct-color-gray-500); padding: 0.5rem 0;">
                   Completed ({computed(() => completedItems.length)})
                 </summary>
-                <cf-vstack gap="2" style="padding-top: 0.5rem;">
+                <ct-vstack gap="2" style="padding-top: 0.5rem;">
                   {completedCards}
-                  <cf-hstack justify="end">
-                    <cf-button
+                  <ct-hstack justify="end">
+                    <ct-button
                       variant="ghost"
                       size="sm"
-                      style="font-size: 0.8rem; color: var(--cf-color-gray-500);"
+                      style="font-size: 0.8rem; color: var(--ct-color-gray-500);"
                       onClick={() => archiveCompleted.send({})}
                     >
                       Archive all
-                    </cf-button>
-                  </cf-hstack>
-                </cf-vstack>
+                    </ct-button>
+                  </ct-hstack>
+                </ct-vstack>
               </details>,
               null,
             )}
-          </cf-vstack>
-        </cf-vscroll>
+          </ct-vstack>
+        </ct-vscroll>
 
-        <cf-hstack slot="footer" gap="2" style="padding: 1rem;">
-          <cf-message-input
+        <ct-hstack slot="footer" gap="2" style="padding: 1rem;">
+          <ct-message-input
             placeholder="Add an item..."
             style="flex: 1;"
-            oncf-send={(e: { detail?: { message?: string } }) => {
+            onct-send={(e: { detail?: { message?: string } }) => {
               const title = e.detail?.message?.trim();
               if (title) {
                 addItem.send({ title });
               }
             }}
           />
-        </cf-hstack>
-      </cf-screen>
+        </ct-hstack>
+      </ct-screen>
     ),
     compactUI,
     isHidden: true,

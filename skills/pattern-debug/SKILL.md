@@ -6,7 +6,7 @@ user-invocable: false
 
 # Debug Pattern
 
-Use the `cf` skill, or read `skills/cf/SKILL.md`, if debugging deployment or
+Use the `ct` skill, or read `skills/ct/SKILL.md`, if debugging deployment or
 piece issues.
 
 ## Read First
@@ -18,7 +18,7 @@ piece issues.
 
 1. **Check TypeScript errors:**
    ```bash
-   deno task cf check pattern.tsx --no-run
+   deno task ct check pattern.tsx --no-run
    ```
 
 2. **Match error to documentation:**
@@ -74,47 +74,47 @@ utilities. Full reference: `docs/development/debugging/console-commands.md`.
 ```bash
 # Read piece cell values
 agent-browser eval "(async () => {
-  const v = await commonfabric.readCell();
+  const v = await commontools.readCell();
   return JSON.stringify(v).slice(0, 500);
 })()"
 
 # Inspect VDOM tree
 agent-browser eval "(async () => {
-  await commonfabric.vdom.dump();
+  await commontools.vdom.dump();
   return 'dumped';
 })()"
 
 # Detect non-idempotent computations (UI churning)
 agent-browser eval "(async () => {
-  const r = await commonfabric.detectNonIdempotent(5000);
+  const r = await commontools.detectNonIdempotent(5000);
   return JSON.stringify({ nonIdempotent: r.nonIdempotent.length, cycles: r.cycles.length });
 })()"
 
 # Check for action schema mismatches (handlers doing nothing)
-agent-browser eval "JSON.stringify(commonfabric.getLoggerFlagsBreakdown())"
+agent-browser eval "JSON.stringify(commontools.getLoggerFlagsBreakdown())"
 ```
 
 **In browser console** (for interactive debugging):
 
 ```javascript
 // Read cell values
-await commonfabric.readCell();
-await commonfabric.readArgumentCell({ path: ["items"] });
+await commontools.readCell();
+await commontools.readArgumentCell({ path: ["items"] });
 
 // Watch values change during interaction
-const cancel = commonfabric.subscribeToCell();
+const cancel = commontools.subscribeToCell();
 // ... interact ... then cancel()
 
 // VDOM tree
-await commonfabric.vdom.dump();
-commonfabric.vdom.stats();
+await commontools.vdom.dump();
+commontools.vdom.stats();
 
 // Logger counts and timing
-commonfabric.getLoggerCountsBreakdown();
-commonfabric.getTimingStatsBreakdown();
+commontools.getLoggerCountsBreakdown();
+commontools.getTimingStatsBreakdown();
 
 // Non-idempotent detection
-await commonfabric.detectNonIdempotent();
+await commontools.detectNonIdempotent();
 ```
 
 ## Done When

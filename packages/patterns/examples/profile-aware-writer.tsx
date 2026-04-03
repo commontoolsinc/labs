@@ -11,7 +11,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 type Input = {
   title?: Default<string, "Profile-Aware Writer">;
@@ -52,24 +52,24 @@ Write content personalized to the user when appropriate.`;
       <div>
         <h2>{title}</h2>
 
-        <cf-card>
+        <ct-card>
           <h4 style="margin-top: 0;">Profile Context:</h4>
-          <cf-code-editor
+          <ct-code-editor
             $value={profile.result}
             style={{ maxHeight: "256px" }}
           />
-        </cf-card>
+        </ct-card>
 
         <div>
-          <cf-message-input
+          <ct-message-input
             name="Write"
             placeholder="Enter a topic to write about..."
             appearance="rounded"
-            oncf-send={handleSend({ topic })}
+            onct-send={handleSend({ topic })}
           />
         </div>
 
-        <cf-cell-context $cell={topic}>
+        <ct-cell-context $cell={topic}>
           {derive(topic, (t) =>
             t
               ? (
@@ -81,16 +81,16 @@ Write content personalized to the user when appropriate.`;
                 </div>
               )
               : null)}
-        </cf-cell-context>
+        </ct-cell-context>
 
-        <cf-cell-context $cell={result}>
+        <ct-cell-context $cell={result}>
           {derive(
             [result.pending, result.result],
             ([pending, r]) =>
               pending
                 ? (
                   <div style="margin-top: 16px;">
-                    <cf-loader show-elapsed />{" "}
+                    <ct-loader show-elapsed />{" "}
                     Generating personalized content...
                   </div>
                 )
@@ -105,7 +105,7 @@ Write content personalized to the user when appropriate.`;
                 )
                 : null,
           )}
-        </cf-cell-context>
+        </ct-cell-context>
       </div>
     ),
     topic,

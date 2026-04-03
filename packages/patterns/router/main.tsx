@@ -1,12 +1,5 @@
 /// <cts-enable />
-import {
-  computed,
-  NAME,
-  pattern,
-  UI,
-  type VNode,
-  Writable,
-} from "commonfabric";
+import { computed, NAME, pattern, UI, type VNode, Writable } from "commontools";
 import { type RouteContext, Router } from "./router.tsx";
 
 // deno-lint-ignore no-empty-interface
@@ -49,9 +42,9 @@ const Home = pattern<HomeInput, HomeOutput>(() => {
       <div>
         <p>The Home pattern</p>
         <div>
-          <cf-link to="/books">
+          <ct-link to="/books">
             <a href="/books">Books</a>
-          </cf-link>
+          </ct-link>
         </div>
       </div>
     ),
@@ -65,14 +58,14 @@ const Books = pattern<BooksInput, BooksOutput>(() => {
       <div>
         <p>The Books pattern</p>
         <div>
-          <cf-link to="/books/1">
+          <ct-link to="/books/1">
             <button type="button">Book 1</button>
-          </cf-link>
+          </ct-link>
         </div>
         <div>
-          <cf-link to="/books/2?edition=hardcover">
+          <ct-link to="/books/2?edition=hardcover">
             <button type="button">Book 2 (Hardcover)</button>
-          </cf-link>
+          </ct-link>
         </div>
       </div>
     ),
@@ -89,14 +82,14 @@ const Book = pattern<BookInput, BookOutput>(({ route }) => {
         <p>Book ID: {bookId}</p>
         <p>Edition: {edition}</p>
         <div>
-          <cf-link to="/books">
+          <ct-link to="/books">
             <button type="button">Back to Books</button>
-          </cf-link>
+          </ct-link>
         </div>
         <div>
-          <cf-link to="/">
+          <ct-link to="/">
             <button type="button">Home</button>
-          </cf-link>
+          </ct-link>
         </div>
       </div>
     ),
@@ -122,12 +115,12 @@ export default pattern<MainInput, MainOutput>(() => {
   return {
     [NAME]: "Main",
     [UI]: (
-      <cf-screen>
+      <ct-screen>
         <div>Current path: {path}</div>
         <main>
           {Pattern}
         </main>
-      </cf-screen>
+      </ct-screen>
     ),
   };
 });

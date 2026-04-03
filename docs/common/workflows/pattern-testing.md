@@ -32,13 +32,13 @@ Test patterns are patterns that test other patterns. They:
 - Define assertions using `computed(() => boolean)`
 - Return a `tests` array that the runner executes sequentially
 
-Test files end in `.test.tsx` and are run with `deno task cf test`.
+Test files end in `.test.tsx` and are run with `deno task ct test`.
 
 ## Quick Example
 
 ```tsx
 /// <cts-enable />
-import { action, computed, pattern } from "commonfabric";
+import { action, computed, pattern } from "commontools";
 import Counter from "./counter.tsx";
 
 export default pattern(() => {
@@ -71,13 +71,13 @@ export default pattern(() => {
 
 ```bash
 # Run a specific test
-deno task cf test packages/patterns/my-pattern/main.test.tsx
+deno task ct test packages/patterns/my-pattern/main.test.tsx
 
 # Run with verbose output
-deno task cf test packages/patterns/my-pattern/main.test.tsx --verbose
+deno task ct test packages/patterns/my-pattern/main.test.tsx --verbose
 
 # Run all tests in a directory
-deno task cf test packages/patterns/my-pattern/
+deno task ct test packages/patterns/my-pattern/
 ```
 
 ## Test Step Format
@@ -184,7 +184,7 @@ When a test fails, use the CLI to inspect pattern state:
 ### 1. Run with Verbose Mode
 
 ```bash
-deno task cf test ./main.test.tsx --verbose
+deno task ct test ./main.test.tsx --verbose
 ```
 
 This shows which action ran before each assertion failure.
@@ -195,18 +195,18 @@ Deploy the test pattern and use CLI commands to inspect state:
 
 ```bash
 # Deploy the test pattern
-deno task cf piece new ./main.test.tsx
+deno task ct piece new ./main.test.tsx
 
 # Get the piece ID from the output, then inspect
-deno task cf piece inspect --piece <PIECE_ID>
+deno task ct piece inspect --piece <PIECE_ID>
 
 # Get specific values
-deno task cf piece get subject/items --piece <PIECE_ID>
+deno task ct piece get subject/items --piece <PIECE_ID>
 
 # Step through manually
-deno task cf piece call tests/0/action --piece <PIECE_ID>
-deno task cf piece step --piece <PIECE_ID>
-deno task cf piece get tests/1/assertion --piece <PIECE_ID>
+deno task ct piece call tests/0/action --piece <PIECE_ID>
+deno task ct piece step --piece <PIECE_ID>
+deno task ct piece get tests/1/assertion --piece <PIECE_ID>
 ```
 
 ### 3. Expose Debug Data

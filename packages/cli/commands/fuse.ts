@@ -12,10 +12,8 @@ import {
   removeMountStateFile,
   writeMountState,
 } from "../lib/fuse.ts";
-import { cliText } from "../lib/cli-name.ts";
 
-const fuseDescription = cliText(
-  `Mount Common Fabric spaces as a FUSE filesystem.
+const fuseDescription = `Mount Common Tools spaces as a FUSE filesystem.
 
 Spaces appear as directories at the mount root. Any space name you \`cd\`
 into is connected on demand — no need to specify spaces up front.
@@ -44,7 +42,7 @@ FILESYSTEM LAYOUT:
   cat <piece>/result.json                # full cell value as JSON
   cat <piece>/result/title               # single scalar field
   cat <piece>/result/items/0/name        # nested access
-  head -n1 <piece>/result/search.tool    # callable shebang for cf exec
+  head -n1 <piece>/result/search.tool    # callable shebang for ct exec
 
   WRITING:
   echo '"new title"' > result/title      # write scalar (auto-detects type)
@@ -54,8 +52,7 @@ FILESYSTEM LAYOUT:
   rm result/oldkey                       # delete key
   ln -s ../../other-piece/input/foo result/ref  # sigil link
 
-Requires FUSE-T (preferred) or macFUSE on macOS.`,
-);
+Requires FUSE-T (preferred) or macFUSE on macOS.`;
 
 export async function awaitForegroundMountExit(
   child: { status: Promise<Deno.CommandStatus> },
@@ -102,12 +99,12 @@ export const fuse = new Command()
   .name("fuse")
   .description(fuseDescription)
   .default("help")
-  .globalEnv("CF_API_URL=<url:string>", "URL of the fabric instance.", {
-    prefix: "CF_",
+  .globalEnv("CT_API_URL=<url:string>", "URL of the fabric instance.", {
+    prefix: "CT_",
   })
   .globalOption("-a,--api-url <url:string>", "URL of the fabric instance.")
-  .globalEnv("CF_IDENTITY=<path:string>", "Path to an identity keyfile.", {
-    prefix: "CF_",
+  .globalEnv("CT_IDENTITY=<path:string>", "Path to an identity keyfile.", {
+    prefix: "CT_",
   })
   .globalOption("-i,--identity <path:string>", "Path to an identity keyfile.")
   /* mount */
@@ -118,21 +115,19 @@ export const fuse = new Command()
   .option("--background", "Run in the background (detached).")
   .option("--debug", "Enable FUSE debug output.")
   .example(
-    cliText("cf fuse mount /tmp/cf-fuse"),
-    "Mount with settings from CF_API_URL / CF_IDENTITY env vars.",
+    "ct fuse mount /tmp/ct-fuse",
+    "Mount with settings from CT_API_URL / CT_IDENTITY env vars.",
   )
   .example(
-    cliText(
-      `cf fuse mount /tmp/cf-fuse --api-url http://localhost:${ports.toolshed}`,
-    ),
+    `ct fuse mount /tmp/ct-fuse --api-url http://localhost:${ports.toolshed}`,
     "Mount with explicit API URL.",
   )
   .example(
-    cliText("cf fuse mount /tmp/cf-fuse --background"),
-    cliText("Mount in background; use 'cf fuse status' to check."),
+    "ct fuse mount /tmp/ct-fuse --background",
+    "Mount in background; use 'ct fuse status' to check.",
   )
   .action(async (options, mountpoint) => {
-    // globalEnv merges CF_API_URL / CF_IDENTITY into options automatically
+    // globalEnv merges CT_API_URL / CT_IDENTITY into options automatically
     const apiUrl = options.apiUrl ?? "";
     const identity = options.identity ? resolve(options.identity) : "";
     const absMountpoint = resolve(mountpoint);
@@ -225,9 +220,7 @@ export const fuse = new Command()
       console.log(`  mountpoint: ${absMountpoint}`);
       console.log(`  log:        ${logFile}`);
       console.log(
-        cliText(
-          `Use 'cf fuse status' to check, 'cf fuse unmount ${mountpoint}' to stop.`,
-        ),
+        `Use 'ct fuse status' to check, 'ct fuse unmount ${mountpoint}' to stop.`,
       );
     } else {
       // Foreground — inherit stdio, propagate exit code

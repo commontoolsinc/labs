@@ -6,9 +6,9 @@ subject: Tutorial
 authors:
   - name: Ben Follington
     email: ben@common.tools
-keywords: commonfabric, UI
+keywords: commontools, UI
 abstract: |
-  Common UI is a collection of web components (prefixed with cf-) exposed for building patterns.
+  Common UI is a collection of web components (prefixed with ct-) exposed for building patterns.
 ---
 # Common UI
 
@@ -23,12 +23,12 @@ Swift developers are encouraged to use the defaults as much as possible. By doin
 :::
 
 
-Our `ui` package is a web component library implemented in `lit` that interoperates with the Common Fabric runtime to produce a Swift UI-like abstraction, this means our components are divided into layers:
+Our `ui` package is a web component library implemented in `lit` that interoperates with the Common Tools runtime to produce a Swift UI-like abstraction, this means our components are divided into layers:
 
 
 # System Components
 
-## cf-theme
+## ct-theme
 
 Applies a set of theme variables to the entire subtree. Not all components respect the theme yet, but many do. See `packages/ui/src/v2/components/theme-context.ts`
 
@@ -44,33 +44,33 @@ const localTheme = {
 return {
   [NAME]: "Themed Piece",
   [UI]: (
-    <cf-theme theme={localTheme}>
+    <ct-theme theme={localTheme}>
       {/* all components in subtree are themed */}
-    </cf-theme>
+    </ct-theme>
   )
 }
 ```
 
 Can be nested and overriden further down the subtree.
 
-## cf-render
+## ct-render
 
 Used to render a `Cell` that has a `[UI]` property into the DOM. Usually not required inside a pattern, used in the app shell itself.
 
 ```{code-block} html
-<cf-render $cell={myCharm} />
+<ct-render $cell={myCharm} />
 ```
 
-## cf-keybind (beta)
+## ct-keybind (beta)
 
 Register keyboard shortcuts with a handler. These registrations are mediated by `packages/shell/src/lib/keyboard-router.ts` in the shell to prevent conflicts with system shortcuts.
 
 ```{code-block} html
-    <cf-keybind
+    <ct-keybind
         code="KeyN"
         alt
         preventDefault
-        oncf-keybind={createChatPattern({ ... })}
+        onct-keybind={createChatPattern({ ... })}
     />
 ```
 
@@ -78,21 +78,21 @@ Register keyboard shortcuts with a handler. These registrations are mediated by 
 
 Layout components do not provide any content themselves, they are used to arrange other components. We draw quite directly from the [Swift UI Layout Fundamentals](https://developer.apple.com/documentation/swiftui/layout-fundamentals).
 
-## cf-screen
+## ct-screen
 
 Designed to represent content that could fill the entire screen or a panel / content area. This will expand to fill the available space. It offers two optional slots: `header` and `footer`.
 
 When to use: your `<main>` or `<div>` is not growing to full the available space. Typically appears _once_ at the root of a pattern's `[UI]` tree:
 
-```{figure} ./images/diagrams/cf-screen.svg
+```{figure} ./images/diagrams/ct-screen.svg
 :name: layout-example
 ```
 
 ```{code-block} html
-<cf-screen>
-  <cf-heading slot="header">
+<ct-screen>
+  <ct-heading slot="header">
     Hello
-  </cf-heading>
+  </ct-heading>
 
   <div>...</div>
   <div>...</div>
@@ -100,127 +100,124 @@ When to use: your `<main>` or `<div>` is not growing to full the available space
   <div slot="footer">
     World
   </div>
-</cf-screen>
+</ct-screen>
 ```
 
 Inspired by this [Swift UI convention](https://scottsmithdev.com/screen-vs-view-in-swiftui). A `Screen` is just a `View` but it represents the kind of view that MIGHT fill a screen on some device.
 
-## cf-toolbar
+## ct-toolbar
 
-Stack several actions into a horizontal bar, typically at the top of `<cf-screen>`.
+Stack several actions into a horizontal bar, typically at the top of `<ct-screen>`.
 
-```{figure} ./images/diagrams/cf-toolbar.svg
+```{figure} ./images/diagrams/ct-toolbar.svg
 :name: layout-example
 ```
 
 ```{code-block} html
-<cf-screen>
-  <cf-toolbar slot="header">
-      <cf-button>A</cf-button>
-      <cf-button>B</cf-button>
-  </cf-toolbar>
-</cf-screen>
+<ct-screen>
+  <ct-toolbar slot="header">
+      <ct-button>A</ct-button>
+      <ct-button>B</ct-button>
+  </ct-toolbar>
+</ct-screen>
 ```
 
 ## Stacks are all you need
 
 ... almost. Just the [horizontal and vertical stacks](https://developer.apple.com/tutorials/swiftui-concepts/organizing-and-aligning-content-with-stacks) if you control the [spacing and alignment](https://developer.apple.com/tutorials/swiftui-concepts/adjusting-the-space-between-views).
 
-## cf-vstack
+## ct-vstack
 
 Stack items vertically, this is a layer over the [CSS flexbox API](https://flexbox.malven.co/). You can permuate `gap`, `align`, `justify` and `reverse` attributes to control the behavior.
 
 When to use: any time you need to stack items vertically.
 
-```{figure} ./images/diagrams/cf-vstack-1.svg
+```{figure} ./images/diagrams/ct-vstack-1.svg
 :name: layout-example
 ```
 
 ```{code-block} html
-<cf-vstack gap="1" align="start" justify="stretch">
+<ct-vstack gap="1" align="start" justify="stretch">
     <div>A</div>
     <div>B</div>
     <div>C</div>
-</cf-vstack>
+</ct-vstack>
 ```
 
-## cf-hstack
+## ct-hstack
 
 Stack items horizontally, this is a layer over the [CSS flexbox API](https://flexbox.malven.co/). You can permuate `gap`, `align`, `justify` and `reverse` attributes to control the behavior.
 
 When to use: toolbars, column layouts, grouping icons and buttons and text together.
 
-```{figure} ./images/diagrams/cf-hstack.svg
+```{figure} ./images/diagrams/ct-hstack.svg
 :name: layout-example
 ```
 
 ```{code-block} html
-<cf-hstack gap="1" align="start" justify="stretch">
+<ct-hstack gap="1" align="start" justify="stretch">
     <div>A</div>
     <div>B</div>
     <div>C</div>
-</cf-hstack>
+</ct-hstack>
 ```
 
-## Layered Layouts (gap)
+## ct-zstack
 
-There is no dedicated z-stack primitive right now. For overlapping content, use
-plain positioned HTML/CSS inside the existing `cf-*` layout primitives. See
-[SwiftUI ZStack](https://developer.apple.com/documentation/swiftui/zstack) for
-the intended shape of this missing abstraction.
+Currently missing, would allow similar control for layering items on top of one another. [Swift UI ZStack](https://developer.apple.com/documentation/swiftui/zstack).
 
-## cf-vscroll
+## ct-vscroll
 
 Wrap tall vertical content in a scrollable container with control over autoscroll and scrollbar appearance. Inspired by [SwiftUI ScrollView](https://developer.apple.com/documentation/swiftui/scrollview).
 
 ```{code-block} html
-<cf-vscroll height="400px">
-  <cf-vstack gap="4">
+<ct-vscroll height="400px">
+  <ct-vstack gap="4">
     <p>Long content...</p>
-  </cf-vstack>
-</cf-vscroll>
+  </ct-vstack>
+</ct-vscroll>
 ```
 
 In practice we often use a specific set of properties if dealing with a "chat view" that scrolls:
 
 ```{code-block} html
-<cf-vscroll flex showScrollbar fadeEdges snapToBottom />
+<ct-vscroll flex showScrollbar fadeEdges snapToBottom />
 ```
 
 Here `flex` will force the `vscroll` to expand without a fixed height. `snapToBottom` will automatically scroll to the bottom when new content is added.
 
-## cf-autolayout
+## ct-autolayout
 
 Will attempt to lay out the children provided as best it can. Provides two slots for `left` and `right` sidebars (that can be toggled open/shut). On a wide view, items stack horizontally, on a medium view thet stack vertically and on mobile it converts to a tabbed view.
 
-```{figure} ./images/diagrams/cf-autolayout-wide.svg
+```{figure} ./images/diagrams/ct-autolayout-wide.svg
 :name: layout-example
 ```
 
-```{figure} ./images/diagrams/cf-autolayout-mid.svg
+```{figure} ./images/diagrams/ct-autolayout-mid.svg
 :name: layout-example
 ```
 
-```{figure} ./images/diagrams/cf-autolayout-narrow.svg
+```{figure} ./images/diagrams/ct-autolayout-narrow.svg
 :name: layout-example
 ```
 
 ```{code-block} html
-<cf-screen>
+<ct-screen>
   <!-- Header slot - fixed at top -->
   <div slot="header">
     <h2>Header Section</h2>
   </div>
 
-  <!-- cf-autolayout creates responsive multi-panel layout with optional sidebars -->
+  <!-- ct-autolayout creates responsive multi-panel layout with optional sidebars -->
   <!-- tabNames: Labels for main content panels (shown as tabs on mobile) -->
   <!-- Shows all panels side-by-side in a grid -->
-  <cf-autolayout tabNames={["Main", "Second"]}>
+  <ct-autolayout tabNames={["Main", "Second"]}>
     <!-- Left sidebar - use slot="left" -->
     <aside slot="left">
       <h3>Left Sidebar</h3>
       <p>Left content</p>
-      <cf-button>Left Button</cf-button>
+      <ct-button>Left Button</ct-button>
     </aside>
 
     <!-- Main content panels - no slot attribute needed -->
@@ -228,115 +225,113 @@ Will attempt to lay out the children provided as best it can. Provides two slots
     <div>
       <h1>Main Content Area</h1>
       <p>This is the main content with sidebars</p>
-      <cf-button>Main Button</cf-button>
+      <ct-button>Main Button</ct-button>
     </div>
 
     <div>
       <h1>Second Content Area</h1>
       <p>This is the second content with sidebars</p>
-      <cf-button>Second Button</cf-button>
+      <ct-button>Second Button</ct-button>
     </div>
 
     <!-- Right sidebar - use slot="right" -->
     <aside slot="right">
       <h3>Right Sidebar</h3>
       <p>Right content</p>
-      <cf-button>Right Button</cf-button>
+      <ct-button>Right Button</ct-button>
     </aside>
-  </cf-autolayout>
+  </ct-autolayout>
 
   <!-- Footer slot - fixed at bottom -->
   <div slot="footer">
     <p>Footer Section</p>
   </div>
-</cf-screen>
+</ct-screen>
 ```
 
-## cf-grid (stale)
+## ct-grid (stale)
 
-`cf-grid` has not been used in production and likely doesn't work, but the intention is to wrap the [CSS Grid API](https://grid.malven.co/) and blend in ideas from [Swift UI Grid](https://developer.apple.com/documentation/swiftui/grid).
+`ct-grid` has not been used in production and likely doesn't work, but the intention is to wrap the [CSS Grid API](https://grid.malven.co/) and blend in ideas from [Swift UI Grid](https://developer.apple.com/documentation/swiftui/grid).
 
-## Spacer (gap)
+## ct-spacer (missing)
 
-There is no dedicated spacer primitive right now. Use flex growth on a plain
-element when you need one side of a stack to push the other side away. See
-[SwiftUI Spacer](https://developer.apple.com/documentation/swiftui/spacer).
+[Swift UI Spacer](https://developer.apple.com/documentation/swiftui/spacer)
 
 ## Composed Layouts
 
 You can mix-and-match the above components to achieve practically any (standard) layout.
 
 ```{code-block} html
-<cf-screen>
-    <cf-toolbar slot="top">
-        <cf-button>hello</cf-button>
-    </cf-toolbar>
-    <cf-autolayout>
-        <cf-vstack slot="left">
-            <cf-hstack gap="1">
+<ct-screen>
+    <ct-toolbar slot="top">
+        <ct-button>hello</ct-button>
+    </ct-toolbar>
+    <ct-autolayout>
+        <ct-vstack slot="left">
+            <ct-hstack gap="1">
                 <icon>question</icon>
                 <button>hello</button>
-                <div style="flex: 1"></div>
+                <ct-spacer />
                 <button>hello</button>
-            </cf-hstack>
+            </ct-hstack>
 
-            <cf-hstack gap="1">
+            <ct-hstack gap="1">
                 <icon>question</icon>
                 <button>hello</button>
-            </cf-hstack>
-        </cf-vstack>
+            </ct-hstack>
+        </ct-vstack>
 
-        <cf-screen>
-            <cf-vstack>
-                <cf-grid rows="3" cols="4" gap="2">
+        <ct-screen>
+            <ct-vstack>
+                <ct-grid rows="3" cols="4" gap="2">
                     ...
-                </cf-grid>
-            </cf-vstack>
-        </cf-screen>
+                </ct-grid>
+            </ct-vstack>
+        </ct-screen>
 
-        <cf-vscroll slot="right">
+        <ct-vscroll slot="right">
             <ul>
                 <li>Imagine this was long</li>
             </ul>
-        </cf-vscroll>
-    </cf-autolayout>
-</cf-screen>
+        </ct-vscroll>
+    </ct-autolayout>
+</ct-screen>
 ```
 
 # Visual Components
 
-- typesetting: `cf-label`, `cf-heading`
-	- gap: themed paragraph/text primitive (`p` works)
+- typesetting: `ct-label`, `ct-heading`
+	- gap: `ct-text` for themed paragraph usecase (`p` works)
 	- <p>, <Text>
 
-- gap: icon primitive (and `cf-label` has an optional in-built icon)
+- gap: `ct-icon` (and `ct-label` has an optional in-built icon)
     - gap: icon set?
 
-- visual: `cf-kbd`, `cf-separator`, `cf-table`, `cf-tool-call`
-	- gap: media/image primitive
+- visual: `ct-kdb`, `ct-separator`, `ct-table`, `ct-tool-call`
+	- gap: `ct-img` or `ct-media`
 
 # Input Components
 
-- input: `cf-button`, `cf-select`, `cf-input`, `cf-textarea`, `cf-checkbox`, `cf-tags`
-	- gap: search input with autocomplete menu
-	- gap: dedicated file picker
-	- redundant: common-send-message, cf-message-input (?)
+- input: `ct-button`, `ct-select`, `ct-input`, `ct-textarea`, `ct-checkbox`, `ct-tags`
+	- gap: `ct-search` which has an autocomplete menu
+	- gap: `ct-file-picker`
+	- redundant: common-send-message, ct-message-input (?)
 	    - this is JUST a button and an input
 		- the "right" way is:
       - ```{code-block} html
-        <cf-form oncf-submit={handler({ ... })}>
-          <cf-input></cf-input>
-          <cf-button type="submit">Submit</cf-button>
-        </cf-form>
+        <ct-form onSubmit={handler({ ... })}>
+          <ct-input></ct-input>
+          <ct-button type="submit">Submit</ct-button>
+        </ct-form>
         ```
 
       - ```{code-block} typescript
         const EnterToSubmit = pattern(({ myHandler }) => {
           return {
-              [UI]: <cf-form oncf-submit={myHandler}>
-                <cf-input></cf-input>
-                <cf-button type="submit">Submit</cf-button>
-              </cf-form>
+              [UI]: <ct-form onSubmit={myHandler}>
+                <ct-input></ct-input>
+                <ct-button type="submit">Submit</ct-button>
+              </ct-form>
           }
         })
 
@@ -345,17 +340,16 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Interactive / Complex Components
 
-- interactive: `cf-collapsible`, `cf-tab-list`, `cf-canvas`
+- interactive: `ct-collapsible`, `ct-tab-list`, `ct-canvas`
 
-- complex/integrated (cell interop): `cf-code-editor`
-	- gap: tree/outliner editor
+- complex/integrated (cell interop): `ct-code-editor`, `ct-outliner`
 	- gap: editable table rows
 
 ## Chat Components
 
-- chat: `cf-chat`, `cf-prompt-input`, `cf-chat-message`, `cf-tool-call`, `cf-tools-chip`
+- chat: `ct-chat`, `ct-prompt-input`, `ct-chat-message`, `ct-tool-call`, `ct-tools-chip`
 
 # Unused/Unproven Components
 
-- stale: `cf-aspect-ratio`, `cf-draggable`, `cf-form`, `cf-grid`, `cf-hgroup`, `cf-input-otp`, `cf-message-input`, `cf-progress`, `cf-radio`, `cf-radio-group`, `cf-slider`, `cf-switch`, `cf-tile`, `cf-toggle`, `cf-toggle-group`, `cf-vgroup`
-- superfluous: `cf-resizeable-handle`, `cf-resizable-panel`, `cf-resizeable-panel-group`, `cf-scroll-area`, `cf-tabs`/`cf-tab-list`/`cf-tab-panel`
+- stale: `ct-aspect-ratio`, `ct-draggable`, `ct-form`, `ct-grid`, `ct-hgroup`, `ct-input-otp`, `ct-message-input`, `ct-progress`, `ct-radio`, `ct-radio-group`, `ct-slider`, `ct-switch`, `ct-tile`, `ct-toggle`, `ct-toggle-group`, `ct-vgroup`
+- superfluous: `ct-resizeable-handle`, `ct-resizable-panel`, `ct-resizeable-panel-group`, `ct-scroll-area`, `ct-tabs`/`ct-tab-list`/`ct-tab-panel`

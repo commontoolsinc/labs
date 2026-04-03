@@ -10,7 +10,7 @@
  *   Writable array capture
  * - authored ifElse branches still lower safely around the mixed map behavior
  */
-import { computed, ifElse, pattern, UI, Writable } from "commonfabric";
+import { computed, ifElse, pattern, UI, Writable } from "commontools";
 
 interface Badge {
   text: string;

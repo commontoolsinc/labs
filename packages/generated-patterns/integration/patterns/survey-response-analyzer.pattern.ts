@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-} from "commonfabric";
+} from "commontools";
 
 interface SurveyResponseArgs {
   responses: Default<SurveyResponseInput[], []>;

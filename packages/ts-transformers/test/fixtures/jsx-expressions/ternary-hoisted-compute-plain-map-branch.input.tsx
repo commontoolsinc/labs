@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, pattern, UI, Writable } from "commonfabric";
+import { computed, pattern, UI, Writable } from "commontools";
 
 interface Item {
   name: string;

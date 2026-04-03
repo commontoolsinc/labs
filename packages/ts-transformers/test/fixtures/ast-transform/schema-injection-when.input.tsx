@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { when, pattern, UI, NAME } from "commonfabric";
+import { when, pattern, UI, NAME } from "commontools";
 
 interface State {
   enabled: boolean;

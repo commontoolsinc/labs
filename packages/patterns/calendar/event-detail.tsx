@@ -9,7 +9,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 /** Input for creating a new event detail piece */
 interface EventDetailInput {
@@ -61,55 +61,55 @@ export default pattern<EventDetailInput, EventDetailOutput>(
     return {
       [NAME]: computed(() => `Event: ${title.get()}`),
       [UI]: (
-        <cf-screen>
-          <cf-vstack slot="header">
-            <cf-heading level={4}>{title || "New Event"}</cf-heading>
-          </cf-vstack>
+        <ct-screen>
+          <ct-vstack slot="header">
+            <ct-heading level={4}>{title || "New Event"}</ct-heading>
+          </ct-vstack>
 
-          <cf-vscroll flex showScrollbar fadeEdges>
-            <cf-vstack gap="3" style="padding: 1rem;">
-              <cf-card>
-                <cf-vstack gap="2">
-                  <cf-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+          <ct-vscroll flex showScrollbar fadeEdges>
+            <ct-vstack gap="3" style="padding: 1rem;">
+              <ct-card>
+                <ct-vstack gap="2">
+                  <ct-vstack gap="1">
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                       Title
                     </label>
-                    <cf-input $value={title} placeholder="Event title" />
-                  </cf-vstack>
+                    <ct-input $value={title} placeholder="Event title" />
+                  </ct-vstack>
 
-                  <cf-hstack gap="2">
-                    <cf-vstack gap="1" style="flex: 1;">
-                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+                  <ct-hstack gap="2">
+                    <ct-vstack gap="1" style="flex: 1;">
+                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                         Date
                       </label>
-                      <cf-input $value={date} type="date" />
-                    </cf-vstack>
+                      <ct-input $value={date} type="date" />
+                    </ct-vstack>
 
-                    <cf-vstack gap="1" style="flex: 1;">
-                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+                    <ct-vstack gap="1" style="flex: 1;">
+                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                         Time
                       </label>
-                      <cf-input $value={time} type="time" />
-                    </cf-vstack>
-                  </cf-hstack>
-                </cf-vstack>
-              </cf-card>
+                      <ct-input $value={time} type="time" />
+                    </ct-vstack>
+                  </ct-hstack>
+                </ct-vstack>
+              </ct-card>
 
-              <cf-card>
-                <cf-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+              <ct-card>
+                <ct-vstack gap="1">
+                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                     Notes
                   </label>
-                  <cf-textarea
+                  <ct-textarea
                     $value={notes}
                     placeholder="Add details about this event..."
                     rows={6}
                   />
-                </cf-vstack>
-              </cf-card>
-            </cf-vstack>
-          </cf-vscroll>
-        </cf-screen>
+                </ct-vstack>
+              </ct-card>
+            </ct-vstack>
+          </ct-vscroll>
+        </ct-screen>
       ),
       title,
       date,

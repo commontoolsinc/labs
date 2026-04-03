@@ -9,7 +9,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import GroupChatRoom, { Message, User } from "./group-chat-room.tsx";
 
 /**
@@ -235,12 +235,12 @@ export default pattern<LobbyInput, LobbyOutput>(
               >
                 Join as
               </div>
-              <cf-input
+              <ct-input
                 $value={nameInput}
                 placeholder="Your name"
                 style="width: 100%; margin-bottom: 1rem;"
                 timingStrategy="immediate"
-                oncf-submit={joinChat({
+                onct-submit={joinChat({
                   chatName,
                   messages,
                   users,

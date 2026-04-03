@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { cell, NAME, pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { cell, NAME, pattern, UI } from "commontools";
 // FIXTURE: conditional-empty-check
 // Verifies: !cell.get().length && <JSX> is transformed to when() with derive() predicate
 //   !items.get().length && <span> → when(derive({items}, ({items}) => !items.get().length), <span>)
@@ -10,25 +10,25 @@ export default pattern(() => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [NAME]: "Conditional empty check",
         [UI]: (<div>
-        {__cfHelpers.when({
+        {__ctHelpers.when({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean"
                 }, {}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 items: {
@@ -40,12 +40,12 @@ export default pattern(() => {
                 }
             },
             required: ["items"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => !items.get().length), <span>No items</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => !items.get().length), <span>No items</span>)}
       </div>),
     };
-}, false as const satisfies __cfHelpers.JSONSchema, {
+}, false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -77,8 +77,8 @@ export default pattern(() => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

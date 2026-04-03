@@ -8,7 +8,7 @@ import {
   pattern,
   str,
   type Writable,
-} from "commonfabric";
+} from "commontools";
 
 interface DerivedMinMaxArgs {
   value: Default<number, 0>;

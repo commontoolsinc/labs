@@ -1,5 +1,5 @@
 import { App, AppView, appViewToUrlPath, urlToAppView } from "./app/mod.ts";
-import { getLogger } from "@commonfabric/utils/logger";
+import { getLogger } from "@commontools/utils/logger";
 
 const logger = getLogger("shell.navigation", {
   enabled: false,
@@ -8,7 +8,7 @@ const logger = getLogger("shell.navigation", {
 
 export type NavigationCommand = AppView;
 
-const NavigationEventName = "cf-navigate";
+const NavigationEventName = "ct-navigate";
 
 class NavigationEvent extends CustomEvent<NavigationCommand> {
   command: NavigationCommand;
@@ -22,7 +22,7 @@ export function navigate(command: NavigationCommand) {
   globalThis.dispatchEvent(new NavigationEvent(command));
 }
 
-const UpdatePageTitleEventName = "cf-update-page-title";
+const UpdatePageTitleEventName = "ct-update-page-title";
 
 class UpdatePageTitleEvent extends CustomEvent<string> {
   title: string;

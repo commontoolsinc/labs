@@ -13,7 +13,7 @@
  * - generated handler state only includes `timer`, while the handler body
  *   still uses the other captures inside the nested `setTimeout(...)` callback
  */
-import { action, Default, pattern, Stream, Writable } from "commonfabric";
+import { action, Default, pattern, Stream, Writable } from "commontools";
 
 function flushLater(
   fileId: Writable<Default<string, "">>,

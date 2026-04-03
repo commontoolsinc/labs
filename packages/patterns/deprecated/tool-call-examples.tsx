@@ -1,7 +1,7 @@
 /// <cts-enable />
-import { generateText, NAME, pattern, str, UI, Writable } from "commonfabric";
+import { generateText, NAME, pattern, str, UI, Writable } from "commontools";
 
-import { calculator } from "../system/common-fabric.tsx";
+import { calculator } from "../system/common-tools.tsx";
 
 export default pattern(() => {
   const expression = Writable.of("1+1");
@@ -22,7 +22,7 @@ export default pattern(() => {
     [UI]: (
       <div>
         <div>
-          <cf-input $value={expression} />
+          <ct-input $value={expression} />
         </div>
         <div>
           <h2>Text Generation</h2>

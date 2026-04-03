@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Default, NAME, pattern, UI, Writable } from "commonfabric";
+import { Default, NAME, pattern, UI, Writable } from "commontools";
 
 type Input = {
   selected: Writable<Default<string, "opt_1">>;
@@ -19,18 +19,18 @@ type Result = {
 export default pattern<Input, Result>(
   ({ selected, numericChoice, category, activeTab }) => {
     return {
-      [NAME]: "cf-select demo",
+      [NAME]: "ct-select demo",
       [UI]: (
-        <cf-vstack gap="3" style={{ padding: "1rem" }}>
-          <h3>cf-select Component Demo</h3>
+        <ct-vstack gap="3" style={{ padding: "1rem" }}>
+          <h3>ct-select Component Demo</h3>
 
-          <cf-card>
+          <ct-card>
             <h4>String Values</h4>
             <p>
-              cf-select uses an `items` attribute with {`{label, value}`}{" "}
+              ct-select uses an `items` attribute with {`{label, value}`}{" "}
               objects
             </p>
-            <cf-select
+            <ct-select
               items={[
                 { label: "Option 1", value: "opt_1" },
                 { label: "Option 2", value: "opt_2" },
@@ -39,13 +39,13 @@ export default pattern<Input, Result>(
               $value={selected}
             />
             <p>Selected: {selected}</p>
-          </cf-card>
+          </ct-card>
 
-          <cf-card>
+          <ct-card>
             <h4>
-              <code>cf-autocomplete</code>
+              <code>ct-autocomplete</code>
             </h4>
-            <cf-autocomplete
+            <ct-autocomplete
               items={[
                 { label: "Option 1", value: "opt_1" },
                 { label: "Option 2", value: "opt_2" },
@@ -53,13 +53,13 @@ export default pattern<Input, Result>(
               ]}
               $value={selected}
             />
-          </cf-card>
+          </ct-card>
 
-          <cf-card>
+          <ct-card>
             <h4>
-              <code>cf-radio-group</code>
+              <code>ct-radio-group</code>
             </h4>
-            <cf-radio-group
+            <ct-radio-group
               $value={selected}
               items={[
                 { label: "Option 1", value: "opt_1" },
@@ -68,12 +68,12 @@ export default pattern<Input, Result>(
               ]}
               orientation="horizontal"
             />
-          </cf-card>
+          </ct-card>
 
-          <cf-card>
+          <ct-card>
             <h4>Numeric Values</h4>
             <p>Values can be any type, not just strings</p>
-            <cf-select
+            <ct-select
               items={[
                 { label: "First Item", value: 1 },
                 { label: "Second Item", value: 2 },
@@ -82,11 +82,11 @@ export default pattern<Input, Result>(
               $value={numericChoice}
             />
             <p>Selected number: {numericChoice}</p>
-          </cf-card>
+          </ct-card>
 
-          <cf-card>
+          <ct-card>
             <h4>Common Categories Example</h4>
-            <cf-select
+            <ct-select
               $value={category}
               items={[
                 { label: "Produce", value: "Produce" },
@@ -97,32 +97,32 @@ export default pattern<Input, Result>(
               ]}
             />
             <p>Selected category: {category}</p>
-          </cf-card>
+          </ct-card>
 
-          <cf-card>
+          <ct-card>
             <h4>
-              <code>cf-tabs</code>
+              <code>ct-tabs</code>
             </h4>
             <p>Tabs use $value binding for the active tab</p>
-            <cf-tabs $value={activeTab}>
-              <cf-tab-list>
-                <cf-tab value="tab1">First Tab</cf-tab>
-                <cf-tab value="tab2">Second Tab</cf-tab>
-                <cf-tab value="tab3">Third Tab</cf-tab>
-              </cf-tab-list>
-              <cf-tab-panel value="tab1">
+            <ct-tabs $value={activeTab}>
+              <ct-tab-list>
+                <ct-tab value="tab1">First Tab</ct-tab>
+                <ct-tab value="tab2">Second Tab</ct-tab>
+                <ct-tab value="tab3">Third Tab</ct-tab>
+              </ct-tab-list>
+              <ct-tab-panel value="tab1">
                 <p>Content for the first tab panel.</p>
-              </cf-tab-panel>
-              <cf-tab-panel value="tab2">
+              </ct-tab-panel>
+              <ct-tab-panel value="tab2">
                 <p>Content for the second tab panel.</p>
-              </cf-tab-panel>
-              <cf-tab-panel value="tab3">
+              </ct-tab-panel>
+              <ct-tab-panel value="tab3">
                 <p>Content for the third tab panel.</p>
-              </cf-tab-panel>
-            </cf-tabs>
+              </ct-tab-panel>
+            </ct-tabs>
             <p>Active tab: {activeTab}</p>
-          </cf-card>
-        </cf-vstack>
+          </ct-card>
+        </ct-vstack>
       ),
       selected,
       numericChoice,

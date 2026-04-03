@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, pattern } from "commonfabric";
+import { type Cell, Default, handler, pattern } from "commontools";
 
 interface OptionalBranch {
   counter?: number;

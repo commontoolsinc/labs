@@ -12,7 +12,7 @@ import {
   str,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 type Secret<T> = T;
 type Confidential<T> = T;
@@ -581,7 +581,7 @@ interface GoogleCalendarImporterInput {
     debugMode: false;
   }>;
   // Optional: Link auth directly from a Google Auth piece when wish() is unavailable
-  // Use: cf piece link googleAuthPiece/auth calendarImporterPiece/overrideAuth
+  // Use: ct piece link googleAuthPiece/auth calendarImporterPiece/overrideAuth
   overrideAuth?: Auth;
 }
 
@@ -723,15 +723,15 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     return {
       [NAME]: str`Calendar Importer ${currentEmail}`,
       [UI]: (
-        <cf-screen>
+        <ct-screen>
           <div slot="header">
-            <cf-hstack align="center" gap="2">
-              <cf-heading level={3}>Google Calendar Importer</cf-heading>
-            </cf-hstack>
+            <ct-hstack align="center" gap="2">
+              <ct-heading level={3}>Google Calendar Importer</ct-heading>
+            </ct-hstack>
           </div>
 
-          <cf-vscroll flex showScrollbar>
-            <cf-vstack padding="6" gap="4">
+          <ct-vscroll flex showScrollbar>
+            <ct-vstack padding="6" gap="4">
               {/* Auth status - handled by createGoogleAuth utility */}
               {fullUI}
 
@@ -743,7 +743,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                 Calendars found: {computed(() => calendars.get().length)}
               </div>
 
-              <cf-vstack gap="4">
+              <ct-vstack gap="4">
                 <div>
                   <label
                     style={{
@@ -754,7 +754,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   >
                     Days Back
                   </label>
-                  <cf-input
+                  <ct-input
                     type="number"
                     $value={settings.daysBack}
                     placeholder="7"
@@ -771,7 +771,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   >
                     Days Forward
                   </label>
-                  <cf-input
+                  <ct-input
                     type="number"
                     $value={settings.daysForward}
                     placeholder="30"
@@ -788,7 +788,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   >
                     Max Results per Calendar
                   </label>
-                  <cf-input
+                  <ct-input
                     type="number"
                     $value={settings.maxResults}
                     placeholder="100"
@@ -814,7 +814,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                 </div>
                 {ifElse(
                   isReady,
-                  <cf-button
+                  <ct-button
                     type="button"
                     onClick={calendarUpdater({
                       events,
@@ -835,15 +835,15 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                           gap: "8px",
                         }}
                       >
-                        <cf-loader size="sm" show-elapsed></cf-loader>
+                        <ct-loader size="sm" show-elapsed></ct-loader>
                         Fetching...
                       </span>,
                       "Fetch Calendar Events",
                     )}
-                  </cf-button>,
+                  </ct-button>,
                   null,
                 )}
-              </cf-vstack>
+              </ct-vstack>
 
               {/* Calendar list with selection */}
               <div style={{ marginTop: "16px" }}>
@@ -1059,9 +1059,9 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   </p>,
                 )}
               </div>
-            </cf-vstack>
-          </cf-vscroll>
-        </cf-screen>
+            </ct-vstack>
+          </ct-vscroll>
+        </ct-screen>
       ),
       events,
       calendars,

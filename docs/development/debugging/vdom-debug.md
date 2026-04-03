@@ -1,6 +1,6 @@
 # VDOM Debug Helpers
 
-The `commonfabric.vdom` object provides browser console helpers for inspecting
+The `commontools.vdom` object provides browser console helpers for inspecting
 the VDOM tree structure, applicator state, and DOM node mappings. These are
 useful when debugging rendering issues — wrong/missing content, stale updates,
 or broken reactivity.
@@ -10,10 +10,10 @@ or broken reactivity.
 Open the browser console on any page with a rendered pattern:
 
 ```javascript
-commonfabric.vdom.renders()         // list active renderings
-await commonfabric.vdom.dump()      // pretty-print the VDOM tree
-commonfabric.vdom.stats()           // node/listener counts
-await commonfabric.vdom.tree()      // raw tree object for inspection
+commontools.vdom.renders()         // list active renderings
+await commontools.vdom.dump()      // pretty-print the VDOM tree
+commontools.vdom.stats()           // node/listener counts
+await commontools.vdom.tree()      // raw tree object for inspection
 ```
 
 ## Methods
@@ -76,7 +76,7 @@ Looks up a DOM node by its internal applicator node ID. Only works for
 worker-path renders (the applicator tracks node IDs).
 
 ```javascript
-const node = commonfabric.vdom.nodeForId(1)
+const node = commontools.vdom.nodeForId(1)
 // Returns the DOM element, or undefined
 ```
 
@@ -85,7 +85,7 @@ const node = commonfabric.vdom.nodeForId(1)
 Raw access to the `Map<HTMLElement, ActiveRender>` for advanced inspection.
 
 ```javascript
-commonfabric.vdom.registry
+commontools.vdom.registry
 // Map(1) { div#app => { parent, cell, renderer, path } }
 ```
 
@@ -113,20 +113,20 @@ data attributes) and aren't needed for structural debugging.
 
 ```javascript
 // Check if the render is active
-commonfabric.vdom.renders()
+commontools.vdom.renders()
 
 // Dump the tree to see current VDOM state
-await commonfabric.vdom.dump()
+await commontools.vdom.dump()
 
 // Compare with what's in the DOM
-commonfabric.vdom.nodeForId(1)  // look up specific nodes
+commontools.vdom.nodeForId(1)  // look up specific nodes
 ```
 
 ### Missing children
 
 ```javascript
 // Get the raw tree and inspect children arrays
-const tree = await commonfabric.vdom.tree()
+const tree = await commontools.vdom.tree()
 console.log(tree.children)  // are children present in the VDOM?
 ```
 
@@ -134,7 +134,7 @@ console.log(tree.children)  // are children present in the VDOM?
 
 ```javascript
 // Get the tree and inspect a node's props
-const tree = await commonfabric.vdom.tree()
+const tree = await commontools.vdom.tree()
 // Props are CellHandles — call .get() on individual ones
 tree.props.className.get()
 ```
@@ -143,17 +143,17 @@ tree.props.className.get()
 
 ```javascript
 // List all renders
-commonfabric.vdom.renders()
+commontools.vdom.renders()
 
 // Target a specific one by index
-await commonfabric.vdom.dump(0)  // first render
-await commonfabric.vdom.dump(1)  // second render
+await commontools.vdom.dump(0)  // first render
+await commontools.vdom.dump(1)  // second render
 
 // Or by container element
-await commonfabric.vdom.dump(document.querySelector('#my-container'))
+await commontools.vdom.dump(document.querySelector('#my-container'))
 ```
 
 ## See Also
 
-- [Console Commands](console-commands.md) — full `commonfabric.*` reference
+- [Console Commands](console-commands.md) — full `commontools.*` reference
 - [Logger System](logger-system.md) — structured logging and timing

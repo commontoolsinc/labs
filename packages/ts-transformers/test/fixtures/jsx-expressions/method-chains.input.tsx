@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, pattern, UI } from "commonfabric";
+import { computed, pattern, UI } from "commontools";
 
 interface State {
   text: string;

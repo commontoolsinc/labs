@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commonfabric";
+import { cell, pattern, UI } from "commontools";
 
 // FIXTURE: map-with-array-param
 // Verifies: .map() on reactive array is transformed when the third parameter (array) is used

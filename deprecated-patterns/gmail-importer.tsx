@@ -10,7 +10,7 @@ import {
   pattern,
   str,
   UI,
-} from "commonfabric";
+} from "commontools";
 import TurndownService from "turndown";
 
 type CFC<T, C extends string> = T;
@@ -858,30 +858,30 @@ export default pattern<{
             historyId: {settings.historyId || "none"}
           </div>
 
-          <cf-hstack gap="1">
-            <cf-vstack gap="1">
+          <ct-hstack gap="1">
+            <ct-vstack gap="1">
               <div>
                 <label>Import Limit</label>
-                <cf-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={String(settings.limit)}
                   placeholder="count of emails to import"
-                  oncf-input={updateLimit({ limit: settings.limit })}
+                  onct-input={updateLimit({ limit: settings.limit })}
                 />
               </div>
 
               <div>
                 <label>Gmail Filter Query</label>
-                <cf-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.gmailFilterQuery}
                   placeholder="in:INBOX"
-                  oncf-input={updateGmailFilterQuery({
+                  onct-input={updateGmailFilterQuery({
                     gmailFilterQuery: settings.gmailFilterQuery,
                   })}
                 />
               </div>
-              <cf-button
+              <ct-button
                 type="button"
                 onClick={googleUpdater({
                   emails,
@@ -890,9 +890,9 @@ export default pattern<{
                 })}
               >
                 Fetch Emails
-              </cf-button>
-            </cf-vstack>
-          </cf-hstack>
+              </ct-button>
+            </ct-vstack>
+          </ct-hstack>
 
           <div>
             <table>

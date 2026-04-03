@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, pattern } from "commonfabric";
+import { computed, pattern } from "commontools";
 
 // FIXTURE: computed-no-captures
 // Verifies: computed(() => expr) with no external captures is transformed to derive() with empty captures

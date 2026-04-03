@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commonfabric";
+import { cell, pattern, UI } from "commontools";
 
 // FIXTURE: logical-and-simple-ref
 // Verifies: simple opaque ref && <JSX> is transformed to when() for short-circuit rendering

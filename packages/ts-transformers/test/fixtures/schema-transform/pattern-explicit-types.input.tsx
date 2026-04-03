@@ -2,7 +2,7 @@
 import {
   computed,
   pattern,
-} from "commonfabric";
+} from "commontools";
 
 interface Input {
   foo: string;

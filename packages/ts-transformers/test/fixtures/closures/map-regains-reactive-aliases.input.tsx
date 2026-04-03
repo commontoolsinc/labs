@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, computed, lift, pattern, wish } from "commonfabric";
+import { Default, computed, lift, pattern, wish } from "commontools";
 
 const passthrough = lift((items: string[]) => items);
 

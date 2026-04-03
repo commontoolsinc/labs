@@ -1,5 +1,5 @@
 {
-  "name": "@commonfabric/ts-transformers",
+  "name": "@commontools/ts-transformers",
   "version": "0.1.0",
   "exports": {
     ".": "./src/mod.ts",

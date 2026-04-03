@@ -5,8 +5,8 @@ import {
   AppStateSerialized,
   deserialize,
   serialize,
-} from "@commonfabric/shell/shared";
-import { Identity, serializeKeyPairRaw } from "@commonfabric/identity";
+} from "@commontools/shell/shared";
+import { Identity, serializeKeyPairRaw } from "@commontools/identity";
 import { assert } from "@std/assert";
 
 const API_URL = "http://common.test/";

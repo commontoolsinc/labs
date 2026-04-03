@@ -9,9 +9,9 @@
  * - Game state transition to "playing" when both players join
  * - Reset functionality
  *
- * Run: deno task cf test packages/patterns/battleship/multiplayer/lobby.test.tsx --verbose
+ * Run: deno task ct test packages/patterns/battleship/multiplayer/lobby.test.tsx --verbose
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, computed, pattern, Writable } from "commontools";
 import BattleshipLobby from "./lobby.tsx";
 import {
   createInitialShots,

@@ -7,7 +7,7 @@
  *
  * Pattern under test: ./index.tsx
  */
-import { Cell, computed, handler, pattern } from "commonfabric";
+import { Cell, computed, handler, pattern } from "commontools";
 import TestPattern from "./index.tsx";
 
 // 2. Define test actions at module scope (handlers with void event, hardcoded test data)

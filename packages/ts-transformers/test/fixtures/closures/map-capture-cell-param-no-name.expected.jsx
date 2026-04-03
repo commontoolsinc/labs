@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { Cell, Default, handler, pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { Cell, Default, handler, pattern, UI } from "commontools";
 interface Item {
     text: Default<string, "">;
 }
@@ -9,7 +9,7 @@ interface InputSchema {
 }
 const removeItem = handler({
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         items: {
@@ -36,7 +36,7 @@ const removeItem = handler({
             required: ["text"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, (_, _2) => {
+} as const satisfies __ctHelpers.JSONSchema, (_, _2) => {
     // Not relevant for repro
 });
 // FIXTURE: map-capture-cell-param-no-name
@@ -48,14 +48,14 @@ export default pattern((__ct_pattern_input: InputSchema) => {
     const items = __ct_pattern_input.key("items");
     return {
         [UI]: (<ul>
-          {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
+          {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const _ = __ct_pattern_input.key("element");
                 const index = __ct_pattern_input.key("index");
                 const items = __ct_pattern_input.key("params", "items");
                 return (<li key={index}>
-              <cf-button onClick={removeItem({ items, index })}>
+              <ct-button onClick={removeItem({ items, index })}>
                 Remove
-              </cf-button>
+              </ct-button>
             </li>);
             }, {
                 type: "object",
@@ -92,7 +92,7 @@ export default pattern((__ct_pattern_input: InputSchema) => {
                         required: ["text"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -112,7 +112,7 @@ export default pattern((__ct_pattern_input: InputSchema) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema), {
+            } as const satisfies __ctHelpers.JSONSchema), {
                 items: items
             })}
         </ul>),
@@ -141,7 +141,7 @@ export default pattern((__ct_pattern_input: InputSchema) => {
             required: ["text"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -170,8 +170,8 @@ export default pattern((__ct_pattern_input: InputSchema) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

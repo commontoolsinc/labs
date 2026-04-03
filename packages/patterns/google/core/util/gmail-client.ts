@@ -15,7 +15,7 @@
  * const emails = await client.searchEmails("from:amazon.com", 20);
  * ```
  */
-import { getPatternEnvironment, Writable } from "commonfabric";
+import { getPatternEnvironment, Writable } from "commontools";
 
 const env = getPatternEnvironment();
 

@@ -17,7 +17,7 @@ import {
   str,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -65,7 +65,7 @@ const clearPhoto = handler<
 // ===== The Pattern =====
 export const PhotoModule = pattern<PhotoModuleInput, PhotoModuleOutput>(
   ({ image: inputImage, label }) => {
-    // We use an array internally for cf-image-input compatibility
+    // We use an array internally for ct-image-input compatibility
     // but the module only supports a single image
     // NOTE: Writable.of must use empty array to avoid TypeScript OOM (CT-1148)
     // Using input params in Writable.of() causes deep type inference explosion
@@ -108,11 +108,11 @@ export const PhotoModule = pattern<PhotoModuleInput, PhotoModuleOutput>(
     return {
       [NAME]: str`${MODULE_METADATA.icon} ${displayText}`,
       [UI]: (
-        <cf-vstack style={{ gap: "12px" }}>
+        <ct-vstack style={{ gap: "12px" }}>
           {ifElse(
             hasPhoto,
             // Photo is uploaded - show image with clear button
-            <cf-vstack style={{ gap: "8px" }}>
+            <ct-vstack style={{ gap: "8px" }}>
               {/* Display the uploaded image */}
               <div
                 style={{
@@ -170,30 +170,30 @@ export const PhotoModule = pattern<PhotoModuleInput, PhotoModuleOutput>(
                 </span>,
                 null,
               )}
-            </cf-vstack>,
+            </ct-vstack>,
             // No photo yet - show upload input
-            <cf-image-input
+            <ct-image-input
               $images={images}
               maxImages={1}
               showPreview={false}
               style={{ width: "100%" }}
             />,
           )}
-        </cf-vstack>
+        </ct-vstack>
       ),
       // Settings UI - for configuring the label
       settingsUI: (
-        <cf-vstack style={{ gap: "12px" }}>
-          <cf-vstack style={{ gap: "4px" }}>
+        <ct-vstack style={{ gap: "12px" }}>
+          <ct-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Photo Label
             </label>
-            <cf-input
+            <ct-input
               $value={label}
               placeholder="e.g., Profile Photo, Headshot..."
             />
-          </cf-vstack>
-        </cf-vstack>
+          </ct-vstack>
+        </ct-vstack>
       ),
       image: syncedImage,
       label,

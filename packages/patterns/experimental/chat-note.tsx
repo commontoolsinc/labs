@@ -14,7 +14,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 // Type for backlinks (inline to work around CLI path resolution bug)
 type MentionablePiece = {
@@ -257,7 +257,7 @@ const handleTitleKeydown = handler<
 });
 
 // Handler for Generate button - triggers LLM generation
-// Event type matches both onClick (unknown) and oncf-submit ({ value: string })
+// Event type matches both onClick (unknown) and onct-submit ({ value: string })
 const handleGenerate = handler<
   { value?: string },
   {
@@ -460,17 +460,17 @@ const ChatNote = pattern<Input, Output>(
     return {
       [NAME]: computed(() => `💬 ${title.get()}`),
       [UI]: (
-        <cf-screen>
-          <cf-vstack
+        <ct-screen>
+          <ct-vstack
             slot="header"
             gap="2"
             padding="4"
             style={{
-              borderBottom: "1px solid var(--cf-color-border, #e5e5e7)",
+              borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
             }}
           >
             {/* Parent notebook chip */}
-            <cf-hstack
+            <ct-hstack
               gap="2"
               align="center"
               style={{
@@ -484,22 +484,22 @@ const ChatNote = pattern<Input, Output>(
               <span
                 style={{
                   fontSize: "13px",
-                  color: "var(--cf-color-text-secondary)",
+                  color: "var(--ct-color-text-secondary)",
                 }}
               >
                 In:
               </span>
-              <cf-chip
+              <ct-chip
                 label={computed(() => {
                   const p = (self as any).parentNotebook;
                   return p?.[NAME] ?? p?.title ?? "Notebook";
                 })}
                 interactive
-                oncf-click={goToParent({ self })}
+                onct-click={goToParent({ self })}
               />
-            </cf-hstack>
+            </ct-hstack>
 
-            <cf-hstack gap="3" style={{ alignItems: "center" }}>
+            <ct-hstack gap="3" style={{ alignItems: "center" }}>
               {/* Editable Title - click to edit */}
               <div
                 style={{
@@ -528,12 +528,12 @@ const ChatNote = pattern<Input, Output>(
                   marginRight: "12px",
                 }}
               >
-                <cf-input
+                <ct-input
                   $value={title}
                   placeholder="Chat note title..."
                   style={{ flex: 1 }}
-                  oncf-blur={stopEditingTitle({ isEditingTitle })}
-                  oncf-keydown={handleTitleKeydown({ isEditingTitle })}
+                  onct-blur={stopEditingTitle({ isEditingTitle })}
+                  onct-keydown={handleTitleKeydown({ isEditingTitle })}
                 />
               </div>
 
@@ -546,8 +546,8 @@ const ChatNote = pattern<Input, Output>(
                   padding: "4px 8px",
                   fontSize: "13px",
                   borderRadius: "6px",
-                  border: "1px solid var(--cf-color-border, #e5e5e7)",
-                  background: "var(--cf-color-bg, white)",
+                  border: "1px solid var(--ct-color-border, #e5e5e7)",
+                  background: "var(--ct-color-bg, white)",
                   cursor: "pointer",
                 }}
               >
@@ -555,7 +555,7 @@ const ChatNote = pattern<Input, Output>(
               </select>
 
               {/* Generate button - shown when not generating */}
-              <cf-button
+              <ct-button
                 variant="primary"
                 size="sm"
                 onClick={handleGenerate({
@@ -573,10 +573,10 @@ const ChatNote = pattern<Input, Output>(
                 title="Generate (Cmd+Enter)"
               >
                 Generate
-              </cf-button>
+              </ct-button>
 
               {/* Generation status / Cancel button - shown when generating */}
-              <cf-hstack
+              <ct-hstack
                 gap="2"
                 align="center"
                 style={{
@@ -584,8 +584,8 @@ const ChatNote = pattern<Input, Output>(
                   flexShrink: 0,
                 }}
               >
-                <cf-loader show-elapsed style={{ flexShrink: 0 }} />
-                <cf-button
+                <ct-loader show-elapsed style={{ flexShrink: 0 }} />
+                <ct-button
                   variant="secondary"
                   size="sm"
                   onClick={handleCancelGeneration({
@@ -595,17 +595,17 @@ const ChatNote = pattern<Input, Output>(
                   style={{ flexShrink: 0 }}
                 >
                   Cancel
-                </cf-button>
-              </cf-hstack>
-            </cf-hstack>
-          </cf-vstack>
+                </ct-button>
+              </ct-hstack>
+            </ct-hstack>
+          </ct-vstack>
 
           {/* Keyboard shortcut: Cmd+Enter to generate */}
-          <cf-keybind
+          <ct-keybind
             code="Enter"
             meta
             ignore-editable={false}
-            oncf-keybind={handleGenerate({
+            onct-keybind={handleGenerate({
               content,
               llmSystem,
               llmMessages,
@@ -615,11 +615,11 @@ const ChatNote = pattern<Input, Output>(
             })}
           />
           {/* Keyboard shortcut: Ctrl+Enter to generate (Windows/Linux) */}
-          <cf-keybind
+          <ct-keybind
             code="Enter"
             ctrl
             ignore-editable={false}
-            oncf-keybind={handleGenerate({
+            onct-keybind={handleGenerate({
               content,
               llmSystem,
               llmMessages,
@@ -630,7 +630,7 @@ const ChatNote = pattern<Input, Output>(
           />
 
           {/* Editor */}
-          <cf-code-editor
+          <ct-code-editor
             $value={content}
             $mentionable={mentionable}
             $mentioned={mentioned}
@@ -645,14 +645,14 @@ const ChatNote = pattern<Input, Output>(
             readonly={isGenerating}
           />
 
-          <cf-hstack slot="footer">
+          <ct-hstack slot="footer">
             {backlinks?.map((piece) => (
-              <cf-button onClick={handlePieceLinkClicked({ piece })}>
+              <ct-button onClick={handlePieceLinkClicked({ piece })}>
                 {piece?.[NAME]}
-              </cf-button>
+              </ct-button>
             ))}
-          </cf-hstack>
-        </cf-screen>
+          </ct-hstack>
+        </ct-screen>
       ),
       title,
       content,

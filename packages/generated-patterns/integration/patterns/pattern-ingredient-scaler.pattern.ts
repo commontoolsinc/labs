@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, cell, Default, handler, lift, pattern } from "commonfabric";
+import { type Cell, cell, Default, handler, lift, pattern } from "commontools";
 
 interface IngredientInput {
   name?: unknown;

@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { Default, NAME, pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { Default, NAME, pattern, UI } from "commontools";
 interface PatternState {
     value: Default<number, 0>;
 }
@@ -12,15 +12,15 @@ export default pattern((state) => {
     return {
         [NAME]: "test ternary with derive",
         [UI]: (<div>
-        {__cfHelpers.ifElse({
+        {__ctHelpers.ifElse({
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: ["number", "string"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -34,11 +34,11 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 value: state.key("value")
-            } }, ({ state }) => state.value + 1), __cfHelpers.derive({
+            } }, ({ state }) => state.value + 1), __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -52,9 +52,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 value: state.key("value")
             } }, ({ state }) => state.value + 2), "undefined")}
       </div>),
@@ -68,7 +68,7 @@ export default pattern((state) => {
         }
     },
     required: ["value"]
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -100,8 +100,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

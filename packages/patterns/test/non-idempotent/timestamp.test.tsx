@@ -1,11 +1,11 @@
 /// <cts-enable />
 /**
  * Test that exercises a non-idempotent Date.now() computation.
- * The idempotency check in cf test should warn about it.
+ * The idempotency check in ct test should warn about it.
  *
- * Run: deno task cf test packages/patterns/test/non-idempotent/timestamp.test.tsx --verbose
+ * Run: deno task ct test packages/patterns/test/non-idempotent/timestamp.test.tsx --verbose
  */
-import { computed, pattern, Writable } from "commonfabric";
+import { computed, pattern, Writable } from "commontools";
 
 export default pattern(() => {
   const items = Writable.of([{ title: "Task A" }, { title: "Task B" }]);

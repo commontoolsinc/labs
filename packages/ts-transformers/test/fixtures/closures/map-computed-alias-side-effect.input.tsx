@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, UI } from "commonfabric";
+import { pattern, UI } from "commontools";
 
 let keyCounter = 0;
 function nextKey() {

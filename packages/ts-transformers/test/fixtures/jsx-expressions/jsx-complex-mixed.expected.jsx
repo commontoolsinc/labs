@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { computed, pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { computed, pattern, UI } from "commontools";
 interface Item {
     id: number;
     name: string;
@@ -26,7 +26,7 @@ export default pattern((state) => {
         <p>Total items: {state.key("items", "length")}</p>
         <p>
           Filtered count:{" "}
-          {__cfHelpers.derive({
+          {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -66,9 +66,9 @@ export default pattern((state) => {
                     required: ["id", "name", "price", "active"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 filter: state.key("filter")
             } }, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length)}
@@ -76,14 +76,14 @@ export default pattern((state) => {
 
         <h3>Array with Complex Expressions</h3>
         <ul>
-          {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
+          {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const state = __ct_pattern_input.key("params", "state");
                 return (<li key={item.key("id")}>
               <span>{item.key("name")}</span>
               <span>- Original: ${item.key("price")}</span>
               <span>
-                - Discounted: ${__cfHelpers.derive({
+                - Discounted: ${__ctHelpers.derive({
                     type: "object",
                     properties: {
                         item: {
@@ -106,9 +106,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["item", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __ctHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __ctHelpers.JSONSchema, {
                     item: {
                         price: item.key("price")
                     },
@@ -119,7 +119,7 @@ export default pattern((state) => {
               </span>
               <span>
                 - With tax:
-                ${__cfHelpers.derive({
+                ${__ctHelpers.derive({
                     type: "object",
                     properties: {
                         item: {
@@ -145,9 +145,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["item", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __ctHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __ctHelpers.JSONSchema, {
                     item: {
                         price: item.key("price")
                     },
@@ -205,7 +205,7 @@ export default pattern((state) => {
                         required: ["id", "name", "price", "active"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -225,7 +225,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema), {
+            } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
                     discount: state.key("discount"),
                     taxRate: state.key("taxRate")
@@ -235,7 +235,7 @@ export default pattern((state) => {
 
         <h3>Array Methods</h3>
         <p>Item count: {state.key("items", "length")}</p>
-        <p>Active items: {__cfHelpers.derive({
+        <p>Active items: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -272,14 +272,14 @@ export default pattern((state) => {
                     required: ["id", "name", "price", "active"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items")
             } }, ({ state }) => state.items.filter((i) => i.active).length)}</p>
 
         <h3>Simple Operations</h3>
-        <p>Discount percent: {__cfHelpers.derive({
+        <p>Discount percent: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -293,12 +293,12 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 discount: state.key("discount")
             } }, ({ state }) => state.discount * 100)}%</p>
-        <p>Tax percent: {__cfHelpers.derive({
+        <p>Tax percent: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -312,22 +312,22 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 taxRate: state.key("taxRate")
             } }, ({ state }) => state.taxRate * 100)}%</p>
 
         <h3>Array Predicates</h3>
-        <p>All active: {__cfHelpers.ifElse({
+        <p>All active: {__ctHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -364,20 +364,20 @@ export default pattern((state) => {
                     required: ["id", "name", "price", "active"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items")
             } }, ({ state }) => state.items.every((i) => i.active)), "Yes", "No")}</p>
-        <p>Any active: {__cfHelpers.ifElse({
+        <p>Any active: {__ctHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -414,22 +414,22 @@ export default pattern((state) => {
                     required: ["id", "name", "price", "active"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items")
             } }, ({ state }) => state.items.some((i) => i.active)), "Yes", "No")}</p>
         <p>
           Has expensive (gt 100):{" "}
-          {__cfHelpers.ifElse({
+          {__ctHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -466,15 +466,15 @@ export default pattern((state) => {
                     required: ["id", "name", "price", "active"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items")
             } }, ({ state }) => state.items.some((i) => i.price > 100)), "Yes", "No")}
         </p>
 
         <h3>Object Operations</h3>
-        <div data-item-count={state.key("items", "length")} data-has-filter={__cfHelpers.derive({
+        <div data-item-count={state.key("items", "length")} data-has-filter={__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -494,9 +494,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 filter: {
                     length: state.key("filter", "length")
                 }
@@ -545,7 +545,7 @@ export default pattern((state) => {
             required: ["id", "name", "price", "active"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -574,8 +574,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

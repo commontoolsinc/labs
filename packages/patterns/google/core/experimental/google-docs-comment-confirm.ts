@@ -14,7 +14,7 @@
  * Future trust policies can grant trust to this file independently
  * to assert "this action was user-approved".
  */
-import { Default, handler, Writable } from "commonfabric";
+import { Default, handler, Writable } from "commontools";
 
 type Secret<T> = T;
 

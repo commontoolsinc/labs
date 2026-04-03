@@ -7,7 +7,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 /**
  * Test pattern for fetchProgram builtin.
@@ -40,7 +40,7 @@ export default pattern(() => {
         <h1>Fetch Program Test</h1>
         <div>
           <label>URL:</label>
-          <cf-input type="text" $value={url} />
+          <ct-input type="text" $value={url} />
         </div>
         {fetchPending && <div>Fetching program...</div>}
         {compilePending && <div>Compiling...</div>}

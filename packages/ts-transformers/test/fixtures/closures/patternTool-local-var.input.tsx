@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, generateText, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
+import { computed, generateText, pattern, patternTool, type PatternToolResult, Writable } from "commontools";
 
 const content = Writable.of("Hello world");
 

@@ -8,7 +8,7 @@ import {
   pattern,
   UI,
   type VNode,
-} from "commonfabric";
+} from "commontools";
 
 // ===== Types =====
 
@@ -50,25 +50,25 @@ const Summary = pattern<SummaryInput, SummaryOutput>(({ topic, context }) => {
   return {
     [NAME]: computed(() => (topic ? `Summary: ${topic}` : "Summary")),
     [UI]: (
-      <cf-screen>
-        <cf-vstack slot="header" gap="1">
-          <cf-heading level={4}>
+      <ct-screen>
+        <ct-vstack slot="header" gap="1">
+          <ct-heading level={4}>
             {computed(() => topic || "Summary")}
-          </cf-heading>
-        </cf-vstack>
+          </ct-heading>
+        </ct-vstack>
 
-        <cf-vstack gap="3" style="padding: 1.5rem;">
+        <ct-vstack gap="3" style="padding: 1.5rem;">
           {ifElse(
             response.pending,
-            <div style="color: var(--cf-color-text-secondary);">
-              <cf-loader show-elapsed /> Generating summary...
+            <div style="color: var(--ct-color-text-secondary);">
+              <ct-loader show-elapsed /> Generating summary...
             </div>,
             <div style="line-height: 1.6; white-space: pre-wrap;">
               {response.result}
             </div>,
           )}
-        </cf-vstack>
-      </cf-screen>
+        </ct-vstack>
+      </ct-screen>
     ),
     topic,
     summary: computed(() => response.result || ""),

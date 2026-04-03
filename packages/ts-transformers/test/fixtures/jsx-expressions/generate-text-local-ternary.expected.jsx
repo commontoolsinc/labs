@@ -1,25 +1,25 @@
-import * as __cfHelpers from "commonfabric";
-import { generateText, pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { generateText, pattern, UI } from "commontools";
 // FIXTURE: generate-text-local-ternary
 // Verifies: local reactive builder results still trigger JSX ternary lowering
-//   text.pending ? "Loading" : text.result -> __cfHelpers.ifElse(...)
+//   text.pending ? "Loading" : text.result -> __ctHelpers.ifElse(...)
 // Context: `text` is a local `generateText()` result rather than a pattern
 // input binding, so this exercises expression-site lowering on local reactive
 // aliases in JSX.
 export default pattern(() => {
     const text = generateText({ prompt: "hi" });
     return {
-        [UI]: <div>{__cfHelpers.ifElse({
+        [UI]: <div>{__ctHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, text.pending, "Loading", text.result)}</div>,
+        } as const satisfies __ctHelpers.JSONSchema, text.pending, "Loading", text.result)}</div>,
     };
-}, false as const satisfies __cfHelpers.JSONSchema, {
+}, false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -48,8 +48,8 @@ export default pattern(() => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

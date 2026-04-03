@@ -6,7 +6,7 @@
  * including in LLM context/prompts.
  */
 
-import type { JSONSchema } from "commonfabric";
+import type { JSONSchema } from "commontools";
 
 export interface SchemaFormatOptions {
   /** Definitions map for resolving $ref references */

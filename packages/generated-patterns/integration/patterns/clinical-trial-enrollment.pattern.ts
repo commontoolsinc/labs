@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, pattern, str } from "commonfabric";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 const toTitleCase = (value: string): string => {
   return value

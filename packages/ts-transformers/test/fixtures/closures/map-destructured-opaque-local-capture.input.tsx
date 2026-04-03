@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, UI } from "commonfabric";
+import { pattern, UI } from "commontools";
 
 interface State {
   sections: { tasks: { label: string }[]; tags: { name: string }[] }[];

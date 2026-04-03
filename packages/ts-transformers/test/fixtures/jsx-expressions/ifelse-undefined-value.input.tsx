@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, fetchData, ifElse, pattern, UI } from "commonfabric";
+import { computed, fetchData, ifElse, pattern, UI } from "commontools";
 
 // Tests ifElse where ifTrue is explicitly undefined
 // This pattern is common: ifElse(pending, undefined, { result })

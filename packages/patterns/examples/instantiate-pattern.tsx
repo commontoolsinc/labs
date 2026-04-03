@@ -8,7 +8,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 interface PatternState {
   value: Default<number, 0>;
@@ -44,15 +44,15 @@ export const Counter = pattern<PatternState>((state) => {
     [NAME]: computed(() => `Simple counter: ${state.value}`),
     [UI]: (
       <div>
-        <cf-button onClick={decrement(state)}>
+        <ct-button onClick={decrement(state)}>
           dec to {previous(state.value)}
-        </cf-button>
+        </ct-button>
         <span id="counter-result">
           Counter is the {nth(state.value)} number
         </span>
-        <cf-button onClick={increment({ value: state.value })}>
+        <ct-button onClick={increment({ value: state.value })}>
           inc to {state.value + 1}
-        </cf-button>
+        </ct-button>
       </div>
     ),
     value: state.value,
@@ -82,11 +82,11 @@ export default pattern<FactoryInput, FactoryOutput>((_) => {
     [NAME]: "Counter Factory",
     [UI]: (
       <div>
-        <cf-message-input
+        <ct-message-input
           button-text="Add"
           placeholder="New counter"
           appearance="rounded"
-          oncf-send={newCounter({})}
+          onct-send={newCounter({})}
         />
       </div>
     ),

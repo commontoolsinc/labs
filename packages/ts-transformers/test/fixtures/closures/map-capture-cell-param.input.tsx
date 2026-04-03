@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, pattern, UI } from "commonfabric";
+import { Cell, Default, handler, pattern, UI } from "commontools";
 
 interface Item {
   text: Default<string, "">;
@@ -27,9 +27,9 @@ export default pattern<InputSchema>(
         <ul>
           {items.map((_, index) => (
             <li key={index}>
-              <cf-button onClick={removeItem({ items, index })}>
+              <ct-button onClick={removeItem({ items, index })}>
                 Remove
-              </cf-button>
+              </ct-button>
             </li>
           ))}
         </ul>

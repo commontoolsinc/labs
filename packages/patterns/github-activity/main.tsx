@@ -9,7 +9,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 type CommitResponse = Array<{
   sha: string;
@@ -86,21 +86,21 @@ export default pattern<{
     [UI]: (
       <div>
         <div style="margin-bottom: 16px;">
-          <cf-input
+          <ct-input
             $value={state.repoUrl}
             placeholder="https://github.com/owner/repo"
             customStyle="width: 100%; padding: 8px; font-size: 14px;"
           />
         </div>
 
-        <cf-cell-context $cell={summary.pending}>
+        <ct-cell-context $cell={summary.pending}>
           {derive(
             [summary.pending, summary.result],
             ([pending, result]) =>
               pending
                 ? (
                   <div style="margin-bottom: 16px;">
-                    <cf-loader show-elapsed /> Generating summary...
+                    <ct-loader show-elapsed /> Generating summary...
                   </div>
                 )
                 : result
@@ -114,9 +114,9 @@ export default pattern<{
                 )
                 : null,
           )}
-        </cf-cell-context>
+        </ct-cell-context>
 
-        <cf-cell-context $cell={commits}>
+        <ct-cell-context $cell={commits}>
           {derive(commits, (commitList) => {
             if (!commitList || commitList.length === 0) {
               return (
@@ -134,7 +134,7 @@ export default pattern<{
                     .toLocaleDateString();
 
                   return (
-                    <cf-card style="margin-bottom: 8px;">
+                    <ct-card style="margin-bottom: 8px;">
                       <div style="padding: 12px;">
                         <div style="font-weight: 500; margin-bottom: 4px;">
                           {firstLine}
@@ -151,13 +151,13 @@ export default pattern<{
                           View commit →
                         </a>
                       </div>
-                    </cf-card>
+                    </ct-card>
                   );
                 })}
               </div>
             );
           })}
-        </cf-cell-context>
+        </ct-cell-context>
       </div>
     ),
   };

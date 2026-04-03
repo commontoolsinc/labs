@@ -8,7 +8,7 @@ import {
   pattern,
   UI,
   type VNode,
-} from "commonfabric";
+} from "commontools";
 
 // ===== Types =====
 
@@ -49,23 +49,23 @@ const SvgDiagram = pattern<SvgDiagramInput, SvgDiagramOutput>(
     return {
       [NAME]: computed(() => (topic ? `SVG Diagram: ${topic}` : "SVG Diagram")),
       [UI]: (
-        <cf-screen>
-          <cf-vstack slot="header" gap="1">
-            <cf-heading level={4}>
+        <ct-screen>
+          <ct-vstack slot="header" gap="1">
+            <ct-heading level={4}>
               {computed(() => topic || "SVG Diagram")}
-            </cf-heading>
-          </cf-vstack>
+            </ct-heading>
+          </ct-vstack>
 
-          <cf-vstack gap="3" style="padding: 1.5rem;">
+          <ct-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
               response.pending,
-              <div style="color: var(--cf-color-text-secondary);">
-                <cf-loader show-elapsed /> Generating diagram...
+              <div style="color: var(--ct-color-text-secondary);">
+                <ct-loader show-elapsed /> Generating diagram...
               </div>,
-              <cf-svg content={response.result} />,
+              <ct-svg content={response.result} />,
             )}
-          </cf-vstack>
-        </cf-screen>
+          </ct-vstack>
+        </ct-screen>
       ),
       topic,
       diagram: computed(() => response.result || ""),

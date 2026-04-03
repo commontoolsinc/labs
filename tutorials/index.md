@@ -1,19 +1,19 @@
 ---
-title: Guide to the Common Fabric Runtime
+title: Guide to the Common Tools Runtime
 subject: Tutorial
-keywords: commonfabric
+keywords: commontools
 ---
 
-# Welcome to the Common Fabric Runtime Guide
+# Welcome to the Common Tools Runtime Guide
 
-This guide will help you get started with the Common Fabric runtime, from
+This guide will help you get started with the Common Tools runtime, from
 installation through advanced features.
 
 It is still a work in progress.
 
 ## Contents
 
-- **{doc}`install-cf`** - Get the runtime up and running
+- **{doc}`install-ct`** - Get the runtime up and running
 - **{doc}`llm-builtin`** - A quick tour
 - **{doc}`state`** - Managing application state
 - **{doc}`state_modify`** - How to modify state with user input

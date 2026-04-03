@@ -3,7 +3,7 @@ Simple patterns appear very similar to most popular UI frameworks.
 Two-way bindings can be declared (for compatible components) with a `$` prefix on their properties. Here is a list with bidirectional binding and inline handlers:
 
 ```tsx
-import { Default, NAME, pattern, UI, Writable, equals } from "commonfabric";
+import { Default, NAME, pattern, UI, Writable, equals } from "commontools";
 
 interface Item {
   title: string;
@@ -20,21 +20,21 @@ export default pattern<Input, Input>(({ items }) => ({
     <div>
       {items.map((item) => (
         <div>
-          <cf-checkbox $checked={item.done}>
+          <ct-checkbox $checked={item.done}>
             <span style={item.done ? { textDecoration: "line-through" } : {}}>
               {item.title}
             </span>
-          </cf-checkbox>
-          <cf-button onClick={() => {
+          </ct-checkbox>
+          <ct-button onClick={() => {
             const current = items.get();
             const index = current.findIndex((el) => equals(item, el));
             if (index >= 0) items.set(current.toSpliced(index, 1));
-          }}>×</cf-button>
+          }}>×</ct-button>
         </div>
       ))}
-      <cf-message-input
+      <ct-message-input
         placeholder="Add item..."
-        oncf-send={(e: { detail: { message: string } }) => {
+        onct-send={(e: { detail: { message: string } }) => {
           const text = e.detail.message?.trim();
           if (text) items.push({ title: text, done: false });
         }}

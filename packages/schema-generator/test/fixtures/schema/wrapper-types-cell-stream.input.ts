@@ -1,7 +1,7 @@
 // Tests Cell<T> and Stream<T> wrapper types
 // These should have asCell/asStream markers
 
-import { Cell, Stream } from "commonfabric";
+import { Cell, Stream } from "commontools";
 
 interface SchemaRoot {
   // Cell wrapper with primitive

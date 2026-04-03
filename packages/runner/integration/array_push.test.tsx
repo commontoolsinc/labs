@@ -7,7 +7,7 @@ import {
   NAME,
   pattern,
   UI,
-} from "commonfabric";
+} from "commontools";
 
 // dummy input schema
 const InputSchema = {

@@ -517,7 +517,7 @@ Containers manage items, discover patterns, and support nested lists:
 ```typescript
 // packages/patterns/container-protocol.ts
 
-import type { Stream, Writable, VNode } from "commonfabric";
+import type { Stream, Writable, VNode } from "commontools";
 
 /**
  * What containers expect from their items
@@ -594,8 +594,8 @@ export interface UpgradeOption {
 
 ```typescript
 /// <cts-enable />
-import { pattern, NAME, UI, Writable, action, computed } from "commonfabric";
-import type { PersonLike, ContainerItem, ContainerProtocol } from "commonfabric";
+import { pattern, NAME, UI, Writable, action, computed } from "commontools";
+import type { PersonLike, ContainerItem, ContainerProtocol } from "commontools";
 
 interface Input {
   title?: string;
@@ -636,28 +636,28 @@ export default pattern<Input, Output>(({ title, items, subLists }) => {
   return {
     [NAME]: computed(() => title ?? "Contacts"),
     [UI]: (
-      <cf-screen>
-        <cf-vstack gap="sm">
+      <ct-screen>
+        <ct-vstack gap="sm">
           {/* Direct items */}
           {data.map(entry => (
-            <cf-card>
+            <ct-card>
               <span>{entry.name}</span>
-            </cf-card>
+            </ct-card>
           ))}
 
           {/* Sub-lists (e.g., AutoImportedGoogleContacts) */}
           {lists.map(subList => (
-            <cf-card>
-              <cf-vstack gap="xs">
+            <ct-card>
+              <ct-vstack gap="xs">
                 <strong>{subList[NAME]}</strong>
                 {subList.allItems.map(entry => (
                   <span style="margin-left: 1em">{entry.name}</span>
                 ))}
-              </cf-vstack>
-            </cf-card>
+              </ct-vstack>
+            </ct-card>
           ))}
-        </cf-vstack>
-      </cf-screen>
+        </ct-vstack>
+      </ct-screen>
     ),
     items: data,
     subLists: lists,
@@ -678,8 +678,8 @@ This shows how a user might fork the base Contact pattern to create a FamilyMemb
 ### Base: contact.tsx (provided)
 ```typescript
 /// <cts-enable />
-import { pattern, NAME, UI, Writable, Default, computed } from "commonfabric";
-import type { PersonLike } from "commonfabric";
+import { pattern, NAME, UI, Writable, Default, computed } from "commontools";
+import type { PersonLike } from "commontools";
 
 export interface Contact extends PersonLike {
   name: string;
@@ -691,13 +691,13 @@ export default pattern<{ contact: Writable<Default<Contact, { name: "" }>> }, { 
   return {
     [NAME]: computed(() => contact.name || "Contact"),
     [UI]: (
-      <cf-screen>
-        <cf-vstack gap="md">
-          <cf-input $value={contact.key("name")} placeholder="Name" />
-          <cf-input $value={contact.key("email")} placeholder="Email" />
-          <cf-input $value={contact.key("phone")} placeholder="Phone" />
-        </cf-vstack>
-      </cf-screen>
+      <ct-screen>
+        <ct-vstack gap="md">
+          <ct-input $value={contact.key("name")} placeholder="Name" />
+          <ct-input $value={contact.key("email")} placeholder="Email" />
+          <ct-input $value={contact.key("phone")} placeholder="Phone" />
+        </ct-vstack>
+      </ct-screen>
     ),
     contact,
   };
@@ -711,8 +711,8 @@ LLM forks contact.tsx and adds the requested fields:
 
 ```typescript
 /// <cts-enable />
-import { pattern, NAME, UI, Writable, Default, computed } from "commonfabric";
-import type { PersonLike } from "commonfabric";
+import { pattern, NAME, UI, Writable, Default, computed } from "commontools";
+import type { PersonLike } from "commontools";
 
 // Forked from Contact, added: relationship, birthday, dietary, gifts
 export interface FamilyMember extends PersonLike {
@@ -727,18 +727,18 @@ export default pattern<{ member: Writable<Default<FamilyMember, { name: "", rela
   return {
     [NAME]: computed(() => member.name || "Family Member"),
     [UI]: (
-      <cf-screen>
-        <cf-vstack gap="md">
-          <cf-input $value={member.key("name")} placeholder="Name" />
-          <cf-picker
+      <ct-screen>
+        <ct-vstack gap="md">
+          <ct-input $value={member.key("name")} placeholder="Name" />
+          <ct-picker
             $value={member.key("relationship")}
             options={["spouse", "child", "parent", "sibling", "grandparent"]}
           />
-          <cf-input $value={member.key("birthday")} type="date" placeholder="Birthday" />
-          <cf-tags tags={member.key("dietaryRestrictions")} placeholder="Dietary restrictions" />
-          <cf-tags tags={member.key("giftPreferences")} placeholder="Gift ideas" />
-        </cf-vstack>
-      </cf-screen>
+          <ct-input $value={member.key("birthday")} type="date" placeholder="Birthday" />
+          <ct-tags tags={member.key("dietaryRestrictions")} placeholder="Dietary restrictions" />
+          <ct-tags tags={member.key("giftPreferences")} placeholder="Gift ideas" />
+        </ct-vstack>
+      </ct-screen>
     ),
     member,
   };
@@ -755,8 +755,8 @@ export default pattern<{ member: Writable<Default<FamilyMember, { name: "", rela
 
 ```typescript
 /// <cts-enable />
-import { pattern, NAME, UI, Writable, computed } from "commonfabric";
-import type { PersonLike, ContainerProtocol } from "commonfabric";
+import { pattern, NAME, UI, Writable, computed } from "commontools";
+import type { PersonLike, ContainerProtocol } from "commontools";
 
 // A sub-list that imports from Google Contacts
 interface GoogleContactsImport extends ContainerProtocol<PersonLike> {
@@ -888,7 +888,7 @@ These are over-engineering for an edge case. If someone really needs sophisticat
 
 ### Phase 1: Core Infrastructure
 - [ ] Define minimal interface types (`TaskLike`, `PersonLike`, `EventLike`)
-- [ ] Export from "commonfabric" entrypoint
+- [ ] Export from "commontools" entrypoint
 - [ ] Revise container-protocol.ts with subLists support
 
 ### Phase 2: Base Patterns + First Container

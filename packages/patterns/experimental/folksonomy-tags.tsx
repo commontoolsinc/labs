@@ -14,7 +14,7 @@
  * USAGE:
  * ```tsx
  * const tags = Writable.of<string[]>([]);
- * <cf-render $cell={FolksonomyTags({
+ * <ct-render $cell={FolksonomyTags({
  *   scope: "https://github.com/example/recipe-tracker",
  *   tags,
  * })} />
@@ -26,7 +26,7 @@
  * Without the aggregator, falls back to local-only mode.
  *
  * NOTE: Due to a runtime bug where CustomEvent details aren't passed through
- * cf-render boundaries, we use $value binding instead of oncf-select handlers.
+ * ct-render boundaries, we use $value binding instead of onct-select handlers.
  */
 import {
   type Default,
@@ -40,7 +40,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 /**
  * Tag event sent to the aggregator.
@@ -88,7 +88,7 @@ interface FolksonomyTagsOutput {
 }
 
 /**
- * Autocomplete item structure for cf-autocomplete.
+ * Autocomplete item structure for ct-autocomplete.
  */
 interface AutocompleteItem {
   value: string;
@@ -345,24 +345,24 @@ export const FolksonomyTags = pattern<
     return {
       [NAME]: displayName,
       [UI]: (
-        <cf-vstack gap="3" style={{ padding: "8px 0" }}>
+        <ct-vstack gap="3" style={{ padding: "8px 0" }}>
           {/* Hidden render to force aggregator to execute */}
           <div style={{ display: "none" }}>
-            <cf-render $cell={aggregator} />
+            <ct-render $cell={aggregator} />
           </div>
 
           {
             /* Autocomplete input - use $value binding with multiple mode
-              instead of oncf-select (runtime bug: CustomEvent.detail not passed through cf-render)
-              oncf-change triggers telemetry posting for additions */
+              instead of onct-select (runtime bug: CustomEvent.detail not passed through ct-render)
+              onct-change triggers telemetry posting for additions */
           }
-          <cf-autocomplete
+          <ct-autocomplete
             items={autocompleteItems}
             placeholder="Add a tag..."
             allowCustom
             multiple
             $value={tags}
-            oncf-change={onTagsChanged({
+            onct-change={onTagsChanged({
               tags,
               previousTags,
               aggregatorStream,
@@ -373,7 +373,7 @@ export const FolksonomyTags = pattern<
           {/* Current tags */}
           {hasTags(tags)
             ? (
-              <cf-hstack gap="2" wrap>
+              <ct-hstack gap="2" wrap>
                 {tags.map((tag: string, index: number) => (
                   <span
                     key={index}
@@ -411,7 +411,7 @@ export const FolksonomyTags = pattern<
                     </button>
                   </span>
                 ))}
-              </cf-hstack>
+              </ct-hstack>
             )
             : (
               <span style={{ color: "#9ca3af", fontSize: "13px" }}>
@@ -420,7 +420,7 @@ export const FolksonomyTags = pattern<
             )}
 
           {/* Aggregator status indicator */}
-          <cf-hstack
+          <ct-hstack
             gap="1"
             align="center"
             style={{ fontSize: "11px", color: "#9ca3af" }}
@@ -438,8 +438,8 @@ export const FolksonomyTags = pattern<
                 ? "Connected to community aggregator"
                 : "Local mode (favorite folksonomy-aggregator for community)"}
             </span>
-          </cf-hstack>
-        </cf-vstack>
+          </ct-hstack>
+        </ct-vstack>
       ),
       tags,
       addTag: addTagHandler({ tags }),

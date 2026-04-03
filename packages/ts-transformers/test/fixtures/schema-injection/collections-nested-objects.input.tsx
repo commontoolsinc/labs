@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell } from "commonfabric";
+import { cell } from "commontools";
 
 // FIXTURE: collections-nested-objects
 // Verifies: deeply nested object literals produce recursively nested object schemas

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, type VNode, Writable } from "commonfabric";
+import { NAME, pattern, UI, type VNode, Writable } from "commontools";
 
 interface TextControlInput {
   label: string;
@@ -53,7 +53,7 @@ export const TextControl = pattern<TextControlInput, TextControlOutput>(
           <div style={styles.colDescription}>{description}</div>
           <div style={styles.colDefault}>{defaultValue}</div>
           <div style={styles.colControl}>
-            <cf-input $value={value} style="width: 100%;" />
+            <ct-input $value={value} style="width: 100%;" />
           </div>
         </div>
       ),

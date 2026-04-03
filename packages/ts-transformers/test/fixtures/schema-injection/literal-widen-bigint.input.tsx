@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell } from "commonfabric";
+import { cell } from "commontools";
 
 // FIXTURE: literal-widen-bigint
 // Verifies: bigint literals are widened to { type: "integer" } schema

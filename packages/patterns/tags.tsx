@@ -13,7 +13,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -71,19 +71,19 @@ export const TagsModule = pattern<TagsModuleInput, TagsModuleInput>(
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Tags: ${displayText}`),
       [UI]: (
-        <cf-vstack style={{ gap: "12px" }}>
+        <ct-vstack style={{ gap: "12px" }}>
           {/* Tag input */}
-          <cf-hstack style={{ gap: "8px" }}>
-            <cf-input
+          <ct-hstack style={{ gap: "8px" }}>
+            <ct-input
               $value={tagInput}
               placeholder="Add a tag..."
               style={{ flex: "1" }}
             />
-            <cf-button onClick={addTag({ tags, tagInput })}>Add</cf-button>
-          </cf-hstack>
+            <ct-button onClick={addTag({ tags, tagInput })}>Add</ct-button>
+          </ct-hstack>
 
           {/* Tag chips */}
-          <cf-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
+          <ct-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
             {tags.map((tag: string, index: number) => (
               <span
                 key={index}
@@ -116,8 +116,8 @@ export const TagsModule = pattern<TagsModuleInput, TagsModuleInput>(
                 </button>
               </span>
             ))}
-          </cf-hstack>
-        </cf-vstack>
+          </ct-hstack>
+        </ct-vstack>
       ),
       tags,
     };

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, Default, pattern, UI } from "commonfabric";
+import { computed, Default, pattern, UI } from "commontools";
 
 export default pattern<{ value?: Default<string, "hello"> }>(({ value }) => {
   // This computed will fail silently (console.log in computed)

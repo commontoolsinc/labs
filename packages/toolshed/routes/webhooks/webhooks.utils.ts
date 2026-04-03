@@ -1,8 +1,8 @@
-import { getLogger } from "@commonfabric/utils/logger";
+import { getLogger } from "@commontools/utils/logger";
 import { sha256 } from "@/lib/sha2.ts";
 import { runtime } from "@/index.ts";
 import { identity } from "@/lib/identity.ts";
-import { WebhookConfigSchema } from "@commonfabric/runner";
+import { WebhookConfigSchema } from "@commontools/runner";
 
 const _logger = getLogger("webhooks.utils");
 

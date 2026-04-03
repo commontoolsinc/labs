@@ -4,7 +4,7 @@
  * opaque origin but handler results are typically used directly
  * (no property access), so opaque classification doesn't affect them.
  */
-import { action, pattern, UI, Writable } from "commonfabric";
+import { action, pattern, UI, Writable } from "commontools";
 
 interface State {
   label: string;
@@ -29,8 +29,8 @@ export default pattern<State>(({ label }) => {
     [UI]: (
       <div>
         <span>{label}: {count}</span>
-        <cf-button onClick={increment}>+</cf-button>
-        <cf-button onClick={decrement}>-</cf-button>
+        <ct-button onClick={increment}>+</ct-button>
+        <ct-button onClick={decrement}>-</ct-button>
       </div>
     ),
     count,

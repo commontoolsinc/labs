@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, pattern, str } from "commonfabric";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface SharedAliasArgs {
   value: Default<number, 0>;

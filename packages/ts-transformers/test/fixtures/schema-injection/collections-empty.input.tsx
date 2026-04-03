@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, pattern } from "commonfabric";
+import { Writable, pattern } from "commontools";
 
 // FIXTURE: collections-empty
 // Verifies: empty arrays and objects produce valid degenerate schemas

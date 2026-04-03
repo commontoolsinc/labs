@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, NAME, pattern, UI, wish, Writable } from "commonfabric";
+import { computed, NAME, pattern, UI, wish, Writable } from "commontools";
 import { type SummaryIndexEntry } from "../system/summary-index.tsx";
 
 type SummaryIndexResult = {
@@ -30,31 +30,31 @@ export default pattern<Record<string, never>>((_) => {
   return {
     [NAME]: "Summary Index Tester",
     [UI]: (
-      <cf-screen>
-        <cf-toolbar slot="header" sticky>
+      <ct-screen>
+        <ct-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Summary Index Tester</h2>
-        </cf-toolbar>
+        </ct-toolbar>
 
-        <cf-vstack gap="6" padding="6">
-          <cf-vstack gap="2">
+        <ct-vstack gap="6" padding="6">
+          <ct-vstack gap="2">
             <strong>
               Index: {entryCount} entries
             </strong>
-            <cf-input
+            <ct-input
               $value={query}
               placeholder="Search summaries..."
             />
             <span
               style={{
                 fontSize: "13px",
-                color: "var(--cf-color-text-secondary)",
+                color: "var(--ct-color-text-secondary)",
               }}
             >
               Showing {filteredCount} results
             </span>
-          </cf-vstack>
+          </ct-vstack>
 
-          <cf-table full-width>
+          <ct-table full-width>
             <thead>
               <tr>
                 <th>Name</th>
@@ -65,12 +65,12 @@ export default pattern<Record<string, never>>((_) => {
               {filtered.map((entry) => (
                 <tr>
                   <td style={{ fontWeight: "500", whiteSpace: "nowrap" }}>
-                    <cf-cell-link $cell={entry.piece} />
+                    <ct-cell-link $cell={entry.piece} />
                   </td>
                   <td
                     style={{
                       fontSize: "13px",
-                      color: "var(--cf-color-text-secondary)",
+                      color: "var(--ct-color-text-secondary)",
                     }}
                   >
                     {entry.summary}
@@ -78,9 +78,9 @@ export default pattern<Record<string, never>>((_) => {
                 </tr>
               ))}
             </tbody>
-          </cf-table>
-        </cf-vstack>
-      </cf-screen>
+          </ct-table>
+        </ct-vstack>
+      </ct-screen>
     ),
   };
 });

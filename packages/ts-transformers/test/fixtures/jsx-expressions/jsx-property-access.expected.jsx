@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { pattern, UI } from "commontools";
 interface User {
     name: string;
     age: number;
@@ -43,15 +43,15 @@ export default pattern((state) => {
         <h3>Basic Property Access</h3>
         <h1>{state.key("user", "name")}</h1>
         <p>Age: {state.key("user", "age")}</p>
-        <p>Active: {__cfHelpers.ifElse({
+        <p>Active: {__ctHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, state.key("user", "active"), "Yes", "No")}</p>
+        } as const satisfies __ctHelpers.JSONSchema, state.key("user", "active"), "Yes", "No")}</p>
 
         <h3>Nested Property Access</h3>
         <p>Bio: {state.key("user", "profile", "bio")}</p>
@@ -59,19 +59,19 @@ export default pattern((state) => {
         <p>Theme: {state.key("user", "profile", "settings", "theme")}</p>
         <p>
           Notifications:{" "}
-          {__cfHelpers.ifElse({
+          {__ctHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["On", "Off"]
-        } as const satisfies __cfHelpers.JSONSchema, state.key("user", "profile", "settings", "notifications"), "On", "Off")}
+        } as const satisfies __ctHelpers.JSONSchema, state.key("user", "profile", "settings", "notifications"), "On", "Off")}
         </p>
 
         <h3>Property Access with Operations</h3>
-        <p>Age + 1: {__cfHelpers.derive({
+        <p>Age + 1: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -91,15 +91,15 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     age: state.key("user", "age")
                 }
             } }, ({ state }) => state.user.age + 1)}</p>
         <p>Name length: {state.key("user", "name", "length")}</p>
-        <p>Uppercase name: {__cfHelpers.derive({
+        <p>Uppercase name: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -119,24 +119,24 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     name: state.key("user", "name")
                 }
             } }, ({ state }) => state.user.name.toUpperCase())}</p>
         <p>
           Location includes city:{" "}
-          {__cfHelpers.ifElse({
+          {__ctHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -162,9 +162,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     profile: {
                         location: state.key("user", "profile", "location")
@@ -174,7 +174,7 @@ export default pattern((state) => {
         </p>
 
         <h3>Array Element Access</h3>
-        <p>Item at index: {__cfHelpers.derive({
+        <p>Item at index: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -194,14 +194,14 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 index: state.key("index")
             } }, ({ state }) => state.items[state.index])}</p>
         <p>First item: {state.key("items", "0")}</p>
-        <p>Last item: {__cfHelpers.derive({
+        <p>Last item: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -218,12 +218,12 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items")
             } }, ({ state }) => state.items[state.items.length - 1])}</p>
-        <p>Number at index: {__cfHelpers.derive({
+        <p>Number at index: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -243,9 +243,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: ["number", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 numbers: state.key("numbers"),
                 index: state.key("index")
             } }, ({ state }) => state.numbers[state.index])}</p>
@@ -253,7 +253,7 @@ export default pattern((state) => {
         <h3>Config Access with Styles</h3>
         <p style={{
             color: state.key("config", "theme", "primaryColor"),
-            fontSize: __cfHelpers.derive({
+            fontSize: __ctHelpers.derive({
                 type: "object",
                 properties: {
                     state: {
@@ -279,9 +279,9 @@ export default pattern((state) => {
                     }
                 },
                 required: ["state"]
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, { state: {
+            } as const satisfies __ctHelpers.JSONSchema, { state: {
                     config: {
                         theme: {
                             fontSize: state.key("config", "theme", "fontSize")
@@ -292,22 +292,22 @@ export default pattern((state) => {
           Styled text
         </p>
         <div style={{
-            backgroundColor: __cfHelpers.ifElse({
+            backgroundColor: __ctHelpers.ifElse({
                 type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __ctHelpers.JSONSchema, {
                 "enum": ["#333", "#fff"]
-            } as const satisfies __cfHelpers.JSONSchema, state.key("config", "features", "darkMode"), "#333", "#fff"),
+            } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "darkMode"), "#333", "#fff"),
             borderColor: state.key("config", "theme", "secondaryColor"),
         }}>
           Theme-aware box
         </div>
 
         <h3>Complex Property Chains</h3>
-        <p>{__cfHelpers.derive({
+        <p>{__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -336,9 +336,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     name: state.key("user", "name"),
                     profile: {
@@ -346,7 +346,7 @@ export default pattern((state) => {
                     }
                 }
             } }, ({ state }) => state.user.name + " from " + state.user.profile.location)}</p>
-        <p>Font size + 2: {__cfHelpers.derive({
+        <p>Font size + 2: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -372,9 +372,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     theme: {
                         fontSize: state.key("config", "theme", "fontSize")
@@ -383,21 +383,21 @@ export default pattern((state) => {
             } }, ({ state }) => state.config.theme.fontSize + 2)}px</p>
         <p>
           Has beta and dark mode:{" "}
-          {__cfHelpers.ifElse({
+          {__ctHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.when({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.when({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, state.key("config", "features", "beta"), state.key("config", "features", "darkMode")), "Yes", "No")}
+        } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "beta"), state.key("config", "features", "darkMode")), "Yes", "No")}
         </p>
       </div>),
     };
@@ -501,7 +501,7 @@ export default pattern((state) => {
             required: ["name", "age", "active", "profile"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -530,8 +530,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

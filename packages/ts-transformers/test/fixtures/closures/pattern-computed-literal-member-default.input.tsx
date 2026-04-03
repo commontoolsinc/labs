@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern } from "commonfabric";
+import { pattern } from "commontools";
 
 // FIXTURE: pattern-computed-literal-member-default
 // Verifies: literal-member destructuring defaults survive into schema defaults

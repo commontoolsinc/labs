@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { pattern, UI } from "commontools";
 interface State {
     user: {
         name: string;
@@ -93,7 +93,7 @@ export default pattern((state) => {
         {/* String concatenation with multiple property accesses */}
         <p>
           Full profile:{" "}
-          {__cfHelpers.derive({
+          {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -125,9 +125,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     name: state.key("user", "name"),
                     profile: {
@@ -141,7 +141,7 @@ export default pattern((state) => {
 
         {/* Arithmetic with multiple properties from same base */}
         <p>
-          Age calculation: {__cfHelpers.derive({
+          Age calculation: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -161,14 +161,14 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     age: state.key("user", "age")
                 }
             } }, ({ state }) => state.user.age * 12)} months, or{" "}
-          {__cfHelpers.derive({
+          {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -188,9 +188,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     age: state.key("user", "age")
                 }
@@ -216,15 +216,15 @@ export default pattern((state) => {
         {/* Mixed depth accesses */}
         <p>
           Config summary: Dark mode{" "}
-          {__cfHelpers.ifElse({
+          {__ctHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["enabled", "disabled"]
-        } as const satisfies __cfHelpers.JSONSchema, state.key("config", "features", "darkMode"), "enabled", "disabled")} with{" "}
+        } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "darkMode"), "enabled", "disabled")} with{" "}
           {state.key("config", "theme", "colors", "primary")} primary color
         </p>
 
@@ -267,15 +267,15 @@ export default pattern((state) => {
         <h3>Complex Expressions with Shared Bases</h3>
         {/* Conditional with multiple property accesses */}
         <p>
-          Status: {__cfHelpers.ifElse({
+          Status: {__ctHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, state.key("user", "settings", "notifications"), __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, state.key("user", "settings", "notifications"), __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -304,9 +304,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     name: state.key("user", "name"),
                     settings: {
@@ -314,7 +314,7 @@ export default pattern((state) => {
                     }
                 }
             } }, ({ state }) => state.user.name + " has notifications on with " +
-            state.user.settings.theme + " theme"), __cfHelpers.derive({
+            state.user.settings.theme + " theme"), __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -334,9 +334,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     name: state.key("user", "name")
                 }
@@ -345,7 +345,7 @@ export default pattern((state) => {
 
         {/* Computed expression with shared base */}
         <p>
-          Spacing calc: {__cfHelpers.derive({
+          Spacing calc: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -383,9 +383,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     theme: {
                         spacing: {
@@ -403,27 +403,27 @@ export default pattern((state) => {
         {/* Boolean expressions with multiple properties */}
         <p>
           Features:{" "}
-          {__cfHelpers.ifElse({
+          {__ctHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Full features", "Limited features"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.when({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.when({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, state.key("config", "features", "darkMode"), state.key("config", "features", "animations")), "Full features", "Limited features")}
+        } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "darkMode"), state.key("config", "features", "animations")), "Full features", "Limited features")}
         </p>
 
         <h3>Method Calls on Shared Bases</h3>
         {/* Multiple method calls on properties from same base */}
         <p>
-          Formatted: {__cfHelpers.derive({
+          Formatted: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -443,14 +443,14 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     name: state.key("user", "name")
                 }
             } }, ({ state }) => state.user.name.toUpperCase())} -{" "}
-          {__cfHelpers.derive({
+          {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -470,9 +470,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     email: state.key("user", "email")
                 }
@@ -502,21 +502,21 @@ export default pattern((state) => {
         <p>
           Nested refs: {state.key("config", "theme", "colors", "primary")} in{" "}
           {state.key("config", "theme", "fonts", "body")} with{" "}
-          {__cfHelpers.ifElse({
+          {__ctHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["animations", "no animations"]
-        } as const satisfies __cfHelpers.JSONSchema, state.key("config", "features", "animations"), "animations", "no animations")}
+        } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "animations"), "animations", "no animations")}
         </p>
 
         <h3>Extreme Parent Suppression Test</h3>
         {/* Using every level of a deep chain */}
         <p>
-          All levels: Root: {__cfHelpers.ifElse({
+          All levels: Root: {__ctHelpers.ifElse({
             type: "object",
             properties: {
                 nested: {
@@ -557,14 +557,14 @@ export default pattern((state) => {
                 }
             },
             required: ["nested"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["exists", "missing"]
-        } as const satisfies __cfHelpers.JSONSchema, state.key("deeply"), "exists", "missing")}, Nested:{" "}
-          {__cfHelpers.ifElse({
+        } as const satisfies __ctHelpers.JSONSchema, state.key("deeply"), "exists", "missing")}, Nested:{" "}
+          {__ctHelpers.ifElse({
             type: "object",
             properties: {
                 structure: {
@@ -599,13 +599,13 @@ export default pattern((state) => {
                 }
             },
             required: ["structure"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["exists", "missing"]
-        } as const satisfies __cfHelpers.JSONSchema, state.key("deeply", "nested"), "exists", "missing")}, Value:{" "}
+        } as const satisfies __ctHelpers.JSONSchema, state.key("deeply", "nested"), "exists", "missing")}, Value:{" "}
           {state.key("deeply", "nested", "structure", "with", "many", "levels", "value")}
         </p>
       </div>),
@@ -849,7 +849,7 @@ export default pattern((state) => {
         }
     },
     required: ["user", "config", "data", "deeply", "arrays"]
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -878,8 +878,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

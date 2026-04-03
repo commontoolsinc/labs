@@ -12,7 +12,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import {
   type MentionablePiece,
   type NoteMdInput,
@@ -58,7 +58,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
     const hasBacklinks = computed(() => (note?.backlinks?.length ?? 0) > 0);
 
     // Convert [[Name (id)]] wiki-links to markdown links [Name](/of:id)
-    // cf-markdown will then convert these to clickable cf-cell-link components
+    // ct-markdown will then convert these to clickable ct-cell-link components
     // Use content prop if provided, otherwise fall back to note.content
     const processedContent = computed(() => {
       const raw = content?.get?.() ?? note?.content ?? "";
@@ -126,21 +126,21 @@ export default pattern<NoteMdInput, NoteMdOutput>(
 
     // Scrollable content with markdown + backlinks (for print support)
     const markdownViewer = (
-      <cf-vscroll flex showScrollbar fadeEdges>
+      <ct-vscroll flex showScrollbar fadeEdges>
         <div style={{ padding: "1rem", minHeight: "100%" }}>
           {/* Markdown content with wiki-links converted to clickable links */}
-          <cf-markdown
+          <ct-markdown
             content={processedContent}
-            oncf-checkbox-change={handleCheckboxToggle}
+            onct-checkbox-change={handleCheckboxToggle}
           />
 
-          {/* Backlinks section - cf-chips at bottom */}
+          {/* Backlinks section - ct-chips at bottom */}
           <div
             style={{
               display: computed(() => (hasBacklinks ? "block" : "none")),
               marginTop: "2rem",
               paddingTop: "1rem",
-              borderTop: "1px solid var(--cf-color-border, #e5e5e7)",
+              borderTop: "1px solid var(--ct-color-border, #e5e5e7)",
             }}
           >
             <span
@@ -149,50 +149,50 @@ export default pattern<NoteMdInput, NoteMdOutput>(
                 fontWeight: "600",
                 textTransform: "uppercase",
                 letterSpacing: "0.05em",
-                color: "var(--cf-color-gray-500, #6b7280)",
+                color: "var(--ct-color-gray-500, #6b7280)",
                 marginBottom: "0.5rem",
                 display: "block",
               }}
             >
               Linked from:
             </span>
-            <cf-hstack gap="2" wrap>
+            <ct-hstack gap="2" wrap>
               {note?.backlinks?.map((piece) => (
-                <cf-chip
+                <ct-chip
                   label={piece?.[NAME] ?? "Untitled"}
                   interactive
-                  oncf-click={handleBacklinkClick({ piece })}
+                  onct-click={handleBacklinkClick({ piece })}
                 />
               ))}
-            </cf-hstack>
+            </ct-hstack>
           </div>
         </div>
-      </cf-vscroll>
+      </ct-vscroll>
     );
 
     return {
       [NAME]: displayName,
       [UI]: (
-        <cf-screen>
-          <cf-hstack
+        <ct-screen>
+          <ct-hstack
             slot="header"
             padding="4"
             gap="3"
             align="center"
             style={{
-              borderBottom: "1px solid var(--cf-color-border, #e5e5e7)",
+              borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
             }}
           >
-            <cf-heading level={1} style={{ flex: "1" }}>
+            <ct-heading level={1} style={{ flex: "1" }}>
               {computed(() => note?.title || "Untitled Note")}
-            </cf-heading>
+            </ct-heading>
             {/* Edit button - navigates back to source note for editing */}
-            <cf-button variant="secondary" size="sm" onClick={goToEdit}>
+            <ct-button variant="secondary" size="sm" onClick={goToEdit}>
               Edit
-            </cf-button>
-          </cf-hstack>
+            </ct-button>
+          </ct-hstack>
           {markdownViewer}
-        </cf-screen>
+        </ct-screen>
       ),
       note,
       isHidden: true,

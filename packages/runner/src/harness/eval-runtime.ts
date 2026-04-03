@@ -3,7 +3,7 @@ import {
   MappedPosition,
   SourceMap,
   SourceMapParser,
-} from "@commonfabric/js-compiler";
+} from "@commontools/js-compiler";
 
 // A reference to a runtime value from a `JsIsolate`.
 export interface JsValue {

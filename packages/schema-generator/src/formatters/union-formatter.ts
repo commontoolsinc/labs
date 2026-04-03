@@ -1,8 +1,5 @@
 import ts from "typescript";
-import type {
-  JSONSchemaMutable,
-  JSONSchemaObjMutable,
-} from "@commonfabric/api";
+import type { JSONSchemaMutable, JSONSchemaObjMutable } from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
@@ -10,7 +7,7 @@ import {
   getNativeTypeSchema,
   TypeWithInternals,
 } from "../type-utils.ts";
-import { isRecord } from "@commonfabric/utils/types";
+import { isRecord } from "@commontools/utils/types";
 
 // Simple primitive schemas only have these keys (possibly just one)
 const PRIMITIVE_SCHEMA_KEY_SET = new Set(["type", "enum"]);

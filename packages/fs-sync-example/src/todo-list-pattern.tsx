@@ -20,7 +20,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import type { Edit, FailedEdit, Todo } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -121,10 +121,10 @@ export default pattern<Input, Output>(
     return {
       [NAME]: "Todo List (fs-sync)",
       [UI]: (
-        <cf-screen>
-          <cf-vstack slot="header" gap="2">
-            <cf-hstack justify="between" align="center">
-              <cf-heading level={4}>Todo List</cf-heading>
+        <ct-screen>
+          <ct-vstack slot="header" gap="2">
+            <ct-hstack justify="between" align="center">
+              <ct-heading level={4}>Todo List</ct-heading>
               {ifElse(
                 isSyncing,
                 <span
@@ -140,15 +140,15 @@ export default pattern<Input, Output>(
                 </span>,
                 null,
               )}
-            </cf-hstack>
-          </cf-vstack>
+            </ct-hstack>
+          </ct-vstack>
 
-          <cf-vscroll flex showScrollbar fadeEdges>
-            <cf-vstack gap="2" style="padding: 1rem; max-width: 600px;">
+          <ct-vscroll flex showScrollbar fadeEdges>
+            <ct-vstack gap="2" style="padding: 1rem; max-width: 600px;">
               {/* Add todo */}
-              <cf-message-input
+              <ct-message-input
                 placeholder="Add a todo..."
-                oncf-send={onCreate({ todos, edits })}
+                onct-send={onCreate({ todos, edits })}
               />
 
               {/* Empty state */}
@@ -157,7 +157,7 @@ export default pattern<Input, Output>(
                 <div
                   style={{
                     textAlign: "center",
-                    color: "var(--cf-color-gray-500)",
+                    color: "var(--ct-color-gray-500)",
                     padding: "2rem",
                   }}
                 >
@@ -168,34 +168,34 @@ export default pattern<Input, Output>(
 
               {/* Todo list */}
               {todos.map((todo) => (
-                <cf-card>
-                  <cf-hstack gap="2" align="center">
-                    <cf-checkbox
+                <ct-card>
+                  <ct-hstack gap="2" align="center">
+                    <ct-checkbox
                       checked={todo.done}
-                      oncf-change={onToggle({ todo, edits })}
+                      onct-change={onToggle({ todo, edits })}
                     />
-                    <cf-input
+                    <ct-input
                       $value={todo.description}
-                      oncf-submit={onUpdate({ todo, edits })}
-                      oncf-blur={onUpdate({ todo, edits })}
+                      onct-submit={onUpdate({ todo, edits })}
+                      onct-blur={onUpdate({ todo, edits })}
                       style={{ flex: "1" }}
                     />
                     <span
                       style={{
                         fontSize: "11px",
-                        color: "var(--cf-color-gray-400)",
+                        color: "var(--ct-color-gray-400)",
                       }}
                     >
                       {todo.id}
                     </span>
-                    <cf-button
+                    <ct-button
                       variant="ghost"
                       onClick={onDelete({ todo, todos, edits })}
                     >
                       ×
-                    </cf-button>
-                  </cf-hstack>
-                </cf-card>
+                    </ct-button>
+                  </ct-hstack>
+                </ct-card>
               ))}
 
               {/* Failed edits */}
@@ -213,9 +213,9 @@ export default pattern<Input, Output>(
                   Edit failed: {failed.error}
                 </div>
               ))}
-            </cf-vstack>
-          </cf-vscroll>
-        </cf-screen>
+            </ct-vstack>
+          </ct-vscroll>
+        </ct-screen>
       ),
       todos,
       edits,

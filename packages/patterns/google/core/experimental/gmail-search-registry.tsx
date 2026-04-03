@@ -26,7 +26,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 // ============================================================================
 // TYPES
@@ -250,15 +250,15 @@ const GmailSearchRegistry = pattern<
     downvoteQuery: boundDownvoteQuery,
 
     [UI]: (
-      <cf-screen>
+      <ct-screen>
         <div slot="header">
           <h2 style={{ margin: "0", fontSize: "18px" }}>
             Gmail Search Registry
           </h2>
         </div>
 
-        <cf-vscroll flex showScrollbar>
-          <cf-vstack style="padding: 16px; gap: 16px;">
+        <ct-vscroll flex showScrollbar>
+          <ct-vstack style="padding: 16px; gap: 16px;">
             {/* Info banner */}
             <div
               style={{
@@ -487,9 +487,9 @@ const GmailSearchRegistry = pattern<
                 </li>
               </ul>
             </div>
-          </cf-vstack>
-        </cf-vscroll>
-      </cf-screen>
+          </ct-vstack>
+        </ct-vscroll>
+      </ct-screen>
     ),
   };
 });

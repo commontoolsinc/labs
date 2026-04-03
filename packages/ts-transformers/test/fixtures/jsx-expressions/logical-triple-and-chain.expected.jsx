@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { cell, pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { cell, pattern, UI } from "commontools";
 // Tests triple && chain: a && b && c
 // Should produce nested when calls or derive the entire chain
 // FIXTURE: logical-triple-and-chain
@@ -24,25 +24,25 @@ export default pattern((_state) => {
             }
         },
         required: ["active", "verified", "name"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {/* Triple && chain with complex conditions */}
-        {__cfHelpers.when({
+        {__ctHelpers.when({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean"
                 }, {}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -60,9 +60,9 @@ export default pattern((_state) => {
                 }
             },
             required: ["user"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => user.get().active && user.get().verified), <span>Welcome, {__cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().active && user.get().verified), <span>Welcome, {__ctHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -77,12 +77,12 @@ export default pattern((_state) => {
                 }
             },
             required: ["user"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name)}!</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name)}!</span>)}
       </div>),
     };
-}, false as const satisfies __cfHelpers.JSONSchema, {
+}, false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -111,8 +111,8 @@ export default pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

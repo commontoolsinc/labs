@@ -1,4 +1,4 @@
-# CF Protocol: Receipt Object (Section 7)
+# CT Protocol: Receipt Object (Section 7)
 
 See `docs/specs/verifiable-execution/README.md` for navigation.
 

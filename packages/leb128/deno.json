@@ -1,5 +1,5 @@
 {
-  "name": "@commonfabric/leb128",
+  "name": "@commontools/leb128",
   "exports": {
     ".": "./mod.ts"
   },

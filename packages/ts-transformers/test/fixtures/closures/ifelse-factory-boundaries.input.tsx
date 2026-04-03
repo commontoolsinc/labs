@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, ifElse, lift, pattern, UI, Writable } from "commonfabric";
+import { handler, ifElse, lift, pattern, UI, Writable } from "commontools";
 
 const moduleHasSettings = lift(({ piece }: { piece: { settingsUI?: string } }) =>
   !!piece?.settingsUI

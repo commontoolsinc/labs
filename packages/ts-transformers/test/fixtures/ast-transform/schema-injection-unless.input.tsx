@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { unless, pattern, UI, NAME } from "commonfabric";
+import { unless, pattern, UI, NAME } from "commontools";
 
 interface State {
   value: string | null;

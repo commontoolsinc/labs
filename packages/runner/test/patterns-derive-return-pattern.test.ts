@@ -11,8 +11,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -24,9 +24,9 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let derive: ReturnType<typeof createBuilder>["commonfabric"]["derive"];
-  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
-  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let derive: ReturnType<typeof createBuilder>["commontools"]["derive"];
+  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
+  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -37,12 +37,12 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
 
     tx = runtime.edit();
 
-    const { commonfabric } = createBuilder();
+    const { commontools } = createBuilder();
     ({
       derive,
       lift,
       pattern,
-    } = commonfabric);
+    } = commontools);
   });
 
   afterEach(async () => {

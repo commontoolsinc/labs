@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler } from "commonfabric";
+import { handler } from "commontools";
 
 interface IncrementEvent {
   amount: number;

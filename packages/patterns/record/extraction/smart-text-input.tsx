@@ -32,11 +32,11 @@ import {
   type ImageData,
   pattern,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 // ===== Types =====
 
-// FileData matches cf-file-input's event shape (not exported from commonfabric)
+// FileData matches ct-file-input's event shape (not exported from commontools)
 interface FileData {
   id: string;
   name: string;
@@ -258,7 +258,7 @@ const handleCancelPreview = handler<
 );
 
 /**
- * Handle image change from cf-image-input
+ * Handle image change from ct-image-input
  * NOTE: The $images binding handles actual data flow to the imageArray Cell.
  * This handler only sets UI state flags for the preview section.
  * The image data arrives via the binding, triggering the computed() for OCR.
@@ -318,7 +318,7 @@ export const SmartTextInput = pattern<
   // File error state (for user feedback)
   const fileError = Writable.of<string | null>(null);
 
-  // Image array for cf-image-input binding
+  // Image array for ct-image-input binding
   const imageArray = Writable.of<ImageData[]>([]);
 
   // ===== OCR Processing =====
@@ -423,7 +423,7 @@ export const SmartTextInput = pattern<
   // ===== UI Components =====
 
   const textArea = (
-    <cf-textarea
+    <ct-textarea
       $value={$value}
       placeholder={placeholder}
       rows={rows}
@@ -447,13 +447,13 @@ export const SmartTextInput = pattern<
       }}
     >
       {/* File Upload Button */}
-      <cf-file-input
+      <ct-file-input
         accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
         buttonText="📄 Upload Text File"
         showPreview={false}
         variant="ghost"
         size="sm"
-        oncf-change={handleFileUpload({
+        onct-change={handleFileUpload({
           previewText,
           previewSource,
           previewFileName,
@@ -466,7 +466,7 @@ export const SmartTextInput = pattern<
       {/* Image Upload Button */}
       {/* Using $images binding like image-analysis.tsx - this handles data flow */}
       {/* Handler only sets preview state flags, doesn't store image */}
-      <cf-image-input
+      <ct-image-input
         $images={imageArray}
         maxImages={1}
         showPreview={false}
@@ -474,7 +474,7 @@ export const SmartTextInput = pattern<
         buttonText="📷 Add Photo"
         variant="ghost"
         size="sm"
-        oncf-change={handleImageChange({
+        onct-change={handleImageChange({
           previewText,
           fileError,
         })}
@@ -498,7 +498,7 @@ export const SmartTextInput = pattern<
             gap: "8px",
           }}
         >
-          <cf-loader size="sm" />
+          <ct-loader size="sm" />
           <span style={{ color: "#6b7280", fontSize: "13px" }}>
             Extracting text from image...
           </span>

@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { lift } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { lift } from "commontools";
 // FIXTURE: schema-generation-lift-typed-param
 // Verifies: lift() with a primitive typed parameter generates scalar input and output schemas
 //   lift((value: number) => value * 2) → lift({ type: "number" }, { type: "number" }, fn)
@@ -7,10 +7,10 @@ import { lift } from "commonfabric";
 // Lift requires explicit type annotation for proper schema generation
 export const doubleValue = lift({
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, (value: number) => value * 2);
+} as const satisfies __ctHelpers.JSONSchema, (value: number) => value * 2);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

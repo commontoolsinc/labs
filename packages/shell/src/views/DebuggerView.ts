@@ -5,11 +5,11 @@ import type {
   LoggerMetadata,
   RuntimeTelemetryMarkerResult,
   TimingStats,
-} from "@commonfabric/runtime-client";
-import { isRecord } from "@commonfabric/utils/types";
+} from "@commontools/runtime-client";
+import { isRecord } from "@commontools/utils/types";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
 import "./SchedulerGraphView.ts"; // Register x-scheduler-graph component
-import type { Logger, LoggerBreakdown } from "@commonfabric/utils/logger";
+import type { Logger, LoggerBreakdown } from "@commontools/utils/logger";
 
 /**
  * Hierarchical topic definitions for filtering telemetry events.
@@ -1455,21 +1455,21 @@ export class XDebuggerView extends LitElement {
 
   private getLoggerRegistry(): Record<string, Logger> {
     const global = globalThis as unknown as {
-      commonfabric?: { logger?: Record<string, Logger> };
+      commontools?: { logger?: Record<string, Logger> };
     };
-    return global.commonfabric?.logger ?? {};
+    return global.commontools?.logger ?? {};
   }
 
   private getLoggerBreakdown(): Record<string, LoggerBreakdown | number> {
     const global = globalThis as unknown as {
-      commonfabric?: {
+      commontools?: {
         getLoggerCountsBreakdown?: () => Record<
           string,
           LoggerBreakdown | number
         >;
       };
     };
-    return global.commonfabric?.getLoggerCountsBreakdown?.() ?? { total: 0 };
+    return global.commontools?.getLoggerCountsBreakdown?.() ?? { total: 0 };
   }
 
   private getBreakdownTotal(
@@ -1569,14 +1569,14 @@ export class XDebuggerView extends LitElement {
 
   private getLoggerTiming(): Record<string, Record<string, TimingStats>> {
     const global = globalThis as unknown as {
-      commonfabric?: {
+      commontools?: {
         getTimingStatsBreakdown?: () => Record<
           string,
           Record<string, TimingStats>
         >;
       };
     };
-    return global.commonfabric?.getTimingStatsBreakdown?.() ?? {};
+    return global.commontools?.getTimingStatsBreakdown?.() ?? {};
   }
 
   private mergeLoggerTiming(
@@ -1625,13 +1625,13 @@ export class XDebuggerView extends LitElement {
   private async resetBaseline(): Promise<void> {
     // Reset counts baseline
     const global = globalThis as unknown as {
-      commonfabric?: {
+      commontools?: {
         resetAllCountBaselines?: () => void;
         resetAllTimingBaselines?: () => void;
       };
     };
-    global.commonfabric?.resetAllCountBaselines?.();
-    global.commonfabric?.resetAllTimingBaselines?.();
+    global.commontools?.resetAllCountBaselines?.();
+    global.commontools?.resetAllTimingBaselines?.();
 
     // Reset in worker via IPC
     const runtime = this.debuggerController?.getRuntime();
@@ -2727,7 +2727,7 @@ export class XDebuggerView extends LitElement {
               <br><br>
               You can also run from the console:
               <code style="display: block; margin-top: 0.5rem; color: #3b82f6;">
-                await commonfabric.detectNonIdempotent(5000)
+                await commontools.detectNonIdempotent(5000)
               </code>
             </div>
           `}
@@ -2742,7 +2742,7 @@ export class XDebuggerView extends LitElement {
       return html`
         <div class="watch-empty">
           No cells being watched.<br />
-          Hold Alt and hover over a cf-cell-context to access watch controls.
+          Hold Alt and hover over a ct-cell-context to access watch controls.
         </div>
       `;
     }

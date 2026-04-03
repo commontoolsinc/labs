@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { CFHelpers } from "../../core/cf-helpers.ts";
+import { CTHelpers } from "../../core/ct-helpers.ts";
 import {
   getExpressionText,
   getTypeAtLocationWithFallback,
@@ -73,7 +73,7 @@ interface FallbackEntry {
 export interface DeriveCallOptions {
   readonly factory: ts.NodeFactory;
   readonly tsContext: ts.TransformationContext;
-  readonly cfHelpers: CFHelpers;
+  readonly ctHelpers: CTHelpers;
   readonly context: TransformationContext;
 }
 
@@ -190,7 +190,7 @@ export function createDeriveCall(
 ): ts.Expression | undefined {
   if (refs.length === 0) return undefined;
 
-  const { factory, tsContext, cfHelpers, context } = options;
+  const { factory, tsContext, ctHelpers, context } = options;
   const { captureTree, fallbackEntries, refToParamName } = planDeriveEntries(
     refs,
   );
@@ -242,7 +242,7 @@ export function createDeriveCall(
   const resultTypeNode = buildResultTypeNode(expression, context);
 
   // Create derive call with type arguments for SchemaInjectionTransformer
-  const deriveCall = cfHelpers.createHelperCall(
+  const deriveCall = ctHelpers.createHelperCall(
     "derive",
     expression,
     [inputTypeNode, resultTypeNode],

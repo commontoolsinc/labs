@@ -1,12 +1,12 @@
 import ts from "typescript";
 
 import {
-  CF_HELPERS_IDENTIFIER,
-  resolvesToCommonFabricSymbol,
+  CT_HELPERS_IDENTIFIER,
+  resolvesToCommonToolsSymbol,
   type TransformationContext,
 } from "../core/mod.ts";
 
-type CommonFabricKeyName = "NAME" | "UI" | "SELF" | "FS";
+type CommonToolsKeyName = "NAME" | "UI" | "SELF" | "FS";
 
 export function cloneKeyExpression(
   expr: ts.Expression,
@@ -27,46 +27,46 @@ export function cloneKeyExpression(
   return expr;
 }
 
-export function isCommonFabricKeyIdentifier(
+export function isCommonToolsKeyIdentifier(
   expr: ts.Expression,
   context: TransformationContext,
-  targetName: CommonFabricKeyName,
+  targetName: CommonToolsKeyName,
 ): expr is ts.Identifier {
   if (!ts.isIdentifier(expr)) return false;
   const symbol = context.checker.getSymbolAtLocation(expr);
-  if (resolvesToCommonFabricSymbol(symbol, context.checker, targetName)) {
+  if (resolvesToCommonToolsSymbol(symbol, context.checker, targetName)) {
     return true;
   }
   // Fall back to name matching for synthetic/transformed contexts where symbol
-  // resolution may not find the Common Fabric origin (e.g. virtual test setups).
+  // resolution may not find the CommonTools origin (e.g. virtual test setups).
   return expr.text === targetName;
 }
 
 /**
- * Check if an expression is a `__cfHelpers.X` property access for a known key.
+ * Check if an expression is a `__ctHelpers.X` property access for a known key.
  * Prior transformers (e.g. ClosureTransformer) rewrite bare `NAME`/`UI`/`SELF`
  * identifiers into this form.
  */
 export function isCtHelpersKeyAccess(
   expr: ts.Expression,
-  targetName: CommonFabricKeyName,
+  targetName: CommonToolsKeyName,
 ): boolean {
   return ts.isPropertyAccessExpression(expr) &&
     ts.isIdentifier(expr.expression) &&
-    expr.expression.text === CF_HELPERS_IDENTIFIER &&
+    expr.expression.text === CT_HELPERS_IDENTIFIER &&
     expr.name.text === targetName;
 }
 
 /**
- * Check if an expression refers to a Common Fabric key (NAME/UI/SELF) in either
- * bare identifier or `__cfHelpers.X` property-access form.
+ * Check if an expression refers to a CommonTools key (NAME/UI/SELF) in either
+ * bare identifier or `__ctHelpers.X` property-access form.
  */
-export function isCommonFabricKeyExpression(
+export function isCommonToolsKeyExpression(
   expr: ts.Expression,
   context: TransformationContext,
-  targetName: CommonFabricKeyName,
+  targetName: CommonToolsKeyName,
 ): boolean {
-  return isCommonFabricKeyIdentifier(expr, context, targetName) ||
+  return isCommonToolsKeyIdentifier(expr, context, targetName) ||
     isCtHelpersKeyAccess(expr, targetName);
 }
 
@@ -76,10 +76,10 @@ export function getKnownComputedKeyExpression(
 ): ts.Expression | undefined {
   for (const name of ["NAME", "UI", "SELF", "FS"] as const) {
     if (
-      isCommonFabricKeyIdentifier(expr, context, name) ||
+      isCommonToolsKeyIdentifier(expr, context, name) ||
       isCtHelpersKeyAccess(expr, name)
     ) {
-      return context.cfHelpers.getHelperExpr(name);
+      return context.ctHelpers.getHelperExpr(name);
     }
   }
   return undefined;

@@ -10,7 +10,7 @@
  * Simple opaque refs (like `showPanel && value`) don't use when/unless,
  * only complex expressions that need derivation.
  */
-import { type Cell, Default, handler, lift, pattern, str } from "commonfabric";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface WhenUnlessArgs {
   items: Default<string[], []>;

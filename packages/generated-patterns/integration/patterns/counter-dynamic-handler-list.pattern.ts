@@ -9,7 +9,7 @@ import {
   lift,
   pattern,
   str,
-} from "commonfabric";
+} from "commontools";
 
 interface DynamicHandlerArgs {
   values: Default<number[], []>;

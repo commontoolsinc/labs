@@ -3,7 +3,7 @@
  * Bookmarks - A pattern for collecting and browsing URLs/bookmarks.
  *
  * Displays saved links in a searchable grid with rich previews using
- * cf-link-preview. Users can add URLs, search across titles/descriptions/URLs,
+ * ct-link-preview. Users can add URLs, search across titles/descriptions/URLs,
  * and remove bookmarks.
  *
  * Keywords: bookmarks, links, collection, urls, grid, preview, search
@@ -17,7 +17,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 // ===== Types =====
 interface Bookmark {
@@ -71,28 +71,28 @@ export const Bookmarks = pattern<BookmarksInput, BookmarksOutput>(
     return {
       [NAME]: computed(() => `🔖 Bookmarks (${count})`),
       [UI]: (
-        <cf-vstack gap="4">
+        <ct-vstack gap="4">
           {/* Add URL input */}
-          <cf-message-input
+          <ct-message-input
             placeholder="Add a URL..."
             button-text="Add"
-            oncf-send={(e: { detail?: { message?: string } }) => {
+            onct-send={(e: { detail?: { message?: string } }) => {
               const url = e.detail?.message;
               if (url) addBookmark.send({ url });
             }}
           />
 
           {/* Search */}
-          <cf-input
+          <ct-input
             $value={searchQuery}
             placeholder="Search bookmarks..."
             style={{ fontSize: "14px" }}
           />
 
           {/* Grid of link previews */}
-          <cf-grid columns="3" gap="4">
+          <ct-grid columns="3" gap="4">
             {filteredBookmarks.map((bookmark: Bookmark, index: number) => (
-              <cf-vstack
+              <ct-vstack
                 gap="1"
                 style={{
                   position: "relative",
@@ -100,7 +100,7 @@ export const Bookmarks = pattern<BookmarksInput, BookmarksOutput>(
                   overflow: "hidden",
                 }}
               >
-                <cf-link-preview url={bookmark.url} />
+                <ct-link-preview url={bookmark.url} />
                 <button
                   type="button"
                   onClick={() => removeBookmark.send({ index })}
@@ -124,10 +124,10 @@ export const Bookmarks = pattern<BookmarksInput, BookmarksOutput>(
                 >
                   ✕
                 </button>
-              </cf-vstack>
+              </ct-vstack>
             ))}
-          </cf-grid>
-        </cf-vstack>
+          </ct-grid>
+        </ct-vstack>
       ),
       bookmarks,
       count,

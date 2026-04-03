@@ -41,8 +41,8 @@ This document outlines the design for adding schema injection support to the
 ```tsx
 // Input: {condition && <Content />}
 // Output:
-__cfHelpers.when(
-  __cfHelpers.derive({...schema...}, {...schema...}, {...}, ({ x }) => x > 0),
+__ctHelpers.when(
+  __ctHelpers.derive({...schema...}, {...schema...}, {...}, ({ x }) => x > 0),
   <Content />
 )
 ```
@@ -283,18 +283,18 @@ if (callKind?.kind === "ifElse") {
 ```tsx
 // Input: {condition && <Content />}
 // Output:
-__cfHelpers.when(
+__ctHelpers.when(
   toSchema<boolean>(),           // condition schema
   toSchema<VNode>(),             // value schema
-  __cfHelpers.derive({...}, {...}, {...}, ({ x }) => x > 0),
+  __ctHelpers.derive({...}, {...}, {...}, ({ x }) => x > 0),
   <Content />
 )
 
 // After SchemaGeneratorTransformer:
-__cfHelpers.when(
+__ctHelpers.when(
   { type: "boolean" } as const satisfies JSONSchema,
   { type: "object", properties: {...} } as const satisfies JSONSchema,
-  __cfHelpers.derive({...}, {...}, {...}, ({ x }) => x > 0),
+  __ctHelpers.derive({...}, {...}, {...}, ({ x }) => x > 0),
   <Content />
 )
 ```

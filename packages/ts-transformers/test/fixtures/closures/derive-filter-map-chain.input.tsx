@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, pattern } from "commonfabric";
+import { derive, pattern } from "commontools";
 
 interface Preference {
   ingredient: string;

@@ -8,7 +8,7 @@ import {
   handler,
   pattern,
   str,
-} from "commonfabric";
+} from "commontools";
 
 interface CrossFieldValidationArgs {
   value: Default<number, 0>;

@@ -13,7 +13,7 @@ import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Identity } from "@commonfabric/identity";
+import { Identity } from "@commontools/identity";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

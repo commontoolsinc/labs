@@ -1,5 +1,5 @@
 {
-  "name": "@commonfabric/api",
+  "name": "@commontools/api",
   "tasks": {
     "test": "echo 'No tests to run.'"
   },

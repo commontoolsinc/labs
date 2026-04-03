@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, UI } from "commonfabric";
+import { pattern, UI } from "commontools";
 
 // FIXTURE: boolean-result-schema-normalization
 // Verifies: boolean result schemas stay normalized as `type: "boolean"` instead

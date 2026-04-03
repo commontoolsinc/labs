@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, Default, NAME, pattern, UI, Writable } from "commonfabric";
+import { computed, Default, NAME, pattern, UI, Writable } from "commontools";
 
 /** Raw data shape - use in collection patterns */
 export interface Contact {
@@ -27,51 +27,51 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
     return {
       [NAME]: computed(() => `Contact: ${contact.key("name").get()}`),
       [UI]: (
-        <cf-card>
-          <cf-vstack gap="2">
-            <cf-vstack gap="1">
-              <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+        <ct-card>
+          <ct-vstack gap="2">
+            <ct-vstack gap="1">
+              <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                 Name
               </label>
-              <cf-input
+              <ct-input
                 $value={contact.key("name")}
                 placeholder="Full name"
               />
-            </cf-vstack>
+            </ct-vstack>
 
-            <cf-vstack gap="1">
-              <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+            <ct-vstack gap="1">
+              <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                 Email
               </label>
-              <cf-input
+              <ct-input
                 $value={contact.key("email")}
                 placeholder="email@example.com"
                 type="email"
               />
-            </cf-vstack>
+            </ct-vstack>
 
-            <cf-vstack gap="1">
-              <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+            <ct-vstack gap="1">
+              <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                 Phone
               </label>
-              <cf-input
+              <ct-input
                 $value={contact.key("phone")}
                 placeholder="+1 (555) 123-4567"
                 type="tel"
               />
-            </cf-vstack>
+            </ct-vstack>
 
-            <cf-vstack gap="1">
-              <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
+            <ct-vstack gap="1">
+              <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                 Company
               </label>
-              <cf-input
+              <ct-input
                 $value={contact.key("company")}
                 placeholder="Company name"
               />
-            </cf-vstack>
-          </cf-vstack>
-        </cf-card>
+            </ct-vstack>
+          </ct-vstack>
+        </ct-card>
       ),
       contact,
       summary: computed(() => {

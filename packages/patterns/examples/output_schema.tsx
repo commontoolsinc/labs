@@ -7,7 +7,7 @@ import {
   UI,
   VNode,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 const increment = handler<unknown, { value: Writable<number> }>((_, state) => {
   state.value.set(state.value.get() + 1);
@@ -25,9 +25,9 @@ export default pattern<Input, Output>(({ value }) => {
   return {
     [NAME]: "pattern output issue",
     [UI]: (
-      <cf-button onClick={increment({ value: value })}>
+      <ct-button onClick={increment({ value: value })}>
         {value}
-      </cf-button>
+      </ct-button>
     ),
     value,
   };

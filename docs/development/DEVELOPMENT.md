@@ -2,7 +2,7 @@
 
 # Development Guide
 
-This guide covers coding standards, design principles, and build/test workflows for Common Fabric development.
+This guide covers coding standards, design principles, and build/test workflows for CommonTools development.
 
 ## Style & Conventions
 
@@ -20,8 +20,8 @@ This guide covers coding standards, design principles, and build/test workflows 
 - Prefer named exports over default exports.
 - Use package names for internal imports.
 - Destructure when importing multiple names from the same module.
-- Import either from `@commonfabric/api` (internal API) or
-  `@commonfabric/api/interface` (external API), but not both.
+- Import either from `@commontools/api` (internal API) or
+  `@commontools/api/interface` (external API), but not both.
 
 ## Code Design & Principles
 
@@ -392,7 +392,7 @@ suite will break.
 
    ```json
    {
-     "name": "@commonfabric/my-package",
+     "name": "@commontools/my-package",
      "exports": { ".": "./mod.ts" },
      "tasks": { "test": "deno test" }
    }

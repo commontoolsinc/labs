@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { lift } from "commonfabric";
+import { lift } from "commontools";
 
 type LiftArgs = {
   value: number;

@@ -8,7 +8,7 @@ import {
   pattern,
   str,
   type Writable,
-} from "commonfabric";
+} from "commontools";
 
 interface ReplicatorArgs {
   seeds: Default<number[], []>;

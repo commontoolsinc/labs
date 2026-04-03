@@ -1,4 +1,4 @@
-import { DID, isDID } from "@commonfabric/identity";
+import { DID, isDID } from "@commontools/identity";
 
 export type AppBuiltInView = "home";
 

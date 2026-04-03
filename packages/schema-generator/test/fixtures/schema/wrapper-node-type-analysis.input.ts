@@ -2,7 +2,7 @@
 // This fixture specifically tests the fix for Default<T[], V> erasing to any
 // and incorrectly triggering node-based analysis instead of type-based
 
-import { Default, Cell } from "commonfabric";
+import { Default, Cell } from "commontools";
 
 interface Item {
   id: number;

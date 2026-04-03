@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commonfabric";
+import { cell, pattern, UI } from "commontools";
 
 // FIXTURE: logical-complex-expressions
 // Verifies: nested && and mixed || && with JSX are transformed to when() with derive() predicates

@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run
-import { Identity } from "@commonfabric/identity";
+import { Identity } from "@commontools/identity";
 
 /**
  * Usage:

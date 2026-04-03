@@ -18,7 +18,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import GoogleAuth, { Auth } from "../google-auth.tsx";
 import GoogleAuthPersonal from "../google-auth-personal.tsx";
 import GoogleAuthWork from "../google-auth-work.tsx";

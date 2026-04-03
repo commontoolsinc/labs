@@ -17,7 +17,7 @@ const addItem = handler<
 <button onClick={() => items.push({ title: "Test" })}>Add</button>
 
 // CORRECT: For real handlers, bind with state only
-<cf-message-input oncf-send={addItem({ items })} />
+<ct-message-input onct-send={addItem({ items })} />
 // Event data ({ title }) comes from component at runtime
 ```
 

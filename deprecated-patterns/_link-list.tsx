@@ -9,7 +9,7 @@ import {
   Schema,
   str,
   UI,
-} from "commonfabric";
+} from "commontools";
 
 const ItemSchema = {
   type: "object",
@@ -155,13 +155,13 @@ export default pattern(
       [NAME]: title,
       [UI]: (
         <os-container>
-          <cf-input
+          <ct-input
             value={title}
             placeholder="List title"
-            oncf-input={updateTitle({ title })}
+            onct-input={updateTitle({ title })}
             customStyle="font-size: 20px; font-family: monospace; text-decoration: underline;"
           />
-          <cf-vstack gap="1">
+          <ct-vstack gap="1">
             {results.map((
               { title, question, item }: {
                 title: string;
@@ -170,27 +170,27 @@ export default pattern(
               },
             ) => (
               <li>
-                <cf-vstack>
+                <ct-vstack>
                   <blockquote>
                     {title}
                   </blockquote>
-                  <cf-alert>{question}</cf-alert>
-                  <cf-button
+                  <ct-alert>{question}</ct-alert>
+                  <ct-button
                     outline
                     variant="danger"
                     onclick={deleteItem({ item, items })}
                   >
                     Delete
-                  </cf-button>
-                </cf-vstack>
+                  </ct-button>
+                </ct-vstack>
               </li>
             ))}
-          </cf-vstack>
-          <cf-message-input
+          </ct-vstack>
+          <ct-message-input
             name="Add"
             placeholder="New question"
             appearance="rounded"
-            oncf-send={addTask({ items })}
+            onct-send={addTask({ items })}
           />
         </os-container>
       ),

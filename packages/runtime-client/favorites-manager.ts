@@ -5,7 +5,7 @@
  * defaultPattern through cell operations, without requiring specialized IPC messages.
  */
 
-import { DID } from "@commonfabric/identity";
+import { DID } from "@commontools/identity";
 import { CellHandle } from "./cell-handle.ts";
 import { RuntimeClient } from "./runtime-client.ts";
 import type { CellRef } from "./protocol/types.ts";
@@ -14,7 +14,7 @@ import {
   favoriteListSchema,
   Home,
   homeSchema,
-} from "@commonfabric/home-schemas";
+} from "@commontools/home-schemas";
 
 type HandlerName = "addFavorite" | "removeFavorite";
 

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern } from "commonfabric";
+import { pattern } from "commontools";
 
 // FIXTURE: filter-flatmap-plain-captures
 // Verifies: plain lexical captures in reactive filter/flatMap chains become

@@ -21,8 +21,8 @@ occurs when dragging modules with multiple browser tabs open.
 
 ### Current Implementation
 
-- Uses `<cf-drag-source>` wrapper around each module card
-- Uses `<cf-drop-zone>` between each module and at start/end of columns
+- Uses `<ct-drag-source>` wrapper around each module card
+- Uses `<ct-drop-zone>` between each module and at start/end of columns
 - `insertAtPosition` handler receives the dragged item and insertion position
 - Handler updates `subCharms` array with new order and pinned state
 
@@ -239,9 +239,9 @@ fill remaining column space for easier drop target.
 ### Fix
 
 ```jsx
-<cf-drop-zone
+<ct-drop-zone
   accept="module"
-  oncf-drop={insertAtPosition({
+  onct-drop={insertAtPosition({
     subCharms,
     insertAfterEntry: null,
     targetPinned: false,
@@ -249,7 +249,7 @@ fill remaining column space for easier drop target.
   style={{ flex: 1, display: "flex" }}
 >
   <div style={{ flex: 1, minHeight: "40px" }} />
-</cf-drop-zone>;
+</ct-drop-zone>;
 ```
 
 Location: Around line 654-659 in record.tsx

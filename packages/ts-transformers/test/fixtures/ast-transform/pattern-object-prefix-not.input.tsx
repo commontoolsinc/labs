@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern } from "commonfabric";
+import { pattern } from "commontools";
 
 // FIXTURE: pattern-object-prefix-not
 // Verifies: top-level non-JSX unary boolean negation in an object property is

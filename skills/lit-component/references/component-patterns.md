@@ -11,7 +11,7 @@ Common UI components fall into distinct categories, each with specific patterns:
 
 Components that arrange other components without providing content themselves.
 
-**Examples:** `cf-vstack`, `cf-hstack`, `cf-screen`, `cf-autolayout`
+**Examples:** `ct-vstack`, `ct-hstack`, `ct-screen`, `ct-autolayout`
 
 **Characteristics:**
 
@@ -24,7 +24,7 @@ Components that arrange other components without providing content themselves.
 **Pattern:**
 
 ```typescript
-export class CFVStack extends BaseElement {
+export class CTVStack extends BaseElement {
   static override properties = {
     gap: { type: String },
     align: { type: String },
@@ -56,7 +56,7 @@ export class CFVStack extends BaseElement {
 
 Components that display content with styling.
 
-**Examples:** `cf-label`, `cf-separator`, `cf-skeleton`
+**Examples:** `ct-label`, `ct-separator`, `ct-skeleton`
 
 **Characteristics:**
 
@@ -67,7 +67,7 @@ Components that display content with styling.
 **Pattern:**
 
 ```typescript
-export class CFSeparator extends BaseElement {
+export class CTSeparator extends BaseElement {
   static override properties = {
     orientation: { type: String },
     decorative: { type: Boolean },
@@ -93,7 +93,7 @@ export class CFSeparator extends BaseElement {
 
 Components that capture user input.
 
-**Examples:** `cf-button`, `cf-input`, `cf-checkbox`, `cf-textarea`
+**Examples:** `ct-button`, `ct-input`, `ct-checkbox`, `ct-textarea`
 
 **Characteristics:**
 
@@ -105,10 +105,10 @@ Components that capture user input.
 **Pattern:**
 
 ```typescript
-export class CFButton extends BaseElement {
-  @consume({ context: cfThemeContext, subscribe: true })
+export class CTButton extends BaseElement {
+  @consume({ context: themeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CFTheme;
+  declare theme?: CTTheme;
 
   static override properties = {
     variant: { type: String },
@@ -139,7 +139,7 @@ export class CFButton extends BaseElement {
       return;
     }
     // Emit custom event
-    this.emit("cf-click", {/* detail */});
+    this.emit("ct-click", {/* detail */});
   }
 }
 ```
@@ -148,7 +148,7 @@ export class CFButton extends BaseElement {
 
 Components that deeply integrate with the runtime and Cell abstractions.
 
-**Examples:** `cf-render`, `cf-code-editor`, legacy tree editor implementations
+**Examples:** `ct-render`, `ct-code-editor`, `ct-outliner`
 
 **Characteristics:**
 
@@ -165,8 +165,8 @@ Components that deeply integrate with the runtime and Cell abstractions.
 Each component should follow this structure:
 
 ```
-cf-component-name/
-├── cf-component-name.ts    # Component implementation
+ct-component-name/
+├── ct-component-name.ts    # Component implementation
 ├── index.ts                # Export and registration
 └── styles.ts               # Optional: extracted styles (for complex components)
 ```
@@ -174,14 +174,14 @@ cf-component-name/
 ### Component Implementation File
 
 ```typescript
-// cf-button.ts
+// ct-button.ts
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 export type ButtonVariant = "primary" | "secondary" | "destructive";
 
-export class CFButton extends BaseElement {
+export class CTButton extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -207,20 +207,20 @@ export class CFButton extends BaseElement {
   }
 }
 
-globalThis.customElements.define("cf-button", CFButton);
+globalThis.customElements.define("ct-button", CTButton);
 ```
 
 ### Index File
 
 ```typescript
 // index.ts
-import { ButtonVariant, CFButton } from "./cf-button.ts";
+import { ButtonVariant, CTButton } from "./ct-button.ts";
 
-if (!customElements.get("cf-button")) {
-  customElements.define("cf-button", CFButton);
+if (!customElements.get("ct-button")) {
+  customElements.define("ct-button", CTButton);
 }
 
-export { CFButton };
+export { CTButton };
 export type { ButtonVariant };
 ```
 
@@ -258,8 +258,8 @@ declare disabled: boolean;
 Import types with `type` keyword when possible:
 
 ```typescript
-import type { Cell } from "@commonfabric/runner";
-import type { CFTheme } from "../theme-context.ts";
+import type { Cell } from "@commontools/runner";
+import type { CTTheme } from "../theme-context.ts";
 ```
 
 ## Styling Conventions
@@ -345,15 +345,15 @@ Events are automatically `bubbles: true` and `composed: true`.
 
 ```typescript
 private handleChange(newValue: string) {
-  this.emit("cf-change", { value: newValue });
+  this.emit("ct-change", { value: newValue });
 }
 ```
 
 ### Event Naming
 
-- Prefix custom events with `cf-`
-- Use present tense: `cf-change`, not `cf-changed`
-- Be specific: `cf-add-item`, `cf-remove-item`
+- Prefix custom events with `ct-`
+- Use present tense: `ct-change`, not `ct-changed`
+- Be specific: `ct-add-item`, `ct-remove-item`
 
 ### Event Documentation
 
@@ -361,8 +361,8 @@ Document events in JSDoc:
 
 ```typescript
 /**
- * @fires cf-change - Fired when value changes with detail: { value }
- * @fires cf-submit - Fired when form is submitted with detail: { formData }
+ * @fires ct-change - Fired when value changes with detail: { value }
+ * @fires ct-submit - Fired when form is submitted with detail: { formData }
  */
 ```
 
@@ -439,9 +439,9 @@ Provide comprehensive JSDoc:
 
 ```typescript
 /**
- * CFButton - Interactive button element with multiple variants
+ * CTButton - Interactive button element with multiple variants
  *
- * @element cf-button
+ * @element ct-button
  *
  * @attr {string} variant - Visual style: "primary" | "secondary" | "destructive"
  * @attr {string} size - Button size: "default" | "sm" | "lg" | "icon"
@@ -449,10 +449,10 @@ Provide comprehensive JSDoc:
  *
  * @slot - Default slot for button content
  *
- * @fires cf-click - Fired when button is clicked
+ * @fires ct-click - Fired when button is clicked
  *
  * @example
- * <cf-button variant="primary" size="lg">Click Me</cf-button>
+ * <ct-button variant="primary" size="lg">Click Me</ct-button>
  */
 ```
 
@@ -461,9 +461,9 @@ Provide comprehensive JSDoc:
 Tests should be colocated with components:
 
 ```
-cf-component/
-├── cf-component.ts
-├── cf-component.test.ts
+ct-component/
+├── ct-component.ts
+├── ct-component.test.ts
 └── index.ts
 ```
 
@@ -472,20 +472,20 @@ cf-component/
 ```typescript
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CFButton } from "./cf-button.ts";
+import { CTButton } from "./ct-button.ts";
 
-describe("CFButton", () => {
+describe("CTButton", () => {
   it("should be defined", () => {
-    expect(CFButton).toBeDefined();
+    expect(CTButton).toBeDefined();
   });
 
   it("should create element instance", () => {
-    const element = new CFButton();
-    expect(element).toBeInstanceOf(CFButton);
+    const element = new CTButton();
+    expect(element).toBeInstanceOf(CTButton);
   });
 
   it("should have default properties", () => {
-    const element = new CFButton();
+    const element = new CTButton();
     expect(element.variant).toBe("primary");
     expect(element.disabled).toBe(false);
   });

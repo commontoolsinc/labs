@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern } from "commonfabric";
+import { pattern } from "commontools";
 
 // FIXTURE: pattern-object-logical-or
 // Verifies: top-level non-JSX logical-or in an object property is lowered after

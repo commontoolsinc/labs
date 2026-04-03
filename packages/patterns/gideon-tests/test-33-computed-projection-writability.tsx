@@ -19,7 +19,7 @@ import {
   NAME,
   pattern,
   UI,
-} from "commonfabric";
+} from "commontools";
 
 interface AuthData {
   token: string;
@@ -173,9 +173,9 @@ export default pattern<InputSchema, Output>(({ source }) => {
             <div style={{ marginBottom: "10px" }}>
               <strong>Refresh Count:</strong> {computedRefreshCount}
             </div>
-            <cf-button onClick={updateViaComputed({ computedAuth })}>
+            <ct-button onClick={updateViaComputed({ computedAuth })}>
               Update via Computed
-            </cf-button>
+            </ct-button>
           </div>
 
           {/* .key() Access */}
@@ -206,9 +206,9 @@ export default pattern<InputSchema, Output>(({ source }) => {
             <div style={{ marginBottom: "10px" }}>
               <strong>Refresh Count:</strong> {directRefreshCount}
             </div>
-            <cf-button onClick={updateViaKey({ authViaKey })}>
+            <ct-button onClick={updateViaKey({ authViaKey })}>
               Update via .key()
-            </cf-button>
+            </ct-button>
           </div>
 
           {/* Direct Source (Control) */}
@@ -239,9 +239,9 @@ export default pattern<InputSchema, Output>(({ source }) => {
             <div style={{ marginBottom: "10px" }}>
               <strong>Refresh Count:</strong> {directRefreshCount}
             </div>
-            <cf-button onClick={updateDirect({ source })}>
+            <ct-button onClick={updateDirect({ source })}>
               Update Direct
-            </cf-button>
+            </ct-button>
           </div>
         </div>
 

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, derive, pattern, UI } from "commonfabric";
+import { Cell, derive, pattern, UI } from "commontools";
 
 interface Item {
   name: string;
@@ -59,7 +59,7 @@ export default pattern<{ items: Item[] }>(
               {groupedByAisle[aisleName]!.map((assignment) => (
                 <div>
                   <span>{assignment.item.name}</span>
-                  <cf-checkbox $checked={assignment.item.done} />
+                  <ct-checkbox $checked={assignment.item.done} />
                 </div>
               ))}
             </div>

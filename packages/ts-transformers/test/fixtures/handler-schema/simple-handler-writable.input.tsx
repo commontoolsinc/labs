@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, Writable } from "commonfabric";
+import { handler, Writable } from "commontools";
 
 interface CounterEvent {
   increment: number;

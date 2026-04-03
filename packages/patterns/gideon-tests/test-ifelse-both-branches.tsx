@@ -33,7 +33,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 interface Input {
   condition: Default<boolean, true>;
@@ -130,9 +130,9 @@ export default pattern<Input, Output>(({ condition, toggleCount }) => {
           <p>
             <strong>Toggle Count:</strong> {toggleCount}
           </p>
-          <cf-button onClick={toggle({ condition, toggleCount })}>
+          <ct-button onClick={toggle({ condition, toggleCount })}>
             Toggle Condition
-          </cf-button>
+          </ct-button>
         </div>
 
         {/* The ifElse - if BOTH branches are evaluated, both counters increment */}

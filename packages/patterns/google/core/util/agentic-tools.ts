@@ -34,7 +34,7 @@
  * }
  * ```
  */
-import { handler, JSONSchema, Writable } from "commonfabric";
+import { handler, JSONSchema, Writable } from "commontools";
 
 // =============================================================================
 // SCHEMA UTILITIES

@@ -1,10 +1,10 @@
-import { type SigilLink } from "@commonfabric/runner";
+import { type SigilLink } from "@commontools/runner";
 import { runtime } from "@/index.ts";
 import {
   type JSONSchema,
   type Mutable,
   type Schema,
-} from "@commonfabric/runner";
+} from "@commontools/runner";
 import { Configuration, PlaidApi, PlaidEnvironments } from "plaid";
 import env from "@/env.ts";
 

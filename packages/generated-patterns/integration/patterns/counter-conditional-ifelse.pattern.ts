@@ -7,7 +7,7 @@ import {
   ifElse,
   pattern,
   str,
-} from "commonfabric";
+} from "commontools";
 
 interface ConditionalIfElseArgs {
   value: Default<number, 0>;

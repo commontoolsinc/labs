@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { pattern } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { pattern } from "commontools";
 // FIXTURE: pattern-object-binary-add
 // Verifies: top-level non-JSX arithmetic in an object property is lowered after
 //   closure normalization into a direct derive wrapper rather than left as raw
@@ -7,7 +7,7 @@ import { pattern } from "commonfabric";
 //   return { next: state.count + 1 }
 //   → return { next: derive(state.count + 1) }
 export default pattern((state) => ({
-    next: __cfHelpers.derive({
+    next: __ctHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -21,9 +21,9 @@ export default pattern((state) => ({
             }
         },
         required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __ctHelpers.JSONSchema, { state: {
             count: state.key("count")
         } }, ({ state }) => state.count + 1),
 }), {
@@ -34,7 +34,7 @@ export default pattern((state) => ({
         }
     },
     required: ["count"]
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         next: {
@@ -42,8 +42,8 @@ export default pattern((state) => ({
         }
     },
     required: ["next"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

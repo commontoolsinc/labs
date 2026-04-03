@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, pattern, action } from "commonfabric";
+import { Cell, pattern, action } from "commontools";
 
 interface State {
   count: Cell<number>;

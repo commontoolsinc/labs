@@ -1,16 +1,16 @@
-import * as __cfHelpers from "commonfabric";
-import { pattern, UI, handler, Cell } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { pattern, UI, handler, Cell } from "commontools";
 declare global {
     namespace JSX {
         interface IntrinsicElements {
-            "cf-button": any;
+            "ct-button": any;
         }
     }
 }
 // Event handler defined at module scope
 const handleClick = handler({
     type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         count: {
@@ -19,7 +19,7 @@ const handleClick = handler({
         }
     },
     required: ["count"]
-} as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
+} as const satisfies __ctHelpers.JSONSchema, (_, { count }) => {
     count.set(count.get() + 1);
 });
 interface Item {
@@ -38,12 +38,12 @@ export default pattern((state: State) => {
     return {
         [UI]: (<div>
         {/* Map callback references handler - should NOT capture it */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const state = __ct_pattern_input.key("params", "state");
-                return (<cf-button onClick={handleClick({ count: state.key("count") })}>
+                return (<ct-button onClick={handleClick({ count: state.key("count") })}>
             {item.key("name")}
-          </cf-button>);
+          </ct-button>);
             }, {
                 type: "object",
                 properties: {
@@ -82,7 +82,7 @@ export default pattern((state: State) => {
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -102,7 +102,7 @@ export default pattern((state: State) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema), {
+            } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
                     count: state.key("count")
                 }
@@ -138,7 +138,7 @@ export default pattern((state: State) => {
             required: ["id", "name"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -167,8 +167,8 @@ export default pattern((state: State) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

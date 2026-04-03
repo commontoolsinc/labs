@@ -10,7 +10,7 @@ import {
   pattern,
   str,
   UI,
-} from "commonfabric";
+} from "commontools";
 
 // Reuse email schema from email-summarizer.tsx
 const EmailProperties = {
@@ -467,8 +467,8 @@ export default pattern(
             <span>Dates found: {dateCount}</span>
           </div>
 
-          <cf-hstack gap="2">
-            <cf-vstack gap="1">
+          <ct-hstack gap="2">
+            <ct-vstack gap="1">
               <div>
                 <input
                   type="checkbox"
@@ -507,8 +507,8 @@ export default pattern(
                   onChange={minConfidenceHandler}
                 />
               </div>
-            </cf-vstack>
-          </cf-hstack>
+            </ct-vstack>
+          </ct-hstack>
 
           <div>
             <h3>All Extracted Dates</h3>

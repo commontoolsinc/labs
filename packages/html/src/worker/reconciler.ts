@@ -22,8 +22,8 @@ import {
   type Stream,
   UI,
   useCancelGroup,
-} from "@commonfabric/runner";
-import { getLogger } from "@commonfabric/utils/logger";
+} from "@commontools/runner";
+import { getLogger } from "@commontools/utils/logger";
 import type {
   ChildNodeState,
   NodeState,
@@ -1218,14 +1218,14 @@ export class WorkerReconciler {
   ): NodeState | null {
     const nodeId = ctx.nextNodeId();
     this.queueOps([
-      { op: "create-element", nodeId, tagName: "cf-fragment" },
+      { op: "create-element", nodeId, tagName: "ct-fragment" },
     ]);
 
     const [cancel, addCancel] = useCancelGroup();
 
     const state: NodeState = {
       nodeId,
-      tagName: "cf-fragment",
+      tagName: "ct-fragment",
       cancel,
       children: new Map(),
       propSubscriptions: new Map(),
@@ -1263,7 +1263,7 @@ export class WorkerReconciler {
     // Fragments appear as VNodes with no name property
     let result = node;
     if (!result.name) {
-      result = { ...result, name: "cf-fragment" };
+      result = { ...result, name: "ct-fragment" };
     }
 
     // Ensure props is an object or Cell

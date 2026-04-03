@@ -1,9 +1,5 @@
-import { Identity } from "@commonfabric/identity";
-import {
-  type Cell,
-  type MemorySpace,
-  type Runtime,
-} from "@commonfabric/runner";
+import { Identity } from "@commontools/identity";
+import { type Cell, type MemorySpace, type Runtime } from "@commontools/runner";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
@@ -11,7 +7,7 @@ import {
 } from "./schema.ts";
 import { getBGCharms } from "./utils.ts";
 import { SpaceManager } from "./space-manager.ts";
-import { useCancelGroup } from "@commonfabric/runner";
+import { useCancelGroup } from "@commontools/runner";
 
 export interface BackgroundCharmServiceOptions {
   identity: Identity;

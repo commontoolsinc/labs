@@ -1,4 +1,4 @@
-import { Cell } from "@commonfabric/runner";
+import { Cell } from "@commontools/runner";
 
 // Re-export workflow types and functions from workflow module
 export type { WorkflowConfig, WorkflowType } from "./workflow.ts";

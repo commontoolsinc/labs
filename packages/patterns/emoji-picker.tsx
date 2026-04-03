@@ -2,7 +2,7 @@
 /**
  * Emoji Picker Pattern - Reusable pattern for emoji selection
  *
- * Uses cf-autocomplete for efficient searching through ~250 emojis.
+ * Uses ct-autocomplete for efficient searching through ~250 emojis.
  * Each emoji has comprehensive search aliases including slang terms.
  */
 import {
@@ -13,7 +13,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -2694,7 +2694,7 @@ export const EmojiPicker = pattern<EmojiPickerInput, EmojiPickerInput>(
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Emoji: ${displayText}`),
       [UI]: (
-        <cf-hstack style={{ gap: "8px", alignItems: "center" }}>
+        <ct-hstack style={{ gap: "8px", alignItems: "center" }}>
           <div
             style={{
               fontSize: "32px",
@@ -2705,16 +2705,16 @@ export const EmojiPicker = pattern<EmojiPickerInput, EmojiPickerInput>(
           >
             {selectedEmoji || "\u{2754}"}
           </div>
-          <cf-autocomplete
+          <ct-autocomplete
             items={EMOJI_ITEMS}
             placeholder="Search emojis..."
-            oncf-select={onSelectEmoji({ selectedEmoji })}
+            onct-select={onSelectEmoji({ selectedEmoji })}
             style={{ flex: "1" }}
           />
-          <cf-button onClick={clearSelection({ selectedEmoji })}>
+          <ct-button onClick={clearSelection({ selectedEmoji })}>
             Clear
-          </cf-button>
-        </cf-hstack>
+          </ct-button>
+        </ct-hstack>
       ),
       selectedEmoji,
     };

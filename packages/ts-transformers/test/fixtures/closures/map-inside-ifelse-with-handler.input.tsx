@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, handler, ifElse, pattern, UI } from "commonfabric";
+import { Cell, handler, ifElse, pattern, UI } from "commontools";
 
 interface Item {
   id: number;

@@ -14,7 +14,7 @@ import {
   pattern,
   Stream,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 interface Item {
   name: string;

@@ -7,7 +7,7 @@ import {
   handler,
   lift,
   pattern,
-} from "commonfabric";
+} from "commontools";
 
 type WorkflowStage =
   | "draft"

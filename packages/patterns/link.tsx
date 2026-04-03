@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Stores URL, title, and description.
  */
-import { computed, type Default, NAME, pattern, UI } from "commonfabric";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -39,30 +39,30 @@ export const LinkModule = pattern<LinkModuleInput, LinkModuleInput>(
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Link: ${displayText}`),
       [UI]: (
-        <cf-vstack style={{ gap: "12px" }}>
-          <cf-vstack style={{ gap: "4px" }}>
+        <ct-vstack style={{ gap: "12px" }}>
+          <ct-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>URL</label>
-            <cf-input
+            <ct-input
               type="url"
               $value={url}
               placeholder="https://example.com"
             />
-          </cf-vstack>
-          <cf-vstack style={{ gap: "4px" }}>
+          </ct-vstack>
+          <ct-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Title</label>
-            <cf-input $value={linkTitle} placeholder="Link title" />
-          </cf-vstack>
-          <cf-vstack style={{ gap: "4px" }}>
+            <ct-input $value={linkTitle} placeholder="Link title" />
+          </ct-vstack>
+          <ct-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Description
             </label>
-            <cf-textarea
+            <ct-textarea
               $value={description}
               placeholder="Brief description..."
               rows={2}
             />
-          </cf-vstack>
-        </cf-vstack>
+          </ct-vstack>
+        </ct-vstack>
       ),
       url,
       linkTitle,

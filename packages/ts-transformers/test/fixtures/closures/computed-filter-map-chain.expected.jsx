@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { computed, pattern } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { computed, pattern } from "commontools";
 interface Preference {
     ingredient: string;
     preference: "liked" | "disliked";
@@ -10,7 +10,7 @@ interface Preference {
 //   .filter() and .map() are standard Array methods — they must remain
 //   untransformed. This is a negative test for the reactive method detection.
 export default pattern((state) => {
-    const liked = __cfHelpers.derive({
+    const liked = __ctHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -41,12 +41,12 @@ export default pattern((state) => {
                 required: ["ingredient", "preference"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __ctHelpers.JSONSchema, { state: {
             preferences: state.key("preferences")
         } }, ({ state }) => {
         return state.preferences
@@ -79,7 +79,7 @@ export default pattern((state) => {
             required: ["ingredient", "preference"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         liked: {
@@ -90,8 +90,8 @@ export default pattern((state) => {
         }
     },
     required: ["liked"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

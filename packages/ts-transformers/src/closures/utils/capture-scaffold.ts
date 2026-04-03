@@ -40,7 +40,7 @@ export function buildCapturedHandlerClosureCall(
     options?.paramsParamName ?? "params",
   );
 
-  const handlerCall = context.cfHelpers.createHelperCall(
+  const handlerCall = context.ctHelpers.createHelperCall(
     "handler",
     originalNode,
     [eventTypeNode, stateTypeNode],

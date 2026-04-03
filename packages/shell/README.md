@@ -1,4 +1,4 @@
-# @commonfabric/shell
+# @commontools/shell
 
 ## Commands
 

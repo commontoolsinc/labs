@@ -10,7 +10,7 @@ import {
   pattern,
   str,
   UI,
-} from "commonfabric";
+} from "commontools";
 import { type FeedItem, parseRSSFeed } from "./rss-utils.ts";
 
 interface Settings {
@@ -65,18 +65,18 @@ export default pattern<
             Feed Items: {derive(items, (items) => items.get().length)}
           </h2>
 
-          <cf-hstack gap="1">
-            <cf-vstack gap="1">
+          <ct-hstack gap="1">
+            <ct-vstack gap="1">
               <div>
                 <label>Feed URL</label>
-                <cf-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   $value={settings.feedUrl}
                   placeholder="https://example.com/feed.xml or https://example.com/atom.xml"
                 />
               </div>
-            </cf-vstack>
-          </cf-hstack>
+            </ct-vstack>
+          </ct-hstack>
           <div>
             <table>
               <thead>

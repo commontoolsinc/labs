@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, computed, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commontools";
 
 // FIXTURE: computed-multiple-captures
 // Verifies: computed() with a multi-statement body capturing three cells is closure-extracted

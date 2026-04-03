@@ -7,7 +7,7 @@
  *
  * Expected: ReadOnlyAddressError when using $checked on computed().map()
  */
-import { computed, Default, NAME, pattern, UI } from "commonfabric";
+import { computed, Default, NAME, pattern, UI } from "commontools";
 
 interface Item {
   id: string;
@@ -67,9 +67,9 @@ export default pattern<Input>(({ items }) => {
           </p>
           {items.map((item) => (
             <div style={{ marginBottom: "0.25rem" }}>
-              <cf-checkbox $checked={item.done}>
+              <ct-checkbox $checked={item.done}>
                 {item.title} {item.active ? "" : "(inactive)"}
-              </cf-checkbox>
+              </ct-checkbox>
             </div>
           ))}
         </div>
@@ -90,9 +90,9 @@ export default pattern<Input>(({ items }) => {
           </p>
           {activeItems.map((item) => (
             <div style={{ marginBottom: "0.25rem" }}>
-              <cf-checkbox $checked={item.done}>
+              <ct-checkbox $checked={item.done}>
                 {item.title}
-              </cf-checkbox>
+              </ct-checkbox>
             </div>
           ))}
         </div>

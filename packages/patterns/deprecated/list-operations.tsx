@@ -9,7 +9,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 // NOTE: This example uses [ID] to demonstrate advanced array manipulation features
 // and ensure stable references when items are inserted/removed at the front of the array.
@@ -120,64 +120,64 @@ export default pattern<ListInput, ListOutput>(
     return {
       [NAME]: "List demo",
       [UI]: (
-        <cf-vstack gap="2">
-          <cf-card>
-            <cf-button
+        <ct-vstack gap="2">
+          <ct-card>
+            <ct-button
               id="reset-demo"
               onClick={resetList({ items })}
             >
               Reset Demo
-            </cf-button>
+            </ct-button>
 
-            <cf-button
+            <ct-button
               id="delete-first"
               onClick={deleteFirstItem({ items })}
             >
               Delete First Item
-            </cf-button>
+            </ct-button>
 
-            <cf-button
+            <ct-button
               id="delete-last"
               onClick={deleteLastItem({ items })}
             >
               Delete Last Item
-            </cf-button>
+            </ct-button>
 
-            <cf-button
+            <ct-button
               id="delete-all"
               onClick={deleteAllItems({ items })}
             >
               Delete All Items
-            </cf-button>
+            </ct-button>
 
-            <cf-button
+            <ct-button
               id="insert-start"
               onClick={insertItemAtStart({ items })}
             >
               Insert Item at Start
-            </cf-button>
+            </ct-button>
 
-            <cf-button
+            <ct-button
               id="insert-end"
               onClick={insertItemAtEnd({ items })}
             >
               Insert Item at End
-            </cf-button>
+            </ct-button>
 
-            <cf-button
+            <ct-button
               id="shuffle"
               onClick={shuffleItems({ items })}
             >
               Shuffle Items
-            </cf-button>
+            </ct-button>
 
             <pre id="main-list">{show(items)}</pre>
             <pre id="lowercase-list">{lowerCase}</pre>
             <pre id="filtered-list">{show(itemsLessThanB)}</pre>
             <pre id="extended-list">{show(extendedItems)}</pre>
             <pre id="combined-list">{combinedItems}</pre>
-          </cf-card>
-        </cf-vstack>
+          </ct-card>
+        </ct-vstack>
       ),
       items,
     };

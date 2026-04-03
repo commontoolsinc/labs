@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { cell, pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { cell, pattern, UI } from "commontools";
 // Tests nullish coalescing (??) interaction with && and ||
 // ?? should NOT be transformed to when/unless (different semantics)
 // FIXTURE: logical-nullish-coalescing
@@ -29,23 +29,23 @@ export default pattern((_state) => {
             }
         },
         required: ["timeout", "retries"]
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __ctHelpers.JSONSchema);
     const items = cell<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {/* ?? followed by || - different semantics */}
-        <span>Timeout: {__cfHelpers.unless({
+        <span>Timeout: {__ctHelpers.unless({
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: ["number", "string"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 config: {
@@ -64,18 +64,18 @@ export default pattern((_state) => {
                 }
             },
             required: ["config"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().timeout ?? 30)), "disabled")}</span>
+        } as const satisfies __ctHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().timeout ?? 30)), "disabled")}</span>
 
         {/* ?? followed by && */}
-        <span>{__cfHelpers.when({
+        <span>{__ctHelpers.when({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": [false, "Will retry"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 config: {
@@ -89,19 +89,19 @@ export default pattern((_state) => {
                 }
             },
             required: ["config"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().retries ?? 3) > 0), "Will retry")}</span>
+        } as const satisfies __ctHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().retries ?? 3) > 0), "Will retry")}</span>
 
         {/* Mixed: ?? with && and || */}
         <span>
-          {__cfHelpers.unless({
+          {__ctHelpers.unless({
             type: ["boolean", "string"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 items: {
@@ -113,18 +113,18 @@ export default pattern((_state) => {
                 }
             },
             required: ["items"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "string"
                 }, {
                     type: "boolean",
                     "enum": [false]
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty")), "no items")}
+        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty")), "no items")}
         </span>
       </div>),
     };
-}, false as const satisfies __cfHelpers.JSONSchema, {
+}, false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -153,8 +153,8 @@ export default pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

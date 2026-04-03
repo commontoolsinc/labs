@@ -19,7 +19,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 import BattleshipRoom from "./room.tsx";
 import {
@@ -423,7 +423,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                     </div>
                     {isGameStarted
                       ? (
-                        <cf-button
+                        <ct-button
                           style="margin-top: 1rem; width: 100%;"
                           onClick={rejoinGame({
                             gameName,
@@ -435,19 +435,19 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                           })}
                         >
                           Rejoin Game
-                        </cf-button>
+                        </ct-button>
                       )
                       : <></>}
                   </div>
                 )
                 : (
                   <>
-                    <cf-input
+                    <ct-input
                       $value={player1NameInput}
                       placeholder="Your name"
                       style="width: 100%; margin-bottom: 1rem;"
                     />
-                    <cf-button
+                    <ct-button
                       style="width: 100%;"
                       onClick={joinAsPlayer({
                         gameName,
@@ -460,7 +460,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                       })}
                     >
                       Join as Player 1
-                    </cf-button>
+                    </ct-button>
                   </>
                 )}
             </div>
@@ -523,7 +523,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                     </div>
                     {isGameStarted
                       ? (
-                        <cf-button
+                        <ct-button
                           style="margin-top: 1rem; width: 100%;"
                           onClick={rejoinGame({
                             gameName,
@@ -535,19 +535,19 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                           })}
                         >
                           Rejoin Game
-                        </cf-button>
+                        </ct-button>
                       )
                       : <></>}
                   </div>
                 )
                 : (
                   <>
-                    <cf-input
+                    <ct-input
                       $value={player2NameInput}
                       placeholder="Your name"
                       style="width: 100%; margin-bottom: 1rem;"
                     />
-                    <cf-button
+                    <ct-button
                       style="width: 100%;"
                       onClick={joinAsPlayer({
                         gameName,
@@ -560,7 +560,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                       })}
                     >
                       Join as Player 2
-                    </cf-button>
+                    </ct-button>
                   </>
                 )}
             </div>
@@ -587,7 +587,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
           </div>
 
           {/* Reset Button */}
-          <cf-button
+          <ct-button
             variant="secondary"
             style="margin-top: 2rem;"
             onClick={resetLobby({
@@ -598,7 +598,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
             })}
           >
             Reset Game
-          </cf-button>
+          </ct-button>
         </div>
       ),
       gameName,

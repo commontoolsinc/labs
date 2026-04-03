@@ -6,9 +6,9 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
-// Type definition for transcription data (from cf-voice-input component)
+// Type definition for transcription data (from ct-voice-input component)
 interface TranscriptionChunk {
   timestamp: [number, number];
   text: string;
@@ -46,23 +46,23 @@ const VoiceNoteSimple = pattern<Input, Output>(
     return {
       [NAME]: title,
       [UI]: (
-        <cf-screen>
+        <ct-screen>
           <div slot="header">
-            <cf-input
+            <ct-input
               $value={title}
               placeholder="Voice Note Test"
             />
           </div>
 
-          <cf-vstack gap="3" style="padding: 1rem; max-width: 600px;">
-            <cf-card>
+          <ct-vstack gap="3" style="padding: 1rem; max-width: 600px;">
+            <ct-card>
               <div style={{ padding: "1rem" }}>
                 <h3 style={{ marginTop: 0 }}>Voice Input Component Test</h3>
-                <p style={{ color: "var(--cf-color-gray-600)" }}>
+                <p style={{ color: "var(--ct-color-gray-600)" }}>
                   Hold the microphone button to record. Release to transcribe.
                 </p>
 
-                <cf-voice-input
+                <ct-voice-input
                   $transcription={transcription}
                   recordingMode="hold"
                   autoTranscribe
@@ -70,10 +70,10 @@ const VoiceNoteSimple = pattern<Input, Output>(
                   showWaveform
                 />
               </div>
-            </cf-card>
+            </ct-card>
 
             {hasTranscription && (
-              <cf-card>
+              <ct-card>
                 <div style={{ padding: "1rem" }}>
                   <h3 style={{ marginTop: 0 }}>Latest Transcription</h3>
                   <p style={{ margin: "1rem 0" }}>{transcriptionText}</p>
@@ -82,7 +82,7 @@ const VoiceNoteSimple = pattern<Input, Output>(
                       display: "flex",
                       gap: "1rem",
                       fontSize: "0.875rem",
-                      color: "var(--cf-color-gray-600)",
+                      color: "var(--ct-color-gray-600)",
                     }}
                   >
                     <span>
@@ -94,10 +94,10 @@ const VoiceNoteSimple = pattern<Input, Output>(
                     </span>
                   </div>
                 </div>
-              </cf-card>
+              </ct-card>
             )}
-          </cf-vstack>
-        </cf-screen>
+          </ct-vstack>
+        </ct-screen>
       ),
       transcription,
     };

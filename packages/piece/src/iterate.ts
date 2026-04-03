@@ -1,8 +1,8 @@
-import { isObject, isRecord, Mutable } from "@commonfabric/utils/types";
+import { isObject, isRecord, Mutable } from "@commontools/utils/types";
 import {
   cloneSchemaMutable,
   toDeepFrozenSchema,
-} from "@commonfabric/data-model/schema-utils";
+} from "@commontools/data-model/schema-utils";
 import {
   type Cell,
   createJsonSchema,
@@ -14,9 +14,9 @@ import {
   type PatternMeta,
   type Runtime,
   type RuntimeProgram,
-} from "@commonfabric/runner";
+} from "@commontools/runner";
 import { PieceManager } from "./manager.ts";
-import { pieceSourceCellSchema } from "@commonfabric/runner/schemas";
+import { pieceSourceCellSchema } from "@commontools/runner/schemas";
 import { buildFullPattern, getIframePattern } from "./iframe/pattern.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import {
@@ -27,11 +27,11 @@ import {
   generateSpecAndSchema,
   type GenerationOptions,
   LLMClient,
-} from "@commonfabric/llm";
+} from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
 import { IFramePattern, WorkflowForm } from "./index.ts";
 import { console } from "./conditional-console.ts";
-import { StaticCache } from "@commonfabric/static";
+import { StaticCache } from "@commontools/static";
 
 const llm = new LLMClient();
 

@@ -1,11 +1,11 @@
 import ts from "typescript";
-import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
+import { getPropertyNameText } from "@commontools/schema-generator/property-name";
 import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import {
   cloneKeyExpression,
   getKnownComputedKeyExpression,
-  isCommonFabricKeyExpression,
+  isCommonToolsKeyExpression,
 } from "../utils/reactive-keys.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
@@ -259,8 +259,8 @@ export function collectDestructureBindings(
         key = staticKey;
       } else {
         const computedKey = element.propertyName.expression;
-        if (isCommonFabricKeyExpression(computedKey, context, "SELF")) {
-          directKeyExpression = context.cfHelpers.getHelperExpr("SELF");
+        if (isCommonToolsKeyExpression(computedKey, context, "SELF")) {
+          directKeyExpression = context.ctHelpers.getHelperExpr("SELF");
         } else {
           key = getKnownComputedKeyExpression(computedKey, context) ??
             computedKey;

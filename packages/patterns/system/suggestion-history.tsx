@@ -10,7 +10,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 export type SuggestionHistoryEntry = {
   result: Writable<any>;
@@ -67,12 +67,12 @@ const SuggestionHistory = pattern<Input, Output>(() => {
   return {
     [NAME]: "Suggestion History",
     [UI]: (
-      <cf-screen>
-        <cf-grid columns="3" gap="4" padding="4">
+      <ct-screen>
+        <ct-grid columns="3" gap="4" padding="4">
           {allEntries.map((entry: SuggestionHistoryEntry) => (
             <div
               style={{
-                border: "1px solid var(--cf-color-border, #e5e5e7)",
+                border: "1px solid var(--ct-color-border, #e5e5e7)",
                 borderRadius: "12px",
                 overflow: "hidden",
               }}
@@ -94,15 +94,15 @@ const SuggestionHistory = pattern<Input, Output>(() => {
                     pointerEvents: "none",
                   }}
                 >
-                  <cf-render $cell={entry.result} />
+                  <ct-render $cell={entry.result} />
                 </div>
               </div>
               <div style={{ padding: "8px" }}>
-                <cf-cell-link $cell={entry.result} />
+                <ct-cell-link $cell={entry.result} />
                 <div
                   style={{
                     fontSize: "12px",
-                    color: "var(--cf-color-text-secondary)",
+                    color: "var(--ct-color-text-secondary)",
                   }}
                 >
                   {entry.timestamp}
@@ -110,8 +110,8 @@ const SuggestionHistory = pattern<Input, Output>(() => {
               </div>
             </div>
           ))}
-        </cf-grid>
-      </cf-screen>
+        </ct-grid>
+      </ct-screen>
     ),
     entries: allEntries,
     search: patternTool(searchPattern, { entries: allEntries }),

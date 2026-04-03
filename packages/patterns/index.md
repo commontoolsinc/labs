@@ -305,7 +305,7 @@ interface Output {
 Record voice notes with automatic transcription and note history. Hold the
 microphone button to record, release to transcribe.
 
-**Keywords:** voice, transcription, audio, cf-voice-input
+**Keywords:** voice, transcription, audio, ct-voice-input
 
 ### Input Schema
 
@@ -724,7 +724,7 @@ interface ImageOutput {
 ## `deep-research.tsx`
 
 Deep research agent that uses llmDialog to search the web and synthesize
-findings. Shows live progress via cf-message-beads and renders a structured
+findings. Shows live progress via ct-message-beads and renders a structured
 result with summary, confidence, and sources. Supports follow-up refinement.
 
 **Keywords:** llm, research, web-search, tools, llmDialog, agent, beads
@@ -762,7 +762,7 @@ type Output = {
 Upload images and get AI-powered analysis and descriptions. Supports multiple
 images with customizable prompts.
 
-**Keywords:** vision, image, generateText, cf-image-input
+**Keywords:** vision, image, generateText, ct-image-input
 
 ### Input Schema
 
@@ -1045,9 +1045,9 @@ type DiagramOutput = {
 ## `suggestable/svg-diagram.tsx`
 
 Generates an SVG diagram illustrating relationships, flows, or structures.
-Rendered via `<cf-svg>` web component for scalable vector output.
+Rendered via `<ct-svg>` web component for scalable vector output.
 
-**Keywords:** diagram, SVG, generateText, suggestion-fuel, cf-svg
+**Keywords:** diagram, SVG, generateText, suggestion-fuel, ct-svg
 
 ### Input Schema
 
@@ -1165,7 +1165,7 @@ type EventListOutput = {
 View and manage favorited pieces with tags. Uses the wish system to query
 `#favorites` and allows removing items.
 
-**Keywords:** favorites, wish, cf-cell-link
+**Keywords:** favorites, wish, ct-cell-link
 
 ### Input Schema
 
@@ -1182,9 +1182,9 @@ type Input = Record<string, never>;
 
 ## `system/piece-grid.tsx`
 
-A thumbnail tile grid view for pieces with scaled-down cf-render previews.
+A thumbnail tile grid view for pieces with scaled-down ct-render previews.
 
-**Keywords:** grid, pieces, thumbnail, preview, cf-render
+**Keywords:** grid, pieces, thumbnail, preview, ct-render
 
 ### Input Schema
 
@@ -1230,11 +1230,11 @@ type Input = {
 
 A pattern for collecting and browsing URLs/bookmarks. Users can add URLs to a
 collection, view them in a searchable grid with rich link previews (via
-cf-link-preview), and remove bookmarks. Designed to feed into the summary
+ct-link-preview), and remove bookmarks. Designed to feed into the summary
 system.
 
 **Keywords:** bookmarks, links, collection, urls, grid, preview, search,
-cf-link-preview, cf-grid
+ct-link-preview, ct-grid
 
 ### Input Schema
 
@@ -1262,10 +1262,10 @@ interface BookmarksOutput {
 ## `link-preview.tsx`
 
 A simple pattern that renders a rich link preview for a single URL. Uses
-cf-input for URL entry and cf-link-preview to display the preview card with
+ct-input for URL entry and ct-link-preview to display the preview card with
 metadata and screenshot.
 
-**Keywords:** link, preview, url, cf-link-preview, cf-input
+**Keywords:** link, preview, url, ct-link-preview, ct-input
 
 ### Input Schema
 

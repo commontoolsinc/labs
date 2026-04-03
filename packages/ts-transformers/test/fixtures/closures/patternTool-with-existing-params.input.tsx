@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
+import { cell, derive, pattern, patternTool, type PatternToolResult } from "commontools";
 
 const multiplier = cell(2);
 const offset = cell(10);

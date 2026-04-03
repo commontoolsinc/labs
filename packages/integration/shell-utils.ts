@@ -4,13 +4,13 @@ import {
   env,
   Page,
   pipeConsole,
-} from "@commonfabric/integration";
+} from "@commontools/integration";
 import {
   Identity,
   InsecureCryptoKeyPair,
   serializeKeyPairRaw,
   TransferrableInsecureCryptoKeyPair,
-} from "@commonfabric/identity";
+} from "@commontools/identity";
 import { afterAll, afterEach, beforeAll, beforeEach } from "@std/testing/bdd";
 import {
   AppState,
@@ -18,7 +18,7 @@ import {
   appViewToUrlPath,
   deserialize,
   isAppViewEqual,
-} from "@commonfabric/shell/shared";
+} from "@commontools/shell/shared";
 import { waitFor } from "./utils.ts";
 import { ConsoleEvent, PageErrorEvent } from "@astral/astral";
 

@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { fetchData, pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { fetchData, pattern, UI } from "commontools";
 interface Item {
     name: string;
 }
@@ -9,7 +9,7 @@ export default pattern(() => {
         result: [],
     });
     return {
-        [UI]: <div>{items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
+        [UI]: <div>{items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
             return <span>{item.key("name")}</span>;
         }, {
@@ -31,7 +31,7 @@ export default pattern(() => {
                     required: ["name"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
@@ -51,13 +51,13 @@ export default pattern(() => {
                     required: ["$UI"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema), {})}</div>,
+        } as const satisfies __ctHelpers.JSONSchema), {})}</div>,
     };
 }, {
     type: "object",
     properties: {},
     additionalProperties: false
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -86,8 +86,8 @@ export default pattern(() => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

@@ -1,25 +1,25 @@
 import { createBuilder } from "../builder/factory.ts";
-import { StaticCache } from "@commonfabric/static";
+import { StaticCache } from "@commontools/static";
 import turndown from "turndown";
 
 export type RuntimeModuleIdentifier =
-  | "commonfabric"
-  | "commonfabric/schema"
+  | "commontools"
+  | "commontools/schema"
   | "turndown"
-  | "@commonfabric/html"
-  | "@commonfabric/builder"
-  | "@commonfabric/runner";
+  | "@commontools/html"
+  | "@commontools/builder"
+  | "@commontools/runner";
 export const RuntimeModuleIdentifiers: RuntimeModuleIdentifier[] = [
-  "commonfabric",
-  "commonfabric/schema",
+  "commontools",
+  "commontools/schema",
   "turndown",
   // backwards compat
-  "@commonfabric/html",
+  "@commontools/html",
   // backwards compat
-  "@commonfabric/builder",
-  // backwards compat, for supporting { type Cell } from "@commonfabric/runner"
+  "@commontools/builder",
+  // backwards compat, for supporting { type Cell } from "@commontools/runner"
   // from older patterns
-  "@commonfabric/runner",
+  "@commontools/runner",
 ];
 export function isRuntimeModuleIdentifier(
   value: unknown,
@@ -36,35 +36,35 @@ export const getTypes = (() => {
     if (depTypes) {
       return depTypes;
     }
-    const builderTypes = await cache.getText("types/commonfabric.d.ts");
-    const schemaTypes = await cache.getText("types/commonfabric-schema.d.ts");
+    const builderTypes = await cache.getText("types/commontools.d.ts");
+    const schemaTypes = await cache.getText("types/commontools-schema.d.ts");
     depTypes = {
-      "commonfabric": builderTypes,
-      "commonfabric/schema": schemaTypes,
+      "commontools": builderTypes,
+      "commontools/schema": schemaTypes,
       "turndown": await cache.getText(
         "types/turndown.d.ts",
       ),
-      "@commonfabric/html": builderTypes,
-      "@commonfabric/builder": builderTypes,
-      "@commonfabric/runner": builderTypes,
+      "@commontools/html": builderTypes,
+      "@commontools/builder": builderTypes,
+      "@commontools/runner": builderTypes,
     };
     return depTypes;
   };
 })();
 
 export function getExports() {
-  const { commonfabric, exportsCallback } = createBuilder();
+  const { commontools, exportsCallback } = createBuilder();
   return {
     runtimeExports: {
-      "commonfabric": commonfabric,
-      // commonfabric/schema only exports types, no runtime values needed
-      "commonfabric/schema": {},
+      "commontools": commontools,
+      // commontools/schema only exports types, no runtime values needed
+      "commontools/schema": {},
       // __esModule lets this load in the AMD loader
       // when finding the "default"
       "turndown": { default: turndown, __esModule: true },
-      "@commonfabric/html": commonfabric,
-      "@commonfabric/builder": commonfabric,
-      "@commonfabric/runner": commonfabric,
+      "@commontools/html": commontools,
+      "@commontools/builder": commontools,
+      "@commontools/runner": commontools,
     },
     exportsCallback,
   };

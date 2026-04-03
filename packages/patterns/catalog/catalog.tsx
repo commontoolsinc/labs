@@ -8,7 +8,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 import { Sidebar } from "./ui/sidebar/sidebar.tsx";
 import StoryRenderer from "./ui/story-renderer.tsx";
@@ -164,7 +164,7 @@ export default pattern<CatalogInput, CatalogOutput>(
     return {
       [NAME]: "Component Catalog",
       [UI]: (
-        <cf-screen>
+        <ct-screen>
           <div style={styles.root}>
             <Sidebar
               selected={selected}
@@ -188,7 +188,7 @@ export default pattern<CatalogInput, CatalogOutput>(
               </div>
             </main>
           </div>
-        </cf-screen>
+        </ct-screen>
       ),
       selectedStory,
     };

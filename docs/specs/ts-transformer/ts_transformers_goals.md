@@ -2,7 +2,7 @@
 
 **Status:** Working goals (current understanding)\
 **Date:** March 17, 2026\
-**Package:** `@commonfabric/ts-transformers`\
+**Package:** `@commontools/ts-transformers`\
 **Related:**
 
 - `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`

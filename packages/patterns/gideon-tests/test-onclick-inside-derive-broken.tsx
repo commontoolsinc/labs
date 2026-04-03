@@ -24,7 +24,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 interface State {
   count: Default<number, 0>;
@@ -68,9 +68,9 @@ export default pattern<State>(({ count }) => {
             <p style={{ margin: "0 0 10px 0", fontSize: "14px" }}>
               Button outside derive() - expected to WORK
             </p>
-            <cf-button onClick={incrementHandler({ count })}>
+            <ct-button onClick={incrementHandler({ count })}>
               Increment (Top-level)
-            </cf-button>
+            </ct-button>
           </div>
 
           {/* TEST 2: Button inside derive, using closure variable */}
@@ -90,9 +90,9 @@ export default pattern<State>(({ count }) => {
             {derive(
               { count },
               () => (
-                <cf-button onClick={incrementHandler({ count })}>
+                <ct-button onClick={incrementHandler({ count })}>
                   Increment (derive + closure)
-                </cf-button>
+                </ct-button>
               ),
             )}
           </div>
@@ -114,9 +114,9 @@ export default pattern<State>(({ count }) => {
             {derive(
               { count },
               ({ count: c }) => (
-                <cf-button onClick={incrementHandler({ count: c })}>
+                <ct-button onClick={incrementHandler({ count: c })}>
                   Increment (derive + param)
-                </cf-button>
+                </ct-button>
               ),
             )}
           </div>

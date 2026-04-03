@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, cell, Default, handler, lift, pattern, str } from "commonfabric";
+import { Cell, cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface PersistedState {
   value?: number;

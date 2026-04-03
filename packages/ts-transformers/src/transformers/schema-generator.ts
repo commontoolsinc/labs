@@ -1,10 +1,10 @@
 import ts from "typescript";
 import {
-  CF_HELPERS_IDENTIFIER,
+  CT_HELPERS_IDENTIFIER,
   HelpersOnlyTransformer,
   TransformationContext,
 } from "../core/mod.ts";
-import { createSchemaTransformerV2 } from "@commonfabric/schema-generator";
+import { createSchemaTransformerV2 } from "@commontools/schema-generator";
 import {
   getTypeFromTypeNodeWithFallback,
   visitEachChildWithJsx,
@@ -106,7 +106,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
           ),
         );
 
-        const jsonSchemaName = context.cfHelpers.getHelperQualified(
+        const jsonSchemaName = context.ctHelpers.getHelperQualified(
           "JSONSchema",
         );
         const satisfiesExpression = context.factory.createSatisfiesExpression(
@@ -225,10 +225,10 @@ function isToSchemaNode(node: ts.Node): node is ToSchemaNode {
   ) {
     return true;
   }
-  // Raw property access expression `__cfHelpers.toSchema<T>()`
+  // Raw property access expression `__ctHelpers.toSchema<T>()`
   if (
     ts.isPropertyAccessExpression(expression) &&
-    expression.expression.getText() === CF_HELPERS_IDENTIFIER &&
+    expression.expression.getText() === CT_HELPERS_IDENTIFIER &&
     expression.name.text === "toSchema"
   ) {
     return true;

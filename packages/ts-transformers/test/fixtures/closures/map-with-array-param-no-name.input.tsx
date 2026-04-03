@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commonfabric";
+import { cell, pattern, UI } from "commontools";
 
 // FIXTURE: map-with-array-param-no-name
 // Verifies: .map() with array param works when pattern uses inline type annotation

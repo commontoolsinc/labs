@@ -19,7 +19,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 import ScrabbleGame, {
   createTileBag,
@@ -360,7 +360,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                   )
                   : (
                     <>
-                      <cf-input
+                      <ct-input
                         $value={player1NameInput}
                         placeholder="Your name"
                         style="width: 100%; margin-bottom: 1rem;"
@@ -440,7 +440,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                   )
                   : (
                     <>
-                      <cf-input
+                      <ct-input
                         $value={player2NameInput}
                         placeholder="Your name"
                         style="width: 100%; margin-bottom: 1rem;"

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern } from "commonfabric";
+import { pattern } from "commontools";
 
 // FIXTURE: pattern-object-binary-add
 // Verifies: top-level non-JSX arithmetic in an object property is lowered after

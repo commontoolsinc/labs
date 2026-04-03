@@ -1,8 +1,8 @@
-# @commonfabric/fuse
+# @commontools/fuse
 
-Mount Common Fabric spaces as a FUSE filesystem. Pieces appear as directories
+Mount Common Tools spaces as a FUSE filesystem. Pieces appear as directories
 with their cell data exploded into files and subdirectories — browse with `ls`,
-read with `cat`, write with `echo`, execute mounted callables with `cf exec`,
+read with `cat`, write with `echo`, execute mounted callables with `ct exec`,
 and link pieces together with `ln -s`.
 
 ## Prerequisites
@@ -22,21 +22,21 @@ sudo apt-get install -y fuse3 libfuse3-dev pkg-config gcc
 
 ```bash
 # Mount your home space
-cf fuse mount /tmp/cf
+ct fuse mount /tmp/ct
 
 # In another terminal, explore
-ls /tmp/cf/home/pieces/
-cat /tmp/cf/home/pieces/todo-app/result.json
-cat /tmp/cf/home/pieces/todo-app/result/items/0/text
+ls /tmp/ct/home/pieces/
+cat /tmp/ct/home/pieces/todo-app/result.json
+cat /tmp/ct/home/pieces/todo-app/result/items/0/text
 
 # Unmount
-cf fuse unmount /tmp/cf
+ct fuse unmount /tmp/ct
 ```
 
 ## Filesystem Layout
 
 ```
-/tmp/cf/                              # mount root
+/tmp/ct/                              # mount root
   home/                               # space (connected on demand)
     pieces/
       todo-app/                       # piece directory
@@ -111,7 +111,7 @@ xattr -p user.json.type home/pieces/todo-app/result/count
 cat home/pieces/todo-app/meta.json
 # => {"id":"of:ba4j...","entityId":"ba4j...","patternName":"todo-app"}
 
-# Mounted callables are executable and start with a cf exec shebang
+# Mounted callables are executable and start with a ct exec shebang
 head -n1 home/pieces/todo-app/result/addItem.handler
 head -n1 home/pieces/todo-app/result/search.tool
 
@@ -139,20 +139,20 @@ echo '{"title":"Fresh","items":[],"count":0}' > home/pieces/todo-app/result.json
 echo '{"text":"Buy oat milk"}' > home/pieces/todo-app/result/addItem.handler
 
 # Execute the same mounted handler with schema-derived CLI flags
-cf exec home/pieces/todo-app/result/addItem.handler invoke --text "Buy oat milk"
+ct exec home/pieces/todo-app/result/addItem.handler invoke --text "Buy oat milk"
 
 # Run a mounted pattern tool (tool input flags come from the pattern schema)
-cf exec home/pieces/todo-app/result/search.tool --query "oat milk"
+ct exec home/pieces/todo-app/result/search.tool --query "oat milk"
 
 # Or execute either mounted callable directly through its shebang shim
 home/pieces/todo-app/result/addItem.handler invoke --text "Buy oat milk"
 home/pieces/todo-app/result/search.tool --query "oat milk"
 
 # Top-level help describes the mounted callable instead of invoking it
-cf exec home/pieces/todo-app/result/search.tool --help
+ct exec home/pieces/todo-app/result/search.tool --help
 
 # The same callable paths also exist under entities/<piece-id>/
-cf exec home/entities/of:ba4j.../result/search.tool --query "oat milk"
+ct exec home/entities/of:ba4j.../result/search.tool --query "oat milk"
 ```
 
 ### Creating and Deleting
@@ -208,28 +208,28 @@ ls "did:key:z6Mkk.../pieces/"
 
 ```bash
 # Mount (foreground — Ctrl+C to unmount)
-cf fuse mount /tmp/cf
+ct fuse mount /tmp/ct
 
 # Mount in background
-cf fuse mount /tmp/cf --background
+ct fuse mount /tmp/ct --background
 
 # Check active mounts
-cf fuse status
+ct fuse status
 
 # Unmount
-cf fuse unmount /tmp/cf
+ct fuse unmount /tmp/ct
 
 # With explicit connection settings
-cf fuse mount /tmp/cf --api-url http://localhost:8000 --identity ./my.key
+ct fuse mount /tmp/ct --api-url http://localhost:8000 --identity ./my.key
 
 # Show callable help from the mounted schema
-cf exec /tmp/cf/home/pieces/todo-app/result/search.tool --help
+ct exec /tmp/ct/home/pieces/todo-app/result/search.tool --help
 ```
 
-Environment variables `CF_API_URL` and `CF_IDENTITY` are also supported.
+Environment variables `CT_API_URL` and `CT_IDENTITY` are also supported.
 
 Handlers remain writable through the mounted `.handler` file. Both mounted
-`.handler` and `.tool` files can be executed directly or via `cf exec`.
+`.handler` and `.tool` files can be executed directly or via `ct exec`.
 
 ## Architecture
 
@@ -267,13 +267,13 @@ allow the kernel extension. A reboot may be required.
 If a previous FUSE process crashed, the mount point may be stale:
 
 ```bash
-umount /tmp/cf          # macOS
+umount /tmp/ct          # macOS
 # or
-fusermount -u /tmp/cf   # Linux
+fusermount -u /tmp/ct   # Linux
 
 # If umount fails with "not currently mounted" but the dir looks broken:
-diskutil unmount force /tmp/cf   # macOS last resort
-rm -rf /tmp/cf && mkdir /tmp/cf
+diskutil unmount force /tmp/ct   # macOS last resort
+rm -rf /tmp/ct && mkdir /tmp/ct
 ```
 
 ### `ls` shows stale directory contents
@@ -284,10 +284,10 @@ data:
 
 ```bash
 # Force a fresh listing (bypass shell hash)
-command ls /tmp/cf/home/pieces/
+command ls /tmp/ct/home/pieces/
 
 # Or use a stat-based tool
-find /tmp/cf/home/pieces/ -maxdepth 1
+find /tmp/ct/home/pieces/ -maxdepth 1
 ```
 
 ### Permission denied / Operation not permitted
@@ -296,10 +296,10 @@ The Deno process needs FFI and file access:
 
 ```bash
 deno run --unstable-ffi --allow-ffi --allow-read --allow-write --allow-env --allow-net \
-  packages/fuse/mod.ts /tmp/cf ...
+  packages/fuse/mod.ts /tmp/ct ...
 ```
 
-If using `cf fuse mount`, these permissions are set automatically.
+If using `ct fuse mount`, these permissions are set automatically.
 
 ### `Resource fork` / `._*` files from macOS
 
@@ -309,7 +309,7 @@ the filesystem (EACCES). This is expected — use the terminal, not Finder.
 ### Writes not persisting
 
 Writes are fire-and-forget. If the toolshed is down, writes silently fail. Check
-`cf fuse status` or verify the toolshed is reachable:
+`ct fuse status` or verify the toolshed is reachable:
 
 ```bash
 curl http://localhost:8000/api/storage/memory
@@ -321,9 +321,9 @@ curl http://localhost:8000/api/storage/memory
 Add `--debug` for verbose FUSE operation logging:
 
 ```bash
-cf fuse mount /tmp/cf --debug
+ct fuse mount /tmp/ct --debug
 # or
-deno run ... packages/fuse/mod.ts /tmp/cf --debug
+deno run ... packages/fuse/mod.ts /tmp/ct --debug
 ```
 
 ## Direct Invocation
@@ -332,5 +332,5 @@ You can also run the FUSE filesystem directly without the CLI:
 
 ```bash
 deno run --unstable-ffi --allow-ffi --allow-read --allow-write --allow-env --allow-net \
-  packages/fuse/mod.ts /tmp/cf --api-url http://localhost:8000
+  packages/fuse/mod.ts /tmp/ct --api-url http://localhost:8000
 ```

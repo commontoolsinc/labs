@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commonfabric";
+import { cell, pattern, UI } from "commontools";
 
 // FIXTURE: logical-and-non-jsx
 // Verifies: && with non-JSX right side still lowers through when(), with predicate/value derived separately

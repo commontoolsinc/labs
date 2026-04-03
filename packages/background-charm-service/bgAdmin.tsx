@@ -8,7 +8,7 @@ import {
   NAME,
   pattern,
   UI,
-} from "commonfabric";
+} from "commontools";
 
 const DISABLED_VIA_UI = "Disabled via UI";
 

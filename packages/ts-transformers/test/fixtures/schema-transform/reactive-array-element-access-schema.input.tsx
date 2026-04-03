@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commonfabric";
+import { cell, pattern, UI } from "commontools";
 
 // FIXTURE: reactive-array-element-access-schema
 // Verifies: reactive array element access preserves `string | undefined` in the

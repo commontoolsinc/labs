@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, computed, pattern, UI } from "commonfabric";
+import { Writable, computed, pattern, UI } from "commontools";
 
 interface Habit {
   name: string;

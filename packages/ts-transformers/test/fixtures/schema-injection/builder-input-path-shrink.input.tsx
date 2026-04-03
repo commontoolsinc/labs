@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { action, derive, handler, lift, pattern, type Writable } from "commonfabric";
+import { action, derive, handler, lift, pattern, type Writable } from "commontools";
 
 // FIXTURE: builder-input-path-shrink
 // Verifies: builder input schemas shrink to observed paths when reads/writes are specific,

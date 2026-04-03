@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { cell, pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { cell, pattern, UI } from "commontools";
 // FIXTURE: element-access-both-opaque
 // Verifies: element access where both array and index are cell-backed OpaqueRefs is wrapped in derive()
 //   items.get()[index.get()] → derive({items, index}, ({items, index}) => items.get()[index.get()])
@@ -9,15 +9,15 @@ export default pattern((_state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __ctHelpers.JSONSchema);
     const index = cell(1, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
         <h3>Element Access with Both OpaqueRefs</h3>
         {/* Both items and index are OpaqueRefs */}
-        <p>Selected item: {__cfHelpers.derive({
+        <p>Selected item: {__ctHelpers.derive({
             type: "object",
             properties: {
                 items: {
@@ -33,15 +33,15 @@ export default pattern((_state) => {
                 }
             },
             required: ["items", "index"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             items: items,
             index: index
         }, ({ items, index }) => items.get()[index.get()])}</p>
       </div>),
     };
-}, false as const satisfies __cfHelpers.JSONSchema, {
+}, false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -70,8 +70,8 @@ export default pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

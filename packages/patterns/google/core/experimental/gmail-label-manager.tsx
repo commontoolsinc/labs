@@ -33,7 +33,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import {
   type GmailLabel,
   GmailSendClient,

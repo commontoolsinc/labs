@@ -5,7 +5,7 @@
  * rewritePatternBody correctly rewrites summary.length to
  * summary.key("length").
  */
-import { computed, pattern } from "commonfabric";
+import { computed, pattern } from "commontools";
 
 interface State {
   items: string[];

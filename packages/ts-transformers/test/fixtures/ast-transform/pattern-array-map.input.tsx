@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, derive, handler, NAME, pattern, str, UI } from "commonfabric";
+import { Cell, derive, handler, NAME, pattern, str, UI } from "commontools";
 
 const adder = handler((_, state: { values: Cell<string[]> }) => {
   state.values.push(Math.random().toString(36).substring(2, 15));

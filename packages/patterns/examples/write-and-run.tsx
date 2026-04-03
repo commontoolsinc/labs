@@ -11,11 +11,11 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 // Template for the AI to reference
 const TEMPLATE = `/// <cts-enable />
-import { computed, handler, Default, NAME, pattern, UI } from "commonfabric";
+import { computed, handler, Default, NAME, pattern, UI } from "commontools";
 
 interface Input {
   value: Default<number, 0>;
@@ -34,9 +34,9 @@ export default pattern<Input>(({ value }) => {
     [NAME]: computed(() => \`Counter: \${value}\`),
     [UI]: (
       <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-        <cf-button onClick={decrement({ value })}>-</cf-button>
+        <ct-button onClick={decrement({ value })}>-</ct-button>
         <span>{value}</span>
-        <cf-button onClick={increment({ value })}>+</cf-button>
+        <ct-button onClick={increment({ value })}>+</ct-button>
       </div>
     ),
     value,
@@ -44,14 +44,14 @@ export default pattern<Input>(({ value }) => {
 });`;
 
 const SYSTEM_PROMPT =
-  `You are a Common Fabric pattern generator. Given a user request, generate a complete TypeScript pattern file.
+  `You are a CommonTools pattern generator. Given a user request, generate a complete TypeScript pattern file.
 
 IMPORTANT RULES:
 1. Start with: /// <cts-enable />
-2. Import from "commonfabric": Writable, Default, computed, handler, NAME, pattern, UI, ifElse
+2. Import from "commontools": Writable, Default, computed, handler, NAME, pattern, UI, ifElse
 3. Use the pattern<Input>() or pattern<Input, Output>() API
 4. For arrays that need mutation, use Writable<T[]> in the interface
-5. Use $checked, $value for bidirectional binding on cf-checkbox, cf-input
+5. Use $checked, $value for bidirectional binding on ct-checkbox, ct-input
 6. Use inline handlers for simple operations, handler() for complex ones
 7. Always return [NAME] and [UI] from the pattern
 8. Use computed() for derived values and data transformations
@@ -131,9 +131,9 @@ export default pattern<Input, Output>(({ prompt }) => {
           Describe a pattern and I'll generate, compile, and run it.
         </p>
 
-        <cf-message-input
+        <ct-message-input
           placeholder="Describe the pattern you want..."
-          oncf-send={updatePrompt({ prompt })}
+          onct-send={updatePrompt({ prompt })}
         />
 
         <div
@@ -153,9 +153,9 @@ export default pattern<Input, Output>(({ prompt }) => {
               </div>,
               ifElse(
                 isReady,
-                <cf-button onClick={visit({ result: compiled.result })}>
+                <ct-button onClick={visit({ result: compiled.result })}>
                   Open Generated Pattern
-                </cf-button>,
+                </ct-button>,
                 <span style={{ opacity: 0.6 }}>
                   Enter a prompt to generate a pattern
                 </span>,
@@ -166,7 +166,7 @@ export default pattern<Input, Output>(({ prompt }) => {
 
         {ifElse(
           isReady,
-          <cf-cell-context $cell={compiled} label="Compiled Result">
+          <ct-cell-context $cell={compiled} label="Compiled Result">
             <div>
               <h3>Generated Pattern</h3>
               <div
@@ -180,22 +180,22 @@ export default pattern<Input, Output>(({ prompt }) => {
                 {compiled.result}
               </div>
             </div>
-          </cf-cell-context>,
+          </ct-cell-context>,
           <span />,
         )}
 
         {ifElse(
           hasCode,
-          <cf-cell-context $cell={generated} label="Generated Code">
+          <ct-cell-context $cell={generated} label="Generated Code">
             <div>
               <h3>Generated Code</h3>
-              <cf-code-editor
+              <ct-code-editor
                 value={generated.result}
                 language="text/x.typescript"
                 readonly
               />
             </div>
-          </cf-cell-context>,
+          </ct-cell-context>,
           <span />,
         )}
       </div>

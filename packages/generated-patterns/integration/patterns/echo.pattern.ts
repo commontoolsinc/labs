@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { lift, pattern } from "commonfabric";
+import { lift, pattern } from "commontools";
 
 interface EchoArgs {
   message: string;

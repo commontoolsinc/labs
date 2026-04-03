@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, NAME, Writable } from "commonfabric";
+import { handler, NAME, Writable } from "commontools";
 import { MentionablePiece } from "./backlinks-index.tsx";
 
 /**

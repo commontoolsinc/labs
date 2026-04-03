@@ -25,19 +25,19 @@
  * use the --root option to specify a common ancestor directory.
  */
 
-import { Identity } from "@commonfabric/identity";
-import { Engine, Runtime } from "@commonfabric/runner";
+import { Identity } from "@commontools/identity";
+import { Engine, Runtime } from "@commontools/runner";
 import type {
   Cell,
   ErrorWithContext,
   Pattern,
   SettleStats,
   Stream,
-} from "@commonfabric/runner";
-import type { OpaqueRef } from "@commonfabric/api";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+} from "@commontools/runner";
+import type { OpaqueRef } from "@commontools/api";
+import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { basename } from "@std/path";
-import { timeout } from "@commonfabric/utils/sleep";
+import { timeout } from "@commontools/utils/sleep";
 import { experimentalOptionsFromEnv } from "./utils.ts";
 import {
   type CDFPoint,
@@ -45,7 +45,7 @@ import {
   getTimingStatsBreakdown,
   resetAllCountBaselines,
   resetAllTimingBaselines,
-} from "@commonfabric/utils/logger";
+} from "@commontools/utils/logger";
 
 /**
  * A test step is an object with either an 'assertion' or 'action' property.
@@ -109,7 +109,7 @@ export interface TestRunnerOptions {
 // ---------------------------------------------------------------------------
 
 type GlobalWithLoggers = {
-  commonfabric?: {
+  commontools?: {
     logger?: Record<
       string,
       {
@@ -176,8 +176,8 @@ function getGlobalLogCounts(): {
 } {
   const g = globalThis as unknown as GlobalWithLoggers;
   const r = { debug: 0, info: 0, warn: 0, error: 0, total: 0 };
-  if (g.commonfabric?.logger) {
-    for (const logger of Object.values(g.commonfabric.logger)) {
+  if (g.commontools?.logger) {
+    for (const logger of Object.values(g.commontools.logger)) {
       const c = logger.counts;
       r.debug += c.debug;
       r.info += c.info;
@@ -198,8 +198,8 @@ function getGlobalLogCountDeltas(): {
 } {
   const g = globalThis as unknown as GlobalWithLoggers;
   const r = { debug: 0, info: 0, warn: 0, error: 0, total: 0 };
-  if (g.commonfabric?.logger) {
-    for (const logger of Object.values(g.commonfabric.logger)) {
+  if (g.commontools?.logger) {
+    for (const logger of Object.values(g.commontools.logger)) {
       const d = logger.getCountDeltas();
       r.debug += d.debug;
       r.info += d.info;
@@ -333,8 +333,8 @@ function printLoggerStats(
   const countEntries: CountEntry[] = [];
   if (useDelta) {
     const g = globalThis as unknown as GlobalWithLoggers;
-    if (g.commonfabric?.logger) {
-      for (const [name, logger] of Object.entries(g.commonfabric.logger)) {
+    if (g.commontools?.logger) {
+      for (const [name, logger] of Object.entries(g.commontools.logger)) {
         const c = logger.getCountDeltas();
         if (c.total > 0) {
           countEntries.push({
@@ -551,7 +551,7 @@ export async function runTestPattern(
   const identity = await Identity.fromPassphrase("test-runner");
   const space = identity.did();
   const { StorageManager } = await import(
-    "@commonfabric/runner/storage/cache.deno"
+    "@commontools/runner/storage/cache.deno"
   );
   const storageManager = StorageManager.emulate({ as: identity });
 

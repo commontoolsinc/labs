@@ -13,7 +13,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 // Raw journal entry as stored - subject is a cell link, not a Cell
 type JournalEntry = {
@@ -112,12 +112,12 @@ export default pattern<Record<string, never>>((_) => {
         >
           <h2 style={{ margin: "0" }}>Activity Journal</h2>
           {entryCount > 0 && (
-            <cf-button
+            <ct-button
               onClick={clearJournal({ journal: journalResult.result! })}
               variant="secondary"
             >
               Clear Journal
-            </cf-button>
+            </ct-button>
           )}
         </div>
 
@@ -218,7 +218,7 @@ export default pattern<Record<string, never>>((_) => {
                   }}
                 >
                   {entry.snapshot.name}:{" "}
-                  {entry.subject && <cf-cell-link $cell={entry.subject} />}
+                  {entry.subject && <ct-cell-link $cell={entry.subject} />}
                 </div>
               )}
 

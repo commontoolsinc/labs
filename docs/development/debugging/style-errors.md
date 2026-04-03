@@ -27,17 +27,17 @@
 **Problem:** Using object syntax on custom elements
 
 ```typescript
-<cf-hstack style={{ padding: "1rem" }}>  {/* Won't work */}
+<common-hstack style={{ padding: "1rem" }}>  {/* Won't work */}
   Content
-</cf-hstack>
+</common-hstack>
 ```
 
 **Solution:** Use string syntax for custom elements
 
 ```typescript
-<cf-hstack style="padding: 1rem;">  {/* Correct! */}
+<common-hstack style="padding: 1rem;">  {/* Correct! */}
   Content
-</cf-hstack>
+</common-hstack>
 ```
 
 ## Style Syntax Quick Reference
@@ -45,7 +45,7 @@
 | Element Type | Style Syntax | Property Format | Example |
 |--------------|--------------|-----------------|---------|
 | HTML (`div`, `span`, `button`) | Object | camelCase | `style={{ flex: 1, backgroundColor: "#fff" }}` |
-| Custom (`cf-*`) | String | kebab-case | `style="flex: 1; background-color: #fff;"` |
+| Custom (`common-*`, `ct-*`) | String | kebab-case | `style="flex: 1; background-color: #fff;"` |
 
 ## See Also
 

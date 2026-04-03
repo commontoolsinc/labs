@@ -16,7 +16,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Types =====
@@ -211,28 +211,28 @@ export const AgeCategoryModule = pattern<
   return {
     [NAME]: computed(() => `${MODULE_METADATA.icon} Age: ${displayText}`),
     [UI]: (
-      <cf-vstack style={{ gap: "16px" }}>
+      <ct-vstack style={{ gap: "16px" }}>
         {/* Main category toggle */}
-        <cf-vstack style={{ gap: "8px" }}>
+        <ct-vstack style={{ gap: "8px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>
             Age Group
           </label>
-          <cf-radio-group
+          <ct-radio-group
             orientation="horizontal"
             items={ageGroupOptions}
             value={currentGroup}
-            oncf-change={handleGroupChange({ ageCategory })}
+            onct-change={handleGroupChange({ ageCategory })}
           />
-        </cf-vstack>
+        </ct-vstack>
 
         {/* Specific category selection */}
-        <cf-vstack style={{ gap: "4px" }}>
+        <ct-vstack style={{ gap: "4px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>
             Specific Category
           </label>
-          <cf-select $value={ageCategory} items={categoryOptions} />
-        </cf-vstack>
-      </cf-vstack>
+          <ct-select $value={ageCategory} items={categoryOptions} />
+        </ct-vstack>
+      </ct-vstack>
     ),
     ageCategory,
   };

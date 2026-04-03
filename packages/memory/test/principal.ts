@@ -1,4 +1,4 @@
-import { Identity } from "@commonfabric/identity";
+import { Identity } from "@commontools/identity";
 
 export const alice = await Identity.fromString(
   "MU+bzp2GaFQHso587iSFWPSeCzbSfn/CbNHEz7ilKRZ0=",

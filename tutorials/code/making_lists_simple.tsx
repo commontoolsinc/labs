@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, pattern, UI } from "commonfabric";
+import { Default, pattern, UI } from "commontools";
 
 interface FriendListState {
   names: Default<
@@ -20,7 +20,7 @@ export default pattern<FriendListState>((state) => {
       <div>
         <h2>My Friends</h2>
         <ul>
-          {/* Note: key is not needed for Common Fabric but linters require it */}
+          {/* Note: key is not needed for Common Tools but linters require it */}
           {state.names.map((friend, index) => (
             <li key={index}>{friend.name}</li>
           ))}

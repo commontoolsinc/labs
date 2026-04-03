@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
+import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
 
 interface Item {
   text: Default<string, "">;
@@ -63,17 +63,17 @@ export default pattern<InputSchema>(({ title, items }) => {
               key={index}
               style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
             >
-              <cf-button
+              <ct-button
                 variant="destructive"
                 size="sm"
                 onClick={removeItem({ items, item })}
               >
                 Remove
-              </cf-button>
+              </ct-button>
               <div style={{ flex: 1 }}>
-                <cf-input
+                <ct-input
                   value={item.text}
-                  oncf-change={updateItem({ items, index })}
+                  onct-change={updateItem({ items, index })}
                   placeholder="Enter text..."
                 />
               </div>
@@ -81,11 +81,11 @@ export default pattern<InputSchema>(({ title, items }) => {
           ))}
         </div>
         <div style={{ marginTop: "1rem" }}>
-          <cf-message-input
+          <ct-message-input
             name="Send"
             placeholder="Type a message..."
             appearance="rounded"
-            oncf-send={addItem({ items })}
+            onct-send={addItem({ items })}
           />
         </div>
       </div>

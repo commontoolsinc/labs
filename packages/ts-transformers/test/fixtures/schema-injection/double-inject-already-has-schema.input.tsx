@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell } from "commonfabric";
+import { cell } from "commontools";
 
 const existingSchema = { type: "number" } as const;
 

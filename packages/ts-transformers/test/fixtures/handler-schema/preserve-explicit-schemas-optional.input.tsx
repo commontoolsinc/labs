@@ -1,6 +1,6 @@
 /// <cts-enable />
-import { handler } from "commonfabric";
-import "commonfabric/schema";
+import { handler } from "commontools";
+import "commontools/schema";
 
 // Schema without required fields - properties are optional
 const eventSchema = {

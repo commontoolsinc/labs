@@ -13,7 +13,7 @@ import {
   Schema,
   str,
   UI,
-} from "commonfabric";
+} from "commontools";
 
 const Classification = {
   Unclassified: "unclassified",
@@ -1267,41 +1267,41 @@ export default pattern(
               contacts.length)}
           </h2>
 
-          <cf-hstack gap="1">
-            <cf-vstack gap="1">
+          <ct-hstack gap="1">
+            <ct-vstack gap="1">
               <div>
                 <label>Import Limit</label>
-                <cf-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.limit}
                   placeholder="number of contacts to import"
-                  oncf-input={updateLimit({ limit: settings.limit })}
+                  onct-input={updateLimit({ limit: settings.limit })}
                 />
               </div>
 
               <div>
                 <label>Person Fields</label>
-                <cf-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.personFields}
                   placeholder="names,emailAddresses,phoneNumbers,photos"
-                  oncf-input={updatePersonFields({
+                  onct-input={updatePersonFields({
                     personFields: settings.personFields,
                   })}
                 />
               </div>
-              <cf-button
+              <ct-button
                 onClick={peopleUpdater({ contacts, auth, settings })}
               >
                 Fetch Contacts
-              </cf-button>
-              <cf-button
+              </ct-button>
+              <ct-button
                 onClick={clearContacts({ contacts })}
               >
                 Clear Contacts
-              </cf-button>
-            </cf-vstack>
-          </cf-hstack>
+              </ct-button>
+            </ct-vstack>
+          </ct-hstack>
           <common-google-oauth
             $auth={auth}
             scopes={[

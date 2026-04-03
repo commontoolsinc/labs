@@ -28,7 +28,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import GmailExtractor from "../core/gmail-extractor.tsx";
 import {
   createGoogleAuth,
@@ -300,12 +300,12 @@ Write as if the user wrote it themselves, matching their natural voice.`;
       isAnalyzing,
 
       [UI]: (
-        <cf-screen>
+        <ct-screen>
           <div slot="header">
-            <cf-heading level={3}>Email Style Extractor</cf-heading>
+            <ct-heading level={3}>Email Style Extractor</ct-heading>
           </div>
-          <cf-vscroll flex showScrollbar>
-            <cf-vstack padding="6" gap="4">
+          <ct-vscroll flex showScrollbar>
+            <ct-vstack padding="6" gap="4">
               {authUI}
               {ifElse(
                 isReady,
@@ -416,9 +416,9 @@ Write as if the user wrote it themselves, matching their natural voice.`;
                 </div>,
                 <div />,
               )}
-            </cf-vstack>
-          </cf-vscroll>
-        </cf-screen>
+            </ct-vstack>
+          </ct-vscroll>
+        </ct-screen>
       ),
     };
   },

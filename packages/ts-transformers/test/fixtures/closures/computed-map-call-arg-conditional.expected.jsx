@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { computed, pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { computed, pattern, UI } from "commontools";
 const identity = (x: string) => x;
 interface Item {
     done: boolean;
@@ -13,7 +13,7 @@ interface State {
 //   const label = identity(row.done ? "Done" : "Pending")
 //   → const label = identity(ifElse(row.done, "Done", "Pending"))
 export default pattern((state) => {
-    const rows = __cfHelpers.derive({
+    const rows = __ctHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -41,7 +41,7 @@ export default pattern((state) => {
                 required: ["done"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
             $ref: "#/$defs/Item"
@@ -57,22 +57,22 @@ export default pattern((state) => {
                 required: ["done"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __ctHelpers.JSONSchema, { state: {
             items: state.key("items")
         } }, ({ state }) => state.items);
     return {
         [UI]: (<div>
-        {rows.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
+        {rows.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const row = __ct_pattern_input.key("element");
-                const label = identity(__cfHelpers.ifElse({
+                const label = identity(__ctHelpers.ifElse({
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __ctHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __ctHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __ctHelpers.JSONSchema, {
                     "enum": ["Done", "Pending"]
-                } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending"));
+                } as const satisfies __ctHelpers.JSONSchema, row.key("done"), "Done", "Pending"));
                 return <span>{label}</span>;
             }, {
                 type: "object",
@@ -93,7 +93,7 @@ export default pattern((state) => {
                         required: ["done"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -113,7 +113,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+            } as const satisfies __ctHelpers.JSONSchema), {})}
       </div>),
     };
 }, {
@@ -138,7 +138,7 @@ export default pattern((state) => {
             required: ["done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -167,8 +167,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

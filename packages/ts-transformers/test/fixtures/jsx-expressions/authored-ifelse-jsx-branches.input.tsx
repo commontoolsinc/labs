@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { ifElse, pattern, UI, Writable } from "commonfabric";
+import { ifElse, pattern, UI, Writable } from "commontools";
 
 interface Item {
   name: string;

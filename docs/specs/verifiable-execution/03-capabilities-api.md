@@ -1,4 +1,4 @@
-# CF Protocol: Capabilities API (Section 6)
+# CT Protocol: Capabilities API (Section 6)
 
 See `docs/specs/verifiable-execution/README.md` for navigation.
 

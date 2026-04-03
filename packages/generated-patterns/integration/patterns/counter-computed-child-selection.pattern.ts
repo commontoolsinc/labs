@@ -7,7 +7,7 @@ import {
   handler,
   pattern,
   str,
-} from "commonfabric";
+} from "commontools";
 
 const defaultCounterSeed = [2, 5, 3];
 

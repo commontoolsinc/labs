@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, derive, pattern, toSchema, UI } from "commonfabric";
+import { Cell, derive, pattern, toSchema, UI } from "commontools";
 
 interface State {
   value: Cell<number>;

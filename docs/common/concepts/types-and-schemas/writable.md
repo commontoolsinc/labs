@@ -4,7 +4,7 @@
 `Writable<>` in type signatures indicates **write intent**, not reactivity. Everything is reactive by default.
 
 ```typescript
-import { Writable } from 'commonfabric';
+import { Writable } from 'commontools';
 
 interface Item {}
 

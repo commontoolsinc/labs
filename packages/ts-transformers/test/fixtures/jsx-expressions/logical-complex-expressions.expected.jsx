@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { cell, pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { cell, pattern, UI } from "commontools";
 // FIXTURE: logical-complex-expressions
 // Verifies: nested && and mixed || && with JSX are transformed to when() with derive() predicates
 //   a && b && <JSX>     → when(derive({a, b}, ...), <JSX>)
@@ -10,31 +10,31 @@ export default pattern((_state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __ctHelpers.JSONSchema);
     const isEnabled = cell(false, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __ctHelpers.JSONSchema);
     const count = cell(0, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema);
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {/* Nested && - both conditions reference opaque refs */}
-        {__cfHelpers.when({
+        {__ctHelpers.when({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean"
                 }, {}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 items: {
@@ -50,29 +50,29 @@ export default pattern((_state) => {
                 }
             },
             required: ["items", "isEnabled"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             items: items,
             isEnabled: isEnabled
         }, ({ items, isEnabled }) => items.get().length > 0 && isEnabled.get()), <div>Enabled with items</div>)}
 
         {/* Mixed || and && */}
-        {__cfHelpers.when({
+        {__ctHelpers.when({
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean"
                 }, {}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 count: {
@@ -88,15 +88,15 @@ export default pattern((_state) => {
                 }
             },
             required: ["count", "items"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             count: count,
             items: items
         }, ({ count, items }) => (count.get() > 10 || items.get().length > 5)), <div>Threshold met</div>)}
       </div>),
     };
-}, false as const satisfies __cfHelpers.JSONSchema, {
+}, false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -125,8 +125,8 @@ export default pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { pattern, UI } from "commontools";
 // FIXTURE: jsx-filter-length-roots
 // Verifies: structural filter-length wrappers use the shared post-closure path
 //   instead of rewriting the filter callback itself to filterWithPattern().
@@ -9,7 +9,7 @@ import { pattern, UI } from "commonfabric";
 // Context: all three shapes should lower without leaking callback locals.
 export default pattern((state) => ({
     [UI]: (<div>
-      <p>{__cfHelpers.derive({
+      <p>{__ctHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -29,13 +29,13 @@ export default pattern((state) => ({
             }
         },
         required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __ctHelpers.JSONSchema, { state: {
             items: state.key("items"),
             threshold: state.key("threshold")
         } }, ({ state }) => state.items.filter((x) => x > state.threshold).length)}</p>
-      <p>{__cfHelpers.derive({
+      <p>{__ctHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -55,22 +55,22 @@ export default pattern((state) => ({
             }
         },
         required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __ctHelpers.JSONSchema, { state: {
             items: state.key("items"),
             threshold: state.key("threshold")
         } }, ({ state }) => state.items.filter((x) => x > state.threshold).length > 0)}</p>
       <p>
-        {__cfHelpers.ifElse({
+        {__ctHelpers.ifElse({
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         "enum": ["Yes", "No"]
-    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+    } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -90,9 +90,9 @@ export default pattern((state) => ({
             }
         },
         required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __ctHelpers.JSONSchema, { state: {
             items: state.key("items"),
             threshold: state.key("threshold")
         } }, ({ state }) => state.items.filter((x) => x > state.threshold).length > 0), "Yes", "No")}
@@ -112,7 +112,7 @@ export default pattern((state) => ({
         }
     },
     required: ["items", "threshold"]
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -141,8 +141,8 @@ export default pattern((state) => ({
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

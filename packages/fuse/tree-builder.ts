@@ -46,7 +46,7 @@ export function transformStreamValues(value: unknown): unknown {
 /**
  * Detect sigil link values: { "/": { "link@1": { ... } } }
  *
- * Inline implementation to avoid importing @commonfabric/runner.
+ * Inline implementation to avoid importing @commontools/runner.
  */
 export function isSigilLink(v: unknown): boolean {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;

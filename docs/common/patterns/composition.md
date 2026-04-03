@@ -25,7 +25,7 @@ This is why sub-patterns **must include `[UI]` in their Output type** - see [Pat
 ## Example
 
 ```tsx
-import { pattern, NAME, UI, VNode, Writable } from "commonfabric";
+import { pattern, NAME, UI, VNode, Writable } from "commontools";
 
 interface Item { name: Writable<string> }
 

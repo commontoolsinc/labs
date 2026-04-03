@@ -1,5 +1,5 @@
 {
-  "name": "@commonfabric/html",
+  "name": "@commontools/html",
   "tasks": {
     "test": "deno test --allow-env --allow-ffi --allow-read --allow-net test/*.test.ts test/*.test.tsx"
   },

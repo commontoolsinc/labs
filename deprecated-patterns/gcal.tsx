@@ -11,8 +11,8 @@ import {
   pattern,
   str,
   UI,
-} from "commonfabric";
-import type { Mutable, Schema } from "commonfabric/schema";
+} from "commontools";
+import type { Mutable, Schema } from "commontools/schema";
 
 const Classification = {
   Unclassified: "unclassified",
@@ -605,26 +605,26 @@ export default pattern(
             {ifElse(settings.syncToken, settings.syncToken, "Not yet obtained")}
           </h2>
 
-          <cf-hstack gap="1">
-            <cf-vstack gap="1">
+          <ct-hstack gap="1">
+            <ct-vstack gap="1">
               <div>
                 <label>Import Limit</label>
-                <cf-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={String(settings.limit)}
                   placeholder="count of events to import"
-                  oncf-input={updateLimit({ limit: settings.limit })}
+                  onct-input={updateLimit({ limit: settings.limit })}
                 />
               </div>
 
               <div>
                 <label>
                   Calendars
-                  <cf-button
+                  <ct-button
                     onClick={getCalendars({ auth, calendars })}
                   >
                     Fetch Calendar List
-                  </cf-button>
+                  </ct-button>
                 </label>
                 <table>
                   <thead>
@@ -650,16 +650,16 @@ export default pattern(
 
               <div>
                 <label>Calendar ID</label>
-                <cf-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.calendarId}
                   placeholder="Calendar ID (e.g. primary)"
-                  oncf-input={updateCalendarId({
+                  onct-input={updateCalendarId({
                     calendarId: settings.calendarId,
                   })}
                 />
               </div>
-              <cf-button
+              <ct-button
                 onClick={calendarUpdater({
                   events,
                   auth,
@@ -667,15 +667,15 @@ export default pattern(
                 })}
               >
                 Fetch Events
-              </cf-button>
-              <cf-button
+              </ct-button>
+              <ct-button
                 onClick={clearEvents({ events })}
               >
                 Clear Events
-              </cf-button>
-            </cf-vstack>
-          </cf-hstack>
-          <cf-google-oauth
+              </ct-button>
+            </ct-vstack>
+          </ct-hstack>
+          <ct-google-oauth
             $auth={auth}
             scopes={[
               "email",

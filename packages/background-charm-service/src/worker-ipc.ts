@@ -1,5 +1,5 @@
-import { isKeyPairRaw, KeyPairRaw } from "@commonfabric/identity";
-import { isRecord } from "@commonfabric/utils/types";
+import { isKeyPairRaw, KeyPairRaw } from "@commontools/identity";
+import { isRecord } from "@commontools/utils/types";
 
 export enum WorkerIPCMessageType {
   Initialize = "initialize",

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, derive, fetchData, pattern } from "commonfabric";
+import { computed, derive, fetchData, pattern } from "commontools";
 
 // CT-1334: Sub-pattern combining fetchData() + derive() with computed()
 // capturing pattern parameter in template literal.

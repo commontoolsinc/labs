@@ -31,7 +31,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import GmailExtractor, { type Email } from "../google/core/gmail-extractor.tsx";
 import type { Auth } from "../google/core/util/google-auth-manager.tsx";
 import {
@@ -662,19 +662,19 @@ Respond with the most appropriate action.`;
     previewUI,
 
     [UI]: (
-      <cf-screen>
+      <ct-screen>
         <div slot="header">
-          <cf-hstack align="center" gap="2">
-            <cf-heading level={3}>Email Task Engine</cf-heading>
+          <ct-hstack align="center" gap="2">
+            <ct-heading level={3}>Email Task Engine</ct-heading>
             <span style={{ color: "#6b7280", fontSize: "14px" }}>
               ({taskCount} tasks)
             </span>
-            <cf-checkbox $checked={sortNewestFirst}>Newest first</cf-checkbox>
-          </cf-hstack>
+            <ct-checkbox $checked={sortNewestFirst}>Newest first</ct-checkbox>
+          </ct-hstack>
         </div>
 
-        <cf-vscroll flex showScrollbar>
-          <cf-vstack padding="6" gap="4">
+        <ct-vscroll flex showScrollbar>
+          <ct-vstack padding="6" gap="4">
             {/* Auth UI */}
             {authUI}
 
@@ -742,7 +742,7 @@ Respond with the most appropriate action.`;
                   gap: "8px",
                 }}
               >
-                <cf-loader size="sm" />
+                <ct-loader size="sm" />
                 <span style={{ color: "#2563eb" }}>
                   Analyzing {pendingCount} tasks...
                 </span>
@@ -816,7 +816,7 @@ Respond with the most appropriate action.`;
                   "task-current" label to see it here.
                 </div>
               </div>,
-              <cf-vstack gap="3">
+              <ct-vstack gap="3">
                 {analyses.map((analysis) => {
                   const isProcessing = computed(() =>
                     processingTasks.get().includes(analysis.email.id)
@@ -987,7 +987,7 @@ Respond with the most appropriate action.`;
                             borderRadius: "6px",
                           }}
                         >
-                          <cf-loader size="sm" />
+                          <ct-loader size="sm" />
                           <span style={{ fontSize: "13px", color: "#6b7280" }}>
                             Analyzing...
                           </span>
@@ -1235,11 +1235,11 @@ Respond with the most appropriate action.`;
                     </div>
                   );
                 })}
-              </cf-vstack>,
+              </ct-vstack>,
             )}
-          </cf-vstack>
-        </cf-vscroll>
-      </cf-screen>
+          </ct-vstack>
+        </ct-vscroll>
+      </ct-screen>
     ),
   };
 });

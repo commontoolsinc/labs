@@ -7,7 +7,7 @@ import {
   setParentPointers,
 } from "./utils.ts";
 import { isFunctionLikeExpression } from "./function-predicates.ts";
-import { symbolDeclaresCommonFabricDefault } from "../core/common-fabric-symbols.ts";
+import { symbolDeclaresCommonToolsDefault } from "../core/common-tools-symbols.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import {
   detectCallKind,
@@ -423,7 +423,7 @@ export function createDataFlowAnalyzer(
 
     if (ts.isIdentifier(expression)) {
       // Skip property names in property access expressions - they're not data flows.
-      // For example, `toSchema` in `__cfHelpers.toSchema` is just a property name.
+      // For example, `toSchema` in `__ctHelpers.toSchema` is just a property name.
       if (
         expression.parent &&
         ts.isPropertyAccessExpression(expression.parent) &&
@@ -468,8 +468,8 @@ export function createDataFlowAnalyzer(
           dataFlows: [expression],
         };
       }
-      if (symbolDeclaresCommonFabricDefault(symbol, checker)) {
-        recordDataFlow(expression, scope, null, true); // Explicit: Common Fabric default
+      if (symbolDeclaresCommonToolsDefault(symbol, checker)) {
+        recordDataFlow(expression, scope, null, true); // Explicit: CommonTools default
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
@@ -542,13 +542,13 @@ export function createDataFlowAnalyzer(
         }
       }
       const propertySymbol = getMemberSymbol(expression, checker);
-      if (symbolDeclaresCommonFabricDefault(propertySymbol, checker)) {
+      if (symbolDeclaresCommonToolsDefault(propertySymbol, checker)) {
         if (originatesFromIgnored(expression.expression)) {
           return emptyAnalysis();
         }
         const parentId =
           context.expressionToNodeId.get(expression.expression) ?? null;
-        recordDataFlow(expression, scope, parentId, true); // Explicit: Common Fabric property
+        recordDataFlow(expression, scope, parentId, true); // Explicit: CommonTools property
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
@@ -610,8 +610,8 @@ export function createDataFlowAnalyzer(
             }
           } else {
             // Root symbol undefined - fully synthetic parameter (like `element`)
-            // Skip __cfHelpers.* property accesses - these are helper functions
-            if (root.text === "__cfHelpers") {
+            // Skip __ctHelpers.* property accesses - these are helper functions
+            if (root.text === "__ctHelpers") {
               return {
                 containsOpaqueRef: target.containsOpaqueRef,
                 requiresRewrite: target.requiresRewrite ||

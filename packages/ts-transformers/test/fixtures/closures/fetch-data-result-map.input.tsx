@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { fetchData, pattern, UI } from "commonfabric";
+import { fetchData, pattern, UI } from "commontools";
 
 interface Item {
   name: string;

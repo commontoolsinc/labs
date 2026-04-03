@@ -1,6 +1,6 @@
 /// <cts-enable />
-import { derive, NAME, pattern, str, UI } from "commonfabric";
-import "commonfabric/schema";
+import { derive, NAME, pattern, str, UI } from "commontools";
+import "commontools/schema";
 import { decrement, increment, model } from "./utils.ts";
 
 export const customPatternExport = pattern(
@@ -9,12 +9,12 @@ export const customPatternExport = pattern(
       [NAME]: str`Simple counter: ${derive(cell.value, String)}`,
       [UI]: (
         <div>
-          <cf-button onClick={decrement(cell)}>-</cf-button>
+          <ct-button onClick={decrement(cell)}>-</ct-button>
           {/* use html fragment to test that it works  */}
           <>
             <b>{cell.value}</b>
           </>
-          <cf-button onClick={increment(cell)}>+</cf-button>
+          <ct-button onClick={increment(cell)}>+</ct-button>
         </div>
       ),
       increment: increment(cell),

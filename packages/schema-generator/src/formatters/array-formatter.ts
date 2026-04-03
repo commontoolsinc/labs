@@ -1,8 +1,5 @@
 import ts from "typescript";
-import type {
-  JSONSchemaMutable,
-  JSONSchemaObjMutable,
-} from "@commonfabric/api";
+import type { JSONSchemaMutable, JSONSchemaObjMutable } from "@commontools/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { getArrayElementInfo } from "../type-utils.ts";

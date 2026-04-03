@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, type VNode, Writable } from "commonfabric";
+import { NAME, pattern, UI, type VNode, Writable } from "commontools";
 
 interface SelectControlInput {
   label: string;
@@ -54,7 +54,7 @@ export const SelectControl = pattern<SelectControlInput, SelectControlOutput>(
           <div style={styles.colDescription}>{description}</div>
           <div style={styles.colDefault}>{defaultValue}</div>
           <div style={styles.colControl}>
-            <cf-select $value={value} items={items} style="width: 100%;" />
+            <ct-select $value={value} items={items} style="width: 100%;" />
           </div>
         </div>
       ),

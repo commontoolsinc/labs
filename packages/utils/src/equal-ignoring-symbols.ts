@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
 import type { Async, Expected } from "@std/expect";
-import { isRecord } from "@commonfabric/utils/types";
+import { isRecord } from "@commontools/utils/types";
 
 /**
  * Strips all symbol properties from an object recursively

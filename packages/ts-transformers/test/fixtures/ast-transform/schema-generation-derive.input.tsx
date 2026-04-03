@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive } from "commonfabric";
+import { derive } from "commontools";
 
 type DeriveInput = {
   count: number;

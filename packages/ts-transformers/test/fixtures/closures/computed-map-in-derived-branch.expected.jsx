@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { Cell, computed, Default, pattern, UI, Writable } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { Cell, computed, Default, pattern, UI, Writable } from "commontools";
 interface Person {
     name: string;
     rank: number;
@@ -19,8 +19,8 @@ export default pattern((__ct_pattern_input) => {
     const people = __ct_pattern_input.key("people");
     const showAdmin = Writable.of(false, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema);
-    const adminData = __cfHelpers.derive({
+    } as const satisfies __ctHelpers.JSONSchema);
+    const adminData = __ctHelpers.derive({
         type: "object",
         properties: {
             people: {
@@ -46,7 +46,7 @@ export default pattern((__ct_pattern_input) => {
                 required: ["name", "rank"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "object",
@@ -63,10 +63,10 @@ export default pattern((__ct_pattern_input) => {
             },
             required: ["name", "rank", "isFirst"]
         }
-    } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => [...people.get()]
+    } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => [...people.get()]
         .sort((a, b) => a.rank - b.rank)
         .map((p) => ({ name: p.name, rank: p.rank, isFirst: p.rank === 1 })));
-    const count = __cfHelpers.derive({
+    const count = __ctHelpers.derive({
         type: "object",
         properties: {
             people: {
@@ -92,29 +92,29 @@ export default pattern((__ct_pattern_input) => {
                 required: ["name", "rank"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length);
+    } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length);
     return {
         [UI]: (<div>
-        {__cfHelpers.ifElse({
+        {__ctHelpers.ifElse({
             type: "boolean",
             asCell: true
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "null"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "null"
                 }, {}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, showAdmin, __cfHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, showAdmin, __ctHelpers.derive({
             type: "object",
             properties: {
                 count: {
@@ -140,7 +140,7 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["count", "adminData"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
@@ -160,7 +160,7 @@ export default pattern((__ct_pattern_input) => {
                     required: ["$UI"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             count: count,
             adminData: adminData
         }, ({ count, adminData }) => (() => {
@@ -203,7 +203,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["name", "rank"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -232,8 +232,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

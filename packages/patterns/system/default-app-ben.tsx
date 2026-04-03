@@ -10,7 +10,7 @@ import {
   patternTool,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 import { default as Note } from "../notes/note.tsx";
 
@@ -299,75 +299,75 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     quickCapture,
     [NAME]: computed(() => `Ben's Space (${visiblePieces.length})`),
     [UI]: (
-      <cf-screen>
-        <cf-keybind
+      <ct-screen>
+        <ct-keybind
           code="KeyO"
           meta
           preventDefault
-          oncf-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
+          onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
         />
-        <cf-keybind
+        <ct-keybind
           code="KeyO"
           ctrl
           preventDefault
-          oncf-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
+          onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
         />
 
-        <cf-toolbar slot="header" sticky>
+        <ct-toolbar slot="header" sticky>
           <div slot="start">
             <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>
           </div>
-          <cf-cell-link
+          <ct-cell-link
             $cell={index}
             slot="end"
             style={{
               fontSize: "14px",
               padding: "6px 12px",
               textDecoration: "none",
-              color: "var(--cf-color-text-secondary)",
+              color: "var(--ct-color-text-secondary)",
             }}
           >
             Mentions
-          </cf-cell-link>
-          <cf-cell-link
+          </ct-cell-link>
+          <ct-cell-link
             $cell={summaryIdx}
             slot="end"
             style={{
               fontSize: "14px",
               padding: "6px 12px",
               textDecoration: "none",
-              color: "var(--cf-color-text-secondary)",
+              color: "var(--ct-color-text-secondary)",
             }}
           >
             Search
-          </cf-cell-link>
-          <cf-cell-link
+          </ct-cell-link>
+          <ct-cell-link
             $cell={knowledgeGraph}
             slot="end"
             style={{
               fontSize: "14px",
               padding: "6px 12px",
               textDecoration: "none",
-              color: "var(--cf-color-text-secondary)",
+              color: "var(--ct-color-text-secondary)",
             }}
           >
             Graph
-          </cf-cell-link>
-          <cf-cell-link
+          </ct-cell-link>
+          <ct-cell-link
             $cell={suggestionHistoryViewer}
             slot="end"
             style={{
               fontSize: "14px",
               padding: "6px 12px",
               textDecoration: "none",
-              color: "var(--cf-color-text-secondary)",
+              color: "var(--ct-color-text-secondary)",
             }}
           >
             History
-          </cf-cell-link>
+          </ct-cell-link>
 
           <div slot="end">
-            <cf-button
+            <ct-button
               variant="ghost"
               onClick={toggleMenu({ menuOpen })}
               style={{
@@ -377,7 +377,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
               }}
             >
               Notes ▾
-            </cf-button>
+            </ct-button>
 
             {/* Backdrop to close menu when clicking outside */}
             <div
@@ -391,15 +391,15 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             />
 
             {/* Dropdown Menu */}
-            <cf-vstack
+            <ct-vstack
               gap="0"
               style={{
                 display: computed(() => (menuOpen.get() ? "flex" : "none")),
                 position: "fixed",
                 top: "112px",
                 right: "16px",
-                background: "var(--cf-color-bg, white)",
-                border: "1px solid var(--cf-color-border, #e5e5e7)",
+                background: "var(--ct-color-bg, white)",
+                border: "1px solid var(--ct-color-border, #e5e5e7)",
                 borderRadius: "12px",
                 boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
                 minWidth: "160px",
@@ -407,87 +407,87 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                 padding: "4px",
               }}
             >
-              <cf-button
+              <ct-button
                 variant="ghost"
                 onClick={menuNewNote({ menuOpen })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📝 New Note
-              </cf-button>
-              <cf-button
+              </ct-button>
+              <ct-button
                 variant="ghost"
                 onClick={menuNewNotebook({ menuOpen })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📓 New Notebook
-              </cf-button>
-              <cf-button
+              </ct-button>
+              <ct-button
                 variant="ghost"
                 onClick={menuQuickCapture({ menuOpen, quickCapture })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}⚡ Quick Capture
-              </cf-button>
-              <cf-button
+              </ct-button>
+              <ct-button
                 variant="ghost"
                 onClick={menuDailyJournal({ menuOpen, allPieces })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📅 Daily Journal
-              </cf-button>
+              </ct-button>
               <div
                 style={{
                   height: "1px",
-                  background: "var(--cf-color-border, #e5e5e7)",
+                  background: "var(--ct-color-border, #e5e5e7)",
                   margin: "4px 8px",
                 }}
               />
-            </cf-vstack>
+            </ct-vstack>
           </div>
-        </cf-toolbar>
+        </ct-toolbar>
 
-        <cf-vscroll flex showScrollbar>
-          <cf-hstack gap="6" padding="6" align="start">
+        <ct-vscroll flex showScrollbar>
+          <ct-hstack gap="6" padding="6" align="start">
             <div style={{ flex: "1", minWidth: "0" }}>
-              <cf-vstack gap="4">
+              <ct-vstack gap="4">
                 <h3 style={{ margin: "0", fontSize: "16px" }}>Do List</h3>
-                <cf-cell-link $cell={doList} />
+                <ct-cell-link $cell={doList} />
                 {doList.compactUI}
-              </cf-vstack>
+              </ct-vstack>
             </div>
 
             <div style={{ flex: "1", minWidth: "0" }}>
               {ifElse(
                 computed(() => recentPieces.get().length > 0),
-                <cf-vstack gap="4" style={{ marginBottom: "16px" }}>
-                  <cf-hstack gap="2" align="center">
+                <ct-vstack gap="4" style={{ marginBottom: "16px" }}>
+                  <ct-hstack gap="2" align="center">
                     <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
-                    <cf-cell-link $cell={recentGridView} />
-                  </cf-hstack>
-                  <cf-table full-width hover>
+                    <ct-cell-link $cell={recentGridView} />
+                  </ct-hstack>
+                  <ct-table full-width hover>
                     <tbody>
                       {recentPieces.map((piece: any) => (
                         <tr>
                           <td>
-                            <cf-cell-context $cell={piece}>
-                              <cf-cell-link $cell={piece} />
-                            </cf-cell-context>
+                            <ct-cell-context $cell={piece}>
+                              <ct-cell-link $cell={piece} />
+                            </ct-cell-context>
                           </td>
                         </tr>
                       ))}
                     </tbody>
-                  </cf-table>
-                </cf-vstack>,
+                  </ct-table>
+                </ct-vstack>,
                 undefined,
               )}
 
-              <cf-vstack gap="4">
-                <cf-hstack gap="2" align="center">
+              <ct-vstack gap="4">
+                <ct-hstack gap="2" align="center">
                   <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
-                  <cf-cell-link $cell={gridView} />
-                </cf-hstack>
+                  <ct-cell-link $cell={gridView} />
+                </ct-hstack>
 
-                <cf-table full-width hover>
+                <ct-table full-width hover>
                   <tbody>
                     {visiblePieces.map((piece) => {
                       const isNotebook = computed(() => {
@@ -498,11 +498,11 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                       });
 
                       const link = (
-                        <cf-drag-source $cell={piece} type="note">
-                          <cf-cell-context $cell={piece}>
-                            <cf-cell-link $cell={piece} />
-                          </cf-cell-context>
-                        </cf-drag-source>
+                        <ct-drag-source $cell={piece} type="note">
+                          <ct-cell-context $cell={piece}>
+                            <ct-cell-link $cell={piece} />
+                          </ct-cell-context>
+                        </ct-drag-source>
                       );
 
                       return (
@@ -510,36 +510,36 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                           <td>
                             {ifElse(
                               isNotebook,
-                              <cf-drop-zone
+                              <ct-drop-zone
                                 accept="note"
-                                oncf-drop={dropOntoNotebook({
+                                onct-drop={dropOntoNotebook({
                                   notebook: piece as any,
                                 })}
                               >
                                 {link}
-                              </cf-drop-zone>,
+                              </ct-drop-zone>,
                               link,
                             )}
                           </td>
                           <td>
-                            <cf-button
+                            <ct-button
                               size="sm"
                               variant="ghost"
                               onClick={removePiece({ piece, allPieces })}
                             >
                               🗑️
-                            </cf-button>
+                            </ct-button>
                           </td>
                         </tr>
                       );
                     })}
                   </tbody>
-                </cf-table>
-              </cf-vstack>
+                </ct-table>
+              </ct-vstack>
             </div>
-          </cf-hstack>
-        </cf-vscroll>
-      </cf-screen>
+          </ct-hstack>
+        </ct-vscroll>
+      </ct-screen>
     ),
     sidebarUI: undefined,
     fabUI: fab[UI],

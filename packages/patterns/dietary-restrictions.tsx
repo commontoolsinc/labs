@@ -22,7 +22,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -1220,7 +1220,7 @@ function _getContextualLabel(name: string, level: RestrictionLevel): string {
 }
 
 // ===== Autocomplete Items =====
-// Build items for cf-autocomplete with searchAliases for bidirectional search
+// Build items for ct-autocomplete with searchAliases for bidirectional search
 
 interface AutocompleteItem {
   value: string;
@@ -1272,13 +1272,13 @@ function getAutocompleteItems(): AutocompleteItem[] {
 
 // Empty state for when no restrictions
 const emptyState = (
-  <cf-vstack style="padding: 24px; text-align: center; color: #9ca3af;">
+  <ct-vstack style="padding: 24px; text-align: center; color: #9ca3af;">
     <span style="font-size: 32px; margin-bottom: 8px;">🍽️</span>
     <span>No dietary restrictions added</span>
     <span style="font-size: 13px;">
       Search for allergies, diets (vegetarian, keto), or intolerances
     </span>
-  </cf-vstack>
+  </ct-vstack>
 );
 
 // ===== Handlers =====
@@ -1344,7 +1344,7 @@ const _selectSuggestion = handler<
   input.set("");
 });
 
-// Handler for cf-autocomplete's cf-select event
+// Handler for ct-autocomplete's ct-select event
 const onSelectRestriction = handler<
   CustomEvent<{ value: string; label: string; isCustom?: boolean }>,
   {
@@ -1473,7 +1473,7 @@ export const DietaryRestrictionsModule = pattern<
     return raw.filter((item) => item != null).length > 0;
   });
 
-  // Level options for cf-select
+  // Level options for ct-select
   const levelOptions = [
     { value: "flexible", label: "Flexible" },
     { value: "prefer", label: "Prefer" },
@@ -1484,32 +1484,32 @@ export const DietaryRestrictionsModule = pattern<
   return {
     [NAME]: computed(() => `🍽️ Dietary: ${displayText}`),
     [UI]: (
-      <cf-vstack gap="4">
+      <ct-vstack gap="4">
         {/* Input row */}
-        <cf-hstack gap="2" align="center">
-          <cf-autocomplete
+        <ct-hstack gap="2" align="center">
+          <ct-autocomplete
             items={getAutocompleteItems()}
             placeholder="Search allergies, diets, intolerances..."
             allowCustom
-            oncf-select={onSelectRestriction({ restrictions, selectedLevel })}
+            onct-select={onSelectRestriction({ restrictions, selectedLevel })}
             style="flex: 1;"
           />
 
-          <cf-select
+          <ct-select
             $value={selectedLevel}
             items={levelOptions}
             style="width: 120px;"
           />
-        </cf-hstack>
+        </ct-hstack>
 
         {/* Restrictions list - map directly over Cell for reactive $value binding */}
         {ifElse(
           hasRestrictions,
-          <cf-vstack gap="2">
+          <ct-vstack gap="2">
             <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
               Your Restrictions
             </span>
-            <cf-hstack gap="2" wrap>
+            <ct-hstack gap="2" wrap>
               {restrictions.map(
                 // deno-lint-ignore no-explicit-any
                 (item: any, index: number) => {
@@ -1532,7 +1532,7 @@ export const DietaryRestrictionsModule = pattern<
                         whiteSpace: "nowrap",
                       }}
                     >
-                      <cf-select
+                      <ct-select
                         $value={item.level}
                         items={levelOptions}
                         style={{
@@ -1571,22 +1571,22 @@ export const DietaryRestrictionsModule = pattern<
                   );
                 },
               )}
-            </cf-hstack>
-          </cf-vstack>,
+            </ct-hstack>
+          </ct-vstack>,
           emptyState,
         )}
 
         {/* Implied items section */}
         {ifElse(
           hasImpliedItems(impliedItems),
-          <cf-vstack
+          <ct-vstack
             gap="2"
             style="padding-top: 8px; border-top: 1px solid #e5e7eb;"
           >
             <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
               What This Means (Avoid These)
             </span>
-            <cf-hstack gap="1" wrap>
+            <ct-hstack gap="1" wrap>
               {impliedItems.map(
                 (
                   item: {
@@ -1608,11 +1608,11 @@ export const DietaryRestrictionsModule = pattern<
                   );
                 },
               )}
-            </cf-hstack>
-          </cf-vstack>,
+            </ct-hstack>
+          </ct-vstack>,
           null,
         )}
-      </cf-vstack>
+      </ct-vstack>
     ),
     restrictions,
   };

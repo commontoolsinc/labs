@@ -1,5 +1,5 @@
 ```typescript
-import { computed } from 'commonfabric';
+import { computed } from 'commontools';
 
 interface Item { done: boolean; }
 declare const items: Item[];

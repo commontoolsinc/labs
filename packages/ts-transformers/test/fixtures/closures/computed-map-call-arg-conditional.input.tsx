@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, pattern, UI } from "commonfabric";
+import { computed, pattern, UI } from "commontools";
 
 const identity = (x: string) => x;
 

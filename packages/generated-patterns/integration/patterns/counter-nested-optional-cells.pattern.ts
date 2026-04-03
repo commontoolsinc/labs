@@ -6,7 +6,7 @@ import {
   handler,
   pattern,
   str,
-} from "commonfabric";
+} from "commontools";
 
 interface OptionalBranch {
   counter?: number;

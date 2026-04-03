@@ -1,7 +1,7 @@
 // Tests Default<T, V> where T is a union (non-undefined)
 // These should preserve union types in anyOf
 
-import { Default } from "commonfabric";
+import { Default } from "commontools";
 
 interface SchemaRoot {
   // Union with null

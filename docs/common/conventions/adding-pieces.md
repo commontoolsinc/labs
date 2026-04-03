@@ -16,8 +16,8 @@ exported by the default app pattern. **Never** push to `allPieces` directly.
 The most common case — creating a piece in response to a user interaction:
 
 ```tsx
-import { action, pattern, wish, Stream, UI } from "commonfabric";
-import { MentionablePiece } from "@commonfabric/piece";
+import { action, pattern, wish, Stream, UI } from "commontools";
+import { MentionablePiece } from "@commontools/piece";
 
 // Wish for the addPiece handler at pattern body level
 const defaultApp = wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
@@ -31,7 +31,7 @@ const createNote = action(() => {
 });
 
 return {
-  [UI]: <cf-button onClick={createNote}>New Note</cf-button>,
+  [UI]: <ct-button onClick={createNote}>New Note</ct-button>,
 };
 ```
 
@@ -40,8 +40,8 @@ return {
 When you need reusable logic that can be bound to different state:
 
 ```tsx
-import { handler, Stream } from "commonfabric";
-import { MentionablePiece } from "@commonfabric/piece";
+import { handler, Stream } from "commontools";
+import { MentionablePiece } from "@commontools/piece";
 
 // Define at module scope
 const createNoteHandler = handler<

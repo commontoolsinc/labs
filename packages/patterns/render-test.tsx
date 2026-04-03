@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, NAME, pattern, UI } from "commonfabric";
+import { Cell, Default, handler, NAME, pattern, UI } from "commontools";
 
 interface SubItem {
   label: string;

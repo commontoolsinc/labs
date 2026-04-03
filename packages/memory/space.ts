@@ -12,7 +12,7 @@ import {
   type HashObject,
   hashObjectFromString,
   hashOf,
-} from "@commonfabric/data-model/value-hash";
+} from "@commontools/data-model/value-hash";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
@@ -70,13 +70,13 @@ export type {
   SelectSchemaResult,
   SelectSchemaStats,
 } from "./space-schema.ts";
-import { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { FabricValue } from "@commontools/data-model/fabric-value";
 import { isRecord } from "../utils/src/types.ts";
 import {
   jsonFromValue,
   valueFromJson,
-} from "@commonfabric/data-model/json-encoding";
-import type { ReconstructionContext } from "@commonfabric/data-model/fabric-value";
+} from "@commontools/data-model/json-encoding";
+import type { ReconstructionContext } from "@commontools/data-model/fabric-value";
 export type * from "./interface.ts";
 
 /**

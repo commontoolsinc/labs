@@ -1,5 +1,5 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
-import { UI, VNode } from "@commonfabric/runtime-client";
+import { UI, VNode } from "@commontools/runtime-client";
 import { render, renderImpl } from "../src/render.ts";
 import { sanitizeEvent } from "../src/render-utils.ts";
 import * as assert from "./assert.ts";
@@ -1287,49 +1287,49 @@ describe("DOM reordering algorithm (documentation)", () => {
 describe("bidirectional binding validation", () => {
   it("throws when $value is a primitive string", () => {
     assert.throws(
-      () => h("cf-input", { $value: "hello" }),
+      () => h("ct-input", { $value: "hello" }),
       "Should throw for primitive string $value",
     );
   });
 
   it("throws when $value is a primitive number", () => {
     assert.throws(
-      () => h("cf-input", { $value: 42 }),
+      () => h("ct-input", { $value: 42 }),
       "Should throw for primitive number $value",
     );
   });
 
   it("throws when $checked is a primitive boolean", () => {
     assert.throws(
-      () => h("cf-checkbox", { $checked: true }),
+      () => h("ct-checkbox", { $checked: true }),
       "Should throw for primitive boolean $checked",
     );
   });
 
   it("throws when $value is null", () => {
     assert.throws(
-      () => h("cf-input", { $value: null }),
+      () => h("ct-input", { $value: null }),
       "Should throw for null $value",
     );
   });
 
   it("throws when $value is undefined", () => {
     assert.throws(
-      () => h("cf-input", { $value: undefined }),
+      () => h("ct-input", { $value: undefined }),
       "Should throw for undefined $value",
     );
   });
 
   it("throws when $value is a plain object (not a Cell)", () => {
     assert.throws(
-      () => h("cf-input", { $value: { someData: "test" } }),
+      () => h("ct-input", { $value: { someData: "test" } }),
       "Should throw for plain object $value",
     );
   });
 
   it("throws when $value is an array (not a Cell)", () => {
     assert.throws(
-      () => h("cf-input", { $value: [1, 2, 3] }),
+      () => h("ct-input", { $value: [1, 2, 3] }),
       "Should throw for array $value",
     );
   });
@@ -1355,7 +1355,7 @@ describe("bidirectional binding validation", () => {
   it("error message mentions $value property name", () => {
     let errorMessage = "";
     try {
-      h("cf-input", { $value: "test" });
+      h("ct-input", { $value: "test" });
     } catch (e) {
       errorMessage = (e as Error).message;
     }
@@ -1369,7 +1369,7 @@ describe("bidirectional binding validation", () => {
   it("error message mentions $checked property name", () => {
     let errorMessage = "";
     try {
-      h("cf-checkbox", { $checked: false });
+      h("ct-checkbox", { $checked: false });
     } catch (e) {
       errorMessage = (e as Error).message;
     }
@@ -1383,12 +1383,12 @@ describe("bidirectional binding validation", () => {
   it("error message for $checked includes checkbox example", () => {
     let errorMessage = "";
     try {
-      h("cf-checkbox", { $checked: false });
+      h("ct-checkbox", { $checked: false });
     } catch (e) {
       errorMessage = (e as Error).message;
     }
     assert.equal(
-      errorMessage.includes("cf-checkbox"),
+      errorMessage.includes("ct-checkbox"),
       true,
       "Error message for $checked should include checkbox example",
     );
@@ -1397,12 +1397,12 @@ describe("bidirectional binding validation", () => {
   it("error message for $value includes input example", () => {
     let errorMessage = "";
     try {
-      h("cf-input", { $value: "test" });
+      h("ct-input", { $value: "test" });
     } catch (e) {
       errorMessage = (e as Error).message;
     }
     assert.equal(
-      errorMessage.includes("cf-input"),
+      errorMessage.includes("ct-input"),
       true,
       "Error message for $value should include input example",
     );

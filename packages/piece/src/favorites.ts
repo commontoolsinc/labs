@@ -1,8 +1,8 @@
-import { type Cell, type Runtime } from "@commonfabric/runner";
+import { type Cell, type Runtime } from "@commontools/runner";
 import {
   type FavoriteList,
   favoriteListSchema,
-} from "@commonfabric/home-schemas";
+} from "@commontools/home-schemas";
 import { addJournalEntry } from "./journal.ts";
 
 /**

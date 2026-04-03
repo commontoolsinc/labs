@@ -6,7 +6,7 @@
  * (not encouraged, but should still work). The action is referenced INSIDE
  * the computed expression, so it must be captured in the derive wrapper.
  */
-import { action, Cell, computed, pattern, UI } from "commonfabric";
+import { action, Cell, computed, pattern, UI } from "commontools";
 
 interface Card {
   title: string;
@@ -31,7 +31,7 @@ export default pattern<Input>(({ card }) => {
 
   return {
     [UI]: (
-      <cf-card>
+      <ct-card>
         {isEditing ? (
           <div>Editing</div>
         ) : (
@@ -42,12 +42,12 @@ export default pattern<Input>(({ card }) => {
             {computed(() => (
               <div>
                 <span>{card.description}</span>
-                <cf-button onClick={startEditing}>Edit</cf-button>
+                <ct-button onClick={startEditing}>Edit</ct-button>
               </div>
             ))}
           </div>
         )}
-      </cf-card>
+      </ct-card>
     ),
     card,
   };

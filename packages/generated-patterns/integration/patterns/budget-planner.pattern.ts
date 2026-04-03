@@ -8,7 +8,7 @@ import {
   lift,
   pattern,
   type Writable,
-} from "commonfabric";
+} from "commontools";
 
 interface BudgetCategoryInput {
   name?: string;

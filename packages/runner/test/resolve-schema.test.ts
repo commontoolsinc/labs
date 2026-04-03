@@ -9,7 +9,7 @@ import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 import {
   isNontrivialSchema,
   toDeepFrozenSchema,
-} from "@commonfabric/data-model/schema-utils";
+} from "@commontools/data-model/schema-utils";
 
 /** Narrow a JSONSchema | undefined to JSONSchemaObj or fail the test. */
 function expectNontrivial(

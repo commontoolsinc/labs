@@ -1,5 +1,5 @@
 /**
- * Form context and types for cf-form system
+ * Form context and types for ct-form system
  *
  * Provides a write-gate pattern where form fields buffer writes locally
  * and flush atomically on submit. This enables transactional form handling
@@ -52,8 +52,8 @@ export interface FormContext {
 }
 
 /**
- * Context for sharing FormContext across CF form components
+ * Context for sharing FormContext across CT form components
  */
 export const formContext = createContext<FormContext | undefined>(
-  Symbol("cf.form"),
+  Symbol("ct.form"),
 );

@@ -19,7 +19,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 // Word dictionary for validation
 import { VALID_WORDS } from "./scrabble-words.ts";
@@ -238,6 +238,17 @@ const BONUS_MAP: Map<string, BonusType> = (() => {
 
 const getBonusType = (row: number, col: number): BonusType =>
   BONUS_MAP.get(`${row},${col}`) || "none";
+
+const BOARD_CELLS: ReadonlyArray<
+  { row: number; col: number; bonus: BonusType }
+> = Array.from(
+  { length: BOARD_SIZE * BOARD_SIZE },
+  (_unused, index) => {
+    const row = Math.floor(index / BOARD_SIZE);
+    const col = index % BOARD_SIZE;
+    return { row, col, bonus: getBonusType(row, col) };
+  },
+);
 
 const BONUS_COLORS: Record<BonusType, { bg: string; text: string }> = {
   none: { bg: "#d4c4a8", text: "#666" },
@@ -1211,13 +1222,6 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
     const rackCount = getRackCount({ rack: myRack });
     const bagCount = getBagCount({ bagJson, bagIndex });
 
-    const boardCells: { row: number; col: number; bonus: BonusType }[] = [];
-    for (let row = 0; row < BOARD_SIZE; row++) {
-      for (let col = 0; col < BOARD_SIZE; col++) {
-        boardCells.push({ row, col, bonus: getBonusType(row, col) });
-      }
-    }
-
     const message = Writable.of("");
 
     return {
@@ -1269,9 +1273,9 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                   borderRadius: "8px",
                 }}
               >
-                <cf-drop-zone
+                <ct-drop-zone
                   accept="letter,board-tile"
-                  oncf-drop={dropOnBoard({
+                  onct-drop={dropOnBoard({
                     allRacksJson,
                     allPlacedJson,
                     myName,
@@ -1288,7 +1292,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                         gap: "2px",
                       }}
                     >
-                      {boardCells.map((cell) => {
+                      {BOARD_CELLS.map((cell) => {
                         const colors = BONUS_COLORS[cell.bonus];
                         const label = BONUS_LABELS[cell.bonus];
                         return (
@@ -1359,8 +1363,8 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
 
                     {/* My placed tiles (this turn) - using pre-computed positions */}
                     {myPlaced.map((tile: any) => (
-                      <cf-drag-source
-                        $cell={{ id: tile.letter.id } as any}
+                      <ct-drag-source
+                        $cell={tile.letter}
                         type="board-tile"
                         style={{
                           position: "absolute",
@@ -1404,10 +1408,10 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                             </span>
                           )}
                         </div>
-                      </cf-drag-source>
+                      </ct-drag-source>
                     ))}
                   </div>
-                </cf-drop-zone>
+                </ct-drop-zone>
               </div>
             </div>
 
@@ -1434,9 +1438,9 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                   Bag: {bagCount} tiles remaining
                 </span>
               </div>
-              <cf-drop-zone
+              <ct-drop-zone
                 accept="board-tile,letter"
-                oncf-drop={returnToRack({
+                onct-drop={returnToRack({
                   allRacksJson,
                   allPlacedJson,
                   myName,
@@ -1454,9 +1458,9 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                     flexWrap: "wrap",
                   }}
                 >
-                  {myRack.map((letter: Letter) => (
-                    <cf-drag-source
-                      $cell={{ id: letter.id } as any}
+                  {myRack.map((letter) => (
+                    <ct-drag-source
+                      $cell={letter}
                       type="letter"
                     >
                       <div
@@ -1496,10 +1500,10 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                           </span>
                         )}
                       </div>
-                    </cf-drag-source>
+                    </ct-drag-source>
                   ))}
                 </div>
-              </cf-drop-zone>
+              </ct-drop-zone>
               <div
                 style={{
                   marginTop: "0.5rem",
@@ -1510,7 +1514,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                   flexWrap: "wrap",
                 }}
               >
-                <cf-button
+                <ct-button
                   onClick={submitTurn({
                     allRacksJson,
                     allPlacedJson,
@@ -1525,8 +1529,8 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                   style={{ backgroundColor: "#22c55e" }}
                 >
                   Submit Word
-                </cf-button>
-                <cf-button
+                </ct-button>
+                <ct-button
                   onClick={clearBoard({
                     allRacksJson,
                     allPlacedJson,
@@ -1535,7 +1539,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                   })}
                 >
                   Clear Board
-                </cf-button>
+                </ct-button>
               </div>
               <div
                 style={{

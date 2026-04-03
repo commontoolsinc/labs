@@ -10,7 +10,7 @@ import {
   str,
   toSchema,
   UI,
-} from "commonfabric";
+} from "commontools";
 
 interface InputState {
   number: Cell<number>;
@@ -75,9 +75,9 @@ export default pattern(
       [NAME]: str`Number Story: ${object?.title || "Loading..."}`,
       [UI]: (
         <div>
-          <cf-button onClick={adder({ number: cell.number })}>
+          <ct-button onClick={adder({ number: cell.number })}>
             Current number: {cell.number} (click to increment)
-          </cf-button>
+          </ct-button>
           {ifElse(
             pending,
             <p>Generating story...</p>,
@@ -97,11 +97,11 @@ export default pattern(
                 <ul>
                   {object?.seeAlso?.map((n: number) => (
                     <li>
-                      <cf-button
+                      <ct-button
                         onClick={setNumber({ number: cell.number, n })}
                       >
                         {n}
-                      </cf-button>
+                      </ct-button>
                     </li>
                   ))}
                 </ul>

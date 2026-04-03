@@ -13,7 +13,7 @@
  * See: lobby.tsx for the lobby entry point
  */
 
-import { action, computed, NAME, pattern, UI } from "commonfabric";
+import { action, computed, NAME, pattern, UI } from "commontools";
 
 import {
   areAllShipsSunk,

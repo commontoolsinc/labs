@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Provides status selection with predefined options.
  */
-import { computed, type Default, NAME, pattern, UI } from "commonfabric";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -54,10 +54,10 @@ export const StatusModule = pattern<StatusModuleInput, StatusModuleInput>(
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Status: ${displayText}`),
       [UI]: (
-        <cf-vstack style={{ gap: "8px" }}>
+        <ct-vstack style={{ gap: "8px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>Status</label>
-          <cf-select $value={status} items={STATUS_OPTIONS} />
-        </cf-vstack>
+          <ct-select $value={status} items={STATUS_OPTIONS} />
+        </ct-vstack>
       ),
       status,
     };

@@ -9,7 +9,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
@@ -46,15 +46,15 @@ export default pattern<LLMTestInput>(({ title }) => {
         <h2>{title}</h2>
 
         <div>
-          <cf-message-input
+          <ct-message-input
             name="Ask"
             placeholder="Ask the LLM a question..."
             appearance="rounded"
-            oncf-send={askQuestion({ question })}
+            onct-send={askQuestion({ question })}
           />
         </div>
 
-        <cf-cell-context $cell={question}>
+        <ct-cell-context $cell={question}>
           {derive(question, (q) =>
             q
               ? (
@@ -66,16 +66,16 @@ export default pattern<LLMTestInput>(({ title }) => {
                 </div>
               )
               : null)}
-        </cf-cell-context>
+        </ct-cell-context>
 
-        <cf-cell-context $cell={llmResponse}>
+        <ct-cell-context $cell={llmResponse}>
           {derive(
             [llmResponse.pending, llmResponse.result],
             ([pending, r]) =>
               pending
                 ? (
                   <div>
-                    <cf-loader show-elapsed /> Thinking...
+                    <ct-loader show-elapsed /> Thinking...
                   </div>
                 )
                 : r
@@ -89,7 +89,7 @@ export default pattern<LLMTestInput>(({ title }) => {
                 )
                 : null,
           )}
-        </cf-cell-context>
+        </ct-cell-context>
       </div>
     ),
     question,

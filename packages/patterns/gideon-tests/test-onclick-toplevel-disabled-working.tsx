@@ -43,7 +43,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 interface State {
   count: Default<number, 0>;
@@ -84,22 +84,22 @@ export default pattern<State>(({ count, pending, isProcessing }) => {
         <p>Current count: {count}</p>
 
         <div style={{ marginBottom: "1rem" }}>
-          <cf-checkbox $checked={pending}>Simulate pending state</cf-checkbox>
+          <ct-checkbox $checked={pending}>Simulate pending state</ct-checkbox>
         </div>
 
         <div style={{ marginBottom: "1rem" }}>
-          <cf-checkbox $checked={isProcessing}>
+          <ct-checkbox $checked={isProcessing}>
             Simulate processing state
-          </cf-checkbox>
+          </ct-checkbox>
         </div>
 
         {/* WORKING: Button always rendered at top level */}
-        <cf-button
+        <ct-button
           onClick={incrementHandler({ count, pending, isProcessing })}
           disabled={isDisabled}
         >
           {buttonText}
-        </cf-button>
+        </ct-button>
 
         <p style={{ color: "green", marginTop: "16px" }}>
           This pattern works correctly! Button always rendered, uses disabled

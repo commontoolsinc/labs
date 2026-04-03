@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { computed, pattern } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { computed, pattern } from "commontools";
 // FIXTURE: pattern-computed-opaque-ref-map
 // Verifies: .map() on an OpaqueRef inside computed() is NOT transformed to mapWithPattern
 //   computed(() => items.map((n) => n * 2)) → derive({ items }, ({ items }) => items.map((n) => n * 2))
@@ -9,7 +9,7 @@ import { computed, pattern } from "commonfabric";
 export default pattern((items) => {
     // items is OpaqueRef<number[]> as a pattern parameter
     // Inside the computed callback (which becomes derive), items.map should NOT be transformed
-    const doubled = __cfHelpers.derive({
+    const doubled = __ctHelpers.derive({
         type: "object",
         properties: {
             items: {
@@ -20,25 +20,25 @@ export default pattern((items) => {
             }
         },
         required: ["items"]
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "number"
         }
-    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.map((n) => n * 2));
+    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.map((n) => n * 2));
     return doubled;
 }, {
     type: "array",
     items: {
         type: "number"
     }
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "array",
     items: {
         type: "number"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

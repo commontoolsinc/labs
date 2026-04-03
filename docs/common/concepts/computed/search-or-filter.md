@@ -1,5 +1,5 @@
 ```tsx
-import { computed, Writable, UI, pattern } from 'commonfabric';
+import { computed, Writable, UI, pattern } from 'commontools';
 
 interface Item { title: string; }
 interface Input { items: Item[]; }
@@ -18,7 +18,7 @@ export default pattern<Input>(({ items }) => {
   return {
     [UI]: (
       <div>
-        <cf-input $value={searchQuery} placeholder="Search..." />
+        <ct-input $value={searchQuery} placeholder="Search..." />
         {filteredItems.map(item => <div>{item.title}</div>)}
       </div>
     ),

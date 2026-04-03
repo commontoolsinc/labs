@@ -25,7 +25,7 @@ import {
   TransactionResult,
 } from "./interface.ts";
 export * from "./interface.ts";
-import { type DID } from "@commonfabric/identity";
+import { type DID } from "@commontools/identity";
 
 /** A mounted space instance with both low-level and high-level access. */
 type MountedSpace = Space.SpaceInstance<Subject>;

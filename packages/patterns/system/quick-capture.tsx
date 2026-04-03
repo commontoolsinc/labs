@@ -13,10 +13,10 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import Note from "../notes/note.tsx";
 import Notebook from "../notes/notebook.tsx";
-import { listMentionable, listRecent } from "./common-fabric.tsx";
+import { listMentionable, listRecent } from "./common-tools.tsx";
 import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,
@@ -214,53 +214,53 @@ ${profileSection}`;
     return {
       [NAME]: "Quick Capture",
       [UI]: (
-        <cf-screen>
-          <cf-toolbar slot="header" sticky>
+        <ct-screen>
+          <ct-toolbar slot="header" sticky>
             <h2 style={{ margin: 0, fontSize: "18px" }}>Quick Capture</h2>
-          </cf-toolbar>
+          </ct-toolbar>
 
-          <cf-vscroll flex showScrollbar fadeEdges snapToBottom>
-            <cf-vstack gap="3" style="padding: 1rem;">
-              <cf-message-beads
+          <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
+            <ct-vstack gap="3" style="padding: 1rem;">
+              <ct-message-beads
                 label="capture"
                 $messages={messages}
                 pending={pending}
               />
               {ifElse(
                 hasMessages,
-                <cf-chat $messages={messages} pending={pending} />,
-                <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
+                <ct-chat $messages={messages} pending={pending} />,
+                <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
                   Paste text, meeting notes, or ideas below. The agent will
                   break them into linked notes.
                 </div>,
               )}
-            </cf-vstack>
-          </cf-vscroll>
+            </ct-vstack>
+          </ct-vscroll>
 
           <div slot="footer" style="padding: 0.5rem 1rem 1rem;">
             {ifElse(
               hasMessages,
-              <cf-hstack align="center" gap="1" style="padding-bottom: 0.5rem;">
-                <cf-button
+              <ct-hstack align="center" gap="1" style="padding-bottom: 0.5rem;">
+                <ct-button
                   variant="pill"
                   type="button"
                   title="Clear chat"
                   onClick={clearChat({ messages, pending })}
                 >
                   Clear
-                </cf-button>
-              </cf-hstack>,
+                </ct-button>
+              </ct-hstack>,
               <span />,
             )}
-            <cf-prompt-input
+            <ct-prompt-input
               placeholder="Paste text to capture..."
               pending={pending}
               $mentionable={mentionable}
-              oncf-send={sendMessage({ addMessage })}
-              oncf-stop={cancelGeneration}
+              onct-send={sendMessage({ addMessage })}
+              onct-stop={cancelGeneration}
             />
           </div>
-        </cf-screen>
+        </ct-screen>
       ),
       summary,
       capture: captureHandler({ addMessage }),

@@ -32,7 +32,7 @@ Avoid tests for:
 ## Test Command
 
 ```bash
-deno task cf test <pattern>.test.tsx
+deno task ct test <pattern>.test.tsx
 ```
 
 ## Test File Shape
@@ -47,7 +47,7 @@ The usual shape is:
 ```tsx
 /// <cts-enable />
 
-import { action, computed, pattern } from "commonfabric";
+import { action, computed, pattern } from "commontools";
 import Pattern from "./pattern.tsx";
 
 export default pattern(() => {

@@ -5,7 +5,7 @@
 Four contexts where types appear differently:
 
 ```tsx
-import { Default, Writable, pattern, UI } from 'commonfabric';
+import { Default, Writable, pattern, UI } from 'commontools';
 
 interface ShoppingItem {
   title: string;
@@ -29,7 +29,7 @@ export default pattern<WritableInput>(({ items }) => {
     [UI]: (
       <div>
         {items.map((item) => (
-          <cf-checkbox $checked={item.done}>{item.title}</cf-checkbox>
+          <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
         ))}
       </div>
     ),

@@ -1,10 +1,10 @@
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isRecord } from "@commonfabric/utils/types";
+import { deepEqual } from "@commontools/utils/deep-equal";
+import { isRecord } from "@commontools/utils/types";
 import {
   type FabricObject,
   type FabricValue,
   isArrayIndexPropertyName,
-} from "@commonfabric/data-model/fabric-value";
+} from "@commontools/data-model/fabric-value";
 import type {
   IAttestation,
   IInvalidDataURIError,
@@ -19,9 +19,9 @@ import type {
   Result,
   State,
 } from "../interface.ts";
-import { unclaimed } from "@commonfabric/memory/fact";
-import { getLogger } from "@commonfabric/utils/logger";
-import { LRUCache } from "@commonfabric/utils/cache";
+import { unclaimed } from "@commontools/memory/fact";
+import { getLogger } from "@commontools/utils/logger";
+import { LRUCache } from "@commontools/utils/cache";
 
 /** Copies an array preserving sparse holes (unlike [...arr] which fills them with undefined). */
 const sparseArrayCopy = <T>(arr: T[]): T[] => {

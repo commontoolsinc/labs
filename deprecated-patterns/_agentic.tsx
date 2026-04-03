@@ -10,7 +10,7 @@ import {
   pattern,
   str,
   UI,
-} from "commonfabric";
+} from "commontools";
 
 // Define input schema
 const InputSchema = {
@@ -52,7 +52,7 @@ const OutputSchema = {
 } as const satisfies JSONSchema;
 
 const wrapCode = (src: string) => `
-import { lift, pattern, derive, handler, llm } from "commonfabric";
+import { lift, pattern, derive, handler, llm } from "commontools";
 
 const math = lift((expression: string) => {
   console.log("math", expression);

@@ -98,13 +98,13 @@ async function startServers(
 }
 
 /**
- * Resolve the cf binary: CF_BINARY env var, or fall back to running
+ * Resolve the ct binary: CT_BINARY env var, or fall back to running
  * the CLI entrypoint via deno.
  */
-function getCfCommand(rootDir: string): string[] {
-  const cfBinary = Deno.env.get("CF_BINARY");
-  if (cfBinary) {
-    return [cfBinary];
+function getCtCommand(rootDir: string): string[] {
+  const ctBinary = Deno.env.get("CT_BINARY");
+  if (ctBinary) {
+    return [ctBinary];
   }
   return [
     "deno",
@@ -171,7 +171,7 @@ async function findPatternTests(
 }
 
 /**
- * Find and run all .test.tsx pattern tests via `cf test`.
+ * Find and run all .test.tsx pattern tests via `ct test`.
  * Captures per-test timing and optionally writes JUnit XML.
  */
 async function runPatternTests(
@@ -180,7 +180,7 @@ async function runPatternTests(
   junitDir?: string,
 ): Promise<boolean> {
   const patternsDir = path.join(rootDir, "packages/patterns");
-  const cfCmd = getCfCommand(rootDir);
+  const ctCmd = getCtCommand(rootDir);
   const testFiles = await findPatternTests(rootDir, patternsDir, filter);
 
   if (testFiles.length === 0) {
@@ -208,7 +208,7 @@ async function runPatternTests(
         const startMs = performance.now();
         const result = await runCommand(
           [
-            ...cfCmd,
+            ...ctCmd,
             "test",
             "--timeout",
             "180000",
@@ -387,7 +387,7 @@ async function runPackageIntegration(
     return await runPatternTests(rootDir, filter, junitDir);
   } else if (pkg === "cli") {
     // CLI uses a special shell script
-    env.CF_CLI_INTEGRATION_USE_LOCAL = "1";
+    env.CT_CLI_INTEGRATION_USE_LOCAL = "1";
     result = await runCommand(
       ["bash", "./integration/integration.sh"],
       { cwd: packageDir, env, inheritStdio: true },
@@ -466,7 +466,7 @@ Examples:
   deno task integration --port-offset=500 cli # Combine options
 
 Environment:
-  CF_BINARY      - Path to the cf binary (for pattern-tests target).
+  CT_BINARY      - Path to the ct binary (for pattern-tests target).
                    Falls back to running packages/cli/mod.ts via deno.
 
 Server ports (with offset):

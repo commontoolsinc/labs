@@ -3,18 +3,18 @@ import {
   type WishParams,
   type WishState,
   type WishTag,
-} from "@commonfabric/api";
-import { h } from "@commonfabric/html";
-import { favoriteListSchema } from "@commonfabric/home-schemas";
-import { HttpProgramResolver } from "@commonfabric/js-compiler";
+} from "@commontools/api";
+import { h } from "@commontools/html";
+import { favoriteListSchema } from "@commontools/home-schemas";
+import { HttpProgramResolver } from "@commontools/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { NAME, type Pattern, UI } from "../builder/types.ts";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
 import { getPatternEnvironment } from "../env.ts";
-import { getLogger } from "@commonfabric/utils/logger";
+import { getLogger } from "@commontools/utils/logger";
 
 const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
@@ -614,7 +614,7 @@ function errorUI(message: string): VNode {
 }
 
 function cellLinkUI(cell: Cell<unknown>): VNode {
-  return h("cf-cell-link", { $cell: cell });
+  return h("ct-cell-link", { $cell: cell });
 }
 
 const TARGET_SCHEMA = toDeepFrozenSchema(
@@ -884,7 +884,7 @@ export function wish(
 
           if (uniqueResultCells.length === 1 || headless) {
             // Single result or headless mode - fast path with unified shape
-            // Prefer the result cell's own [UI]; fall back to cf-cell-link
+            // Prefer the result cell's own [UI]; fall back to ct-cell-link
             const resultUI = uniqueResultCells[0].key(UI).get();
             wishFlowLogger.debug(`wish/send-fast/${queryKey}`, () => [
               `[WISH FAST PATH] source=${sourceKey}`,

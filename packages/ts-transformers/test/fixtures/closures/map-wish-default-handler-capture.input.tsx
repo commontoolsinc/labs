@@ -7,7 +7,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 type Item = { name: string; value: number };
 

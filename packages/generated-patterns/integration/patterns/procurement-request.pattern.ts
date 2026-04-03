@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-} from "commonfabric";
+} from "commontools";
 
 /** Pattern managing procurement approvals with derived spending summaries. */
 export type StageStatus = "pending" | "approved" | "rejected";

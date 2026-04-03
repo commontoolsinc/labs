@@ -1,4 +1,4 @@
-import { transformCfDirective } from "@commonfabric/ts-transformers";
+import { transformCtDirective } from "@commontools/ts-transformers";
 import { RuntimeProgram } from "./types.ts";
 
 export function pretransformProgram(
@@ -21,7 +21,7 @@ export function transformInjectHelperModule(
     main: program.main,
     files: program.files.map((source) => ({
       name: source.name,
-      contents: transformCfDirective(source.contents),
+      contents: transformCtDirective(source.contents),
     })),
     mainExport: program.mainExport,
   };

@@ -37,7 +37,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import {
   type AccountType as _AccountType,
   createGoogleAuth as createGoogleAuthUtil,
@@ -1605,22 +1605,22 @@ When you're done searching, STOP calling tools and produce your final structured
               {derive(wishedAuthPiece, (piece: any) =>
                 piece
                   ? (
-                    <cf-button
+                    <ct-button
                       onClick={() => navigateTo(piece)}
                       size="sm"
                       variant="secondary"
                     >
                       Re-authenticate Gmail
-                    </cf-button>
+                    </ct-button>
                   )
                   : (
-                    <cf-button
+                    <ct-button
                       onClick={createGoogleAuth}
                       size="sm"
                       variant="secondary"
                     >
                       Connect Gmail
-                    </cf-button>
+                    </ct-button>
                   ))}
             </div>
           </div>,
@@ -1654,13 +1654,13 @@ When you're done searching, STOP calling tools and produce your final structured
                 {derive(wishedAuthPiece, (piece: any) =>
                   piece
                     ? (
-                      <cf-button
+                      <ct-button
                         onClick={() => navigateTo(piece)}
                         size="sm"
                         variant="secondary"
                       >
                         Re-authenticate Gmail
-                      </cf-button>
+                      </ct-button>
                     )
                     : null)}
               </div>
@@ -1746,7 +1746,7 @@ When you're done searching, STOP calling tools and produce your final structured
         {/* Scan Button */}
         {ifElse(
           isAuthenticated,
-          <cf-button
+          <ct-button
             onClick={boundStartScan}
             size="lg"
             style="width: 100%;"
@@ -1764,21 +1764,21 @@ When you're done searching, STOP calling tools and produce your final structured
                   ? scanButtonLabel
                   : "⚠️ No Goal Set",
             )}
-          </cf-button>,
+          </ct-button>,
           null,
         )}
 
         {/* Stop Button */}
         {ifElse(
           isScanning,
-          <cf-button
+          <ct-button
             onClick={boundStopScan}
             variant="secondary"
             size="lg"
             style="width: 100%; margin-top: 8px;"
           >
             ⏹ Stop Scan
-          </cf-button>,
+          </ct-button>,
           null,
         )}
       </div>
@@ -1819,7 +1819,7 @@ When you're done searching, STOP calling tools and produce your final structured
                         color: "#475569",
                       }}
                     >
-                      <cf-loader show-elapsed></cf-loader>
+                      <ct-loader show-elapsed></ct-loader>
                       Scanning emails...
                     </div>
 
@@ -1874,7 +1874,7 @@ When you're done searching, STOP calling tools and produce your final structured
                                 gap: "8px",
                               }}
                             >
-                              <cf-loader size="sm"></cf-loader>
+                              <ct-loader size="sm"></ct-loader>
                               Analyzing emails...
                             </div>
                           </div>
@@ -1978,17 +1978,17 @@ When you're done searching, STOP calling tools and produce your final structured
                     textAlign: "center",
                   }}
                 >
-                  <cf-markdown>
+                  <ct-markdown>
                     {derive(agentResult, (r: any) => r?.summary || "")}
-                  </cf-markdown>
+                  </ct-markdown>
                 </div>
-                <cf-button
+                <ct-button
                   onClick={boundCompleteScan}
                   size="lg"
                   style="width: 100%; margin-top: 12px;"
                 >
                   ✓ Done
-                </cf-button>
+                </ct-button>
               </div>
             )
             : null)}
@@ -2259,7 +2259,7 @@ When you're done searching, STOP calling tools and produce your final structured
                           </div>
                           <div style={{ display: "flex", gap: "4px" }}>
                             {query.shareStatus === "private" && (
-                              <cf-button
+                              <ct-button
                                 onClick={flagForShareHandler({
                                   queryId: query.id,
                                   localQueries,
@@ -2270,9 +2270,9 @@ When you're done searching, STOP calling tools and produce your final structured
                                 style="color: #3b82f6; font-size: 11px;"
                               >
                                 Share
-                              </cf-button>
+                              </ct-button>
                             )}
-                            <cf-button
+                            <ct-button
                               onClick={deleteLocalQueryHandler({
                                 queryId: query.id,
                                 localQueries,
@@ -2283,7 +2283,7 @@ When you're done searching, STOP calling tools and produce your final structured
                               style="color: #dc2626; font-size: 12px;"
                             >
                               ×
-                            </cf-button>
+                            </ct-button>
                           </div>
                         </div>
                       </div>
@@ -2704,7 +2704,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 justifyContent: "flex-end",
                               }}
                             >
-                              <cf-button
+                              <ct-button
                                 onClick={() => {
                                   // Reject
                                   const pendingWritable =
@@ -2739,8 +2739,8 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 style="color: #64748b;"
                               >
                                 Keep Private
-                              </cf-button>
-                              <cf-button
+                              </ct-button>
+                              <ct-button
                                 onClick={() => {
                                   // Approve
                                   const pendingWritable =
@@ -2768,7 +2768,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                 {submission.userApproved
                                   ? "✓ Approved"
                                   : "Approve for Sharing"}
-                              </cf-button>
+                              </ct-button>
                             </div>
                           </div>
                         ))}
@@ -2796,7 +2796,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                     textAlign: "center",
                                   }}
                                 >
-                                  <cf-button
+                                  <ct-button
                                     variant="default"
                                     disabled={!hasRegistry}
                                     onClick={() => {
@@ -2868,7 +2868,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                     {approvedCount === 1 ? "Query" : "Queries"}
                                     {" "}
                                     to Community
-                                  </cf-button>
+                                  </ct-button>
                                   {!hasRegistry && (
                                     <div
                                       style={{
@@ -2901,13 +2901,13 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                         current space. After creation, favorite
                                         it with tag #gmailSearchRegistry.
                                       </div>
-                                      <cf-button
+                                      <ct-button
                                         onClick={boundCreateSearchRegistry}
                                         variant="secondary"
                                         size="sm"
                                       >
                                         Create Registry
-                                      </cf-button>
+                                      </ct-button>
                                     </div>
                                   )}
                                 </div>
@@ -2990,21 +2990,21 @@ Be conservative: when in doubt, recommend "do_not_share".`,
 
       // Full UI (composed from pieces)
       [UI]: (
-        <cf-screen>
+        <ct-screen>
           <div slot="header">
             <h2 style={{ margin: "0", fontSize: "18px" }}>{title}</h2>
           </div>
 
-          <cf-vscroll flex showScrollbar>
-            <cf-vstack style="padding: 16px; gap: 16px;">
+          <ct-vscroll flex showScrollbar>
+            <ct-vstack style="padding: 16px; gap: 16px;">
               {authUI}
               {controlsUI}
               {progressUI}
               {statsUI}
               {extrasUI}
-            </cf-vstack>
-          </cf-vscroll>
-        </cf-screen>
+            </ct-vstack>
+          </ct-vscroll>
+        </ct-screen>
       ),
     };
   },

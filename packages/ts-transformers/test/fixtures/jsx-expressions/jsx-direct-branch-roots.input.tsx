@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, UI } from "commonfabric";
+import { pattern, UI } from "commontools";
 
 // FIXTURE: jsx-direct-branch-roots
 // Verifies: direct JSX branch roots lower structurally without leaving raw

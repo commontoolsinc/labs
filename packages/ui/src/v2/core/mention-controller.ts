@@ -3,7 +3,7 @@ import {
   type CellHandle,
   isCellHandle,
   NAME,
-} from "@commonfabric/runtime-client";
+} from "@commontools/runtime-client";
 import {
   type Mentionable,
   type MentionableArray,

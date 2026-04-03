@@ -1,11 +1,11 @@
 # Advanced Component Patterns
 
 This document explores advanced patterns revealed by complex components like
-`cf-theme`, `cf-code-editor`, and historical outliner implementations.
+`ct-theme`, `ct-code-editor`, and `ct-outliner`.
 
 ## Architectural Principles
 
-### 1. Context Provision Pattern (`cf-theme`)
+### 1. Context Provision Pattern (`ct-theme`)
 
 **Philosophy:** Components should receive configuration from their environment,
 not just properties. Theme is ambient context that flows down the tree.
@@ -16,7 +16,7 @@ providing context.
 ```typescript
 import { provide } from "@lit/context";
 
-export class CFThemeProvider extends BaseElement {
+export class CTThemeProvider extends BaseElement {
   static override styles = css`
     :host {
       display: contents; /* Do not add extra layout */
@@ -26,9 +26,9 @@ export class CFThemeProvider extends BaseElement {
   @property({ attribute: false })
   theme: any = {};
 
-  @provide({ context: cfThemeContext })
+  @provide({ context: themeContext })
   @property({ attribute: false })
-  _computedTheme: CFTheme = defaultTheme;
+  _computedTheme: CTTheme = defaultTheme;
 
   private _recomputeAndApply() {
     // Merge partial theme with defaults (pattern-style support)
@@ -71,7 +71,7 @@ locale, services) to a subtree.
 
 ---
 
-### 2. Third-Party Integration Pattern (`cf-code-editor`)
+### 2. Third-Party Integration Pattern (`ct-code-editor`)
 
 **Philosophy:** Complex third-party libraries (CodeMirror, Monaco, etc.) require
 careful lifecycle management and bidirectional synchronization with Lit
@@ -85,7 +85,7 @@ properties.
 - Clean up library instances in `disconnectedCallback()`
 
 ```typescript
-export class CFCodeEditor extends BaseElement {
+export class CTCodeEditor extends BaseElement {
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
   private _readonly = new Compartment();
@@ -95,7 +95,7 @@ export class CFCodeEditor extends BaseElement {
   private _cellController = createStringCellController(this, {
     timing: { strategy: "debounce", delay: 500 },
     onChange: (newValue, oldValue) => {
-      this.emit("cf-change", { value: newValue, oldValue });
+      this.emit("ct-change", { value: newValue, oldValue });
     },
   });
 
@@ -224,7 +224,7 @@ private inputTiming = new InputTimingController(this, {
 private handleInput(event: Event) {
   const value = (event.target as HTMLInputElement).value;
   this.inputTiming.schedule(() => {
-    this.emit("cf-change", { value });
+    this.emit("ct-change", { value });
   });
 }
 ```
@@ -237,7 +237,7 @@ Manages Cell<T> ↔ value synchronization with timing:
 private _cellController = createStringCellController(this, {
   timing: { strategy: "debounce", delay: 500 },
   onChange: (newValue, oldValue) => {
-    this.emit("cf-change", { value: newValue, oldValue });
+    this.emit("ct-change", { value: newValue, oldValue });
   },
 });
 
@@ -285,7 +285,7 @@ this.mentionController.setup({
 
 ---
 
-### 4. Path-Based Operations Pattern (legacy outliner)
+### 4. Path-Based Operations Pattern (`ct-outliner`)
 
 **Philosophy:** For tree structures, use paths (arrays of indices) instead of
 direct references to enable operations that work with both immutable state and
@@ -363,7 +363,7 @@ supports editing.
 
 ---
 
-### 5. Diff-Based Rendering Pattern (legacy outliner)
+### 5. Diff-Based Rendering Pattern (`ct-outliner`)
 
 **Philosophy:** For complex nested structures, calculate minimal diffs to update
 only what changed rather than re-rendering everything.

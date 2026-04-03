@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern } from "commonfabric";
+import { pattern } from "commontools";
 
 // FIXTURE: pattern-underscore-param-never-input-schema
 // Verifies: underscore-prefixed authored pattern params still emit the `false`

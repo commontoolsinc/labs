@@ -8,7 +8,7 @@
  * UPDATED: Now uses the elegant agentic-tools API (defineItemSchema + listTool)
  * which eliminates the 3x redundancy of interface + input type + schema.
  */
-import { computed, Default, NAME, pattern, UI } from "commonfabric";
+import { computed, Default, NAME, pattern, UI } from "commontools";
 import GmailAgenticSearch from "../core/experimental/gmail-agentic-search.tsx";
 import {
   defineItemSchema,
@@ -245,15 +245,15 @@ Report each discovery immediately. Focus on patterns - if someone orders from th
       count: totalFoods,
 
       [UI]: (
-        <cf-screen>
+        <ct-screen>
           <div slot="header">
             <h2 style={{ margin: "0", fontSize: "18px" }}>
               My Food Preferences
             </h2>
           </div>
 
-          <cf-vscroll flex showScrollbar>
-            <cf-vstack style="padding: 16px; gap: 16px;">
+          <ct-vscroll flex showScrollbar>
+            <ct-vstack style="padding: 16px; gap: 16px;">
               {/* Embed the base searcher - provides auth + scan UI */}
               {searcher as any}
 
@@ -309,7 +309,7 @@ Report each discovery immediately. Focus on patterns - if someone orders from th
                         {categoryLabels[category] || category}{" "}
                         ({groups[category].length})
                       </summary>
-                      <cf-vstack gap={2} style="padding-left: 16px;">
+                      <ct-vstack gap={2} style="padding-left: 16px;">
                         {groups[category].map((f: FoodPreference) => (
                           <div
                             style={{
@@ -360,14 +360,14 @@ Report each discovery immediately. Focus on patterns - if someone orders from th
                             </div>
                           </div>
                         ))}
-                      </cf-vstack>
+                      </ct-vstack>
                     </details>
                   ));
                 })}
               </div>
-            </cf-vstack>
-          </cf-vscroll>
-        </cf-screen>
+            </ct-vstack>
+          </ct-vscroll>
+        </ct-screen>
       ),
     };
   },

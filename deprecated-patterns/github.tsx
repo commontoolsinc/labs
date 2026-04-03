@@ -8,7 +8,7 @@ import {
   pattern,
   str,
   UI,
-} from "commonfabric";
+} from "commontools";
 
 const sleep = (timeout: number) =>
   new Promise((resolve) => setTimeout(resolve, timeout));

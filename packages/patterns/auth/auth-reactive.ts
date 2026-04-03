@@ -1,7 +1,7 @@
 /**
  * Shared reactive utilities for OAuth auth patterns.
  */
-import { Writable } from "commonfabric";
+import { Writable } from "commontools";
 
 /**
  * Start a reactive clock that updates a Writable cell with Date.now()

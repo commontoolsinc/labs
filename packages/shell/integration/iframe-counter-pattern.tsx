@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { CellLike, type JSONSchema, NAME, pattern, UI } from "commonfabric";
+import { CellLike, type JSONSchema, NAME, pattern, UI } from "commontools";
 
 type IFramePattern = {
   src: string;
@@ -59,7 +59,7 @@ const runIframePattern = (
   pattern(
     (data: any) => ({
       [NAME]: name,
-      [UI]: <cf-iframe src={src} $context={data as CellLike<any>}></cf-iframe>,
+      [UI]: <ct-iframe src={src} $context={data as CellLike<any>}></ct-iframe>,
       count: data.count,
     }),
     argumentSchema,

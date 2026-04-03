@@ -5,16 +5,16 @@
 ```typescript
 // WRONG - Buttons inside computed() fail when clicked
 {computed(() =>
-  showAdd ? <cf-button onClick={addItem({ items })}>Add</cf-button> : null
+  showAdd ? <ct-button onClick={addItem({ items })}>Add</ct-button> : null
 )}
 
 // CORRECT - Move button outside, use disabled attribute
-<cf-button onClick={addItem({ items })} disabled={computed(() => !showAdd)}>
+<ct-button onClick={addItem({ items })} disabled={computed(() => !showAdd)}>
   Add
-</cf-button>
+</ct-button>
 
 // CORRECT - Or use ifElse instead of computed
-{ifElse(showAdd, <cf-button onClick={addItem({ items })}>Add</cf-button>, null)}
+{ifElse(showAdd, <ct-button onClick={addItem({ items })}>Add</ct-button>, null)}
 ```
 
 **Why:** `computed()` creates read-only inline data addresses. Always render buttons at the top level and control visibility with `disabled`.

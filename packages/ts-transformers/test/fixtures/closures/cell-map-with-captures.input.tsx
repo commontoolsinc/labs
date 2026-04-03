@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, cell, pattern, UI } from "commonfabric";
+import { Cell, cell, pattern, UI } from "commontools";
 
 interface State {
   values: number[];

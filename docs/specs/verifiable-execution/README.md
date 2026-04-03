@@ -1,4 +1,4 @@
-# CF Protocol: Verifiable State Update & Provenance
+# CT Protocol: Verifiable State Update & Provenance
 
 **Status:** Draft
 

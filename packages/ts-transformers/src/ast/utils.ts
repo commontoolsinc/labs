@@ -250,7 +250,7 @@ export function setParentPointers(node: ts.Node, parent?: ts.Node): void {
 import {
   isDefaultAliasSymbol,
   isOptionalSymbol,
-} from "@commonfabric/schema-generator/property-optionality";
+} from "@commontools/schema-generator/property-optionality";
 export { isDefaultAliasSymbol, isOptionalSymbol };
 
 /**

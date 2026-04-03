@@ -8,9 +8,9 @@ import {
   Consumer,
   Fact,
   TransactionBuilder,
-} from "@commonfabric/memory";
-import * as Commit from "@commonfabric/memory/commit";
-import { Identity } from "@commonfabric/identity";
+} from "@commontools/memory";
+import * as Commit from "@commontools/memory/commit";
+import { Identity } from "@commontools/identity";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");

@@ -16,7 +16,7 @@ import {
   str,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -76,7 +76,7 @@ function decodeBase64ToText(dataUrl: string): string {
 
 // ===== Handlers =====
 
-// Define the expected event shape from cf-file-input
+// Define the expected event shape from ct-file-input
 interface FileUploadEvent {
   detail: {
     files: Array<{
@@ -151,11 +151,11 @@ export const TextImportModule = pattern<
   return {
     [NAME]: str`${MODULE_METADATA.icon} ${displayText}`,
     [UI]: (
-      <cf-vstack style={{ gap: "12px" }}>
+      <ct-vstack style={{ gap: "12px" }}>
         {ifElse(
           hasContent,
           // File is uploaded - show preview with clear button
-          <cf-vstack style={{ gap: "8px" }}>
+          <ct-vstack style={{ gap: "8px" }}>
             {/* Header with filename and clear button */}
             <div
               style={{
@@ -245,17 +245,17 @@ export const TextImportModule = pattern<
                 {contentPreview}
               </pre>
             </div>
-          </cf-vstack>,
+          </ct-vstack>,
           // No file yet - show upload input
-          <cf-file-input
+          <ct-file-input
             accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
             buttonText={`${MODULE_METADATA.icon} Import Text File`}
             showPreview={false}
-            oncf-change={handleFileUpload({ content, filename })}
+            onct-change={handleFileUpload({ content, filename })}
             style={{ width: "100%" }}
           />,
         )}
-      </cf-vstack>
+      </ct-vstack>
     ),
     content,
     filename,

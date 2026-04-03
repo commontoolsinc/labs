@@ -6,7 +6,7 @@
  * @returns A formatted prompt string for the import-json workflow
  */
 
-import { createJsonSchema } from "@commonfabric/runner";
+import { createJsonSchema } from "@commontools/runner";
 
 export function formatJsonImportPrompt(
   title: string,

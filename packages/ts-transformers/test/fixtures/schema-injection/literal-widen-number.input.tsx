@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell } from "commonfabric";
+import { cell } from "commontools";
 
 // FIXTURE: literal-widen-number
 // Verifies: numeric literals (int, negative, float, scientific, zero) are all widened to { type: "number" }

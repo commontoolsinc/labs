@@ -1,7 +1,7 @@
 The `computed()` function is used for derived data:
 
 ```tsx
-import { computed, Default, NAME, pattern, UI } from "commonfabric";
+import { computed, Default, NAME, pattern, UI } from "commontools";
 
 interface Item {
   title: string;
@@ -35,7 +35,7 @@ export default pattern<Input, Input>(({ items }) => {
           <div>
             <h3>{cat}</h3>
             {(grouped[cat] ?? []).map((item) => (
-              <cf-checkbox $checked={item.done}>{item.title}</cf-checkbox>
+              <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
             ))}
           </div>
         ))}
@@ -122,7 +122,7 @@ arrays, objects). For conditional rendering, use JSX ternaries.
 Example of correct usage:
 
 ```tsx
-import { computed, UI, Writable } from 'commonfabric';
+import { computed, UI, Writable } from 'commontools';
 
 interface Item { title: string; }
 const searchQuery = Writable.of("");
@@ -158,7 +158,7 @@ const result = {
 If your `computed()` has side effects (like setting another cell), they should be idempotent. Non-idempotent side effects cause the scheduler to re-run repeatedly until it hits the 101-iteration limit.
 
 ```typescript
-import { computed, Writable } from 'commonfabric';
+import { computed, Writable } from 'commontools';
 
 interface Item {}
 declare const items: Item[];

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, lift } from "commonfabric";
+import { Cell, lift } from "commontools";
 
 interface CharmEntry {
   id: string;

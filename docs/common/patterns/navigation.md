@@ -5,7 +5,7 @@ Use `navigateTo()` for drilling into detail views from list patterns.
 ## List Pattern
 
 ```typescript
-import { navigateTo, pattern, UI, Writable } from "commonfabric";
+import { navigateTo, pattern, UI, Writable } from "commontools";
 import ItemDetail from "./item-detail.tsx";
 
 interface Item {
@@ -19,16 +19,16 @@ interface Input {
 
 export default pattern<Input>(({ items }) => ({
   [UI]: (
-    <cf-screen>
+    <ct-screen>
       {items.map((item) => (
-        <cf-card>
+        <ct-card>
           {item.name}
-          <cf-button onClick={() => navigateTo(ItemDetail({ item }))}>
+          <ct-button onClick={() => navigateTo(ItemDetail({ item }))}>
             Edit
-          </cf-button>
-        </cf-card>
+          </ct-button>
+        </ct-card>
       ))}
-    </cf-screen>
+    </ct-screen>
   ),
   items,
 }));
@@ -39,7 +39,7 @@ export default pattern<Input>(({ items }) => ({
 The detail pattern receives a `Writable<Item>` and uses `.key()` to access individual fields for editing:
 
 ```typescript
-import { pattern, UI, Writable } from "commonfabric";
+import { pattern, UI, Writable } from "commontools";
 
 interface Item {
   name: string;
@@ -52,16 +52,16 @@ interface Input {
 
 export default pattern<Input>(({ item }) => ({
   [UI]: (
-    <cf-screen>
-      <cf-input $value={item.key("name")} placeholder="Name" />
-      <cf-select
+    <ct-screen>
+      <ct-input $value={item.key("name")} placeholder="Name" />
+      <ct-select
         $value={item.key("status")}
         items={[
           { label: "Active", value: "active" },
           { label: "Done", value: "done" },
         ]}
       />
-    </cf-screen>
+    </ct-screen>
   ),
   item,
 }));

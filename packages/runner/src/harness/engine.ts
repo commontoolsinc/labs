@@ -15,20 +15,20 @@ import {
   ProgramResolver,
   Source,
   TypeScriptCompiler,
-} from "@commonfabric/js-compiler";
+} from "@commontools/js-compiler";
 import {
   MappedPosition,
   UnsafeEvalIsolate,
   UnsafeEvalRuntime,
 } from "./eval-runtime.ts";
 import {
-  CommonFabricTransformerPipeline,
+  CommonToolsTransformerPipeline,
   OpaqueRefErrorTransformer,
-} from "@commonfabric/ts-transformers";
+} from "@commontools/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
 import { Runtime } from "../runtime.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { StaticCache } from "@commonfabric/static";
+import { hashOf } from "@commontools/data-model/value-hash";
+import { StaticCache } from "@commontools/static";
 import { pretransformProgram } from "./pretransform.ts";
 
 const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
@@ -153,7 +153,7 @@ export class Engine extends EventTarget implements Harness {
       getTransformedProgram: options.getTransformedProgram,
       diagnosticMessageTransformer,
       beforeTransformers: (program) => {
-        const pipeline = new CommonFabricTransformerPipeline();
+        const pipeline = new CommonToolsTransformerPipeline();
         return {
           factories: pipeline.toFactories(program),
           getDiagnostics: () => pipeline.getDiagnostics(),

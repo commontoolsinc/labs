@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { pattern, UI } from "commontools";
 // Module-level constant - should NOT be captured
 const TAX_RATE = 0.08;
 // Module-level function - should NOT be captured
@@ -22,10 +22,10 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Should NOT capture module-level constant or function */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 return (<div>
-            Item: {__cfHelpers.derive({
+            Item: {__ctHelpers.derive({
                     type: "object",
                     properties: {
                         item: {
@@ -39,9 +39,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["item"]
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __ctHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, { item: {
+                } as const satisfies __ctHelpers.JSONSchema, { item: {
                         price: item.key("price")
                     } }, ({ item }) => formatPrice(item.price * (1 + TAX_RATE)))}
           </div>);
@@ -67,7 +67,7 @@ export default pattern((state) => {
                         required: ["id", "price"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -87,7 +87,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+            } as const satisfies __ctHelpers.JSONSchema), {})}
       </div>),
     };
 }, {
@@ -115,7 +115,7 @@ export default pattern((state) => {
             required: ["id", "price"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -144,8 +144,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

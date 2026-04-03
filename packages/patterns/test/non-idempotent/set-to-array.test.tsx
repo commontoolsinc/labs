@@ -2,11 +2,11 @@
 /**
  * Test that exercises a non-idempotent Set-to-Array computation.
  * Random sort before Set insertion changes iteration order each run.
- * The idempotency check in cf test should warn about it.
+ * The idempotency check in ct test should warn about it.
  *
- * Run: deno task cf test packages/patterns/test/non-idempotent/set-to-array.test.tsx --verbose
+ * Run: deno task ct test packages/patterns/test/non-idempotent/set-to-array.test.tsx --verbose
  */
-import { computed, pattern, Writable } from "commonfabric";
+import { computed, pattern, Writable } from "commontools";
 
 export default pattern(() => {
   const items = Writable.of([

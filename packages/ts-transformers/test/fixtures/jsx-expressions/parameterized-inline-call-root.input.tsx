@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, UI } from "commonfabric";
+import { pattern, UI } from "commontools";
 
 // FIXTURE: parameterized-inline-call-root
 // Verifies: helper-owned parameterized inline-function call roots lower as a

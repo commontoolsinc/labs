@@ -1,5 +1,5 @@
-import { createSession, DID, Identity, Session } from "@commonfabric/identity";
-import { NameSchema } from "@commonfabric/runner/schemas";
+import { createSession, DID, Identity, Session } from "@commontools/identity";
+import { NameSchema } from "@commontools/runner/schemas";
 import {
   CellHandle,
   FavoritesManager,
@@ -9,9 +9,9 @@ import {
   RuntimeClient,
   RuntimeClientEvents,
   RuntimeTelemetryMarkerResult,
-} from "@commonfabric/runtime-client";
-import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
-import { getLogger } from "@commonfabric/utils/logger";
+} from "@commontools/runtime-client";
+import { WebWorkerRuntimeTransport } from "@commontools/runtime-client/transports/web-worker";
+import { getLogger } from "@commontools/utils/logger";
 import { AppView, navigate } from "../../shared/mod.ts";
 import { COMPILATION_CACHE_CLIENT, EXPERIMENTAL } from "./env.ts";
 

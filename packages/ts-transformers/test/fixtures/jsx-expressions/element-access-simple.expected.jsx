@@ -1,5 +1,5 @@
-import * as __cfHelpers from "commonfabric";
-import { pattern, UI } from "commonfabric";
+import * as __ctHelpers from "commontools";
+import { pattern, UI } from "commontools";
 interface State {
     items: string[];
     index: number;
@@ -17,7 +17,7 @@ export default pattern((state) => {
         [UI]: (<div>
         <h3>Dynamic Element Access</h3>
         {/* Basic dynamic index */}
-        <p>Item: {__cfHelpers.derive({
+        <p>Item: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -37,15 +37,15 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 index: state.key("index")
             } }, ({ state }) => state.items[state.index])}</p>
 
         {/* Computed index */}
-        <p>Last: {__cfHelpers.derive({
+        <p>Last: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -62,14 +62,14 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items")
             } }, ({ state }) => state.items[state.items.length - 1])}</p>
 
         {/* Double indexing */}
-        <p>Matrix: {__cfHelpers.derive({
+        <p>Matrix: {__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -95,9 +95,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: ["number", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 matrix: state.key("matrix"),
                 row: state.key("row"),
                 col: state.key("col")
@@ -133,7 +133,7 @@ export default pattern((state) => {
         }
     },
     required: ["items", "index", "matrix", "row", "col"]
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -162,8 +162,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+h.fragment = __ctHelpers.h.fragment;

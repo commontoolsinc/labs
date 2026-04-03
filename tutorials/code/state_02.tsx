@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, cell, handler, lift, pattern, UI } from "commonfabric";
+import { type Cell, cell, handler, lift, pattern, UI } from "commontools";
 
 const calcAC = (dex: number): number => 20 + Math.floor((dex - 10) / 2);
 
@@ -23,10 +23,10 @@ export default pattern(() => {
     [UI]: (
       <div>
         <h2>Character name: {characterName}</h2>
-        <cf-message-input
+        <ct-message-input
           name="Update"
           placeholder="Update Name"
-          oncf-send={updateName({ characterName })}
+          onct-send={updateName({ characterName })}
         />
         <li>DEX: {dex}</li>
         <li>DEX Modifier: {Math.floor((dex - 10) / 2)}</li>

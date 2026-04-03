@@ -1,4 +1,4 @@
-import { JSONSchema } from "@commonfabric/runner";
+import { JSONSchema } from "@commontools/runner";
 
 export enum CommandType {
   New,

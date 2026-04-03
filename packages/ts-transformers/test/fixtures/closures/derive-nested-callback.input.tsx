@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, derive, pattern } from "commontools";
 
 // FIXTURE: derive-nested-callback
 // Verifies: capture extraction works with nested .map() which is itself transformed to mapWithPattern

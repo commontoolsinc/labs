@@ -1,4 +1,4 @@
-import { sleep } from "@commonfabric/utils/sleep";
+import { sleep } from "@commontools/utils/sleep";
 
 /**
  * Receives an async predicate function to executed repeatedly

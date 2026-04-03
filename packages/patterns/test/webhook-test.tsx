@@ -9,7 +9,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 // ===== Types =====
 
@@ -55,36 +55,36 @@ const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
     return {
       [NAME]: "Webhook Test Pattern",
       [UI]: (
-        <cf-screen>
-          <cf-vstack slot="header" gap="1">
-            <cf-heading level={4}>Webhook Test</cf-heading>
-          </cf-vstack>
+        <ct-screen>
+          <ct-vstack slot="header" gap="1">
+            <ct-heading level={4}>Webhook Test</ct-heading>
+          </ct-vstack>
 
-          <cf-vstack gap="3" style="padding: 1.5rem;">
-            <cf-card>
-              <cf-vstack gap="2">
+          <ct-vstack gap="3" style="padding: 1.5rem;">
+            <ct-card>
+              <ct-vstack gap="2">
                 <div style={{ fontWeight: "600", fontSize: "1rem" }}>
                   Webhook Integration
                 </div>
                 <div
                   style={{
-                    color: "var(--cf-color-gray-500)",
+                    color: "var(--ct-color-gray-500)",
                     fontSize: "0.875rem",
                   }}
                 >
                   Click "Create Webhook" to register a new endpoint. The URL and
                   secret will be stored in the config cell below.
                 </div>
-                <cf-webhook
+                <ct-webhook
                   name="Test Webhook"
                   $inbox={webhookInbox}
                   $config={webhookConfig}
                 />
-              </cf-vstack>
-            </cf-card>
+              </ct-vstack>
+            </ct-card>
 
-            <cf-card>
-              <cf-vstack gap="2">
+            <ct-card>
+              <ct-vstack gap="2">
                 <div style={{ fontWeight: "600", fontSize: "1rem" }}>
                   Last Received Event
                 </div>
@@ -92,7 +92,7 @@ const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
                   style={{
                     fontSize: "0.8rem",
                     fontFamily: "monospace",
-                    background: "var(--cf-color-gray-100, #f3f4f6)",
+                    background: "var(--ct-color-gray-100, #f3f4f6)",
                     padding: "0.5rem",
                     borderRadius: "0.25rem",
                     whiteSpace: "pre-wrap",
@@ -101,10 +101,10 @@ const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
                 >
                   {inboxDisplay}
                 </div>
-              </cf-vstack>
-            </cf-card>
-          </cf-vstack>
-        </cf-screen>
+              </ct-vstack>
+            </ct-card>
+          </ct-vstack>
+        </ct-screen>
       ),
       webhookInbox,
       webhookConfig,

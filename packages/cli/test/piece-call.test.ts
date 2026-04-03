@@ -1,9 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { JSONSchema } from "@commonfabric/api";
-import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
+import type { JSONSchema } from "@commontools/api";
+import { CT_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
 import { executePieceCallable } from "../lib/piece.ts";
-import { withEnv } from "./utils.ts";
 
 describe("executePieceCallable", () => {
   it("invokes handlers from schema-derived flags", async () => {
@@ -439,10 +438,10 @@ describe("executePieceCallable", () => {
     );
 
     expect(result.helpText).toContain(
-      "cf piece call ... search --help",
+      "ct piece call ... search --help",
     );
     expect(result.helpText).toContain(
-      "cf piece call ... search -- [run] --query <string>",
+      "ct piece call ... search -- [run] --query <string>",
     );
     expect(result.helpText).toContain("JSON input:");
     expect(result.helpText).toContain("Pass inline JSON as the next argument");
@@ -452,52 +451,9 @@ describe("executePieceCallable", () => {
       "Read the full input object from stdin.",
     );
     expect(result.helpText).not.toContain(
-      "cf piece call ... search -- [run] --help",
+      "ct piece call ... search -- [run] --help",
     );
-    expect(result.helpText).not.toContain("cf exec");
-  });
-
-  it("renders ct piece-call help when the compatibility alias is active", async () => {
-    const harness = createPieceCallableHarness({
-      callableKind: "tool",
-      cellKey: "search",
-      inputSchema: {
-        type: "object",
-        properties: {
-          query: { type: "string" },
-        },
-        required: ["query"],
-      },
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-          },
-          required: ["query"],
-        },
-      },
-    });
-
-    await withEnv("CF_CLI_NAME", "ct", async () => {
-      const result = await executePieceCallable(
-        {
-          apiUrl: "http://localhost:8000",
-          identity: "/tmp/test-identity.pem",
-          piece: "of:piece-123",
-          space: "home",
-        },
-        "search",
-        ["--help"],
-        {
-          loadManager: () => Promise.resolve(harness.manager),
-          loadPiece: () => Promise.resolve(harness.piece),
-        },
-      );
-
-      expect(result.helpText).toContain("ct piece call ... search --help");
-      expect(result.helpText).not.toContain("cf piece call ... search --help");
-    });
+    expect(result.helpText).not.toContain("ct exec");
   });
 
   it("surfaces handler transaction failures as errors", async () => {
@@ -657,7 +613,7 @@ function createPieceCallableHarness(options: {
     getSpace: () => "home",
     synced: async () => {},
     runtime: {
-      [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
+      [CT_RUNTIME_ERROR_LOG]: runtimeErrors,
       edit: () => ({
         commit: async () => {},
       }),

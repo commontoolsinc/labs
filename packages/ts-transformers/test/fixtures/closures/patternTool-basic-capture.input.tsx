@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
+import { cell, derive, pattern, patternTool, type PatternToolResult } from "commontools";
 
 const content = cell("Hello world\nGoodbye world");
 

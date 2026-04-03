@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-} from "commonfabric";
+} from "commontools";
 
 type ChannelId = "email" | "sms" | "push" | "digest";
 

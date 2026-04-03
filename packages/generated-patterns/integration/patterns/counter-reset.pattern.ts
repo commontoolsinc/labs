@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, pattern, str } from "commonfabric";
+import { Cell, Default, handler, pattern, str } from "commontools";
 
 interface ResetCounterArgs {
   value: Default<number, 0>;

@@ -1,22 +1,15 @@
 import { Command } from "@cliffy/command";
 import { executeMountedCallableFile } from "../lib/exec.ts";
-import { cliText } from "../lib/cli-name.ts";
 
 export const exec = new Command()
   .name("exec")
-  .description(
-    "Execute a mounted callable file from a Common Fabric FUSE mount.",
-  )
+  .description("Execute a mounted callable file from a ct FUSE mount.")
   .example(
-    cliText(
-      "cf exec /tmp/cf/home/pieces/notes/result/add.handler invoke --query milk",
-    ),
+    "ct exec /tmp/ct/home/pieces/notes/result/add.handler invoke --query milk",
     "Invoke a mounted handler with schema-derived flags.",
   )
   .example(
-    cliText(
-      "cf exec /tmp/cf/home/pieces/notes/result/search.tool --query milk",
-    ),
+    "ct exec /tmp/ct/home/pieces/notes/result/search.tool --query milk",
     "Run a mounted tool using its default verb.",
   )
   .stopEarly()

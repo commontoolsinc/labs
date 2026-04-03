@@ -1,10 +1,10 @@
 import { expect } from "@std/expect";
-import "@commonfabric/utils/equal-ignoring-symbols";
+import "@commontools/utils/equal-ignoring-symbols";
 import { fromFileUrl } from "@std/path";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { Identity } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commontools/js-compiler";
+import { Identity } from "@commontools/identity";
 import { StorageManager } from "../../../packages/runner/src/storage/cache.deno.ts";
-import { Runtime } from "@commonfabric/runner";
+import { Runtime } from "@commontools/runner";
 
 export interface EventSpec {
   stream: string;

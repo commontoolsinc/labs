@@ -14,7 +14,7 @@ import {
   VNode,
   wish,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import { type MentionablePiece } from "./system/backlinks-index.tsx";
 
 const sendMessage = handler<
@@ -198,41 +198,41 @@ export default pattern<ChatInput, ChatOutput>(
     const title = TitleGenerator({ model, messages });
 
     const promptInput = (
-      <cf-prompt-input
+      <ct-prompt-input
         slot="footer"
         placeholder="Ask the LLM a question..."
         pending={pending}
         $mentionable={mentionable}
         modelItems={items}
         $model={model}
-        oncf-send={sendMessage({ addMessage })}
-        oncf-stop={cancelGeneration}
+        onct-send={sendMessage({ addMessage })}
+        onct-stop={cancelGeneration}
       />
     );
 
     const chatLog = (
-      <cf-vscroll
+      <ct-vscroll
         style="padding: 1rem;"
         flex
         showScrollbar
         fadeEdges
         snapToBottom
       >
-        <cf-chat
+        <ct-chat
           theme={theme}
           $messages={messages}
           pending={pending}
         />
-      </cf-vscroll>
+      </ct-vscroll>
     );
 
     const attachmentsAndTools = (
-      <cf-hstack align="center" gap="1">
-        <cf-cell-context $cell={pinnedCells}>
-          <cf-attachments-bar pinnedCells={pinnedCells} />
-        </cf-cell-context>
-        <cf-tools-chip $tools={flattenedTools} />
-        <cf-button
+      <ct-hstack align="center" gap="1">
+        <ct-cell-context $cell={pinnedCells}>
+          <ct-attachments-bar pinnedCells={pinnedCells} />
+        </ct-cell-context>
+        <ct-tools-chip $tools={flattenedTools} />
+        <ct-button
           variant="pill"
           type="button"
           title="Clear chat"
@@ -242,23 +242,23 @@ export default pattern<ChatInput, ChatOutput>(
           })}
         >
           Clear
-        </cf-button>
-      </cf-hstack>
+        </ct-button>
+      </ct-hstack>
     );
 
     return {
       [NAME]: title,
       [UI]: (
-        <cf-screen>
-          <cf-vstack slot="header">
-            <cf-heading level={4}>{title}</cf-heading>
+        <ct-screen>
+          <ct-vstack slot="header">
+            <ct-heading level={4}>{title}</ct-heading>
             {attachmentsAndTools}
-          </cf-vstack>
+          </ct-vstack>
 
           {chatLog}
 
           {promptInput}
-        </cf-screen>
+        </ct-screen>
       ),
       messages,
       pending,

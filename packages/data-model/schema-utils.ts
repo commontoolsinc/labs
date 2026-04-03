@@ -7,7 +7,7 @@ import type {
   JSONSchemaObj,
   JSONSchemaObjMutable,
   JSONSchemaTypes,
-} from "@commonfabric/api";
+} from "@commontools/api";
 import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { cloneIfNecessary } from "./fabric-value.ts";
 import { internSchema, isInternedSchema } from "./schema-hash.ts";

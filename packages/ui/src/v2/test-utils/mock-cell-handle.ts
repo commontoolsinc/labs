@@ -20,7 +20,7 @@ import {
   type CellRef,
   type InitializedRuntimeConnection,
   type RuntimeClient,
-} from "@commonfabric/runtime-client";
+} from "@commontools/runtime-client";
 
 /** Default CellRef used when none is provided. */
 const DEFAULT_REF: CellRef = {

@@ -1,13 +1,13 @@
 /**
- * NULL ELIMINATION REPRODUCTION - Using Actual Common Fabric Types
+ * NULL ELIMINATION REPRODUCTION - Using Actual CommonTools Types
  * ===============================================================
  *
- * This uses the real OpaqueRef from commonfabric to verify the bug.
+ * This uses the real OpaqueRef from commontools to verify the bug.
  *
  * RUN: deno run -A test/fixtures/bug-repro/verify-actual.ts
  */
 
-import type { OpaqueRef, OpaqueCell } from "commonfabric";
+import type { OpaqueRef, OpaqueCell } from "commontools";
 
 // ============================================================================
 // TEST CASES

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, schema, str, UI } from "commonfabric";
+import { NAME, pattern, schema, str, UI } from "commontools";
 
 const model = schema({
   type: "object",
@@ -25,20 +25,20 @@ export default pattern(
             </p>
 
             <div style="display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
-              <cf-button>Default</cf-button>
-              <cf-button variant="secondary">Secondary</cf-button>
-              <cf-button variant="destructive">Destructive</cf-button>
-              <cf-button variant="outline">Outline</cf-button>
-              <cf-button variant="ghost">Ghost</cf-button>
-              <cf-button variant="link">Link</cf-button>
+              <ct-button>Default</ct-button>
+              <ct-button variant="secondary">Secondary</ct-button>
+              <ct-button variant="destructive">Destructive</ct-button>
+              <ct-button variant="outline">Outline</ct-button>
+              <ct-button variant="ghost">Ghost</ct-button>
+              <ct-button variant="link">Link</ct-button>
             </div>
 
             <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-              <cf-button size="sm">Small</cf-button>
-              <cf-button>Default Size</cf-button>
-              <cf-button size="lg">Large</cf-button>
-              <cf-button size="icon">🎯</cf-button>
-              <cf-button disabled>Disabled</cf-button>
+              <ct-button size="sm">Small</ct-button>
+              <ct-button>Default Size</ct-button>
+              <ct-button size="lg">Large</ct-button>
+              <ct-button size="icon">🎯</ct-button>
+              <ct-button disabled>Disabled</ct-button>
             </div>
           </section>
 
@@ -51,45 +51,45 @@ export default pattern(
 
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
               <div>
-                <cf-label for="text-input">Text Input</cf-label>
-                <cf-input
+                <ct-label for="text-input">Text Input</ct-label>
+                <ct-input
                   id="text-input"
                   type="text"
                   placeholder="Enter text..."
                 >
-                </cf-input>
+                </ct-input>
               </div>
 
               <div>
-                <cf-label for="email-input" required>Email Input</cf-label>
-                <cf-input
+                <ct-label for="email-input" required>Email Input</ct-label>
+                <ct-input
                   id="email-input"
                   type="email"
                   placeholder="you@example.com"
                 >
-                </cf-input>
+                </ct-input>
               </div>
 
               <div>
-                <cf-label for="password-input">Password Input</cf-label>
-                <cf-input
+                <ct-label for="password-input">Password Input</ct-label>
+                <ct-input
                   id="password-input"
                   type="password"
                   placeholder="Enter password..."
                 >
-                </cf-input>
+                </ct-input>
               </div>
 
               <div>
-                <cf-label for="number-input">Number Input</cf-label>
-                <cf-input
+                <ct-label for="number-input">Number Input</ct-label>
+                <ct-input
                   id="number-input"
                   type="number"
                   placeholder="0"
                   min="0"
                   max="100"
                 >
-                </cf-input>
+                </ct-input>
               </div>
             </div>
           </section>
@@ -103,24 +103,24 @@ export default pattern(
 
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">
               <div>
-                <cf-label for="basic-textarea">Basic Textarea</cf-label>
-                <cf-textarea
+                <ct-label for="basic-textarea">Basic Textarea</ct-label>
+                <ct-textarea
                   id="basic-textarea"
                   placeholder="Enter your message..."
-                  rows={4}
+                  rows="4"
                 >
-                </cf-textarea>
+                </ct-textarea>
               </div>
 
               <div>
-                <cf-label for="auto-textarea">Auto-resize Textarea</cf-label>
-                <cf-textarea
+                <ct-label for="auto-textarea">Auto-resize Textarea</ct-label>
+                <ct-textarea
                   id="auto-textarea"
                   placeholder="This grows as you type..."
                   auto-resize
-                  rows={2}
+                  rows="2"
                 >
-                </cf-textarea>
+                </ct-textarea>
               </div>
             </div>
           </section>
@@ -133,7 +133,7 @@ export default pattern(
             </p>
 
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">
-              <cf-card>
+              <ct-card>
                 <div slot="header">
                   <h3>Card Title</h3>
                   <p>Card description goes here</p>
@@ -145,16 +145,16 @@ export default pattern(
                   </p>
                 </div>
                 <div slot="footer">
-                  <cf-button size="sm">Action</cf-button>
+                  <ct-button size="sm">Action</ct-button>
                 </div>
-              </cf-card>
+              </ct-card>
 
-              <cf-card>
+              <ct-card>
                 <div slot="content">
                   <h3>Simple Card</h3>
                   <p>Cards don't require all slots to be filled.</p>
                 </div>
-              </cf-card>
+              </ct-card>
             </div>
           </section>
 
@@ -164,10 +164,10 @@ export default pattern(
             <p style="color: #64748b; margin-bottom: 1rem;">Badge variations</p>
 
             <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-              <cf-badge>Default</cf-badge>
-              <cf-badge variant="secondary">Secondary</cf-badge>
-              <cf-badge variant="destructive">Destructive</cf-badge>
-              <cf-badge variant="outline">Outline</cf-badge>
+              <ct-badge>Default</ct-badge>
+              <ct-badge variant="secondary">Secondary</ct-badge>
+              <ct-badge variant="destructive">Destructive</ct-badge>
+              <ct-badge variant="outline">Outline</ct-badge>
             </div>
           </section>
 
@@ -177,17 +177,17 @@ export default pattern(
             <p style="color: #64748b; margin-bottom: 1rem;">Alert messages</p>
 
             <div style="margin-bottom: 1rem;">
-              <cf-alert>
+              <ct-alert>
                 <strong>Default Alert</strong>{" "}
                 - This is a default alert message.
-              </cf-alert>
+              </ct-alert>
             </div>
 
             <div>
-              <cf-alert variant="destructive">
+              <ct-alert variant="destructive">
                 <strong>Destructive Alert</strong>{" "}
                 - This action cannot be undone.
-              </cf-alert>
+              </ct-alert>
             </div>
           </section>
 
@@ -197,18 +197,18 @@ export default pattern(
             <p style="color: #64748b; margin-bottom: 1rem;">Checkbox states</p>
 
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
-              <cf-checkbox id="checkbox1"></cf-checkbox>
-              <cf-label for="checkbox1">Unchecked by default</cf-label>
+              <ct-checkbox id="checkbox1"></ct-checkbox>
+              <ct-label for="checkbox1">Unchecked by default</ct-label>
             </div>
 
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
-              <cf-checkbox id="checkbox2" checked></cf-checkbox>
-              <cf-label for="checkbox2">Checked by default</cf-label>
+              <ct-checkbox id="checkbox2" checked></ct-checkbox>
+              <ct-label for="checkbox2">Checked by default</ct-label>
             </div>
 
             <div style="display: flex; align-items: center; gap: 0.5rem;">
-              <cf-checkbox id="checkbox3" disabled></cf-checkbox>
-              <cf-label for="checkbox3" disabled>Disabled checkbox</cf-label>
+              <ct-checkbox id="checkbox3" disabled></ct-checkbox>
+              <ct-label for="checkbox3" disabled>Disabled checkbox</ct-label>
             </div>
           </section>
 
@@ -218,18 +218,18 @@ export default pattern(
             <p style="color: #64748b; margin-bottom: 1rem;">Toggle switches</p>
 
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
-              <cf-switch id="switch1"></cf-switch>
-              <cf-label for="switch1">Enable notifications</cf-label>
+              <ct-switch id="switch1"></ct-switch>
+              <ct-label for="switch1">Enable notifications</ct-label>
             </div>
 
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
-              <cf-switch id="switch2" checked></cf-switch>
-              <cf-label for="switch2">Dark mode (on by default)</cf-label>
+              <ct-switch id="switch2" checked></ct-switch>
+              <ct-label for="switch2">Dark mode (on by default)</ct-label>
             </div>
 
             <div style="display: flex; align-items: center; gap: 0.5rem;">
-              <cf-switch id="switch3" disabled></cf-switch>
-              <cf-label for="switch3" disabled>Disabled switch</cf-label>
+              <ct-switch id="switch3" disabled></ct-switch>
+              <ct-label for="switch3" disabled>Disabled switch</ct-label>
             </div>
           </section>
 
@@ -239,26 +239,26 @@ export default pattern(
             <p style="color: #64748b; margin-bottom: 1rem;">Range sliders</p>
 
             <div style="margin-bottom: 1rem;">
-              <cf-label for="slider1">Volume</cf-label>
-              <cf-slider
+              <ct-label for="slider1">Volume</ct-label>
+              <ct-slider
                 id="slider1"
-                min={0}
-                max={100}
-                value={50}
+                min="0"
+                max="100"
+                value="50"
               >
-              </cf-slider>
+              </ct-slider>
             </div>
 
             <div style="margin-bottom: 1rem;">
-              <cf-label for="slider2">Temperature</cf-label>
-              <cf-slider
+              <ct-label for="slider2">Temperature</ct-label>
+              <ct-slider
                 id="slider2"
-                min={0}
-                max={30}
-                value={22}
-                step={0.5}
+                min="0"
+                max="30"
+                value="22"
+                step="0.5"
               >
-              </cf-slider>
+              </ct-slider>
             </div>
           </section>
 
@@ -270,10 +270,10 @@ export default pattern(
             </p>
 
             <div style="display: flex; flex-direction: column; gap: 1rem;">
-              <cf-progress value={0}></cf-progress>
-              <cf-progress value={33}></cf-progress>
-              <cf-progress value={66}></cf-progress>
-              <cf-progress value={100}></cf-progress>
+              <ct-progress value="0"></ct-progress>
+              <ct-progress value="33"></ct-progress>
+              <ct-progress value="66"></ct-progress>
+              <ct-progress value="100"></ct-progress>
             </div>
           </section>
 
@@ -282,28 +282,28 @@ export default pattern(
             <h2>11. Tabs Component</h2>
             <p style="color: #64748b; margin-bottom: 1rem;">Tabbed interface</p>
 
-            <cf-tabs default-value="tab1">
-              <cf-tab-list>
-                <cf-tab value="tab1">Account</cf-tab>
-                <cf-tab value="tab2">Password</cf-tab>
-                <cf-tab value="tab3">Settings</cf-tab>
-              </cf-tab-list>
+            <ct-tabs default-value="tab1">
+              <ct-tab-list>
+                <ct-tab value="tab1">Account</ct-tab>
+                <ct-tab value="tab2">Password</ct-tab>
+                <ct-tab value="tab3">Settings</ct-tab>
+              </ct-tab-list>
 
-              <cf-tab-panel value="tab1">
+              <ct-tab-panel value="tab1">
                 <h3>Account Information</h3>
                 <p>Manage your account details and preferences here.</p>
-              </cf-tab-panel>
+              </ct-tab-panel>
 
-              <cf-tab-panel value="tab2">
+              <ct-tab-panel value="tab2">
                 <h3>Password Settings</h3>
                 <p>Update your password and security settings.</p>
-              </cf-tab-panel>
+              </ct-tab-panel>
 
-              <cf-tab-panel value="tab3">
+              <ct-tab-panel value="tab3">
                 <h3>General Settings</h3>
                 <p>Configure your application preferences.</p>
-              </cf-tab-panel>
-            </cf-tabs>
+              </ct-tab-panel>
+            </ct-tabs>
           </section>
 
           {/* Accordion Component */}
@@ -313,31 +313,31 @@ export default pattern(
               Collapsible content panels
             </p>
 
-            <cf-accordion>
-              <cf-accordion-item value="item-1">
+            <ct-accordion>
+              <ct-accordion-item value="item-1">
                 <div slot="trigger">What is Common UI?</div>
                 <div slot="content">
                   Common UI is a collection of web components that follow modern
                   design principles.
                 </div>
-              </cf-accordion-item>
+              </ct-accordion-item>
 
-              <cf-accordion-item value="item-2">
+              <ct-accordion-item value="item-2">
                 <div slot="trigger">How do I use these components?</div>
                 <div slot="content">
                   Simply import the components and use them as custom HTML
                   elements in your markup.
                 </div>
-              </cf-accordion-item>
+              </ct-accordion-item>
 
-              <cf-accordion-item value="item-3">
+              <ct-accordion-item value="item-3">
                 <div slot="trigger">Are they framework agnostic?</div>
                 <div slot="content">
                   Yes! These web components work with any framework or vanilla
                   JavaScript.
                 </div>
-              </cf-accordion-item>
-            </cf-accordion>
+              </ct-accordion-item>
+            </ct-accordion>
           </section>
 
           {/* Separator Component */}
@@ -348,12 +348,12 @@ export default pattern(
             </p>
 
             <div>Content above separator</div>
-            <cf-separator></cf-separator>
+            <ct-separator></ct-separator>
             <div>Content below separator</div>
 
             <div style="display: flex; height: 100px; align-items: stretch; margin-top: 1rem;">
               <div>Left content</div>
-              <cf-separator orientation="vertical"></cf-separator>
+              <ct-separator orientation="vertical"></ct-separator>
               <div>Right content</div>
             </div>
           </section>
@@ -366,16 +366,16 @@ export default pattern(
             </p>
 
             <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
-              <cf-toggle>Bold</cf-toggle>
-              <cf-toggle pressed>Italic</cf-toggle>
-              <cf-toggle>Underline</cf-toggle>
+              <ct-toggle>Bold</ct-toggle>
+              <ct-toggle pressed>Italic</ct-toggle>
+              <ct-toggle>Underline</ct-toggle>
             </div>
 
-            <cf-toggle-group type="single">
-              <cf-toggle>Left</cf-toggle>
-              <cf-toggle>Center</cf-toggle>
-              <cf-toggle>Right</cf-toggle>
-            </cf-toggle-group>
+            <ct-toggle-group type="single">
+              <ct-toggle value="left">Left</ct-toggle>
+              <ct-toggle value="center">Center</ct-toggle>
+              <ct-toggle value="right">Right</ct-toggle>
+            </ct-toggle-group>
           </section>
 
           {/* Radio Component */}
@@ -385,20 +385,20 @@ export default pattern(
               Radio buttons with grouping
             </p>
 
-            <cf-radio-group name="options" value="option1">
+            <ct-radio-group name="options" value="option1">
               <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-                <cf-radio id="radio1" value="option1"></cf-radio>
-                <cf-label for="radio1">Option 1</cf-label>
+                <ct-radio id="radio1" value="option1"></ct-radio>
+                <ct-label for="radio1">Option 1</ct-label>
               </div>
               <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-                <cf-radio id="radio2" value="option2"></cf-radio>
-                <cf-label for="radio2">Option 2</cf-label>
+                <ct-radio id="radio2" value="option2"></ct-radio>
+                <ct-label for="radio2">Option 2</ct-label>
               </div>
               <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <cf-radio id="radio3" value="option3"></cf-radio>
-                <cf-label for="radio3">Option 3</cf-label>
+                <ct-radio id="radio3" value="option3"></ct-radio>
+                <ct-label for="radio3">Option 3</ct-label>
               </div>
-            </cf-radio-group>
+            </ct-radio-group>
           </section>
 
           {/* Collapsible Component */}
@@ -408,15 +408,15 @@ export default pattern(
               Expandable content area
             </p>
 
-            <cf-collapsible>
-              <cf-button slot="trigger" variant="outline">
+            <ct-collapsible>
+              <ct-button slot="trigger" variant="outline">
                 Toggle Content
-              </cf-button>
+              </ct-button>
               <div slot="content" style="margin-top: 1rem;">
                 <p>This content can be toggled open and closed.</p>
                 <p>It's useful for showing/hiding additional information.</p>
               </div>
-            </cf-collapsible>
+            </ct-collapsible>
           </section>
 
           {/* Skeleton Component */}
@@ -427,19 +427,19 @@ export default pattern(
             </p>
 
             <div style="display: flex; flex-direction: column; gap: 1rem;">
-              <cf-skeleton style="width: 200px; height: 20px;"></cf-skeleton>
-              <cf-skeleton style="width: 100px; height: 100px; border-radius: 50%;">
-              </cf-skeleton>
+              <ct-skeleton style="width: 200px; height: 20px;"></ct-skeleton>
+              <ct-skeleton style="width: 100px; height: 100px; border-radius: 50%;">
+              </ct-skeleton>
 
-              <cf-card>
+              <ct-card>
                 <div slot="content">
-                  <cf-skeleton style="width: 100%; height: 20px; margin-bottom: 8px;">
-                  </cf-skeleton>
-                  <cf-skeleton style="width: 80%; height: 20px; margin-bottom: 8px;">
-                  </cf-skeleton>
-                  <cf-skeleton style="width: 60%; height: 20px;"></cf-skeleton>
+                  <ct-skeleton style="width: 100%; height: 20px; margin-bottom: 8px;">
+                  </ct-skeleton>
+                  <ct-skeleton style="width: 80%; height: 20px; margin-bottom: 8px;">
+                  </ct-skeleton>
+                  <ct-skeleton style="width: 60%; height: 20px;"></ct-skeleton>
                 </div>
-              </cf-card>
+              </ct-card>
             </div>
           </section>
 
@@ -450,46 +450,46 @@ export default pattern(
               Form wrapper with validation
             </p>
 
-            <cf-form>
+            <ct-form>
               <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
                 <div>
-                  <cf-label for="form-name" required>Name</cf-label>
-                  <cf-input
+                  <ct-label for="form-name" required>Name</ct-label>
+                  <ct-input
                     id="form-name"
                     name="name"
                     type="text"
                     placeholder="John Doe"
                     required
                   >
-                  </cf-input>
+                  </ct-input>
                 </div>
 
                 <div>
-                  <cf-label for="form-email" required>Email</cf-label>
-                  <cf-input
+                  <ct-label for="form-email" required>Email</ct-label>
+                  <ct-input
                     id="form-email"
                     name="email"
                     type="email"
                     placeholder="john@example.com"
                     required
                   >
-                  </cf-input>
+                  </ct-input>
                 </div>
               </div>
 
               <div style="margin-bottom: 1rem;">
-                <cf-label for="form-message">Message</cf-label>
-                <cf-textarea
+                <ct-label for="form-message">Message</ct-label>
+                <ct-textarea
                   id="form-message"
                   name="message"
                   placeholder="Your message..."
-                  rows={4}
+                  rows="4"
                 >
-                </cf-textarea>
+                </ct-textarea>
               </div>
 
-              <cf-button type="submit">Submit Form</cf-button>
-            </cf-form>
+              <ct-button type="submit">Submit Form</ct-button>
+            </ct-form>
           </section>
 
           {/* Input OTP Component */}
@@ -500,8 +500,8 @@ export default pattern(
             </p>
 
             <div>
-              <cf-label for="otp-input">Enter verification code</cf-label>
-              <cf-input-otp id="otp-input" length={6}></cf-input-otp>
+              <ct-label for="otp-input">Enter verification code</ct-label>
+              <ct-input-otp id="otp-input" length="6"></ct-input-otp>
             </div>
           </section>
 
@@ -513,19 +513,19 @@ export default pattern(
             </p>
 
             <div style="max-width: 400px; margin-bottom: 1rem;">
-              <cf-aspect-ratio ratio="16/9">
+              <ct-aspect-ratio ratio="16/9">
                 <div style="width: 100%; height: 100%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; border-radius: 4px;">
                   16:9 Aspect Ratio
                 </div>
-              </cf-aspect-ratio>
+              </ct-aspect-ratio>
             </div>
 
             <div style="max-width: 400px;">
-              <cf-aspect-ratio ratio="1/1">
+              <ct-aspect-ratio ratio="1/1">
                 <div style="width: 100%; height: 100%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; border-radius: 4px;">
                   1:1 Square
                 </div>
-              </cf-aspect-ratio>
+              </ct-aspect-ratio>
             </div>
           </section>
 
@@ -536,7 +536,7 @@ export default pattern(
               Custom scrollable area
             </p>
 
-            <cf-scroll-area style="height: 200px; border: 1px solid #e2e8f0; border-radius: 4px;">
+            <ct-scroll-area style="height: 200px; border: 1px solid #e2e8f0; border-radius: 4px;">
               <div style="padding: 1rem;">
                 <h3>Scrollable Content</h3>
                 <p>This is a custom scroll area component.</p>
@@ -555,7 +555,7 @@ export default pattern(
                 </p>
                 <p>Esse cillum dolore eu fugiat nulla pariatur.</p>
               </div>
-            </cf-scroll-area>
+            </ct-scroll-area>
           </section>
 
           {/* Resizable Panels Component */}
@@ -566,21 +566,21 @@ export default pattern(
             </p>
 
             <div style="height: 400px; border: 1px solid #e2e8f0; border-radius: 4px; overflow: hidden;">
-              <cf-resizable-panel-group direction="horizontal">
-                <cf-resizable-panel default-size="30" min-size="20">
+              <ct-resizable-panel-group direction="horizontal">
+                <ct-resizable-panel default-size="30" min-size="20">
                   <div style="padding: 1rem; height: 100%; display: flex; align-items: center; justify-content: center; background: #f1f5f9;">
                     Left Panel (30%)
                   </div>
-                </cf-resizable-panel>
+                </ct-resizable-panel>
 
-                <cf-resizable-handle></cf-resizable-handle>
+                <ct-resizable-handle></ct-resizable-handle>
 
-                <cf-resizable-panel default-size="70" min-size="20">
+                <ct-resizable-panel default-size="70" min-size="20">
                   <div style="padding: 1rem; height: 100%; display: flex; align-items: center; justify-content: center; background: #f1f5f9;">
                     Right Panel (70%)
                   </div>
-                </cf-resizable-panel>
-              </cf-resizable-panel-group>
+                </ct-resizable-panel>
+              </ct-resizable-panel-group>
             </div>
           </section>
         </div>

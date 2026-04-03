@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, pattern, UI, NAME } from "commonfabric";
+import { computed, pattern, UI, NAME } from "commontools";
 
 // Represents a question that may or may not exist
 type Question = {

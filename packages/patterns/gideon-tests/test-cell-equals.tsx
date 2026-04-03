@@ -35,7 +35,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 
 interface Item {
   title: string;
@@ -143,10 +143,10 @@ export default pattern<TestCellEqualsInput, TestCellEqualsOutput>(
 
           {/* Controls */}
           <div style={{ marginBottom: "1rem", display: "flex", gap: "0.5rem" }}>
-            <cf-button onClick={addItem({ items })}>Add Item</cf-button>
-            <cf-button onClick={removeSelected({ items, selectedItem })}>
+            <ct-button onClick={addItem({ items })}>Add Item</ct-button>
+            <ct-button onClick={removeSelected({ items, selectedItem })}>
               Remove Selected
-            </cf-button>
+            </ct-button>
           </div>
 
           {/* Selected item display */}

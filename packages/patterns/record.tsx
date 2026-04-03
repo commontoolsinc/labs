@@ -24,7 +24,7 @@ import {
   str,
   UI,
   Writable,
-} from "commonfabric";
+} from "commontools";
 import {
   createSubPiece,
   getAddableTypes,
@@ -151,7 +151,7 @@ const initializeRecord = lift<{
   recordPatternJson,
 }) => {
   if ((currentPieces || []).length === 0) {
-    // Create Note as default module (rendered via cf-render variant="embedded")
+    // Create Note as default module (rendered via ct-render variant="embedded")
     // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
     const notesPiece = Note({ linkPattern: recordPatternJson });
 
@@ -276,7 +276,7 @@ const addSubPiece = handler<
   const nextLabel = getNextUnusedLabel(type, current);
   const initialValues = nextLabel ? { label: nextLabel } : undefined;
 
-  // Special case: create Note (rendered via cf-render variant="embedded")
+  // Special case: create Note (rendered via ct-render variant="embedded")
   // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
   // Special case: create ExtractorModule as controller with parent Cells and title
   const piece = type === "notes"
@@ -838,11 +838,11 @@ const Record = pattern<RecordInput, RecordOutput>(
     const trashExpanded = Writable.of(false);
 
     // Note editor modal state
-    // NOTE: In the future, this should use a <cf-modal> component instead of inline implementation.
-    // A cf-modal component would follow the cf-fab pattern:
-    //   <cf-modal $open={isOpen} oncf-modal-close={handleClose}>
+    // NOTE: In the future, this should use a <ct-modal> component instead of inline implementation.
+    // A ct-modal component would follow the ct-fab pattern:
+    //   <ct-modal $open={isOpen} onct-modal-close={handleClose}>
     //     <content />
-    //   </cf-modal>
+    //   </ct-modal>
     // With features: backdrop blur, escape key, focus trap, centered positioning, animations
     // IMPORTANT: Don't use Writable.of(null) - it creates a cell pointing to null, not primitive null.
     // Use Writable.of() without argument so .get() returns undefined (falsy) initially.
@@ -1073,9 +1073,9 @@ const Record = pattern<RecordInput, RecordOutput>(
     return {
       [NAME]: str`${recordIcon} ${displayNameWithAlias}`,
       [UI]: (
-        <cf-vstack style={{ height: "100%", gap: "0" }}>
+        <ct-vstack style={{ height: "100%", gap: "0" }}>
           {/* Header toolbar */}
-          <cf-hstack
+          <ct-hstack
             style={{
               padding: "8px 12px",
               gap: "8px",
@@ -1083,17 +1083,17 @@ const Record = pattern<RecordInput, RecordOutput>(
               alignItems: "center",
             }}
           >
-            <cf-input
+            <ct-input
               $value={title}
               placeholder="Record title..."
               style={{ flex: "1", fontWeight: "600", fontSize: "16px" }}
             />
             {hasTypesToAdd && (
-              <cf-select
+              <ct-select
                 $value={selectedAddType}
                 placeholder="+ Add"
                 items={addSelectItems}
-                oncf-change={addSubPiece({
+                onct-change={addSubPiece({
                   subPieces,
                   trashedSubPieces,
                   title,
@@ -1103,7 +1103,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 style={{ width: "130px" }}
               />
             )}
-          </cf-hstack>
+          </ct-hstack>
 
           {/* Main content area */}
           <div
@@ -1396,9 +1396,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                             >
                               {computed(() => {
                                 const piece = entry.piece as any;
-                                // Use embeddedUI if available, otherwise fall back to cf-render for default [UI]
+                                // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
                                 return piece?.embeddedUI ??
-                                  <cf-render $cell={entry.piece} />;
+                                  <ct-render $cell={entry.piece} />;
                               })}
                             </div>,
                             null,
@@ -1690,9 +1690,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                               >
                                 {computed(() => {
                                   const piece = entry.piece as any;
-                                  // Use embeddedUI if available, otherwise fall back to cf-render for default [UI]
+                                  // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
                                   return piece?.embeddedUI ??
-                                    <cf-render $cell={entry.piece} />;
+                                    <ct-render $cell={entry.piece} />;
                                 })}
                               </div>,
                               null,
@@ -1977,9 +1977,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                           >
                             {computed(() => {
                               const piece = entry.piece as any;
-                              // Use embeddedUI if available, otherwise fall back to cf-render for default [UI]
+                              // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
                               return piece?.embeddedUI ??
-                                <cf-render $cell={entry.piece} />;
+                                <ct-render $cell={entry.piece} />;
                             })}
                           </div>,
                           null,
@@ -2135,49 +2135,49 @@ const Record = pattern<RecordInput, RecordOutput>(
           </div>
 
           {/* Note Editor Modal */}
-          <cf-modal
+          <ct-modal
             $open={computed(() => editingNoteIndex.get() !== undefined)}
             dismissable
             size="md"
-            oncf-modal-close={closeNoteEditor({
+            onct-modal-close={closeNoteEditor({
               editingNoteIndex,
               editingNoteText,
             })}
           >
             <span slot="header">Module Note</span>
-            <cf-textarea
+            <ct-textarea
               $value={editingNoteText}
               placeholder="Add notes about this module... (visible to LLM reads)"
               rows={6}
               style={{ width: "100%", resize: "vertical" }}
             />
             {/* Keyboard shortcut for save (Cmd/Ctrl+Enter) */}
-            <cf-keybind
+            <ct-keybind
               code="Enter"
               meta
               ignore-editable={false}
-              oncf-keybind={saveNote({
+              onct-keybind={saveNote({
                 subPieces,
                 editingNoteIndex,
                 editingNoteText,
               })}
             />
-            <cf-keybind
+            <ct-keybind
               code="Enter"
               ctrl
               ignore-editable={false}
-              oncf-keybind={saveNote({
+              onct-keybind={saveNote({
                 subPieces,
                 editingNoteIndex,
                 editingNoteText,
               })}
             />
-            <cf-hstack
+            <ct-hstack
               slot="footer"
               gap="3"
               style={{ justifyContent: "flex-end" }}
             >
-              <cf-button
+              <ct-button
                 variant="ghost"
                 onClick={closeNoteEditor({
                   editingNoteIndex,
@@ -2185,8 +2185,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                 })}
               >
                 Cancel
-              </cf-button>
-              <cf-button
+              </ct-button>
+              <ct-button
                 variant="primary"
                 onClick={saveNote({
                   subPieces,
@@ -2195,35 +2195,35 @@ const Record = pattern<RecordInput, RecordOutput>(
                 })}
               >
                 Save Note
-              </cf-button>
-            </cf-hstack>
-          </cf-modal>
+              </ct-button>
+            </ct-hstack>
+          </ct-modal>
 
           {/* Settings Modal */}
-          <cf-modal
+          <ct-modal
             $open={computed(() => settingsModuleIndex.get() !== undefined)}
             dismissable
             size="md"
-            oncf-modal-close={closeSettings({ settingsModuleIndex })}
+            onct-modal-close={closeSettings({ settingsModuleIndex })}
           >
             <span slot="header">
               {settingsModuleDisplay.icon} {settingsModuleDisplay.label}{" "}
               Settings
             </span>
             {currentSettingsUI}
-            <cf-hstack
+            <ct-hstack
               slot="footer"
               gap="3"
               style={{ justifyContent: "flex-end" }}
             >
-              <cf-button
+              <ct-button
                 variant="primary"
                 onClick={closeSettings({ settingsModuleIndex })}
               >
                 Done
-              </cf-button>
-            </cf-hstack>
-          </cf-modal>
+              </ct-button>
+            </ct-hstack>
+          </ct-modal>
 
           {/* Expanded (Maximize) Module Overlay - backdrop + escape handler */}
           {ifElse(
@@ -2241,15 +2241,15 @@ const Record = pattern<RecordInput, RecordOutput>(
                 }}
               />
               {/* Escape key handler */}
-              <cf-keybind
+              <ct-keybind
                 code="Escape"
                 ignore-editable={false}
-                oncf-keybind={closeExpanded({ expandedIndex })}
+                onct-keybind={closeExpanded({ expandedIndex })}
               />
             </div>,
             null,
           )}
-        </cf-vstack>
+        </ct-vstack>
       ),
       title,
       subPieces,

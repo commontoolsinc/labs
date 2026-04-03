@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type JSONSchema, NAME, pattern, str, UI } from "commonfabric";
+import { type JSONSchema, NAME, pattern, str, UI } from "commontools";
 import TurndownService from "turndown";
 
 const Input = {

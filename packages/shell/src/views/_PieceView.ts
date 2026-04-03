@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
-import { PieceController } from "@commonfabric/piece/ops";
+import { PieceController } from "@commontools/piece/ops";
 
 export class XPieceView extends BaseView {
   static override styles = css`
@@ -13,14 +13,14 @@ export class XPieceView extends BaseView {
       min-height: 0; /* Important for flex children */
     }
 
-    cf-piece {
+    ct-piece {
       flex: 1;
       display: flex;
       flex-direction: column;
       min-height: 0;
     }
 
-    cf-render {
+    ct-render {
       flex: 1;
       display: flex;
       flex-direction: column;
@@ -42,9 +42,9 @@ export class XPieceView extends BaseView {
     const cell = this.piece.getCell();
 
     return html`
-      <cf-piece .pieceId="${this.piece.id}">
-        <cf-render .cell="${cell}"></cf-render>
-      </cf-piece>
+      <ct-piece .pieceId="${this.piece.id}">
+        <ct-render .cell="${cell}"></ct-render>
+      </ct-piece>
     `;
   }
 }

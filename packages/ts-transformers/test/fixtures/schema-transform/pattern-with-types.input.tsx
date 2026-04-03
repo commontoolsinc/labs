@@ -7,8 +7,8 @@ import {
   pattern,
   toSchema,
   UI,
-} from "commonfabric";
-import "commonfabric/schema";
+} from "commontools";
+import "commontools/schema";
 
 interface Item {
   text: Default<string, "">;
@@ -65,11 +65,11 @@ export default pattern<InputSchemaInterface, OutputSchemaInterface>(({ title, it
             <li key={index}>{item.text}</li>
           ))}
         </ul>
-        <cf-message-input
+        <ct-message-input
           name="Send"
           placeholder="Type a message..."
           appearance="rounded"
-          oncf-send={addItem({ items })}
+          onct-send={addItem({ items })}
         />
       </div>
     ),

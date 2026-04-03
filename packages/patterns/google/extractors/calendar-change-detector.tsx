@@ -15,10 +15,10 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: cf piece link google-auth/auth calendar-change-detector/overrideAuth
+ * 3. Link: ct piece link google-auth/auth calendar-change-detector/overrideAuth
  */
-import { computed, JSONSchema, NAME, pattern, UI } from "commonfabric";
-import type { Schema } from "commonfabric/schema";
+import { computed, JSONSchema, NAME, pattern, UI } from "commontools";
+import type { Schema } from "commontools/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
@@ -449,13 +449,13 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     previewUI,
 
     [UI]: (
-      <cf-screen>
+      <ct-screen>
         <div slot="header">
-          <cf-heading level={3}>Calendar Change Detector</cf-heading>
+          <ct-heading level={3}>Calendar Change Detector</ct-heading>
         </div>
 
-        <cf-vscroll flex showScrollbar>
-          <cf-vstack padding="6" gap="4">
+        <ct-vscroll flex showScrollbar>
+          <ct-vstack padding="6" gap="4">
             {/* Auth UI from GmailExtractor */}
             {extractor.ui.authStatusUI}
 
@@ -494,7 +494,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                     color: "#2563eb",
                   }}
                 >
-                  <cf-loader size="sm" />
+                  <ct-loader size="sm" />
                   <span>{computed(() => pendingCount)} analyzing...</span>
                 </div>
                 <span style={{ color: "#059669" }}>
@@ -629,7 +629,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                     Critical - Today/Tomorrow
                   </span>
                 </div>
-                <cf-vstack gap="3">
+                <ct-vstack gap="3">
                   {criticalChanges.map((change) => (
                     <div
                       style={{
@@ -702,7 +702,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                       </div>
                     </div>
                   ))}
-                </cf-vstack>
+                </ct-vstack>
               </div>
             </div>
 
@@ -742,7 +742,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                     Urgent - Within 48 Hours
                   </span>
                 </div>
-                <cf-vstack gap="3">
+                <ct-vstack gap="3">
                   {urgentChanges.map((change) => (
                     <div
                       style={{
@@ -815,7 +815,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                       </div>
                     </div>
                   ))}
-                </cf-vstack>
+                </ct-vstack>
               </div>
             </div>
 
@@ -854,7 +854,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                     Upcoming - Within 7 Days
                   </span>
                 </div>
-                <cf-vstack gap="3">
+                <ct-vstack gap="3">
                   {normalChanges.map((change) => (
                     <div
                       style={{
@@ -927,7 +927,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                       </div>
                     </div>
                   ))}
-                </cf-vstack>
+                </ct-vstack>
               </div>
             </div>
 
@@ -966,7 +966,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                   >
                     Fetched Emails:
                   </h4>
-                  <cf-vstack gap="2">
+                  <ct-vstack gap="2">
                     {extractor.emails.map((email) => (
                       <div
                         style={{
@@ -1008,7 +1008,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                         </details>
                       </div>
                     ))}
-                  </cf-vstack>
+                  </ct-vstack>
 
                   <h4
                     style={{
@@ -1021,7 +1021,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                   >
                     LLM Analysis Results:
                   </h4>
-                  <cf-vstack gap="2">
+                  <ct-vstack gap="2">
                     {emailAnalyses.map((analysis) => {
                       const debugResult = analysis.result as
                         | ScheduleChangeAnalysisResult
@@ -1063,7 +1063,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                               marginTop: "4px",
                             }}
                           >
-                            <cf-loader size="sm" />
+                            <ct-loader size="sm" />
                             <span>Analyzing...</span>
                           </div>
 
@@ -1168,13 +1168,13 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                         </div>
                       );
                     })}
-                  </cf-vstack>
+                  </ct-vstack>
                 </div>
               </details>
             </div>
-          </cf-vstack>
-        </cf-vscroll>
-      </cf-screen>
+          </ct-vstack>
+        </ct-vscroll>
+      </ct-screen>
     ),
   };
 });

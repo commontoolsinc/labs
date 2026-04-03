@@ -1,4 +1,4 @@
-import { PieceManager } from "@commonfabric/piece";
+import { PieceManager } from "@commontools/piece";
 import {
   Cell,
   type ConsoleHandler,
@@ -8,15 +8,15 @@ import {
   isStream,
   Runtime,
   Stream,
-} from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+} from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 import {
   createSession,
   type DID,
   Identity,
   Session,
-} from "@commonfabric/identity";
+} from "@commontools/identity";
 import {
   InitializationData,
   isWorkerIPCRequest,

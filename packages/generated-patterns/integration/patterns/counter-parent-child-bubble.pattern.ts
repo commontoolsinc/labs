@@ -8,7 +8,7 @@ import {
   pattern,
   str,
   type Stream,
-} from "commonfabric";
+} from "commontools";
 
 interface ParentChildBubbleArgs {
   parent: Default<number, 0>;
