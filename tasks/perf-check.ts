@@ -36,6 +36,7 @@ import {
   type MetricTimeline,
   MIN_SAMPLES,
   parseBaselineOverrides,
+  type PRInfo,
   REPO,
   STDDEV_FACTOR,
   type TimingSample,
@@ -152,12 +153,17 @@ async function main() {
   // 4. Fetch job/step metrics for baseline runs + check for baseline overrides
   const timelines = new Map<string, MetricTimeline>();
   const overridesBySha = new Map<string, BaselineOverrides>();
+  const prInfoBySha = new Map<string, PRInfo>();
 
   await mapConcurrent(baselineRuns, API_CONCURRENCY, async (run) => {
     const [jobs, pr] = await Promise.all([
       fetchJobsForRun(run.id),
       fetchPRForCommit(run.head_sha),
     ]);
+
+    if (pr) {
+      prInfoBySha.set(run.head_sha, pr);
+    }
 
     const metrics = extractMetrics(run, jobs);
     for (const [name, sample] of metrics) {
@@ -287,6 +293,28 @@ async function main() {
         fmt(f.threshold)
       } | +${f.pctIncrease.toFixed(0)}% |`,
     );
+  }
+
+  console.log("\nBaseline sample breakdown:\n");
+  for (const f of failures) {
+    const timeline = timelines.get(f.metric);
+    if (!timeline) continue;
+
+    const fmt = (v: number) => formatMetricValue(f.metric, v);
+    console.log(
+      `  ${f.metric} (n=${timeline.samples.length}, median=${
+        fmt(f.median)
+      }, threshold=${fmt(f.threshold)}):`,
+    );
+    for (const s of timeline.samples) {
+      const pr = prInfoBySha.get(s.sha);
+      const prStr = pr ? `PR #${pr.number}` : s.sha.slice(0, 8);
+      console.log(
+        `    ${fmt(s.durationSeconds)} — ${prStr} (${
+          s.createdAt.slice(0, 10)
+        })`,
+      );
+    }
   }
 
   console.log(

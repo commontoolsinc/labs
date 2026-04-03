@@ -175,12 +175,67 @@ function buildIssueBody(
   }
 
   lines.push("");
-  lines.push("### Recent values\n");
+  lines.push("### Sample breakdown\n");
+
   for (const r of regressions) {
+    const timeline = timelines.get(r.metric);
+    if (!timeline) continue;
+
+    const samples = timeline.samples;
+    if (samples.length < MIN_SAMPLES + RECENT_WINDOW) continue;
+
+    const recentSamples = samples.slice(-RECENT_WINDOW);
+    const baselineSamples = samples.slice(0, -RECENT_WINDOW);
+
     const fmt = (v: number) => formatMetricValue(r.metric, v);
+
+    lines.push(`<details>`);
     lines.push(
-      `- **${r.metric}**: ${r.recentValues.map(fmt).join(", ")}`,
+      `<summary><b>${r.metric}</b> — baseline median ${
+        fmt(r.baseline.median)
+      }, recent avg ${fmt(r.avgRecent)} (+${
+        r.pctIncrease.toFixed(0)
+      }%)</summary>\n`,
     );
+
+    lines.push(
+      `**Baseline samples** (n=${baselineSamples.length}, median=${
+        fmt(r.baseline.median)
+      }, stddev=${fmt(r.baseline.stddev)}, threshold=${
+        fmt(r.baseline.threshold)
+      })\n`,
+    );
+    lines.push("| # | Value | Commit | PR | Date |");
+    lines.push("|---|-------|--------|-----|------|");
+
+    for (let i = 0; i < baselineSamples.length; i++) {
+      const s = baselineSamples[i];
+      const pr = prInfoBySha.get(s.sha);
+      const prStr = pr ? `[#${pr.number}](${pr.html_url}) — ${pr.title}` : "—";
+      lines.push(
+        `| ${i + 1} | ${fmt(s.durationSeconds)} | \`${
+          s.sha.slice(0, 8)
+        }\` | ${prStr} | ${s.createdAt.slice(0, 10)} |`,
+      );
+    }
+
+    lines.push("");
+    lines.push(`**Recent samples** (avg=${fmt(r.avgRecent)})\n`);
+    lines.push("| # | Value | Commit | PR | Date |");
+    lines.push("|---|-------|--------|-----|------|");
+
+    for (let i = 0; i < recentSamples.length; i++) {
+      const s = recentSamples[i];
+      const pr = prInfoBySha.get(s.sha);
+      const prStr = pr ? `[#${pr.number}](${pr.html_url}) — ${pr.title}` : "—";
+      lines.push(
+        `| ${i + 1} | ${fmt(s.durationSeconds)} | \`${
+          s.sha.slice(0, 8)
+        }\` | ${prStr} | ${s.createdAt.slice(0, 10)} |`,
+      );
+    }
+
+    lines.push("\n</details>\n");
   }
 
   lines.push("");
@@ -566,6 +621,34 @@ async function main() {
           fmt(r.baseline.median)
         } (+${r.pctIncrease.toFixed(0)}%)`,
       );
+
+      // Show individual contributions
+      const timeline = timelines.get(r.metric);
+      if (timeline && timeline.samples.length >= MIN_SAMPLES + RECENT_WINDOW) {
+        const baselineSamples = timeline.samples.slice(0, -RECENT_WINDOW);
+        const recentSamples = timeline.samples.slice(-RECENT_WINDOW);
+
+        console.log(`    Baseline samples (n=${baselineSamples.length}):`);
+        for (const s of baselineSamples) {
+          const pr = prInfoBySha.get(s.sha);
+          const prStr = pr ? `PR #${pr.number}` : s.sha.slice(0, 8);
+          console.log(
+            `      ${fmt(s.durationSeconds)} — ${prStr} (${
+              s.createdAt.slice(0, 10)
+            })`,
+          );
+        }
+        console.log(`    Recent samples (n=${recentSamples.length}):`);
+        for (const s of recentSamples) {
+          const pr = prInfoBySha.get(s.sha);
+          const prStr = pr ? `PR #${pr.number}` : s.sha.slice(0, 8);
+          console.log(
+            `      ${fmt(s.durationSeconds)} — ${prStr} (${
+              s.createdAt.slice(0, 10)
+            })`,
+          );
+        }
+      }
     }
   } else {
     console.log("\nNo regressions detected.");
