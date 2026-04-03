@@ -281,7 +281,7 @@ export class Runtime {
       .filter(([_, v]) => v !== undefined)
       .map(([k, v]) => `${k}=${v}`);
     if (overrideFlags.length > 0) {
-      console.error(
+      console.log(
         `Experimental flag overrides: ${overrideFlags.join(", ")}`,
       );
     }
