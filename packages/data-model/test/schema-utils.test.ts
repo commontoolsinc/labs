@@ -760,11 +760,11 @@ describe("schemaForValueType", () => {
       });
 
       it("should return a frozen result", () => {
-        assert(isDeepFrozen(schemaForValueType(example)));
+        assert(isDeepFrozen(schemaForValueType(example)!));
       });
 
       it("should return an interned result", () => {
-        assert(isInternedSchema(schemaForValueType(example)));
+        assert(isInternedSchema(schemaForValueType(example)!));
       });
 
       it("should return the same result every time", () => {
