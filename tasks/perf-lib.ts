@@ -24,7 +24,7 @@ export const RECENT_WINDOW = 3;
 export const RECENT_THRESHOLD = 2;
 
 /** Standard deviations above the median to flag a regression. */
-export const STDDEV_FACTOR = 3;
+export const STDDEV_FACTOR = 2;
 
 /** Minimum percentage increase over median to flag a regression. */
 export const MIN_REGRESSION_PCT = 0.10;
