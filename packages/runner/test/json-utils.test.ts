@@ -39,12 +39,37 @@ describe("json-utils", () => {
   });
 
   describe("createJsonSchema", () => {
+    // Asserts that a schema and all its sub-schemas (recursively) are interned.
+    // Recurses into `.items` and `.properties` values. For `.anyOf` / `.oneOf`,
+    // recurses into each element.
+    function expectDeeplyInterned(schema: JSONSchema) {
+      expect(isInternedSchema(schema)).toBe(true);
+      if (typeof schema === "boolean") return;
+      const obj = schema as JSONSchemaObj;
+      if (obj.items !== undefined && typeof obj.items !== "boolean") {
+        expectDeeplyInterned(obj.items as JSONSchema);
+      }
+      if (obj.properties !== undefined) {
+        for (const sub of Object.values(obj.properties)) {
+          expectDeeplyInterned(sub as JSONSchema);
+        }
+      }
+      for (const key of ["anyOf", "oneOf"] as const) {
+        const arr = (obj as Record<string, unknown>)[key];
+        if (Array.isArray(arr)) {
+          for (const sub of arr) {
+            expectDeeplyInterned(sub as JSONSchema);
+          }
+        }
+      }
+    }
+
     function testSchemaForType(typeName: string, example: unknown) {
       describe(`basics for type \`${typeName}\``, () => {
         it("should create schema for direct value", () => {
           const schema = createJsonSchema(example);
           expect(schema).toEqual({ type: typeName });
-          expect(isInternedSchema(schema)).toBe(true);
+          expectDeeplyInterned(schema);
         });
 
         it("should create schema for single-element array", () => {
@@ -53,7 +78,7 @@ describe("json-utils", () => {
             type: "array",
             items: { type: typeName },
           });
-          expect(isInternedSchema(schema)).toBe(true);
+          expectDeeplyInterned(schema);
         });
 
         it("should create schema for single-property object", () => {
@@ -62,7 +87,7 @@ describe("json-utils", () => {
             type: "object",
             properties: { prop: { type: typeName } },
           });
-          expect(isInternedSchema(schema)).toBe(true);
+          expectDeeplyInterned(schema);
         });
 
         it("should set default with addDefaults", () => {
@@ -71,7 +96,7 @@ describe("json-utils", () => {
             type: typeName,
             default: example,
           });
-          expect(isInternedSchema(schema)).toBe(true);
+          expectDeeplyInterned(schema);
         });
       });
     }
@@ -86,7 +111,7 @@ describe("json-utils", () => {
       it("should create schema for direct value", () => {
         const schema = createJsonSchema(undefined);
         expect(schema).toEqual({});
-        expect(isInternedSchema(schema)).toBe(true);
+        expectDeeplyInterned(schema);
       });
 
       it("should create schema for single-element array", () => {
@@ -95,7 +120,7 @@ describe("json-utils", () => {
           type: "array",
           items: {},
         });
-        expect(isInternedSchema(schema)).toBe(true);
+        expectDeeplyInterned(schema);
       });
 
       it("should create schema for single-property object", () => {
@@ -106,14 +131,14 @@ describe("json-utils", () => {
           type: "object",
           properties: { prop: {} },
         });
-        expect(isInternedSchema(schema)).toBe(true);
+        expectDeeplyInterned(schema);
       });
 
       it("should not set default with addDefaults", () => {
         const schema = createJsonSchema(undefined, true);
         expect(schema).toEqual({});
         expect(schema).not.toHaveProperty("default");
-        expect(isInternedSchema(schema)).toBe(true);
+        expectDeeplyInterned(schema);
       });
     });
 
@@ -125,7 +150,7 @@ describe("json-utils", () => {
           type: "string",
         },
       });
-      expect(isInternedSchema(arraySchema)).toBe(true);
+      expectDeeplyInterned(arraySchema);
 
       const mixedArraySchema = createJsonSchema([{ name: "item1" }, {
         name: "item2",
@@ -153,14 +178,16 @@ describe("json-utils", () => {
           },
         } satisfies JSONSchema,
       );
-      expect(isInternedSchema(mixedArraySchema)).toBe(true);
+      expectDeeplyInterned(mixedArraySchema);
     });
 
     it("should handle single-element array", () => {
-      expect(createJsonSchema([42])).toEqual({
+      const schema = createJsonSchema([42]);
+      expect(schema).toEqual({
         type: "array",
         items: { type: "integer" },
       });
+      expectDeeplyInterned(schema);
     });
 
     it("should deduplicate mixed types with repeats in arrays", () => {
@@ -208,7 +235,7 @@ describe("json-utils", () => {
           },
         },
       });
-      expect(isInternedSchema(objectSchema)).toBe(true);
+      expectDeeplyInterned(objectSchema);
     });
 
     it("should handle empty objects and arrays", () => {
@@ -270,7 +297,7 @@ describe("json-utils", () => {
         },
       });
 
-      expect(isInternedSchema(schema)).toBe(true);
+      expectDeeplyInterned(schema);
     });
 
     it("should use cell schema when available", () => {
@@ -282,6 +309,7 @@ describe("json-utils", () => {
 
       const schema = createJsonSchema(cellWithSchema, false, runtime);
       expect(schema).toEqual({ type: "string", format: "email" });
+      expectDeeplyInterned(schema);
     });
 
     it("should analyze cell value when no schema is provided", () => {
@@ -303,7 +331,7 @@ describe("json-utils", () => {
           isActive: { type: "boolean" },
         },
       });
-      expect(isInternedSchema(schema)).toBe(true);
+      expectDeeplyInterned(schema);
     });
 
     it("should handle array cell without schema", () => {
@@ -320,6 +348,7 @@ describe("json-utils", () => {
           type: "integer",
         },
       });
+      expectDeeplyInterned(schema);
     });
 
     it("should handle nested cells with and without schema", () => {
@@ -419,6 +448,7 @@ describe("json-utils", () => {
           },
         },
       });
+      expectDeeplyInterned(schema);
     });
 
     it("should produce anyOf for arrays with different cell links", () => {
@@ -518,11 +548,13 @@ describe("json-utils", () => {
           },
         },
       });
+      expectDeeplyInterned(schema);
     });
 
     it("should handle multidimensional array of numbers", () => {
       const data = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
-      expect(createJsonSchema(data)).toEqual({
+      const schema = createJsonSchema(data);
+      expect(schema).toEqual({
         type: "array",
         items: {
           type: "array",
@@ -531,6 +563,7 @@ describe("json-utils", () => {
           },
         },
       });
+      expectDeeplyInterned(schema);
     });
 
     it("should handle nested array of strings", () => {
@@ -549,7 +582,8 @@ describe("json-utils", () => {
             "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
         }],
       };
-      expect(createJsonSchema(data)).toEqual({
+      const schema = createJsonSchema(data);
+      expect(schema).toEqual({
         "type": "object",
         "properties": {
           "recipes": {
@@ -574,6 +608,7 @@ describe("json-utils", () => {
           },
         },
       });
+      expectDeeplyInterned(schema);
     });
 
     it("should not set default on object schemas when addDefaults is true", () => {
