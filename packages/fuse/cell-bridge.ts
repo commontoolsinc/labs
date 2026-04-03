@@ -264,6 +264,8 @@ export class CellBridge {
   private pieceRoots = new Map<bigint, PieceRootInfo>();
   private piecePropRoots = new Map<bigint, PiecePropRootInfo>();
   private hydratedPieceProps = new Map<bigint, Set<"input" | "result">>();
+  /** In-flight hydration promises keyed by `${pieceIno}-${propName}`. */
+  private pendingHydrations = new Map<string, Promise<boolean>>();
   /**
    * Tracks root-level entries created by [FS] projections so they can be
    * cleared when the result switches back to the default result/ tree.
@@ -1054,27 +1056,42 @@ export class CellBridge {
     this.debugLog(`[${spaceName}] Updated ${pieceName}/${propName}`);
   }
 
-  private async hydratePieceProp(
+  private hydratePieceProp(
     pieceIno: bigint,
     propName: "input" | "result",
   ): Promise<boolean> {
     const info = this.getPieceInfo(pieceIno);
-    if (!info) return false;
-    if (this.hydratedPieceProps.get(pieceIno)?.has(propName)) return true;
+    if (!info) return Promise.resolve(false);
+    if (this.hydratedPieceProps.get(pieceIno)?.has(propName)) {
+      return Promise.resolve(true);
+    }
 
-    const cell = await info.piece[propName].getCell();
-    const newValue = await info.piece[propName].get();
-    await this.rebuildPieceProp({
-      cell,
-      newValue,
-      pieceId: info.piece.id,
-      pieceIno,
-      pieceName: info.rootName,
-      propName,
-      resolveLink: this.makeLinkResolver(info.spaceName),
-      spaceName: info.spaceName,
-    });
-    return true;
+    const key = `${pieceIno}-${propName}`;
+    const existing = this.pendingHydrations.get(key);
+    if (existing) return existing;
+
+    const promise = (async () => {
+      try {
+        const cell = await info.piece[propName].getCell();
+        const newValue = await info.piece[propName].get();
+        await this.rebuildPieceProp({
+          cell,
+          newValue,
+          pieceId: info.piece.id,
+          pieceIno,
+          pieceName: info.rootName,
+          propName,
+          resolveLink: this.makeLinkResolver(info.spaceName),
+          spaceName: info.spaceName,
+        });
+        return true;
+      } finally {
+        this.pendingHydrations.delete(key);
+      }
+    })();
+
+    this.pendingHydrations.set(key, promise);
+    return promise;
   }
 
   private invalidateRootPropCache(
@@ -1084,6 +1101,7 @@ export class CellBridge {
     if (this.tree.getNode(rootIno)?.kind !== "dir") return false;
 
     const invalidatedNames = new Set<string>([propName, `${propName}.json`]);
+    this.pendingHydrations.delete(`${rootIno}-${propName}`);
     this.markPiecePropCleared(rootIno, propName);
     const propIno = this.tree.lookup(rootIno, propName);
     if (propIno !== undefined) {
