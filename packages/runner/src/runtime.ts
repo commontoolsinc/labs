@@ -276,7 +276,7 @@ export class Runtime {
       );
     }
 
-    // Log any enabled experimental flags.
+    // Log any overridden experimental flags.
     const overrideFlags = Object.entries(this.experimental)
       .filter(([_, v]) => v !== undefined)
       .map(([k, v]) => `${k}=${v}`);
