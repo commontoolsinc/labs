@@ -266,6 +266,8 @@ export class CellBridge {
   private hydratedPieceProps = new Map<bigint, Set<"input" | "result">>();
   /** In-flight hydration promises keyed by `${pieceIno}-${propName}`. */
   private pendingHydrations = new Map<string, Promise<boolean>>();
+  /** Monotonic invalidation epoch per hydration key. */
+  private hydrationEpochs = new Map<string, number>();
   /**
    * Tracks root-level entries created by [FS] projections so they can be
    * cleared when the result switches back to the default result/ tree.
@@ -1069,8 +1071,9 @@ export class CellBridge {
     const key = `${pieceIno}-${propName}`;
     const existing = this.pendingHydrations.get(key);
     if (existing) return existing;
+    const startedEpoch = this.hydrationEpochs.get(key) ?? 0;
 
-    const promise = (async () => {
+    const promise: Promise<boolean> = (async (): Promise<boolean> => {
       try {
         const cell = await info.piece[propName].getCell();
         const newValue = await info.piece[propName].get();
@@ -1084,9 +1087,20 @@ export class CellBridge {
           resolveLink: this.makeLinkResolver(info.spaceName),
           spaceName: info.spaceName,
         });
+        const currentEpoch = this.hydrationEpochs.get(key) ?? 0;
+        const stillHydrated =
+          this.hydratedPieceProps.get(pieceIno)?.has(propName) ?? false;
+        if (currentEpoch !== startedEpoch || !stillHydrated) {
+          if (this.pendingHydrations.get(key) === promise) {
+            this.pendingHydrations.delete(key);
+          }
+          return await this.hydratePieceProp(pieceIno, propName);
+        }
         return true;
       } finally {
-        this.pendingHydrations.delete(key);
+        if (this.pendingHydrations.get(key) === promise) {
+          this.pendingHydrations.delete(key);
+        }
       }
     })();
 
@@ -1101,7 +1115,8 @@ export class CellBridge {
     if (this.tree.getNode(rootIno)?.kind !== "dir") return false;
 
     const invalidatedNames = new Set<string>([propName, `${propName}.json`]);
-    this.pendingHydrations.delete(`${rootIno}-${propName}`);
+    const key = `${rootIno}-${propName}`;
+    this.hydrationEpochs.set(key, (this.hydrationEpochs.get(key) ?? 0) + 1);
     this.markPiecePropCleared(rootIno, propName);
     const propIno = this.tree.lookup(rootIno, propName);
     if (propIno !== undefined) {

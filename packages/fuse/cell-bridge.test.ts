@@ -1274,3 +1274,78 @@ Deno.test("CellBridge.invalidateHandlerTarget clears hydrated entity result cach
     "hydrated entity result/ dir should be cleared after handler invalidation",
   );
 });
+
+Deno.test("CellBridge.invalidateWritePath does not spawn concurrent hydrations for the same prop", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  let resolveFirstGet: (() => void) | undefined;
+  const firstGetGate = new Promise<void>((resolve) => {
+    resolveFirstGet = resolve;
+  });
+  let getCalls = 0;
+  let maxConcurrentGets = 0;
+  let activeGets = 0;
+
+  const piece = {
+    id: "of:race-piece",
+    name: () => "Race Piece",
+    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () =>
+        Promise.resolve(makeCell({ content: "fresh" }, {
+          type: "object",
+          properties: { content: { type: "string" } },
+        })),
+      get: async () => {
+        getCalls++;
+        activeGets++;
+        maxConcurrentGets = Math.max(maxConcurrentGets, activeGets);
+        try {
+          if (getCalls === 2) {
+            await firstGetGate;
+          }
+          return { content: "fresh" };
+        } finally {
+          activeGets--;
+        }
+      },
+    },
+  };
+
+  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace.bind(bridge);
+  await addPiece(state, piece, "home");
+
+  const pieceIno = tree.lookup(state.piecesIno, "Race-Piece")!;
+  const firstHydration = (bridge as unknown as {
+    hydratePieceProp: HydratePieceProp;
+  }).hydratePieceProp.call(bridge, pieceIno, "result");
+
+  await Promise.resolve();
+  bridge.invalidateWritePath({
+    spaceName: "home",
+    pieceName: "Race-Piece",
+    cell: "result",
+    jsonPath: ["content"],
+    isJsonFile: false,
+    piece: piece as unknown as WritePath["piece"],
+  });
+  const secondHydration = (bridge as unknown as {
+    hydratePieceProp: HydratePieceProp;
+  }).hydratePieceProp.call(bridge, pieceIno, "result");
+
+  if (resolveFirstGet) resolveFirstGet();
+  await Promise.all([firstHydration, secondHydration]);
+
+  assertEquals(maxConcurrentGets, 1);
+  assertEquals(getCalls >= 2, true);
+  const resultIno = tree.lookup(pieceIno, "result");
+  assertEquals(resultIno !== undefined, true);
+  assertEquals(getFileContent(tree, resultIno!, "content"), "fresh");
+});
