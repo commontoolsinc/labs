@@ -283,7 +283,7 @@ function itemsSchemaFromArray(
       // TODO(danfuzz): I think it's safe to return `true` here. (See longer
       // related comment above.)
       // TODO(seefeld): should be `true` in this case.
-      return {};
+      return emptySchemaObject();
     }
     case 1: {
       return analyzeType(value[0], state);
