@@ -16,7 +16,13 @@ export function absPath(relpath: string, cwd = Deno.cwd()): string {
  * (felt.config.ts) so all three share one source of truth.
  */
 export function experimentalOptionsFromEnv(): ExperimentalOptions {
-  const read = (name: string) => Deno.env.get(name) === "true";
+  /**
+   * Results in `true` (on), `false` (off), or `undefined` (default).
+   */
+  const read = (name: string): boolean | undefined => {
+    const v = Deno.env.get(name);
+    return v === undefined ? undefined : v === "true";
+  };
   const opts: ExperimentalOptions = {
     modernDataModel: read("EXPERIMENTAL_MODERN_DATA_MODEL"),
     unifiedJsonEncoding: read("EXPERIMENTAL_UNIFIED_JSON_ENCODING"),
