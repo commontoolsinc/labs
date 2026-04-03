@@ -14,6 +14,12 @@ import {
   trimRange,
   tryParseCallExpression,
 } from "./compiled-js-parser.ts";
+import {
+  isIdentifierStartCode,
+  isSimpleIdentifierText,
+  readIdentifierEnd,
+  startsWithStatementWord,
+} from "./compiled-js-identifiers.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ModuleVerificationError } from "./module-verification-error.ts";
 import {
@@ -48,7 +54,6 @@ const CANONICAL_HARDENING_HELPER = stripJsTrivia(
   createFunctionHardeningHelperSource(),
 );
 
-const SIMPLE_IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
 const RESERVED_FACTORY_BINDING_SET = new Set<string>(RESERVED_FACTORY_BINDINGS);
 const CANONICAL_FACTORY_GUARD_STATEMENTS = createFactoryShadowGuardSource().map(
   (statement) => stripJsTrivia(statement),
@@ -1178,7 +1183,7 @@ function parseVariableDeclarators(
       }
       const nameRange = trimRange(source, range.start, equals);
       const name = source.slice(nameRange.start, nameRange.end);
-      if (!SIMPLE_IDENTIFIER_RE.test(name)) {
+      if (!isSimpleIdentifierText(name)) {
         throw new CompiledJsParseError(
           nameRange.start,
           "Top-level declarations must bind simple identifiers",
@@ -1442,20 +1447,6 @@ function getVariableStatementKindFromRange(
   return undefined;
 }
 
-function startsWithStatementWord(
-  source: string,
-  start: number,
-  end: number,
-  word: string,
-): boolean {
-  if (!source.startsWith(word, start)) {
-    return false;
-  }
-
-  const next = source.charCodeAt(start + word.length);
-  return start + word.length >= end || !isIdentifierPartCode(next);
-}
-
 function skipInlineWhitespace(
   source: string,
   start: number,
@@ -1474,38 +1465,6 @@ function skipInlineWhitespace(
     break;
   }
   return cursor;
-}
-
-function readIdentifierEnd(
-  source: string,
-  start: number,
-  end: number,
-): number | undefined {
-  if (start >= end) {
-    return undefined;
-  }
-
-  const first = source.charCodeAt(start);
-  if (
-    !(first === 36 || first === 95 ||
-      (first >= 65 && first <= 90) ||
-      (first >= 97 && first <= 122))
-  ) {
-    return undefined;
-  }
-
-  let cursor = start + 1;
-  while (cursor < end && isIdentifierPartCode(source.charCodeAt(cursor))) {
-    cursor++;
-  }
-  return cursor;
-}
-
-function isIdentifierPartCode(charCode: number): boolean {
-  return charCode === 36 || charCode === 95 ||
-    (charCode >= 48 && charCode <= 57) ||
-    (charCode >= 65 && charCode <= 90) ||
-    (charCode >= 97 && charCode <= 122);
 }
 
 function isPrimitiveLikeExpression(normalized: string): boolean {
@@ -1561,7 +1520,7 @@ function parseNormalizedCallReference(
 function parseNormalizedMemberReference(
   normalized: string,
 ): { root: string; property?: string; properties: string[] } | undefined {
-  const rootEnd = readSimpleIdentifierEnd(normalized, 0);
+  const rootEnd = readIdentifierEnd(normalized, 0, normalized.length);
   if (rootEnd === undefined) {
     return undefined;
   }
@@ -1576,7 +1535,11 @@ function parseNormalizedMemberReference(
     const char = normalized[cursor];
     if (char === ".") {
       const propertyStart = cursor + 1;
-      const propertyEnd = readSimpleIdentifierEnd(normalized, propertyStart);
+      const propertyEnd = readIdentifierEnd(
+        normalized,
+        propertyStart,
+        normalized.length,
+      );
       if (propertyEnd === undefined) {
         return undefined;
       }
@@ -1618,50 +1581,6 @@ function parseNormalizedMemberReference(
   }
 
   return { root, property, properties };
-}
-
-function isSimpleIdentifierText(source: string): boolean {
-  return readSimpleIdentifierEnd(source, 0) === source.length;
-}
-
-function isIdentifierStartCode(charCode: number): boolean {
-  return charCode === 36 || charCode === 95 ||
-    (charCode >= 65 && charCode <= 90) ||
-    (charCode >= 97 && charCode <= 122);
-}
-
-function readSimpleIdentifierEnd(
-  source: string,
-  start: number,
-): number | undefined {
-  if (start >= source.length) {
-    return undefined;
-  }
-
-  const firstCode = source.charCodeAt(start);
-  if (
-    !(firstCode === 36 || firstCode === 95 ||
-      (firstCode >= 65 && firstCode <= 90) ||
-      (firstCode >= 97 && firstCode <= 122))
-  ) {
-    return undefined;
-  }
-
-  let cursor = start + 1;
-  while (cursor < source.length) {
-    const charCode = source.charCodeAt(cursor);
-    if (
-      charCode === 36 || charCode === 95 ||
-      (charCode >= 48 && charCode <= 57) ||
-      (charCode >= 65 && charCode <= 90) ||
-      (charCode >= 97 && charCode <= 122)
-    ) {
-      cursor++;
-      continue;
-    }
-    break;
-  }
-  return cursor;
 }
 
 function isNoSubstitutionTemplateLiteral(normalized: string): boolean {

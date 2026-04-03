@@ -1,36 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { getAMDLoader } from "../../js-compiler/typescript/bundler/amd-loader.ts";
 import { parseCompiledBundleSource } from "../src/sandbox/compiled-js-parser.ts";
 import {
   preflightCompiledBundle,
   preflightParsedCompiledBundle,
 } from "../src/sandbox/bundle-preflight.ts";
-
-const LOADER_SOURCE = getAMDLoader.toString();
-
-function bundleWithCanonicalLoader(body: string): string {
-  return `
-((runtimeDeps = {}) => {
-  const { define, require } = (${LOADER_SOURCE})();
-${body}
-});
-`;
-}
-
-function bundleWithHookedLoader(body: string): string {
-  return `
-((runtimeDeps = {}) => {
-  const __ctAmdHooks = runtimeDeps.__ctAmdHooks ?? {};
-  const { define, require } = (${LOADER_SOURCE})(__ctAmdHooks);
-  for (const [name, dep] of Object.entries(runtimeDeps)) {
-    if (name === "__ctAmdHooks") continue;
-    define(name, ["exports"], exports => Object.assign(exports, dep));
-  }
-${body}
-});
-`;
-}
+import {
+  bundleWithCanonicalLoader,
+  bundleWithHookedLoader,
+} from "./support/amd-bundles.ts";
 
 describe("preflightCompiledBundle()", () => {
   it("accepts a define-only AMD bundle shell", () => {

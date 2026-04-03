@@ -1,6 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createFactoryShadowGuardSource } from "@commontools/utils/sandbox-contract";
 import {
   parseCompiledBundleSource as parseCompiledBundleSourceRaw,
 } from "../src/sandbox/compiled-js-parser.ts";
@@ -10,17 +9,7 @@ import {
   verifyParsedCompiledBundleModuleFactoriesWithParser
     as verifyParsedCompiledBundleModuleFactoriesWithParserRaw,
 } from "../src/sandbox/compiled-bundle-verifier.ts";
-
-const FACTORY_SHADOW_GUARD = createFactoryShadowGuardSource().map((statement) =>
-  `    ${statement}`
-).join("\n");
-
-function withFactoryGuards(bundle: string): string {
-  return bundle.replaceAll(
-    /(define\([^]*?function\s*\([^)]*\)\s*\{\n\s*"use strict";\n)(?!\s*const define = undefined;)/g,
-    `$1${FACTORY_SHADOW_GUARD}\n`,
-  );
-}
+import { withFactoryGuards } from "./support/amd-bundles.ts";
 
 function parseCompiledBundleSource(bundle: string) {
   return parseCompiledBundleSourceRaw(withFactoryGuards(bundle));

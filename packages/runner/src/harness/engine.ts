@@ -27,7 +27,6 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
 import { pretransformProgram } from "./pretransform.ts";
 import { popFrame, pushFrame } from "../builder/pattern.ts";
-import { isPattern, unsafe_verifiedLoadId } from "../builder/types.ts";
 import {
   ensureSESLockdown,
   getRuntimeModuleExports,
@@ -40,20 +39,10 @@ import {
   createModuleCompartmentGlobals,
   createSafeConsoleGlobal,
 } from "../sandbox/compartment-globals.ts";
-import {
-  hardenVerifiedFunction,
-  setVerifiedFunctionRegistrar,
-} from "../sandbox/function-hardening.ts";
+import { setVerifiedFunctionRegistrar } from "../sandbox/function-hardening.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
-import {
-  BundlePreflightError,
-  preflightParsedCompiledBundle,
-} from "../sandbox/bundle-preflight.ts";
-import {
-  CompiledJsParseError,
-  parseCompiledBundleSource,
-} from "../sandbox/compiled-js-parser.ts";
-import { verifyParsedCompiledBundleModuleFactoriesWithParser } from "../sandbox/compiled-bundle-verifier.ts";
+import { ExecutableRegistry } from "./executable-registry.ts";
+import { CompiledBundleValidator } from "../sandbox/compiled-bundle-validation.ts";
 
 const INJECTED_SCRIPT = "const console = globalThis.console;";
 const logger = getLogger("engine");
@@ -114,29 +103,10 @@ export class Engine extends EventTarget implements Harness {
   private internals: Internals | undefined;
   private ctRuntime: Runtime;
   private sesRuntime: SESRuntime | undefined;
-  private verifiedBundleHashes = new Set<string>();
-  private readonly loadIds = new WeakMap<JsScript, string>();
+  private loadIds = new WeakMap<JsScript, string>();
   private nextLoadId = 0;
-  private readonly verifiedFunctions = new Map<
-    string,
-    Map<string, HarnessedFunction>
-  >();
-  private readonly verifiedFunctionIndex = new Map<string, HarnessedFunction>();
-  private readonly verifiedFunctionLoadIds = new Map<string, string>();
-  private readonly verifiedPatternFunctions = new Map<
-    string,
-    Map<string, HarnessedFunction>
-  >();
-  private readonly verifiedPatternLoadIds = new Map<string, string>();
-  private readonly trustedHostFunctionIndex = new Map<
-    string,
-    HarnessedFunction
-  >();
-  private readonly trustedHostFunctionRefs = new WeakMap<
-    HarnessedFunction,
-    string
-  >();
-  private nextTrustedHostFunctionId = 0;
+  private readonly bundleValidator = new CompiledBundleValidator();
+  private readonly executableRegistry = new ExecutableRegistry();
   private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
 
   constructor(ctRuntime: Runtime) {
@@ -214,7 +184,7 @@ export class Engine extends EventTarget implements Harness {
         logger.timeEnd("compile", "typescript");
       }
 
-      this.verifyCompiledBundle(jsScript, filename);
+      this.bundleValidator.verify(jsScript, filename);
 
       return { id, jsScript };
     } finally {
@@ -234,21 +204,15 @@ export class Engine extends EventTarget implements Harness {
   > {
     logger.timeStart("evaluate");
     try {
-      this.verifyCompiledBundle(jsScript, `${id}.js`);
+      this.bundleValidator.verify(jsScript, `${id}.js`);
       const { runtime, runtimeExports, exportsCallback } = await this
         .getInternals();
       const loadId = this.getLoadId(id, jsScript);
-      this.resetVerifiedFunctions(loadId);
+      this.executableRegistry.beginVerifiedLoad(loadId);
       const isolate = runtime.getIsolate(loadId);
       const runtimeDeps = this.createRuntimeDeps(runtimeExports ?? {});
       const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
-        (implementationRef, implementation) => {
-          this.registerVerifiedFunction(
-            loadId,
-            implementationRef,
-            implementation as HarnessedFunction,
-          );
-        },
+        this.executableRegistry.createVerifiedFunctionRegistrar(loadId),
       );
       const sourceLocationFrame = pushFrame({
         runtime: this.ctRuntime,
@@ -272,10 +236,8 @@ export class Engine extends EventTarget implements Harness {
       ) {
         const main = result.main as Exports;
         const exportMap = result.exportMap as Record<string, Exports>;
-        this.recordVerifiedFunctions(loadId, main);
-        this.recordVerifiedFunctions(loadId, exportMap);
-        this.annotateVerifiedPatterns(main, loadId);
-        this.annotateVerifiedPatterns(exportMap, loadId);
+        this.executableRegistry.captureVerifiedValue(loadId, main);
+        this.executableRegistry.captureVerifiedValue(loadId, exportMap);
 
         // Create a map from exported values to `RuntimeProgram` that can
         // generate them and pass to the callback from the exports.
@@ -330,99 +292,62 @@ export class Engine extends EventTarget implements Harness {
     implementationRef: string,
     implementation: HarnessedFunction,
   ): void {
-    let registry = this.verifiedFunctions.get(loadId);
-    if (!registry) {
-      registry = new Map();
-      this.verifiedFunctions.set(loadId, registry);
-    }
-    registry.set(implementationRef, implementation);
-    this.verifiedFunctionIndex.set(implementationRef, implementation);
-    this.verifiedFunctionLoadIds.set(implementationRef, loadId);
+    this.executableRegistry.registerVerifiedFunction(
+      loadId,
+      implementationRef,
+      implementation,
+    );
   }
 
   getVerifiedFunction(
     implementationRef: string,
     patternId?: string,
   ): HarnessedFunction | undefined {
-    if (patternId) {
-      const registry = this.verifiedPatternFunctions.get(patternId);
-      if (registry?.has(implementationRef)) {
-        return registry.get(implementationRef);
-      }
-    }
-    return this.verifiedFunctionIndex.get(implementationRef);
+    return this.executableRegistry.getVerifiedFunction(
+      implementationRef,
+      patternId,
+    );
   }
 
   getVerifiedFunctionInLoad(
     loadId: string,
     implementationRef: string,
   ): HarnessedFunction | undefined {
-    return this.verifiedFunctions.get(loadId)?.get(implementationRef);
+    return this.executableRegistry.getVerifiedFunctionInLoad(
+      loadId,
+      implementationRef,
+    );
   }
 
   getVerifiedLoadId(
     implementationRef: string,
     patternId?: string,
   ): string | undefined {
-    return this.verifiedFunctionLoadIds.get(implementationRef) ??
-      (patternId ? this.verifiedPatternLoadIds.get(patternId) : undefined);
-  }
-
-  getTrustedHostFunction(
-    implementationRef: string,
-  ): HarnessedFunction | undefined {
-    return this.trustedHostFunctionIndex.get(implementationRef);
+    return this.executableRegistry.getVerifiedLoadId(
+      implementationRef,
+      patternId,
+    );
   }
 
   getExecutableFunction(
     implementationRef: string,
     patternId?: string,
   ): HarnessedFunction | undefined {
-    return this.getVerifiedFunction(implementationRef, patternId) ??
-      this.getTrustedHostFunction(implementationRef);
+    return this.executableRegistry.getExecutableFunction(
+      implementationRef,
+      patternId,
+    );
   }
 
   associatePattern(patternId: string, value: unknown, loadId?: string): void {
-    const registry = new Map<string, HarnessedFunction>();
-    this.collectAssociatedFunctions(
-      value,
-      registry,
-      new Set(),
-      (implementationRef) => this.getVerifiedFunction(implementationRef),
-    );
-    this.verifiedPatternFunctions.set(patternId, registry);
-    if (loadId) {
-      for (const [implementationRef, implementation] of registry) {
-        this.registerVerifiedFunction(
-          loadId,
-          implementationRef,
-          implementation,
-        );
-      }
-      this.verifiedPatternLoadIds.set(patternId, loadId);
-    }
+    this.executableRegistry.associatePattern(patternId, value, loadId);
   }
 
   unsafeTrustHostValue(
     value: unknown,
     options: UnsafeHostTrustOptions,
   ): void {
-    if (
-      typeof options.reason !== "string" || options.reason.trim().length === 0
-    ) {
-      throw new Error("unsafe host trust requires a non-empty reason");
-    }
-    const registry = new Map<string, HarnessedFunction>();
-    this.collectAssociatedFunctions(
-      value,
-      registry,
-      new Set(),
-      undefined,
-      true,
-    );
-    for (const [implementationRef, implementation] of registry) {
-      this.trustedHostFunctionIndex.set(implementationRef, implementation);
-    }
+    this.executableRegistry.trustHostValue(value, options);
   }
 
   // Map a single position to its original source location.
@@ -475,13 +400,10 @@ export class Engine extends EventTarget implements Harness {
     }
     this.sesRuntime = undefined;
     this.internals = undefined;
-    this.verifiedFunctions.clear();
-    this.verifiedFunctionIndex.clear();
-    this.verifiedFunctionLoadIds.clear();
-    this.verifiedPatternFunctions.clear();
-    this.verifiedPatternLoadIds.clear();
-    this.trustedHostFunctionIndex.clear();
-    this.verifiedBundleHashes.clear();
+    this.loadIds = new WeakMap();
+    this.nextLoadId = 0;
+    this.executableRegistry.clear();
+    this.bundleValidator.clear();
   }
 
   private getSESRuntime(): SESRuntime {
@@ -495,53 +417,6 @@ export class Engine extends EventTarget implements Harness {
       });
     }
     return this.sesRuntime;
-  }
-
-  private verifyCompiledBundle(jsScript: JsScript, fallbackFilename: string) {
-    const bundleHash = hashOf(jsScript.js).toString();
-    if (this.verifiedBundleHashes.has(bundleHash)) {
-      return;
-    }
-
-    const filename = jsScript.filename ?? fallbackFilename;
-    logger.timeStart("verifyCompiledBundle");
-    try {
-      logger.timeStart("verifyCompiledBundle", "parseBundle");
-      const parsedBundle = (() => {
-        try {
-          return parseCompiledBundleSource(jsScript.js);
-        } catch (error) {
-          if (error instanceof CompiledJsParseError) {
-            throw new BundlePreflightError(`${filename}: ${error.message}`);
-          }
-          throw error;
-        } finally {
-          logger.timeEnd("verifyCompiledBundle", "parseBundle");
-        }
-      })();
-
-      logger.timeStart("verifyCompiledBundle", "preflight");
-      try {
-        preflightParsedCompiledBundle(jsScript.js, parsedBundle, filename);
-      } finally {
-        logger.timeEnd("verifyCompiledBundle", "preflight");
-      }
-
-      logger.timeStart("verifyCompiledBundle", "moduleFactories");
-      try {
-        verifyParsedCompiledBundleModuleFactoriesWithParser(
-          jsScript.js,
-          parsedBundle,
-          filename,
-        );
-      } finally {
-        logger.timeEnd("verifyCompiledBundle", "moduleFactories");
-      }
-
-      this.verifiedBundleHashes.add(bundleHash);
-    } finally {
-      logger.timeEnd("verifyCompiledBundle");
-    }
   }
 
   private getLoadId(compileId: string, jsScript: JsScript): string {
@@ -573,271 +448,6 @@ export class Engine extends EventTarget implements Harness {
         },
       }),
     });
-  }
-
-  private recordVerifiedFunctions(
-    loadId: string,
-    value: unknown,
-    seen = new Set<unknown>(),
-  ): void {
-    if (!value || (typeof value !== "object" && typeof value !== "function")) {
-      return;
-    }
-    if (seen.has(value)) {
-      return;
-    }
-    seen.add(value);
-
-    if (
-      value !== null &&
-      (typeof value === "object" || typeof value === "function") &&
-      "implementationRef" in (value as Record<string, unknown>) &&
-      typeof (value as Record<string, unknown>).implementationRef ===
-        "string" &&
-      "implementation" in (value as Record<string, unknown>) &&
-      typeof (value as Record<string, unknown>).implementation === "function"
-    ) {
-      let registry = this.verifiedFunctions.get(loadId);
-      if (!registry) {
-        registry = new Map();
-        this.verifiedFunctions.set(loadId, registry);
-      }
-      const implementationRef = (value as Record<string, unknown>)
-        .implementationRef as string;
-      const implementation = (value as Record<string, unknown>)
-        .implementation as HarnessedFunction;
-      registry.set(implementationRef, implementation);
-      this.verifiedFunctionIndex.set(implementationRef, implementation);
-      this.verifiedFunctionLoadIds.set(implementationRef, loadId);
-    }
-
-    if (
-      typeof value === "function" &&
-      typeof (value as { implementation?: unknown }).implementation !==
-        "function"
-    ) {
-      const implementationRef = (value as { implementationRef?: string })
-        .implementationRef;
-      if (implementationRef) {
-        let registry = this.verifiedFunctions.get(loadId);
-        if (!registry) {
-          registry = new Map();
-          this.verifiedFunctions.set(loadId, registry);
-        }
-        registry.set(implementationRef, value as HarnessedFunction);
-        this.verifiedFunctionIndex.set(
-          implementationRef,
-          value as HarnessedFunction,
-        );
-        this.verifiedFunctionLoadIds.set(implementationRef, loadId);
-      }
-    }
-
-    for (const key of Reflect.ownKeys(value as object)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
-      if (!descriptor || !("value" in descriptor)) {
-        continue;
-      }
-      this.recordVerifiedFunctions(loadId, descriptor.value, seen);
-    }
-  }
-
-  private annotateVerifiedPatterns(
-    value: unknown,
-    loadId: string,
-    seen = new Set<unknown>(),
-  ): void {
-    if (!value || (typeof value !== "object" && typeof value !== "function")) {
-      return;
-    }
-    if (seen.has(value)) {
-      return;
-    }
-    seen.add(value);
-
-    if (isPattern(value) && Object.isExtensible(value)) {
-      Object.defineProperty(value, unsafe_verifiedLoadId, {
-        value: loadId,
-        configurable: true,
-      });
-    }
-
-    for (const key of Reflect.ownKeys(value as object)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
-      if (!descriptor || !("value" in descriptor)) {
-        continue;
-      }
-      this.annotateVerifiedPatterns(descriptor.value, loadId, seen);
-    }
-  }
-
-  private resetVerifiedFunctions(loadId: string): void {
-    const existing = this.verifiedFunctions.get(loadId);
-    if (existing) {
-      for (const implementationRef of existing.keys()) {
-        const replacement = this.findVerifiedFunctionInOtherLoads(
-          loadId,
-          implementationRef,
-        );
-        if (replacement) {
-          this.verifiedFunctionIndex.set(
-            implementationRef,
-            replacement.implementation,
-          );
-          this.verifiedFunctionLoadIds.set(
-            implementationRef,
-            replacement.loadId,
-          );
-        } else {
-          this.verifiedFunctionIndex.delete(implementationRef);
-          this.verifiedFunctionLoadIds.delete(implementationRef);
-        }
-      }
-    }
-    this.verifiedFunctions.set(loadId, new Map());
-  }
-
-  private findVerifiedFunctionInOtherLoads(
-    loadId: string,
-    implementationRef: string,
-  ): { implementation: HarnessedFunction; loadId: string } | undefined {
-    let replacement:
-      | { implementation: HarnessedFunction; loadId: string }
-      | undefined;
-    for (const [otherLoadId, registry] of this.verifiedFunctions) {
-      if (otherLoadId === loadId) {
-        continue;
-      }
-      const candidate = registry.get(implementationRef);
-      if (candidate) {
-        replacement = {
-          implementation: candidate,
-          loadId: otherLoadId,
-        };
-      }
-    }
-    return replacement;
-  }
-
-  private collectAssociatedFunctions(
-    value: unknown,
-    registry: Map<string, HarnessedFunction>,
-    seen: Set<unknown>,
-    fallbackLookup?: (
-      implementationRef: string,
-    ) => HarnessedFunction | undefined,
-    allowMintMissingRefs = false,
-  ): void {
-    if (!value || (typeof value !== "object" && typeof value !== "function")) {
-      return;
-    }
-    if (seen.has(value)) {
-      return;
-    }
-    seen.add(value);
-
-    const associated = this.extractAssociatedFunction(
-      value,
-      fallbackLookup,
-      allowMintMissingRefs,
-    );
-    if (associated) {
-      registry.set(associated.implementationRef, associated.implementation);
-    }
-
-    for (const key of Reflect.ownKeys(value as object)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
-      if (!descriptor || !("value" in descriptor)) {
-        continue;
-      }
-      this.collectAssociatedFunctions(
-        descriptor.value,
-        registry,
-        seen,
-        fallbackLookup,
-        allowMintMissingRefs,
-      );
-    }
-  }
-
-  private extractAssociatedFunction(
-    value: unknown,
-    fallbackLookup?: (
-      implementationRef: string,
-    ) => HarnessedFunction | undefined,
-    allowMintMissingRefs = false,
-  ): { implementationRef: string; implementation: HarnessedFunction } | null {
-    const record = value as {
-      implementationRef?: string;
-      implementation?: unknown;
-    };
-    if (typeof record.implementation === "function") {
-      const implementation = record.implementation as HarnessedFunction;
-      const implementationRef = typeof record.implementationRef === "string"
-        ? record.implementationRef
-        : allowMintMissingRefs
-        ? this.ensureTrustedHostImplementationRef(implementation)
-        : undefined;
-      if (!implementationRef) {
-        return null;
-      }
-      record.implementationRef ??= implementationRef;
-      return {
-        implementationRef,
-        implementation,
-      };
-    }
-    if (typeof value === "function") {
-      const implementation = value as HarnessedFunction;
-      const implementationRef = allowMintMissingRefs
-        ? this.ensureTrustedHostImplementationRef(implementation)
-        : (value as { implementationRef?: string }).implementationRef;
-      return implementationRef
-        ? {
-          implementationRef,
-          implementation,
-        }
-        : null;
-    }
-    if (typeof record.implementationRef !== "string") {
-      return null;
-    }
-
-    const rebound = fallbackLookup?.(record.implementationRef);
-    return rebound
-      ? { implementationRef: record.implementationRef, implementation: rebound }
-      : null;
-  }
-
-  private ensureTrustedHostImplementationRef(
-    implementation: HarnessedFunction,
-  ): string {
-    const existing = this.trustedHostFunctionRefs.get(implementation) ??
-      (typeof (implementation as { implementationRef?: string })
-          .implementationRef ===
-          "string"
-        ? (implementation as { implementationRef?: string }).implementationRef
-        : undefined);
-    if (existing) {
-      hardenVerifiedFunction(implementation as (...args: any[]) => unknown);
-      return existing;
-    }
-
-    const implementationRef = `unsafe-host:${this.nextTrustedHostFunctionId++}`;
-    this.trustedHostFunctionRefs.set(implementation, implementationRef);
-    if (
-      Object.isExtensible(implementation) &&
-      typeof (implementation as { implementationRef?: string })
-          .implementationRef !==
-        "string"
-    ) {
-      Object.defineProperty(implementation, "implementationRef", {
-        value: implementationRef,
-        configurable: true,
-      });
-    }
-    hardenVerifiedFunction(implementation as (...args: any[]) => unknown);
-    return implementationRef;
   }
 }
 

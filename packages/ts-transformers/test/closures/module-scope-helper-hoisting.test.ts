@@ -1,4 +1,4 @@
-import { assert, assertMatch } from "@std/assert";
+import { assert, assertMatch, assertNotMatch } from "@std/assert";
 import { StaticCacheFS } from "@commontools/static";
 import { transformSource } from "../utils.ts";
 
@@ -46,7 +46,35 @@ Deno.test("Closure Transformer hoists nested derive callbacks that close over mo
   assertMatch(
     normalized,
     new RegExp(
-      `derive\\(\\{ dateStr \\}, ${hoistedName}\\)`,
+      `derive\\(.*\\{ dateStr \\}, ${hoistedName}\\)`,
     ),
+  );
+});
+
+Deno.test("Closure Transformer does not hoist nested handler callbacks that also capture factory parameters", async () => {
+  const source = `/// <cts-enable />
+    import { handler } from "commontools";
+
+    const normalize = (value: string) => value.trim();
+
+    export const makeHandler = (allowed: string[]) =>
+      handler((event: { status?: string } | undefined) => {
+        const status = normalize(event?.status ?? "");
+        if (!allowed.includes(status)) {
+          return;
+        }
+      });
+`;
+
+  const output = await transformSource(source, options);
+  const normalized = output.replace(/\s+/g, " ");
+
+  assertNotMatch(
+    normalized,
+    /const \S+ = __ctHardenFn\(\(event: \{ status\?: string \} \| undefined\) =>/,
+  );
+  assertMatch(
+    normalized,
+    /const makeHandler = .*handler\(.*\(event: \{ status\?: string; \} \| undefined\) => \{.*allowed\.includes\(status\)/,
   );
 });

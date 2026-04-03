@@ -843,10 +843,18 @@ describe("moduleToJSON", () => {
 
   it("does not stringify verified compiled callbacks after standalone-engine registration", async () => {
     const compileEngine = new Engine(runtime);
+    const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
+      /\/$/,
+      "",
+    );
+    const sourcePath = new URL(
+      "../../patterns/factory-outputs/parking-coordinator/main.test.tsx",
+      import.meta.url,
+    ).pathname;
     const program = await compileEngine.resolve(
       new FileSystemProgramResolver(
-        "packages/patterns/factory-outputs/parking-coordinator/main.test.tsx",
-        "packages/patterns",
+        sourcePath,
+        repoRoot,
       ),
     );
     const { jsScript, id } = await compileEngine.compile(program);

@@ -78,11 +78,21 @@ export interface Harness extends EventTarget {
     patternId?: string,
   ): string | undefined;
 
+  getVerifiedFunctionInLoad?(
+    loadId: string,
+    implementationRef: string,
+  ): HarnessedFunction | undefined;
+
   registerVerifiedFunction?(
     loadId: string,
     implementationRef: string,
     implementation: HarnessedFunction,
   ): void;
+
+  getExecutableFunction?(
+    implementationRef: string,
+    patternId?: string,
+  ): HarnessedFunction | undefined;
 
   unsafeTrustHostValue(
     value: unknown,

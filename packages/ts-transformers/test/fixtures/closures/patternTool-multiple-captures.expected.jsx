@@ -11,6 +11,9 @@ import { derive, pattern, patternTool, type PatternToolResult, Writable } from "
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
+const __ctModuleCallback_1 = __ctHardenFn(({ value }) => {
+    return prefix.get() + String(value * multiplier.get());
+});
 const multiplier = __cfHelpers.__ct_data(Writable.of(2, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema));
@@ -43,9 +46,7 @@ export default pattern(() => {
             required: ["value"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { value }, ({ value }) => {
-            return prefix.get() + String(value * multiplier.get());
-        });
+        } as const satisfies __cfHelpers.JSONSchema, { value }, __ctModuleCallback_1);
     }, {
         prefix: prefix,
         multiplier: multiplier

@@ -39,7 +39,7 @@ export function hoistModuleScopedBuilderCallbacks(
       if (
         !isFunctionLikeExpression(argument) ||
         !isNestedWithinFunction(argument) ||
-        !callbackUsesModuleScopedReferences(argument, context.checker)
+        !callbackCanBeHoisted(argument, context.checker)
       ) {
         return argument;
       }
@@ -126,10 +126,13 @@ function getBuilderCallbackIndices(
   }
 }
 
-function callbackUsesModuleScopedReferences(
+function callbackCanBeHoisted(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
 ): boolean {
+  let usesModuleScopedReferences = false;
+  let capturesEnclosingBindings = false;
+
   const visit = (node: ts.Node): boolean => {
     if (
       node !== callback &&
@@ -138,10 +141,14 @@ function callbackUsesModuleScopedReferences(
       return false;
     }
 
-    if (
-      ts.isIdentifier(node) && isModuleScopedReference(node, callback, checker)
-    ) {
-      return true;
+    if (ts.isIdentifier(node)) {
+      const scope = getReferenceScope(node, callback, checker);
+      if (scope === "module") {
+        usesModuleScopedReferences = true;
+      } else if (scope === "enclosing") {
+        capturesEnclosingBindings = true;
+        return true;
+      }
     }
 
     return ts.forEachChild(node, (child) => visit(child)) ?? false;
@@ -149,38 +156,26 @@ function callbackUsesModuleScopedReferences(
 
   for (const parameter of callback.parameters) {
     if (parameter.initializer && visit(parameter.initializer)) {
-      return true;
+      return false;
     }
   }
 
-  return callback.body ? visit(callback.body) : false;
+  if (callback.body) {
+    visit(callback.body);
+  }
+
+  return usesModuleScopedReferences && !capturesEnclosingBindings;
 }
 
-function isModuleScopedReference(
+type ReferenceScope = "local" | "module" | "enclosing" | "other";
+
+function getReferenceScope(
   node: ts.Identifier,
   callback: ts.FunctionLikeDeclaration,
   checker: ts.TypeChecker,
-): boolean {
-  if (
-    ts.isPropertyAccessExpression(node.parent) && node.parent.name === node
-  ) {
-    return false;
-  }
-
-  if (ts.isPropertyAssignment(node.parent) && node.parent.name === node) {
-    return false;
-  }
-
-  if (ts.isBindingElement(node.parent) && node.parent.propertyName === node) {
-    return false;
-  }
-
-  if (
-    ts.isJsxOpeningElement(node.parent) ||
-    ts.isJsxClosingElement(node.parent) ||
-    ts.isJsxSelfClosingElement(node.parent)
-  ) {
-    return false;
+): ReferenceScope {
+  if (shouldIgnoreReferenceSite(node)) {
+    return "local";
   }
 
   const symbol = ts.isShorthandPropertyAssignment(node.parent)
@@ -192,30 +187,84 @@ function isModuleScopedReference(
     : checker.getSymbolAtLocation(node) ??
       getSymbolAtLocation(ts.getOriginalNode(node), checker);
   if (!symbol) {
-    return false;
+    return "other";
   }
 
   const declarations = (symbol.getDeclarations() ?? []).filter((decl) =>
     !ts.isShorthandPropertyAssignment(decl)
   );
   if (declarations.length === 0) {
-    return false;
+    return "other";
   }
 
   if (declarations.every((decl) => isDeclaredWithinFunction(decl, callback))) {
-    return false;
+    return "local";
   }
 
   if (declarations.some((decl) => ts.isTypeParameterDeclaration(decl))) {
-    return false;
+    return "local";
   }
 
-  return declarations.some((decl) =>
-    ts.isImportSpecifier(decl) ||
-    ts.isImportClause(decl) ||
-    ts.isNamespaceImport(decl) ||
-    isModuleScopedDeclaration(decl)
-  );
+  if (
+    declarations.some((decl) =>
+      ts.isImportSpecifier(decl) ||
+      ts.isImportClause(decl) ||
+      ts.isNamespaceImport(decl) ||
+      isModuleScopedDeclaration(decl)
+    )
+  ) {
+    return "module";
+  }
+
+  if (declarations.some((decl) => isDeclaredInEnclosingFunction(decl))) {
+    return "enclosing";
+  }
+
+  return "other";
+}
+
+function shouldIgnoreReferenceSite(node: ts.Identifier): boolean {
+  if (!node.parent) {
+    return true;
+  }
+
+  if (
+    ts.isPropertyAccessExpression(node.parent) && node.parent.name === node
+  ) {
+    return true;
+  }
+
+  if (ts.isPropertyAssignment(node.parent) && node.parent.name === node) {
+    return true;
+  }
+
+  if (ts.isBindingElement(node.parent) && node.parent.propertyName === node) {
+    return true;
+  }
+
+  if (
+    ts.isJsxOpeningElement(node.parent) ||
+    ts.isJsxClosingElement(node.parent) ||
+    ts.isJsxSelfClosingElement(node.parent)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function isDeclaredInEnclosingFunction(decl: ts.Declaration): boolean {
+  let current: ts.Node | undefined = decl;
+  while (current) {
+    if (ts.isFunctionLike(current)) {
+      return true;
+    }
+    if (ts.isSourceFile(current)) {
+      return false;
+    }
+    current = current.parent;
+  }
+  return false;
 }
 
 function isFunctionLikeExpression(

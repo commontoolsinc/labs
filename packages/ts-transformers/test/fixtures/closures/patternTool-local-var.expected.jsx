@@ -11,6 +11,62 @@ import { computed, generateText, pattern, patternTool, type PatternToolResult, W
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
+const __ctModuleCallback_1 = __ctHardenFn(({ language, content }: {
+    language: string;
+    content: string;
+}) => {
+    const genResult = generateText({
+        system: __cfHelpers.derive({
+            type: "object",
+            properties: {
+                language: {
+                    type: "string"
+                }
+            },
+            required: ["language"]
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, { language: language }, ({ language }) => `Translate to ${language}.`),
+        prompt: __cfHelpers.derive({
+            type: "object",
+            properties: {
+                content: {
+                    type: "string"
+                }
+            },
+            required: ["content"]
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, { content: content }, ({ content }) => content),
+    });
+    return __cfHelpers.derive({
+        type: "object",
+        properties: {
+            genResult: {
+                type: "object",
+                properties: {
+                    pending: {
+                        type: "boolean"
+                    },
+                    result: {
+                        type: ["string", "undefined"]
+                    }
+                },
+                required: ["pending"]
+            }
+        },
+        required: ["genResult"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: ["string", "undefined"]
+    } as const satisfies __cfHelpers.JSONSchema, { genResult: {
+            pending: genResult.pending,
+            result: genResult.result
+        } }, ({ genResult }) => {
+        if (genResult.pending)
+            return undefined;
+        return genResult.result;
+    });
+});
 const content = __cfHelpers.__ct_data(Writable.of("Hello world", {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema));
@@ -30,62 +86,7 @@ type Output = {
 //   must not be hoisted into extraParams. Only module-scoped reactive bindings
 //   (here, `content` from Writable.of) should be captured.
 export default pattern(() => {
-    const tool = patternTool(({ language, content }: {
-        language: string;
-        content: string;
-    }) => {
-        const genResult = generateText({
-            system: __cfHelpers.derive({
-                type: "object",
-                properties: {
-                    language: {
-                        type: "string"
-                    }
-                },
-                required: ["language"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, { language: language }, ({ language }) => `Translate to ${language}.`),
-            prompt: __cfHelpers.derive({
-                type: "object",
-                properties: {
-                    content: {
-                        type: "string"
-                    }
-                },
-                required: ["content"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, { content: content }, ({ content }) => content),
-        });
-        return __cfHelpers.derive({
-            type: "object",
-            properties: {
-                genResult: {
-                    type: "object",
-                    properties: {
-                        pending: {
-                            type: "boolean"
-                        },
-                        result: {
-                            type: "string"
-                        }
-                    },
-                    required: ["pending"]
-                }
-            },
-            required: ["genResult"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { genResult: {
-                pending: genResult.pending,
-                result: genResult.result
-            } }, ({ genResult }) => {
-            if (genResult.pending)
-                return undefined;
-            return genResult.result;
-        });
-    }, { content });
+    const tool = patternTool(__ctModuleCallback_1, { content });
     return { tool };
 }, {
     type: "object",

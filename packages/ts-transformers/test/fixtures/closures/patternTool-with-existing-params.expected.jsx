@@ -11,6 +11,9 @@ import { cell, derive, pattern, patternTool, type PatternToolResult } from "comm
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
+const __ctModuleCallback_1 = __ctHardenFn(({ value, offset }) => {
+    return value * multiplier.get() + offset;
+});
 const multiplier = cell(2, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
@@ -51,9 +54,7 @@ export default pattern(() => {
             required: ["value", "offset"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { value, offset }, ({ value, offset }) => {
-            return value * multiplier.get() + offset;
-        });
+        } as const satisfies __cfHelpers.JSONSchema, { value, offset }, __ctModuleCallback_1);
     }, {
         multiplier: multiplier,
         offset

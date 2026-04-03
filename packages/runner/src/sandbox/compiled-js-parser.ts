@@ -1,3 +1,9 @@
+import {
+  readIdentifierEnd,
+  SIMPLE_IDENTIFIER_RE,
+  startsWithStatementWord,
+} from "./compiled-js-identifiers.ts";
+
 export interface SourceRange {
   start: number;
   end: number;
@@ -35,8 +41,6 @@ export class CompiledJsParseError extends Error {
     this.name = "CompiledJsParseError";
   }
 }
-
-const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
 
 interface ScanState {
   parenDepth: number;
@@ -746,20 +750,6 @@ function readLeadingBlockTerminatedKeyword(
   }
 }
 
-function startsWithStatementWord(
-  source: string,
-  start: number,
-  end: number,
-  word: string,
-): boolean {
-  if (!source.startsWith(word, start)) {
-    return false;
-  }
-
-  const next = source.charCodeAt(start + word.length);
-  return start + word.length >= end || !isIdentifierPartCode(next);
-}
-
 function shouldTerminateAfterBlock(
   source: string,
   cursor: number,
@@ -787,7 +777,7 @@ function parseArrowParameterNames(
   const raw = source.slice(stripped.start, stripped.end).trim();
   if (!raw) return [];
   const simple = extractSimpleParameterName(raw);
-  if (IDENTIFIER_RE.test(simple)) {
+  if (SIMPLE_IDENTIFIER_RE.test(simple)) {
     return [simple];
   }
   return parseParameterNames(raw, stripped.start);
@@ -806,7 +796,7 @@ function parseParameterNames(
     const name = extractSimpleParameterName(
       sourceOrSlice.slice(range.start, range.end).trim(),
     );
-    if (!IDENTIFIER_RE.test(name)) {
+    if (!SIMPLE_IDENTIFIER_RE.test(name)) {
       throw new CompiledJsParseError(
         baseOffset + range.start,
         "Factory parameters must be simple identifiers",
@@ -1186,7 +1176,7 @@ function advanceScanner(
     return cursor + (nextCode === 61 ? 2 : 1);
   }
 
-  const identifierEnd = scanIdentifierEnd(source, cursor, end);
+  const identifierEnd = readIdentifierEnd(source, cursor, end);
   if (identifierEnd !== undefined) {
     state.regexAllowed = isRegexPrefixKeyword(source, cursor, identifierEnd);
     return identifierEnd;
@@ -1425,7 +1415,7 @@ function tryReadIdentifier(
   start: number,
   end: number,
 ): { text: string; start: number; end: number } | undefined {
-  const identifierEnd = scanIdentifierEnd(source, start, end);
+  const identifierEnd = readIdentifierEnd(source, start, end);
   if (identifierEnd === undefined) {
     return undefined;
   }
@@ -1463,21 +1453,6 @@ export function findTopLevelArrow(
   return undefined;
 }
 
-function scanIdentifierEnd(
-  source: string,
-  start: number,
-  end: number,
-): number | undefined {
-  if (start >= end || !isIdentifierStartCode(source.charCodeAt(start))) {
-    return undefined;
-  }
-  let cursor = start + 1;
-  while (cursor < end && isIdentifierPartCode(source.charCodeAt(cursor))) {
-    cursor++;
-  }
-  return cursor;
-}
-
 function isRegexPrefixKeyword(
   source: string,
   start: number,
@@ -1505,18 +1480,6 @@ function isRegexPrefixKeyword(
     default:
       return false;
   }
-}
-
-function isIdentifierStartCode(charCode: number): boolean {
-  return (charCode >= 65 && charCode <= 90) ||
-    (charCode >= 97 && charCode <= 122) ||
-    charCode === 95 ||
-    charCode === 36;
-}
-
-function isIdentifierPartCode(charCode: number): boolean {
-  return isIdentifierStartCode(charCode) ||
-    (charCode >= 48 && charCode <= 57);
 }
 
 function isDigitCode(charCode: number): boolean {

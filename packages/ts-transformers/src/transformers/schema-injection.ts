@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
+import { FUNCTION_HARDENING_HELPER_NAME } from "@commontools/utils/sandbox-contract";
 
 import {
   classifyArrayMethodCall,
@@ -21,6 +22,8 @@ import {
   unwrapOpaqueLikeType,
   widenLiteralType,
 } from "../ast/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
+import { uniquePaths } from "../utils/path-serialization.ts";
 import {
   type CapabilityParamSummary,
   type CapabilitySummaryRegistry,
@@ -971,6 +974,7 @@ function inferLiftFactoryResultType(
   const callback = resolveFunctionLikeExpression(
     factoryInitializer.arguments[0],
     checker,
+    sourceFile,
   );
   if (!callback) {
     return undefined;
@@ -1454,13 +1458,15 @@ function prependSchemaArguments(
 function findFunctionArgument(
   argsArray: readonly ts.Expression[],
   checker: ts.TypeChecker,
+  sourceFile?: ts.SourceFile,
 ): {
   expression: ts.Expression;
   callback: ts.ArrowFunction | ts.FunctionExpression;
 } | undefined {
   for (let i = argsArray.length - 1; i >= 0; i--) {
     const arg = argsArray[i];
-    const callback = arg && resolveFunctionLikeExpression(arg, checker);
+    const callback = arg &&
+      resolveFunctionLikeExpression(arg, checker, sourceFile);
     if (arg && callback) {
       return { expression: arg, callback };
     }
@@ -1471,18 +1477,120 @@ function findFunctionArgument(
 function resolveFunctionLikeExpression(
   expression: ts.Expression | undefined,
   checker: ts.TypeChecker,
+  sourceFile?: ts.SourceFile,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  return resolveFunctionLikeExpressionInner(
+    expression,
+    checker,
+    sourceFile,
+    new Set(),
+  );
+}
+
+function resolveFunctionLikeExpressionInner(
+  expression: ts.Expression | undefined,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile | undefined,
+  seen: Set<ts.Node>,
 ): ts.ArrowFunction | ts.FunctionExpression | undefined {
   if (!expression) {
     return undefined;
   }
-  if (isFunctionLikeExpression(expression)) {
-    return expression;
+
+  const unwrapped = unwrapExpression(expression);
+  if (seen.has(unwrapped)) {
+    return undefined;
+  }
+  seen.add(unwrapped);
+
+  if (isFunctionLikeExpression(unwrapped)) {
+    return unwrapped;
   }
 
-  const initializer = getVariableInitializer(expression, checker);
-  return initializer && isFunctionLikeExpression(initializer)
-    ? initializer
+  const hardened = unwrapHardenedFunctionExpression(unwrapped);
+  if (hardened) {
+    return resolveFunctionLikeExpressionInner(
+      hardened,
+      checker,
+      sourceFile,
+      seen,
+    );
+  }
+
+  const initializer = ts.isIdentifier(unwrapped)
+    ? getSyntheticModuleCallbackInitializer(unwrapped, sourceFile)
     : undefined;
+  if (!initializer) {
+    return undefined;
+  }
+
+  return resolveFunctionLikeExpressionInner(
+    initializer,
+    checker,
+    sourceFile,
+    seen,
+  );
+}
+
+function unwrapHardenedFunctionExpression(
+  expression: ts.Expression,
+): ts.Expression | undefined {
+  if (!ts.isCallExpression(expression) || expression.arguments.length !== 1) {
+    return undefined;
+  }
+
+  const callee = unwrapExpression(expression.expression);
+  if (
+    !ts.isIdentifier(callee) ||
+    !callee.text.startsWith(FUNCTION_HARDENING_HELPER_NAME)
+  ) {
+    return undefined;
+  }
+
+  return expression.arguments[0];
+}
+
+function getSyntheticModuleCallbackInitializer(
+  identifier: ts.Identifier,
+  sourceFile: ts.SourceFile | undefined,
+): ts.Expression | undefined {
+  if (!identifier.text.startsWith("__ctModuleCallback")) {
+    return undefined;
+  }
+
+  const containingSourceFile = sourceFile ??
+    findContainingSourceFile(identifier);
+  if (!containingSourceFile) {
+    return undefined;
+  }
+
+  for (const statement of containingSourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) {
+      continue;
+    }
+
+    for (const declaration of statement.declarationList.declarations) {
+      if (
+        ts.isIdentifier(declaration.name) &&
+        declaration.name.text === identifier.text
+      ) {
+        return declaration.initializer;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function findContainingSourceFile(node: ts.Node): ts.SourceFile | undefined {
+  let current: ts.Node | undefined = node;
+  while (current) {
+    if (ts.isSourceFile(current)) {
+      return current;
+    }
+    current = current.parent ?? ts.getOriginalNode(current).parent;
+  }
+  return undefined;
 }
 
 /**
@@ -1581,7 +1689,11 @@ function handlePatternSchemaInjection(
   const argsArray = Array.from(node.arguments);
 
   // Find the function argument
-  const builderFunctionArg = findFunctionArgument(argsArray, checker);
+  const builderFunctionArg = findFunctionArgument(
+    argsArray,
+    checker,
+    sourceFile,
+  );
   if (!builderFunctionArg) {
     return undefined; // No function found - skip transformation
   }
@@ -1840,6 +1952,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           const handlerFn = resolveFunctionLikeExpression(
             handlerCandidate,
             checker,
+            sourceFile,
           );
           if (handlerCandidate && handlerFn) {
             const eventTypeValue = getTypeFromTypeNodeWithFallback(
@@ -1907,6 +2020,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           const handlerFn = resolveFunctionLikeExpression(
             handlerCandidate,
             checker,
+            sourceFile,
           );
           if (handlerCandidate && handlerFn) {
             // Infer types from the handler function for both parameters
@@ -2131,6 +2245,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           const liftCallback = resolveFunctionLikeExpression(
             node.arguments[0],
             checker,
+            sourceFile,
           );
           const resolved = resolveDualSchemaBuilderTypes(
             liftCallback,
@@ -2174,6 +2289,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           const liftCallback = resolveFunctionLikeExpression(
             node.arguments[0],
             checker,
+            sourceFile,
           );
           if (!liftCallback) {
             return ts.visitEachChild(node, visit, transformation);
@@ -2221,6 +2337,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           const callback = resolveFunctionLikeExpression(
             node.arguments[0],
             checker,
+            sourceFile,
           );
           if (!callback) {
             return ts.visitEachChild(node, visit, transformation);

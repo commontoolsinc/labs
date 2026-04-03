@@ -11,6 +11,21 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
+const __ctModuleCallback_1 = __ctHardenFn(() => {
+    const foo = __cfHelpers.derive({
+        type: "object",
+        properties: {}
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "object",
+        properties: {
+            bar: {
+                type: "number"
+            }
+        },
+        required: ["bar"]
+    } as const satisfies __cfHelpers.JSONSchema, {}, () => ({ bar: 1 }));
+    return foo.bar;
+});
 // FIXTURE: computed-in-computed-property-access
 // Verifies: property access on a computed() result declared INSIDE another computed()
 //   gets transformed to .key() access
@@ -24,21 +39,7 @@ export default pattern(() => {
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {}, () => {
-        const foo = __cfHelpers.derive({
-            type: "object",
-            properties: {}
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                bar: {
-                    type: "number"
-                }
-            },
-            required: ["bar"]
-        } as const satisfies __cfHelpers.JSONSchema, {}, () => ({ bar: 1 }));
-        return foo.key("bar");
-    });
+    } as const satisfies __cfHelpers.JSONSchema, {}, __ctModuleCallback_1);
     return outer;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

@@ -11,6 +11,17 @@ import { Cell, derive, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
+const __ctModuleCallback_1 = __ctHardenFn(({ itemsWithAisles }) => {
+    const groups: Record<string, Assignment[]> = {};
+    for (const assignment of itemsWithAisles) {
+        if (!groups[assignment.aisle]) {
+            groups[assignment.aisle] = [];
+        }
+        groups[assignment.aisle]!.push(assignment);
+    }
+    return groups;
+});
+const __ctModuleCallback_2 = __ctHardenFn(({ groupedByAisle }) => Object.keys(groupedByAisle).sort());
 interface Item {
     name: string;
     done: Cell<boolean>;
@@ -161,32 +172,52 @@ export default pattern((__ct_pattern_input) => {
                 required: ["name", "done"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { itemsWithAisles }, ({ itemsWithAisles }) => {
-        const groups: Record<string, Assignment[]> = {};
-        for (const assignment of itemsWithAisles) {
-            if (!groups[assignment.aisle]) {
-                groups[assignment.aisle] = [];
-            }
-            groups[assignment.aisle]!.push(assignment);
-        }
-        return groups;
-    });
+    } as const satisfies __cfHelpers.JSONSchema, { itemsWithAisles }, __ctModuleCallback_1);
     // Derive sorted aisle names from grouped object
     const aisleNames = derive({
         type: "object",
         properties: {
-            groupedByAisle: {
-                type: "object",
-                properties: {},
-                additionalProperties: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Assignment"
-                    }
+            itemsWithAisles: {
+                type: "array",
+                items: {
+                    type: "object",
+                    properties: {
+                        aisle: {
+                            type: "string"
+                        },
+                        item: {
+                            $ref: "#/$defs/Item"
+                        }
+                    },
+                    required: ["aisle", "item"]
                 }
             }
         },
-        required: ["groupedByAisle"],
+        required: ["itemsWithAisles"],
+        $defs: {
+            Item: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    },
+                    done: {
+                        type: "boolean",
+                        asCell: true
+                    }
+                },
+                required: ["name", "done"]
+            }
+        }
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "object",
+        properties: {},
+        additionalProperties: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Assignment"
+            }
+        },
         $defs: {
             Assignment: {
                 type: "object",
@@ -214,12 +245,7 @@ export default pattern((__ct_pattern_input) => {
                 required: ["name", "done"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "string"
-        }
-    } as const satisfies __cfHelpers.JSONSchema, { groupedByAisle }, ({ groupedByAisle }) => Object.keys(groupedByAisle).sort());
+    } as const satisfies __cfHelpers.JSONSchema, { groupedByAisle }, __ctModuleCallback_2);
     // The pattern from CT-1036:
     // - Map over derived keys (aisleNames)
     // - Access derived object with derived key (groupedByAisle[aisleName])

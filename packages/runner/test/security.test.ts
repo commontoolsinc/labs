@@ -9,44 +9,14 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 import { createModuleCompartmentGlobals } from "../src/sandbox/mod.ts";
 import { createCallbackCompartmentGlobals } from "../src/sandbox/compartment-globals.ts";
 import { evaluateFunctionSourceInSES } from "../src/sandbox/ses-runtime.ts";
-import { getAMDLoader } from "../../js-compiler/typescript/bundler/amd-loader.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import {
+  bundleWithCanonicalLoader,
+  bundleWithGuardedFactory,
+  withFactoryGuards,
+} from "./support/amd-bundles.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
-const FACTORY_SHADOW_GUARD = [
-  "    const define = undefined;",
-  "    const runtimeDeps = undefined;",
-  "    const __ctAmdHooks = undefined;",
-].join("\n");
-
-function withFactoryGuards(bundle: string): string {
-  return bundle.replaceAll(
-    /(define\([^]*?function\s*\([^)]*\)\s*\{\n\s*"use strict";\n)(?!\s*const define = undefined;)/g,
-    `$1${FACTORY_SHADOW_GUARD}\n`,
-  );
-}
-
-function bundleWithGuardedFactory(body: string): string {
-  return `
-((runtimeDeps = {}) => {
-  const __ctAmdHooks = runtimeDeps.__ctAmdHooks ?? {};
-  const { define, require } = (${getAMDLoader.toString()})(__ctAmdHooks);
-  for (const [name, dep] of Object.entries(runtimeDeps)) {
-    if (name === "__ctAmdHooks") continue;
-    define(name, ["exports"], exports => Object.assign(exports, dep));
-  }
-  const console = globalThis.console;
-  define("main", ["require", "exports", "commontools"], function (require, exports, commontools_1) {
-    "use strict";
-${FACTORY_SHADOW_GUARD}
-${body}
-  });
-  const main = require("main");
-  const exportMap = Object.create(null);
-  return { main, exportMap };
-});
-`;
-}
 
 describe("SES security regressions", () => {
   let runtime: Runtime;
@@ -345,9 +315,13 @@ describe("SES security regressions", () => {
 
     const { jsScript, id } = await engine.compile(program);
     const { main, loadId } = await engine.evaluate(id, jsScript, program.files);
-    const verifiedRegistry = ((engine as unknown as {
-      verifiedFunctions: Map<string, Map<string, unknown>>;
-    }).verifiedFunctions.get(loadId!)?.size) ?? 0;
+    const countVerifiedFunctionsForLoad = () =>
+      ((engine as unknown as {
+        executableRegistry: {
+          verifiedFunctions: Map<string, Map<string, unknown>>;
+        };
+      }).executableRegistry.verifiedFunctions.get(loadId!)?.size) ?? 0;
+    const verifiedRegistry = countVerifiedFunctionsForLoad();
 
     (runtime.runner as unknown as {
       invokeJavaScriptImplementation(
@@ -364,9 +338,7 @@ describe("SES security regressions", () => {
       loadId,
     );
 
-    const updatedRegistry = ((engine as unknown as {
-      verifiedFunctions: Map<string, Map<string, unknown>>;
-    }).verifiedFunctions.get(loadId!)?.size) ?? 0;
+    const updatedRegistry = countVerifiedFunctionsForLoad();
 
     expect(updatedRegistry).toBeGreaterThan(verifiedRegistry);
   });
@@ -748,9 +720,7 @@ describe("SES security regressions", () => {
   });
 
   it("makes authored AMD require inert even when called indirectly", async () => {
-    const bundle = `
-((runtimeDeps = {}) => {
-  const { define, require } = (${getAMDLoader.toString()})();
+    const bundle = bundleWithCanonicalLoader(`
   define("dep", ["require", "exports"], function (require, exports) {
     "use strict";
     exports.default = 42;
@@ -772,8 +742,7 @@ describe("SES security regressions", () => {
   const main = require("main");
   const exportMap = Object.create(null);
   return { main, exportMap };
-});
-`;
+`);
 
     const { main } = await engine.evaluate(
       "authored-require-probe",

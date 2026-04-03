@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { createFactoryShadowGuardSource } from "@commontools/utils/sandbox-contract";
 import {
   FileSystemProgramResolver,
   InMemoryProgram,
@@ -10,12 +9,12 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { getAMDLoader } from "../../js-compiler/typescript/bundler/amd-loader.ts";
+import {
+  bundleWithCanonicalLoader,
+  FACTORY_SHADOW_GUARDS,
+} from "./support/amd-bundles.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
-const FACTORY_SHADOW_GUARDS = createFactoryShadowGuardSource().map((
-  statement,
-) => `    ${statement}`).join("\n");
 
 describe("Engine.compile()", () => {
   let runtime: Runtime;
@@ -330,19 +329,16 @@ describe("Engine.evaluate()", () => {
   it("rejects invalid bundles passed directly to evaluate()", async () => {
     const jsScript = {
       filename: "invalid-bundle.js",
-      js: [
-        "((runtimeDeps = {}) => {",
-        `  const { define, require } = (${getAMDLoader.toString()})();`,
-        "  const leaked = globalThis.process;",
-        '  define("main", ["require", "exports"], function (require, exports) {',
-        '    "use strict";',
-        "    exports.default = leaked ? 42 : 0;",
-        "  });",
-        '  const main = require("main");',
-        "  const exportMap = Object.create(null);",
-        "  return { main, exportMap };",
-        "});",
-      ].join("\n"),
+      js: bundleWithCanonicalLoader(`
+  const leaked = globalThis.process;
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.default = leaked ? 42 : 0;
+  });
+  const main = require("main");
+  const exportMap = Object.create(null);
+  return { main, exportMap };
+`),
     };
 
     await expect(engine.evaluate("invalid", jsScript, [])).rejects.toThrow(
@@ -377,29 +373,26 @@ describe("Engine.evaluate()", () => {
   it("rejects duplicate AMD module registrations during evaluate()", async () => {
     const jsScript = {
       filename: "duplicate-define.js",
-      js: [
-        "((runtimeDeps = {}) => {",
-        `  const { define, require } = (${getAMDLoader.toString()})();`,
-        "  for (const [name, dep] of Object.entries(runtimeDeps)) {",
-        '    define(name, ["exports"], exports => Object.assign(exports, dep));',
-        "  }",
-        "  const console = globalThis.console;",
-        '  define("main", ["require", "exports"], function (require, exports) {',
-        '    "use strict";',
-        FACTORY_SHADOW_GUARDS,
-        "    exports.default = 1;",
-        "  });",
-        '  define("main", ["require", "exports"], function (require, exports) {',
-        '    "use strict";',
-        FACTORY_SHADOW_GUARDS,
-        "    exports.default = 2;",
-        "  });",
-        '  const main = require("main");',
-        "  const exportMap = Object.create(null);",
-        '  exportMap["main"] = require("main");',
-        "  return { main, exportMap };",
-        "});",
-      ].join("\n"),
+      js: bundleWithCanonicalLoader(`
+  for (const [name, dep] of Object.entries(runtimeDeps)) {
+    define(name, ["exports"], exports => Object.assign(exports, dep));
+  }
+  const console = globalThis.console;
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+${FACTORY_SHADOW_GUARDS}
+    exports.default = 1;
+  });
+  define("main", ["require", "exports"], function (require, exports) {
+    "use strict";
+${FACTORY_SHADOW_GUARDS}
+    exports.default = 2;
+  });
+  const main = require("main");
+  const exportMap = Object.create(null);
+  exportMap["main"] = require("main");
+  return { main, exportMap };
+`),
     };
 
     await expect(engine.evaluate("duplicate", jsScript, [])).rejects.toThrow(
@@ -1143,7 +1136,10 @@ describe("Engine in SES mode", () => {
   });
 
   it("compiles the self-improving classifier pattern", async () => {
-    const repoRoot = new URL("../../../", import.meta.url).pathname;
+    const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
+      /\/$/,
+      "",
+    );
     const sourcePath = new URL(
       "../../patterns/self-improving-classifier.tsx",
       import.meta.url,

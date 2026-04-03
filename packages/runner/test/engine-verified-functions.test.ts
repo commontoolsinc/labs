@@ -26,6 +26,10 @@ describe("Engine verified function cleanup", () => {
     await storageManager?.close();
   });
 
+  function getExecutableRegistry() {
+    return (engine as any).executableRegistry;
+  }
+
   it("restores verifiedFunctionIndex entries from other loads when one load resets", () => {
     const previous = Object.assign(() => "previous", {
       implementationRef: "main.tsx#000:handler",
@@ -33,27 +37,28 @@ describe("Engine verified function cleanup", () => {
     const surviving = Object.assign(() => "surviving", {
       implementationRef: "main.tsx#000:handler",
     });
+    const executableRegistry = getExecutableRegistry();
 
-    (engine as any).verifiedFunctions.set(
+    executableRegistry.verifiedFunctions.set(
       "load:previous",
       new Map([[previous.implementationRef, previous]]),
     );
-    (engine as any).verifiedFunctions.set(
+    executableRegistry.verifiedFunctions.set(
       "load:surviving",
       new Map([[surviving.implementationRef, surviving]]),
     );
-    (engine as any).verifiedFunctionIndex.set(
+    executableRegistry.verifiedFunctionIndex.set(
       previous.implementationRef,
       previous,
     );
 
-    (engine as any).resetVerifiedFunctions("load:previous");
+    executableRegistry.beginVerifiedLoad("load:previous");
 
-    expect((engine as any).verifiedFunctions.get("load:previous")).toEqual(
+    expect(executableRegistry.verifiedFunctions.get("load:previous")).toEqual(
       new Map(),
     );
     expect(
-      (engine as any).verifiedFunctionIndex.get(previous.implementationRef),
+      executableRegistry.verifiedFunctionIndex.get(previous.implementationRef),
     ).toBe(surviving);
   });
 
@@ -61,17 +66,17 @@ describe("Engine verified function cleanup", () => {
     const only = Object.assign(() => "only", {
       implementationRef: "main.tsx#000:handler",
     });
+    const executableRegistry = getExecutableRegistry();
 
-    (engine as any).verifiedFunctions.set(
+    executableRegistry.verifiedFunctions.set(
       "load:only",
       new Map([[only.implementationRef, only]]),
     );
-    (engine as any).verifiedFunctionIndex.set(only.implementationRef, only);
+    executableRegistry.verifiedFunctionIndex.set(only.implementationRef, only);
 
-    (engine as any).resetVerifiedFunctions("load:only");
+    executableRegistry.beginVerifiedLoad("load:only");
 
-    expect(
-      (engine as any).verifiedFunctionIndex.has(only.implementationRef),
-    ).toBe(false);
+    expect(executableRegistry.verifiedFunctionIndex.has(only.implementationRef))
+      .toBe(false);
   });
 });

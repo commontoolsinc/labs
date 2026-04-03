@@ -11,6 +11,30 @@ import { derive, pattern, patternTool, type PatternToolResult } from "commonfabr
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
+const __ctModuleCallback_1 = __ctHardenFn(({ query, content }: {
+    query: string;
+    content: string;
+}) => {
+    return derive({
+        type: "object",
+        properties: {
+            content: {
+                type: "string"
+            },
+            query: {
+                type: "string"
+            }
+        },
+        required: ["content", "query"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __cfHelpers.JSONSchema, { query, content }, ({ query, content }) => {
+        return content.split("\n").filter((c: string) => c.includes(query));
+    });
+});
 type Output = {
     tool: PatternToolResult<Record<string, never>>;
 };
@@ -22,30 +46,7 @@ type Output = {
 //   parameters (query, content) and no module-scoped reactive variables, the
 //   transformer should not inject any extraParams.
 export default pattern(() => {
-    const tool = patternTool(({ query, content }: {
-        query: string;
-        content: string;
-    }) => {
-        return derive({
-            type: "object",
-            properties: {
-                query: {
-                    type: "string"
-                },
-                content: {
-                    type: "string"
-                }
-            },
-            required: ["query", "content"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        } as const satisfies __cfHelpers.JSONSchema, { query, content }, ({ query, content }) => {
-            return content.split("\n").filter((c: string) => c.includes(query));
-        });
-    });
+    const tool = patternTool(__ctModuleCallback_1);
     return { tool };
 }, {
     type: "object",

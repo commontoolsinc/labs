@@ -11,6 +11,9 @@ import { Cell, derive, handler, NAME, pattern, str, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
+const __ctModuleCallback_1 = __ctHardenFn((values) => {
+    console.log("values#", values?.length);
+});
 const adder = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -42,9 +45,7 @@ export default pattern((__ct_pattern_input) => {
         items: {
             type: "unknown"
         }
-    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, values, (values) => {
-        console.log("values#", values?.length);
-    });
+    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, values, __ctModuleCallback_1);
     return {
         [NAME]: str `Simple Value: ${values.key("length")}`,
         [UI]: (<div>
