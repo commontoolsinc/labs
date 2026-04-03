@@ -33,6 +33,7 @@ import {
   githubGet,
   mapConcurrent,
   type MetricTimeline,
+  MIN_ABSOLUTE_DELTA,
   MIN_REGRESSION_PCT,
   MIN_SAMPLES,
   parseBaselineOverrides,
@@ -253,6 +254,7 @@ async function main() {
 
     const baseline = computeBaseline(
       timeline.samples.map((s) => s.durationSeconds),
+      metric.startsWith("bench:") ? 0 : MIN_ABSOLUTE_DELTA,
     );
     if (!baseline) continue;
 
@@ -332,9 +334,9 @@ async function main() {
   console.log("---END COPY-PASTE---");
 
   console.log(
-    `\nThresholds: median + ${STDDEV_FACTOR}σ or +${
+    `\nThresholds: median + ${STDDEV_FACTOR}σ, +${
       MIN_REGRESSION_PCT * 100
-    }% (whichever is higher).`,
+    }%, or +${MIN_ABSOLUTE_DELTA}s (whichever is highest).`,
   );
 
   Deno.exit(1);

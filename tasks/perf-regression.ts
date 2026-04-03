@@ -45,6 +45,7 @@ import {
   mapConcurrent,
   MAX_RUNS_TO_FETCH,
   type MetricTimeline,
+  MIN_ABSOLUTE_DELTA,
   MIN_BASELINE_DAYS,
   MIN_BASELINE_RUNS,
   MIN_REGRESSION_PCT,
@@ -94,6 +95,7 @@ function detectRegressions(
 
     const baseline = computeBaseline(
       baselineSamples.map((s) => s.durationSeconds),
+      name.startsWith("bench:") ? 0 : MIN_ABSOLUTE_DELTA,
     );
     if (!baseline) continue;
 
@@ -663,9 +665,9 @@ async function main() {
     runs[runs.length - 1]?.created_at.slice(0, 10) ?? "?"
   } to ${
     runs[0]?.created_at.slice(0, 10) ?? "?"
-  }. Thresholds: median + ${STDDEV_FACTOR}σ or +${
+  }. Thresholds: median + ${STDDEV_FACTOR}σ, +${
     MIN_REGRESSION_PCT * 100
-  }% (whichever is higher). Requires ${RECENT_THRESHOLD}/${RECENT_WINDOW} recent runs to exceed threshold.`;
+  }%, or +${MIN_ABSOLUTE_DELTA}s (whichever is highest). Requires ${RECENT_THRESHOLD}/${RECENT_WINDOW} recent runs to exceed threshold.`;
 
   await reportRegressions(regressions, baselineInfo, prInfoBySha, timelines);
 }

@@ -29,6 +29,9 @@ export const STDDEV_FACTOR = 2;
 /** Minimum percentage increase over median to flag a regression. */
 export const MIN_REGRESSION_PCT = 0.10;
 
+/** Minimum absolute increase (in seconds) over median for non-bench metrics. */
+export const MIN_ABSOLUTE_DELTA = 2;
+
 /** Baseline window: at least this many runs. */
 export const MIN_BASELINE_RUNS = 20;
 
@@ -708,7 +711,10 @@ export function extractTestFileMetrics(
 // Statistics
 // ---------------------------------------------------------------------------
 
-export function computeBaseline(samples: number[]): Baseline | null {
+export function computeBaseline(
+  samples: number[],
+  minAbsoluteDelta = 0,
+): Baseline | null {
   if (samples.length < MIN_SAMPLES) return null;
 
   const sorted = [...samples].sort((a, b) => a - b);
@@ -725,6 +731,7 @@ export function computeBaseline(samples: number[]): Baseline | null {
   const threshold = Math.max(
     median + STDDEV_FACTOR * stddev,
     median * (1 + MIN_REGRESSION_PCT),
+    median + minAbsoluteDelta,
   );
 
   return { median, stddev, variance, count: samples.length, threshold };
