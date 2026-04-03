@@ -31,6 +31,7 @@ export class CommonFabricTransformerPipeline extends Pipeline {
       mapCallbackRegistry: new WeakSet(),
       syntheticComputeCallbackRegistry: new WeakSet(),
       syntheticComputeOwnedNodeRegistry: new WeakSet(),
+      syntheticReactiveCollectionRegistry: new WeakSet(),
       schemaHints: new WeakMap(),
       capabilitySummaryRegistry: new WeakMap(),
       ...options,

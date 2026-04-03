@@ -204,6 +204,22 @@ export class TransformationContext {
     );
   }
 
+  markSyntheticReactiveCollectionDeclaration(node: ts.Node): void {
+    this.options.syntheticReactiveCollectionRegistry?.add(node);
+  }
+
+  isSyntheticReactiveCollectionDeclaration(node: ts.Node): boolean {
+    if (this.options.syntheticReactiveCollectionRegistry?.has(node)) {
+      return true;
+    }
+    const original = ts.getOriginalNode(node);
+    return !!(
+      original &&
+      original !== node &&
+      this.options.syntheticReactiveCollectionRegistry?.has(original)
+    );
+  }
+
   getDataFlowAnalyzer(): ReturnType<typeof createDataFlowAnalyzer> {
     this.#dataFlowAnalyzer ??= createDataFlowAnalyzer(this.checker);
     return this.#dataFlowAnalyzer;
