@@ -204,9 +204,10 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
 
     let schema = cell.schema;
     if (schema === undefined) {
-      // The `seen.set()` here provides a safe default which prevents ending up
-      // back in this block (which would cause runaway recursion). The call to
-      // `analyzeType()` will typically overwrite the backstop.
+      // The `seen.set()` here provides a safe default which prevents the call
+      // to `analyzeType()` (immediately below) from ending up recursing back
+      // into this block (i.e., runaway recursion). Typically, `analyzeType()`
+      // promptly overwrites the backstop.
       // TODO(seefeld): This should create `$ref: "#/.."`.
       seen.set(linkAsStr, emptySchemaObject());
       schema = analyzeType(cell.getRaw(), state);
