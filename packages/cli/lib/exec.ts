@@ -188,8 +188,10 @@ export async function executeMountedCallableFile(
   });
 
   // Auto-step: trigger reactive recomputation after handler execution
-  await resolved.piece.getCell().pull();
-  await resolved.manager.synced();
+  if (typeof resolved.piece?.getCell === "function") {
+    await resolved.piece.getCell().pull();
+    await resolved.manager.synced();
+  }
 
   return result;
 }

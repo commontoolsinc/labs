@@ -224,7 +224,7 @@ sleep 1
 
 wait_for_path "$MOUNTPOINT/$SPACE/pieces"
 
-PIECE_NAME="Fuse Exec Fixture"
+PIECE_NAME="Fuse-Exec-Fixture"
 PIECE_DIR="$MOUNTPOINT/$SPACE/pieces/$PIECE_NAME"
 RESULT_DIR="$PIECE_DIR/result"
 RESULT_JSON="$PIECE_DIR/result.json"
