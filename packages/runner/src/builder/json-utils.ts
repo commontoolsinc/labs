@@ -289,6 +289,10 @@ function itemsSchemaFromArray(
     return schemas[0];
   }
 
+  // We get schema uniquing (with the `Set` constructor), exactly because all
+  // the `schemas` are guaranteed to be interned. That is if `schema1 !==
+  // schema2` (not the same actual object), then we know that they also aren't
+  // equivalent (same-content objects).
   const uniqueSchemas = [...new Set(schemas)];
   return (uniqueSchemas.length === 1)
     ? uniqueSchemas[0]
