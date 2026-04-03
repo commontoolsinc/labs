@@ -27,6 +27,7 @@ import {
   computeBaseline,
   type DenoBenchResult,
   downloadAndParseJUnit,
+  escapeTableCell,
   extractBenchMetrics,
   extractMetrics,
   extractTestFileMetrics,
@@ -211,7 +212,9 @@ function buildIssueBody(
     for (let i = 0; i < baselineSamples.length; i++) {
       const s = baselineSamples[i];
       const pr = prInfoBySha.get(s.sha);
-      const prStr = pr ? `[#${pr.number}](${pr.html_url}) — ${pr.title}` : "—";
+      const prStr = pr
+        ? `[#${pr.number}](${pr.html_url}) — ${escapeTableCell(pr.title)}`
+        : "—";
       lines.push(
         `| ${i + 1} | ${fmt(s.durationSeconds)} | \`${
           s.sha.slice(0, 8)
@@ -227,7 +230,9 @@ function buildIssueBody(
     for (let i = 0; i < recentSamples.length; i++) {
       const s = recentSamples[i];
       const pr = prInfoBySha.get(s.sha);
-      const prStr = pr ? `[#${pr.number}](${pr.html_url}) — ${pr.title}` : "—";
+      const prStr = pr
+        ? `[#${pr.number}](${pr.html_url}) — ${escapeTableCell(pr.title)}`
+        : "—";
       lines.push(
         `| ${i + 1} | ${fmt(s.durationSeconds)} | \`${
           s.sha.slice(0, 8)

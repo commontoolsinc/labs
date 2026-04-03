@@ -733,6 +733,11 @@ export function computeBaseline(samples: number[]): Baseline | null {
 // Formatting
 // ---------------------------------------------------------------------------
 
+/** Escape a string for use inside a Markdown table cell. */
+export function escapeTableCell(s: string): string {
+  return s.replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
+
 export function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
   const m = Math.floor(seconds / 60);
