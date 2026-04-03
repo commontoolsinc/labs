@@ -220,6 +220,8 @@ async function main() {
     metric: string;
     current: number;
     median: number;
+    variance: number;
+    stddev: number;
     threshold: number;
     pctIncrease: number;
   }[] = [];
@@ -262,6 +264,8 @@ async function main() {
         metric,
         current: currentSample.durationSeconds,
         median: baseline.median,
+        variance: baseline.variance,
+        stddev: baseline.stddev,
         threshold: baseline.threshold,
         pctIncrease,
       });
@@ -304,7 +308,7 @@ async function main() {
     console.log(
       `  ${f.metric} (n=${timeline.samples.length}, median=${
         fmt(f.median)
-      }, threshold=${fmt(f.threshold)}):`,
+      }, variance=${fmt(f.variance)}, stddev=${fmt(f.stddev)}):`,
     );
     for (const s of timeline.samples) {
       const pr = prInfoBySha.get(s.sha);
