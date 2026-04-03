@@ -11,6 +11,7 @@ import {
   hashSchema,
   hashSchemaItem,
   internSchema,
+  isInternedSchema,
   resetSchemaHashConfig,
   setSchemaHashConfig,
 } from "../schema-hash.ts";
@@ -214,6 +215,32 @@ describe("schema-hash dispatch", () => {
             });
           });
         }
+      });
+
+      describe("isInternedSchema()", () => {
+        it("returns true for boolean true", () => {
+          assertStrictEquals(isInternedSchema(true), true);
+        });
+
+        it("returns true for boolean false", () => {
+          assertStrictEquals(isInternedSchema(false), true);
+        });
+
+        it("returns true for a freshly interned schema", () => {
+          const schema = internSchema({ type: "string" });
+          assertStrictEquals(isInternedSchema(schema), true);
+        });
+
+        it("returns false for a non-interned schema", () => {
+          const schema: JSONSchemaObj = { type: "string" };
+          assertStrictEquals(isInternedSchema(schema), false);
+        });
+
+        it("returns false for an equivalent-but-different object", () => {
+          internSchema({ type: "number" });
+          const equivalent: JSONSchemaObj = { type: "number" };
+          assertStrictEquals(isInternedSchema(equivalent), false);
+        });
       });
 
       describe("findInternedSchema()", () => {

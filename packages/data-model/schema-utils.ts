@@ -6,9 +6,18 @@ import type {
   JSONSchema,
   JSONSchemaObj,
   JSONSchemaObjMutable,
+  JSONSchemaTypes,
 } from "@commontools/api";
 import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { cloneIfNecessary } from "./fabric-value.ts";
+import { internSchema } from "./schema-hash.ts";
+import { type FabricValue } from "./interface.ts";
+
+/**
+ * Map from `JSONSchema` type names (and special names) to corresponding
+ * interned schemas. Populated lazily.
+ */
+const BASIC_SCHEMAS: Record<string, JSONSchemaObj> = {};
 
 /**
  * Indicates if the given (nullable) schema is in fact a non-trivial schema. A
@@ -165,4 +174,82 @@ export function schemaWithoutProperties(
   return copy
     ? toDeepFrozenSchema(copy as JSONSchemaObj, true)
     : toDeepFrozenSchema(schema);
+}
+
+/**
+ * Gets the basic `{ type: name }` schema for a given value. Returns `undefined`
+ * if there is no well-defined type for the value. The result is always interned
+ * (and frozen).
+ *
+ * **Note:** `undefined` (as a value) is in an "intermediate" state in the
+ * codebase as of this writing, and _this_ function treats it as not having a
+ * well-defined type.
+ */
+export function schemaForValueType(
+  value: FabricValue,
+): JSONSchemaObj | undefined {
+  // TODO(danfuzz): This is a place that will need to get smarter once we
+  // actually want to accept values beyond what's strictly allowed in JSON. This
+  // notably includes `undefined` and all the other non-plain-object
+  // `FabricValue` possibilities.
+
+  const type = typeof value;
+  switch (type) {
+    case "object": {
+      if (value === null) {
+        return getBasicSchema("null");
+      } else if (Array.isArray(value)) {
+        return getBasicSchema("array");
+      }
+      break;
+    }
+
+    case "number": {
+      if (Number.isInteger(value)) {
+        return getBasicSchema("integer");
+      }
+      break;
+    }
+
+    case "bigint":
+    case "symbol":
+    case "undefined": {
+      // Not accepted yet, even though the intention is to accept most or all
+      // of these.
+      return undefined;
+    }
+  }
+
+  return getBasicSchema(type);
+}
+
+/**
+ * Gets the standard interned empty schema _object_, a literal `{}`.
+ */
+export function emptySchemaObject() {
+  const key = "emptySchema";
+  const found = BASIC_SCHEMAS[key];
+  if (found) {
+    return found;
+  } else {
+    const result = BASIC_SCHEMAS[key] = internSchema({}) as JSONSchemaObj;
+    return result;
+  }
+}
+
+/**
+ * Helper for `schemaForValueType()` and `emptySchemaObject()` to do the
+ * lookup and interning as necessary.
+ */
+function getBasicSchema(key: string) {
+  const found = BASIC_SCHEMAS[key];
+
+  if (found) {
+    return found;
+  } else {
+    const result = BASIC_SCHEMAS[key] = internSchema({
+      type: key as JSONSchemaTypes,
+    }) as JSONSchemaObj;
+    return result;
+  }
 }

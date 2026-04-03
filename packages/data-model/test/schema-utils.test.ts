@@ -1,25 +1,37 @@
 import { describe, it } from "@std/testing/bdd";
-import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
-import type { JSONSchemaObj } from "@commontools/api";
-import { deepFreeze } from "../deep-freeze.ts";
+import {
+  assert,
+  assertEquals,
+  assertStrictEquals,
+  assertThrows,
+} from "@std/assert";
+import type {
+  FabricValue,
+  JSONSchemaObj,
+  JSONSchemaTypes,
+} from "@commontools/api";
+import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 import {
   cloneSchemaMutable,
+  emptySchemaObject,
   isNontrivialSchema,
+  schemaForValueType,
   schemaWithoutProperties,
   schemaWithProperties,
   toDeepFrozenSchema,
 } from "../schema-utils.ts";
+import { isInternedSchema } from "../schema-hash.ts";
 
 describe("toDeepFrozenSchema", () => {
   describe("boolean schemas", () => {
     it("boolean true is returned as-is", () => {
       const result = toDeepFrozenSchema(true, false);
-      assertEquals(result, true);
+      assertStrictEquals(result, true);
     });
 
     it("boolean false is returned as-is", () => {
       const result = toDeepFrozenSchema(false, true);
-      assertEquals(result, false);
+      assertStrictEquals(result, false);
     });
   });
 
@@ -36,13 +48,13 @@ describe("toDeepFrozenSchema", () => {
       const result = toDeepFrozenSchema(schema, true);
 
       // Top-level should be the same reference — frozen in place.
-      assertEquals(result === schema, true);
-      assertEquals(Object.isFrozen(schema), true);
+      assert(result === schema);
+      assert(Object.isFrozen(schema));
 
       // Property values are replaced with frozen clones (not the originals).
-      assertEquals(Object.isFrozen(schema.properties), true);
-      assertEquals(schema.properties !== originalProperties, true);
-      assertEquals(Object.isFrozen(schema.properties!.name), true);
+      assert(Object.isFrozen(schema.properties));
+      assert(schema.properties !== originalProperties);
+      assert(Object.isFrozen(schema.properties!.name));
     });
 
     it("unfrozen schema is frozen in place (same reference)", () => {
@@ -55,8 +67,8 @@ describe("toDeepFrozenSchema", () => {
       const result = toDeepFrozenSchema(schema, true);
 
       // Same reference — frozen in place, not cloned.
-      assertEquals(result === schema, true);
-      assertEquals(Object.isFrozen(result), true);
+      assert(result === schema);
+      assert(Object.isFrozen(result));
     });
   });
 
@@ -72,16 +84,16 @@ describe("toDeepFrozenSchema", () => {
       const result = toDeepFrozenSchema(schema, false);
 
       // Should NOT be the same reference.
-      assertEquals(result !== schema, true);
+      assert(result !== schema);
 
       // Original should NOT be frozen.
-      assertEquals(Object.isFrozen(schema), false);
+      assert(!Object.isFrozen(schema));
 
       // Result should be deeply frozen.
-      assertEquals(Object.isFrozen(result), true);
+      assert(Object.isFrozen(result));
       const obj = result as JSONSchemaObj;
-      assertEquals(Object.isFrozen(obj.properties), true);
-      assertEquals(Object.isFrozen(obj.properties!.age), true);
+      assert(Object.isFrozen(obj.properties));
+      assert(Object.isFrozen(obj.properties!.age));
     });
 
     it("preserves original schema", () => {
@@ -94,8 +106,8 @@ describe("toDeepFrozenSchema", () => {
       toDeepFrozenSchema(schema, false);
 
       // Original should still be mutable.
-      assertEquals(Object.isFrozen(schema), false);
-      assertEquals(Object.isFrozen(inner), false);
+      assert(!Object.isFrozen(schema));
+      assert(!Object.isFrozen(inner));
 
       // Prove mutability by actually mutating.
       (inner as Record<string, unknown>).type = "number";
@@ -112,7 +124,7 @@ describe("toDeepFrozenSchema", () => {
       toDeepFrozenSchema(schema, false);
 
       // Original property value should not be frozen.
-      assertEquals(Object.isFrozen(innerProp), false);
+      assert(!Object.isFrozen(innerProp));
     });
   });
 
@@ -134,14 +146,14 @@ describe("toDeepFrozenSchema", () => {
 
       const result = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
 
-      assertEquals(Object.isFrozen(result), true);
-      assertEquals(Object.isFrozen(result.properties), true);
+      assert(Object.isFrozen(result));
+      assert(Object.isFrozen(result.properties));
 
       const address = result.properties!.address as JSONSchemaObj;
-      assertEquals(Object.isFrozen(address), true);
-      assertEquals(Object.isFrozen(address.properties), true);
-      assertEquals(Object.isFrozen(address.required), true);
-      assertEquals(Object.isFrozen(address.properties!.street), true);
+      assert(Object.isFrozen(address));
+      assert(Object.isFrozen(address.properties));
+      assert(Object.isFrozen(address.required));
+      assert(Object.isFrozen(address.properties!.street));
     });
 
     it("schema with arrays is frozen", () => {
@@ -158,12 +170,12 @@ describe("toDeepFrozenSchema", () => {
 
       const result = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
 
-      assertEquals(Object.isFrozen(result), true);
-      assertEquals(Object.isFrozen(result.required), true);
+      assert(Object.isFrozen(result));
+      assert(Object.isFrozen(result.required));
 
       const tags = result.properties!.tags as JSONSchemaObj;
-      assertEquals(Object.isFrozen(tags), true);
-      assertEquals(Object.isFrozen(tags.items), true);
+      assert(Object.isFrozen(tags));
+      assert(Object.isFrozen(tags.items));
     });
 
     it("anyOf schemas are frozen", () => {
@@ -176,10 +188,10 @@ describe("toDeepFrozenSchema", () => {
 
       const result = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
 
-      assertEquals(Object.isFrozen(result), true);
-      assertEquals(Object.isFrozen(result.anyOf), true);
-      assertEquals(Object.isFrozen(result.anyOf![0]), true);
-      assertEquals(Object.isFrozen(result.anyOf![1]), true);
+      assert(Object.isFrozen(result));
+      assert(Object.isFrozen(result.anyOf));
+      assert(Object.isFrozen(result.anyOf![0]));
+      assert(Object.isFrozen(result.anyOf![1]));
     });
 
     it("enum values are frozen", () => {
@@ -189,7 +201,7 @@ describe("toDeepFrozenSchema", () => {
       };
 
       const result = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
-      assertEquals(Object.isFrozen(result.enum), true);
+      assert(Object.isFrozen(result.enum));
     });
   });
 
@@ -211,8 +223,8 @@ describe("toDeepFrozenSchema", () => {
     it("already-frozen schema is handled", () => {
       const schema: JSONSchemaObj = Object.freeze({ type: "string" as const });
       const result = toDeepFrozenSchema(schema, true);
-      assertEquals(result === schema, true);
-      assertEquals(Object.isFrozen(result), true);
+      assert(result === schema);
+      assert(Object.isFrozen(result));
     });
 
     it("already-deep-frozen returns same reference (canShare=true)", () => {
@@ -222,7 +234,7 @@ describe("toDeepFrozenSchema", () => {
       });
 
       const result = toDeepFrozenSchema(schema, true);
-      assertEquals(result === schema, true);
+      assert(result === schema);
     });
 
     it("already-deep-frozen returns same reference (canShare=false)", () => {
@@ -232,7 +244,7 @@ describe("toDeepFrozenSchema", () => {
       });
 
       const result = toDeepFrozenSchema(schema, false);
-      assertEquals(result === schema, true);
+      assert(result === schema);
     });
 
     it("frozen but not deep-frozen schema is shallow-cloned even with canShare=true", () => {
@@ -247,12 +259,12 @@ describe("toDeepFrozenSchema", () => {
 
       // Must be a different reference (shallow-cloned) since original is
       // frozen and can't be mutated.
-      assertEquals(result !== schema, true);
+      assert(result !== schema);
 
       // Result must be deeply frozen.
-      assertEquals(Object.isFrozen(result), true);
+      assert(Object.isFrozen(result));
       const obj = result as JSONSchemaObj;
-      assertEquals(Object.isFrozen(obj.properties), true);
+      assert(Object.isFrozen(obj.properties));
     });
   });
 
@@ -274,14 +286,14 @@ describe("toDeepFrozenSchema", () => {
       const result = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
 
       // The already-deep-frozen "properties" value should be the same reference.
-      assertEquals(result.properties === frozenProperties, true);
+      assert(result.properties === frozenProperties);
 
       // The unfrozen "required" should be a different reference (cloned).
-      assertEquals(result.required !== unfrozenRequired, true);
+      assert(result.required !== unfrozenRequired);
 
       // Both should be deeply frozen in the result.
-      assertEquals(Object.isFrozen(result.properties), true);
-      assertEquals(Object.isFrozen(result.required), true);
+      assert(Object.isFrozen(result.properties));
+      assert(Object.isFrozen(result.required));
     });
   });
 });
@@ -289,33 +301,33 @@ describe("toDeepFrozenSchema", () => {
 describe("isNontrivialSchema", () => {
   describe("nullish inputs", () => {
     it("returns false for undefined", () => {
-      assertEquals(isNontrivialSchema(undefined), false);
+      assert(!isNontrivialSchema(undefined));
     });
 
     it("returns false for null", () => {
-      assertEquals(isNontrivialSchema(null), false);
+      assert(!isNontrivialSchema(null));
     });
   });
 
   describe("boolean schemas", () => {
     it("returns false for true", () => {
-      assertEquals(isNontrivialSchema(true), false);
+      assert(!isNontrivialSchema(true));
     });
 
     it("returns false for false", () => {
-      assertEquals(isNontrivialSchema(false), false);
+      assert(!isNontrivialSchema(false));
     });
   });
 
   describe("empty object schema", () => {
     it("returns false for {}", () => {
-      assertEquals(isNontrivialSchema({}), false);
+      assert(!isNontrivialSchema({}));
     });
   });
 
   describe("non-trivial schemas", () => {
     it("returns true for a schema with type", () => {
-      assertEquals(isNontrivialSchema({ type: "string" }), true);
+      assert(isNontrivialSchema({ type: "string" }));
     });
 
     it("returns true for a schema with properties", () => {
@@ -323,11 +335,11 @@ describe("isNontrivialSchema", () => {
         type: "object",
         properties: { name: { type: "string" } },
       };
-      assertEquals(isNontrivialSchema(schema), true);
+      assert(isNontrivialSchema(schema));
     });
 
     it("returns true for a schema with only $ref", () => {
-      assertEquals(isNontrivialSchema({ $ref: "#/definitions/Foo" }), true);
+      assert(isNontrivialSchema({ $ref: "#/definitions/Foo" }));
     });
 
     it("returns true for a schema with anyOf", () => {
@@ -339,7 +351,7 @@ describe("isNontrivialSchema", () => {
 
     it("returns true for a frozen non-empty schema", () => {
       const schema = Object.freeze({ type: "number" as const });
-      assertEquals(isNontrivialSchema(schema), true);
+      assert(isNontrivialSchema(schema));
     });
 
     it("returns true for a deep-frozen schema", () => {
@@ -347,7 +359,7 @@ describe("isNontrivialSchema", () => {
         type: "object",
         properties: { x: { type: "number" } },
       });
-      assertEquals(isNontrivialSchema(schema), true);
+      assert(isNontrivialSchema(schema));
     });
   });
 
@@ -391,12 +403,12 @@ describe("cloneSchemaMutable", () => {
     const result = cloneSchemaMutable(schema) as JSONSchemaObj;
 
     // Different top-level reference.
-    assertEquals(result !== schema, true);
+    assert(result !== schema);
     // Content is equal.
     assertEquals(result.type, "object");
     assertEquals((result.properties!.name as JSONSchemaObj).type, "string");
     // Nested objects share references (shallow).
-    assertEquals(result.properties === schema.properties, true);
+    assert(result.properties === schema.properties);
   });
 
   it("returns a deep copy when deep=true", () => {
@@ -409,12 +421,12 @@ describe("cloneSchemaMutable", () => {
     const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
 
     // Different top-level reference.
-    assertEquals(result !== schema, true);
+    assert(result !== schema);
     // Content is equal.
     assertEquals(result.type, "object");
     assertEquals((result.properties!.name as JSONSchemaObj).type, "string");
     // Nested objects are also cloned (deep).
-    assertEquals(result.properties !== schema.properties, true);
+    assert(result.properties !== schema.properties);
   });
 
   it("result is deeply mutable when deep=true", () => {
@@ -424,16 +436,16 @@ describe("cloneSchemaMutable", () => {
     };
 
     const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
-    assertEquals(Object.isFrozen(result), false);
+    assert(!Object.isFrozen(result));
 
     // Top-level mutation should work.
     (result as Record<string, unknown>).type = "array";
     assertEquals(result.type, "array");
 
     // Nested mutation should also work.
-    assertEquals(Object.isFrozen(result.properties), false);
+    assert(!Object.isFrozen(result.properties));
     const xProp = result.properties!.x as Record<string, unknown>;
-    assertEquals(Object.isFrozen(xProp), false);
+    assert(!Object.isFrozen(xProp));
     xProp.type = "string";
     assertEquals((result.properties!.x as JSONSchemaObj).type, "string");
   });
@@ -458,7 +470,7 @@ describe("cloneSchemaMutable", () => {
 
     const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
 
-    assertEquals(Object.isFrozen(result), false);
+    assert(!Object.isFrozen(result));
     assertEquals(result.type, "object");
     // Nested properties should also be mutable.
     assertEquals(
@@ -474,16 +486,16 @@ describe("cloneSchemaMutable", () => {
 
     const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
 
-    assertEquals(result !== schema, true);
+    assert(result !== schema);
     assertEquals(result.anyOf!.length, 2);
-    assertEquals(result.anyOf !== schema.anyOf, true);
+    assert(result.anyOf !== schema.anyOf);
   });
 
   it("handles empty object schema", () => {
     const schema: JSONSchemaObj = {};
     const result = cloneSchemaMutable(schema) as JSONSchemaObj;
 
-    assertEquals(result !== schema, true);
+    assert(result !== schema);
     assertEquals(Object.keys(result).length, 0);
   });
 });
@@ -495,7 +507,7 @@ describe("schemaWithProperties", () => {
       description: "new",
     }) as JSONSchemaObj;
 
-    assertEquals(result !== schema, true);
+    assert(result !== schema);
     assertEquals(result.type, "object");
     assertEquals(result.description, "new");
   });
@@ -517,7 +529,7 @@ describe("schemaWithProperties", () => {
     // value distinct from absence, which matters once schemas carry
     // FabricValue-typed fields.
     assertEquals(result.asStream, undefined);
-    assertEquals("asStream" in result, true);
+    assert("asStream" in result);
     assertEquals(result.type, "object");
   });
 
@@ -554,44 +566,44 @@ describe("schemaWithProperties", () => {
       description: "hi",
     }) as JSONSchemaObj;
 
-    assertEquals(Object.isFrozen(result), true);
-    assertEquals(Object.isFrozen(result.properties), true);
+    assert(Object.isFrozen(result));
+    assert(Object.isFrozen(result.properties));
   });
 
   it("distinguishes undefined-valued key from absent key", () => {
     // A schema with no `description` key at all.
     const schema: JSONSchemaObj = { type: "string" };
-    assertEquals("description" in schema, false);
+    assert(!("description" in schema));
 
     // Setting description to undefined: key is present but value is undefined.
     const withUndefined = schemaWithProperties(schema, {
       description: undefined,
     }) as JSONSchemaObj;
-    assertEquals("description" in withUndefined, true);
+    assert("description" in withUndefined);
     assertEquals(withUndefined.description, undefined);
 
     // Not mentioning description: key remains absent.
     const withoutOverride = schemaWithProperties(schema, {
       type: "number",
     }) as JSONSchemaObj;
-    assertEquals("description" in withoutOverride, false);
+    assert(!("description" in withoutOverride));
   });
 
   it("treats undefined as {} and applies overrides", () => {
     const result = schemaWithProperties(undefined, { type: "string" });
     assertEquals(result, { type: "string" });
-    assertEquals(Object.isFrozen(result), true);
+    assert(Object.isFrozen(result));
   });
 
   it("treats boolean true as {} and applies overrides", () => {
     const result = schemaWithProperties(true, { type: "string" });
     assertEquals(result, { type: "string" });
-    assertEquals(Object.isFrozen(result), true);
+    assert(Object.isFrozen(result));
   });
 
   it("returns false as-is regardless of overrides", () => {
     const result = schemaWithProperties(false, { type: "string" });
-    assertEquals(result, false);
+    assertStrictEquals(result, false);
   });
 });
 
@@ -601,7 +613,7 @@ describe("schemaWithoutProperties", () => {
     const result = schemaWithoutProperties(schema, "asCell") as JSONSchemaObj;
 
     assertEquals(result, { type: "object" });
-    assertEquals("asCell" in result, false);
+    assert(!("asCell" in result));
   });
 
   it("removes multiple named properties", () => {
@@ -617,22 +629,22 @@ describe("schemaWithoutProperties", () => {
     ) as JSONSchemaObj;
 
     assertEquals(result, { type: "object" });
-    assertEquals("asCell" in result, false);
-    assertEquals("asStream" in result, false);
+    assert(!("asCell" in result));
+    assert(!("asStream" in result));
   });
 
   it("returns a frozen result", () => {
     const schema: JSONSchemaObj = { type: "object", asCell: true };
     const result = schemaWithoutProperties(schema, "asCell");
 
-    assertEquals(Object.isFrozen(result), true);
+    assert(Object.isFrozen(result));
   });
 
   it("does not mutate the original", () => {
     const schema: JSONSchemaObj = { type: "object", asCell: true };
     schemaWithoutProperties(schema, "asCell");
 
-    assertEquals(schema.asCell, true);
+    assertStrictEquals(schema.asCell, true);
   });
 
   it("is a no-op (deep-frozen clone) when the named property is absent from a mutable schema", () => {
@@ -640,8 +652,8 @@ describe("schemaWithoutProperties", () => {
     const result = schemaWithoutProperties(schema, "asCell");
 
     assertEquals(result, schema);
-    assertEquals(Object.isFrozen(result), true);
-    assertEquals(Object.isFrozen((result as JSONSchemaObj).not), true);
+    assert(Object.isFrozen(result));
+    assert(Object.isFrozen((result as JSONSchemaObj).not));
   });
 
   it("is a true no-op when the named property is absent from a deep-frozen schema", () => {
@@ -655,14 +667,82 @@ describe("schemaWithoutProperties", () => {
   });
 
   it("treats undefined as true (accept everything)", () => {
-    assertEquals(schemaWithoutProperties(undefined, "asCell"), true);
+    assertStrictEquals(schemaWithoutProperties(undefined, "asCell"), true);
   });
 
   it("returns boolean true as-is", () => {
-    assertEquals(schemaWithoutProperties(true, "asCell"), true);
+    assertStrictEquals(schemaWithoutProperties(true, "asCell"), true);
   });
 
   it("returns boolean false as-is", () => {
-    assertEquals(schemaWithoutProperties(false, "asCell"), false);
+    assertStrictEquals(schemaWithoutProperties(false, "asCell"), false);
+  });
+});
+
+describe("schemaForValueType", () => {
+  function testType(
+    typeName: JSONSchemaTypes,
+    example: FabricValue,
+  ) {
+    describe(typeName, () => {
+      it(`should return { type: "${typeName}" }`, () => {
+        assertEquals(schemaForValueType(example), { type: typeName });
+      });
+
+      it("should return an interned result", () => {
+        assertStrictEquals(
+          schemaForValueType(example),
+          schemaForValueType(example),
+        );
+      });
+
+      it("should return a frozen result", () => {
+        assert(isDeepFrozen(schemaForValueType(example)));
+      });
+    });
+  }
+
+  testType("string", "hello");
+  testType("integer", 42);
+  testType("number", 3.14);
+  testType("boolean", true);
+  testType("null", null);
+  testType("array", [1, 2, 3]);
+  testType("object", { a: 1 });
+
+  describe("undefined", () => {
+    it("should return undefined", () => {
+      assertEquals(schemaForValueType(undefined), undefined);
+    });
+  });
+
+  describe("bigint", () => {
+    it("should return undefined", () => {
+      assertEquals(schemaForValueType(BigInt(42)), undefined);
+    });
+  });
+
+  describe("symbol", () => {
+    it("should return undefined", () => {
+      assertEquals(schemaForValueType(Symbol("test")), undefined);
+    });
+  });
+});
+
+describe("emptySchemaObject", () => {
+  it("should return {}", () => {
+    assertEquals(emptySchemaObject(), {});
+  });
+
+  it("should return the same object every time", () => {
+    assertStrictEquals(emptySchemaObject(), emptySchemaObject());
+  });
+
+  it("should return an interned result", () => {
+    assert(isInternedSchema(emptySchemaObject()));
+  });
+
+  it("should return a frozen result", () => {
+    assert(isDeepFrozen(emptySchemaObject()));
   });
 });
