@@ -89,11 +89,13 @@ describe("ExperimentalOptions", () => {
           modernHash: true,
         },
       });
-      // Explicitly-set flags should be honored; unset flags get defaults.
+      // Explicitly-set flags should be honored; unset flags should be
+      // `undefined`.
       expect(runtime.experimental.modernDataModel).toBe(true);
       expect(runtime.experimental.modernHash).toBe(true);
-      // unifiedJsonEncoding was not set, so it gets the default (whatever it is).
-      expect(typeof runtime.experimental.unifiedJsonEncoding).toBe("boolean");
+      // unifiedJsonEncoding was not set, so it gets `undefined`.
+      expect("unifiedJsonEncoding" in runtime.experimental).toBe(true);
+      expect(runtime.experimental.unifiedJsonEncoding).toBe(undefined);
       await runtime.dispose();
       await sm.close();
     });
