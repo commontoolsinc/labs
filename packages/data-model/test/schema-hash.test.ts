@@ -358,16 +358,20 @@ describe("schema-hash dispatch", () => {
   // Reset behavior
   // -------------------------------------------------------------------------
 
-  describe("reset restores modern path (default)", () => {
-    it("hashSchema returns modern result after reset", () => {
-      setSchemaHashConfig(true);
-      const modern = hashSchema({ type: "boolean" });
+  describe("reset restores original path (default)", () => {
+    it("hashSchema returns original result after reset", () => {
+      const orig = hashSchema({ type: "boolean" });
 
       setSchemaHashConfig(false);
       resetSchemaHashConfig();
-      const afterReset = hashSchema({ type: "boolean" });
+      const afterReset1 = hashSchema({ type: "boolean" });
 
-      assertStrictEquals(modern, afterReset);
+      setSchemaHashConfig(true);
+      resetSchemaHashConfig();
+      const afterReset2 = hashSchema({ type: "boolean" });
+
+      assertStrictEquals(orig, afterReset1);
+      assertStrictEquals(orig, afterReset2);
     });
   });
 });
