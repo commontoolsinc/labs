@@ -277,22 +277,24 @@ function itemsSchemaFromArray(
   value: JSONValue[],
   state: AnalyzeTypeState,
 ): JSONSchema {
-  if (value.length === 0) {
-    // TODO(danfuzz): I think it's safe to return `true` here. (See longer
-    // related comment above.)
-    // TODO(seefeld): should be `true` in this case.
-    return {};
-  }
-
-  const schemas = value.map((v) => analyzeType(v, state));
-  if (schemas.length === 1) {
-    return schemas[0];
+  // No need for any fanciness for empty or single-element arrays.
+  switch (value.length) {
+    case 0: {
+      // TODO(danfuzz): I think it's safe to return `true` here. (See longer
+      // related comment above.)
+      // TODO(seefeld): should be `true` in this case.
+      return {};
+    }
+    case 1: {
+      return analyzeType(value[0], state);
+    }
   }
 
   // This `Set` constructor call achieves schema uniquing, exactly because all
   // the `schemas` are guaranteed to be interned. That is if `schema1 !==
   // schema2` (not the same actual object), then we know that they also aren't
   // equivalent (same-content objects).
+  const schemas = value.map((v) => analyzeType(v, state));
   const uniqueSchemas = [...new Set(schemas)];
   return (uniqueSchemas.length === 1)
     ? uniqueSchemas[0]
