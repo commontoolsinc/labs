@@ -33,6 +33,8 @@ export interface SchedulerGraphNode {
   // Timing controls
   debounceMs?: number; // Current debounce delay in ms (if set)
   throttleMs?: number; // Current throttle period in ms (if set)
+  // Pattern association
+  patternId?: string; // ID of the pattern this action belongs to
 }
 
 export interface SchedulerGraphEdge {

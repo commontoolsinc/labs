@@ -56,6 +56,9 @@ export default pattern((state) => {
             <button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
                     type: "object",
                     properties: {
+                        index: {
+                            type: "number"
+                        },
                         state: {
                             type: "object",
                             properties: {
@@ -65,12 +68,9 @@ export default pattern((state) => {
                                 }
                             },
                             required: ["selectedIndex"]
-                        },
-                        index: {
-                            type: "number"
                         }
                     },
-                    required: ["state", "index"]
+                    required: ["index", "state"]
                 } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state, index }) => state.selectedIndex.set(index))({
                     state: {
                         selectedIndex: state.key("selectedIndex")

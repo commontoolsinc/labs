@@ -1,0 +1,236 @@
+import * as __ctHelpers from "commontools";
+import { computed, pattern, UI, Writable } from "commontools";
+interface Item {
+    name: string;
+    value: number;
+}
+// FIXTURE: ternary-hoisted-compute-plain-map-branch
+// Verifies: once a ternary JSX branch is wholly compute-wrapped, compute-owned
+// array maps inside that branch stay plain Array.map() calls.
+//   showList ? (() => { const itemCount = count + " items"; return <div>{sorted.map(...)}</div>; })() : ...
+//     → ifElse(showList, derive(() => { const itemCount = ...; return <div>{sorted.map(...)}</div>; }), ...)
+// Context: the branch contains both a local compute-only alias and a map over
+//   a computed array result, so the whole branch should be handled as compute-owned.
+export default pattern((state) => {
+    const showList = Writable.of(true, {
+        type: "boolean"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const sorted = __ctHelpers.derive({
+        type: "object",
+        properties: {
+            state: {
+                type: "object",
+                properties: {
+                    items: {
+                        type: "array",
+                        items: {
+                            $ref: "#/$defs/Item"
+                        }
+                    }
+                },
+                required: ["items"]
+            }
+        },
+        required: ["state"],
+        $defs: {
+            Item: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    },
+                    value: {
+                        type: "number"
+                    }
+                },
+                required: ["name", "value"]
+            }
+        }
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "array",
+        items: {
+            $ref: "#/$defs/Item"
+        },
+        $defs: {
+            Item: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    },
+                    value: {
+                        type: "number"
+                    }
+                },
+                required: ["name", "value"]
+            }
+        }
+    } as const satisfies __ctHelpers.JSONSchema, { state: {
+            items: state.key("items")
+        } }, ({ state }) => [...state.items].sort((a, b) => a.value - b.value));
+    const count = __ctHelpers.derive({
+        type: "object",
+        properties: {
+            state: {
+                type: "object",
+                properties: {
+                    items: {
+                        type: "object",
+                        properties: {
+                            length: {
+                                type: "number"
+                            }
+                        },
+                        required: ["length"]
+                    }
+                },
+                required: ["items"]
+            }
+        },
+        required: ["state"]
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, { state: {
+            items: {
+                length: state.key("items", "length")
+            }
+        } }, ({ state }) => state.items.length);
+    return {
+        [UI]: (<div>
+        {__ctHelpers.ifElse({
+            type: "boolean",
+            asCell: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{}, {
+                    type: "object",
+                    properties: {}
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{}, {
+                    type: "object",
+                    properties: {}
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{}, {
+                    type: "object",
+                    properties: {}
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, showList, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                },
+                sorted: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    }
+                }
+            },
+            required: ["count", "sorted"],
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        value: {
+                            type: "number"
+                        }
+                    },
+                    required: ["name", "value"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }],
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, {
+            count: count,
+            sorted: sorted
+        }, ({ count, sorted }) => (() => {
+            const itemCount = count + " items";
+            return (<div>
+                <span>{itemCount}</span>
+                {sorted.map((item: Item) => (<span>{item.name}</span>))}
+              </div>);
+        })()), <span>Hidden</span>)}
+      </div>),
+    };
+}, {
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            }
+        }
+    },
+    required: ["items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["name", "value"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

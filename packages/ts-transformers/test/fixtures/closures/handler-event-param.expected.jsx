@@ -31,16 +31,16 @@ export default pattern((state) => {
                 state: {
                     type: "object",
                     properties: {
-                        selectedValue: {
-                            type: "string",
-                            asCell: true
-                        },
                         changeCount: {
                             type: "number",
                             asCell: true
+                        },
+                        selectedValue: {
+                            type: "string",
+                            asCell: true
                         }
                     },
-                    required: ["selectedValue", "changeCount"]
+                    required: ["changeCount", "selectedValue"]
                 }
             },
             required: ["state"]

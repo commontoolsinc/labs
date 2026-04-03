@@ -44,7 +44,7 @@ export default pattern((state: State) => {
         value,
         state: {
             counter: {
-                value: state.key("counter").value
+                value: state.key("counter", "value")
             }
         }
     }, ({ value: v, state }) => v.get() + state.counter.value);

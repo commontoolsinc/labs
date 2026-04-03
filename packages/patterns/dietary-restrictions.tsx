@@ -1418,31 +1418,12 @@ export const DietaryRestrictionsModule = pattern<
       .filter((entry) => entry.name && entry.name.trim() !== "");
   });
 
-  // Cache for impliedItems to avoid recomputation when restrictions haven't changed
-  let _cachedImpliedItems: Array<{
-    name: string;
-    level: RestrictionLevel;
-    sources: string[];
-  }> = [];
-  let _lastRestrictionsHash = "";
-
   // Compute implied items (expanded from groups) - memoized
   // VERIFIED: This computed() only runs when restrictions change, not on autocomplete keypress.
   // Console instrumentation confirmed memoization works correctly (Dec 2025).
   const impliedItems = computed(() => {
     // Access the normalized array - normalizedRestrictions is already a computed OpaqueRef
     const current = (normalizedRestrictions || []) as RestrictionEntry[];
-
-    // Full hash to catch ALL item changes (including middle items)
-    // Defensive: handle potentially missing name/level
-    const hash = current
-      .filter((e) => e?.name)
-      .map((e) => `${e.name}:${e.level || "prefer"}`)
-      .join("|");
-    if (hash === _lastRestrictionsHash) {
-      return _cachedImpliedItems;
-    }
-    _lastRestrictionsHash = hash;
 
     const implied = new Map<
       string,
@@ -1475,11 +1456,9 @@ export const DietaryRestrictionsModule = pattern<
       }
     }
 
-    _cachedImpliedItems = [...implied.entries()]
+    return [...implied.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([name, info]) => ({ name, ...info }));
-
-    return _cachedImpliedItems;
   });
 
   const displayText = computed(() => {

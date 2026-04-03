@@ -4,9 +4,8 @@ import type { ClosureTransformationStrategy } from "./strategy.ts";
 import { isEventHandlerJsxAttribute } from "../../ast/mod.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
-import { buildCapturePropertyAssignments } from "./array-method-strategy.ts";
-import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
+import { buildCapturedHandlerClosureCall } from "../utils/capture-scaffold.ts";
 
 export class HandlerStrategy implements ClosureTransformationStrategy {
   canTransform(
@@ -58,23 +57,6 @@ export function transformHandlerJsxAttribute(
 
   const collector = new CaptureCollector(context.checker);
   const { captureTree } = collector.analyze(callback);
-
-  // Initialize PatternBuilder
-  const builder = new PatternBuilder(context);
-  builder.setCaptureTree(captureTree);
-
-  // Register capture names as used to avoid collision with event parameter
-  // MOVED: This logic is now handled inside PatternBuilder.buildHandlerCallback
-  // to prevent captures from colliding with themselves.
-
-  // Build the new callback using buildHandlerCallback
-  const handlerCallback = builder.buildHandlerCallback(
-    callback,
-    transformedBody,
-    "__ct_handler_event",
-    "__ct_handler_params",
-  );
-
   const { factory } = context;
 
   // Build type information for handler params using SchemaFactory
@@ -85,24 +67,18 @@ export function transformHandlerJsxAttribute(
     callback.parameters[1] as ts.ParameterDeclaration | undefined,
   );
 
-  const handlerCall = context.ctHelpers.createHelperCall(
-    "handler",
+  const finalCall = buildCapturedHandlerClosureCall(
     expression,
-    [eventTypeNode, stateTypeNode],
-    [handlerCallback],
-  );
-
-  const paramProperties = buildCapturePropertyAssignments(captureTree, factory);
-
-  const paramsObject = factory.createObjectLiteralExpression(
-    paramProperties,
-    paramProperties.length > 0,
-  );
-
-  const finalCall = factory.createCallExpression(
-    handlerCall,
-    undefined,
-    [paramsObject],
+    callback,
+    transformedBody,
+    captureTree,
+    eventTypeNode,
+    stateTypeNode,
+    context,
+    {
+      eventParamName: "__ct_handler_event",
+      paramsParamName: "__ct_handler_params",
+    },
   );
 
   const newInitializer = factory.createJsxExpression(

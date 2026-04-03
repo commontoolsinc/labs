@@ -2,10 +2,10 @@
 import { cell, pattern, UI } from "commontools";
 
 // FIXTURE: logical-and-non-jsx
-// Verifies: && with non-JSX right side (string template, number) is wrapped in derive(), not when()
-//   user.get().name.length > 0 && `Hello...` → derive({user}, ({user}) => user.get().name.length > 0 && `Hello...`)
-//   user.get().age > 18 && user.get().age    → derive({user}, ...)
-// Context: when() is only for JSX right-hand sides; non-JSX uses derive()
+// Verifies: && with non-JSX right side still lowers through when(), with predicate/value derived separately
+//   user.get().name.length > 0 && `Hello...` → when(derive(predicate), derive(template))
+//   user.get().age > 18 && user.get().age    → when(derive(predicate), derive(number))
+// Context: JSX-local control flow still uses when(); non-JSX right-hand values become derived branch values
 export default pattern((_state) => {
   const user = cell<{ name: string; age: number }>({ name: "", age: 0 });
 

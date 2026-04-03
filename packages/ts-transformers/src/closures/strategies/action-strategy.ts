@@ -3,10 +3,9 @@ import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import { detectCallKind, registerSyntheticCallType } from "../../ast/mod.ts";
 import { CaptureCollector } from "../capture-collector.ts";
-import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
-import { buildCapturePropertyAssignments } from "./array-method-strategy.ts";
 import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
+import { buildCapturedHandlerClosureCall } from "../utils/capture-scaffold.ts";
 
 /**
  * ActionStrategy transforms action() calls to handler() calls with explicit closures.
@@ -98,7 +97,7 @@ function transformActionCall(
   context: TransformationContext,
   visitor: ts.Visitor,
 ): ts.CallExpression | undefined {
-  const { factory, checker } = context;
+  const { checker } = context;
 
   // Extract callback
   const callback = extractActionCallback(actionCall);
@@ -116,10 +115,6 @@ function transformActionCall(
   const collector = new CaptureCollector(checker);
   const { captureTree } = collector.analyze(callback);
 
-  // Initialize PatternBuilder
-  const builder = new PatternBuilder(context);
-  builder.setCaptureTree(captureTree);
-
   // Determine event parameter name:
   // - If callback has an event param, preserve its name
   // - Otherwise use "_" to indicate unused
@@ -127,14 +122,6 @@ function transformActionCall(
   const eventParamName = eventParam && ts.isIdentifier(eventParam.name)
     ? eventParam.name.text
     : "_";
-
-  // Build the handler callback with (event, params) signature
-  const handlerCallback = builder.buildHandlerCallback(
-    callback,
-    transformedBody,
-    eventParamName,
-    "__ct_action_params",
-  );
 
   // Build type information for handler params using SchemaFactory
   const schemaFactory = new SchemaFactory(context);
@@ -152,26 +139,18 @@ function transformActionCall(
     undefined, // no explicit state parameter in action
   );
 
-  // Build the handler call: handler<void, StateType>(callback)
-  const handlerCall = context.ctHelpers.createHelperCall(
-    "handler",
+  const finalCall = buildCapturedHandlerClosureCall(
     actionCall,
-    [eventTypeNode, stateTypeNode],
-    [handlerCallback],
-  );
-
-  // Build the params object: { count, ... }
-  const paramProperties = buildCapturePropertyAssignments(captureTree, factory);
-  const paramsObject = factory.createObjectLiteralExpression(
-    paramProperties,
-    paramProperties.length > 0,
-  );
-
-  // Build the final call: handler(...)({ captures })
-  const finalCall = factory.createCallExpression(
-    handlerCall,
-    undefined,
-    [paramsObject],
+    callback,
+    transformedBody,
+    captureTree,
+    eventTypeNode,
+    stateTypeNode,
+    context,
+    {
+      eventParamName,
+      paramsParamName: "__ct_action_params",
+    },
   );
 
   // Register the return type in the TypeRegistry for schema inference.

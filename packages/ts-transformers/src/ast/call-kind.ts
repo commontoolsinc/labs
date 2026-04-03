@@ -1,12 +1,14 @@
 /**
  * Call Kind Detection
  *
- * This module identifies CommonTools-specific call expressions (derive, ifElse,
- * pattern, etc.) to enable appropriate transformation behavior.
+ * This module identifies compiler-significant call families. Most are
+ * CommonTools-specific calls (derive, ifElse, pattern, etc.), but array-method
+ * families are also classified because they establish callback/container
+ * boundaries relevant to analysis and lowering.
  *
  * ## Detection Strategy
  *
- * Detection is provenance-first:
+ * Detection is provenance-first for CommonTools calls:
  *
  * 1. **Symbol resolution**: Resolve the callee symbol and verify it comes from
  *    CommonTools declarations or imports.
@@ -22,13 +24,16 @@
  * ## Narrow Exceptions
  *
  * The remaining syntactic fallback is intentionally limited to synthetic
- * `__ctHelpers.*` calls and unresolved bare builder identifiers. Local helpers
- * or object methods that merely share a CommonTools name should not be
- * classified as CommonTools calls.
+ * `__ctHelpers.*` calls, unresolved bare builder identifiers, and explicit
+ * reactive array-method receiver checks. Plain array methods share the same
+ * syntax family but require separate ownership classification; consumers
+ * should use `classifyArrayMethodCallSite(...)` when that distinction matters.
  */
 import ts from "typescript";
 
-import { CT_HELPERS_IDENTIFIER, isCommonToolsSymbol } from "../core/mod.ts";
+import { CT_HELPERS_IDENTIFIER } from "../core/ct-helpers.ts";
+import { isCommonToolsSymbol } from "../core/common-tools-symbols.ts";
+import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 import {
   COMMONTOOLS_BUILDER_EXPORT_NAMES,
   COMMONTOOLS_CALL_EXPORT_NAMES,
@@ -37,15 +42,8 @@ import {
   COMMONTOOLS_RUNTIME_EXPORTS_BY_NAME,
 } from "../core/commontools-runtime-registry.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
-
-const ARRAY_METHOD_NAMES = new Set([
-  "map",
-  "mapWithPattern",
-  "filter",
-  "filterWithPattern",
-  "flatMap",
-  "flatMapWithPattern",
-]);
+import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
+import { getTypeAtLocationWithFallback } from "./utils.ts";
 
 const BUILDER_SYMBOL_NAMES = COMMONTOOLS_BUILDER_EXPORT_NAMES;
 
@@ -73,6 +71,68 @@ const CELL_LIKE_CLASSES = new Set([
 const CELL_FACTORY_NAMES = new Set(["of"]);
 const CELL_FOR_NAMES = new Set(["for"]);
 const COMMONTOOLS_CALL_NAMES = COMMONTOOLS_CALL_EXPORT_NAMES;
+const WILDCARD_OBJECT_METHOD_NAMES = new Set(["keys", "values", "entries"]);
+
+export type ArrayMethodFamilyName = "map" | "filter" | "flatMap";
+
+export interface ArrayMethodAccessKind {
+  readonly family: ArrayMethodFamilyName;
+  readonly lowered: boolean;
+}
+
+const ARRAY_METHOD_ACCESS_BY_NAME = new Map<string, ArrayMethodAccessKind>([
+  ["map", { family: "map", lowered: false }],
+  ["mapWithPattern", { family: "map", lowered: true }],
+  ["filter", { family: "filter", lowered: false }],
+  ["filterWithPattern", { family: "filter", lowered: true }],
+  ["flatMap", { family: "flatMap", lowered: false }],
+  ["flatMapWithPattern", { family: "flatMap", lowered: true }],
+]);
+
+function getArrayMethodAccessKindByName(
+  name: string,
+): ArrayMethodAccessKind | undefined {
+  return ARRAY_METHOD_ACCESS_BY_NAME.get(name);
+}
+
+function isKnownArrayMethodName(name: string): boolean {
+  return ARRAY_METHOD_ACCESS_BY_NAME.has(name);
+}
+
+export type ArrayMethodOwnership = "plain" | "reactive";
+
+export interface ArrayMethodCallSiteInfo extends ArrayMethodAccessKind {
+  readonly ownership: ArrayMethodOwnership;
+}
+
+export interface ReactiveCollectionProvenanceOptions {
+  readonly allowTypeBasedRoot?: boolean;
+  readonly allowImplicitReactiveParameters?: boolean;
+  readonly allowReactiveArrayCallbackParameters?: boolean;
+  readonly sameScope?: ts.FunctionLikeDeclaration;
+  readonly typeRegistry?: WeakMap<ts.Node, ts.Type>;
+  readonly logger?: (message: string) => void;
+}
+
+export type ArrayCallbackContainerCallKind =
+  | "reactive-array-method"
+  | "plain-array-value"
+  | "plain-array-void";
+
+type ImplicitReactiveParameterContextKind =
+  | "builder"
+  | "reactive-array-method";
+
+export interface ArrayMethodResultSinkCallInfo {
+  readonly sink: "join";
+  readonly receiverFamily: ArrayMethodFamilyName;
+  readonly receiverLowered: boolean;
+}
+
+export interface ArrayMethodResultSinkReceiverChainCallInfo {
+  readonly sinkCall: ArrayMethodResultSinkCallInfo;
+  readonly depth: number;
+}
 
 export type CallKind =
   | { kind: "ifElse"; symbol?: ts.Symbol }
@@ -94,6 +154,58 @@ export type CallKind =
     reactiveOrigin: boolean;
   };
 
+export type WildcardTraversalCallKind =
+  | "object-wildcard-traversal"
+  | "json-stringify";
+
+type ExpressionCache<T> = WeakMap<ts.TypeChecker, WeakMap<ts.Expression, T>>;
+
+const callKindCacheByChecker: ExpressionCache<CallKind | null> = new WeakMap();
+const directBuilderKindCacheByChecker: ExpressionCache<
+  Extract<CallKind, { kind: "builder" }> | null
+> = new WeakMap();
+const reactiveValueCacheByChecker: ExpressionCache<boolean> = new WeakMap();
+const reactiveCollectionProvenanceCacheByChecker: ExpressionCache<boolean> =
+  new WeakMap();
+
+function getCheckerExpressionCache<T>(
+  cacheByChecker: ExpressionCache<T>,
+  checker: ts.TypeChecker,
+): WeakMap<ts.Expression, T> {
+  let cache = cacheByChecker.get(checker);
+  if (!cache) {
+    cache = new WeakMap<ts.Expression, T>();
+    cacheByChecker.set(checker, cache);
+  }
+  return cache;
+}
+
+function getCachedExpressionValue<T>(
+  cacheByChecker: ExpressionCache<T>,
+  checker: ts.TypeChecker,
+  expression: ts.Expression,
+  compute: () => T,
+): T {
+  const cache = getCheckerExpressionCache(cacheByChecker, checker);
+  if (cache.has(expression)) {
+    return cache.get(expression)!;
+  }
+  const value = compute();
+  cache.set(expression, value);
+  return value;
+}
+
+function usesDefaultReactiveCollectionProvenanceOptions(
+  options: ReactiveCollectionProvenanceOptions,
+): boolean {
+  return options.allowTypeBasedRoot === undefined &&
+    options.allowImplicitReactiveParameters === undefined &&
+    options.allowReactiveArrayCallbackParameters === undefined &&
+    options.sameScope === undefined &&
+    options.typeRegistry === undefined &&
+    options.logger === undefined;
+}
+
 export function detectCallKind(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -105,13 +217,118 @@ export function detectDirectBuilderCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
 ): Extract<CallKind, { kind: "builder" }> | undefined {
-  const builderKind = resolveBuilderExpressionKind(
+  return resolveBuilderExpressionKind(
     call.expression,
     checker,
     new Set(),
     { followFactoryResults: false },
   );
-  return builderKind?.kind === "builder" ? builderKind : undefined;
+}
+
+export function isPatternBuilderCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const builderKind = detectDirectBuilderCall(call, checker);
+  if (builderKind?.builderName === "pattern") {
+    return true;
+  }
+
+  const target = stripWrappers(call.expression);
+  return ts.isPropertyAccessExpression(target) &&
+    target.name.text === "pattern";
+}
+
+export function getPatternBuilderCallbackArgument(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  if (!isPatternBuilderCall(call, checker)) {
+    return undefined;
+  }
+
+  const callbackArg = call.arguments[0];
+  if (callbackArg && isCallbackFunctionExpression(callbackArg)) {
+    return callbackArg;
+  }
+  return undefined;
+}
+
+export function getPatternToolCallbackArgument(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  const callKind = detectCallKind(call, checker);
+  if (callKind?.kind !== "pattern-tool") {
+    const target = stripWrappers(call.expression);
+    if (
+      !ts.isPropertyAccessExpression(target) ||
+      target.name.text !== "patternTool"
+    ) {
+      return undefined;
+    }
+  }
+
+  const callbackArg = call.arguments[0];
+  if (callbackArg && isCallbackFunctionExpression(callbackArg)) {
+    return callbackArg;
+  }
+  return undefined;
+}
+
+export function getCapabilitySummaryCallbackArgument(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  const callKind = detectCallKind(call, checker);
+  if (!callKind) return undefined;
+
+  let callbackArg: ts.Expression | undefined;
+  if (callKind.kind === "derive") {
+    callbackArg = call.arguments[call.arguments.length - 1];
+  } else if (
+    callKind.kind === "builder" &&
+    (
+      callKind.builderName === "lift" ||
+      callKind.builderName === "handler" ||
+      callKind.builderName === "computed" ||
+      callKind.builderName === "action"
+    )
+  ) {
+    callbackArg = call.arguments[0];
+  }
+
+  if (callbackArg && isCallbackFunctionExpression(callbackArg)) {
+    return callbackArg;
+  }
+  return undefined;
+}
+
+export function getDeriveInputAndCallbackArgument(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): {
+  input: ts.Expression;
+  callback: ts.ArrowFunction | ts.FunctionExpression;
+} | undefined {
+  const callKind = detectCallKind(call, checker);
+  if (callKind?.kind !== "derive") {
+    return undefined;
+  }
+
+  const callback = getCapabilitySummaryCallbackArgument(call, checker);
+  if (!callback) {
+    return undefined;
+  }
+
+  const callbackIndex = call.arguments.indexOf(callback);
+  const inputIndex = callbackIndex === 1 ? 0 : callbackIndex === 3 ? 2 : -1;
+  const input = inputIndex >= 0 ? call.arguments[inputIndex] : undefined;
+  if (!input) {
+    return undefined;
+  }
+
+  return { input, callback };
 }
 
 export function isReactiveOriginCall(
@@ -120,6 +337,267 @@ export function isReactiveOriginCall(
 ): boolean {
   const callKind = detectCallKind(call, checker);
   return !!callKind && isReactiveOriginKind(callKind);
+}
+
+export function classifyWildcardTraversalCall(
+  call: ts.CallExpression,
+  checker?: ts.TypeChecker,
+): WildcardTraversalCallKind | undefined {
+  const target = stripWrappers(call.expression);
+  if (!ts.isPropertyAccessExpression(target)) {
+    return undefined;
+  }
+
+  if (checker) {
+    const symbol = checker.getSymbolAtLocation(target.name);
+    const resolved = symbol
+      ? (resolveAlias(symbol, checker, new Set()) ?? symbol)
+      : undefined;
+
+    for (const declaration of resolved?.getDeclarations() ?? []) {
+      if (!hasIdentifierName(declaration)) continue;
+
+      const owner = findOwnerName(declaration);
+      if (!owner) continue;
+
+      const name = declaration.name.text;
+      if (
+        owner === "ObjectConstructor" &&
+        WILDCARD_OBJECT_METHOD_NAMES.has(name)
+      ) {
+        return "object-wildcard-traversal";
+      }
+
+      if (owner === "JSON" && name === "stringify") {
+        return "json-stringify";
+      }
+    }
+  }
+
+  if (
+    ts.isIdentifier(target.expression) &&
+    target.expression.text === "Object" &&
+    WILDCARD_OBJECT_METHOD_NAMES.has(target.name.text)
+  ) {
+    return "object-wildcard-traversal";
+  }
+
+  if (
+    ts.isIdentifier(target.expression) &&
+    target.expression.text === "JSON" &&
+    target.name.text === "stringify"
+  ) {
+    return "json-stringify";
+  }
+
+  return undefined;
+}
+
+function isCallbackFunctionExpression(
+  expression: ts.Expression,
+): expression is ts.ArrowFunction | ts.FunctionExpression {
+  return ts.isArrowFunction(expression) || ts.isFunctionExpression(expression);
+}
+
+export function isWildcardTraversalCall(
+  call: ts.CallExpression,
+  checker?: ts.TypeChecker,
+): boolean {
+  return !!classifyWildcardTraversalCall(call, checker);
+}
+
+export function classifyArrayMethodAccess(
+  expression: ts.Expression,
+): ArrayMethodAccessKind | undefined {
+  const target = stripWrappers(expression);
+
+  let methodName: string | undefined;
+  if (ts.isPropertyAccessExpression(target)) {
+    methodName = target.name.text;
+  } else if (ts.isElementAccessExpression(target)) {
+    const argument = target.argumentExpression;
+    if (
+      argument &&
+      (ts.isStringLiteralLike(argument) ||
+        ts.isNoSubstitutionTemplateLiteral(argument))
+    ) {
+      methodName = argument.text;
+    }
+  }
+
+  return methodName ? getArrayMethodAccessKindByName(methodName) : undefined;
+}
+
+export function classifyArrayMethodCall(
+  call: ts.CallExpression,
+): ArrayMethodAccessKind | undefined {
+  return classifyArrayMethodAccess(call.expression);
+}
+
+export function getLoweredArrayMethodName(
+  family: ArrayMethodFamilyName,
+): string {
+  return `${family}WithPattern`;
+}
+
+export function classifyArrayMethodCallSite(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ArrayMethodCallSiteInfo | undefined {
+  const access = classifyArrayMethodCall(call);
+  if (!access) {
+    return undefined;
+  }
+
+  const target = stripWrappers(call.expression);
+  if (
+    !ts.isPropertyAccessExpression(target) &&
+    !ts.isElementAccessExpression(target)
+  ) {
+    return { ...access, ownership: "plain" };
+  }
+
+  return {
+    ...access,
+    ownership: hasReactiveCollectionProvenance(
+        target.expression,
+        checker,
+      )
+      ? "reactive"
+      : "plain",
+  };
+}
+
+export function classifyArrayCallbackContainerCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ArrayCallbackContainerCallKind | undefined {
+  const arrayMethodCallSite = classifyArrayMethodCallSite(call, checker);
+  if (arrayMethodCallSite?.ownership === "reactive") {
+    if (isConsumedByTerminalChainCall(call)) {
+      return "plain-array-value";
+    }
+    return "reactive-array-method";
+  }
+
+  if (
+    arrayMethodCallSite?.ownership === "plain" &&
+    !arrayMethodCallSite.lowered
+  ) {
+    return "plain-array-value";
+  }
+
+  const signature = checker.getResolvedSignature(call);
+  const declaration = signature?.declaration;
+  if (!signature || !declaration) {
+    return undefined;
+  }
+
+  const owner = findOwnerName(declaration);
+  if (!owner || !ARRAY_OWNER_NAMES.has(owner)) {
+    return undefined;
+  }
+
+  const returnType = checker.getReturnTypeOfSignature(signature);
+  return (returnType.flags & ts.TypeFlags.Void) === 0
+    ? "plain-array-value"
+    : "plain-array-void";
+}
+
+export function classifyArrayMethodResultSinkCall(
+  call: ts.CallExpression,
+  checker?: ts.TypeChecker,
+): ArrayMethodResultSinkCallInfo | undefined {
+  const target = stripWrappers(call.expression);
+  if (!ts.isPropertyAccessExpression(target)) {
+    return undefined;
+  }
+
+  const receiver = stripWrappers(target.expression);
+  if (!ts.isCallExpression(receiver)) {
+    return undefined;
+  }
+
+  const receiverMethod = classifyArrayMethodCall(receiver);
+  if (!receiverMethod) {
+    return undefined;
+  }
+
+  if (checker) {
+    const symbol = checker.getSymbolAtLocation(target.name);
+    const resolved = symbol
+      ? (resolveAlias(symbol, checker, new Set()) ?? symbol)
+      : undefined;
+    const declarations = resolved?.getDeclarations() ?? [];
+
+    for (const declaration of declarations) {
+      if (!hasIdentifierName(declaration)) continue;
+
+      const owner = findOwnerName(declaration);
+      if (!owner) continue;
+
+      if (
+        ARRAY_OWNER_NAMES.has(owner) &&
+        declaration.name.text === "join"
+      ) {
+        return {
+          sink: "join",
+          receiverFamily: receiverMethod.family,
+          receiverLowered: receiverMethod.lowered,
+        };
+      }
+    }
+
+    if (declarations.length > 0) {
+      return undefined;
+    }
+  }
+
+  if (target.name.text === "join") {
+    return {
+      sink: "join",
+      receiverFamily: receiverMethod.family,
+      receiverLowered: receiverMethod.lowered,
+    };
+  }
+
+  return undefined;
+}
+
+export function classifyArrayMethodResultSinkReceiverChainCall(
+  call: ts.CallExpression,
+  checker?: ts.TypeChecker,
+): ArrayMethodResultSinkReceiverChainCallInfo | undefined {
+  const target = stripWrappers(call.expression);
+  if (!ts.isPropertyAccessExpression(target)) {
+    return undefined;
+  }
+
+  const receiver = stripWrappers(target.expression);
+  if (!ts.isCallExpression(receiver)) {
+    return undefined;
+  }
+
+  const sinkCall = classifyArrayMethodResultSinkCall(receiver, checker);
+  if (!sinkCall) {
+    const receiverChain = classifyArrayMethodResultSinkReceiverChainCall(
+      receiver,
+      checker,
+    );
+    if (!receiverChain) {
+      return undefined;
+    }
+
+    return {
+      sinkCall: receiverChain.sinkCall,
+      depth: receiverChain.depth + 1,
+    };
+  }
+
+  return {
+    sinkCall,
+    depth: 1,
+  };
 }
 
 function isReactiveOriginKind(callKind: CallKind): boolean {
@@ -158,7 +636,7 @@ export function isReactiveValueSymbol(
   symbol: ts.Symbol | undefined,
   checker: ts.TypeChecker,
 ): boolean {
-  return !!getImplicitReactiveParameterCallKind(symbol, checker) ||
+  return hasImplicitReactiveParameterContext(symbol, checker) ||
     isVariableFromReactiveCallSymbol(symbol, checker);
 }
 
@@ -166,36 +644,77 @@ export function isReactiveValueExpression(
   expression: ts.Expression,
   checker: ts.TypeChecker,
 ): boolean {
-  const target = stripWrappers(expression);
+  return getCachedExpressionValue(
+    reactiveValueCacheByChecker,
+    checker,
+    expression,
+    () => {
+      const target = stripWrappers(expression);
 
-  try {
-    const type = checker.getTypeAtLocation(target);
-    if (isOpaqueRefType(type, checker)) {
-      return true;
-    }
-  } catch {
-    // Fall through to structural analysis.
+      try {
+        const type = checker.getTypeAtLocation(target);
+        if (isOpaqueRefType(type, checker)) {
+          return true;
+        }
+      } catch {
+        // Fall through to structural analysis.
+      }
+
+      if (ts.isIdentifier(target)) {
+        return isReactiveValueSymbol(
+          checker.getSymbolAtLocation(target),
+          checker,
+        );
+      }
+
+      if (
+        ts.isPropertyAccessExpression(target) ||
+        ts.isElementAccessExpression(target)
+      ) {
+        return isReactiveValueExpression(target.expression, checker);
+      }
+
+      if (ts.isCallExpression(target)) {
+        if (classifyOpaquePathTerminalCall(target) === "key") {
+          return true;
+        }
+        if (isReactiveOriginCall(target, checker)) {
+          return true;
+        }
+        return isLoweredReactiveArrayMethodCall(target, checker);
+      }
+
+      return false;
+    },
+  );
+}
+
+export function hasReactiveCollectionProvenance(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  options: ReactiveCollectionProvenanceOptions = {},
+): boolean {
+  if (usesDefaultReactiveCollectionProvenanceOptions(options)) {
+    return getCachedExpressionValue(
+      reactiveCollectionProvenanceCacheByChecker,
+      checker,
+      expression,
+      () =>
+        hasReactiveCollectionProvenanceInternal(
+          expression,
+          checker,
+          options,
+          new Set(),
+        ),
+    );
   }
 
-  if (ts.isIdentifier(target)) {
-    return isReactiveValueSymbol(checker.getSymbolAtLocation(target), checker);
-  }
-
-  if (
-    ts.isPropertyAccessExpression(target) ||
-    ts.isElementAccessExpression(target)
-  ) {
-    return isReactiveValueExpression(target.expression, checker);
-  }
-
-  if (ts.isCallExpression(target)) {
-    if (isReactiveOriginCall(target, checker)) {
-      return true;
-    }
-    return isLoweredReactiveArrayMethodCall(target, checker);
-  }
-
-  return false;
+  return hasReactiveCollectionProvenanceInternal(
+    expression,
+    checker,
+    options,
+    new Set(),
+  );
 }
 
 export function isSimpleReactiveAccessExpression(
@@ -225,23 +744,195 @@ export function isSimpleReactiveAccessExpression(
   return false;
 }
 
+function hasReactiveCollectionProvenanceInternal(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  options: ReactiveCollectionProvenanceOptions,
+  seenSymbols: Set<ts.Symbol>,
+): boolean {
+  const target = stripWrappers(expression);
+  if (options.allowTypeBasedRoot !== false) {
+    const type = getTypeAtLocationWithFallback(
+      target,
+      checker,
+      options.typeRegistry,
+      options.logger,
+    );
+    if (type && isOpaqueRefType(type, checker)) {
+      return true;
+    }
+  }
+
+  if (
+    ts.isPropertyAccessExpression(target) ||
+    ts.isElementAccessExpression(target)
+  ) {
+    return hasReactiveCollectionProvenanceInternal(
+      target.expression,
+      checker,
+      options,
+      seenSymbols,
+    );
+  }
+
+  if (
+    ts.isBinaryExpression(target) &&
+    (
+      target.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken ||
+      target.operatorToken.kind === ts.SyntaxKind.BarBarToken
+    )
+  ) {
+    return hasReactiveCollectionProvenanceInternal(
+      target.left,
+      checker,
+      options,
+      seenSymbols,
+    ) || hasReactiveCollectionProvenanceInternal(
+      target.right,
+      checker,
+      options,
+      seenSymbols,
+    );
+  }
+
+  if (ts.isCallExpression(target)) {
+    if (classifyOpaquePathTerminalCall(target) === "key") {
+      return true;
+    }
+
+    const arrayMethodCall = classifyArrayMethodCall(target);
+    if (
+      arrayMethodCall &&
+      (
+        ts.isPropertyAccessExpression(target.expression) ||
+        ts.isElementAccessExpression(target.expression)
+      )
+    ) {
+      return hasReactiveCollectionProvenanceInternal(
+        target.expression.expression,
+        checker,
+        options,
+        seenSymbols,
+      );
+    }
+
+    if (isReactiveOriginCall(target, checker)) {
+      return true;
+    }
+
+    const directBuilder = detectDirectBuilderCall(target, checker);
+    return !!directBuilder &&
+      COMMONTOOLS_REACTIVE_ORIGIN_BUILDER_NAMES.has(directBuilder.builderName);
+  }
+
+  if (!ts.isIdentifier(target)) {
+    return false;
+  }
+
+  const symbol = checker.getSymbolAtLocation(target);
+  if (!symbol || seenSymbols.has(symbol)) {
+    return false;
+  }
+  seenSymbols.add(symbol);
+
+  if (
+    options.allowImplicitReactiveParameters !== false &&
+    isSymbolDeclaredInScope(symbol, options.sameScope)
+  ) {
+    const implicitContext = getImplicitReactiveParameterContextKind(
+      symbol,
+      checker,
+    );
+    if (
+      implicitContext === "builder" ||
+      (
+        options.allowReactiveArrayCallbackParameters !== false &&
+        implicitContext === "reactive-array-method"
+      )
+    ) {
+      return true;
+    }
+  }
+
+  for (const declaration of symbol.getDeclarations() ?? []) {
+    if (!isDeclarationInScope(declaration, options.sameScope)) {
+      continue;
+    }
+
+    if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
+      if (
+        hasReactiveCollectionProvenanceInternal(
+          declaration.initializer,
+          checker,
+          options,
+          seenSymbols,
+        )
+      ) {
+        return true;
+      }
+      continue;
+    }
+
+    if (!ts.isBindingElement(declaration)) {
+      continue;
+    }
+
+    let parent: ts.Node = declaration;
+    while (
+      ts.isBindingElement(parent) ||
+      ts.isObjectBindingPattern(parent) ||
+      ts.isArrayBindingPattern(parent)
+    ) {
+      parent = parent.parent;
+    }
+
+    if (
+      ts.isVariableDeclaration(parent) &&
+      parent.initializer &&
+      hasReactiveCollectionProvenanceInternal(
+        parent.initializer,
+        checker,
+        options,
+        seenSymbols,
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function resolveExpressionKind(
   expression: ts.Expression,
   checker: ts.TypeChecker,
   seen: Set<ts.Symbol>,
 ): CallKind | undefined {
+  const cache = getCheckerExpressionCache(callKindCacheByChecker, checker);
+  if (cache.has(expression)) {
+    return cache.get(expression) ?? undefined;
+  }
+
   const target = stripWrappers(expression);
 
   const builderKind = resolveBuilderExpressionKind(target, checker, new Set(), {
     followFactoryResults: true,
   });
-  if (builderKind) return builderKind;
+  if (builderKind) {
+    cache.set(expression, builderKind);
+    return builderKind;
+  }
 
   const syntheticHelperKind = getSyntheticHelperCallKind(target);
-  if (syntheticHelperKind) return syntheticHelperKind;
+  if (syntheticHelperKind) {
+    cache.set(expression, syntheticHelperKind);
+    return syntheticHelperKind;
+  }
 
   if (ts.isCallExpression(target)) {
-    return resolveExpressionKind(target.expression, checker, seen);
+    const result = resolveExpressionKind(target.expression, checker, seen);
+    cache.set(expression, result ?? null);
+    return result;
   }
 
   let symbol: ts.Symbol | undefined;
@@ -260,19 +951,21 @@ function resolveExpressionKind(
 
   if (symbol) {
     const kind = resolveSymbolKind(symbol, checker, seen);
-    if (kind) return kind;
+    if (kind) {
+      cache.set(expression, kind);
+      return kind;
+    }
   }
 
   if (ts.isPropertyAccessExpression(target)) {
     const name = target.name.text;
-    if (ARRAY_METHOD_NAMES.has(name)) {
-      // Only classify as array-map if receiver is reactive (OpaqueRef/Cell).
-      // Plain Array.prototype methods should not be treated as reactive.
-      if (
-        isReactiveValueExpression(target.expression, checker) ||
-        isReactiveArrayMethodChain(target.expression, checker)
-      ) {
-        return { kind: "array-method" };
+    if (isKnownArrayMethodName(name)) {
+      // Fallback path: when symbol resolution doesn't already identify the
+      // array-method family, only treat it as such for reactive receivers.
+      if (isReactiveArrayMethodReceiverExpression(target.expression, checker)) {
+        const result = { kind: "array-method" } as const;
+        cache.set(expression, result);
+        return result;
       }
     }
   }
@@ -283,9 +976,13 @@ function resolveExpressionKind(
     const signatureSymbol = getSignatureSymbol(signature);
     if (!signatureSymbol) continue;
     const kind = resolveSymbolKind(signatureSymbol, checker, seen);
-    if (kind) return kind;
+    if (kind) {
+      cache.set(expression, kind);
+      return kind;
+    }
   }
 
+  cache.set(expression, null);
   return undefined;
 }
 
@@ -328,29 +1025,79 @@ function stripInitializerAccess(expression: ts.Expression): ts.Expression {
   return current;
 }
 
-function isReactiveArrayMethodChain(
-  expression: ts.Expression,
-  checker: ts.TypeChecker,
+export function isConsumedByTerminalChainCall(
+  call: ts.CallExpression,
 ): boolean {
-  const target = stripWrappers(expression);
-  return ts.isCallExpression(target) &&
-    detectCallKind(target, checker)?.kind === "array-method";
+  let current: ts.Expression = call;
+
+  while (true) {
+    const parent = current.parent;
+    if (!parent) {
+      return false;
+    }
+
+    if (
+      ts.isParenthesizedExpression(parent) ||
+      ts.isAsExpression(parent) ||
+      ts.isTypeAssertionExpression(parent) ||
+      ts.isNonNullExpression(parent) ||
+      ts.isSatisfiesExpression(parent)
+    ) {
+      current = parent;
+      continue;
+    }
+
+    if (
+      ts.isPropertyAccessExpression(parent) && parent.expression === current
+    ) {
+      const memberName = parent.name.text;
+      if (isKnownArrayMethodName(memberName)) {
+        const callParent = parent.parent;
+        if (
+          callParent &&
+          ts.isCallExpression(callParent) &&
+          callParent.expression === parent
+        ) {
+          current = callParent;
+          continue;
+        }
+      }
+      return true;
+    }
+
+    if (ts.isElementAccessExpression(parent) && parent.expression === current) {
+      return true;
+    }
+
+    if (ts.isCallExpression(parent) && parent.expression === current) {
+      return true;
+    }
+
+    return false;
+  }
 }
 
 function isLoweredReactiveArrayMethodCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
 ): boolean {
-  const target = stripWrappers(call.expression);
-  return ts.isPropertyAccessExpression(target) &&
-    target.name.text.endsWith("WithPattern") &&
-    detectCallKind(call, checker)?.kind === "array-method";
+  const callSite = classifyArrayMethodCallSite(call, checker);
+  return !!callSite &&
+    callSite.lowered &&
+    callSite.ownership === "reactive";
 }
 
-function getImplicitReactiveParameterCallKind(
+function hasImplicitReactiveParameterContext(
   symbol: ts.Symbol | undefined,
   checker: ts.TypeChecker,
-): "builder" | "array-method" | undefined {
+): boolean {
+  return !!getImplicitReactiveParameterContextKind(symbol, checker);
+}
+
+function getImplicitReactiveParameterContextKind(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): ImplicitReactiveParameterContextKind | undefined {
   if (!symbol) return undefined;
   const declarations = symbol.getDeclarations();
   if (!declarations) return undefined;
@@ -378,13 +1125,28 @@ function getImplicitReactiveParameterCallKind(
     }
     if (!candidate) continue;
 
-    const callKind = detectCallKind(candidate as ts.CallExpression, checker);
-    if (callKind?.kind === "builder" || callKind?.kind === "array-method") {
-      return callKind.kind;
+    const call = candidate as ts.CallExpression;
+    const callKind = detectCallKind(call, checker);
+    if (callKind?.kind === "builder") {
+      return "builder";
+    }
+
+    if (
+      classifyArrayCallbackContainerCall(call, checker) ===
+        "reactive-array-method"
+    ) {
+      return "reactive-array-method";
     }
   }
 
   return undefined;
+}
+
+function isReactiveArrayMethodReceiverExpression(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  return hasReactiveCollectionProvenance(expression, checker);
 }
 
 function isVariableFromReactiveCallSymbol(
@@ -428,16 +1190,48 @@ function isVariableFromReactiveCallSymbol(
   return false;
 }
 
+function isDeclarationInScope(
+  declaration: ts.Declaration,
+  scope: ts.FunctionLikeDeclaration | undefined,
+): boolean {
+  if (!scope) {
+    return true;
+  }
+
+  return getEnclosingFunctionLikeDeclaration(declaration) === scope;
+}
+
+function isSymbolDeclaredInScope(
+  symbol: ts.Symbol,
+  scope: ts.FunctionLikeDeclaration | undefined,
+): boolean {
+  if (!scope) {
+    return true;
+  }
+
+  return (symbol.getDeclarations() ?? []).some((declaration) =>
+    isDeclarationInScope(declaration, scope)
+  );
+}
+
 function resolveBuilderExpressionKind(
   expression: ts.Expression,
   checker: ts.TypeChecker,
   seen: Set<ts.Symbol>,
   options: { followFactoryResults: boolean },
 ): Extract<CallKind, { kind: "builder" }> | undefined {
+  const cache = options.followFactoryResults
+    ? undefined
+    : getCheckerExpressionCache(directBuilderKindCacheByChecker, checker);
+  if (cache?.has(expression)) {
+    return cache.get(expression) ?? undefined;
+  }
+
   const target = stripWrappers(expression);
 
   if (ts.isCallExpression(target)) {
     if (!options.followFactoryResults) {
+      cache?.set(expression, null);
       return undefined;
     }
     return resolveBuilderExpressionKind(
@@ -451,11 +1245,16 @@ function resolveBuilderExpressionKind(
   const symbol = getExpressionSymbol(target, checker);
   if (symbol) {
     const kind = resolveBuilderSymbolKind(symbol, checker, seen, options);
-    if (kind) return kind;
+    if (kind) {
+      cache?.set(expression, kind);
+      return kind;
+    }
   } else {
     const fallbackName = getDirectBuilderName(target);
     if (fallbackName) {
-      return { kind: "builder", builderName: fallbackName };
+      const result = { kind: "builder", builderName: fallbackName } as const;
+      cache?.set(expression, result);
+      return result;
     }
   }
 
@@ -471,10 +1270,14 @@ function resolveBuilderExpressionKind(
         seen,
         options,
       );
-      if (kind) return kind;
+      if (kind) {
+        cache?.set(expression, kind);
+        return kind;
+      }
     }
   }
 
+  cache?.set(expression, null);
   return undefined;
 }
 
@@ -822,21 +1625,31 @@ function detectCellMethodFromDeclaration(
 }
 
 function isArrayMethodDeclaration(declaration: ts.Declaration): boolean {
-  if (!hasIdentifierName(declaration)) return false;
-  if (!ARRAY_METHOD_NAMES.has(declaration.name.text)) return false;
-
-  const owner = findOwnerName(declaration);
-  if (!owner) return false;
-  return ARRAY_OWNER_NAMES.has(owner);
+  return isMethodDeclarationOwnedBy(
+    declaration,
+    isKnownArrayMethodName,
+    ARRAY_OWNER_NAMES,
+  );
 }
 
 function isOpaqueRefMethodDeclaration(declaration: ts.Declaration): boolean {
+  return isMethodDeclarationOwnedBy(
+    declaration,
+    isKnownArrayMethodName,
+    OPAQUE_REF_OWNER_NAMES,
+  );
+}
+
+function isMethodDeclarationOwnedBy(
+  declaration: ts.Declaration,
+  hasMethodName: (name: string) => boolean,
+  ownerNames: ReadonlySet<string>,
+): boolean {
   if (!hasIdentifierName(declaration)) return false;
-  if (!ARRAY_METHOD_NAMES.has(declaration.name.text)) return false;
+  if (!hasMethodName(declaration.name.text)) return false;
 
   const owner = findOwnerName(declaration);
-  if (!owner) return false;
-  return OPAQUE_REF_OWNER_NAMES.has(owner);
+  return !!owner && ownerNames.has(owner);
 }
 
 function findOwnerName(node: ts.Node): string | undefined {

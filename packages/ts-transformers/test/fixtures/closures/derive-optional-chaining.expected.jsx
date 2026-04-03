@@ -22,7 +22,7 @@ export default pattern((config: Config) => {
                 type: "object",
                 properties: {
                     multiplier: {
-                        type: ["number", "undefined"]
+                        type: "number"
                     }
                 }
             }

@@ -283,6 +283,9 @@ export default pattern((state) => {
                 state: {
                     type: "object",
                     properties: {
+                        end: {
+                            type: "number"
+                        },
                         items: {
                             type: "array",
                             items: {
@@ -291,12 +294,9 @@ export default pattern((state) => {
                         },
                         start: {
                             type: "number"
-                        },
-                        end: {
-                            type: "number"
                         }
                     },
-                    required: ["items", "start", "end"]
+                    required: ["end", "items", "start"]
                 }
             },
             required: ["state"]

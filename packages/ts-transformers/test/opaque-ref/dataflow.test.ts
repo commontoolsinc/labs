@@ -2,7 +2,11 @@ import ts from "typescript";
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 
-import { detectCallKind, isReactiveOriginCall } from "../../src/ast/mod.ts";
+import {
+  classifyArrayMethodResultSinkCall,
+  detectCallKind,
+  isReactiveOriginCall,
+} from "../../src/ast/mod.ts";
 import { analyzeExpression } from "./harness.ts";
 
 function getCallExpression(
@@ -38,6 +42,21 @@ describe("data flow analyzer", () => {
       analysis.rewriteHint && analysis.rewriteHint.kind === "skip-call-rewrite",
     );
     assertEquals(analysis.rewriteHint.reason, "array-method");
+  });
+
+  it("does not treat custom map methods as array-method rewrite hints", () => {
+    const { analysis } = analyzeExpression(
+      "collection.map((item) => item + state.count)",
+      {
+        prelude: `
+declare const collection: {
+  map<T>(fn: (item: number) => T): T[];
+};
+        `,
+      },
+    );
+
+    assertEquals(analysis.rewriteHint, undefined);
   });
 
   it("recognises ifElse when called via alias", () => {
@@ -103,6 +122,23 @@ declare const collection: {
     );
 
     assertEquals(detectCallKind(call, checker), undefined);
+  });
+
+  it("does not classify custom map(...).join(...) chains as array sinks", () => {
+    const { call, checker } = getCallExpression(
+      'collection.map((item) => item + 1).join(",")',
+      {
+        prelude: `
+declare const collection: {
+  map<T>(fn: (item: number) => T): {
+    join(separator: string): string;
+  };
+};
+        `,
+      },
+    );
+
+    assertEquals(classifyArrayMethodResultSinkCall(call, checker), undefined);
   });
 
   it("recognises fetchData as a reactive origin call", () => {

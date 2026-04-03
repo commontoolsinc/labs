@@ -59,6 +59,8 @@ export enum RequestType {
   GetWriteStackTrace = "runtime:getWriteStackTrace",
   SetWriteStackTraceMatchers = "runtime:setWriteStackTraceMatchers",
   DetectNonIdempotent = "runtime:detectNonIdempotent",
+  GetPatternSources = "runtime:getPatternSources",
+  SetBreakpoints = "runtime:setBreakpoints",
 
   // Page operations (main -> worker)
   GetSpaceRootPattern = "pattern:getSpaceRoot",
@@ -297,6 +299,30 @@ export interface DetectNonIdempotentResponse {
   result: SchedulerDiagnosisResult;
 }
 
+export interface GetPatternSourcesRequest extends BaseRequest {
+  type: RequestType.GetPatternSources;
+}
+
+export interface PatternSourceFile {
+  name: string;
+  contents: string;
+}
+
+export interface PatternSourceInfo {
+  patternId: string;
+  patternName?: string;
+  files: PatternSourceFile[];
+}
+
+export interface PatternSourcesResponse {
+  patterns: PatternSourceInfo[];
+}
+
+export interface SetBreakpointsRequest extends BaseRequest {
+  type: RequestType.SetBreakpoints;
+  actionIds: string[];
+}
+
 // Logger count types for IPC (matches @commontools/utils/logger types)
 export interface LogCounts {
   debug: number;
@@ -520,7 +546,9 @@ export type IPCClientRequest =
   | VDomEventRequest
   | VDomMountRequest
   | VDomUnmountRequest
-  | DetectNonIdempotentRequest;
+  | DetectNonIdempotentRequest
+  | GetPatternSourcesRequest
+  | SetBreakpointsRequest;
 
 export type NullResponse = null;
 
@@ -643,7 +671,8 @@ export type RemoteResponse =
   | WriteStackTraceResponse
   | PageResponse
   | VDomMountResponse
-  | DetectNonIdempotentResponse;
+  | DetectNonIdempotentResponse
+  | PatternSourcesResponse;
 
 export type IPCRemoteNotification =
   | CellUpdateNotification
@@ -808,6 +837,14 @@ export type Commands = {
   [RequestType.DetectNonIdempotent]: {
     request: DetectNonIdempotentRequest;
     response: DetectNonIdempotentResponse;
+  };
+  [RequestType.GetPatternSources]: {
+    request: GetPatternSourcesRequest;
+    response: PatternSourcesResponse;
+  };
+  [RequestType.SetBreakpoints]: {
+    request: SetBreakpointsRequest;
+    response: EmptyResponse;
   };
   // VDOM requests
   [RequestType.VDomEvent]: {

@@ -313,6 +313,9 @@ export class Scheduler {
   private dirty = new Set<Action>();
   private pullMode = false;
 
+  // Debugger breakpoints: action IDs that should trigger `debugger` before execution
+  private breakpoints = new Set<string>();
+
   // Compute time tracking for cycle-aware scheduling
   // Keyed by action ID (source location) to persist stats across action recreation
   private actionStats = new Map<string, ActionStats>();
@@ -1995,6 +1998,30 @@ export class Scheduler {
   }
 
   /**
+   * Set action IDs that should trigger a debugger breakpoint before execution.
+   */
+  setBreakpoints(actionIds: string[]): void {
+    this.breakpoints.clear();
+    for (const id of actionIds) {
+      this.breakpoints.add(id);
+    }
+  }
+
+  /**
+   * Get currently set breakpoint action IDs.
+   */
+  getBreakpoints(): string[] {
+    return Array.from(this.breakpoints);
+  }
+
+  /**
+   * Check if an action ID has a breakpoint set.
+   */
+  hasBreakpoint(actionId: string): boolean {
+    return this.breakpoints.has(actionId);
+  }
+
+  /**
    * Returns a snapshot of the current dependency graph for visualization.
    * Uses getActionId for the identifier (includes code location).
    */
@@ -2027,6 +2054,12 @@ export class Scheduler {
       const debounceMs = this.actionDebounce.get(action);
       const throttleMs = this.actionThrottle.get(action);
 
+      // Get pattern association
+      const annotated = action as Partial<TelemetryAnnotations>;
+      const patternId = annotated.pattern
+        ? this.runtime.patternManager.getPatternId(annotated.pattern)
+        : undefined;
+
       nodes.push({
         id,
         type: this.effects.has(action) ? "effect" : "computation",
@@ -2042,6 +2075,7 @@ export class Scheduler {
         writes,
         debounceMs: debounceMs && debounceMs > 0 ? debounceMs : undefined,
         throttleMs: throttleMs && throttleMs > 0 ? throttleMs : undefined,
+        patternId,
       });
     }
 

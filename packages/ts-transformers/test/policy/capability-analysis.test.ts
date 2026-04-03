@@ -35,7 +35,18 @@ function createProgramWithSource(source: string): {
   program: ts.Program;
   sourceFile: ts.SourceFile;
 } {
-  const fileName = "/test.ts";
+  return createProgramWithFiles({
+    "/test.ts": source,
+  });
+}
+
+function createProgramWithFiles(
+  files: Record<string, string>,
+  entryFileName = "/test.ts",
+): {
+  program: ts.Program;
+  sourceFile: ts.SourceFile;
+} {
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ESNext,
     module: ts.ModuleKind.ESNext,
@@ -44,8 +55,8 @@ function createProgramWithSource(source: string): {
   };
 
   const host: ts.CompilerHost = {
-    fileExists: (name) => name === fileName,
-    readFile: (name) => (name === fileName ? source : undefined),
+    fileExists: (name) => files[name] !== undefined,
+    readFile: (name) => files[name],
     directoryExists: () => true,
     getDirectories: () => [],
     getCanonicalFileName: (name) => name,
@@ -55,19 +66,19 @@ function createProgramWithSource(source: string): {
     useCaseSensitiveFileNames: () => true,
     writeFile: () => {},
     getSourceFile: (name, languageVersion) =>
-      name === fileName
+      files[name] !== undefined
         ? ts.createSourceFile(
-          fileName,
-          source,
+          name,
+          files[name]!,
           languageVersion,
           true,
-          ts.ScriptKind.TS,
+          name.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
         )
         : undefined,
   };
 
-  const program = ts.createProgram([fileName], options, host);
-  const sourceFile = program.getSourceFile(fileName);
+  const program = ts.createProgram([entryFileName], options, host);
+  const sourceFile = program.getSourceFile(entryFileName);
   if (!sourceFile) {
     throw new Error("Expected source file in program.");
   }
@@ -155,6 +166,132 @@ Deno.test("Capability analysis tracks object destructure aliases", () => {
   assert(input.readPaths.includes("bar"));
   assert(input.readPaths.includes("user.name"));
 });
+
+Deno.test("Capability analysis does not descend into nested callbacks", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      const local = () => input.hidden;
+      return input.visible;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "readonly");
+  assert(input.readPaths.includes("visible"));
+  assert(!input.readPaths.includes("hidden"));
+});
+
+Deno.test(
+  "Capability analysis counts outer captures used inside inline array callbacks",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        filter(predicate: (value: T) => boolean): Array<T>;
+        map<U>(mapper: (value: T) => U): Array<U>;
+      }
+
+      const fn = (input: {
+        items: number[];
+        threshold: number;
+        factor: number;
+      }) => input.items
+        .filter((value) => value > input.threshold)
+        .map((value) => value * input.factor);
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "readonly");
+    assert(input.readPaths.includes("items"));
+    assert(input.readPaths.includes("threshold"));
+    assert(input.readPaths.includes("factor"));
+  },
+);
+
+Deno.test(
+  "Capability analysis counts outer captures used inside other eager array callbacks",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        find(
+          predicate: (value: T) => boolean,
+        ): T | undefined;
+        findIndex(
+          predicate: (value: T) => boolean,
+        ): number;
+        reduce<U>(
+          reducer: (accumulator: U, value: T) => U,
+          initialValue: U,
+        ): U;
+      }
+
+      const fn = (input: {
+        names: string[];
+        searchTerm: string;
+        prices: number[];
+        discount: number;
+        items: { id: string }[];
+        selectedId: string;
+      }) => ({
+        match: input.names.find((name) => name.includes(input.searchTerm)),
+        total: input.prices.reduce(
+          (sum, price) => sum + price * (1 - input.discount),
+          0,
+        ),
+        index: input.items.findIndex((item) => item.id === input.selectedId),
+      });
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "readonly");
+    assert(input.readPaths.includes("names"));
+    assert(input.readPaths.includes("searchTerm"));
+    assert(input.readPaths.includes("prices"));
+    assert(input.readPaths.includes("discount"));
+    assert(input.readPaths.includes("items"));
+    assert(input.readPaths.includes("selectedId"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps opaque helper callbacks out of outer summaries",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare function later(callback: () => void): void;
+
+      const fn = (input: {
+        visible: number;
+        hidden: number;
+      }) => {
+        later(() => input.hidden);
+        return input.visible;
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "readonly");
+    assert(input.readPaths.includes("visible"));
+    assert(!input.readPaths.includes("hidden"));
+  },
+);
 
 Deno.test(
   "Capability analysis keeps dotted literal keys distinct from nested member paths",
@@ -438,5 +575,28 @@ const caller = (input) => callee(input);`;
     assertEquals(input.capability, "readonly");
     assert(input.readPaths.includes("foo"));
     assertEquals(input.wildcard, false);
+  },
+);
+
+Deno.test(
+  "Capability analysis interprocedural propagation stays conservative across source-file boundaries",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/helper.ts": `const helper = (value) => value.foo;`,
+      "/test.ts": `const fn = (input) => helper(input);`,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+
+    const summary = analyzeFunctionCapabilities(fn, {
+      checker,
+      interprocedural: true,
+    });
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.passthrough, true);
+    assertEquals(input.wildcard, true);
+    assertEquals(input.readPaths.length, 0);
   },
 );

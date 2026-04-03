@@ -32,6 +32,7 @@ import {
   type LoggerTimingData,
   type LogLevel,
   NavigateRequestNotification,
+  type PatternSourcesResponse,
   RequestType,
   TelemetryNotification,
 } from "./protocol/mod.ts";
@@ -419,6 +420,19 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Run non-idempotent computation detection.
    * Returns a report of non-idempotent actions found.
    */
+  async getPatternSources(): Promise<PatternSourcesResponse> {
+    return await this.#conn.request<RequestType.GetPatternSources>({
+      type: RequestType.GetPatternSources,
+    });
+  }
+
+  async setBreakpoints(actionIds: string[]): Promise<void> {
+    await this.#conn.request<RequestType.SetBreakpoints>({
+      type: RequestType.SetBreakpoints,
+      actionIds,
+    });
+  }
+
   async detectNonIdempotent(
     durationMs?: number,
   ): Promise<SchedulerDiagnosisResult> {

@@ -1,9 +1,9 @@
 # @commontools/ts-transformers
 
-TypeScript AST transformers that bridge natural TypeScript code and the
-CommonTools runtime. Pattern authors write idiomatic TypeScript; the
-transformers rewrite it into schema-annotated form for reactivity and
-information flow control (IFC).
+TypeScript AST transformers that bridge authored TypeScript patterns and the
+CommonTools runtime. Pattern authors write natural TypeScript; the transformer
+pipeline rewrites supported reactive constructs into explicit schema-annotated
+form for reactivity and information-flow control.
 
 ## What It Does
 
@@ -39,6 +39,16 @@ state.items.mapWithPattern(
   { state: { discount: state.discount } },
 );
 ```
+
+## Review First
+
+For the current branch shape, start here instead of inferring architecture from
+older implementation notes:
+
+- `docs/specs/ts-transformer/ts_transformers_review_guide.md`
+- `docs/specs/ts-transformer/ts_transformers_target_pattern_language_spec.md`
+- `docs/specs/ts-transformer/ts_transformers_lowering_contract.md`
+- `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
 
 ## Development
 
@@ -86,16 +96,27 @@ deno task ct check --show-transformed test/fixtures/closures/map-single-capture.
 
 ## Architecture
 
-### Transformation Pipeline
+### Pipeline
 
 ```
-Closure → SchemaInjection → OpaqueRefJSX → SchemaGenerator
+CastValidation
+→ EmptyArrayOfValidation
+→ OpaqueGetValidation
+→ PatternContextValidation
+→ JsxExpressionSiteRouter
+→ Computed
+→ Closure
+→ PatternOwnedExpressionSiteLowering
+→ HelperOwnedExpressionSiteLowering
+→ CapabilityLowering
+→ SchemaInjection
+→ SchemaGenerator
 ```
 
-The closure transformer runs first on clean AST so TypeChecker node identity
-works for scope detection.
+The exact current order and behavior are documented normatively in
+`docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`.
 
-### Key Transformations
+### Representative Rewrites
 
 | Input Pattern         | Output                                    | Purpose                   |
 | --------------------- | ----------------------------------------- | ------------------------- |
@@ -103,14 +124,18 @@ works for scope detection.
 | `expr1 * expr2`       | `derive(schema, schema, inputs, fn)`      | Data flow boundary        |
 | `onClick={() => ...}` | `handler(eventSchema, stateSchema, fn)`   | Handler with dual schemas |
 | `Cell<T>`             | `{ type: "...", asCell: true }`           | Writable reactive ref     |
-| `OpaqueRef<T>`        | `{ type: "...", asOpaque: true }`         | Read-only reactive ref    |
+| `OpaqueRef<T>`        | structural schema without `asOpaque`      | Read-only reactive ref    |
 
-## Documentation
+## Additional Documentation
 
-- `docs/closure-design.md` - Closure transformation design decisions
-- `docs/handler-closures-design.md` - Event handler transformation
-- `docs/hierarchical-params-spec.md` - Nested parameter handling
-- `ISSUES_TO_FOLLOW_UP.md` - Known issues and open questions
+- `docs/specs/ts-transformer/ts_transformers_review_guide.md` - concise review
+  entrypoint and read order
+- `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md` -
+  implemented behavior inventory
+- `docs/specs/ts-transformer/ts_transformers_design_deltas.md` - hardening
+  follow-ups and historical deltas
+- `ISSUES_TO_FOLLOW_UP.md` - narrow internal follow-up queue for remaining live
+  schema questions
 
 ## Why This Matters
 

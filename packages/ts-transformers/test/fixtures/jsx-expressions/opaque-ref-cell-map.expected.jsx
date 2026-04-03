@@ -166,7 +166,9 @@ export default pattern(() => {
             properties: {
                 cellRef: {
                     type: "array",
-                    items: true
+                    items: {
+                        type: "unknown"
+                    }
                 }
             },
             required: ["cellRef"]

@@ -221,151 +221,151 @@ export default pattern((__ct_pattern_input) => {
                 return (<div>
               <h3>{aisleName}</h3>
               {__ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        groupedByAisle: {
-                            type: "object",
-                            properties: {},
-                            additionalProperties: {
+                        type: "object",
+                        properties: {
+                            groupedByAisle: {
+                                type: "object",
+                                properties: {},
+                                additionalProperties: {
+                                    type: "array",
+                                    items: {
+                                        $ref: "#/$defs/Assignment"
+                                    }
+                                }
+                            },
+                            aisleName: {
+                                type: "string"
+                            }
+                        },
+                        required: ["groupedByAisle", "aisleName"],
+                        $defs: {
+                            Assignment: {
+                                type: "object",
+                                properties: {
+                                    aisle: {
+                                        type: "string"
+                                    },
+                                    item: {
+                                        $ref: "#/$defs/Item"
+                                    }
+                                },
+                                required: ["aisle", "item"]
+                            },
+                            Item: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string"
+                                    },
+                                    done: {
+                                        type: "boolean",
+                                        asCell: true
+                                    }
+                                },
+                                required: ["name", "done"]
+                            }
+                        }
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        anyOf: [{
+                                type: "undefined"
+                            }, {
                                 type: "array",
                                 items: {
                                     $ref: "#/$defs/Assignment"
                                 }
+                            }],
+                        $defs: {
+                            Assignment: {
+                                type: "object",
+                                properties: {
+                                    aisle: {
+                                        type: "string"
+                                    },
+                                    item: {
+                                        $ref: "#/$defs/Item"
+                                    }
+                                },
+                                required: ["aisle", "item"]
+                            },
+                            Item: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string"
+                                    },
+                                    done: {
+                                        type: "boolean",
+                                        asCell: true
+                                    }
+                                },
+                                required: ["name", "done"]
                             }
-                        },
-                        aisleName: {
-                            type: "string"
                         }
-                    },
-                    required: ["groupedByAisle", "aisleName"],
-                    $defs: {
-                        Assignment: {
-                            type: "object",
-                            properties: {
-                                aisle: {
-                                    type: "string"
-                                },
-                                item: {
-                                    $ref: "#/$defs/Item"
-                                }
-                            },
-                            required: ["aisle", "item"]
-                        },
-                        Item: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                },
-                                done: {
-                                    type: "boolean",
-                                    asCell: true
-                                }
-                            },
-                            required: ["name", "done"]
-                        }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Assignment"
-                            }
-                        }],
-                    $defs: {
-                        Assignment: {
-                            type: "object",
-                            properties: {
-                                aisle: {
-                                    type: "string"
-                                },
-                                item: {
-                                    $ref: "#/$defs/Item"
-                                }
-                            },
-                            required: ["aisle", "item"]
-                        },
-                        Item: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                },
-                                done: {
-                                    type: "boolean",
-                                    asCell: true
-                                }
-                            },
-                            required: ["name", "done"]
-                        }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    groupedByAisle: groupedByAisle,
-                    aisleName: aisleName
-                }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName])!.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                    const assignment = __ct_pattern_input.key("element");
-                    return (<div>
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        groupedByAisle: groupedByAisle,
+                        aisleName: aisleName
+                    }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName])!.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                        const assignment = __ct_pattern_input.key("element");
+                        return (<div>
                   <span>{assignment.key("item", "name")}</span>
                   <ct-checkbox $checked={assignment.key("item", "done")}/>
                 </div>);
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Assignment"
-                        }
-                    },
-                    required: ["element"],
-                    $defs: {
-                        Assignment: {
-                            type: "object",
-                            properties: {
-                                aisle: {
-                                    type: "string"
-                                },
-                                item: {
-                                    $ref: "#/$defs/Item"
-                                }
-                            },
-                            required: ["aisle", "item"]
+                    }, {
+                        type: "object",
+                        properties: {
+                            element: {
+                                $ref: "#/$defs/Assignment"
+                            }
                         },
-                        Item: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
+                        required: ["element"],
+                        $defs: {
+                            Assignment: {
+                                type: "object",
+                                properties: {
+                                    aisle: {
+                                        type: "string"
+                                    },
+                                    item: {
+                                        $ref: "#/$defs/Item"
+                                    }
                                 },
-                                done: {
-                                    type: "boolean",
-                                    asCell: true
-                                }
+                                required: ["aisle", "item"]
                             },
-                            required: ["name", "done"]
+                            Item: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string"
+                                    },
+                                    done: {
+                                        type: "boolean",
+                                        asCell: true
+                                    }
+                                },
+                                required: ["name", "done"]
+                            }
                         }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        anyOf: [{
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }, {
+                                $ref: "#/$defs/UIRenderable"
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }],
+                        $defs: {
+                            UIRenderable: {
+                                type: "object",
+                                properties: {
+                                    $UI: {
+                                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                                    }
+                                },
+                                required: ["$UI"]
+                            }
                         }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema), {})}
+                    } as const satisfies __ctHelpers.JSONSchema), {})}
             </div>);
             }, {
                 type: "object",

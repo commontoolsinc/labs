@@ -4,10 +4,14 @@ import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import {
   cloneSchemaDefinition,
   getNativeTypeSchema,
+  getPropertyNameText,
   isFunctionLike,
   safeGetPropertyType,
 } from "../type-utils.ts";
-import { getCellWrapperInfo } from "../typescript/cell-brand.ts";
+import {
+  getCellWrapperInfo,
+  isCellInternalMarkerName,
+} from "../typescript/cell-brand.ts";
 import {
   isDefaultNodeWithUndefined,
   isOptionalSymbol,
@@ -69,6 +73,57 @@ function getWrapperSchemaFromCallable(
   return undefined;
 }
 
+function typeNodeExplicitlyDeclaresProperty(
+  typeNode: ts.TypeNode | undefined,
+  propName: string,
+): boolean {
+  if (!typeNode) return false;
+
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    return typeNodeExplicitlyDeclaresProperty(typeNode.type, propName);
+  }
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    return typeNode.types.some((member) =>
+      typeNodeExplicitlyDeclaresProperty(member, propName)
+    );
+  }
+
+  if (!ts.isTypeLiteralNode(typeNode)) {
+    return false;
+  }
+
+  return typeNode.members.some((member) =>
+    (ts.isPropertySignature(member) || ts.isPropertyDeclaration(member)) &&
+    !!member.name &&
+    getPropertyNameText(member.name) === propName
+  );
+}
+
+function shouldSkipInternalProperty(
+  propName: string,
+  propDecl: ts.Declaration | undefined,
+  context: GenerationContext,
+): boolean {
+  if (propName.startsWith("__@")) {
+    return true;
+  }
+
+  if (isCellInternalMarkerName(propName)) {
+    return true;
+  }
+
+  if (!propName.startsWith("__")) {
+    return false;
+  }
+
+  if (propDecl) {
+    return false;
+  }
+
+  return !typeNodeExplicitlyDeclaresProperty(context.typeNode, propName);
+}
+
 /**
  * Formatter for object types (interfaces, type literals, etc.)
  */
@@ -109,7 +164,6 @@ export class ObjectFormatter implements TypeFormatter {
     const props = checker.getPropertiesOfType(type);
     for (const prop of props) {
       const propName = prop.getName();
-      if (propName.startsWith("__")) continue; // Skip internal properties
 
       let propTypeNode: ts.TypeNode | undefined;
       const propDecl = prop.valueDeclaration ??
@@ -126,6 +180,10 @@ export class ObjectFormatter implements TypeFormatter {
         ) {
           if (propDecl.type) propTypeNode = propDecl.type as ts.TypeNode;
         }
+      }
+
+      if (shouldSkipInternalProperty(propName, propDecl, context)) {
+        continue;
       }
 
       if ((prop.flags & ts.SymbolFlags.Method) !== 0) continue;

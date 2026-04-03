@@ -3,13 +3,13 @@ import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   detectCallKind,
-  isFunctionLikeExpression,
+  getDeriveInputAndCallbackArgument,
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
 import { getCellKind } from "../../transformers/opaque-ref/opaque-ref.ts";
-import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
+import { buildCapturePropertyAssignments } from "../../utils/capture-tree.ts";
 import {
   createPropertyName,
   normalizeBindingName,
@@ -106,36 +106,6 @@ export function isDeriveCall(
 }
 
 /**
- * Extract the callback function from a derive call.
- * Derive has two signatures:
- * - 2-arg: derive(input, callback)
- * - 4-arg: derive(inputSchema, resultSchema, input, callback)
- */
-function extractDeriveCallback(
-  deriveCall: ts.CallExpression,
-): ts.ArrowFunction | ts.FunctionExpression | undefined {
-  const args = deriveCall.arguments;
-
-  // 2-arg form: callback is at index 1
-  if (args.length === 2) {
-    const callback = args[1];
-    if (callback && isFunctionLikeExpression(callback)) {
-      return callback;
-    }
-  }
-
-  // 4-arg form: callback is at index 3
-  if (args.length === 4) {
-    const callback = args[3];
-    if (callback && isFunctionLikeExpression(callback)) {
-      return callback;
-    }
-  }
-
-  return undefined;
-}
-
-/**
  * Resolve capture name collisions with the original input parameter name.
  * If a capture has the same name as originalInputParamName, rename it (e.g., multiplier -> multiplier_1).
  * Returns a mapping from original capture names to their potentially renamed versions.
@@ -206,15 +176,9 @@ function buildDeriveInputObject(
   }
 
   // Add captures with potentially renamed property names
-  for (const [originalName, node] of captureTree) {
-    const propertyName = captureNameMap.get(originalName) ?? originalName;
-    properties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(propertyName, factory),
-        buildHierarchicalParamsValue(node, originalName, factory),
-      ),
-    );
-  }
+  properties.push(
+    ...buildCapturePropertyAssignments(captureTree, factory, captureNameMap),
+  );
 
   return factory.createObjectLiteralExpression(
     properties,
@@ -350,10 +314,11 @@ export function transformDeriveCall(
   const { factory, checker, options } = context;
 
   // Extract callback
-  const callback = extractDeriveCallback(deriveCall);
-  if (!callback) {
+  const deriveArgs = getDeriveInputAndCallbackArgument(deriveCall, checker);
+  if (!deriveArgs) {
     return undefined;
   }
+  const { input: originalInput, callback } = deriveArgs;
 
   // Collect captures
   const collector = new CaptureCollector(checker);
@@ -380,26 +345,6 @@ export function transformDeriveCall(
     callback.body,
     visitor,
   ) as ts.ConciseBody;
-
-  // Determine original input and parameter name
-  const args = deriveCall.arguments;
-  let originalInput: ts.Expression | undefined;
-
-  if (args.length === 2) {
-    // 2-arg form: derive(input, callback)
-    originalInput = args[0];
-  } else if (args.length === 4) {
-    // 4-arg form: derive(inputSchema, resultSchema, input, callback)
-    originalInput = args[2];
-  } else {
-    // Invalid number of arguments
-    return undefined;
-  }
-
-  // Ensure we have a valid input expression
-  if (!originalInput) {
-    return undefined;
-  }
 
   // Determine parameter name for the original input
   let originalInputParamName = "input"; // Fallback for complex expressions

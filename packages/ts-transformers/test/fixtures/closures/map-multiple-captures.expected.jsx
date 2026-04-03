@@ -13,8 +13,8 @@ const shippingCost = 5.99;
 // FIXTURE: map-multiple-captures
 // Verifies: .map() on reactive array captures multiple outer variables (state + local)
 //   .map(fn) → .mapWithPattern(pattern(...), {state: {discount, taxRate}, multiplier})
-//   expression → derive() combining element props, state props, and local variable
-// Context: Captures state.discount, state.taxRate, and local const multiplier; module-level shippingCost is not captured
+//   expression → derive() combining item + state reactively while closing over local multiplier
+// Context: state.discount and state.taxRate are explicit derive inputs; multiplier stays callback-local via params; module-level shippingCost is not captured
 export default pattern((state) => {
     const multiplier = 2;
     return {
@@ -50,12 +50,9 @@ export default pattern((state) => {
                                 }
                             },
                             required: ["discount", "taxRate"]
-                        },
-                        multiplier: {
-                            type: "number"
                         }
                     },
-                    required: ["item", "state", "multiplier"]
+                    required: ["item", "state"]
                 } as const satisfies __ctHelpers.JSONSchema, {
                     type: "number"
                 } as const satisfies __ctHelpers.JSONSchema, {
@@ -66,9 +63,8 @@ export default pattern((state) => {
                     state: {
                         discount: state.key("discount"),
                         taxRate: state.key("taxRate")
-                    },
-                    multiplier: multiplier
-                }, ({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost)}
+                    }
+                }, ({ item, state }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost)}
           </span>);
             }, {
                 type: "object",

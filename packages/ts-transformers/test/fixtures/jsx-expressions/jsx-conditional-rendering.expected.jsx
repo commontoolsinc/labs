@@ -90,7 +90,15 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 score: state.key("score")
-            } }, ({ state }) => state.score >= 90), "A", __ctHelpers.derive({
+            } }, ({ state }) => state.score >= 90), "A", __ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["B", "C"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -105,10 +113,10 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            "enum": ["B", "C"]
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 score: state.key("score")
-            } }, ({ state }) => state.score >= 80 ? "B" : "C"))}</span>
+            } }, ({ state }) => state.score >= 80), "B", "C"))}</span>
         <span>
           {__ctHelpers.ifElse({
             type: "boolean"
@@ -136,7 +144,15 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count === 0), "Empty", __ctHelpers.derive({
+            } }, ({ state }) => state.count === 0), "Empty", __ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Single", "Multiple"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -151,12 +167,10 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            "enum": ["Single", "Multiple"]
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count === 1
-            ? "Single"
-            : "Multiple"))}
+            } }, ({ state }) => state.count === 1), "Single", "Multiple"))}
         </span>
 
         <h3>Nested Ternary</h3>
@@ -169,25 +183,15 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Inactive", "Premium Active", "Regular Active"]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("isActive"), __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        isPremium: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["isPremium"]
-                }
-            },
-            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, state.key("isActive"), __ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Premium Active", "Regular Active"]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                isPremium: state.key("isPremium")
-            } }, ({ state }) => (state.isPremium ? "Premium Active" : "Regular Active")), "Inactive")}
+        } as const satisfies __ctHelpers.JSONSchema, state.key("isPremium"), "Premium Active", "Regular Active"), "Inactive")}
         </span>
         <span>
           {__ctHelpers.ifElse({
@@ -216,7 +220,15 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 userType: state.key("userType")
-            } }, ({ state }) => state.userType === "admin"), "Admin", __ctHelpers.derive({
+            } }, ({ state }) => state.userType === "admin"), "Admin", __ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["User", "Guest"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -231,12 +243,10 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            "enum": ["User", "Guest"]
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 userType: state.key("userType")
-            } }, ({ state }) => state.userType === "user"
-            ? "User"
-            : "Guest"))}
+            } }, ({ state }) => state.userType === "user"), "User", "Guest"))}
         </span>
 
         <h3>Complex Conditions</h3>
@@ -249,29 +259,13 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Full Access", "Limited Access"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        isActive: {
-                            type: "boolean"
-                        },
-                        hasPermission: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["isActive", "hasPermission"]
-                }
-            },
-            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.when({
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                isActive: state.key("isActive"),
-                hasPermission: state.key("hasPermission")
-            } }, ({ state }) => state.isActive && state.hasPermission), "Full Access", "Limited Access")}
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, state.key("isActive"), state.key("hasPermission")), "Full Access", "Limited Access")}
         </span>
         <span>
           {__ctHelpers.ifElse({
@@ -282,6 +276,12 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["In Range", "Out of Range"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.when({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
@@ -300,7 +300,25 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count > 0 && state.count < 10), "In Range", "Out of Range")}
+            } }, ({ state }) => state.count > 0), __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        count: {
+                            type: "number"
+                        }
+                    },
+                    required: ["count"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                count: state.key("count")
+            } }, ({ state }) => state.count < 10)), "In Range", "Out of Range")}
         </span>
         <span>
           {__ctHelpers.ifElse({
@@ -311,29 +329,31 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Premium Features", "Basic Features"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.unless({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, state.key("isPremium"), __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
                     type: "object",
                     properties: {
-                        isPremium: {
-                            type: "boolean"
-                        },
                         score: {
                             type: "number"
                         }
                     },
-                    required: ["isPremium", "score"]
+                    required: ["score"]
                 }
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                isPremium: state.key("isPremium"),
                 score: state.key("score")
-            } }, ({ state }) => state.isPremium || state.score > 100), "Premium Features", "Basic Features")}
+            } }, ({ state }) => state.score > 100)), "Premium Features", "Basic Features")}
         </span>
 
         <h3>IfElse Component</h3>

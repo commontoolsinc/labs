@@ -9,3 +9,24 @@ export function isFunctionLikeExpression(
 ): expression is ts.ArrowFunction | ts.FunctionExpression {
   return ts.isArrowFunction(expression) || ts.isFunctionExpression(expression);
 }
+
+export function getEnclosingFunctionLikeDeclaration(
+  node: ts.Node,
+): ts.FunctionLikeDeclaration | undefined {
+  let current: ts.Node | undefined = node.parent;
+  while (current) {
+    if (
+      ts.isArrowFunction(current) ||
+      ts.isFunctionExpression(current) ||
+      ts.isFunctionDeclaration(current) ||
+      ts.isMethodDeclaration(current) ||
+      ts.isGetAccessorDeclaration(current) ||
+      ts.isSetAccessorDeclaration(current) ||
+      ts.isConstructorDeclaration(current)
+    ) {
+      return current;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}

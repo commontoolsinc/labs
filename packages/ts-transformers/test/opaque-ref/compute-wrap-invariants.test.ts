@@ -3,7 +3,7 @@ import ts from "typescript";
 
 import { createDataFlowAnalyzer } from "../../src/ast/mod.ts";
 import { TransformationContext } from "../../src/core/mod.ts";
-import { findPendingComputeWrapCandidate } from "../../src/transformers/opaque-ref/emitters/compute-wrap-invariants.ts";
+import { findPendingComputeWrapCandidate } from "../../src/transformers/expression-rewrite/emitters/compute-wrap-invariants.ts";
 
 function createProgramAndContext(source: string): {
   sourceFile: ts.SourceFile;
@@ -177,6 +177,34 @@ Deno.test(
         label,
       ),
       total,
+    );
+  },
+);
+
+Deno.test(
+  "findPendingComputeWrapCandidate does not treat custom map methods as supported rewrite boundaries",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare const CELL_BRAND: unique symbol;
+      type BrandedCell<T, Brand extends string> = {
+        readonly [CELL_BRAND]: Brand;
+      };
+      type OpaqueRef<T> = BrandedCell<T, "opaque">;
+      declare const count: OpaqueRef<number>;
+      declare const collection: {
+        map<T>(fn: (item: number) => T): T[];
+      };
+
+      const branch = { value: collection.map((item) => item + count) };
+    `);
+
+    const analyze = createDataFlowAnalyzer(checker);
+    const branch = findInitializer(sourceFile, "branch");
+    const value = findObjectPropertyInitializer(branch, "value");
+
+    assertStrictEquals(
+      findPendingComputeWrapCandidate(branch, analyze, context),
+      value,
     );
   },
 );

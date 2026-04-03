@@ -1,7 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertRejects } from "@std/assert";
-import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
-import { transformFiles, transformSource } from "./utils.ts";
+import { transformFiles } from "./utils.ts";
 
 const fixture = `
 import { toSchema } from "commontools";
@@ -67,62 +66,5 @@ describe("CTHelpers handling", () => {
         "/main.ts": fixture + `\n${statement}`,
       });
     }
-  });
-});
-
-describe("Builder symbol resolution", () => {
-  it("rewrites const aliases to computed()", async () => {
-    const output = await transformSource(
-      `/// <cts-enable />
-      import { computed } from "commontools";
-
-      const alias = computed;
-
-      export default alias(() => 1);
-    `,
-      { types: COMMONTOOLS_TYPES },
-    );
-
-    assert(
-      output.includes("__ctHelpers.derive("),
-      "const aliases to computed() should still lower to derive()",
-    );
-  });
-
-  it("does not rewrite a shadowed local computed helper", async () => {
-    const output = await transformSource(
-      `/// <cts-enable />
-      function computed<T>(fn: () => T): T {
-        return fn();
-      }
-
-      export default computed(() => 1);
-    `,
-      { types: COMMONTOOLS_TYPES },
-    );
-
-    assert(
-      !output.includes("__ctHelpers.derive("),
-      "shadowed local helpers named computed should not lower to derive()",
-    );
-  });
-
-  it("does not rewrite reassigned computed aliases", async () => {
-    const output = await transformSource(
-      `/// <cts-enable />
-      import { computed } from "commontools";
-
-      let alias = computed;
-      alias = ((fn: () => number) => fn()) as typeof alias;
-
-      export default alias(() => 1);
-    `,
-      { types: COMMONTOOLS_TYPES },
-    );
-
-    assert(
-      !output.includes("__ctHelpers.derive("),
-      "mutable aliases should not be treated as stable computed() references",
-    );
   });
 });

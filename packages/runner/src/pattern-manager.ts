@@ -138,6 +138,16 @@ export class PatternManager {
     );
   }
 
+  /**
+   * Get the patternId for a pattern or module object.
+   * Returns undefined if the pattern is not registered.
+   */
+  getPatternId(pattern: Pattern | Module): string | undefined {
+    return this.patternToIdMap.get(
+      this.findOriginalPattern(pattern as Pattern),
+    );
+  }
+
   private findOriginalPattern(pattern: Pattern): Pattern {
     while (pattern[unsafe_originalPattern]) {
       pattern = pattern[unsafe_originalPattern];

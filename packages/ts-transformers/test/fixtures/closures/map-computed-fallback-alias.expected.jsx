@@ -28,14 +28,10 @@ export default pattern((__ct_pattern_input) => {
                             type: "object",
                             properties: {
                                 reactions: {
-                                    anyOf: [{
-                                            type: "undefined"
-                                        }, {
-                                            type: "array",
-                                            items: {
-                                                $ref: "#/$defs/Reaction"
-                                            }
-                                        }]
+                                    type: "array",
+                                    items: {
+                                        $ref: "#/$defs/Reaction"
+                                    }
                                 }
                             }
                         }

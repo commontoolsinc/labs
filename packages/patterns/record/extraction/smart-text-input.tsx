@@ -30,6 +30,7 @@ import {
   handler,
   ifElse,
   type ImageData,
+  pattern,
   Writable,
 } from "commontools";
 
@@ -286,16 +287,26 @@ const handleImageChange = handler<
 
 // ===== The Pattern =====
 
-export function SmartTextInput(
-  input: SmartTextInputInput,
-): SmartTextInputOutput {
+export const SmartTextInput = pattern<
+  SmartTextInputInput,
+  SmartTextInputOutput
+>((input) => {
   const {
     $value,
-    placeholder = DEFAULT_PLACEHOLDER,
-    rows = 4,
-    maxImageSizeBytes = DEFAULT_MAX_IMAGE_SIZE,
-    maxTextFileSizeBytes = DEFAULT_MAX_TEXT_FILE_SIZE,
+    placeholder: placeholderInput,
+    rows: rowsInput,
+    maxImageSizeBytes: maxImageSizeBytesInput,
+    maxTextFileSizeBytes: maxTextFileSizeBytesInput,
   } = input;
+
+  const placeholder = computed(() => placeholderInput ?? DEFAULT_PLACEHOLDER);
+  const rows = computed(() => rowsInput ?? 4);
+  const maxImageSizeBytes = computed(() =>
+    maxImageSizeBytesInput ?? DEFAULT_MAX_IMAGE_SIZE
+  );
+  const maxTextFileSizeBytes = computed(() =>
+    maxTextFileSizeBytesInput ?? DEFAULT_MAX_TEXT_FILE_SIZE
+  );
 
   // ===== Internal State =====
 
@@ -696,6 +707,6 @@ export function SmartTextInput(
       preview,
     },
   };
-}
+});
 
 export default SmartTextInput;

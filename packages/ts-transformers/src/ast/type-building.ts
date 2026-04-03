@@ -2,7 +2,10 @@ import ts from "typescript";
 import type { TransformationContext } from "../core/mod.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
-import { inferWidenedTypeFromExpression } from "./type-inference.ts";
+import {
+  ensureTypeNodeRegistered,
+  inferWidenedTypeFromExpression,
+} from "./type-inference.ts";
 import {
   isOptionalMemberSymbol,
   isOptionalSymbol,
@@ -16,6 +19,12 @@ import {
  */
 export const DEFAULT_TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation |
   ts.NodeBuilderFlags.UseStructuralFallback;
+
+export interface TypeLiteralRegistrationContext {
+  readonly factory: ts.NodeFactory;
+  readonly checker: ts.TypeChecker;
+  readonly typeRegistry?: WeakMap<ts.Node, ts.Type>;
+}
 
 /**
  * Converts a Type to a TypeNode, optionally registering it in the type registry.
@@ -42,6 +51,19 @@ export function typeToTypeNodeWithRegistry(
   return node;
 }
 
+export function createRegisteredTypeLiteral(
+  members: readonly ts.TypeElement[],
+  context: TypeLiteralRegistrationContext,
+): ts.TypeLiteralNode {
+  const typeNode = context.factory.createTypeLiteralNode([...members]);
+  ensureTypeNodeRegistered(
+    typeNode,
+    context.checker,
+    context.typeRegistry,
+  );
+  return typeNode;
+}
+
 /**
  * Converts an expression to a TypeNode by getting its type at that location.
  * Automatically widens literal types (e.g., `5` → `number`) for more flexible schemas.
@@ -53,7 +75,11 @@ export function expressionToTypeNode(
 ): ts.TypeNode {
   // Use inferWidenedTypeFromExpression to widen literal types
   // This ensures `const x = 5` produces `number`, not `5`
-  const type = inferWidenedTypeFromExpression(expr, context.checker);
+  const type = inferWidenedTypeFromExpression(
+    expr,
+    context.checker,
+    context.options.typeRegistry,
+  );
   return typeToTypeNodeWithRegistry(
     type,
     context,
@@ -160,7 +186,14 @@ export function buildTypeElementsFromCaptureTree(
         currentExpr,
         currentType,
       );
-      typeNode = factory.createTypeLiteralNode(nested);
+      typeNode = createRegisteredTypeLiteral(
+        nested,
+        {
+          factory,
+          checker,
+          typeRegistry: context.options.typeRegistry,
+        },
+      );
     } else {
       // Fallback to unknown
       typeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
@@ -177,4 +210,93 @@ export function buildTypeElementsFromCaptureTree(
   }
 
   return properties;
+}
+
+export function buildCaptureTypeElements(
+  captureTree: Iterable<[string, CaptureTreeNode]>,
+  context: TransformationContext,
+  renameMap?: ReadonlyMap<string, string>,
+): ts.TypeElement[] {
+  const elements = buildTypeElementsFromCaptureTree(captureTree, context);
+  if (!renameMap || renameMap.size === 0) {
+    return elements;
+  }
+
+  return elements.map((element) => {
+    if (
+      !ts.isPropertySignature(element) || !ts.isIdentifier(element.name)
+    ) {
+      return element;
+    }
+
+    const renamedName = renameMap.get(element.name.text);
+    if (!renamedName || renamedName === element.name.text) {
+      return element;
+    }
+
+    return context.factory.createPropertySignature(
+      element.modifiers,
+      context.factory.createIdentifier(renamedName),
+      element.questionToken,
+      element.type,
+    );
+  });
+}
+
+export function createCaptureTypeLiteral(
+  captureTree: Iterable<[string, CaptureTreeNode]>,
+  context: TransformationContext,
+  renameMap?: ReadonlyMap<string, string>,
+): ts.TypeLiteralNode {
+  return createRegisteredTypeLiteral(
+    buildCaptureTypeElements(captureTree, context, renameMap),
+    {
+      factory: context.factory,
+      checker: context.checker,
+      typeRegistry: context.options.typeRegistry,
+    },
+  );
+}
+
+export function mergeCaptureTypesIntoTypeLiteral(
+  typeLiteral: ts.TypeLiteralNode,
+  captureTree: Iterable<[string, CaptureTreeNode]>,
+  context: TransformationContext,
+  renameMap?: ReadonlyMap<string, string>,
+): ts.TypeLiteralNode {
+  const existingMembers = [...typeLiteral.members];
+  const existingNames = new Set(
+    existingMembers.flatMap((member) =>
+      ts.isPropertySignature(member) && member.name &&
+        ts.isIdentifier(member.name)
+        ? [member.name.text]
+        : []
+    ),
+  );
+
+  for (
+    const captureMember of buildCaptureTypeElements(
+      captureTree,
+      context,
+      renameMap,
+    )
+  ) {
+    if (
+      ts.isPropertySignature(captureMember) &&
+      ts.isIdentifier(captureMember.name) &&
+      existingNames.has(captureMember.name.text)
+    ) {
+      continue;
+    }
+    existingMembers.push(captureMember);
+  }
+
+  return createRegisteredTypeLiteral(
+    existingMembers,
+    {
+      factory: context.factory,
+      checker: context.checker,
+      typeRegistry: context.options.typeRegistry,
+    },
+  );
 }

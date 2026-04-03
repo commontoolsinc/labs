@@ -1,17 +1,19 @@
 import ts from "typescript";
-import {
-  classifyReactiveContext,
-  createDataFlowAnalyzer,
-  detectCallKind,
-  findEnclosingCallbackContext,
-  isEventHandlerJsxAttribute,
-  isFunctionLikeExpression,
-  visitEachChildWithJsx,
-} from "../ast/mod.ts";
+import { detectCallKind, visitEachChildWithJsx } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
-import { unwrapExpression } from "../utils/expression.ts";
-import { rewriteExpression } from "./opaque-ref/mod.ts";
-import type { AnalyzeFn } from "./opaque-ref/types.ts";
+import {
+  classifyExpressionSiteHandling,
+  containsLogicalBinaryOperator,
+  findLowerableExpressionSite,
+  getExpressionContainerKind,
+  isControlFlowRewriteExpression,
+  isDirectArrayMethodRootExpression,
+} from "./expression-site-policy.ts";
+import { rewriteExpression } from "./expression-rewrite/mod.ts";
+import {
+  createReactiveWrapperForExpression,
+} from "./expression-rewrite/rewrite-helpers.ts";
+import type { AnalyzeFn } from "./expression-rewrite/types.ts";
 import type { ExpressionContainerKind } from "./expression-site-types.ts";
 
 interface RewriteExpressionSiteParams {
@@ -20,100 +22,42 @@ interface RewriteExpressionSiteParams {
   readonly context: TransformationContext;
   readonly analyze: AnalyzeFn;
   readonly visit: ts.Visitor;
+  readonly preferDeriveWrappers?: boolean;
 }
 
-export function containsLogicalBinaryOperator(expr: ts.Expression): boolean {
-  if (ts.isBinaryExpression(expr)) {
-    const op = expr.operatorToken.kind;
-    if (
-      op === ts.SyntaxKind.AmpersandAmpersandToken ||
-      op === ts.SyntaxKind.BarBarToken
-    ) {
-      return true;
-    }
-  }
-
-  let found = false;
-  expr.forEachChild((child) => {
-    if (found || ts.isFunctionLike(child)) return;
-    if (ts.isExpression(child) && containsLogicalBinaryOperator(child)) {
-      found = true;
-    }
-  });
-  return found;
-}
-
-function isLogicalBinaryExpression(
-  expr: ts.Expression,
-): expr is ts.BinaryExpression {
-  return ts.isBinaryExpression(expr) &&
-    (
-      expr.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
-      expr.operatorToken.kind === ts.SyntaxKind.BarBarToken
-    );
-}
-
-function isControlFlowRewriteExpression(expr: ts.Expression): boolean {
-  return ts.isConditionalExpression(expr) || isLogicalBinaryExpression(expr);
-}
-
-export function getExpressionContainerKind(
+function isDirectDeriveCall(
   expression: ts.Expression,
-): ExpressionContainerKind | undefined {
-  const parent = expression.parent;
-  if (!parent) return undefined;
-
-  if (ts.isJsxExpression(parent) && parent.expression === expression) {
-    return "jsx-expression";
-  }
-  if (
-    (ts.isArrowFunction(parent) || ts.isFunctionExpression(parent)) &&
-    parent.body === expression
-  ) {
-    return "return-expression";
-  }
-  if (ts.isReturnStatement(parent) && parent.expression === expression) {
-    return "return-expression";
-  }
-  if (ts.isVariableDeclaration(parent) && parent.initializer === expression) {
-    return "variable-initializer";
-  }
-  if (ts.isCallExpression(parent) && parent.arguments.includes(expression)) {
-    return "call-argument";
-  }
-  if (ts.isPropertyAssignment(parent) && parent.initializer === expression) {
-    return "object-property";
-  }
-  if (
-    ts.isArrayLiteralExpression(parent) && parent.elements.includes(expression)
-  ) {
-    return "array-element";
+  context: TransformationContext,
+): expression is ts.CallExpression {
+  if (!ts.isCallExpression(expression)) {
+    return false;
   }
 
-  return undefined;
+  return detectCallKind(expression, context.checker)?.kind === "derive";
 }
 
-function hasAuthoredSourceSite(node: ts.Node): boolean {
-  const original = ts.getOriginalNode(node);
-
-  if (node.getSourceFile() && node.pos >= 0) {
-    return true;
-  }
-
-  return original !== node &&
-    !!original.getSourceFile() &&
-    original.pos >= 0;
-}
-
-function isWithinEventHandlerJsxAttribute(
-  node: ts.Node,
-  checker: ts.TypeChecker,
+function isSyntheticHelperWrapperInArrayMethodCallback(
+  expression: ts.Expression,
+  context: TransformationContext,
 ): boolean {
-  let current: ts.Node | undefined = node;
+  if (!ts.isCallExpression(expression) || expression.pos >= 0) {
+    return false;
+  }
 
+  const callKind = detectCallKind(expression, context.checker)?.kind;
+  if (
+    callKind !== "derive" &&
+    callKind !== "ifElse" &&
+    callKind !== "when" &&
+    callKind !== "unless"
+  ) {
+    return false;
+  }
+
+  let current: ts.Node | undefined = expression.parent;
   while (current) {
-    if (ts.isJsxAttribute(current)) {
-      return isEventHandlerJsxAttribute(current, checker);
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      return context.isArrayMethodCallback(current);
     }
     current = current.parent;
   }
@@ -121,162 +65,40 @@ function isWithinEventHandlerJsxAttribute(
   return false;
 }
 
-function isArrayMethodOwnedExpressionSite(
-  expression: ts.Expression,
-  context: TransformationContext,
-): boolean {
-  const contextInfo = classifyReactiveContext(
-    expression,
-    context.checker,
-    context,
-  );
-  if (contextInfo.kind === "pattern" && contextInfo.owner === "array-method") {
-    return true;
-  }
-
-  const callbackContext = findEnclosingCallbackContext(expression);
-  if (!callbackContext) {
-    return false;
-  }
-
-  if (context.isArrayMethodCallback(callbackContext.callback)) {
-    return true;
-  }
-
-  const callKind = detectCallKind(callbackContext.call, context.checker);
-  return callKind?.kind === "array-method";
-}
-
-function isDeferredJsxArrayMethodExpression(
-  expression: ts.Expression,
-  context: TransformationContext,
-  analyze: AnalyzeFn,
-): boolean {
-  const current = unwrapExpression(expression);
-  if (!ts.isCallExpression(current)) {
-    return false;
-  }
-
-  if (
-    ts.isPropertyAccessExpression(current.expression) &&
-    (
-      current.expression.name.text === "map" ||
-      current.expression.name.text === "filter" ||
-      current.expression.name.text === "flatMap"
-    )
-  ) {
-    if (current.arguments.some(isFunctionLikeExpression)) {
-      return true;
-    }
-
-    const receiverAnalysis = analyze(current.expression.expression);
-    if (receiverAnalysis.containsOpaqueRef) {
-      return true;
-    }
-  }
-
-  return detectCallKind(current, context.checker)?.kind === "array-method";
-}
-
-function canRewriteExpressionSite(
-  expression: ts.Expression,
-  containerKind: ExpressionContainerKind,
-  context: TransformationContext,
-  analyze: AnalyzeFn,
-): boolean {
-  if (!hasAuthoredSourceSite(expression)) {
-    return false;
-  }
-
-  if (isWithinEventHandlerJsxAttribute(expression, context.checker)) {
-    return false;
-  }
-
-  const contextInfo = classifyReactiveContext(
-    expression,
-    context.checker,
-    context,
-  );
-  if (contextInfo.kind !== "pattern") {
-    return false;
-  }
-
-  if (
-    containerKind !== "jsx-expression" &&
-    !isArrayMethodOwnedExpressionSite(expression, context)
-  ) {
-    return false;
-  }
-
-  if (
-    containerKind === "jsx-expression" &&
-    isDeferredJsxArrayMethodExpression(expression, context, analyze)
-  ) {
-    return false;
-  }
-
-  if (
-    containerKind !== "jsx-expression" &&
-    !isControlFlowRewriteExpression(expression)
-  ) {
-    return false;
-  }
-
-  const analysis = analyze(expression);
-  return analysis.requiresRewrite || isLogicalBinaryExpression(expression);
-}
-
-export function findLowerableExpressionSite(
-  expression: ts.Expression,
-  context: TransformationContext,
-  analyze: AnalyzeFn,
-):
-  | { expression: ts.Expression; containerKind: ExpressionContainerKind }
-  | undefined {
-  let current: ts.Node | undefined = expression;
-
-  while (current) {
-    if (current !== expression && ts.isFunctionLike(current)) {
-      return undefined;
-    }
-
-    if (ts.isExpression(current)) {
-      const containerKind = getExpressionContainerKind(current);
-      if (
-        containerKind &&
-        canRewriteExpressionSite(current, containerKind, context, analyze)
-      ) {
-        return {
-          expression: current,
-          containerKind,
-        };
-      }
-    }
-
-    current = current.parent;
-  }
-
-  return undefined;
-}
-
 export function rewriteExpressionSite(
   params: RewriteExpressionSiteParams,
 ): ts.Expression | undefined {
-  const { expression, containerKind, context, analyze, visit } = params;
+  const {
+    expression,
+    containerKind,
+    context,
+    analyze,
+    visit,
+    preferDeriveWrappers = false,
+  } = params;
 
-  if (!canRewriteExpressionSite(expression, containerKind, context, analyze)) {
+  const handling = classifyExpressionSiteHandling(
+    expression,
+    containerKind,
+    context,
+    analyze,
+  );
+  if (handling.kind !== "shared") {
     return undefined;
   }
 
-  const contextInfo = classifyReactiveContext(
-    expression,
-    context.checker,
-    context,
-  );
+  if (!handling.lowerable) {
+    return undefined;
+  }
+
+  const contextInfo = context.getReactiveContext(expression);
   const analysis = analyze(expression);
   const hasLogicalOps = containsLogicalBinaryOperator(expression);
+  const controlFlowNeedsRewrite = containerKind === "jsx-expression" &&
+    isControlFlowRewriteExpression(expression) &&
+    analysis.containsOpaqueRef;
 
-  if (!analysis.requiresRewrite && !hasLogicalOps) {
+  if (!analysis.requiresRewrite && !hasLogicalOps && !controlFlowNeedsRewrite) {
     return undefined;
   }
 
@@ -299,10 +121,15 @@ export function rewriteExpressionSite(
     reactiveContextKind: contextInfo.kind,
     inSafeContext: contextInfo.kind === "compute",
     containerKind,
+    preferDeriveWrappers,
   });
 
   if (!result) {
     return undefined;
+  }
+
+  if (preferDeriveWrappers && isDirectDeriveCall(result, context)) {
+    return result;
   }
 
   return visitEachChildWithJsx(
@@ -312,11 +139,260 @@ export function rewriteExpressionSite(
   ) as ts.Expression;
 }
 
+// Shared rewrite entrypoint for explicit owned pre-closure JSX roots.
+export function rewriteOwnedPreClosureJsxExpressionSite(
+  params: Omit<RewriteExpressionSiteParams, "containerKind">,
+): ts.Expression | undefined {
+  const {
+    expression,
+    context,
+    analyze,
+    visit,
+    preferDeriveWrappers = false,
+  } = params;
+
+  const contextInfo = context.getReactiveContext(expression);
+  const inSafeContext = contextInfo.kind === "compute";
+  const analysis = analyze(expression);
+  const hasLogicalOps = containsLogicalBinaryOperator(expression);
+
+  if (inSafeContext) {
+    return undefined;
+  }
+
+  if (!analysis.requiresRewrite && !hasLogicalOps) {
+    return undefined;
+  }
+
+  if (context.options.mode === "error") {
+    context.reportDiagnostic({
+      type: "opaque-ref:jsx-expression",
+      message: "JSX expression with OpaqueRef computation should use derive",
+      node: expression,
+    });
+    return expression;
+  }
+
+  const result = rewriteExpression({
+    expression,
+    analysis,
+    context,
+    analyze,
+    reactiveContextKind: contextInfo.kind,
+    inSafeContext,
+    containerKind: "jsx-expression",
+    preferDeriveWrappers,
+  });
+
+  if (!result) {
+    return undefined;
+  }
+
+  if (preferDeriveWrappers && isDirectDeriveCall(result, context)) {
+    return result;
+  }
+
+  return visitEachChildWithJsx(
+    result,
+    visit,
+    context.tsContext,
+  ) as ts.Expression;
+}
+
+export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
+  root: T,
+  context: TransformationContext,
+): T {
+  const analyze = context.getDataFlowAnalyzer();
+
+  const visit: ts.Visitor = (node) => {
+    const visited = visitEachChildWithJsx(node, visit, context.tsContext);
+
+    if (ts.isExpression(visited)) {
+      const containerKind = getExpressionContainerKind(visited);
+      if (containerKind) {
+        const handling = classifyExpressionSiteHandling(
+          visited,
+          containerKind,
+          context,
+          analyze,
+        );
+        if (
+          handling.kind !== "owned" ||
+          handling.owner !== "helper"
+        ) {
+          return visited;
+        }
+        if (!handling.lowerable) {
+          return visited;
+        }
+        const analysis = analyze(visited);
+        const result = rewriteExpression({
+          expression: visited,
+          analysis,
+          context,
+          analyze,
+          reactiveContextKind: "pattern",
+          inSafeContext: false,
+          containerKind,
+          preferDeriveWrappers: true,
+        });
+        if (result) {
+          return result;
+        }
+      }
+    }
+
+    return visited;
+  };
+
+  return ts.visitNode(root, visit) as T;
+}
+
+export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
+  root: T,
+  context: TransformationContext,
+): T {
+  const analyze = context.getDataFlowAnalyzer();
+
+  const visit: ts.Visitor = (node) => {
+    if (
+      (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+      context.isArrayMethodCallback(node) &&
+      !ts.isBlock(node.body)
+    ) {
+      return node;
+    }
+
+    if (ts.isJsxExpression(node)) {
+      if (!node.expression) {
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
+
+      const handling = classifyExpressionSiteHandling(
+        node.expression,
+        "jsx-expression",
+        context,
+        analyze,
+      );
+      if (
+        handling.kind !== "shared" ||
+        (handling.jsxRoute ?? "shared-post-closure") !==
+          "shared-post-closure"
+      ) {
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
+
+      const rewritten = rewriteExpressionSite({
+        expression: node.expression,
+        containerKind: "jsx-expression",
+        context,
+        analyze,
+        visit,
+        preferDeriveWrappers: true,
+      });
+      if (rewritten) {
+        return context.factory.createJsxExpression(
+          node.dotDotDotToken,
+          rewritten,
+        );
+      }
+
+      return visitEachChildWithJsx(node, visit, context.tsContext);
+    }
+
+    if (ts.isExpression(node)) {
+      const containerKind = getExpressionContainerKind(node);
+      if (containerKind) {
+        if (containerKind === "jsx-expression") {
+          return visitEachChildWithJsx(node, visit, context.tsContext);
+        }
+
+        // Array-method callback lowering may already have produced a synthetic
+        // helper wrapper (derive/ifElse/when/unless) for this subtree. When
+        // that happens, the later pattern-owned pass should not re-enter the
+        // wrapper root and compete for ownership again.
+        if (isSyntheticHelperWrapperInArrayMethodCallback(node, context)) {
+          return node;
+        }
+
+        const rewritten = rewriteExpressionSite({
+          expression: node,
+          containerKind,
+          context,
+          analyze,
+          visit,
+          preferDeriveWrappers: true,
+        });
+        if (rewritten) {
+          return rewritten;
+        }
+      }
+    }
+
+    return visitEachChildWithJsx(node, visit, context.tsContext);
+  };
+
+  return ts.visitNode(root, visit) as T;
+}
+
 export function rewriteArrayMethodCallbackExpressionSites(
   body: ts.ConciseBody,
   context: TransformationContext,
 ): ts.ConciseBody {
-  const analyze = createDataFlowAnalyzer(context.checker);
+  const analyze = context.getDataFlowAnalyzer();
+
+  const rewriteArrayMethodOwnedReceiverMethodExpressionSite = (
+    expression: ts.Expression,
+  ): ts.Expression | undefined => {
+    const lowerableSite = findLowerableExpressionSite(
+      expression,
+      context,
+      analyze,
+    );
+    if (lowerableSite && lowerableSite.expression !== expression) {
+      return undefined;
+    }
+
+    const containerKind = expression === body
+      ? "return-expression"
+      : getExpressionContainerKind(expression);
+    if (!containerKind || containerKind === "jsx-expression") {
+      return undefined;
+    }
+
+    const handling = classifyExpressionSiteHandling(
+      expression,
+      containerKind,
+      context,
+      analyze,
+    );
+    if (
+      handling.kind !== "owned" ||
+      handling.owner !== "array-method-receiver-method" ||
+      !handling.lowerable
+    ) {
+      return undefined;
+    }
+
+    const analysis = analyze(expression);
+    const relevantDataFlows = context.getRelevantDataFlowsFromAnalysis(
+      analysis,
+    );
+    if (relevantDataFlows.length === 0) {
+      return undefined;
+    }
+
+    return createReactiveWrapperForExpression(
+      expression,
+      relevantDataFlows,
+      context,
+      {
+        allowDirectExpressionWrap: true,
+        preferDeriveWrapper: true,
+      },
+    );
+  };
 
   const visit: ts.Visitor = (node) => {
     if (
@@ -326,17 +402,62 @@ export function rewriteArrayMethodCallbackExpressionSites(
       return node;
     }
 
+    if (ts.isJsxExpression(node)) {
+      if (!node.expression) {
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
+
+      if (isDirectArrayMethodRootExpression(node.expression)) {
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
+
+      const handling = classifyExpressionSiteHandling(
+        node.expression,
+        "jsx-expression",
+        context,
+        analyze,
+      );
+      if (
+        handling.kind === "owned" &&
+        handling.owner === "array-method-callback-jsx" &&
+        handling.lowerable
+      ) {
+        const rewritten = rewriteOwnedPreClosureJsxExpressionSite({
+          expression: node.expression,
+          context,
+          analyze,
+          visit,
+          preferDeriveWrappers: true,
+        });
+        if (rewritten) {
+          return context.factory.createJsxExpression(
+            node.dotDotDotToken,
+            rewritten,
+          );
+        }
+      }
+
+      return visitEachChildWithJsx(node, visit, context.tsContext);
+    }
+
     if (ts.isExpression(node)) {
       const containerKind = node === body
         ? "return-expression"
         : getExpressionContainerKind(node);
       if (containerKind && containerKind !== "jsx-expression") {
+        const callbackOwnedReceiverRewrite =
+          rewriteArrayMethodOwnedReceiverMethodExpressionSite(node);
+        if (callbackOwnedReceiverRewrite) {
+          return callbackOwnedReceiverRewrite;
+        }
+
         const rewritten = rewriteExpressionSite({
           expression: node,
           containerKind,
           context,
           analyze,
           visit,
+          preferDeriveWrappers: true,
         });
         if (rewritten) {
           return rewritten;

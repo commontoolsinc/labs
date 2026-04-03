@@ -57,7 +57,7 @@ export default pattern(() => {
                             type: "boolean"
                         },
                         result: {
-                            type: ["string", "undefined"]
+                            type: "string"
                         }
                     },
                     required: ["pending"]

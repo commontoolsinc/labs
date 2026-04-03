@@ -1,11 +1,14 @@
-import { assertEquals, assertGreater } from "@std/assert";
+import { assertEquals, assertGreater, assertStringIncludes } from "@std/assert";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
 
 /**
  * Extracts JSON schema literals from transformed output.
- * Schemas appear as `{ type: "object", ... } as const satisfies __ctHelpers.JSONSchema`
+ * Schemas appear as either:
+ * - `{ type: "object", ... } as const satisfies __ctHelpers.JSONSchema`
+ * - `true as const satisfies __ctHelpers.JSONSchema`
+ * - `false as const satisfies __ctHelpers.JSONSchema`
  * Returns them in order of appearance.
  */
 function extractSchemas(output: string): string[] {
@@ -15,25 +18,39 @@ function extractSchemas(output: string): string[] {
   while (true) {
     const markerIdx = output.indexOf(marker, searchFrom);
     if (markerIdx === -1) break;
-    // Walk backwards from marker to find matching opening brace
-    let depth = 0;
+    // Walk backwards from marker to find the schema literal.
     let start = markerIdx - 1;
     // Skip whitespace before marker
     while (start >= 0 && /\s/.test(output[start]!)) start--;
-    // Now we should be at a closing brace or end of object literal
-    if (output[start] !== "}") {
+
+    let schemaText: string | undefined;
+    if (output[start] === "}") {
+      let depth = 1;
+      start--;
+      while (start >= 0 && depth > 0) {
+        if (output[start] === "}") depth++;
+        else if (output[start] === "{") depth--;
+        start--;
+      }
+      start++; // back to the opening brace
+      schemaText = output.slice(start, markerIdx).trim();
+    } else {
+      let tokenStart = start;
+      while (tokenStart >= 0 && /[A-Za-z]/.test(output[tokenStart]!)) {
+        tokenStart--;
+      }
+      tokenStart++;
+      const token = output.slice(tokenStart, start + 1).trim();
+      if (token === "true" || token === "false") {
+        schemaText = token;
+      }
+    }
+
+    if (!schemaText) {
       searchFrom = markerIdx + marker.length;
       continue;
     }
-    depth = 1;
-    start--;
-    while (start >= 0 && depth > 0) {
-      if (output[start] === "}") depth++;
-      else if (output[start] === "{") depth--;
-      start--;
-    }
-    start++; // back to the opening brace
-    const schemaText = output.slice(start, markerIdx).trim();
+
     schemas.push(schemaText);
     searchFrom = markerIdx + marker.length;
   }
@@ -610,6 +627,35 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "errors when lift accesses .length on numeric index signature object",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "type Indexed = { [index: number]: string };",
+        "const hasItems = lift<Indexed, boolean>(",
+        "  (items) => items.length > 0,",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:path-not-in-type",
+      );
+      assertGreater(
+        shrinkErrors.length,
+        0,
+        `Expected schema:path-not-in-type for numeric index signature .length access but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
     "no error when handler without type args has SomeType | undefined param",
     async () => {
       // Reproduces pattern-ingredient-scaler: handler() without type args
@@ -988,11 +1034,8 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
-    "pattern<T> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
+    "pattern<T> and inline destructured form produce identical schemas",
     async () => {
-      // Known divergence: pattern<T> produces both argument and result schemas
-      // (result schema has asOpaque on each property), while inline form produces
-      // only the argument schema. This needs more changes to reconcile.
       const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { pattern } from "commontools";',
@@ -1037,19 +1080,17 @@ Deno.test("Schema Shrink Validation", async (t) => {
         0,
         "inline form should produce schemas",
       );
-      // Argument schemas (first schema) should match
       assertEquals(
-        schemasTA[0],
-        schemasInline[0],
-        "pattern argument schemas should be identical between type-arg and inline forms",
+        schemasTA,
+        schemasInline,
+        "pattern schemas should be identical between type-arg and inline forms",
       );
     },
   );
 
   await t.step(
-    "pattern<TypeAlias> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
+    "pattern<TypeAlias> and inline destructured alias form produce identical schemas",
     async () => {
-      // Same divergence as above.
       const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { pattern } from "commontools";',
@@ -1100,12 +1141,127 @@ Deno.test("Schema Shrink Validation", async (t) => {
         0,
         "inline form should produce schemas",
       );
-      // Argument schemas (first schema) should match
       assertEquals(
-        schemasTA[0],
-        schemasInline[0],
-        "pattern argument schemas should be identical between type-arg and inline forms",
+        schemasTA,
+        schemasInline,
+        "pattern schemas should be identical between type-arg and inline forms",
       );
+    },
+  );
+
+  await t.step(
+    "derive object-literal input preserves property schemas",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { cell, derive, lift } from "commontools";',
+        "",
+        'const stage = cell<string>("initial");',
+        "const attemptCount = cell<number>(0);",
+        "const acceptedCount = cell<number>(0);",
+        "const rejectedCount = cell<number>(0);",
+        "",
+        "const normalizedStage = lift((value: string) => value)(stage);",
+        "const attempts = lift((count: number) => count)(attemptCount);",
+        "const accepted = lift((count: number) => count)(acceptedCount);",
+        "const rejected = lift((count: number) => count)(rejectedCount);",
+        "",
+        "const _summary = derive(",
+        "  {",
+        "    stage: normalizedStage,",
+        "    attempts: attempts,",
+        "    accepted: accepted,",
+        "    rejected: rejected,",
+        "  },",
+        "  (snapshot) =>",
+        "    `stage:${snapshot.stage} attempts:${snapshot.attempts}` +",
+        "    ` accepted:${snapshot.accepted} rejected:${snapshot.rejected}`,",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      assertStringIncludes(result.output, "stage: {");
+      assertStringIncludes(result.output, "attempts: {");
+      assertStringIncludes(result.output, "accepted: {");
+      assertStringIncludes(result.output, "rejected: {");
+      assertEquals(result.output.includes("stage: true"), false);
+      assertEquals(result.output.includes("attempts: true"), false);
+      assertEquals(result.output.includes("accepted: true"), false);
+      assertEquals(result.output.includes("rejected: true"), false);
+    },
+  );
+
+  await t.step(
+    "derive wildcard usage keeps conservative full-shape input schema",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive, type Writable } from "commontools";',
+        "const input = {} as Writable<{ foo: string; bar: string }>;",
+        "const d = derive(input, (v: Writable<{ foo: string; bar: string }>) => {",
+        '  const foo = v.key("foo").get();',
+        "  Object.keys(v.get());",
+        "  return foo;",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      assertStringIncludes(result.output, "asCell: true");
+      assertStringIncludes(result.output, '"foo"');
+      assertStringIncludes(result.output, '"bar"');
+    },
+  );
+
+  await t.step(
+    "handler wildcard usage keeps conservative full-shape state schema",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { handler, type Writable } from "commontools";',
+        "const h = handler((event: { id: string }, state: Writable<{ foo: string; bar: string }>) => {",
+        '  const foo = state.key("foo").get();',
+        "  Object.keys(state.get());",
+        "  return foo + event.id;",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      assertStringIncludes(result.output, "asCell: true");
+      assertStringIncludes(result.output, '"foo"');
+      assertStringIncludes(result.output, '"bar"');
     },
   );
 });

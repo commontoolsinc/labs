@@ -4,7 +4,11 @@
 **Package:** `@commontools/ts-transformers`\
 **Effective date:** March 17, 2026\
 **Scope:** Compile-time behavior implemented in `packages/ts-transformers/src`
-and exercised by current tests/fixtures.
+and exercised by current tests/fixtures. **Related:**
+
+- `docs/specs/ts-transformer/ts_transformers_target_pattern_language_spec.md`
+- `docs/specs/ts-transformer/ts_transformers_lowering_contract.md`
+- `docs/specs/ts-transformer/ts_transformers_goals.md`
 
 ## 1. Scope And Source Of Truth
 
@@ -34,6 +38,12 @@ Before AST transforms, `transformCtDirective()`:
 If `/// <cts-enable />` is absent, no helper import is injected and most
 transformers effectively no-op.
 
+Current rollout note:
+
+- This directive is still the active rollout gate in the implementation.
+- The branch is being hardened as the candidate default compiler path, but the
+  default-on flip itself is intentionally not part of the current PR.
+
 ### 2.2 Pipeline object
 
 `CommonToolsTransformerPipeline` constructs one ordered pipeline with shared
@@ -53,12 +63,14 @@ Transformers always run in this order:
 2. `EmptyArrayOfValidationTransformer`
 3. `OpaqueGetValidationTransformer`
 4. `PatternContextValidationTransformer`
-5. `OpaqueRefJSXTransformer`
+5. `JsxExpressionSiteRouterTransformer`
 6. `ComputedTransformer`
 7. `ClosureTransformer`
-8. `CapabilityLoweringTransformer`
-9. `SchemaInjectionTransformer`
-10. `SchemaGeneratorTransformer`
+8. `PatternOwnedExpressionSiteLoweringTransformer`
+9. `HelperOwnedExpressionSiteLoweringTransformer`
+10. `PatternCallbackLoweringTransformer`
+11. `SchemaInjectionTransformer`
+12. `SchemaGeneratorTransformer`
 
 The order is behaviorally significant.
 
@@ -71,8 +83,8 @@ The order is behaviorally significant.
 
 Current mode-sensitive behavior:
 
-- `OpaqueRefJSXTransformer` in `error` mode reports diagnostics instead of
-  rewriting JSX expressions that would require opaque-ref rewrites in
+- `JsxExpressionSiteRouterTransformer` in `error` mode reports diagnostics
+  instead of rewriting JSX expressions that would require opaque-ref rewrites in
   non-compute contexts.
 - Other transformers currently do not branch on mode.
 
@@ -83,8 +95,8 @@ Current mode-sensitive behavior:
 - builders: `pattern`, `handler`, `action`, `lift`, `computed`, `render`
 - `derive`
 - `ifElse`, `when`, `unless`
-- reactive array calls (`map`, `mapWithPattern`, `filter`,
-  `filterWithPattern`, `flatMap`, `flatMapWithPattern`)
+- reactive array calls (`map`, `mapWithPattern`, `filter`, `filterWithPattern`,
+  `flatMap`, `flatMapWithPattern`)
 - cell factories (`cell`, `Cell.of`, `OpaqueCell.of`, `Stream.of`, etc.)
 - `Cell.for`-style calls
 - `wish`
@@ -186,9 +198,13 @@ from capability analysis.
 
 When interprocedural analysis is enabled (compute-context builders like `lift`,
 `derive`, `handler`), read paths discovered in helper function bodies propagate
-back to the caller's parameter summary. This means a `lift` callback that
-delegates to a local helper which reads `(x as any).foo` will trigger shrink
-validation on the caller's parameter type.
+back to the caller's parameter summary, but the current MVP intentionally only
+does this for resolved helper bodies in the same source file. Cross-file or
+otherwise unsupported helper calls fall back to the conservative wildcard path
+instead of taking partial transitive precision. This means a `lift` callback
+that delegates to a local helper which reads `(x as any).foo` will trigger
+shrink validation on the caller's parameter type, while the same helper body in
+another file will conservatively disable shrinking for that parameter.
 
 When a wildcard parameter (one passed to an opaque/unanalyzable function like
 `console.log`) is typed `unknown`, validation emits `schema:unknown-type-access`
@@ -196,12 +212,11 @@ because the generated schema cannot express what data to fetch. This does not
 apply to `any`-typed parameters (which fetch everything at runtime) or to
 concrete types (which already describe the expected shape).
 
-Declared members typed as `unknown` also trigger
-`schema:unknown-type-access` when accessed, even if the property name exists in
-the declared interface/type literal. This catches cases like
-`{ data?: unknown }` where the schema would otherwise degrade to
-`{ type: "unknown" }` for that property and the runtime could not express the
-required fetch shape.
+Declared members typed as `unknown` also trigger `schema:unknown-type-access`
+when accessed, even if the property name exists in the declared interface/type
+literal. This catches cases like `{ data?: unknown }` where the schema would
+otherwise degrade to `{ type: "unknown" }` for that property and the runtime
+could not express the required fetch shape.
 
 Guards that skip validation:
 
@@ -212,7 +227,7 @@ Guards that skip validation:
   `__param0`, etc. — names starting with `__`)
 - `never`-typed parameters (bottom type, vacuously valid)
 - paths whose head is `"key"` (reactive proxy accessor injected by
-  `CapabilityLoweringTransformer`)
+  `PatternCallbackLoweringTransformer`)
 
 Diagnostics:
 
@@ -237,9 +252,9 @@ the shrunk TypeNode, the base TypeNode, and the resolved `ts.Type`. For union
 types (e.g. `{ amount?: number } | undefined`), non-nullish constituents are
 checked individually — a head is valid if ANY non-nullish member has it. For
 array types (e.g. `number[]`), numeric heads like `"0"` are valid when the type
-has a numeric index signature. TypeReferences within unions are resolved to their
-declaration members. This eliminates false `schema:path-not-in-type` errors on
-nullable/optional union patterns and array index accesses.
+has a numeric index signature. TypeReferences within unions are resolved to
+their declaration members. This eliminates false `schema:path-not-in-type`
+errors on nullable/optional union patterns and array index accesses.
 
 ### 6.5 Pattern-context validation
 
@@ -271,8 +286,8 @@ Diagnostics emitted in all modes:
   - special message for immediate `lift(fn)(args)` suggesting `computed()`
 - **Error** `standalone-function:reactive-operation`
   - in standalone functions (except inline first arg to `patternTool`):
-    `computed(...)`, `derive(...)`, or reactive collection methods on
-    reactive receivers
+    `computed(...)`, `derive(...)`, or reactive collection methods on reactive
+    receivers
   - collection-method diagnostics currently use `.map(...)`-style guidance and
     suggest eager `<cell>.get().map(...)` when explicit eager mapping is
     acceptable
@@ -285,46 +300,38 @@ Diagnostics emitted in all modes:
   - message instructs the author to move the use into a nested
     `computed(() => ...)` or `derive(() => ...)`
 - **Error** `pattern-context:optional-chaining`
-  - optional property access `?.` in restricted reactive context (outside JSX)
+  - optional calls in restricted reactive context (outside JSX)
+  - optional property / element access that appears outside a supported
+    lowerable expression site
 - **Error** `pattern-context:computation`
   - binary/unary/conditional computations using opaque dependencies outside
     wrappers
+  - validation first checks the shared lowerable-expression-site policy; only
+    non-lowerable computation sites still report this error
 - **Error** `pattern-context:map-on-fallback`
   - `(opaqueExpr ?? fallback).map(...)` or `(opaqueExpr || fallback).map(...)`
     where left is reactive and right is not
 
-### 6.6 Pattern any-result-schema validation
+### 6.6 Pattern Result Schema Inference
 
 When `pattern()` is called with zero or one type parameters and the result
-schema must be inferred, the transformer checks whether the callback's return
-type resolves to `any` or `unknown`. If it does, the inferred result schema
-would degenerate to `{ type: "object" }` (schema-less), which causes runtime
-proxy-depth crashes.
+schema must be inferred, CTS requires the inferred top-level result shape to be
+structurally representable.
 
-The check runs in `collectFunctionSchemaTypeNodes` via `inferReturnType` +
-`isAnyOrUnknownType`. This catches cases where the callback directly returns an
-`any`-typed expression (e.g., the result of an untyped fetch or `as any` cast).
+- structurally recoverable object-literal returns still emit concrete object
+  schemas even when some individual property values come from `any`-typed
+  expressions
+- direct top-level `any` / `unknown` result inference emits
+  `pattern:any-result-schema`
+- authors who intentionally want a permissive/opaque output boundary must make
+  it explicit with `pattern<Input, Output>(...)`
 
-This does not target callbacks whose return type has concrete structure — even
-if individual properties are OpaqueCell-wrapped (e.g., `{ name: OpaqueCell<string> & string }` from a destructured passthrough), the return type is not
-`any` and a usable result schema can be generated.
+This inference runs through `collectFunctionSchemaTypeNodes` via
+`inferReturnType`, object-literal recovery, and direct projection recovery.
 
-Suppressed when:
+## 7. JSX Expression Site Routing And Early Rewriting
 
-- two or more type parameters are provided (explicit Output type takes
-  precedence)
-- the callback returns a concrete (non-any, non-unknown) type
-
-Diagnostics:
-
-- **Error** `pattern:any-result-schema`
-  - pattern callback return type resolves to `any` or `unknown`
-  - message instructs adding an explicit Output type parameter:
-    `pattern<Input, Output>(...)`
-
-## 7. OpaqueRef JSX Rewriting
-
-`OpaqueRefJSXTransformer` runs only when helper import is present.
+`JsxExpressionSiteRouterTransformer` runs only when helper import is present.
 
 ### 7.1 Top-level behavior
 
@@ -491,9 +498,9 @@ values:
 
 If no qualifying captures exist, call is unchanged.
 
-### 9.7 Capability lowering
+### 9.7 Pattern callback lowering
 
-`CapabilityLoweringTransformer` runs after closure transformation.
+`PatternCallbackLoweringTransformer` runs after closure transformation.
 
 Primary behaviors:
 
@@ -503,14 +510,16 @@ Primary behaviors:
   access in pattern contexts
 - preserves terminal path methods (`get`, `set`, `update`, etc.) and rewrites
   only the receiver path portion when needed
-- treats dynamic key access, wildcard traversals (`Object.keys/values/entries`,
-  `JSON.stringify`, spread), and optional-call forms as non-lowerable in pattern
-  context with diagnostics
+- treats dynamic key access, spread, and optional-call forms as non-lowerable in
+  pattern context with diagnostics
+- treats wildcard traversals (`Object.keys/values/entries`, `JSON.stringify`) as
+  broad/full-shape access for capability analysis, but allows whole-call
+  lowering when they appear in supported expression-root positions
 - classifies map captures as reactive vs non-reactive and avoids `.key(...)`
   rewrites for non-reactive captures
-- recursively rewrites derive callback bodies so locally-declared opaque/reactive
-  aliases created inside compute callbacks (including inside nested blocks) also
-  receive `.key(...)` lowering
+- recursively rewrites derive callback bodies so locally-declared
+  opaque/reactive aliases created inside compute callbacks (including inside
+  nested blocks) also receive `.key(...)` lowering
 - local opaque-root discovery is symbol-scoped and block-aware to avoid
   same-name false rewrites across scopes
 - extracts static destructuring defaults into capability summaries for schema
@@ -545,14 +554,22 @@ Cases:
   - if 1 schema arg present: treated as input schema, infer result schema
   - if none: infer both
 
-When inferring the result schema (0 or 1 type args), emits
-`pattern:any-result-schema` if the callback return type resolves to `any` or
-`unknown` (see §6.6).
+When inferring the result schema (0 or 1 type args), CTS requires a
+structurally representable top-level result:
+
+- structurally recoverable object-literal returns still emit concrete object
+  schemas when CTS can recover their shape (see §6.6)
+- direct top-level `any` / `unknown` result inference emits
+  `pattern:any-result-schema`
+- permissive/opaque result semantics are still allowed when made explicit via a
+  result type parameter
 
 ### 10.3 `handler(...)`
 
 - with type args `<Event, State>`:
   - prepends event/state schemas
+  - unresolved generic helper-definition-site type parameters degrade to
+    `{ type: "unknown" }`
 - with single function arg:
   - infers event/state schemas from parameters
   - event absent -> `never`; untyped params -> `unknown`
@@ -566,10 +583,13 @@ If schemas are not already present via type args:
 - literal-based input inference widens literals (`"x"` -> `string`, `1` ->
   `number`, etc.)
 - when inferred result type is missing or degrades to `any`/`unknown`, recovery
-  first attempts object-literal return reconstruction and then direct
-  projection recovery (`x => x.foo`, `x => x["foo"]`)
+  first attempts object-literal return reconstruction and then direct projection
+  recovery (`x => x.foo`, `x => x["foo"]`)
 - direct projection recovery can reuse result types recovered from local
   `lift(...)` / `derive(...)` initializer aliases registered in `typeRegistry`
+- unresolved generic helper-definition-site type parameters degrade to
+  `{ type: "unknown" }` when schemas are injected from explicit builder type
+  arguments
 
 ### 10.5 Cell factories and related APIs
 
@@ -578,12 +598,23 @@ Injected behaviors:
 - `cell(...)`, `Cell.of(...)`, `OpaqueCell.of(...)`, `Stream.of(...)`, etc.:
   - inject schema as second argument if missing
   - if no value arg, inject `undefined` then schema
+  - value inference first uses registry/initializer recovery for transformed
+    expressions before falling back to the direct value type
+  - direct semantic `any` values emit `true`
+  - direct semantic `unknown` values emit `{ type: "unknown" }`
+  - if the value type at a generic helper definition site is an uninstantiated
+    type parameter, CTS degrades the emitted schema to `{ type: "unknown" }`
+    instead of leaking `{}` or omitting the schema
 - `Cell.for(...)`-style calls:
   - wrap with `.asSchema(schema)` unless already wrapped
 - `wish(...)`:
   - append schema as second argument if missing
+  - explicit or contextual unresolved generic type parameters degrade to
+    `{ type: "unknown" }`
 - `generateObject(...)`:
   - ensure options object has `schema` property (merge/spread as needed)
+  - explicit or contextual unresolved generic result types degrade to
+    `{ type: "unknown" }`
 
 ### 10.6 Conditional helpers
 
@@ -654,13 +685,12 @@ Special path:
 - synthetic union handling preserves `undefined` members (for example
   `string | undefined` retains an explicit `undefined` branch in generated
   schema).
-- `unknown` is emitted distinctly as `{ type: "unknown" }`; `any` remains
-  `true`
+- `unknown` is emitted distinctly as `{ type: "unknown" }`; `any` remains `true`
 - arrays of `unknown` emit `items: { type: "unknown" }`
 - synthetic unions preserve explicit `{ type: "unknown" }` members in `anyOf`
   rather than collapsing them away
-- `OpaqueRef<T>` does not emit `asOpaque`; only cell/stream wrappers add
-  wrapper markers such as `asCell` / `asStream`
+- `OpaqueRef<T>` does not emit `asOpaque`; only cell/stream wrappers add wrapper
+  markers such as `asCell` / `asStream`
 
 ## 12. Diagnostics Message Transformation (Optional Consumer Layer)
 
@@ -682,8 +712,9 @@ pipeline. Current built-in behavior:
 2. Action and JSX inline handler callback extraction currently unwraps arrow
    functions only.
 3. Optional-call forms on opaque pattern roots are non-lowerable and report
-   `pattern-context:optional-chaining` diagnostics (author must move into
-   compute wrappers).
+   `pattern-context:optional-chaining` diagnostics. Optional property/element
+   access is supported only in explicit lowerable expression sites; statement-
+   position optional access still errors.
 4. Non-static destructuring defaults, rest destructuring, and unsupported
    computed destructuring keys in pattern callbacks remain non-lowerable and
    produce pattern-context diagnostics.
@@ -711,7 +742,7 @@ Additional non-fixture unit suites cover:
 - diagnostic message transformer behavior
 - event-handler detection heuristics
 - opaque-ref analysis/normalization/runtime-style APIs
-- capability-first and policy/capability-analysis behavior
+- pipeline regression and policy/capability-analysis behavior
 - derive call helper and identifier utilities
 
 ## 15. Stability Statement

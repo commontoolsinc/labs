@@ -1,4 +1,13 @@
 import * as ts from "typescript";
+import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
+
+const expressionTextCache = new WeakMap<ts.Expression, string>();
+const syntheticExpressionPrinter = ts.createPrinter();
+const syntheticExpressionSourceFile = ts.createSourceFile(
+  "",
+  "",
+  ts.ScriptTarget.Latest,
+);
 
 /**
  * Safely get text from an expression, handling both regular and synthetic nodes.
@@ -6,22 +15,30 @@ import * as ts from "typescript";
  * so we use a printer instead of getText().
  */
 export function getExpressionText(expr: ts.Expression): string {
+  const cached = expressionTextCache.get(expr);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  let text: string;
   const sourceFile = expr.getSourceFile();
   // Check both: no source file OR synthetic node (pos=-1)
   if (!sourceFile || expr.pos === -1) {
     // Synthetic node - use printer
     try {
-      const printer = ts.createPrinter();
-      return printer.printNode(
+      text = syntheticExpressionPrinter.printNode(
         ts.EmitHint.Unspecified,
         expr,
-        ts.createSourceFile("", "", ts.ScriptTarget.Latest),
+        syntheticExpressionSourceFile,
       );
     } catch {
-      return `<error printing ${ts.SyntaxKind[expr.kind]}>`;
+      text = `<error printing ${ts.SyntaxKind[expr.kind]}>`;
     }
+  } else {
+    text = expr.getText(sourceFile);
   }
-  return expr.getText(sourceFile);
+  expressionTextCache.set(expr, text);
+  return text;
 }
 
 /**
@@ -282,19 +299,8 @@ export function isFunctionParameter(
           ts.isFunctionDeclaration(parent) ||
           ts.isMethodDeclaration(parent)
         ) {
-          let callExpr: ts.Node = parent;
-          while (callExpr.parent && !ts.isCallExpression(callExpr.parent)) {
-            callExpr = callExpr.parent;
-          }
-          if (callExpr.parent && ts.isCallExpression(callExpr.parent)) {
-            const funcName = callExpr.parent.expression.getText();
-            if (
-              funcName.includes("pattern") ||
-              funcName.includes("handler") ||
-              funcName.includes("lift")
-            ) {
-              return false;
-            }
+          if (isBuilderOwnedFunctionLike(parent)) {
+            return false;
           }
         }
         return true;
@@ -307,20 +313,7 @@ export function isFunctionParameter(
     return true;
   }
 
-  let current: ts.Node = node;
-  let containingFunction: ts.FunctionLikeDeclaration | undefined;
-  while (current.parent) {
-    current = current.parent;
-    if (
-      ts.isFunctionExpression(current) ||
-      ts.isArrowFunction(current) ||
-      ts.isFunctionDeclaration(current) ||
-      ts.isMethodDeclaration(current)
-    ) {
-      containingFunction = current as ts.FunctionLikeDeclaration;
-      break;
-    }
-  }
+  const containingFunction = getEnclosingFunctionLikeDeclaration(node);
 
   if (containingFunction && containingFunction.parameters) {
     for (const param of containingFunction.parameters) {
@@ -328,19 +321,8 @@ export function isFunctionParameter(
         param.name && ts.isIdentifier(param.name) &&
         param.name.text === node.text
       ) {
-        let callExpr: ts.Node = containingFunction;
-        while (callExpr.parent && !ts.isCallExpression(callExpr.parent)) {
-          callExpr = callExpr.parent;
-        }
-        if (callExpr.parent && ts.isCallExpression(callExpr.parent)) {
-          const funcName = callExpr.parent.expression.getText();
-          if (
-            funcName.includes("pattern") ||
-            funcName.includes("handler") ||
-            funcName.includes("lift")
-          ) {
-            return false;
-          }
+        if (isBuilderOwnedFunctionLike(containingFunction)) {
+          return false;
         }
         return true;
       }
@@ -348,6 +330,22 @@ export function isFunctionParameter(
   }
 
   return false;
+}
+
+function isBuilderOwnedFunctionLike(func: ts.FunctionLikeDeclaration): boolean {
+  let callExpr: ts.Node = func;
+  while (callExpr.parent && !ts.isCallExpression(callExpr.parent)) {
+    callExpr = callExpr.parent;
+  }
+
+  if (!callExpr.parent || !ts.isCallExpression(callExpr.parent)) {
+    return false;
+  }
+
+  const funcName = callExpr.parent.expression.getText();
+  return funcName.includes("pattern") ||
+    funcName.includes("handler") ||
+    funcName.includes("lift");
 }
 
 /**

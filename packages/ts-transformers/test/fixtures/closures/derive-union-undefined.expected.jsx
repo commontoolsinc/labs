@@ -26,10 +26,10 @@ export default pattern((config: Config) => {
                         type: "number"
                     },
                     unionUndefined: {
-                        type: ["number", "undefined"]
+                        type: "number"
                     }
                 },
-                required: ["required", "unionUndefined"]
+                required: ["required"]
             }
         },
         required: ["value", "config"]

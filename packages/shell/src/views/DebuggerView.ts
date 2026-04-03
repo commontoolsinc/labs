@@ -2916,6 +2916,8 @@ export class XDebuggerView extends LitElement {
               ? html`
                 <x-scheduler-graph
                   .debuggerController="${this.debuggerController}"
+                  .patternSourcesVersion="${this.debuggerController
+                    ?.getPatternSourcesVersion() ?? 0}"
                   style="flex: 1; min-height: 0;"
                 ></x-scheduler-graph>
               `

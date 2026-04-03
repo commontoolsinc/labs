@@ -9,7 +9,7 @@ interface State {
 // FIXTURE: map-capture-derived-from-param
 // Verifies: variable derived from state (const settings = state.settings) is captured correctly
 //   .map(fn) → .mapWithPattern(pattern(...), { settings: { multiplier: settings.key("multiplier") } })
-//   item * settings.multiplier → derive() with both element and captured param inputs
+//   item * settings.multiplier → derive() keeps item as an explicit input and closes over the callback-owned settings param
 export default pattern((state) => {
     const settings = state.key("settings");
     return {
@@ -22,26 +22,12 @@ export default pattern((state) => {
                     properties: {
                         item: {
                             type: "number"
-                        },
-                        settings: {
-                            type: "object",
-                            properties: {
-                                multiplier: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["multiplier"]
                         }
                     },
-                    required: ["item", "settings"]
+                    required: ["item"]
                 } as const satisfies __ctHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    item: item,
-                    settings: {
-                        multiplier: settings.key("multiplier")
-                    }
-                }, ({ item, settings }) => item * settings.multiplier)}</span>);
+                } as const satisfies __ctHelpers.JSONSchema, { item: item }, ({ item }) => item * settings.multiplier)}</span>);
             }, {
                 type: "object",
                 properties: {

@@ -215,3 +215,23 @@ export function buildHierarchicalParamsValue(
     assignments.length > 0,
   );
 }
+
+export function buildCapturePropertyAssignments(
+  captureTree: Iterable<[string, CaptureTreeNode]>,
+  factory: ts.NodeFactory,
+  renameMap?: ReadonlyMap<string, string>,
+): ts.PropertyAssignment[] {
+  const properties: ts.PropertyAssignment[] = [];
+  for (const [rootName, node] of captureTree) {
+    const propertyName = renameMap?.get(rootName) ?? rootName;
+    properties.push(
+      factory.createPropertyAssignment(
+        isSafeIdentifierText(propertyName)
+          ? factory.createIdentifier(propertyName)
+          : factory.createStringLiteral(propertyName),
+        buildHierarchicalParamsValue(node, rootName, factory),
+      ),
+    );
+  }
+  return properties;
+}

@@ -121,6 +121,10 @@ export class UnsafeEvalIsolate implements JsIsolate {
     return new UnsafeEvalJsValue(this.internals, value);
   }
 
+  loadSourceMap(filename: string, sourceMap: SourceMap): void {
+    this.internals.loadSourceMap(filename, sourceMap);
+  }
+
   mapPosition(
     filename: string,
     line: number,
