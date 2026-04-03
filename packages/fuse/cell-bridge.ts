@@ -485,6 +485,19 @@ export class CellBridge {
     }
   }
 
+  private ensurePiecePropStub(
+    pieceIno: bigint,
+    propName: "input" | "result",
+  ): bigint | undefined {
+    if (this.tree.getNode(pieceIno)?.kind !== "dir") return undefined;
+    let propIno = this.tree.lookup(pieceIno, propName);
+    if (propIno === undefined) {
+      propIno = this.tree.addDir(pieceIno, propName);
+    }
+    this.piecePropRoots.set(propIno, { pieceIno, propName });
+    return propIno;
+  }
+
   private unregisterPieceRoot(pieceIno: bigint): void {
     const propNames = this.hydratedPieceProps.get(pieceIno);
     if (propNames) {
@@ -566,13 +579,13 @@ export class CellBridge {
 
     const pieceInfo = this.getPieceInfo(parentIno);
     if (pieceInfo) {
-      if (name === "input") {
+      if (name === "input" || name === "input.json") {
         await this.hydratePieceProp(parentIno, "input");
         return true;
       }
       if (
-        name === "result" || name === "index.md" || name === "index.json" ||
-        name === ".handlers"
+        name === "result" || name === "result.json" ||
+        name === "index.md" || name === "index.json" || name === ".handlers"
       ) {
         await this.hydratePieceProp(parentIno, "result");
         return true;
@@ -1073,6 +1086,7 @@ export class CellBridge {
     if (existing) return existing;
     const startedEpoch = this.hydrationEpochs.get(key) ?? 0;
 
+    const pending: { promise?: Promise<boolean> } = {};
     const promise: Promise<boolean> = (async (): Promise<boolean> => {
       try {
         const cell = await info.piece[propName].getCell();
@@ -1091,18 +1105,19 @@ export class CellBridge {
         const stillHydrated =
           this.hydratedPieceProps.get(pieceIno)?.has(propName) ?? false;
         if (currentEpoch !== startedEpoch || !stillHydrated) {
-          if (this.pendingHydrations.get(key) === promise) {
+          if (this.pendingHydrations.get(key) === pending.promise) {
             this.pendingHydrations.delete(key);
           }
           return await this.hydratePieceProp(pieceIno, propName);
         }
         return true;
       } finally {
-        if (this.pendingHydrations.get(key) === promise) {
+        if (this.pendingHydrations.get(key) === pending.promise) {
           this.pendingHydrations.delete(key);
         }
       }
     })();
+    pending.promise = promise;
 
     this.pendingHydrations.set(key, promise);
     return promise;
@@ -1122,6 +1137,7 @@ export class CellBridge {
     if (propIno !== undefined) {
       this.tree.clear(propIno);
     }
+    this.ensurePiecePropStub(rootIno, propName);
 
     const jsonIno = this.tree.lookup(rootIno, `${propName}.json`);
     if (jsonIno !== undefined) {
@@ -2408,6 +2424,8 @@ export class CellBridge {
       pieceId: piece.id,
       piece,
     });
+    this.ensurePiecePropStub(pieceIno, "input");
+    this.ensurePiecePropStub(pieceIno, "result");
 
     return pieceIno;
   }

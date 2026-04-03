@@ -230,7 +230,7 @@ Deno.test("CellBridge.loadPieceTree creates meta.json with id, name, patternName
   assertEquals(meta.patternName, "note");
 });
 
-Deno.test("CellBridge.loadPieceTree creates a stub without eager input hydration", async () => {
+Deno.test("CellBridge.loadPieceTree creates stable input/result stubs without eager hydration", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/ct-exec");
 
@@ -256,10 +256,57 @@ Deno.test("CellBridge.loadPieceTree creates a stub without eager input hydration
     .loadPieceTree(piece, tree.rootIno, "Article", "home");
 
   const inputIno = tree.lookup(pieceIno, "input");
+  const resultIno = tree.lookup(pieceIno, "result");
   assertEquals(
-    inputIno,
-    undefined,
-    "input/ dir should not exist before hydration",
+    inputIno !== undefined,
+    true,
+    "input/ stub dir should exist before hydration",
+  );
+  assertEquals(
+    resultIno !== undefined,
+    true,
+    "result/ stub dir should exist before hydration",
+  );
+  assertEquals(tree.getChildren(inputIno!).length, 0);
+  assertEquals(tree.getChildren(resultIno!).length, 0);
+});
+
+Deno.test("CellBridge.prepareLookup hydrates result.json on direct lookup", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+
+  const piece = {
+    id: "of:entity-result-json",
+    name: () => "Lookup JSON",
+    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () =>
+        Promise.resolve(makeCell({ content: "hello" }, {
+          type: "object",
+          properties: { content: { type: "string" } },
+        })),
+      get: () => Promise.resolve({ content: "hello" }),
+    },
+  };
+
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, tree.rootIno, "Lookup JSON", "home");
+
+  assertEquals(tree.lookup(pieceIno, "result.json"), undefined);
+
+  const prepared = await (bridge as unknown as {
+    prepareLookup: (parentIno: bigint, name: string) => Promise<boolean>;
+  }).prepareLookup(pieceIno, "result.json");
+
+  assertEquals(prepared, true);
+  assertEquals(tree.lookup(pieceIno, "result.json") !== undefined, true);
+  assertEquals(
+    JSON.parse(getFileContent(tree, pieceIno, "result.json")),
+    { content: "hello" },
   );
 });
 
@@ -1160,7 +1207,8 @@ Deno.test("CellBridge.status stays idle without eager content rebuild subscripti
   await addPiece(state, piece, "home");
 
   const pieceIno = tree.lookup(state.piecesIno, "Status-Piece")!;
-  assertEquals(tree.lookup(pieceIno, "result"), undefined);
+  assertEquals(tree.lookup(pieceIno, "result") !== undefined, true);
+  assertEquals(tree.getChildren(tree.lookup(pieceIno, "result")!).length, 0);
 
   resultCell.set({ content: "Second" });
   resultCell.set({ content: "Final" });
@@ -1218,10 +1266,12 @@ Deno.test("CellBridge.invalidateWritePath clears hydrated piece result cache", a
     piece: piece as unknown as WritePath["piece"],
   });
 
+  const resultIno = tree.lookup(pieceIno, "result");
+  assertEquals(resultIno !== undefined, true);
   assertEquals(
-    tree.lookup(pieceIno, "result"),
-    undefined,
-    "hydrated result/ dir should be cleared after invalidation",
+    tree.getChildren(resultIno!).length,
+    0,
+    "result/ should be restored as an empty stub after invalidation",
   );
 });
 
@@ -1268,10 +1318,12 @@ Deno.test("CellBridge.invalidateHandlerTarget clears hydrated entity result cach
     cellKey: "content",
   });
 
+  const resultIno = tree.lookup(entityIno, "result");
+  assertEquals(resultIno !== undefined, true);
   assertEquals(
-    tree.lookup(entityIno, "result"),
-    undefined,
-    "hydrated entity result/ dir should be cleared after handler invalidation",
+    tree.getChildren(resultIno!).length,
+    0,
+    "entity result/ should be restored as an empty stub after handler invalidation",
   );
 });
 
