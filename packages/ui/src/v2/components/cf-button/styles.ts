@@ -79,6 +79,8 @@ export const styles = css`
     align-items: center;
     justify-content: center;
     white-space: nowrap;
+    width: 100%;
+    height: 100%;
     border-radius: var(
       --cf-button-border-radius,
       var(--cf-border-radius-md, 0.375rem)
