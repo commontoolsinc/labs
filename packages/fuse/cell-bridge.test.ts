@@ -323,6 +323,53 @@ Deno.test("CellBridge.hydratePieceProp materializes input and result on demand",
   assertEquals(contentValue, "world");
 });
 
+Deno.test("CellBridge.hydratePieceProp returns early when a prop is already hydrated", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  let resultGets = 0;
+  let resultCellGets = 0;
+
+  const piece = {
+    id: "of:cached-piece",
+    name: () => "Cached Piece",
+    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => {
+        resultCellGets++;
+        return Promise.resolve(makeCell({ content: "world" }, {
+          type: "object",
+          properties: { content: { type: "string" } },
+        }));
+      },
+      get: () => {
+        resultGets++;
+        return Promise.resolve({ content: "world" });
+      },
+    },
+  };
+
+  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace.bind(bridge);
+  await addPiece(state, piece, "home");
+
+  const pieceIno = tree.lookup(state.piecesIno, "Cached-Piece")!;
+  const initialResultCellGets = resultCellGets;
+  const initialResultGets = resultGets;
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+
+  assertEquals(resultCellGets - initialResultCellGets, 1);
+  assertEquals(resultGets - initialResultGets, 1);
+  assertEquals(tree.lookup(pieceIno, "result") !== undefined, true);
+});
+
 Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables in .handlers", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/ct-exec");
@@ -1052,6 +1099,14 @@ Deno.test("CellBridge.subscribePiece clears stale FS root entries when result sw
 
   resultCell.set({ content: "Now a regular result tree" });
   await new Promise((r) => setTimeout(r, 10));
+  bridge.invalidateWritePath({
+    spaceName: "home",
+    pieceName: "FS-Piece",
+    cell: "result",
+    jsonPath: ["content"],
+    isJsonFile: false,
+    piece: piece as unknown as WritePath["piece"],
+  });
   await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
     .hydratePieceProp.call(bridge, pieceIno, "result");
 

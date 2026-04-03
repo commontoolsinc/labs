@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { DIR_MODE, FILE_MODE_RWX } from "./platform.ts";
+import { DIR_MODE, DIR_MODE_RW, FILE_MODE_RWX } from "./platform.ts";
 import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
 import type { FsNode } from "./types.ts";
 
@@ -63,4 +63,13 @@ Deno.test("nodeMode exposes directories as read-only", () => {
   };
 
   assertEquals(nodeMode(node), DIR_MODE);
+});
+
+Deno.test("nodeMode exposes writable directories with write bits", () => {
+  const node: FsNode = {
+    kind: "dir",
+    children: new Map(),
+  };
+
+  assertEquals(nodeMode(node, true), DIR_MODE_RW);
 });

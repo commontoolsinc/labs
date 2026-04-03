@@ -1060,6 +1060,7 @@ export class CellBridge {
   ): Promise<boolean> {
     const info = this.getPieceInfo(pieceIno);
     if (!info) return false;
+    if (this.hydratedPieceProps.get(pieceIno)?.has(propName)) return true;
 
     const cell = await info.piece[propName].getCell();
     const newValue = await info.piece[propName].get();
@@ -1083,9 +1084,9 @@ export class CellBridge {
     if (this.tree.getNode(rootIno)?.kind !== "dir") return false;
 
     const invalidatedNames = new Set<string>([propName, `${propName}.json`]);
+    this.markPiecePropCleared(rootIno, propName);
     const propIno = this.tree.lookup(rootIno, propName);
     if (propIno !== undefined) {
-      this.markPiecePropCleared(rootIno, propName);
       this.tree.clear(propIno);
     }
 
