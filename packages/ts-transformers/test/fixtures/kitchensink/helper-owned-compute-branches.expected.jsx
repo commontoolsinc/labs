@@ -274,7 +274,49 @@ export default pattern((state) => {
                 const memberIndex = __ct_pattern_input.key("index");
                 const project = __ct_pattern_input.params.project;
                 return (<small>
-              {memberIndex === 0 ? `${project.name}-${member}` : member}
+              {__ctHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        memberIndex: {
+                            type: "number"
+                        }
+                    },
+                    required: ["memberIndex"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __ctHelpers.JSONSchema, { memberIndex: memberIndex }, ({ memberIndex }) => memberIndex === 0), __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        project: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"]
+                        },
+                        member: {
+                            type: "string"
+                        }
+                    },
+                    required: ["project", "member"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    project: {
+                        name: project.name
+                    },
+                    member: member
+                }, ({ project, member }) => `${project.name}-${member}`), member)}
             </small>);
             }, {
                 type: "object",

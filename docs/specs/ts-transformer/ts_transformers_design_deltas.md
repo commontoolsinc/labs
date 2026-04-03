@@ -18,7 +18,7 @@ behavior and open follow-up work.
 ## Implementation Snapshot (March 17, 2026)
 
 - Landed:
-  - capability-first transform pipeline (legacy `useLegacyOpaqueRefSemantics`
+  - single transform pipeline (legacy `useLegacyOpaqueRefSemantics`
     flag removed)
   - unified context classifier (`pattern` / `compute` / `neutral`)
   - provenance-first CommonTools call detection with shadowed-helper rejection
@@ -231,8 +231,8 @@ contract support).
 6. Optional-call forms (for example `foo?.bar()`) are explicitly out of scope
    for key-lowering until modeled separately.
 7. ~~A feature gate exists for rollout and A/B fixture validation.~~
-   (Completed: `useLegacyOpaqueRefSemantics` gate has been removed; capability-first
-   is the only path.)
+   (Completed: `useLegacyOpaqueRefSemantics` gate has been removed; the single
+   transform pipeline is the only path.)
 8. Destructured callback parameters in pattern-style contexts are lowered to
    non-destructured receiver parameters with explicit `key(...)` bindings.
 9. Alias/nested destructuring (for example `{ bar: b }`, `{ user: { name } }`)
@@ -422,9 +422,9 @@ fields/defaults unless an explicit author opt-in narrowing model is introduced.
 - `packages/ts-transformers/src/ast/reactive-context.ts`
 - `packages/ts-transformers/src/ast/type-inference.ts`
   (`isReactiveArrayMapCall`)
-- `packages/ts-transformers/src/transformers/opaque-ref-jsx.ts`
-- `packages/ts-transformers/src/transformers/opaque-ref/emitters/binary-expression.ts`
-- `packages/ts-transformers/src/transformers/opaque-ref/emitters/conditional-expression.ts`
+- `packages/ts-transformers/src/transformers/jsx-expression-site-router.ts`
+- `packages/ts-transformers/src/transformers/expression-rewrite/emitters/binary-expression.ts`
+- `packages/ts-transformers/src/transformers/expression-rewrite/emitters/conditional-expression.ts`
 - `packages/ts-transformers/src/closures/strategies/map-strategy.ts`
 - `packages/ts-transformers/src/ast/call-kind.ts`
 - `packages/ts-transformers/src/ast/dataflow.ts` (or successor capability graph)
@@ -432,7 +432,7 @@ fields/defaults unless an explicit author opt-in narrowing model is introduced.
 - `packages/ts-transformers/src/ast/type-building.ts`
 - validation messaging in
   `packages/ts-transformers/src/transformers/pattern-context-validation.ts`
-- replacement/merge path for that validation in capability-lowering diagnostics
+- replacement/merge path for that validation in pattern-callback-lowering diagnostics
 - schema emission in
   `packages/ts-transformers/src/transformers/schema-injection.ts`
 - schema generation coupling in
@@ -773,10 +773,21 @@ produce hard errors rather than silently degrading.
 
 1. Replace map/logical receiver classification inputs with capability summaries.
 2. Remove remaining `OpaqueRef`-specific heuristic branches where superseded.
-3. Start routing pattern-context validation diagnostics through lowering
-   eligibility checks.
+3. ~~Start routing pattern-context validation diagnostics through lowering
+   eligibility checks.~~ Done for restricted-reactive computation diagnostics:
+   validation now consults shared expression-site lowerability before
+   reporting `pattern-context:computation`.
 
-**Exit criteria:** operator rewrite matrix decisions are capability-backed.
+Remaining work:
+
+1. Keep shrinking residual heuristic branches where no capability-backed
+   replacement exists yet.
+2. Expand matrix-style policy coverage if we want a permanent gate on
+   expression-site / operator behavior.
+
+**Exit criteria:** operator rewrite matrix decisions are capability-backed and
+validation-side computation diagnostics no longer rediscover lowerability
+independently.
 
 ## Phase D6: Opaque Path Navigation Lowering
 
@@ -799,16 +810,20 @@ unsupported optional-call cases.
 Implemented in current MVP:
 
 1. Compute-context capability analysis reuses callee summaries through resolved
-   function signatures with concrete function bodies.
+   function signatures with concrete function bodies in the same source file.
 2. Transitive read/write paths from helper callees propagate to caller compute
    boundaries.
-3. Pattern-context legality summaries remain direct/local (no helper-driven
+3. Cross-file or otherwise unsupported helper calls fall back to the existing
+   conservative wildcard path rather than taking partial transitive precision.
+4. Pattern-context legality summaries remain direct/local (no helper-driven
    widening).
+5. Recursion still bails out conservatively via the existing `recursive`
+   summary path.
 
 Remaining work:
 
-1. Expand/clarify interprocedural scope boundaries (for example unsupported
-   declaration forms and cross-module behavior expectations).
+1. Decide whether to widen beyond same-source-file concrete helper bodies (for
+   example broader declaration forms or cross-module calls).
 2. Add dedicated fixture matrix for interprocedural edge cases and recursion
    boundaries.
 
@@ -821,7 +836,7 @@ without major compile-time regression.
 **Status:** Landed
 
 1. ~~Flip `capabilityDataflowV1` to default after stabilization window.~~
-   Done — capability-first is the only path.
+   Done — the single transform pipeline is the only path.
 2. ~~Remove legacy branches tied to old `OpaqueRef` heuristics.~~
    Done — `useLegacyOpaqueRefSemantics` flag and all legacy branches removed.
 3. ~~Update behavior spec to reflect new default behavior.~~
@@ -831,14 +846,18 @@ without major compile-time regression.
 
 **Exit criteria:** new path is default, old path removed or hard-deprecated.
 
-## Open Questions
+## Remaining Hardening Follow-Ups
 
-1. Should ternary in compute context JSX also be preserved (no `ifElse`
-   lowering), mirroring the proposed `&&`/`||` rule?
-2. Do we want a strict “context policy matrix” test suite that all operator
-   rewrites must satisfy before merge?
-3. For path shrinking, which operations should immediately force wildcard shape
-   fallback vs allow partial precision?
-4. For compute context, what interprocedural scope is required in MVP
-   (same-module direct calls only vs broader), given pattern-context signatures
-   are intentionally direct/local?
+Normative language decisions now live in the target-language spec and lowering
+contract. The items below are rollout/hardening follow-ups, not unresolved
+source-language policy.
+
+1. Decide and pin whether compute-context JSX ternary should preserve authored
+   ternary (no `ifElse` lowering), mirroring the current `&&`/`||` direction.
+2. Add a strict context-policy matrix test suite if we want a permanent gate on
+   operator rewrite behavior.
+3. Tighten wildcard-fallback rules for path shrinking so partial precision vs
+   full-shape fallback is consistently classified.
+4. Tighten the compute-context interprocedural MVP scope (for example
+   same-module direct calls vs broader) while keeping pattern-context legality
+   intentionally direct/local.

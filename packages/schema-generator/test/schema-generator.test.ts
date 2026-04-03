@@ -123,6 +123,33 @@ type CalculatorRequest = {
       expect(schema.required).toEqual(["0"]);
     });
 
+    it("preserves explicit double-underscore property names", async () => {
+      const generator = new SchemaGenerator();
+      const { checker } = await getTypeFromCode(
+        "type Dummy = unknown;",
+        "Dummy",
+      );
+      const typeNode = ts.factory.createTypeLiteralNode([
+        ts.factory.createPropertySignature(
+          undefined,
+          ts.factory.createIdentifier("__ct_reserved"),
+          undefined,
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+        ),
+      ]);
+
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        typeNode,
+        checker,
+      ) as Record<string, unknown>;
+
+      expect(schema.type).toBe("object");
+      expect(schema.properties).toEqual({
+        __ct_reserved: { type: "number" },
+      });
+      expect(schema.required).toEqual(["__ct_reserved"]);
+    });
+
     it("preserves anyOf for synthetic union containing unknown", async () => {
       const generator = new SchemaGenerator();
       const { checker } = await getTypeFromCode(

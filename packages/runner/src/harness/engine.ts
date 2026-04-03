@@ -224,6 +224,26 @@ export class Engine extends EventTarget implements Harness {
   }
 
   getInvocation(source: string): HarnessedFunction {
+    if (this.internals) {
+      // Extract inline source map and sourceURL from the source string
+      // so the isolate's SourceMapParser can map stack traces back to
+      // original TypeScript sources.
+      const sourceMapMatch = source.match(
+        /\/\/# sourceMappingURL=data:application\/json;base64,([^\s]+)/,
+      );
+      const sourceUrlMatch = source.match(/\/\/# sourceURL=([^\s]+)/);
+      if (sourceMapMatch && sourceUrlMatch) {
+        try {
+          const sourceMap = JSON.parse(atob(sourceMapMatch[1]));
+          this.internals.isolate.loadSourceMap(
+            sourceUrlMatch[1],
+            sourceMap,
+          );
+        } catch {
+          // Ignore malformed source maps
+        }
+      }
+    }
     return eval(source);
   }
 

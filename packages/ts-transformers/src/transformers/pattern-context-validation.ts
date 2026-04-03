@@ -25,18 +25,20 @@
  *
  * Errors reported:
  * - Property access used in computation: ERROR (must wrap in computed())
- * - Optional chaining (?.): ERROR (not allowed in reactive context)
+ * - Optional chaining:
+ *   - optional property/element access is allowed in supported lowerable
+ *     expression sites
+ *   - optional calls and non-lowerable optional access still error
  * - Calling .get() on cells: ERROR (must wrap in computed())
  * - Function creation in pattern context: ERROR (move to module scope)
  * - lift()/handler() inside pattern: ERROR (move to module scope)
- * - .map() on fallback expression (x ?? [] or x || []): ERROR (use direct property access)
  * - Local computed()/derive() aliases used as plain values in the same
  *   callback: ERROR (use a nested computed()/derive())
  */
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
-  createDataFlowAnalyzer,
+  classifyArrayMethodCallSite,
   detectCallKind,
   detectDirectBuilderCall,
   isInRestrictedReactiveContext,
@@ -44,20 +46,24 @@ import {
   isInsideSafeCallbackWrapper,
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
-import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
+import { getCallbackBoundarySemantics } from "../policy/callback-boundary.ts";
 import {
   collectLocalOpaqueRootSymbols,
   isOpaqueSourceExpression,
   isTopmostMemberAccess,
 } from "./opaque-roots.ts";
-import { findLowerableExpressionSite } from "./expression-site-lowering.ts";
+import {
+  classifyRestrictedReactiveComputation,
+  classifyUnsupportedExpressionSiteCallRoot,
+  findLowerableExpressionSite,
+} from "./expression-site-policy.ts";
 
 const EMPTY_OPAQUE_ROOTS = new Set<string>();
 
 export class PatternContextValidationTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     const checker = context.checker;
-    const analyze = createDataFlowAnalyzer(checker);
+    const analyze = context.getDataFlowAnalyzer();
 
     const visit = (node: ts.Node): ts.Node => {
       // Skip JSX element containers; expression-level handling is shared.
@@ -78,11 +84,17 @@ export class PatternContextValidationTransformer extends Transformer {
           this.validateStandaloneFunction(node, context, checker);
         }
 
-        if (
-          (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
-          this.isComputedLikeCallback(node, checker)
-        ) {
-          this.validateLocalReactiveAliasUsage(node, context);
+        if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+          const boundarySemantics = getCallbackBoundarySemantics(
+            node,
+            checker,
+            context,
+          );
+          if (boundarySemantics.establishesLocalReactiveAliasScope) {
+            this.validateLocalReactiveAliasUsage(node, context);
+          }
+
+          this.validateSupportedPatternStatements(node, context, checker);
         }
       }
 
@@ -90,10 +102,27 @@ export class PatternContextValidationTransformer extends Transformer {
       // Note: isInRestrictedReactiveContext returns false for JSX expressions,
       // so this won't flag optional chaining inside JSX like <div>{user?.name}</div>
       if (
-        ts.isPropertyAccessExpression(node) &&
+        (
+          ts.isPropertyAccessExpression(node) ||
+          ts.isElementAccessExpression(node)
+        ) &&
         node.questionDotToken
       ) {
-        if (isInRestrictedReactiveContext(node, checker, context)) {
+        const optionalCallTargetHandledByCallRootPolicy =
+          !!node.questionDotToken &&
+          !!node.parent &&
+          ts.isCallExpression(node.parent) &&
+          node.parent.expression === node &&
+          classifyUnsupportedExpressionSiteCallRoot(
+              node.parent,
+              context,
+              analyze,
+            ) === "optional-call";
+        if (
+          !optionalCallTargetHandledByCallRootPolicy &&
+          isInRestrictedReactiveContext(node, checker, context) &&
+          !findLowerableExpressionSite(node, context, analyze)
+        ) {
           context.reportDiagnostic({
             severity: "error",
             type: "pattern-context:optional-chaining",
@@ -110,25 +139,21 @@ export class PatternContextValidationTransformer extends Transformer {
         // Check for lift/handler inside pattern
         this.validateBuilderPlacement(node, context, checker);
 
-        // Check for .map() on fallback expressions (x ?? [] or x || [])
-        // Only in restricted context (pattern body) where this pattern causes runtime failures.
-        // Note: We use isInsideRestrictedContext, not isInRestrictedReactiveContext, because
-        // the map-on-fallback pattern fails even inside JSX expressions (which are "safe" for
-        // other validations but still need this check).
-        if (isInsideRestrictedContext(node, checker, context)) {
-          this.validateArrayMethodOnFallbackExpression(
+        const unsupportedCallRoot = classifyUnsupportedExpressionSiteCallRoot(
+          node,
+          context,
+          analyze,
+        );
+        if (unsupportedCallRoot === "optional-call") {
+          context.reportDiagnostic({
+            severity: "error",
+            type: "pattern-context:optional-chaining",
+            message:
+              `Optional chaining '?.' is not allowed in reactive context. ` +
+              `Use ifElse() or wrap in computed() for conditional access.`,
             node,
-            context,
-            checker,
-            analyze,
-          );
-        }
-
-        // Check for .get() calls
-        if (
-          this.isGetCall(node) &&
-          isInRestrictedReactiveContext(node, checker, context)
-        ) {
+          });
+        } else if (unsupportedCallRoot === "restricted-get-call") {
           context.reportDiagnostic({
             severity: "error",
             type: "pattern-context:get-call",
@@ -143,25 +168,13 @@ export class PatternContextValidationTransformer extends Transformer {
       // Check for property access used in computation (not just pass-through)
       // This applies to expressions in binary operators, conditionals, etc.
       if (this.isComputationExpression(node)) {
-        this.validateComputationExpression(node, context, checker, analyze);
+        this.validateComputationExpression(node, context, analyze);
       }
 
       return ts.visitEachChild(node, visit, context.tsContext);
     };
 
     return ts.visitNode(context.sourceFile, visit) as ts.SourceFile;
-  }
-
-  /**
-   * Checks if a call expression is a .get() call
-   */
-  private isGetCall(node: ts.CallExpression): boolean {
-    const expr = node.expression;
-    return (
-      ts.isPropertyAccessExpression(expr) &&
-      expr.name.text === "get" &&
-      node.arguments.length === 0
-    );
   }
 
   /**
@@ -183,39 +196,31 @@ export class PatternContextValidationTransformer extends Transformer {
   private validateComputationExpression(
     node: ts.Node,
     context: TransformationContext,
-    checker: ts.TypeChecker,
-    analyze: ReturnType<typeof createDataFlowAnalyzer>,
+    analyze: ReturnType<TransformationContext["getDataFlowAnalyzer"]>,
   ): void {
-    // Skip if not in restricted reactive context
-    if (!isInRestrictedReactiveContext(node, checker, context)) {
-      return;
-    }
-
     const expression = node as ts.Expression;
-    if (findLowerableExpressionSite(expression, context, analyze)) {
+    const decision = classifyRestrictedReactiveComputation(
+      expression,
+      context,
+      analyze,
+    );
+    if (decision.kind !== "requires-computed") {
       return;
     }
 
-    // Analyze the expression for reactive dependencies
-    const analysis = analyze(expression);
+    const problemAccess = this.findProblematicAccess(node);
+    const accessText = problemAccess
+      ? `'${problemAccess.getText()}'`
+      : "property access";
 
-    // If this computation contains reactive refs, it should be wrapped in computed()
-    if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
-      // Find the specific property access that's causing the issue
-      const problemAccess = this.findProblematicAccess(node);
-      const accessText = problemAccess
-        ? `'${problemAccess.getText()}'`
-        : "property access";
-
-      context.reportDiagnostic({
-        severity: "error",
-        type: "pattern-context:computation",
-        message:
-          `Property access ${accessText} used in computation is not allowed in reactive context. ` +
-          `Wrap the computation in computed(() => ...) instead.`,
-        node,
-      });
-    }
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:computation",
+      message:
+        `Property access ${accessText} used in computation is not allowed in reactive context. ` +
+        `Wrap the computation in computed(() => ...) instead.`,
+      node,
+    });
   }
 
   /**
@@ -387,6 +392,135 @@ export class PatternContextValidationTransformer extends Transformer {
   }
 
   /**
+   * Validates statement-level constructs in pattern-owned callback bodies.
+   * For now, the supported subset is intentionally narrow:
+   * - a single terminal return statement
+   * - no let declarations
+   * - no reassignment
+   * - no loops
+   * - no var declarations
+   *
+   * This applies to any callback body that still classifies as pattern context
+   * at validation time, which intentionally includes pattern-owned array method
+   * callbacks while excluding compute-owned wrappers like computed()/derive().
+   */
+  private validateSupportedPatternStatements(
+    func: ts.ArrowFunction | ts.FunctionExpression,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    if (!ts.isBlock(func.body)) return;
+
+    const boundarySemantics = getCallbackBoundarySemantics(
+      func,
+      checker,
+      context,
+    );
+    const bodyContext = context.getReactiveContext(func.body);
+    if (
+      !boundarySemantics.supportsPatternOwnedStatements ||
+      bodyContext.kind !== "pattern"
+    ) {
+      return;
+    }
+
+    const lastStatement = func.body.statements.at(-1);
+    const diagnosticsSeen = new Set<number>();
+    const reportOnce = (
+      node: ts.Node,
+      type:
+        | "pattern-context:assignment"
+        | "pattern-context:early-return"
+        | "pattern-context:let-declaration"
+        | "pattern-context:loop"
+        | "pattern-context:var-declaration",
+      message: string,
+    ) => {
+      const start = node.getStart(context.sourceFile);
+      if (diagnosticsSeen.has(start)) return;
+      diagnosticsSeen.add(start);
+      context.reportDiagnostic({
+        severity: "error",
+        type,
+        message,
+        node,
+      });
+    };
+
+    const visit = (node: ts.Node): void => {
+      if (node !== func.body && ts.isFunctionLike(node)) {
+        return;
+      }
+
+      if (ts.isReturnStatement(node)) {
+        const isTerminalReturn = node.parent === func.body &&
+          node === lastStatement;
+        if (!isTerminalReturn) {
+          reportOnce(
+            node,
+            "pattern-context:early-return",
+            `Early returns are not supported in pattern bodies. ` +
+              `Use a single terminal return statement and move conditional branching into expressions or helper wrappers.`,
+          );
+        }
+        return;
+      }
+
+      if (ts.isVariableDeclarationList(node)) {
+        if ((node.flags & ts.NodeFlags.Let) !== 0) {
+          reportOnce(
+            node,
+            "pattern-context:let-declaration",
+            `let declarations are not supported in pattern-owned callback bodies. ` +
+              `Use const, or move mutable logic into computed(), derive(), or a helper.`,
+          );
+        } else if (
+          (node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0
+        ) {
+          reportOnce(
+            node,
+            "pattern-context:var-declaration",
+            `var declarations are not supported in pattern-owned callback bodies. ` +
+              `Use const, or move mutable logic into computed(), derive(), or a module-scope helper.`,
+          );
+        }
+      }
+
+      if (
+        ts.isForStatement(node) ||
+        ts.isForInStatement(node) ||
+        ts.isForOfStatement(node) ||
+        ts.isWhileStatement(node) ||
+        ts.isDoStatement(node)
+      ) {
+        reportOnce(
+          node,
+          "pattern-context:loop",
+          `Loop statements are not supported in pattern-owned callback bodies. ` +
+            `Use array methods, helper-owned expressions, or move imperative iteration into computed(), derive(), or a helper.`,
+        );
+      }
+
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+      ) {
+        reportOnce(
+          node,
+          "pattern-context:assignment",
+          `Reassignment is not supported in pattern-owned callback bodies. ` +
+            `Use straight-line data construction, or move mutable logic into computed(), derive(), or a helper.`,
+        );
+      }
+
+      ts.forEachChild(node, visit);
+    };
+
+    visit(func.body);
+  }
+
+  /**
    * Validates that functions are not created directly in pattern context.
    * Functions inside safe wrappers (computed, action, derive, lift, handler)
    * and inside JSX expressions are allowed since they get transformed.
@@ -396,18 +530,40 @@ export class PatternContextValidationTransformer extends Transformer {
     context: TransformationContext,
     checker: ts.TypeChecker,
   ): void {
-    // Skip if inside JSX (including map callbacks, event handlers)
-    if (this.isInsideJsx(node)) return;
-
     // Skip if inside safe wrapper callback (computed, action, derive, lift, handler)
     if (isInsideSafeCallbackWrapper(node, checker, context)) return;
 
-    // Skip if this function IS a callback to a safe wrapper
-    // e.g., computed(() => ...), action(() => ...), derive(() => ...)
-    if (this.isSafeWrapperCallback(node, checker)) return;
+    const boundarySemantics = !ts.isFunctionDeclaration(node)
+      ? getCallbackBoundarySemantics(node, checker, context)
+      : undefined;
+
+    if (boundarySemantics?.allowsRestrictedContextFunctionCallback) {
+      return;
+    }
 
     // Only error if inside restricted context (pattern/render)
     if (!isInsideRestrictedContext(node, checker, context)) return;
+
+    if (this.isInsideJsx(node)) {
+      if (boundarySemantics?.decision.kind === "supported") {
+        return;
+      }
+
+      if (
+        boundarySemantics?.decision.kind === "unsupported" &&
+        boundarySemantics.decision.boundaryDiagnostic === "callback-container"
+      ) {
+        context.reportDiagnostic({
+          severity: "error",
+          type: "pattern-context:callback-container",
+          message:
+            `Callbacks passed to unsupported containers in pattern-facing JSX are not supported. ` +
+            `Use a supported array method/value call, an event handler, or move this work into computed(() => ...), derive(...), or a helper.`,
+          node,
+        });
+      }
+      return;
+    }
 
     context.reportDiagnostic({
       severity: "error",
@@ -417,65 +573,6 @@ export class PatternContextValidationTransformer extends Transformer {
         `Note: callbacks inside computed(), action(), and .map() are allowed.`,
       node,
     });
-  }
-
-  /**
-   * Checks if a function is being passed directly as a callback to a safe wrapper
-   * (computed, action, derive, lift, handler) or to a .map() call on cells/opaques.
-   */
-  private isSafeWrapperCallback(
-    node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
-    checker: ts.TypeChecker,
-  ): boolean {
-    // Function declarations can't be callbacks
-    if (ts.isFunctionDeclaration(node)) return false;
-
-    const parent = node.parent;
-    if (!parent || !ts.isCallExpression(parent)) return false;
-
-    // Check if this function is an argument to the call
-    if (!parent.arguments.includes(node)) return false;
-
-    const callKind = detectCallKind(parent, checker);
-    if (!callKind) return false;
-
-    // derive is a safe wrapper
-    if (callKind.kind === "derive") return true;
-
-    // array method calls on cells/opaques are transformed, so callbacks are allowed
-    if (callKind.kind === "array-method") return true;
-
-    // patternTool handles closure capture for its callback
-    if (callKind.kind === "pattern-tool") return true;
-
-    // Check builder-based safe wrappers (computed, action, lift, handler)
-    // Note: derive is handled separately above (it has its own kind, not "builder")
-    if (callKind.kind === "builder") {
-      const safeBuilders = new Set([
-        "computed",
-        "action",
-        "lift",
-        "handler",
-      ]);
-      return safeBuilders.has(callKind.builderName);
-    }
-
-    return false;
-  }
-
-  private isComputedLikeCallback(
-    node: ts.ArrowFunction | ts.FunctionExpression,
-    checker: ts.TypeChecker,
-  ): boolean {
-    const parent = node.parent;
-    if (!parent || !ts.isCallExpression(parent)) return false;
-    if (!parent.arguments.includes(node)) return false;
-
-    const callKind = detectCallKind(parent, checker);
-    if (!callKind) return false;
-
-    return callKind.kind === "derive" ||
-      (callKind.kind === "builder" && callKind.builderName === "computed");
   }
 
   /**
@@ -531,60 +628,6 @@ export class PatternContextValidationTransformer extends Transformer {
   }
 
   /**
-   * Validates that .map() is not called on a fallback expression like (x ?? []) or (x || [])
-   * where one side is reactive (OpaqueRef) and the other is not.
-   *
-   * This pattern fails at runtime because the transformer can't properly detect that
-   * the result needs mapWithPattern transformation.
-   */
-  private validateArrayMethodOnFallbackExpression(
-    node: ts.CallExpression,
-    context: TransformationContext,
-    _checker: ts.TypeChecker,
-    analyze: ReturnType<typeof createDataFlowAnalyzer>,
-  ): void {
-    if (!ts.isPropertyAccessExpression(node.expression)) return;
-    const methodName = node.expression.name.text;
-    if (
-      methodName !== "map" && methodName !== "filter" &&
-      methodName !== "flatMap"
-    ) return;
-
-    let target: ts.Expression = node.expression.expression;
-
-    // Unwrap parentheses
-    while (ts.isParenthesizedExpression(target)) {
-      target = target.expression;
-    }
-
-    // Check if target is (x ?? y) or (x || y)
-    if (!ts.isBinaryExpression(target)) return;
-
-    const op = target.operatorToken.kind;
-    if (
-      op !== ts.SyntaxKind.QuestionQuestionToken &&
-      op !== ts.SyntaxKind.BarBarToken
-    ) {
-      return;
-    }
-
-    // Check if left side traces to a reactive pattern parameter and right side does not
-    const leftIsOpaque = analyze(target.left).containsOpaqueRef;
-    const rightIsOpaque = analyze(target.right).containsOpaqueRef;
-
-    if (leftIsOpaque && !rightIsOpaque) {
-      context.reportDiagnostic({
-        severity: "error",
-        type: "pattern-context:map-on-fallback",
-        message:
-          `'.${methodName}()' on fallback expression with mixed reactive/non-reactive types is not supported. ` +
-          `Use direct property access: 'x.${methodName}(...)' rather than '(x ?? fallback).${methodName}(...)'`,
-        node,
-      });
-    }
-  }
-
-  /**
    * Validates that standalone functions don't use reactive operations like
    * computed(), derive(), or .map() on CellLike types.
    *
@@ -613,8 +656,15 @@ export class PatternContextValidationTransformer extends Transformer {
     checker: ts.TypeChecker,
   ): void {
     // Skip if this function is passed to patternTool()
-    if (this.isPatternToolArgument(func, checker)) {
-      return;
+    if (!ts.isFunctionDeclaration(func)) {
+      const boundarySemantics = getCallbackBoundarySemantics(
+        func,
+        checker,
+        context,
+      );
+      if (boundarySemantics.isPatternToolCallback) {
+        return;
+      }
     }
 
     // Walk the function body looking for reactive operations
@@ -631,6 +681,7 @@ export class PatternContextValidationTransformer extends Transformer {
 
       if (ts.isCallExpression(node)) {
         const callKind = detectCallKind(node, checker);
+        const arrayMethodCallSite = classifyArrayMethodCallSite(node, checker);
 
         if (callKind) {
           // Check for computed() calls
@@ -663,27 +714,18 @@ export class PatternContextValidationTransformer extends Transformer {
             return;
           }
 
-          // Check for array method on CellLike types
-          if (callKind.kind === "array-method") {
-            // Check if this is an array method on a CellLike type (not a plain array)
-            if (ts.isPropertyAccessExpression(node.expression)) {
-              const receiverType = checker.getTypeAtLocation(
-                node.expression.expression,
-              );
-              if (this.isCellLikeOrOpaqueRefType(receiverType, checker)) {
-                context.reportDiagnostic({
-                  severity: "error",
-                  type: "standalone-function:reactive-operation",
-                  message:
-                    `.map() on reactive types is not allowed inside standalone functions. ` +
-                    `Standalone functions cannot capture reactive closures. ` +
-                    `Move the .map() call to the pattern body, or use patternTool() to enable automatic closure capture. ` +
-                    `If this is an explicit Cell/Writable value and eager mapping is acceptable, use <cell>.get().map(...).`,
-                  node,
-                });
-                return;
-              }
-            }
+          if (arrayMethodCallSite?.ownership === "reactive") {
+            context.reportDiagnostic({
+              severity: "error",
+              type: "standalone-function:reactive-operation",
+              message:
+                `.${arrayMethodCallSite.family}() on reactive types is not allowed inside standalone functions. ` +
+                `Standalone functions cannot capture reactive closures. ` +
+                `Move the .${arrayMethodCallSite.family}() call to the pattern body, or use patternTool() to enable automatic closure capture. ` +
+                `If this is an explicit Cell/Writable value and eager ${arrayMethodCallSite.family}ing is acceptable, use <cell>.get().${arrayMethodCallSite.family}(...).`,
+              node,
+            });
+            return;
           }
         }
       }
@@ -694,58 +736,5 @@ export class PatternContextValidationTransformer extends Transformer {
     if (func.body) {
       visitBody(func.body);
     }
-  }
-
-  /**
-   * Checks if a function is passed directly as an argument to patternTool().
-   * If so, the patternTool transformer will handle closure capture.
-   */
-  private isPatternToolArgument(
-    func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
-    checker: ts.TypeChecker,
-  ): boolean {
-    // Function declarations can't be passed as arguments
-    if (ts.isFunctionDeclaration(func)) return false;
-
-    const parent = func.parent;
-    if (!parent || !ts.isCallExpression(parent)) return false;
-
-    // Check if this function is the first argument
-    if (parent.arguments[0] !== func) return false;
-
-    // Use detectCallKind for consistent call detection
-    const callKind = detectCallKind(parent, checker);
-    return callKind?.kind === "pattern-tool";
-  }
-
-  /**
-   * Checks if a type is a CellLike or OpaqueRef type that would require
-   * reactive handling in .map() calls inside standalone functions.
-   *
-   * Includes OpaqueRef/OpaqueRefMethods because standalone helper functions
-   * may accept pattern parameters (typed as OpaqueRef<T[]>) and call .map()
-   * on them.
-   */
-  private isCellLikeOrOpaqueRefType(
-    type: ts.Type,
-    checker: ts.TypeChecker,
-  ): boolean {
-    // Check if it's an OpaqueRef type
-    if (isOpaqueRefType(type, checker)) {
-      return true;
-    }
-
-    // Check the type name for Cell-like types
-    const typeStr = checker.typeToString(type);
-    const cellLikePatterns = [
-      "Cell<",
-      "OpaqueCell<",
-      "Writable<",
-      "Stream<",
-      "OpaqueRef<",
-      "OpaqueRefMethods<",
-    ];
-
-    return cellLikePatterns.some((pattern) => typeStr.includes(pattern));
   }
 }

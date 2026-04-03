@@ -1,8 +1,8 @@
 import ts from "typescript";
 import {
   CT_HELPERS_IDENTIFIER,
+  HelpersOnlyTransformer,
   TransformationContext,
-  Transformer,
 } from "../core/mod.ts";
 import { createSchemaTransformerV2 } from "@commontools/schema-generator";
 import {
@@ -13,11 +13,7 @@ import { createPropertyName } from "../utils/identifiers.ts";
 
 let schemaTransformer: ReturnType<typeof createSchemaTransformerV2> | undefined;
 
-export class SchemaGeneratorTransformer extends Transformer {
-  override filter(context: TransformationContext): boolean {
-    return context.ctHelpers.sourceHasHelpers();
-  }
-
+export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     if (!schemaTransformer) schemaTransformer = createSchemaTransformerV2();
     const { sourceFile, tsContext: transformation, checker } = context;

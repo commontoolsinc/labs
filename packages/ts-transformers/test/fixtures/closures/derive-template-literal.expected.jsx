@@ -13,16 +13,16 @@ export default pattern(() => {
     const result = __ctHelpers.derive({
         type: "object",
         properties: {
-            value: {
-                type: "number",
-                asCell: true
-            },
             prefix: {
                 type: "string",
                 asCell: true
+            },
+            value: {
+                type: "number",
+                asCell: true
             }
         },
-        required: ["value", "prefix"]
+        required: ["prefix", "value"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __ctHelpers.JSONSchema, {

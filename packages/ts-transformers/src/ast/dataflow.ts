@@ -7,17 +7,18 @@ import {
   setParentPointers,
 } from "./utils.ts";
 import { isFunctionLikeExpression } from "./function-predicates.ts";
-import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
+import { symbolDeclaresCommonToolsDefault } from "../core/common-tools-symbols.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import {
   detectCallKind,
   isReactiveValueExpression,
   isReactiveValueSymbol,
 } from "./call-kind.ts";
+import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
 
 export interface DataFlowScopeParameter {
   readonly name: string;
-  readonly symbol: ts.Symbol;
+  readonly symbol?: ts.Symbol;
   readonly declaration?: ts.ParameterDeclaration;
 }
 
@@ -95,10 +96,36 @@ const mergeAnalyses = (...analyses: InternalAnalysis[]): InternalAnalysis => {
   };
 };
 
+function unwrapStructuralDataFlowExpression(
+  expression: ts.Expression,
+): ts.Expression {
+  let current = expression;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isPartiallyEmittedExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function isStructuralOpaqueKeyDataFlow(
+  expression: ts.Expression,
+): boolean {
+  const target = unwrapStructuralDataFlowExpression(expression);
+  return ts.isCallExpression(target) &&
+    classifyOpaquePathTerminalCall(target) === "key";
+}
+
 export function createDataFlowAnalyzer(
   checker: ts.TypeChecker,
 ): (expression: ts.Expression) => DataFlowAnalysis {
   const analysisCache = new WeakMap<ts.Expression, DataFlowAnalysis>();
+  const resolvingConstAliases = new Set<ts.Symbol>();
 
   // === Synthetic node helpers ===
   // These enable unified handling of both synthetic (transformer-created) and
@@ -123,29 +150,92 @@ export function createDataFlowAnalyzer(
     }
   };
 
+  const getStableConstAliasInitializer = (
+    symbol: ts.Symbol | undefined,
+  ): ts.Expression | undefined => {
+    if (!symbol || resolvingConstAliases.has(symbol)) {
+      return undefined;
+    }
+
+    const declaration = symbol.valueDeclaration;
+    if (
+      !declaration ||
+      !ts.isVariableDeclaration(declaration) ||
+      !ts.isIdentifier(declaration.name) ||
+      !declaration.initializer
+    ) {
+      return undefined;
+    }
+
+    const declarationList = declaration.parent;
+    if (
+      !declarationList ||
+      !ts.isVariableDeclarationList(declarationList) ||
+      (declarationList.flags & ts.NodeFlags.Const) === 0
+    ) {
+      return undefined;
+    }
+
+    return declaration.initializer;
+  };
+
+  const shouldPreserveConstAliasIdentity = (
+    initializer: ts.Expression,
+  ): boolean => {
+    const target = unwrapStructuralDataFlowExpression(initializer);
+
+    if (
+      ts.isIdentifier(target) ||
+      ts.isPropertyAccessExpression(target) ||
+      ts.isElementAccessExpression(target)
+    ) {
+      return false;
+    }
+
+    if (
+      ts.isObjectLiteralExpression(target) ||
+      ts.isArrayLiteralExpression(target) ||
+      isFunctionLikeExpression(target)
+    ) {
+      return false;
+    }
+
+    return true;
+  };
+
   // Convert symbols to enriched parameters with name and declaration info
   const toScopeParameters = (
-    symbols: ts.Symbol[],
+    parameters: readonly ts.ParameterDeclaration[],
   ): DataFlowScopeParameter[] =>
-    symbols.map((symbol) => {
-      const declarations = symbol.getDeclarations();
-      const parameterDecl = declarations?.find((
-        decl,
-      ): decl is ts.ParameterDeclaration => ts.isParameter(decl));
-      return parameterDecl
-        ? { name: symbol.getName(), symbol, declaration: parameterDecl }
-        : { name: symbol.getName(), symbol };
+    parameters.flatMap((parameter) => {
+      const symbol = tryGetSymbol(parameter.name);
+      if (symbol) {
+        return [{
+          name: symbol.getName(),
+          symbol,
+          declaration: parameter,
+        }];
+      }
+
+      if (ts.isIdentifier(parameter.name)) {
+        return [{
+          name: parameter.name.text,
+          declaration: parameter,
+        }];
+      }
+
+      return [];
     });
 
   const createScope = (
     context: AnalyzerContext,
     parent: DataFlowScope | null,
-    parameterSymbols: ts.Symbol[],
+    parameters: readonly ts.ParameterDeclaration[],
   ): DataFlowScope => {
     const scope: DataFlowScope = {
       id: context.nextScopeId++,
       parentId: parent ? parent.id : null,
-      parameters: toScopeParameters(parameterSymbols),
+      parameters: toScopeParameters(parameters),
     };
     context.scopes.set(scope.id, scope);
     return scope;
@@ -160,7 +250,9 @@ export function createDataFlowAnalyzer(
     let current: DataFlowScope | undefined = scope;
     while (current) {
       for (const param of current.parameters) {
-        result.add(param.symbol);
+        if (param.symbol) {
+          result.add(param.symbol);
+        }
       }
       current = current.parentId !== null
         ? scopes.get(current.parentId)
@@ -180,8 +272,10 @@ export function createDataFlowAnalyzer(
   // Determine how CallExpressions should be handled based on their call kind.
   // Returns the appropriate InternalAnalysis with correct requiresRewrite logic.
   const handleCallExpression = (
+    expression: ts.CallExpression,
     merged: InternalAnalysis,
     callKind: ReturnType<typeof detectCallKind>,
+    isArrayMethodFamily: boolean,
     callee: InternalAnalysis,
     rewriteHint: RewriteHint,
   ): InternalAnalysis => {
@@ -196,10 +290,22 @@ export function createDataFlowAnalyzer(
 
     // Array-map calls preserve requiresRewrite from the callee
     // to handle cases like state.items.filter(...).map(...)
-    if (callKind?.kind === "array-method") {
+    if (isArrayMethodFamily) {
       return {
         ...merged,
         requiresRewrite: callee.requiresRewrite,
+        rewriteHint,
+      };
+    }
+
+    if (
+      classifyOpaquePathTerminalCall(expression) !== "get" &&
+      merged.dataFlows.length > 0 &&
+      merged.dataFlows.every(isStructuralOpaqueKeyDataFlow)
+    ) {
+      return {
+        ...merged,
+        requiresRewrite: false,
         rewriteHint,
       };
     }
@@ -331,6 +437,13 @@ export function createDataFlowAnalyzer(
       // Can't resolve symbol - if synthetic, treat as opaque parameter
       // This handles cases like `discount` where the whole identifier is synthetic
       if (!symbol && isSynthetic(expression)) {
+        const hasSyntheticLocalParameter = scope.parameters.some((parameter) =>
+          !parameter.symbol && parameter.name === expression.text
+        );
+        if (hasSyntheticLocalParameter) {
+          return emptyAnalysis();
+        }
+
         recordDataFlow(expression, scope, null, true); // Explicit: synthetic opaque parameter
         return {
           containsOpaqueRef: true,
@@ -363,6 +476,38 @@ export function createDataFlowAnalyzer(
           dataFlows: [expression],
         };
       }
+
+      const stableConstInitializer = getStableConstAliasInitializer(symbol);
+      if (symbol && stableConstInitializer) {
+        resolvingConstAliases.add(symbol);
+        try {
+          const initializerAnalysis = analyzeExpression(
+            stableConstInitializer,
+            scope,
+            context,
+          );
+          if (
+            initializerAnalysis.containsOpaqueRef ||
+            initializerAnalysis.requiresRewrite ||
+            initializerAnalysis.dataFlows.length > 0
+          ) {
+            if (!shouldPreserveConstAliasIdentity(stableConstInitializer)) {
+              return emptyAnalysis();
+            }
+            recordDataFlow(expression, scope, null, true);
+            return {
+              containsOpaqueRef: initializerAnalysis.containsOpaqueRef ||
+                initializerAnalysis.requiresRewrite ||
+                initializerAnalysis.dataFlows.length > 0,
+              requiresRewrite: initializerAnalysis.requiresRewrite,
+              dataFlows: [expression],
+            };
+          }
+        } finally {
+          resolvingConstAliases.delete(symbol);
+        }
+      }
+
       // Check if this identifier is a parameter to a builder or array-map call (like pattern)
       // These parameters become implicitly opaque even though their type isn't OpaqueRef
       return emptyAnalysis();
@@ -617,18 +762,28 @@ export function createDataFlowAnalyzer(
     }
 
     if (ts.isCallExpression(expression)) {
+      if (classifyOpaquePathTerminalCall(expression) === "key") {
+        const callee = expression.expression;
+        const parentId = (
+            ts.isPropertyAccessExpression(callee) ||
+            ts.isElementAccessExpression(callee)
+          )
+          ? context.expressionToNodeId.get(callee.expression) ?? null
+          : null;
+        recordDataFlow(expression, scope, parentId, true);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
+          dataFlows: [expression],
+          rewriteHint: undefined,
+        };
+      }
+
       const callee = analyzeExpression(expression.expression, scope, context);
       const analyses: InternalAnalysis[] = [callee];
       for (const arg of expression.arguments) {
         if (isFunctionLikeExpression(arg)) {
-          const parameterSymbols: ts.Symbol[] = [];
-          for (const parameter of arg.parameters) {
-            const symbol = tryGetSymbol(parameter.name);
-            if (symbol) {
-              parameterSymbols.push(symbol);
-            }
-          }
-          const childScope = createScope(context, scope, parameterSymbols);
+          const childScope = createScope(context, scope, arg.parameters);
           if (ts.isBlock(arg.body)) {
             const blockAnalyses: InternalAnalysis[] = [];
             for (const statement of arg.body.statements) {
@@ -647,8 +802,9 @@ export function createDataFlowAnalyzer(
         }
       }
 
-      const combined = mergeAnalyses(...analyses);
       const callKind = detectCallKind(expression, checker);
+      const isArrayMethodFamily = callKind?.kind === "array-method";
+      const combined = mergeAnalyses(...analyses);
       const rewriteHint: RewriteHint | undefined = (() => {
         if (callKind?.kind === "ifElse" && expression.arguments.length > 0) {
           const predicate = expression.arguments[0];
@@ -659,22 +815,24 @@ export function createDataFlowAnalyzer(
         if (callKind?.kind === "builder") {
           return { kind: "skip-call-rewrite", reason: "builder" };
         }
-        if (callKind?.kind === "array-method") {
+        if (isArrayMethodFamily) {
           return { kind: "skip-call-rewrite", reason: "array-method" };
         }
         return undefined;
       })();
 
-      return handleCallExpression(combined, callKind, callee, rewriteHint);
+      return handleCallExpression(
+        expression,
+        combined,
+        callKind,
+        isArrayMethodFamily,
+        callee,
+        rewriteHint,
+      );
     }
 
     if (isFunctionLikeExpression(expression)) {
-      const parameterSymbols: ts.Symbol[] = [];
-      for (const parameter of expression.parameters) {
-        const symbol = tryGetSymbol(parameter.name);
-        if (symbol) parameterSymbols.push(symbol);
-      }
-      const childScope = createScope(context, scope, parameterSymbols);
+      const childScope = createScope(context, scope, expression.parameters);
       if (ts.isBlock(expression.body)) {
         const analyses: InternalAnalysis[] = [];
         for (const statement of expression.body.statements) {

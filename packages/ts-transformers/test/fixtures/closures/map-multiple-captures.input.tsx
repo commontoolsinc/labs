@@ -17,8 +17,8 @@ const shippingCost = 5.99;
 // FIXTURE: map-multiple-captures
 // Verifies: .map() on reactive array captures multiple outer variables (state + local)
 //   .map(fn) → .mapWithPattern(pattern(...), {state: {discount, taxRate}, multiplier})
-//   expression → derive() combining element props, state props, and local variable
-// Context: Captures state.discount, state.taxRate, and local const multiplier; module-level shippingCost is not captured
+//   expression → derive() combining item + state reactively while closing over local multiplier
+// Context: state.discount and state.taxRate are explicit derive inputs; multiplier stays callback-local via params; module-level shippingCost is not captured
 export default pattern<State>((state) => {
   const multiplier = 2;
 

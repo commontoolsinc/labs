@@ -1,0 +1,155 @@
+import * as __ctHelpers from "commontools";
+import { pattern, UI } from "commontools";
+interface TagEvent {
+    label: string;
+}
+// FIXTURE: ternary-pure-jsx-map-branch
+// Verifies: a plain reactive array map inside a ternary JSX branch stays
+// pattern-lowered without wrapping the whole branch in extra derive noise.
+//   recentEvents.length === 0 ? <span>...</span> : <div>{recentEvents.map(...)}</div>
+//     → ifElse(derive(length===0), <span>...</span>, <div>{recentEvents.mapWithPattern(...)}</div>)
+// Context: implicit JSX ternary branch selection with a pure pattern-owned map
+//   in the false branch.
+export default pattern((__ct_pattern_input) => {
+    const recentEvents = __ct_pattern_input.key("recentEvents");
+    return ({
+        [UI]: (<div>
+      {__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{}, {
+                    type: "object",
+                    properties: {}
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{}, {
+                    type: "object",
+                    properties: {}
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{}, {
+                    type: "object",
+                    properties: {}
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                recentEvents: {
+                    type: "array",
+                    items: {
+                        type: "unknown"
+                    }
+                }
+            },
+            required: ["recentEvents"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { recentEvents: recentEvents }, ({ recentEvents }) => recentEvents.length === 0), <span>No events yet</span>, <div>
+            {recentEvents.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const event = __ct_pattern_input.key("element");
+                const idx = __ct_pattern_input.key("index");
+                return (<ct-hstack key={idx} gap="2">
+                <span>{event.key("label")}</span>
+              </ct-hstack>);
+            }, {
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/TagEvent"
+                    },
+                    index: {
+                        type: "number"
+                    }
+                },
+                required: ["element"],
+                $defs: {
+                    TagEvent: {
+                        type: "object",
+                        properties: {
+                            label: {
+                                type: "string"
+                            }
+                        },
+                        required: ["label"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        $ref: "#/$defs/UIRenderable"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {})}
+          </div>)}
+    </div>),
+    });
+}, {
+    type: "object",
+    properties: {
+        recentEvents: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/TagEvent"
+            }
+        }
+    },
+    required: ["recentEvents"],
+    $defs: {
+        TagEvent: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                }
+            },
+            required: ["label"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

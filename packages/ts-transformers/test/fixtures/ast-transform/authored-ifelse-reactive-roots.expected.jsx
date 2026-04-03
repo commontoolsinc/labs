@@ -1,0 +1,141 @@
+import * as __ctHelpers from "commontools";
+import { ifElse, pattern, Writable } from "commontools";
+const identity = <T,>(value: T) => value;
+// FIXTURE: authored-ifelse-reactive-roots
+// Verifies: authored ifElse outside JSX and top-level receiver-method roots lower reactively
+//   ifElse(show, count + 1, 0)         → compute-wrapped branch
+//   ifElse(show, cell.get(), 0)        → reactive branch lowering around Writable.get()
+//   ifElse(show, name.trim(), "x")     → reactive receiver-method branch
+//   name.trim()                        → top-level receiver-method root lowered via derive
+//   identity(name.trim())             → derive-wrapped local-helper root
+export default pattern((__ct_pattern_input) => {
+    const count = __ct_pattern_input.key("count");
+    const show = __ct_pattern_input.key("show");
+    const name = __ct_pattern_input.key("name");
+    const cell = __ct_pattern_input.key("cell");
+    const upper = __ctHelpers.derive({
+        type: "object",
+        properties: {
+            name: {
+                type: "string"
+            }
+        },
+        required: ["name"]
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __ctHelpers.JSONSchema, { name: name }, ({ name }) => identity(name.trim()));
+    return {
+        value: ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, show, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count + 1), 0),
+        cellValue: ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, show, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                cell: {
+                    type: "number",
+                    asCell: true
+                }
+            },
+            required: ["cell"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { cell: cell }, ({ cell }) => cell.get()), 0),
+        trimmed: ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, show, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { name: name }, ({ name }) => name.trim()), "fallback"),
+        upper,
+        upperDirect: __ctHelpers.derive({
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { name: name }, ({ name }) => name.trim()),
+    };
+}, {
+    type: "object",
+    properties: {
+        count: {
+            type: "number"
+        },
+        show: {
+            type: "boolean"
+        },
+        name: {
+            type: "string"
+        },
+        cell: {
+            type: "number",
+            asCell: true
+        }
+    },
+    required: ["count", "show", "name", "cell"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        value: {
+            type: "number"
+        },
+        cellValue: {
+            type: "number"
+        },
+        trimmed: {
+            type: "string"
+        },
+        upper: {
+            type: "string"
+        },
+        upperDirect: {
+            type: "string"
+        }
+    },
+    required: ["value", "cellValue", "trimmed", "upper", "upperDirect"]
+} as const satisfies __ctHelpers.JSONSchema);
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

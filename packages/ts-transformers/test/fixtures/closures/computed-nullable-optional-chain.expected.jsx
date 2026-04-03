@@ -56,30 +56,19 @@ export default pattern((_) => {
             properties: {
                 topQuestion: {
                     anyOf: [{
-                            $ref: "#/$defs/Question"
+                            type: "object",
+                            properties: {
+                                question: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["question"]
                         }, {
                             type: "null"
                         }]
                 }
             },
-            required: ["topQuestion"],
-            $defs: {
-                Question: {
-                    type: "object",
-                    properties: {
-                        question: {
-                            type: "string"
-                        },
-                        category: {
-                            type: "string"
-                        },
-                        priority: {
-                            type: "number"
-                        }
-                    },
-                    required: ["question", "category", "priority"]
-                }
-            }
+            required: ["topQuestion"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion?.question || "")}</p>
@@ -125,30 +114,19 @@ export default pattern((_) => {
             properties: {
                 topQuestion: {
                     anyOf: [{
-                            $ref: "#/$defs/Question"
+                            type: "object",
+                            properties: {
+                                category: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["category"]
                         }, {
                             type: "null"
                         }]
                 }
             },
-            required: ["topQuestion"],
-            $defs: {
-                Question: {
-                    type: "object",
-                    properties: {
-                        question: {
-                            type: "string"
-                        },
-                        category: {
-                            type: "string"
-                        },
-                        priority: {
-                            type: "number"
-                        }
-                    },
-                    required: ["question", "category", "priority"]
-                }
-            }
+            required: ["topQuestion"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion?.category || "")}</span>

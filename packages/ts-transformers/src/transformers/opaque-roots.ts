@@ -13,6 +13,43 @@ export interface OpaqueAccessInfo {
   dynamic: boolean;
 }
 
+export type OpaquePathTerminalCallKind = "get" | "key";
+
+export function classifyOpaquePathTerminalCall(
+  call: ts.CallExpression,
+): OpaquePathTerminalCallKind | undefined {
+  const target = unwrapExpression(call.expression);
+
+  if (ts.isPropertyAccessExpression(target)) {
+    switch (target.name.text) {
+      case "get":
+      case "key":
+        return target.name.text;
+      default:
+        return undefined;
+    }
+  }
+
+  if (ts.isElementAccessExpression(target)) {
+    const argument = target.argumentExpression;
+    if (
+      argument &&
+      (ts.isStringLiteralLike(argument) ||
+        ts.isNoSubstitutionTemplateLiteral(argument))
+    ) {
+      switch (argument.text) {
+        case "get":
+        case "key":
+          return argument.text;
+        default:
+          return undefined;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 export function getOpaqueAccessInfo(
   expr: ts.Expression,
   context: TransformationContext,

@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { computed, pattern, UI } from "commontools";
-const wrap = (x: unknown) => x;
+const identity = (x: unknown) => x;
 interface Item {
     done: boolean;
 }
@@ -10,8 +10,8 @@ interface State {
 // FIXTURE: computed-map-call-arg-logical-and
 // Verifies: nested && inside a callback-local call argument within a
 //   computed-array .map() callback is lowered to when().
-//   const label = wrap(row.done && "Done")
-//   → const label = wrap(when(row.done, "Done"))
+//   const label = identity(row.done && "Done")
+//   → const label = identity(when(row.done, "Done"))
 export default pattern((state) => {
     const rows = __ctHelpers.derive({
         type: "object",
@@ -64,7 +64,7 @@ export default pattern((state) => {
         [UI]: (<div>
         {rows.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const row = __ct_pattern_input.key("element");
-                const label = wrap(__ctHelpers.when({
+                const label = identity(__ctHelpers.when({
                     type: "boolean"
                 } as const satisfies __ctHelpers.JSONSchema, {
                     type: "string"

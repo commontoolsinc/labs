@@ -2,12 +2,14 @@ import ts from "typescript";
 import { type TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
-  classifyReactiveContext,
+  classifyArrayMethodCall,
   detectCallKind,
+  getEnclosingFunctionLikeDeclaration,
+  getLoweredArrayMethodName,
   getTypeAtLocationWithFallback,
-  isDeriveCall,
+  hasReactiveCollectionProvenance,
+  isConsumedByTerminalChainCall,
   isFunctionLikeExpression,
-  isReactiveOriginCall,
   type ReactiveContextInfo,
   registerSyntheticCallType,
 } from "../../ast/mod.ts";
@@ -15,10 +17,8 @@ import {
   classifyReactiveReceiverKind,
   shouldRewriteCollectionMethod,
 } from "../../policy/mod.ts";
-import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
-  createPropertyName,
   normalizeBindingName,
   reserveIdentifier,
 } from "../../utils/identifiers.ts";
@@ -30,35 +30,29 @@ import type { ComputedAliasInfo } from "./array-method-utils.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
+import { buildCaptureParamsObject } from "../utils/capture-scaffold.ts";
 import { unwrapExpression } from "../../utils/expression.ts";
 import {
   cloneKeyExpression,
   getKnownComputedKeyExpression,
   isCommonToolsKeyIdentifier,
-  isFallbackOperator,
 } from "../../utils/reactive-keys.ts";
 import { rewriteArrayMethodCallbackExpressionSites } from "../../transformers/expression-site-lowering.ts";
-
-const METHOD_TO_WITH_PATTERN: Record<string, string> = {
-  map: "mapWithPattern",
-  filter: "filterWithPattern",
-  flatMap: "flatMapWithPattern",
-};
-
-const WITH_PATTERN_METHOD_NAMES = new Set([
-  "mapWithPattern",
-  "filterWithPattern",
-  "flatMapWithPattern",
-]);
 
 export class ArrayMethodStrategy implements ClosureTransformationStrategy {
   canTransform(
     node: ts.Node,
     _context: TransformationContext,
   ): boolean {
-    return ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      Object.hasOwn(METHOD_TO_WITH_PATTERN, node.expression.name.text);
+    if (
+      !ts.isCallExpression(node) ||
+      !ts.isPropertyAccessExpression(node.expression)
+    ) {
+      return false;
+    }
+
+    const arrayMethodInfo = classifyArrayMethodCall(node);
+    return !!arrayMethodInfo && !arrayMethodInfo.lowered;
   }
 
   transform(
@@ -78,183 +72,24 @@ export class ArrayMethodStrategy implements ClosureTransformationStrategy {
   }
 }
 
-/**
- * Build property assignments for captured variables from a capture tree.
- * Used by map, handler, and derive transformations to build params/input objects.
- */
-export function buildCapturePropertyAssignments(
-  captureTree: Map<string, CaptureTreeNode>,
-  factory: ts.NodeFactory,
-): ts.PropertyAssignment[] {
-  const properties: ts.PropertyAssignment[] = [];
-  for (const [rootName, node] of captureTree) {
-    properties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(rootName, factory),
-        buildHierarchicalParamsValue(node, rootName, factory),
-      ),
-    );
-  }
-  return properties;
-}
-
-function getEnclosingFunctionLike(
-  node: ts.Node,
-): ts.FunctionLikeDeclaration | undefined {
-  let current: ts.Node | undefined = node.parent;
-  while (current) {
-    if (
-      ts.isArrowFunction(current) ||
-      ts.isFunctionExpression(current) ||
-      ts.isFunctionDeclaration(current) ||
-      ts.isMethodDeclaration(current) ||
-      ts.isGetAccessorDeclaration(current) ||
-      ts.isSetAccessorDeclaration(current) ||
-      ts.isConstructorDeclaration(current)
-    ) {
-      return current;
-    }
-    current = current.parent;
-  }
-  return undefined;
-}
-
-function isConsumedByTerminalChain(
-  expression: ts.Expression,
-): boolean {
-  let current: ts.Expression = expression;
-
-  while (true) {
-    const parent = current.parent;
-    if (!parent) {
-      return false;
-    }
-
-    if (
-      ts.isParenthesizedExpression(parent) ||
-      ts.isAsExpression(parent) ||
-      ts.isTypeAssertionExpression(parent) ||
-      ts.isNonNullExpression(parent) ||
-      ts.isSatisfiesExpression(parent)
-    ) {
-      current = parent;
-      continue;
-    }
-
-    if (
-      ts.isPropertyAccessExpression(parent) && parent.expression === current
-    ) {
-      const memberName = parent.name.text;
-      if (
-        Object.hasOwn(METHOD_TO_WITH_PATTERN, memberName) ||
-        WITH_PATTERN_METHOD_NAMES.has(memberName)
-      ) {
-        const callParent = parent.parent;
-        if (
-          callParent &&
-          ts.isCallExpression(callParent) &&
-          callParent.expression === parent
-        ) {
-          current = callParent;
-          continue;
-        }
-      }
-      return true;
-    }
-
-    if (ts.isElementAccessExpression(parent) && parent.expression === current) {
-      return true;
-    }
-
-    if (ts.isCallExpression(parent) && parent.expression === current) {
-      return true;
-    }
-
-    return false;
-  }
-}
-
-function createsReactiveCollectionInPlace(
+function hasSharedReactiveCollectionProvenance(
   expression: ts.Expression,
   context: TransformationContext,
+  options: {
+    sameScope?: ts.FunctionLikeDeclaration;
+    allowTypeBasedRoot?: boolean;
+    allowImplicitReactiveParameters?: boolean;
+  } = {},
 ): boolean {
-  const current = unwrapExpression(expression);
-
-  if (
-    ts.isPropertyAccessExpression(current) ||
-    ts.isElementAccessExpression(current)
-  ) {
-    return createsReactiveCollectionInPlace(current.expression, context);
-  }
-
-  if (!ts.isCallExpression(current)) {
-    return false;
-  }
-
-  const currentType = getTypeAtLocationWithFallback(
-    current,
+  return hasReactiveCollectionProvenance(
+    expression,
     context.checker,
-    context.options.typeRegistry,
-    context.options.logger,
+    {
+      ...options,
+      typeRegistry: context.options.typeRegistry,
+      logger: context.options.logger,
+    },
   );
-  if (
-    classifyReactiveReceiverKind(current, currentType, context.checker) ===
-      "celllike_requires_rewrite"
-  ) {
-    return true;
-  }
-
-  if (shouldTransformArrayMethod(current, context)) {
-    return true;
-  }
-
-  return isReactiveOriginCall(current, context.checker);
-}
-
-function isLocalReactiveRewrapAlias(
-  expression: ts.Expression,
-  scope: ts.FunctionLikeDeclaration,
-  context: TransformationContext,
-  seenSymbols: Set<ts.Symbol> = new Set(),
-): boolean {
-  const current = unwrapExpression(expression);
-
-  if (createsReactiveCollectionInPlace(current, context)) {
-    return true;
-  }
-
-  if (!ts.isIdentifier(current)) {
-    return false;
-  }
-
-  const symbol = context.checker.getSymbolAtLocation(current);
-  if (!symbol || seenSymbols.has(symbol)) {
-    return false;
-  }
-  seenSymbols.add(symbol);
-
-  for (const declaration of symbol.declarations ?? []) {
-    if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) {
-      continue;
-    }
-
-    if (getEnclosingFunctionLike(declaration) !== scope) {
-      continue;
-    }
-
-    if (
-      isLocalReactiveRewrapAlias(
-        declaration.initializer,
-        scope,
-        context,
-        seenSymbols,
-      )
-    ) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 function getNodeSnippet(
@@ -332,21 +167,18 @@ function shouldTransformArrayMethod(
 ): boolean {
   if (!ts.isPropertyAccessExpression(methodCall.expression)) return false;
 
-  const methodName = methodCall.expression.name.text;
-  if (!Object.hasOwn(METHOD_TO_WITH_PATTERN, methodName)) {
+  const arrayMethodInfo = classifyArrayMethodCall(methodCall);
+  if (!arrayMethodInfo || arrayMethodInfo.lowered) {
     return false;
   }
+  const methodName = arrayMethodInfo.family;
 
-  if (isConsumedByTerminalChain(methodCall)) {
+  if (isConsumedByTerminalChainCall(methodCall)) {
     return false;
   }
 
   const mapTarget = methodCall.expression.expression;
-  const contextInfo = classifyReactiveContext(
-    methodCall,
-    context.checker,
-    context,
-  );
+  const contextInfo = context.getReactiveContext(methodCall);
   assertValidSyntheticComputeOwnedArrayMethodContext(
     methodCall,
     contextInfo,
@@ -366,23 +198,31 @@ function shouldTransformArrayMethod(
   );
 
   if (
-    contextInfo.kind === "pattern" && isReactiveMapOrigin(mapTarget, context)
+    contextInfo.kind === "pattern" &&
+    hasSharedReactiveCollectionProvenance(mapTarget, context)
   ) {
     return true;
   }
 
-  const enclosingFunction = getEnclosingFunctionLike(methodCall);
+  const enclosingFunction = getEnclosingFunctionLikeDeclaration(methodCall);
   if (
     contextInfo.kind === "compute" &&
     enclosingFunction &&
-    isLocalReactiveRewrapAlias(mapTarget, enclosingFunction, context)
+    hasSharedReactiveCollectionProvenance(mapTarget, context, {
+      sameScope: enclosingFunction,
+      allowTypeBasedRoot: false,
+      allowImplicitReactiveParameters: false,
+    })
   ) {
     return true;
   }
 
   // derive() returns an opaque value at runtime, but checker fallback may see the
   // unwrapped callback result type. Preserve policy by context.
-  if (isDeriveCall(mapTarget)) {
+  if (
+    ts.isCallExpression(mapTarget) &&
+    detectCallKind(mapTarget, context.checker)?.kind === "derive"
+  ) {
     return contextInfo.kind === "pattern";
   }
 
@@ -457,274 +297,6 @@ function lowerMapReceiverMemberAccess(
   );
 }
 
-function bindingContainsName(
-  binding: ts.BindingName,
-  name: string,
-): boolean {
-  if (ts.isIdentifier(binding)) {
-    return binding.text === name;
-  }
-  for (const element of binding.elements) {
-    if (ts.isOmittedExpression(element)) continue;
-    if (bindingContainsName(element.name, name)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function isPatternBuilderCallback(
-  node: ts.ArrowFunction | ts.FunctionExpression,
-  context: TransformationContext,
-): boolean {
-  const parent = node.parent;
-  if (!parent || !ts.isCallExpression(parent)) {
-    return false;
-  }
-  if (!parent.arguments.includes(node)) {
-    return false;
-  }
-
-  const kind = detectCallKind(parent, context.checker);
-  if (kind?.kind === "builder" && kind.builderName === "pattern") {
-    return true;
-  }
-
-  const expression = unwrapExpression(parent.expression);
-  if (ts.isIdentifier(expression)) {
-    return expression.text === "pattern";
-  }
-  if (ts.isPropertyAccessExpression(expression)) {
-    return expression.name.text === "pattern";
-  }
-  return false;
-}
-
-function isIdentifierBoundInPatternCallback(
-  identifier: ts.Identifier,
-  context: TransformationContext,
-): boolean {
-  let current: ts.Node | undefined = identifier.parent;
-  while (current) {
-    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-      if (!isPatternBuilderCallback(current, context)) {
-        current = current.parent;
-        continue;
-      }
-
-      const firstParam = current.parameters[0];
-      if (!firstParam) {
-        return false;
-      }
-      return bindingContainsName(firstParam.name, identifier.text);
-    }
-    current = current.parent;
-  }
-  return false;
-}
-
-function isPatternOwnedParameterDeclaration(
-  declaration: ts.ParameterDeclaration,
-  context: TransformationContext,
-): boolean {
-  const owner = declaration.parent;
-  if (
-    !owner || (!ts.isArrowFunction(owner) && !ts.isFunctionExpression(owner))
-  ) {
-    return false;
-  }
-  if (!isPatternBuilderCallback(owner, context)) {
-    return false;
-  }
-  return owner.parameters[0] === declaration;
-}
-
-function isReactiveCollectionCallbackParameter(
-  declaration: ts.ParameterDeclaration,
-  context: TransformationContext,
-): boolean {
-  const owner = declaration.parent;
-  if (
-    !owner || (!ts.isArrowFunction(owner) && !ts.isFunctionExpression(owner))
-  ) {
-    return false;
-  }
-
-  const call = owner.parent;
-  if (!call || !ts.isCallExpression(call) || !call.arguments.includes(owner)) {
-    return false;
-  }
-
-  if (!ts.isPropertyAccessExpression(call.expression)) {
-    return false;
-  }
-
-  const methodName = call.expression.name.text;
-  if (
-    !Object.hasOwn(METHOD_TO_WITH_PATTERN, methodName) &&
-    methodName !== "mapWithPattern" &&
-    methodName !== "filterWithPattern" &&
-    methodName !== "flatMapWithPattern"
-  ) {
-    return false;
-  }
-
-  return isReactiveMapOrigin(call.expression.expression, context);
-}
-
-function getOwningParameterDeclaration(
-  declaration: ts.BindingElement,
-): ts.ParameterDeclaration | undefined {
-  let current: ts.Node | undefined = declaration.parent;
-  while (current) {
-    if (ts.isParameter(current)) {
-      return current;
-    }
-    if (ts.isSourceFile(current)) {
-      return undefined;
-    }
-    current = current.parent;
-  }
-  return undefined;
-}
-
-function isReactiveMapOrigin(
-  expression: ts.Expression,
-  context: TransformationContext,
-  seenSymbols: Set<ts.Symbol> = new Set(),
-): boolean {
-  const current = unwrapExpression(expression);
-
-  if (isDeriveCall(current)) {
-    return true;
-  }
-
-  if (ts.isCallExpression(current)) {
-    const callee = unwrapExpression(current.expression);
-    if (ts.isIdentifier(callee)) {
-      if (callee.text === "derive" || callee.text === "computed") {
-        return true;
-      }
-    } else if (
-      ts.isPropertyAccessExpression(callee) &&
-      (callee.name.text === "derive" || callee.name.text === "computed")
-    ) {
-      return true;
-    }
-
-    if (isReactiveOriginCall(current, context.checker)) {
-      return true;
-    }
-
-    // Syntactic chaining detection: .filter().map() — the intermediate result
-    // of a reactive array method call is still reactive.
-    if (
-      ts.isPropertyAccessExpression(current.expression) &&
-      Object.hasOwn(METHOD_TO_WITH_PATTERN, current.expression.name.text)
-    ) {
-      return isReactiveMapOrigin(
-        current.expression.expression,
-        context,
-        seenSymbols,
-      );
-    }
-  }
-
-  const type = getTypeAtLocationWithFallback(
-    current,
-    context.checker,
-    context.options.typeRegistry,
-    context.options.logger,
-  );
-  if (
-    classifyReactiveReceiverKind(current, type, context.checker) !== "plain"
-  ) {
-    return true;
-  }
-
-  if (
-    ts.isPropertyAccessExpression(current) ||
-    ts.isElementAccessExpression(current)
-  ) {
-    return isReactiveMapOrigin(current.expression, context, seenSymbols);
-  }
-
-  if (
-    ts.isBinaryExpression(current) &&
-    isFallbackOperator(current.operatorToken.kind)
-  ) {
-    return isReactiveMapOrigin(current.left, context, seenSymbols) ||
-      isReactiveMapOrigin(current.right, context, seenSymbols);
-  }
-
-  if (!ts.isIdentifier(current)) {
-    return false;
-  }
-
-  if (isIdentifierBoundInPatternCallback(current, context)) {
-    return true;
-  }
-
-  const symbol = context.checker.getSymbolAtLocation(current);
-  if (!symbol || seenSymbols.has(symbol)) {
-    return false;
-  }
-  seenSymbols.add(symbol);
-
-  for (const declaration of symbol.declarations ?? []) {
-    if (ts.isParameter(declaration)) {
-      if (
-        isPatternOwnedParameterDeclaration(declaration, context) ||
-        isReactiveCollectionCallbackParameter(declaration, context)
-      ) {
-        return true;
-      }
-      continue;
-    }
-
-    if (ts.isBindingElement(declaration)) {
-      const parameter = getOwningParameterDeclaration(declaration);
-      if (
-        parameter &&
-        (
-          isPatternOwnedParameterDeclaration(parameter, context) ||
-          isReactiveCollectionCallbackParameter(parameter, context)
-        )
-      ) {
-        return true;
-      }
-      // Also check if the binding element is from a variable declaration
-      // with a reactive initializer (e.g. const { items } = wish(...).result!)
-      let parent: ts.Node = declaration;
-      while (
-        ts.isBindingElement(parent) ||
-        ts.isObjectBindingPattern(parent) ||
-        ts.isArrayBindingPattern(parent)
-      ) {
-        parent = parent.parent;
-      }
-      if (ts.isVariableDeclaration(parent) && parent.initializer) {
-        if (
-          isReactiveMapOrigin(parent.initializer, context, seenSymbols)
-        ) {
-          return true;
-        }
-      }
-    }
-
-    if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
-      if (isReactiveMapOrigin(declaration.initializer, context, seenSymbols)) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-/**
- * Create the final pattern call with params object.
- */
 /**
  * Create the final pattern call with params object.
  */
@@ -887,14 +459,7 @@ function createPatternCallWithParams(
   );
 
   // Create params object
-  const paramProperties = buildCapturePropertyAssignments(
-    filteredCaptureTree,
-    factory,
-  );
-  const paramsObject = factory.createObjectLiteralExpression(
-    paramProperties,
-    paramProperties.length > 0,
-  );
+  const paramsObject = buildCaptureParamsObject(filteredCaptureTree, factory);
 
   if (!ts.isPropertyAccessExpression(methodCall.expression)) {
     throw new Error(
@@ -913,10 +478,13 @@ function createPatternCallWithParams(
     context,
   );
 
-  const originalMethodName =
-    (methodCall.expression as ts.PropertyAccessExpression).name.text;
-  const targetMethodName = METHOD_TO_WITH_PATTERN[originalMethodName] ??
-    "mapWithPattern";
+  const originalMethodName = classifyArrayMethodCall(methodCall);
+  if (!originalMethodName || originalMethodName.lowered) {
+    throw new Error("Expected methodCall to be a source array method call");
+  }
+  const targetMethodName = getLoweredArrayMethodName(
+    originalMethodName.family,
+  );
   const mapWithPatternAccess = factory.createPropertyAccessExpression(
     loweredArrayExpr,
     factory.createIdentifier(targetMethodName),

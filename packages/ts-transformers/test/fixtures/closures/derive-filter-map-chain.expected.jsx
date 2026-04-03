@@ -17,13 +17,29 @@ export default pattern((state) => {
         properties: {
             prefs: {
                 type: "array",
-                items: true
+                items: {
+                    $ref: "#/$defs/Preference"
+                }
             },
             food: {
                 type: "string"
             }
         },
-        required: ["prefs", "food"]
+        required: ["prefs", "food"],
+        $defs: {
+            Preference: {
+                type: "object",
+                properties: {
+                    ingredient: {
+                        type: "string"
+                    },
+                    preference: {
+                        "enum": ["liked", "disliked"]
+                    }
+                },
+                required: ["ingredient", "preference"]
+            }
+        }
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __ctHelpers.JSONSchema, { food: state.key("foodDescription"), prefs: state.key("preferences") }, ({ food, prefs }) => {

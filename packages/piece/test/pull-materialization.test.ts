@@ -148,6 +148,43 @@ describe("piece pull materialization", () => {
     expect(manager.getResult(piece).get()).toEqual({ output: 50 });
   });
 
+  it("waits for setup to settle before setupPersistent syncs pattern metadata", async () => {
+    const pattern = doublePattern();
+    const originalSetup = manager.runtime.setup.bind(manager.runtime);
+    const originalSyncPattern = manager.syncPattern.bind(manager);
+    let setupResolved = false;
+    let releaseSetup: (() => void) | undefined;
+
+    manager.runtime.setup = ((...args) => {
+      const piece = args[3];
+      return new Promise<typeof piece>((resolve) => {
+        releaseSetup = () => {
+          setupResolved = true;
+          resolve(piece);
+        };
+      });
+    }) as typeof manager.runtime.setup;
+
+    manager.syncPattern = (() => {
+      expect(setupResolved).toBe(true);
+      return Promise.resolve(pattern);
+    }) as typeof manager.syncPattern;
+
+    try {
+      const pending = manager.setupPersistent(pattern, { input: 5 });
+      await Promise.resolve();
+      expect(setupResolved).toBe(false);
+      if (!releaseSetup) {
+        throw new Error("Expected runtime.setup to be called");
+      }
+      releaseSetup();
+      await pending;
+    } finally {
+      manager.runtime.setup = originalSetup;
+      manager.syncPattern = originalSyncPattern;
+    }
+  });
+
   it("restarts stopped pieces when runWithPattern is called with start", async () => {
     const piece = await manager.runPersistent(
       doublePattern(),

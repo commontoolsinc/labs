@@ -1,4 +1,8 @@
 import ts from "typescript";
+import {
+  classifyArrayCallbackContainerCall,
+  isWildcardTraversalCall,
+} from "../ast/mod.ts";
 import type {
   CapabilityParamSummary,
   FunctionCapabilitySummary,
@@ -16,6 +20,7 @@ type CapabilityAnalyzableFunction =
 export interface CapabilityAnalysisOptions {
   readonly checker?: ts.TypeChecker;
   readonly interprocedural?: boolean;
+  readonly includeNestedCallbacks?: boolean;
   readonly summaryCache?: WeakMap<ts.Node, FunctionCapabilitySummary>;
   readonly inProgress?: WeakSet<ts.Node>;
 }
@@ -44,7 +49,6 @@ const PARAMETER_SUMMARY_PREFIX = "__param";
 
 const WRITER_METHODS = new Set(["set", "update"]);
 const READER_METHODS = new Set(["get"]);
-const WILDCARD_OBJECT_METHODS = new Set(["keys", "values", "entries"]);
 const ASSIGNMENT_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.EqualsToken,
   ts.SyntaxKind.PlusEqualsToken,
@@ -75,6 +79,14 @@ function isCapabilityAnalyzableFunction(
       ts.isMethodDeclaration(node)
     ) &&
     !!node.body;
+}
+
+function isInterproceduralSummaryTarget(
+  declaration: ts.Node | undefined,
+  sourceFile: ts.SourceFile,
+): declaration is CapabilityAnalyzableFunction {
+  return isCapabilityAnalyzableFunction(declaration) &&
+    declaration.getSourceFile() === sourceFile;
 }
 
 function isLiteralElement(
@@ -380,6 +392,8 @@ export function analyzeFunctionCapabilities(
   try {
     const checker = options?.checker;
     const interprocedural = !!options?.interprocedural && !!checker;
+    const includeNestedCallbacks = !!options?.includeNestedCallbacks;
+    const summarySourceFile = fn.getSourceFile();
 
     if (!fn.body) {
       const empty = { params: [] };
@@ -745,7 +759,7 @@ export function analyzeFunctionCapabilities(
       const signature = checker.getResolvedSignature(call);
       if (!signature) return undefined;
       const declaration = signature.declaration;
-      if (!isCapabilityAnalyzableFunction(declaration)) {
+      if (!isInterproceduralSummaryTarget(declaration, summarySourceFile)) {
         return undefined;
       }
 
@@ -757,7 +771,71 @@ export function analyzeFunctionCapabilities(
       });
     };
 
+    const visitScopedFunctionBody = (
+      callback: CapabilityAnalyzableFunction,
+    ): void => {
+      const savedAliases = new Map(aliases);
+      const savedSpecificPaths = new Set(aliasesWithSpecificPaths);
+
+      try {
+        if (callback.name && ts.isIdentifier(callback.name)) {
+          aliases.delete(callback.name.text);
+        }
+        for (const parameter of callback.parameters) {
+          clearBindingAliases(parameter.name, aliases);
+        }
+
+        const body = callback.body;
+        if (!body) return;
+
+        if (ts.isBlock(body)) {
+          for (const statement of body.statements) {
+            visit(statement);
+          }
+        } else {
+          visit(body);
+        }
+      } finally {
+        aliases.clear();
+        for (const [name, source] of savedAliases) {
+          aliases.set(name, source);
+        }
+        aliasesWithSpecificPaths.clear();
+        for (const name of savedSpecificPaths) {
+          aliasesWithSpecificPaths.add(name);
+        }
+      }
+    };
+
+    const visitInlineEagerCallbackArguments = (
+      call: ts.CallExpression,
+    ): void => {
+      if (!checker) return;
+
+      const callbackContainerKind = classifyArrayCallbackContainerCall(
+        call,
+        checker,
+      );
+      if (!callbackContainerKind) {
+        return;
+      }
+
+      const callbackArg = call.arguments[0];
+      if (!callbackArg || !isCapabilityAnalyzableFunction(callbackArg)) {
+        return;
+      }
+
+      visitScopedFunctionBody(callbackArg);
+    };
+
     const visit = (node: ts.Node): void => {
+      if (node !== fn && isCapabilityAnalyzableFunction(node)) {
+        if (includeNestedCallbacks) {
+          visitScopedFunctionBody(node);
+        }
+        return;
+      }
+
       if (
         ts.isBinaryExpression(node) &&
         isAssignmentOperator(node.operatorToken.kind)
@@ -994,29 +1072,14 @@ export function analyzeFunctionCapabilities(
         }
 
         // Full-shape operations.
-        if (
-          ts.isPropertyAccessExpression(node.expression) &&
-          ts.isIdentifier(node.expression.expression) &&
-          node.expression.expression.text === "Object" &&
-          WILDCARD_OBJECT_METHODS.has(node.expression.name.text)
-        ) {
+        if (isWildcardTraversalCall(node, checker)) {
           const firstArg = node.arguments[0];
           if (firstArg) {
             markWildcardFromExpression(firstArg);
           }
         }
 
-        if (
-          ts.isPropertyAccessExpression(node.expression) &&
-          ts.isIdentifier(node.expression.expression) &&
-          node.expression.expression.text === "JSON" &&
-          node.expression.name.text === "stringify"
-        ) {
-          const firstArg = node.arguments[0];
-          if (firstArg) {
-            markWildcardFromExpression(firstArg);
-          }
-        }
+        visitInlineEagerCallbackArguments(node);
       }
 
       if (ts.isVariableDeclaration(node)) {

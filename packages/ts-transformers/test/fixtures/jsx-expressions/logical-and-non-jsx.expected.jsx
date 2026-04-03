@@ -1,10 +1,10 @@
 import * as __ctHelpers from "commontools";
 import { cell, pattern, UI } from "commontools";
 // FIXTURE: logical-and-non-jsx
-// Verifies: && with non-JSX right side (string template, number) is wrapped in derive(), not when()
-//   user.get().name.length > 0 && `Hello...` → derive({user}, ({user}) => user.get().name.length > 0 && `Hello...`)
-//   user.get().age > 18 && user.get().age    → derive({user}, ...)
-// Context: when() is only for JSX right-hand sides; non-JSX uses derive()
+// Verifies: && with non-JSX right side still lowers through when(), with predicate/value derived separately
+//   user.get().name.length > 0 && `Hello...` → when(derive(predicate), derive(template))
+//   user.get().age > 18 && user.get().age    → when(derive(predicate), derive(number))
+// Context: JSX-local control flow still uses when(); non-JSX right-hand values become derived branch values
 export default pattern((_state) => {
     const user = cell<{
         name: string;
@@ -47,7 +47,7 @@ export default pattern((_state) => {
             required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name.length > 0), `Hello, ${__ctHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name.length > 0), __ctHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -64,7 +64,7 @@ export default pattern((_state) => {
             required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name)}!`)}</p>
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => `Hello, ${user.get().name}!`))}</p>
 
         {/* Non-JSX right side: number expression */}
         <p>Age: {__ctHelpers.when({
@@ -96,30 +96,18 @@ export default pattern((_state) => {
                 user: {
                     type: "object",
                     properties: {
-                        name: {
-                            type: "string"
-                        },
                         age: {
                             type: "number"
                         }
                     },
-                    required: ["name", "age"],
+                    required: ["age"],
                     asCell: true
                 }
             },
             required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                age: {
-                    type: "number"
-                }
-            },
-            required: ["name", "age"]
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get()).age)}</p>
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().age))}</p>
       </div>),
     };
 }, false as const satisfies __ctHelpers.JSONSchema, {

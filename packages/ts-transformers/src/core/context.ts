@@ -1,5 +1,17 @@
 import ts from "typescript";
 import {
+  createDataFlowAnalyzer,
+  type DataFlowAnalysis,
+} from "../ast/dataflow.ts";
+import type { NormalizedDataFlow } from "../ast/normalize.ts";
+import {
+  type CallbackContext,
+  classifyReactiveContext,
+  findEnclosingCallbackContext,
+  type ReactiveContextInfo,
+} from "../ast/reactive-context.ts";
+import { getRelevantDataFlows } from "../ast/normalize.ts";
+import {
   DiagnosticInput,
   TransformationDiagnostic,
   TransformationOptions,
@@ -19,6 +31,13 @@ export interface TransformationContextConfig {
 }
 
 export class TransformationContext {
+  #dataFlowAnalyzer?: ReturnType<typeof createDataFlowAnalyzer>;
+  #reactiveContextCache = new WeakMap<ts.Node, ReactiveContextInfo>();
+  #callbackContextCache = new WeakMap<ts.Node, CallbackContext | null>();
+  #relevantDataFlowCache = new WeakMap<
+    DataFlowAnalysis,
+    readonly NormalizedDataFlow[]
+  >();
   readonly program: ts.Program;
   readonly checker: ts.TypeChecker;
   readonly factory: ts.NodeFactory;
@@ -115,6 +134,7 @@ export class TransformationContext {
     if (this.options.mapCallbackRegistry) {
       this.options.mapCallbackRegistry.add(node);
     }
+    this.invalidateReactiveAnalysisCaches();
   }
 
   /**
@@ -141,6 +161,7 @@ export class TransformationContext {
     if (this.options.syntheticComputeCallbackRegistry) {
       this.options.syntheticComputeCallbackRegistry.add(node);
     }
+    this.invalidateReactiveAnalysisCaches();
   }
 
   /**
@@ -168,6 +189,7 @@ export class TransformationContext {
     };
 
     visit(node);
+    this.invalidateReactiveAnalysisCaches();
   }
 
   isSyntheticComputeOwnedNode(node: ts.Node): boolean {
@@ -180,5 +202,60 @@ export class TransformationContext {
       original !== node &&
       this.options.syntheticComputeOwnedNodeRegistry?.has(original)
     );
+  }
+
+  getDataFlowAnalyzer(): ReturnType<typeof createDataFlowAnalyzer> {
+    this.#dataFlowAnalyzer ??= createDataFlowAnalyzer(this.checker);
+    return this.#dataFlowAnalyzer;
+  }
+
+  analyzeExpression(node: ts.Expression): DataFlowAnalysis {
+    return this.getDataFlowAnalyzer()(node);
+  }
+
+  getRelevantDataFlows(node: ts.Expression): readonly NormalizedDataFlow[] {
+    return this.getRelevantDataFlowsFromAnalysis(this.analyzeExpression(node));
+  }
+
+  getRelevantDataFlowsFromAnalysis(
+    analysis: DataFlowAnalysis,
+  ): readonly NormalizedDataFlow[] {
+    const cached = this.#relevantDataFlowCache.get(analysis);
+    if (cached) {
+      return cached;
+    }
+
+    const relevant = getRelevantDataFlows(analysis, this.checker, this);
+    this.#relevantDataFlowCache.set(analysis, relevant);
+    return relevant;
+  }
+
+  getReactiveContext(node: ts.Node): ReactiveContextInfo {
+    const cached = this.#reactiveContextCache.get(node);
+    if (cached) {
+      return cached;
+    }
+
+    const info = classifyReactiveContext(node, this.checker, this);
+    this.#reactiveContextCache.set(node, info);
+    return info;
+  }
+
+  getEnclosingCallbackContext(node: ts.Node): CallbackContext | undefined {
+    if (this.#callbackContextCache.has(node)) {
+      return this.#callbackContextCache.get(node) ?? undefined;
+    }
+
+    const info = findEnclosingCallbackContext(node);
+    this.#callbackContextCache.set(node, info ?? null);
+    return info;
+  }
+
+  private invalidateReactiveAnalysisCaches(): void {
+    this.#reactiveContextCache = new WeakMap<ts.Node, ReactiveContextInfo>();
+    this.#relevantDataFlowCache = new WeakMap<
+      DataFlowAnalysis,
+      readonly NormalizedDataFlow[]
+    >();
   }
 }

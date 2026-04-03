@@ -1,11 +1,33 @@
 export {
+  type ArrayCallbackContainerCallKind,
+  type ArrayMethodAccessKind,
+  type ArrayMethodCallSiteInfo,
+  type ArrayMethodFamilyName,
+  type ArrayMethodOwnership,
+  type ArrayMethodResultSinkCallInfo,
+  type ArrayMethodResultSinkReceiverChainCallInfo,
   type CallKind,
+  classifyArrayCallbackContainerCall,
+  classifyArrayMethodAccess,
+  classifyArrayMethodCall,
+  classifyArrayMethodCallSite,
+  classifyArrayMethodResultSinkCall,
+  classifyArrayMethodResultSinkReceiverChainCall,
+  classifyWildcardTraversalCall,
   detectCallKind,
   detectDirectBuilderCall,
+  getCapabilitySummaryCallbackArgument,
+  getDeriveInputAndCallbackArgument,
+  getLoweredArrayMethodName,
+  getPatternBuilderCallbackArgument,
+  hasReactiveCollectionProvenance,
+  isConsumedByTerminalChainCall,
+  isPatternBuilderCall,
   isReactiveOriginCall,
   isReactiveValueExpression,
   isReactiveValueSymbol,
   isSimpleReactiveAccessExpression,
+  isWildcardTraversalCall,
 } from "./call-kind.ts";
 export * from "./dataflow.ts";
 export {
@@ -29,7 +51,10 @@ export {
   isEventHandlerType,
   isSafeEventHandlerCall,
 } from "./event-handlers.ts";
-export { isFunctionLikeExpression } from "./function-predicates.ts";
+export {
+  getEnclosingFunctionLikeDeclaration,
+  isFunctionLikeExpression,
+} from "./function-predicates.ts";
 export {
   getExpressionText,
   getMemberSymbol,
@@ -43,6 +68,7 @@ export {
   visitEachChildWithJsx,
 } from "./utils.ts";
 export {
+  ensureTypeNodeRegistered,
   getTypeFromTypeNodeWithFallback,
   getTypeReferenceArgument,
   hasArrayTypeArgument,
@@ -51,11 +77,14 @@ export {
   inferReturnType,
   inferWidenedTypeFromExpression,
   isAnyOrUnknownType,
-  isDeriveCall,
-  isReactiveArrayMethodCall,
+  isAnyType,
+  isCellLikeType,
+  isUnknownType,
+  isUnresolvedSchemaType,
   registerSyntheticCallType,
   typeToSchemaTypeNode,
   typeToTypeNode,
+  unwrapCellLikeType,
   unwrapOpaqueLikeType,
   widenLiteralType,
 } from "./type-inference.ts";

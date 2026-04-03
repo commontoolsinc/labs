@@ -1,4 +1,4 @@
-import { assertEquals, assertGreater } from "@std/assert";
+import { assertEquals, assertGreater, assertStringIncludes } from "@std/assert";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
@@ -9,6 +9,42 @@ function getErrors(diagnostics: readonly TransformationDiagnostic[]) {
 
 function getWarnings(diagnostics: readonly TransformationDiagnostic[]) {
   return diagnostics.filter((d) => d.severity === "warning");
+}
+
+function getEmptyArrayErrors(diagnostics: readonly TransformationDiagnostic[]) {
+  return diagnostics.filter((d) =>
+    d.type === "cell-factory:empty-array" && d.severity === "error"
+  );
+}
+
+async function getEmptyArrayErrorCount(
+  imports: string,
+  expression: string,
+): Promise<number> {
+  const source = `
+    import { ${imports}, pattern } from "commontools";
+    export default pattern(() => {
+      const value = ${expression};
+      return <div>{value}</div>;
+    });
+  `;
+
+  const { diagnostics } = await validateSource(source, {
+    types: COMMONTOOLS_TYPES,
+  });
+
+  return getEmptyArrayErrors(diagnostics).length;
+}
+
+function assertHasErrorType(
+  errors: readonly TransformationDiagnostic[],
+  expectedType: string,
+) {
+  assertEquals(
+    errors.some((error) => error.type === expectedType),
+    true,
+    `Expected error list to contain ${expectedType}`,
+  );
 }
 
 Deno.test("Cast Validation", async (t) => {
@@ -25,7 +61,7 @@ Deno.test("Cast Validation", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "cast-validation:double-unknown");
+    assertHasErrorType(errors, "cast-validation:double-unknown");
   });
 
   await t.step("errors on 'as OpaqueRef<>'", async () => {
@@ -41,7 +77,7 @@ Deno.test("Cast Validation", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "cast-validation:forbidden-cast");
+    assertHasErrorType(errors, "cast-validation:forbidden-cast");
   });
 
   await t.step("warns on 'as Cell<>'", async () => {
@@ -101,6 +137,79 @@ Deno.test("Cast Validation", async (t) => {
     const errors = getErrors(diagnostics);
     assertEquals(errors.length, 0, "Should not produce any errors");
   });
+});
+
+Deno.test("Empty Array .of() Validation", async (t) => {
+  const errorCases = [
+    {
+      name: "errors on Cell.of([])",
+      imports: "Cell",
+      expression: "Cell.of([])",
+    },
+    {
+      name: "errors on Writable.of([])",
+      imports: "Writable",
+      expression: "Writable.of([])",
+    },
+    {
+      name: "errors on OpaqueCell.of([])",
+      imports: "OpaqueCell",
+      expression: "OpaqueCell.of([])",
+    },
+    {
+      name: "errors on Stream.of([])",
+      imports: "Stream",
+      expression: "Stream.of([])",
+    },
+    {
+      name: "errors on deprecated cell([])",
+      imports: "cell",
+      expression: "cell([])",
+    },
+  ] as const;
+
+  for (const testCase of errorCases) {
+    await t.step(testCase.name, async () => {
+      const count = await getEmptyArrayErrorCount(
+        testCase.imports,
+        testCase.expression,
+      );
+      assertGreater(count, 0, "Expected at least one empty-array error");
+    });
+  }
+
+  const okCases = [
+    {
+      name: "no error on Cell.of<string[]>([])",
+      imports: "Cell",
+      expression: "Cell.of<string[]>([])",
+    },
+    {
+      name: "no error on Cell.of([1, 2, 3])",
+      imports: "Cell",
+      expression: "Cell.of([1, 2, 3])",
+    },
+    {
+      name: "no error on Cell.of('hello')",
+      imports: "Cell",
+      expression: 'Cell.of("hello")',
+    },
+    {
+      name: "no error on Cell.of() with no arguments",
+      imports: "Cell",
+      expression: "Cell.of<string>()",
+    },
+  ] as const;
+
+  for (const testCase of okCases) {
+    await t.step(testCase.name, async () => {
+      const count = await getEmptyArrayErrorCount(
+        testCase.imports,
+        testCase.expression,
+      );
+      assertEquals(count, 0);
+    });
+  }
 });
 
 Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
@@ -176,6 +285,48 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
   );
 
   await t.step(
+    "errors on top-level optional call in pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern((input) => input?.foo());
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:optional-chaining");
+      assertEquals(
+        errors.some((error) => error.message.includes("Optional chaining")),
+        true,
+        "Optional call diagnostics should explain the optional chaining restriction",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on statement-position optional call in pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern((input) => {
+        input?.foo();
+        return {};
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:optional-chaining");
+    },
+  );
+
+  await t.step(
     "errors on spread of pattern input outside computed()",
     async () => {
       const source = `/// <cts-enable />
@@ -225,9 +376,938 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
     assertEquals(
       errors.length,
       0,
-      ".get() inside JSX should be allowed (OpaqueRefJSXTransformer handles it)",
+      ".get() inside JSX should be allowed (explicit opaque-path-terminal JSX owner handles it)",
     );
   });
+});
+
+Deno.test(
+  "Pattern Context Validation - Destructuring and Structural Traversal",
+  async (t) => {
+    await t.step(
+      "errors on rest destructuring in pattern params",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const p = pattern(({ foo, ...rest }) => <div>{foo}</div>);
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        const computationErrors = errors.filter((error) =>
+          error.type === "pattern-context:computation"
+        );
+
+        assertEquals(computationErrors.length, 1);
+        assertStringIncludes(
+          computationErrors[0]!.message,
+          "Rest destructuring",
+        );
+      },
+    );
+
+    await t.step(
+      "allows array destructuring in pattern params",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const p = pattern(([first]) => <div>{first}</div>);
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        const computationErrors = errors.filter((error) =>
+          error.type === "pattern-context:computation"
+        );
+
+        assertEquals(computationErrors.length, 0);
+      },
+    );
+
+    await t.step(
+      "errors on Object.keys/values/entries over pattern input",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const p = pattern((input) => {
+        Object.keys(input);
+        Object.values(input);
+        Object.entries(input);
+        return input;
+      });
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        const computationErrors = errors.filter((error) =>
+          error.type === "pattern-context:computation"
+        );
+
+        assertGreater(computationErrors.length, 2);
+      },
+    );
+
+    await t.step(
+      "errors on dynamic key access over pattern input",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const p = pattern((input, key: string) => input[key]);
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        const computationErrors = errors.filter((error) =>
+          error.type === "pattern-context:computation"
+        );
+
+        assertGreater(computationErrors.length, 0);
+      },
+    );
+
+    await t.step("allows known symbol key access", async () => {
+      const source = `/// <cts-enable />
+      import { NAME, UI, pattern } from "commontools";
+
+      const p = pattern(({ items }) =>
+        items.map((item) => ({ n: item[NAME], u: item[UI] }))
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const computationErrors = errors.filter((error) =>
+        error.type === "pattern-context:computation"
+      );
+
+      assertEquals(computationErrors.length, 0);
+    });
+
+    await t.step("allows SELF destructuring key", async () => {
+      const source = `/// <cts-enable />
+      import { SELF, pattern } from "commontools";
+
+      const p = pattern(({ [SELF]: self, value }) => self);
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const computationErrors = errors.filter((error) =>
+        error.type === "pattern-context:computation"
+      );
+
+      assertEquals(computationErrors.length, 0);
+    });
+
+    await t.step("errors on for..in over pattern input", async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const p = pattern((input) => {
+        for (const key in input) {
+          key;
+        }
+        return input;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const computationErrors = errors.filter((error) =>
+        error.type === "pattern-context:computation"
+      );
+
+      assertGreater(computationErrors.length, 0);
+    });
+
+    await t.step(
+      "allows JSON.stringify over pattern input in return position",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const p = pattern((input) => JSON.stringify(input));
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        const computationErrors = errors.filter((error) =>
+          error.type === "pattern-context:computation"
+        );
+
+        assertEquals(computationErrors.length, 0);
+      },
+    );
+  },
+);
+
+Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
+  await t.step(
+    "errors on let declaration in top-level pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ count: number }>(({ count }) => {
+        let display = count;
+        return display;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:let-declaration");
+    },
+  );
+
+  await t.step(
+    "errors on loop in top-level pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern(() => {
+        const values: number[] = [];
+        for (let i = 0; i < 3; i++) {
+          values.push(i);
+        }
+        return values;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:loop");
+    },
+  );
+
+  await t.step(
+    "errors on early return in top-level pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ flag: boolean }>(({ flag }) => {
+        if (flag) {
+          return "yes";
+        }
+        return "no";
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:early-return");
+    },
+  );
+
+  await t.step(
+    "errors on let declaration in pattern-owned map callback",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        return items.map((item) => {
+          let upper = item.toUpperCase();
+          return upper;
+        });
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:let-declaration");
+    },
+  );
+
+  await t.step(
+    "errors on loop in pattern-owned map callback",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        return items.map((item) => {
+          const chars: string[] = [];
+          for (const char of item) {
+            chars.push(char);
+          }
+          return chars.join("-");
+        });
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:loop");
+    },
+  );
+
+  await t.step(
+    "allows early return inside computed callback",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern<{ flag: boolean }>(({ flag }) => {
+        return computed(() => {
+          if (flag) {
+            return "yes";
+          }
+          return "no";
+        });
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "computed() callbacks should retain their own control-flow semantics",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on reassignment in top-level pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      let lastSeen = "";
+
+      export default pattern<{ name: string }>(({ name }) => {
+        lastSeen = name;
+        return lastSeen;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:assignment");
+    },
+  );
+
+  await t.step(
+    "allows let and loops inside computed map callback",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        return computed(() =>
+          items.map((item) => {
+            let total = "";
+            for (const char of item) {
+              total += char;
+            }
+            return total;
+          })
+        );
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "compute-owned callbacks should keep imperative local control flow",
+      );
+    },
+  );
+
+  await t.step(
+    "allows let inside plain array callback in pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern(() => {
+        const items = ["a", "b"];
+        return items.map((item) => {
+          let upper = item.toUpperCase();
+          return upper;
+        });
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "plain array callbacks should stay outside the pattern-owned statement boundary",
+      );
+    },
+  );
+
+  await t.step(
+    "allows reassignment inside computed callback",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern<{ count: number }>(({ count }) => {
+        const next = computed(() => {
+          let total = 0;
+          total = count + 1;
+          return total;
+        });
+        return next;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "computed() callbacks should still allow local reassignment",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on var declaration in top-level pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ count: number }>(({ count }) => {
+        var display = count;
+        return display;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:var-declaration");
+    },
+  );
+
+  await t.step(
+    "errors on block-scoped early return inside pattern-owned nested map callback",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface State {
+        sections: { tasks: { label: string }[]; tags: { name: string }[] }[];
+      }
+
+      export default pattern<State>((state) => ({
+        [UI]: (
+          <div>
+            {state.sections.map((section) => {
+              if (!section.tags.length) return <div />;
+              {
+                const tasks = section.tasks;
+                return (
+                  <div>
+                    {section.tags.map((tag) => (
+                      <span>{tag.name}:{tasks.length}</span>
+                    ))}
+                  </div>
+                );
+              }
+            })}
+          </div>
+        ),
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:early-return");
+    },
+  );
+});
+
+Deno.test(
+  "Pattern Context Validation - Lowerable Non-JSX Expression Sites",
+  async (t) => {
+    await t.step(
+      "allows top-level call-argument ternary in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const identity = <T,>(value: T) => value;
+
+      export default pattern<{ done: boolean }>((state) => {
+        const label = identity(state.done ? "Done" : "Pending");
+        return { label };
+      });
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
+
+    await t.step(
+      "allows top-level object-property logical-or in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ label?: string }>((state) => ({
+        label: state.label || "Pending",
+      }));
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
+
+    await t.step(
+      "allows top-level call-argument property access in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const identity = <T,>(value: T) => value;
+
+      export default pattern<{ user: { name: string } }>((state) => {
+        const label = identity(state.user.name);
+        return { label };
+      });
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
+
+    await t.step(
+      "allows top-level object-property arithmetic in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ count: number }>((state) => ({
+        next: state.count + 1,
+      }));
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
+
+    await t.step(
+      "allows top-level object-property nullish coalescing in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ label?: string | null }>((state) => ({
+        label: state.label ?? "Pending",
+      }));
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
+
+    await t.step(
+      "allows top-level return-expression optional property access in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ user?: { name: string } }>((state) =>
+        state.user?.name
+      );
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
+
+    await t.step(
+      "allows top-level call-argument optional property access in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const identity = <T,>(value: T) => value;
+
+      export default pattern<{ user?: { name: string } }>((state) => {
+        const label = identity(state.user?.name);
+        return { label };
+      });
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
+
+    await t.step(
+      "allows top-level object-property optional element access in pattern body",
+      async () => {
+        const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ items?: string[] }>((state) => ({
+        first: state.items?.[0],
+      }));
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONTOOLS_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertEquals(errors.length, 0);
+      },
+    );
+  },
+);
+
+Deno.test("Pattern Context Validation - Destructuring Defaults", async (t) => {
+  await t.step(
+    "errors on non-static default initializer destructuring",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const fallback = "fallback";
+
+      export default pattern(({ foo = fallback }) => <div>{foo}</div>);
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const computationErrors = errors.filter((error) =>
+        error.type === "pattern-context:computation"
+      );
+
+      assertEquals(computationErrors.length, 1);
+      assertStringIncludes(
+        computationErrors[0]!.message,
+        "Non-static destructuring initializers",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on opaque local default destructuring",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, generateObject, pattern } from "commontools";
+
+      export default pattern<{ messages: string[] }>(({ messages }) => {
+        const preview = computed(() => messages[0] ?? "");
+        const { result = { title: "fallback" } } = generateObject({
+          prompt: preview,
+          schema: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+          },
+        });
+        return <div>{result.title}</div>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const computationErrors = errors.filter((error) =>
+        error.type === "pattern-context:computation"
+      );
+
+      assertEquals(computationErrors.length, 1);
+      assertStringIncludes(
+        computationErrors[0]!.message,
+        "opaque local bindings",
+      );
+    },
+  );
+});
+
+Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
+  await t.step(
+    "allows top-level object-property receiver method call in pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ name: string }>((state) => ({
+        upper: state.name.toUpperCase(),
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "allows top-level call-argument receiver method call in pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const identity = <T,>(value: T) => value;
+
+      export default pattern<{ name: string }>((state) => {
+        const upper = identity(state.name.trim());
+        return { upper };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step("allows receiver method call inside JSX", async () => {
+    const source = `/// <cts-enable />
+      import { pattern, h } from "commontools";
+
+      export default pattern<{ name: string }>((state) => {
+        return <div>{state.name.toUpperCase()}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0);
+  });
+
+  await t.step("allows receiver method call inside computed()", async () => {
+    const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern<{ name: string }>((state) => {
+        const upper = computed(() => state.name.toUpperCase());
+        return { upper };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0);
+  });
+
+  await t.step(
+    "allows receiver method call inside authored ifElse branch",
+    async () => {
+      const source = `/// <cts-enable />
+      import { ifElse, pattern } from "commontools";
+
+      export default pattern<{ name: string; show: boolean }>((state) => ({
+        value: ifElse(state.show, state.name.trim(), "fallback"),
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "allows direct receiver-method root inside pattern-owned array-method callbacks",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        return items.map((item) => item.toUpperCase());
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "allows call-argument receiver-method root inside pattern-owned array-method callbacks",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const identity = <T,>(value: T) => value;
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        return items.map((item) => identity(item.toUpperCase()));
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "allows receiver-method roots through aliased reactive array-method chains",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern } from "commontools";
+
+      export default pattern<{ items: string[] }>((state) => {
+        const inner = computed(() => state.items);
+        const value = computed(() => {
+          const foo = computed(() => inner);
+          const filtered = foo.filter((item) => item.length > 1);
+          return filtered.map((item) => item.toUpperCase());
+        });
+        return { value };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "errors on opaque array receiver-method calls nested inside array-callback expressions",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Person {
+        name: string;
+        spotPreferences: string[];
+      }
+
+      export default pattern<{ people: Person[] }>(({ people }) => ({
+        [UI]: <ul>{people.map((person) => {
+          const { name, spotPreferences } = person;
+          return (
+            <li>
+              {spotPreferences.length > 0
+                ? name + ": " + spotPreferences.join(", ")
+                : name}
+            </li>
+          );
+        })}</ul>,
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+    },
+  );
+
+  await t.step(
+    "allows the same opaque array receiver-method call when wrapped in computed()",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, pattern, UI } from "commontools";
+
+      interface Person {
+        spotPreferences: string[];
+      }
+
+      export default pattern<{ people: Person[] }>(({ people }) => ({
+        [UI]: <ul>{people.map((person) => {
+          const { spotPreferences } = person;
+          return <li><span>{computed(() => spotPreferences.join(", "))}</span></li>;
+        })}</ul>,
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "still errors on optional receiver-call root inside pattern-owned array-method callbacks",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ items: Array<string | undefined> }>(({ items }) => {
+        return items.map((item) => item?.toUpperCase());
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:optional-chaining");
+    },
+  );
 });
 
 Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
@@ -348,7 +1428,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
         0,
         "lift() inside pattern should error (must be at module scope)",
       );
-      assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+      assertHasErrorType(errors, "pattern-context:builder-placement");
     },
   );
 
@@ -378,7 +1458,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
         0,
         "handler() inside pattern should error (must be at module scope)",
       );
-      assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+      assertHasErrorType(errors, "pattern-context:builder-placement");
     },
   );
 
@@ -444,7 +1524,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
         0,
         "Function declarations in pattern should error (must be at module scope)",
       );
-      assertEquals(errors[0]!.type, "pattern-context:function-creation");
+      assertHasErrorType(errors, "pattern-context:function-creation");
     },
   );
 
@@ -473,7 +1553,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
         0,
         "Arrow functions in pattern should error (must be at module scope)",
       );
-      assertEquals(errors[0]!.type, "pattern-context:function-creation");
+      assertHasErrorType(errors, "pattern-context:function-creation");
     },
   );
 });
@@ -502,7 +1582,7 @@ Deno.test("Computed/derive local reactive alias validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "compute-context:local-reactive-use");
+      assertHasErrorType(errors, "compute-context:local-reactive-use");
     },
   );
 
@@ -526,7 +1606,7 @@ Deno.test("Computed/derive local reactive alias validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "compute-context:local-reactive-use");
+      assertHasErrorType(errors, "compute-context:local-reactive-use");
     },
   );
 
@@ -618,7 +1698,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "pattern-context:function-creation");
+    assertHasErrorType(errors, "pattern-context:function-creation");
   });
 
   await t.step("errors on function expression in pattern body", async () => {
@@ -637,7 +1717,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "pattern-context:function-creation");
+    assertHasErrorType(errors, "pattern-context:function-creation");
   });
 
   await t.step("errors on function declaration in pattern body", async () => {
@@ -656,7 +1736,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "pattern-context:function-creation");
+    assertHasErrorType(errors, "pattern-context:function-creation");
   });
 
   await t.step("allows arrow function inside computed()", async () => {
@@ -747,6 +1827,43 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
     assertEquals(errors.length, 0, "Map callback inside JSX should be allowed");
   });
 
+  await t.step("allows value-returning array callback inside JSX", async () => {
+    const source = `/// <cts-enable />
+      import { pattern, h } from "commontools";
+
+      interface Item { id: number; name: string; }
+
+      export default pattern<{ items: Item[] }>(({ items }) => {
+        return <div>{items.find((item) => item.id === 1)?.name}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Value-returning array callbacks inside JSX should be allowed",
+    );
+  });
+
+  await t.step("errors on foreign callback container inside JSX", async () => {
+    const source = `/// <cts-enable />
+      import { pattern, h } from "commontools";
+
+      export default pattern<{ list: string[] }>(({ list }) => {
+        return <div>{[0, 1].forEach(() => list.map((item) => item))}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertHasErrorType(errors, "pattern-context:callback-container");
+  });
+
   await t.step("allows map callback outside JSX in pattern body", async () => {
     const source = `/// <cts-enable />
       import { pattern, OpaqueRef } from "commontools";
@@ -773,6 +1890,30 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       "Map callback outside JSX in pattern should be allowed (transformed to pattern)",
     );
   });
+
+  await t.step(
+    "allows arithmetic computation inside authored ifElse branches",
+    async () => {
+      const source = `/// <cts-enable />
+      import { ifElse, pattern } from "commontools";
+
+      export default pattern<{ count: number; show: boolean }>(({ count, show }) => {
+        return {
+          value: ifElse(show, count + 1, 0),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Arithmetic inside authored ifElse branches should be owned by helper rewriting",
+      );
+    },
+  );
 
   await t.step(
     "allows nested map/filter callbacks inside module-scope helpers",
@@ -831,7 +1972,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+    assertHasErrorType(errors, "pattern-context:builder-placement");
   });
 
   await t.step(
@@ -852,7 +1993,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+      assertHasErrorType(errors, "pattern-context:builder-placement");
       assertEquals(
         errors[0]!.message.includes("computed"),
         true,
@@ -877,7 +2018,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+    assertHasErrorType(errors, "pattern-context:builder-placement");
   });
 
   await t.step(
@@ -1054,7 +2195,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
+      assertHasErrorType(errors, "opaque-get:invalid-call");
       assertEquals(
         errors[0]!.message.includes("bar"),
         true,
@@ -1089,7 +2230,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
+      assertHasErrorType(errors, "opaque-get:invalid-call");
     },
   );
 
@@ -1117,6 +2258,25 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   );
 
   await t.step(
+    "errors on top-level .get() on Writable path in pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, Writable } from "commontools";
+
+      export default pattern((input: Writable<{ count: number; label: string }>) =>
+        input.key("count").get()
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:get-call");
+    },
+  );
+
+  await t.step(
     "allows .get() on Cell pattern input",
     async () => {
       const source = `/// <cts-enable />
@@ -1136,6 +2296,72 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
         0,
         ".get() on Cell should be allowed",
       );
+    },
+  );
+
+  await t.step(
+    "allows .get() on Writable inside authored ifElse branch",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, ifElse, Writable } from "commontools";
+
+      export default pattern<{ count: Writable<number>; show: boolean }>((
+        { count, show },
+      ) => {
+        return { value: ifElse(show, count.get(), 0) };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        ".get() on Writable inside authored ifElse should be allowed",
+      );
+    },
+  );
+
+  await t.step(
+    "still errors on opaque .get() inside authored ifElse branch",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, ifElse } from "commontools";
+
+      export default pattern<{ items: string[]; show: boolean }>((
+        { items, show },
+      ) => {
+        return { value: ifElse(show, items.get(), []) };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "opaque-get:invalid-call");
+      assertHasErrorType(errors, "pattern-context:get-call");
+    },
+  );
+
+  await t.step(
+    "errors on statement-position .get() in pattern body",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        items.get();
+        return {};
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:get-call");
     },
   );
 
@@ -1231,7 +2457,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
+      assertHasErrorType(errors, "opaque-get:invalid-call");
     },
   );
 
@@ -1251,7 +2477,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
+      assertHasErrorType(errors, "opaque-get:invalid-call");
     },
   );
 
@@ -1281,9 +2507,9 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   );
 });
 
-Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
+Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
   await t.step(
-    "errors on .map() after ?? [] fallback with reactive left side",
+    "allows .map() after ?? [] fallback with reactive left side",
     async () => {
       const source = `/// <cts-enable />
       import { pattern, UI } from "commontools";
@@ -1304,13 +2530,64 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:map-on-fallback");
+      assertEquals(errors.length, 0);
     },
   );
 
   await t.step(
-    "errors on .map() after || [] fallback with reactive left side",
+    "allows .map() after ?? [] fallback with cast-wrapped reactive left side",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Item {
+        id: string;
+      }
+
+      export default pattern<{ items?: Item[] }>(({ items }) => ({
+        [UI]: <div>{((items as Item[] | undefined) ?? []).map((item) => item.id)}</div>,
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+        diagnostic.type === "pattern-context:map-on-fallback"
+      );
+      assertEquals(fallbackDiagnostics.length, 0);
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "allows .map() after ?? [] fallback with satisfies-wrapped reactive left side",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Item {
+        id: string;
+      }
+
+      export default pattern<{ items?: Item[] }>(({ items }) => ({
+        [UI]: <div>{((items satisfies Item[] | undefined) ?? []).map((item) => item.id)}</div>,
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+        diagnostic.type === "pattern-context:map-on-fallback"
+      );
+      assertEquals(fallbackDiagnostics.length, 0);
+      const errors = getErrors(diagnostics);
+      assertEquals(errors.length, 0);
+    },
+  );
+
+  await t.step(
+    "allows .map() after || [] fallback with reactive left side",
     async () => {
       const source = `/// <cts-enable />
       import { pattern, UI } from "commontools";
@@ -1331,13 +2608,12 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:map-on-fallback");
+      assertEquals(errors.length, 0);
     },
   );
 
   await t.step(
-    "errors on .map() after ?? [] fallback regardless of legacy flag",
+    "allows .map() after ?? [] fallback without fallback-specific diagnostics",
     async () => {
       const source = `/// <cts-enable />
       import { pattern, UI } from "commontools";
@@ -1357,11 +2633,68 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter((error) =>
+      const fallbackErrors = getErrors(diagnostics).filter((error) =>
         error.type === "pattern-context:map-on-fallback"
       );
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern-context:map-on-fallback");
+      assertEquals(fallbackErrors.length, 0);
+    },
+  );
+
+  await t.step(
+    "allows .filter() after ?? [] fallback with reactive left side",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Item { name: string; }
+
+      export default pattern<{ items?: Item[] }>(({ items }) => {
+        return {
+          [UI]: (
+            <div>
+              {(items ?? []).filter((item) => item.name.length > 0)}
+            </div>
+          ),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const fallbackErrors = getErrors(diagnostics).filter((error) =>
+        error.type === "pattern-context:map-on-fallback"
+      );
+      assertEquals(fallbackErrors.length, 0);
+      assertEquals(getErrors(diagnostics).length, 0);
+    },
+  );
+
+  await t.step(
+    "allows .flatMap() after ?? [] fallback with reactive left side",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Item { name: string; }
+
+      export default pattern<{ items?: Item[] }>(({ items }) => {
+        return {
+          [UI]: (
+            <div>
+              {(items ?? []).flatMap((item) => [item.name])}
+            </div>
+          ),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const fallbackErrors = getErrors(diagnostics).filter((error) =>
+        error.type === "pattern-context:map-on-fallback"
+      );
+      assertEquals(fallbackErrors.length, 0);
+      assertEquals(getErrors(diagnostics).length, 0);
     },
   );
 
@@ -1425,7 +2758,7 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
   );
 });
 
-Deno.test("Pattern Any Result Schema", async (t) => {
+Deno.test("Pattern Result Schema Inference", async (t) => {
   await t.step(
     "errors when pattern return type infers as any (one type arg)",
     async () => {
@@ -1441,11 +2774,9 @@ Deno.test("Pattern Any Result Schema", async (t) => {
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) => e.type === "pattern:any-result-schema",
-      );
+      const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern:any-result-schema");
+      assertHasErrorType(errors, "pattern:any-result-schema");
     },
   );
 
@@ -1464,11 +2795,30 @@ Deno.test("Pattern Any Result Schema", async (t) => {
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) => e.type === "pattern:any-result-schema",
-      );
+      const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "pattern:any-result-schema");
+      assertHasErrorType(errors, "pattern:any-result-schema");
+    },
+  );
+
+  await t.step(
+    "errors when pattern return type infers as unknown",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      declare function fetchUnknown(): unknown;
+
+      export default pattern<{ prompt: string }>(({ prompt }) => {
+        return fetchUnknown();
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern:any-result-schema");
     },
   );
 
@@ -1488,9 +2838,7 @@ Deno.test("Pattern Any Result Schema", async (t) => {
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) => e.type === "pattern:any-result-schema",
-      );
+      const errors = getErrors(diagnostics);
       assertEquals(
         errors.length,
         0,
@@ -1512,9 +2860,7 @@ Deno.test("Pattern Any Result Schema", async (t) => {
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) => e.type === "pattern:any-result-schema",
-      );
+      const errors = getErrors(diagnostics);
       assertEquals(
         errors.length,
         0,
@@ -1542,7 +2888,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "standalone-function:reactive-operation");
+      assertHasErrorType(errors, "standalone-function:reactive-operation");
       assertEquals(
         errors[0]!.message.includes("computed()"),
         true,
@@ -1568,7 +2914,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "standalone-function:reactive-operation");
+      assertHasErrorType(errors, "standalone-function:reactive-operation");
       assertEquals(
         errors[0]!.message.includes("derive()"),
         true,
@@ -1594,7 +2940,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "standalone-function:reactive-operation");
+      assertHasErrorType(errors, "standalone-function:reactive-operation");
       assertEquals(
         errors[0]!.message.includes(".map()"),
         true,
@@ -1655,6 +3001,27 @@ Deno.test("Standalone Function Validation", async (t) => {
         0,
         "Callbacks passed to name-matched patternTool should not be treated as restricted pattern context",
       );
+    },
+  );
+
+  await t.step(
+    "does not treat shadowed local patternTool helpers as safe wrappers in pattern context",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      const patternTool = <T,>(fn: T) => fn;
+
+      export default pattern<{ value?: string }>((state) => {
+        const tool = patternTool((input: { value?: string }) => input?.value);
+        return state.value ?? tool;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "pattern-context:function-creation");
     },
   );
 

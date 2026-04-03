@@ -4,6 +4,7 @@ import type {
   CellHandle,
   CellRef,
   LoggerFlagsData,
+  PatternSourceInfo,
   RuntimeTelemetryMarkerResult,
   SchedulerDiagnosisResult,
   SchedulerGraphEdge,
@@ -86,6 +87,14 @@ export class DebuggerController implements ReactiveController {
   >();
   private schedulerBaselineVersion = 0;
 
+  // Pattern source files for source browser
+  private patternSources: PatternSourceInfo[] = [];
+  private patternSourcesVersion = 0;
+
+  // Debugger breakpoints: action IDs
+  private breakpointIds = new Set<string>();
+  private breakpointsVersion = 0;
+
   constructor(host: ReactiveControllerHost & HTMLElement) {
     this.host = host;
     this.host.addController(this);
@@ -148,6 +157,13 @@ export class DebuggerController implements ReactiveController {
           e,
         );
       });
+
+      // Clear stale pattern sources from previous runtime
+      this.patternSources = [];
+      this.patternSourcesVersion++;
+
+      // Re-sync breakpoints to new runtime
+      this.syncBreakpoints().catch(() => {});
 
       // Load existing telemetry markers
       this.telemetryMarkers = this.runtime.telemetry().slice(
@@ -463,6 +479,110 @@ export class DebuggerController implements ReactiveController {
    */
   getSchedulerBaselineVersion(): number {
     return this.schedulerBaselineVersion;
+  }
+
+  /**
+   * Request pattern source files for the source browser
+   */
+  async requestPatternSources(): Promise<void> {
+    if (!this.runtime) return;
+    const rt = this.runtime.runtime();
+    if (!rt) return;
+    try {
+      const response = await rt.getPatternSources();
+      this.patternSources = response.patterns;
+      this.patternSourcesVersion++;
+      this.host.requestUpdate();
+    } catch (e) {
+      console.error(
+        "[DebuggerController] Failed to request pattern sources:",
+        e,
+      );
+    }
+  }
+
+  /**
+   * Get cached pattern sources
+   */
+  getPatternSources(): PatternSourceInfo[] {
+    return this.patternSources;
+  }
+
+  /**
+   * Get pattern sources version for change detection
+   */
+  getPatternSourcesVersion(): number {
+    return this.patternSourcesVersion;
+  }
+
+  /**
+   * Toggle a breakpoint for an action ID. Sends updated set to worker.
+   */
+  async toggleBreakpoint(actionId: string): Promise<void> {
+    if (this.breakpointIds.has(actionId)) {
+      this.breakpointIds.delete(actionId);
+    } else {
+      this.breakpointIds.add(actionId);
+    }
+    this.breakpointsVersion++;
+    this.host.requestUpdate();
+    await this.syncBreakpoints();
+  }
+
+  /**
+   * Set breakpoints for multiple action IDs at once.
+   */
+  async setBreakpointsForActions(
+    actionIds: string[],
+    enabled: boolean,
+  ): Promise<void> {
+    for (const id of actionIds) {
+      if (enabled) {
+        this.breakpointIds.add(id);
+      } else {
+        this.breakpointIds.delete(id);
+      }
+    }
+    this.breakpointsVersion++;
+    this.host.requestUpdate();
+    await this.syncBreakpoints();
+  }
+
+  /**
+   * Send current breakpoints to the worker.
+   */
+  private async syncBreakpoints(): Promise<void> {
+    const rt = this.runtime?.runtime();
+    if (!rt) return;
+    try {
+      await rt.setBreakpoints(Array.from(this.breakpointIds));
+    } catch (e) {
+      console.error(
+        "[DebuggerController] Failed to set breakpoints:",
+        e,
+      );
+    }
+  }
+
+  /**
+   * Check if an action ID has a breakpoint set.
+   */
+  hasBreakpoint(actionId: string): boolean {
+    return this.breakpointIds.has(actionId);
+  }
+
+  /**
+   * Get all breakpoint action IDs.
+   */
+  getBreakpoints(): Set<string> {
+    return new Set(this.breakpointIds);
+  }
+
+  /**
+   * Get breakpoints version for change detection.
+   */
+  getBreakpointsVersion(): number {
+    return this.breakpointsVersion;
   }
 
   /**

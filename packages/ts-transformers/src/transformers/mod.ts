@@ -1,8 +1,10 @@
 export { CastValidationTransformer } from "./cast-validation.ts";
-export { CapabilityLoweringTransformer } from "./capability-lowering.ts";
+export { PatternCallbackLoweringTransformer } from "./pattern-callback-lowering.ts";
 export { EmptyArrayOfValidationTransformer } from "./empty-array-of-validation.ts";
+export { HelperOwnedExpressionSiteLoweringTransformer } from "./helper-owned-expression-site-lowering.ts";
+export { JsxExpressionSiteRouterTransformer } from "./jsx-expression-site-router.ts";
 export { OpaqueGetValidationTransformer } from "./opaque-get-validation.ts";
-export { OpaqueRefJSXTransformer } from "./opaque-ref-jsx.ts";
 export { PatternContextValidationTransformer } from "./pattern-context-validation.ts";
+export { PatternOwnedExpressionSiteLoweringTransformer } from "./pattern-owned-expression-site-lowering.ts";
 export { SchemaInjectionTransformer } from "./schema-injection.ts";
 export { SchemaGeneratorTransformer } from "./schema-generator.ts";

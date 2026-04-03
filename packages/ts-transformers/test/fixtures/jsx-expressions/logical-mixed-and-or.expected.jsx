@@ -57,7 +57,18 @@ export default pattern((_state) => {
                     type: "boolean",
                     "enum": [false]
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => (user.get().name.length > 0 && user.get().name)), defaultMessage.get())}</span>
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => (user.get().name.length > 0 && user.get().name)), __ctHelpers.derive({
+            type: "object",
+            properties: {
+                defaultMessage: {
+                    type: "string",
+                    asCell: true
+                }
+            },
+            required: ["defaultMessage"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { defaultMessage: defaultMessage }, ({ defaultMessage }) => defaultMessage.get()))}</span>
 
         {/* condition && (value || fallback) pattern */}
         <span>{__ctHelpers.when({

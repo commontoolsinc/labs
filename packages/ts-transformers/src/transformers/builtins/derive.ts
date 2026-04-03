@@ -3,22 +3,23 @@ import { CTHelpers } from "../../core/ct-helpers.ts";
 import {
   getExpressionText,
   getTypeAtLocationWithFallback,
+  setParentPointers,
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
 import {
-  buildHierarchicalParamsValue,
+  buildCapturePropertyAssignments,
   groupCapturesByRoot,
   parseCaptureExpression,
 } from "../../utils/capture-tree.ts";
 import {
   createBindingElementsFromNames,
   createParameterFromBindings,
-  createPropertyName,
   createPropertyParamNames,
   reserveIdentifier,
 } from "../../utils/identifiers.ts";
 import {
-  buildTypeElementsFromCaptureTree,
+  buildCaptureTypeElements,
+  createRegisteredTypeLiteral,
   expressionToTypeNode,
 } from "../../ast/type-building.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
@@ -160,14 +161,7 @@ function createDeriveArgs(
 ): readonly ts.Expression[] {
   const properties: ts.ObjectLiteralElementLike[] = [];
 
-  for (const [rootName, node] of captureTree) {
-    properties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(rootName, factory),
-        buildHierarchicalParamsValue(node, rootName, factory),
-      ),
-    );
-  }
+  properties.push(...buildCapturePropertyAssignments(captureTree, factory));
 
   for (const entry of fallbackEntries) {
     if (ts.isIdentifier(entry.ref) && entry.propertyName === entry.ref.text) {
@@ -204,6 +198,8 @@ export function createDeriveCall(
     return undefined;
   }
 
+  context.markSyntheticComputeOwnedSubtree?.(expression);
+
   const parameter = createParameterForPlan(
     factory,
     captureTree,
@@ -228,6 +224,7 @@ export function createDeriveCall(
     factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
     lambdaBody,
   );
+  context.markAsSyntheticComputeCallback?.(arrowFunction);
 
   const deriveArgs = [
     ...createDeriveArgs(factory, captureTree, fallbackEntries),
@@ -264,6 +261,10 @@ export function createDeriveCall(
     );
   }
 
+  // Maintain parent chains and compute-wrapper ownership for later passes that
+  // revisit synthetic derive callbacks after post-closure lowering.
+  setParentPointers(deriveCall, expression.parent);
+
   return deriveCall;
 }
 
@@ -276,7 +277,7 @@ function buildInputTypeNode(
   const typeElements: ts.TypeElement[] = [];
 
   // Add type elements from capture tree (preserves Cell<T>)
-  const captureTypeElements = buildTypeElementsFromCaptureTree(
+  const captureTypeElements = buildCaptureTypeElements(
     captureTree,
     context,
   );
@@ -295,9 +296,14 @@ function buildInputTypeNode(
     );
   }
 
-  const typeLiteral = factory.createTypeLiteralNode(typeElements);
-
-  return typeLiteral;
+  return createRegisteredTypeLiteral(
+    typeElements,
+    {
+      factory,
+      checker: context.checker,
+      typeRegistry: context.options.typeRegistry,
+    },
+  );
 }
 
 function buildResultTypeNode(

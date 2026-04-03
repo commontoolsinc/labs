@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { detectCallKind } from "./call-kind.ts";
+import { getCallbackBoundarySemantics } from "../policy/callback-boundary.ts";
 
 export type ReactiveContextKind = "pattern" | "compute" | "neutral";
 
@@ -7,7 +8,6 @@ export type ReactiveContextOwner =
   | "pattern"
   | "render"
   | "array-method"
-  | "jsx-callback"
   | "computed"
   | "derive"
   | "action"
@@ -125,41 +125,6 @@ export function findEnclosingCallbackContext(
   return undefined;
 }
 
-function isInlineJsxEventHandler(
-  func: ts.ArrowFunction | ts.FunctionExpression,
-): boolean {
-  const parent = func.parent;
-  if (!ts.isJsxExpression(parent)) return false;
-  const jsxExprParent = parent.parent;
-  if (!ts.isJsxAttribute(jsxExprParent)) return false;
-  return jsxExprParent.name.getText().startsWith("on");
-}
-
-function isWithinJsxExpression(node: ts.Node): boolean {
-  let current: ts.Node | undefined = node.parent;
-  while (current) {
-    if (ts.isJsxExpression(current)) {
-      return true;
-    }
-    current = current.parent;
-  }
-  return false;
-}
-
-function isNamedCallbackCall(
-  call: ts.CallExpression,
-  name: string,
-): boolean {
-  const expression = call.expression;
-  if (ts.isIdentifier(expression)) {
-    return expression.text === name;
-  }
-  if (ts.isPropertyAccessExpression(expression)) {
-    return expression.name.text === name;
-  }
-  return false;
-}
-
 export function isStandaloneFunctionDefinition(
   func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
 ): boolean {
@@ -237,64 +202,30 @@ export function classifyReactiveContext(
       }
 
       if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-        // Transformed mapWithPattern callbacks are explicitly tracked and should
-        // always be treated as pattern callbacks, regardless of symbol lookup.
-        if (lookup?.isArrayMethodCallback(current)) {
-          return { kind: "pattern", owner: "array-method", inJsxExpression };
-        }
-
-        if (isInlineJsxEventHandler(current)) {
-          return { kind: "compute", owner: "handler", inJsxExpression };
-        }
-
         if (isStandaloneFunctionDefinition(current)) {
           return { kind: "compute", owner: "standalone", inJsxExpression };
         }
 
-        const callParent: ts.Node | undefined = current.parent;
-        if (
-          callParent &&
-          ts.isCallExpression(callParent) &&
-          callParent.arguments.includes(current)
-        ) {
-          const callKind = detectCallKind(callParent, checker);
-          if (callKind?.kind === "derive") {
-            return { kind: "compute", owner: "derive", inJsxExpression };
-          }
-
-          if (callKind?.kind === "builder") {
-            const builderContext = getBuilderContext(callKind.builderName);
-            if (builderContext) {
-              return { ...builderContext, inJsxExpression };
-            }
-            // Unknown builder callback: inherit parent context.
-          }
-
-          if (callKind?.kind === "pattern-tool") {
-            return { kind: "compute", owner: "unknown", inJsxExpression };
-          }
-
-          if (callKind?.kind === "array-method") {
-            // Non-transformed map callbacks inherit the parent context.
+        const boundarySemantics = getCallbackBoundarySemantics(
+          current,
+          checker,
+          {
+            isArrayMethodCallback: (node) =>
+              lookup?.isArrayMethodCallback(node) ?? false,
+          },
+        );
+        const bodyContext = boundarySemantics.bodyContext;
+        if (bodyContext) {
+          if (bodyContext.strategy === "inherit-parent") {
             current = current.parent;
             continue;
           }
 
-          // Fallback for synthetic helper calls where symbol-based call-kind
-          // classification can fail transiently during transformation.
-          if (
-            isNamedCallbackCall(callParent, "pattern") ||
-            isNamedCallbackCall(callParent, "patternTool")
-          ) {
-            return { kind: "pattern", owner: "pattern", inJsxExpression };
-          }
-
-          // Unknown callbacks inside JSX expressions should run in compute context.
-          // This ensures chains like `list.map(...).filter(...)` are treated as
-          // compute callbacks rather than pattern callbacks.
-          if (inJsxExpression || isWithinJsxExpression(current)) {
-            return { kind: "compute", owner: "jsx-callback", inJsxExpression };
-          }
+          return {
+            kind: bodyContext.kind,
+            owner: bodyContext.owner,
+            inJsxExpression,
+          };
         }
       }
 

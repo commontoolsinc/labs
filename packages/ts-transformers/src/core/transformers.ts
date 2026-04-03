@@ -91,10 +91,16 @@ export interface DiagnosticInput {
 /**
  * Registry for passing Type information between transformer stages.
  *
- * When schema-injection creates synthetic TypeNodes, the original Type
- * may not survive round-tripping through checker.getTypeFromTypeNode().
- * This registry allows us to pass the original Type directly to the
- * schema-transformer stage.
+ * The registry carries three related kinds of synthetic typing:
+ * - replacement expression nodes that should keep the original authored type
+ * - synthetic TypeNodes that later schema/codegen phases must resolve faithfully
+ * - synthetic call expressions (`derive`, `computed`, `ifElse`, etc.) whose
+ *   result types would otherwise be lost after rewriting
+ *
+ * Most TypeNodes are registered directly at creation time. For composite
+ * synthetic TypeNodes that still collapse to unresolved `any` / `unknown`
+ * through the public checker APIs, `ensureTypeNodeRegistered(...)` in
+ * `ast/type-inference.ts` reconstructs and caches a Type on demand.
  *
  * Uses WeakMap with node identity as key. Node identity is preserved when
  * transformers are applied in sequence via ts.transform().
@@ -136,6 +142,12 @@ export abstract class Transformer {
 
       return transformed;
     };
+  }
+}
+
+export abstract class HelpersOnlyTransformer extends Transformer {
+  override filter(context: TransformationContext): boolean {
+    return context.ctHelpers.sourceHasHelpers();
   }
 }
 

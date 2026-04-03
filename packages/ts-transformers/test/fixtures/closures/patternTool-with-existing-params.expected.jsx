@@ -25,7 +25,7 @@ export default pattern(() => {
     const tool = patternTool(({ value, offset, multiplier }: {
         value: number;
         offset: number;
-        multiplier: unknown;
+        multiplier: __ctHelpers.Cell<number>;
     }) => {
         return derive({
             type: "object",

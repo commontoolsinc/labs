@@ -113,9 +113,9 @@ export default pattern<{
                       </div>
                     ))}
                   </div>,
-                  // [TRANSFORM] ternary lowered (false-branch of ifElse(expanded)):
+                  // [TRANSFORM] ternary preserved inside the ifElse(expanded) false branch:
                   //   section.tasks.length > 0 ? <small>...collapsed</small> : <small>empty</small>
-                  //   → local ifElse(...) inside the JSX branch
+                  //   → plain local ternary inside the JSX branch
                   section.tasks.length > 0
                     ? <small>{section.title} collapsed</small>
                     : <small>empty</small>,

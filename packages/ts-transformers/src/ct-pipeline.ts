@@ -1,10 +1,12 @@
 import {
-  CapabilityLoweringTransformer,
   CastValidationTransformer,
   EmptyArrayOfValidationTransformer,
+  HelperOwnedExpressionSiteLoweringTransformer,
+  JsxExpressionSiteRouterTransformer,
   OpaqueGetValidationTransformer,
-  OpaqueRefJSXTransformer,
+  PatternCallbackLoweringTransformer,
   PatternContextValidationTransformer,
+  PatternOwnedExpressionSiteLoweringTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
 } from "./transformers/mod.ts";
@@ -38,9 +40,9 @@ export class CommonToolsTransformerPipeline extends Pipeline {
 
     const transformers: Transformer[] = [
       // Validation transformers run first to catch errors early.
-      // PatternContextValidation runs in both modes. In capability-first mode
-      // it still enforces placement/standalone/get-call rules while skipping
-      // legacy computation/optional heuristics.
+      // PatternContextValidation still enforces placement/standalone/get-call
+      // rules while skipping the old computation/optional heuristics that were
+      // tied to the removed legacy path.
       new CastValidationTransformer(sharedOps),
       new EmptyArrayOfValidationTransformer(sharedOps),
       new OpaqueGetValidationTransformer(sharedOps),
@@ -49,12 +51,14 @@ export class CommonToolsTransformerPipeline extends Pipeline {
 
     transformers.push(
       // Then the regular transformation pipeline
-      new OpaqueRefJSXTransformer(sharedOps),
+      new JsxExpressionSiteRouterTransformer(sharedOps),
       new ComputedTransformer(sharedOps),
       new ClosureTransformer(sharedOps),
+      new PatternOwnedExpressionSiteLoweringTransformer(sharedOps),
+      new HelperOwnedExpressionSiteLoweringTransformer(sharedOps),
     );
 
-    transformers.push(new CapabilityLoweringTransformer(sharedOps));
+    transformers.push(new PatternCallbackLoweringTransformer(sharedOps));
 
     transformers.push(
       new SchemaInjectionTransformer(sharedOps),

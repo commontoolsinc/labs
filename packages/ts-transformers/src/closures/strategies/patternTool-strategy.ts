@@ -1,14 +1,14 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
-import { detectCallKind, isFunctionLikeExpression } from "../../ast/mod.ts";
+import { buildCapturePropertyAssignments } from "../../utils/capture-tree.ts";
 import {
-  buildHierarchicalParamsValue,
-  type CaptureTreeNode,
-  groupCapturesByRoot,
-} from "../../utils/capture-tree.ts";
-import { createPropertyName } from "../../utils/identifiers.ts";
-import { isOpaqueRefType } from "../../transformers/opaque-ref/opaque-ref.ts";
+  detectCallKind,
+  isCellLikeType,
+  isFunctionLikeExpression,
+} from "../../ast/mod.ts";
+import { createModuleScopedReactiveCaptureCollector } from "../capture-collector.ts";
+import { buildCallbackWithTopLevelCaptures } from "../utils/pattern-builder.ts";
 
 /**
  * PatternToolStrategy transforms patternTool() calls to capture closed-over variables.
@@ -84,13 +84,15 @@ function transformPatternToolCall(
   }
 
   // Collect module-scoped reactive captures from the callback
-  // Unlike CaptureCollector which skips module-scoped variables,
-  // patternTool needs to capture reactive (Cell-like) module-scoped variables
-  const captureExpressions = collectModuleScopedReactiveCaptures(
-    callback,
-    context,
+  // Unlike the default closure strategies, patternTool only wants
+  // module-scoped reactive identifier captures in extraParams.
+  const collector = createModuleScopedReactiveCaptureCollector(
+    context.checker,
+    (_identifier, type, checker) => isCellLikeType(type, checker),
   );
-  const captureTree = groupCapturesByRoot(captureExpressions);
+  const { captures: captureExpressions, captureTree } = collector.analyze(
+    callback,
+  );
 
   // If no captures, no transformation needed
   if (captureExpressions.size === 0) {
@@ -107,17 +109,10 @@ function transformPatternToolCall(
   const existingExtraParams = patternToolCall.arguments[1];
 
   // Build the merged extraParams object
-  const captureProperties: ts.ObjectLiteralElementLike[] = [];
-
-  // Add captures
-  for (const [captureName, node] of captureTree) {
-    captureProperties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(captureName, factory),
-        buildHierarchicalParamsValue(node, captureName, factory),
-      ),
-    );
-  }
+  const captureProperties = buildCapturePropertyAssignments(
+    captureTree,
+    factory,
+  );
 
   // Merge with existing extraParams if present
   let mergedExtraParams: ts.Expression;
@@ -160,7 +155,7 @@ function transformPatternToolCall(
 
   // Build the new callback with updated parameter type
   // We need to add the captured variables to the parameter's type
-  const newCallback = buildCallbackWithCaptures(
+  const newCallback = buildCallbackWithTopLevelCaptures(
     callback,
     transformedBody,
     captureTree,
@@ -175,374 +170,4 @@ function transformPatternToolCall(
     patternToolCall.typeArguments,
     newArgs,
   );
-}
-
-/**
- * Build a new callback function with captured variables added to its parameter type.
- *
- * Original: ({ query }: { query: string }) => { ... }
- * With captures: ({ query, content }: { query: string; content: string }) => { ... }
- */
-function buildCallbackWithCaptures(
-  originalCallback: ts.ArrowFunction | ts.FunctionExpression,
-  transformedBody: ts.ConciseBody,
-  captureTree: Map<string, CaptureTreeNode>,
-  context: TransformationContext,
-): ts.ArrowFunction | ts.FunctionExpression {
-  const { factory } = context;
-
-  // Get the original parameter (patternTool callbacks take a single parameter)
-  const originalParam = originalCallback.parameters[0];
-
-  // Build new parameter with captures added
-  let newParam: ts.ParameterDeclaration;
-
-  if (originalParam) {
-    // Get the existing parameter binding pattern
-    const existingBinding = originalParam.name;
-
-    if (ts.isObjectBindingPattern(existingBinding)) {
-      // Add capture bindings to the existing object pattern
-      const newBindingElements = [...existingBinding.elements];
-
-      for (const captureName of captureTree.keys()) {
-        // Check if this capture is already in the binding
-        const alreadyExists = existingBinding.elements.some((element) => {
-          if (ts.isIdentifier(element.name)) {
-            return element.name.text === captureName;
-          }
-          return false;
-        });
-
-        if (!alreadyExists) {
-          newBindingElements.push(
-            factory.createBindingElement(
-              undefined,
-              undefined,
-              factory.createIdentifier(captureName),
-              undefined,
-            ),
-          );
-        }
-      }
-
-      const newBindingPattern = factory.createObjectBindingPattern(
-        newBindingElements,
-      );
-
-      // Update the type annotation if present
-      let newTypeNode = originalParam.type;
-      if (newTypeNode && ts.isTypeLiteralNode(newTypeNode)) {
-        newTypeNode = addCapturesToTypeLiteral(
-          newTypeNode,
-          captureTree,
-          context,
-        );
-      }
-
-      newParam = factory.createParameterDeclaration(
-        originalParam.modifiers,
-        originalParam.dotDotDotToken,
-        newBindingPattern,
-        originalParam.questionToken,
-        newTypeNode,
-        originalParam.initializer,
-      );
-    } else {
-      // Parameter is a simple identifier or other binding, keep as-is
-      newParam = originalParam;
-    }
-  } else {
-    // No original parameter, create one with just captures
-    const bindingElements = Array.from(captureTree.keys()).map((captureName) =>
-      factory.createBindingElement(
-        undefined,
-        undefined,
-        factory.createIdentifier(captureName),
-        undefined,
-      )
-    );
-
-    const bindingPattern = factory.createObjectBindingPattern(bindingElements);
-
-    // Build type literal for captures
-    const typeElements = Array.from(captureTree.keys()).map((captureName) => {
-      return factory.createPropertySignature(
-        undefined,
-        factory.createIdentifier(captureName),
-        undefined,
-        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
-      );
-    });
-
-    newParam = factory.createParameterDeclaration(
-      undefined,
-      undefined,
-      bindingPattern,
-      undefined,
-      factory.createTypeLiteralNode(typeElements),
-      undefined,
-    );
-  }
-
-  // Create the new callback
-  if (ts.isArrowFunction(originalCallback)) {
-    return factory.createArrowFunction(
-      originalCallback.modifiers,
-      originalCallback.typeParameters,
-      [newParam],
-      originalCallback.type,
-      originalCallback.equalsGreaterThanToken,
-      transformedBody,
-    );
-  } else {
-    return factory.createFunctionExpression(
-      originalCallback.modifiers,
-      originalCallback.asteriskToken,
-      originalCallback.name,
-      originalCallback.typeParameters,
-      [newParam],
-      originalCallback.type,
-      ts.isBlock(transformedBody)
-        ? transformedBody
-        : factory.createBlock([factory.createReturnStatement(transformedBody)]),
-    );
-  }
-}
-
-/**
- * Add captured variable types to a type literal node.
- */
-function addCapturesToTypeLiteral(
-  typeLiteral: ts.TypeLiteralNode,
-  captureTree: Map<string, CaptureTreeNode>,
-  context: TransformationContext,
-): ts.TypeLiteralNode {
-  const { factory } = context;
-
-  // Get existing members
-  const existingMembers = [...typeLiteral.members];
-
-  // Add type for each capture
-  for (const [captureName] of captureTree) {
-    // Check if this property already exists
-    const alreadyExists = existingMembers.some((member) => {
-      if (ts.isPropertySignature(member) && ts.isIdentifier(member.name)) {
-        return member.name.text === captureName;
-      }
-      return false;
-    });
-
-    if (!alreadyExists) {
-      // Add a property signature for the capture
-      // We use 'unknown' as a placeholder type since we don't have precise type info
-      existingMembers.push(
-        factory.createPropertySignature(
-          undefined,
-          factory.createIdentifier(captureName),
-          undefined,
-          factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
-        ),
-      );
-    }
-  }
-
-  return factory.createTypeLiteralNode(existingMembers);
-}
-
-/**
- * Collect module-scoped reactive (Cell-like) captures from a function.
- *
- * Unlike the regular CaptureCollector which skips module-scoped declarations,
- * patternTool needs to capture reactive values declared at module scope so
- * they can be passed as extraParams.
- */
-function collectModuleScopedReactiveCaptures(
-  func: ts.FunctionLikeDeclaration,
-  context: TransformationContext,
-): Set<ts.Expression> {
-  const { checker } = context;
-  const captures = new Set<ts.Expression>();
-
-  // Get the function's parameters to exclude from captures
-  const funcParamNames = new Set<string>();
-  for (const param of func.parameters) {
-    extractBindingNames(param.name, funcParamNames);
-  }
-
-  const visit = (node: ts.Node) => {
-    // Skip nested function declarations - they have their own scope
-    if (
-      node !== func &&
-      (ts.isArrowFunction(node) ||
-        ts.isFunctionExpression(node) ||
-        ts.isFunctionDeclaration(node))
-    ) {
-      // Still visit nested function to capture module-scoped refs used there
-      ts.forEachChild(node, visit);
-      return;
-    }
-
-    // Check identifiers for module-scoped reactive captures
-    if (ts.isIdentifier(node)) {
-      // Skip if this is part of a property access name (the property, not the object)
-      if (
-        ts.isPropertyAccessExpression(node.parent) &&
-        node.parent.name === node
-      ) {
-        return;
-      }
-
-      // Skip if this is a function parameter
-      if (funcParamNames.has(node.text)) {
-        return;
-      }
-
-      // Skip property names in object literals
-      if (ts.isPropertyAssignment(node.parent) && node.parent.name === node) {
-        return;
-      }
-
-      // Skip shorthand property assignments (we'll check their value separately)
-      if (ts.isShorthandPropertyAssignment(node.parent)) {
-        // Check if this shorthand is referencing a captured value
-        const valueSymbol = checker.getShorthandAssignmentValueSymbol(
-          node.parent,
-        );
-        if (valueSymbol) {
-          const decls = valueSymbol.getDeclarations();
-          if (decls && decls.length > 0) {
-            const isModuleScoped = decls.some((d) =>
-              isModuleScopedDeclaration(d)
-            );
-            if (isModuleScoped) {
-              const type = checker.getTypeAtLocation(node);
-              if (isCellLikeType(type, checker)) {
-                captures.add(node);
-              }
-            }
-          }
-        }
-        return;
-      }
-
-      const symbol = checker.getSymbolAtLocation(node);
-      if (!symbol) return;
-
-      const declarations = symbol.getDeclarations();
-      if (!declarations || declarations.length === 0) return;
-
-      // Skip imports
-      const isImport = declarations.some(
-        (decl) =>
-          ts.isImportSpecifier(decl) ||
-          ts.isImportClause(decl) ||
-          ts.isNamespaceImport(decl),
-      );
-      if (isImport) return;
-
-      // Check if it's module-scoped
-      const isModuleScoped = declarations.some((decl) =>
-        isModuleScopedDeclaration(decl)
-      );
-      if (!isModuleScoped) return;
-
-      // Check if it's a reactive (Cell-like) type
-      const type = checker.getTypeAtLocation(node);
-      if (isCellLikeType(type, checker)) {
-        captures.add(node);
-      }
-    }
-
-    ts.forEachChild(node, visit);
-  };
-
-  if (func.body) {
-    visit(func.body);
-  }
-
-  return captures;
-}
-
-/**
- * Extract all binding names from a binding pattern recursively.
- */
-function extractBindingNames(
-  binding: ts.BindingName,
-  names: Set<string>,
-): void {
-  if (ts.isIdentifier(binding)) {
-    names.add(binding.text);
-    return;
-  }
-
-  if (ts.isObjectBindingPattern(binding)) {
-    for (const element of binding.elements) {
-      extractBindingNames(element.name, names);
-    }
-  } else if (ts.isArrayBindingPattern(binding)) {
-    for (const element of binding.elements) {
-      if (!ts.isOmittedExpression(element)) {
-        extractBindingNames(element.name, names);
-      }
-    }
-  }
-}
-
-/**
- * Check if a declaration is at module scope (top level of a source file).
- */
-function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
-  // For variable declarations, check if the containing variable statement
-  // is directly at source file level. We must NOT walk further up the tree,
-  // because ancestor nodes (e.g. a module-scoped `const Note = pattern(...)`)
-  // would falsely match for locally-declared variables inside callbacks.
-  if (ts.isVariableDeclaration(decl)) {
-    const varDeclList = decl.parent;
-    if (ts.isVariableDeclarationList(varDeclList)) {
-      const varStatement = varDeclList.parent;
-      return (
-        ts.isVariableStatement(varStatement) &&
-        ts.isSourceFile(varStatement.parent)
-      );
-    }
-    return false;
-  }
-
-  // For function declarations, check if directly at source file level
-  if (ts.isFunctionDeclaration(decl)) {
-    return !!decl.parent && ts.isSourceFile(decl.parent);
-  }
-
-  return false;
-}
-
-/**
- * Check if a type is a CellLike type (Cell, Writable, OpaqueCell, Stream).
- *
- * This function is used to decide which module-scoped variables to capture
- * in patternTool() extraParams. In practice, module-scoped reactive variables
- * come from cell(), Cell.of(), Writable.of(), etc. — never OpaqueRef (which
- * is a proxy wrapper for pattern parameters, always pattern-scoped).
- *
- * The isOpaqueRefType brand check is included as a safety net; it shouldn't
- * match in practice because isModuleScopedDeclaration filters first.
- *
- * See also: isCellLikeOrOpaqueRefType in pattern-context-validation.ts,
- * which additionally matches OpaqueRef for validating .map() receivers.
- */
-function isCellLikeType(type: ts.Type, checker: ts.TypeChecker): boolean {
-  if (isOpaqueRefType(type, checker)) {
-    return true;
-  }
-
-  const typeStr = checker.typeToString(type);
-  const cellLikePatterns = [
-    "Cell<",
-    "OpaqueCell<",
-    "Writable<",
-    "Stream<",
-  ];
-
-  return cellLikePatterns.some((pattern) => typeStr.includes(pattern));
 }

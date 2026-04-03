@@ -54,6 +54,7 @@ import {
   GetGraphSnapshotRequest,
   type GetHomeSpaceCellRequest,
   type GetLoggerCountsRequest,
+  type GetPatternSourcesRequest,
   type GetSettleStatsHistoryRequest,
   type GetSettleStatsRequest,
   type GetTriggerTraceRequest,
@@ -73,9 +74,11 @@ import {
   PageResponse,
   type PageStartRequest,
   type PageStopRequest,
+  type PatternSourcesResponse,
   type RecreateSpaceRootPatternRequest,
   RequestType,
   type SetActionRunTraceEnabledRequest,
+  type SetBreakpointsRequest,
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
   type SetPullModeRequest,
@@ -789,6 +792,47 @@ export class RuntimeProcessor {
     handler.send({ piece: target });
   }
 
+  getPatternSources(
+    _request: GetPatternSourcesRequest,
+  ): PatternSourcesResponse {
+    const snapshot = this.runtime.scheduler.getGraphSnapshot();
+    const seen = new Set<string>();
+    const patterns: PatternSourcesResponse["patterns"] = [];
+
+    for (const node of snapshot.nodes) {
+      if (node.patternId && !seen.has(node.patternId)) {
+        seen.add(node.patternId);
+        try {
+          const meta = this.runtime.patternManager.getPatternMeta({
+            patternId: node.patternId,
+          });
+          if (meta?.program && typeof meta.program === "object") {
+            const program = meta.program as {
+              files?: Array<{ name: string; contents: string }>;
+            };
+            if (program.files) {
+              patterns.push({
+                patternId: node.patternId,
+                patternName: meta.patternName,
+                files: program.files.map((f) => ({
+                  name: f.name,
+                  contents: f.contents,
+                })),
+              });
+            }
+          }
+        } catch {
+          // Pattern not found or no metadata available
+        }
+      }
+    }
+    return { patterns };
+  }
+
+  setBreakpoints(request: SetBreakpointsRequest): void {
+    this.runtime.scheduler.setBreakpoints(request.actionIds);
+  }
+
   async detectNonIdempotent(
     request: DetectNonIdempotentRequest,
   ): Promise<DetectNonIdempotentResponse> {
@@ -946,6 +990,10 @@ export class RuntimeProcessor {
         return this.setWriteStackTraceMatchers(request);
       case RequestType.DetectNonIdempotent:
         return await this.detectNonIdempotent(request);
+      case RequestType.GetPatternSources:
+        return this.getPatternSources(request);
+      case RequestType.SetBreakpoints:
+        return this.setBreakpoints(request);
       case RequestType.VDomEvent:
         return this.handleVDomEvent(request);
       case RequestType.VDomMount:
