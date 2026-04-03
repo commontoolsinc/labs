@@ -259,10 +259,10 @@ export class Runtime {
 
   constructor(options: RuntimeOptions) {
     this.experimental = {
-      modernDataModel: false,
-      unifiedJsonEncoding: false,
-      modernHash: false,
-      modernSchemaHash: false,
+      modernDataModel: undefined,
+      unifiedJsonEncoding: undefined,
+      modernHash: undefined,
+      modernSchemaHash: undefined,
       ...options.experimental,
     };
 
