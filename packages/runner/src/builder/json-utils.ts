@@ -171,7 +171,8 @@ type AnalyzeTypeState = {
 
 /**
  * Helper for `createJsonSchema()` which analyzes a value, calling itself
- * recursively on subcomponents of the value (if any).
+ * recursively on subcomponents of the value (if any). The return value is
+ * always an interned schema.
  */
 function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
   if (isCellLink(value)) {
@@ -185,23 +186,34 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
     }
 
     const cell = state.runtime?.getCellFromLink(link);
-    if (!cell) return emptySchemaObject(); // TODO(seefeld): Should be `true`.
+    if (!cell) {
+      // Shouldn't happen: We have a cell link but its link doesn't correspond
+      // to a cell.
+      // TODO(seefeld): Should be `true`.
+      // TODO(danfuzz): Or maybe it should `throw`?
+      return emptySchemaObject();
+    }
 
     let schema = cell.schema;
     if (schema === undefined) {
-      // If we find pointing back here, assume an empty schema. This is
-      // overwritten below. (TODO(seefeld): This should create `$ref: "#/.."`)
+      // The `seen.set()` here provides a safe default which prevents ending up
+      // back in this block (which would cause runaway recursion). The call to
+      // `analyzeType()` will typically overwrite the backstop.
+      // TODO(seefeld): This should create `$ref: "#/.."`.
       seen.set(linkAsStr, emptySchemaObject());
       schema = analyzeType(cell.getRaw(), state);
+    } else {
+      // This needs to be interned for deduping during array analysis. (See
+      // comments below.)
+      schema = internSchema(schema);
     }
     seen.set(linkAsStr, schema);
     return schema;
   }
 
-  // Adds the `default` when appropriate and does any final result processing.
-  // **Note:** The interning here is necessary so that the array analysis can
-  // do its object-identity-based uniquing. (That is, this isn't merely to
-  // get the outer return value of `createJsonSchema()` to be interned.)
+  // Adds the `default` when appropriate and does the necessary final result
+  // processing. The result needs to be interned for deduping during array
+  // analysis. (See comment below.)
   const finishResult = (schema: JSONSchema, addDefault = true): JSONSchema => {
     const result = (addDefault && state.addDefaults)
       ? schemaWithProperties(schema, { default: value })
@@ -217,6 +229,10 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
 
   switch (basicSchema.type) {
     case "array": {
+      // The call here deduplicates the individual array element schemas using
+      // object-identity-based uniquing. In order for it to work, all of the
+      // schemas have to be interned. See comments above on the `internSchema()`
+      // use sites that enable this.
       const items = itemsSchemaFromArray(value, state);
       const result = schemaWithProperties(basicSchema, { items });
       return finishResult(result);
