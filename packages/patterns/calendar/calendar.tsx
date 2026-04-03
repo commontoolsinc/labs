@@ -59,7 +59,7 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
   const newDate = Writable.of(todayDate);
   const newTime = Writable.of("");
 
-  const eventCount = computed(() => events.get().length);
+  const eventCount = computed(() => events.get()?.length ?? 0);
 
   const sortedEvents = computed((): EventPiece[] => {
     const all = events.get();
