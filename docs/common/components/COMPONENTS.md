@@ -32,6 +32,28 @@ Use camelCase for Common Fabric component properties. Kebab-case JSX attributes 
 <cf-autocomplete allowCustom={true} />  // Sets element.allowCustom correctly
 ```
 
+## Styling Affordances
+
+When you need to style Common Fabric components, look for these public
+affordances in this order:
+
+1. documented component props and layout primitives
+2. CSS custom properties
+3. CSS parts
+4. `cf-theme` when the environment already provides or intentionally adds it
+5. current component stories and cookbook examples
+
+Useful companion references:
+
+- `docs/common/patterns/style.md`
+- `docs/common/patterns/ui-cookbook.md`
+- `packages/ui/README.md`
+- `packages/ui/LLM-COMPONENT-INSTRUCTIONS.md`
+
+This document does not yet enumerate every custom property or part for every
+component. When a component exposes those affordances, prefer them over
+guessing at unsupported shadow-internal structure.
+
 ---
 
 ## cf-button
@@ -426,24 +448,6 @@ const mapData = {
 - **Default center:** San Francisco (37.7749, -122.4194)
 - **Emoji markers:** Use any emoji as the `icon` property
 - **Rich popups:** Pass a pattern reference via `popup` for interactive popup content
-
----
-
-## Style Syntax
-
-| Element | Syntax | Example |
-|---------|--------|---------|
-| HTML (`div`, `span`) | Object, camelCase | `style={{ backgroundColor: "#fff" }}` |
-| Custom (`cf-*`) | String, kebab-case | `style="background-color: #fff;"` |
-
-```tsx
-// Mixed usage
-<div style={{ display: "flex", gap: "1rem" }}>
-  <cf-vstack style="flex: 1; padding: 1rem;">
-    <span style={{ color: "#333" }}>Label</span>
-  </cf-vstack>
-</div>
-```
 
 ---
 

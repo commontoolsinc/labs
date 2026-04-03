@@ -78,17 +78,17 @@ Ternaries are valid in JSX. The transformer auto-converts them to `ifElse()`.
 | `$checked={item}` | `$checked={item.done}` |
 | wrong event name | Use `oncf-send`, `oncf-input`, or `oncf-change` |
 
-### 6. Style Syntax
+### 6. Custom Component Props and Styling Affordances
 
-HTML elements require object style syntax. Custom `cf-*` elements require
-string style syntax. Also check that custom component props use the correct
-camelCase names.
+Check that Common Fabric component props use the correct camelCase names and
+that the implementation uses public styling affordances intentionally rather
+than guessing at unsupported internals.
 
 | Violation | Fix |
 |-----------|-----|
-| string style on HTML | Convert to object syntax |
-| object style on `cf-*` | Convert to string syntax |
 | kebab-case props on `cf-*` | Use camelCase, for example `allowCustom` |
+| styling through guessed shadow-internal selectors | Prefer documented custom properties, parts, or theme hooks |
+| arbitrary one-off visual overrides where theme/custom properties would work | Prefer public styling affordances with fallbacks |
 
 ### 7. Handler Binding
 
@@ -161,6 +161,10 @@ When to use `handler()`:
 | normalized state | no duplicate data, single source of truth |
 | self-documenting types | type names and field names are clear without comments |
 | appropriate granularity | neither too fine nor too coarse |
+| visual hierarchy | important content and actions read clearly at a glance |
+| spacing and grouping | related elements are grouped; the layout does not collapse into a raw form dump |
+| empty and first-run states | zero-data flows are understandable and actionable |
+| theme/styling stance | theme hooks, custom properties, or parts are used intentionally when relevant |
 
 ### 13. Regression Check
 
