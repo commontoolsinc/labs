@@ -35,7 +35,7 @@ describe("hashOf", () => {
   it("should create a reference that is equal to another reference with the same source", () => {
     const ref = hashOf({ hello: "world" });
     const ref2 = hashOf({ hello: "world" });
-    expect(ref).toEqual(ref2);
+    expect(ref.toJSON!()).toEqual(ref2.toJSON!());
   });
 });
 
@@ -67,7 +67,7 @@ describe("cell-map", () => {
       const cause = "custom-cause";
       const ref = createRef(source, cause);
       const ref2 = createRef(source);
-      expect(ref).not.toEqual(ref2);
+      expect(ref.toJSON!()).not.toEqual(ref2.toJSON!());
     });
   });
 

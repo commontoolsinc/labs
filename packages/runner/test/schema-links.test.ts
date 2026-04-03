@@ -1384,7 +1384,7 @@ describe("Schema - Link Resolution", () => {
           "system": {
             "$alias": {
               "path": ["internal", "__#1"],
-              "cell": { "/": cellCLink.id.split(":")[1] },
+              "cell": { "/": cellCLink.id.replace(/^of:/, "") },
             },
           },
         },
@@ -1403,7 +1403,7 @@ describe("Schema - Link Resolution", () => {
               "$defs": {}, // the real case has a bunch here, but it doesn't matter
             },
             "cell": {
-              "/": cellBLink.id.split(":")[1],
+              "/": cellBLink.id.replace(/^of:/, ""),
             },
           },
         },
