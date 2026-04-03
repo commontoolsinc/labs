@@ -256,7 +256,11 @@ Deno.test("CellBridge.loadPieceTree creates a stub without eager input hydration
     .loadPieceTree(piece, tree.rootIno, "Article", "home");
 
   const inputIno = tree.lookup(pieceIno, "input");
-  assertEquals(inputIno, undefined, "input/ dir should not exist before hydration");
+  assertEquals(
+    inputIno,
+    undefined,
+    "input/ dir should not exist before hydration",
+  );
 });
 
 Deno.test("CellBridge.hydratePieceProp materializes input and result on demand", async () => {
@@ -286,7 +290,11 @@ Deno.test("CellBridge.hydratePieceProp materializes input and result on demand",
     },
   };
 
-  state.pieceControllers.set("Post", piece as unknown as SpaceState["pieceControllers"] extends Map<string, infer T> ? T : never);
+  state.pieceControllers.set(
+    "Post",
+    piece as unknown as SpaceState["pieceControllers"] extends
+      Map<string, infer T> ? T : never,
+  );
   const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
     .loadPieceTree(piece, state.piecesIno, "Post", "home");
   state.pieceMap.set("Post", piece.id);
@@ -295,13 +303,21 @@ Deno.test("CellBridge.hydratePieceProp materializes input and result on demand",
   await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
     .hydratePieceProp.call(bridge, pieceIno, "input");
   const inputIno = tree.lookup(pieceIno, "input");
-  assertEquals(inputIno !== undefined, true, "input/ dir should exist after hydration");
+  assertEquals(
+    inputIno !== undefined,
+    true,
+    "input/ dir should exist after hydration",
+  );
   assertEquals(getFileContent(tree, inputIno!, "title"), "hello");
 
   await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
     .hydratePieceProp.call(bridge, pieceIno, "result");
   const resultIno = tree.lookup(pieceIno, "result");
-  assertEquals(resultIno !== undefined, true, "result/ dir should exist after hydration");
+  assertEquals(
+    resultIno !== undefined,
+    true,
+    "result/ dir should exist after hydration",
+  );
 
   const contentValue = getFileContent(tree, resultIno!, "content");
   assertEquals(contentValue, "world");
@@ -343,7 +359,11 @@ Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables 
     },
   };
 
-  state.pieceControllers.set("Contact Book", piece as unknown as SpaceState["pieceControllers"] extends Map<string, infer T> ? T : never);
+  state.pieceControllers.set(
+    "Contact Book",
+    piece as unknown as SpaceState["pieceControllers"] extends
+      Map<string, infer T> ? T : never,
+  );
   const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
     .loadPieceTree(piece, state.piecesIno, "Contact Book", "home");
   state.pieceMap.set("Contact Book", piece.id);

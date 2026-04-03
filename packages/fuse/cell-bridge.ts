@@ -527,7 +527,9 @@ export class CellBridge {
   ): PieceController | undefined {
     const bareId = pieceId.startsWith("of:") ? pieceId.slice(3) : pieceId;
     for (const piece of state.pieceControllers.values()) {
-      const candidate = piece.id.startsWith("of:") ? piece.id.slice(3) : piece.id;
+      const candidate = piece.id.startsWith("of:")
+        ? piece.id.slice(3)
+        : piece.id;
       if (candidate === bareId) return piece;
     }
     return undefined;
