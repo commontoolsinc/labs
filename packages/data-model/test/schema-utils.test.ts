@@ -689,15 +689,19 @@ describe("schemaForValueType", () => {
         assertEquals(schemaForValueType(example), { type: typeName });
       });
 
+      it("should return a frozen result", () => {
+        assert(isDeepFrozen(schemaForValueType(example)));
+      });
+
       it("should return an interned result", () => {
+        assert(isInternedSchema(schemaForValueType(example)));
+      });
+
+      it("should return the same result every time", () => {
         assertStrictEquals(
           schemaForValueType(example),
           schemaForValueType(example),
         );
-      });
-
-      it("should return a frozen result", () => {
-        assert(isDeepFrozen(schemaForValueType(example)));
       });
     });
   }
