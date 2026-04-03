@@ -150,8 +150,11 @@ describe("piece pull materialization", () => {
 
   it("waits for setup to settle before setupPersistent syncs pattern metadata", async () => {
     const pattern = doublePattern();
+    const patternId = "test-pattern-id";
     const originalSetup = manager.runtime.setup.bind(manager.runtime);
-    const originalSyncPattern = manager.syncPattern.bind(manager);
+    const originalGetPatternMeta = manager.runtime.patternManager.getPatternMeta
+      .bind(manager.runtime.patternManager);
+    const originalSyncPatternById = manager.syncPatternById.bind(manager);
     let setupResolved = false;
     let releaseSetup: (() => void) | undefined;
 
@@ -165,14 +168,23 @@ describe("piece pull materialization", () => {
       });
     }) as typeof manager.runtime.setup;
 
-    manager.syncPattern = (() => {
+    const getPatternMetaStub: unknown = () => ({
+      id: patternId,
+    });
+    manager.runtime.patternManager.getPatternMeta =
+      getPatternMetaStub as typeof manager.runtime.patternManager.getPatternMeta;
+
+    manager.syncPatternById = ((id: string) => {
+      expect(id).toBe(patternId);
       expect(setupResolved).toBe(true);
       return Promise.resolve(pattern);
-    }) as typeof manager.syncPattern;
+    }) as typeof manager.syncPatternById;
 
     try {
       const pending = manager.setupPersistent(pattern, { input: 5 });
-      await Promise.resolve();
+      for (let i = 0; i < 20 && !releaseSetup; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
       expect(setupResolved).toBe(false);
       if (!releaseSetup) {
         throw new Error("Expected runtime.setup to be called");
@@ -181,7 +193,8 @@ describe("piece pull materialization", () => {
       await pending;
     } finally {
       manager.runtime.setup = originalSetup;
-      manager.syncPattern = originalSyncPattern;
+      manager.runtime.patternManager.getPatternMeta = originalGetPatternMeta;
+      manager.syncPatternById = originalSyncPatternById;
     }
   });
 
