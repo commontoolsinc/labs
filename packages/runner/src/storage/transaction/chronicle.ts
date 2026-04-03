@@ -1,12 +1,6 @@
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isRecord } from "@commonfabric/utils/types";
 import { normalizeFact, unclaimed } from "@commonfabric/memory/fact";
-import {
-  ENTITY_DOCUMENT_MARKER_KEY,
-  ENTITY_DOCUMENT_MARKER_VALUE,
-  isEntityDocument,
-} from "@commonfabric/memory/v2";
 import type {
   Assertion,
   IAttestation,

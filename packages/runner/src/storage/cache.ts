@@ -1,7 +1,5 @@
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
-import {
-  hashObjectFromString,
-} from "@commonfabric/data-model/value-hash";
+import { hashObjectFromString } from "@commonfabric/data-model/value-hash";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import type {
   CauseString,
@@ -33,14 +31,11 @@ import * as Consumer from "@commonfabric/memory/consumer";
 import * as Codec from "@commonfabric/memory/codec";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isBrowser } from "@commonfabric/utils/env";
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import {
-  hashSchema,
-  internSchema,
-} from "@commonfabric/data-model/schema-hash";
+import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   schemaWithProperties,
   toDeepFrozenSchema,
