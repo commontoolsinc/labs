@@ -259,7 +259,7 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
 
 /**
  * Helper for `analyzeType()` which derives an `items` schema property from an
- * array value.
+ * array value. The result is always an interned schema.
  */
 function itemsSchemaFromArray(
   value: JSONValue[],
@@ -278,7 +278,7 @@ function itemsSchemaFromArray(
   const uniqueSchemas = [...new Set(schemas)];
   return (uniqueSchemas.length === 1)
     ? uniqueSchemas[0]
-    : { anyOf: uniqueSchemas };
+    : internSchema({ anyOf: uniqueSchemas });
 }
 
 export function moduleToJSON(module: Module) {
