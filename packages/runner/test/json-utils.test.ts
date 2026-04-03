@@ -8,7 +8,11 @@ import {
   createJsonSchema,
   toJSONWithLegacyAliases,
 } from "../src/builder/json-utils.ts";
-import { type JSONSchema, type JSONSchemaObj } from "../src/builder/types.ts";
+import {
+  type FabricValue,
+  type JSONSchema,
+  type JSONSchemaObj,
+} from "../src/builder/types.ts";
 import { isInternedSchema } from "@commontools/data-model/schema-hash";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
@@ -444,6 +448,51 @@ describe("json-utils", () => {
           ],
         },
       });
+    });
+
+    it("should deduplicate an array type that is derived from a cell and a non-cell", () => {
+      const itemsSchema = {
+        type: "object",
+        properties: { name: { type: "string" } },
+      };
+      const expectSchema = {
+        type: "array",
+        items: itemsSchema
+      };
+
+      const nonCell = { name: "Zamboni" };
+      const sansSchema = runtime.getImmutableCell(
+        space,
+        { name: "Philo" },
+      );
+      const avecSchema = runtime.getImmutableCell(
+        space,
+        { name: "Damian" },
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+          }
+        }
+      );
+
+      const create = (value: FabricValue) => createJsonSchema(value, false, runtime);
+
+      // Preflight expectations.
+      const schema1 = create(nonCell);
+      const schema2 = create(sansSchema);
+      const schema3 = create(avecSchema);
+      expect(schema1).toEqual(itemsSchema);
+      expect(schema2).toBe(schema1);
+      expect(schema3).toBe(schema1);
+
+      // The main tests.
+      const schema4 = create([sansSchema, nonCell]);
+      const schema5 = create([avecSchema, nonCell]);
+      const schema6 = create([nonCell, sansSchema, avecSchema]);
+      expect(schema4).toEqual(expectSchema);
+      expect(schema5).toBe(schema4);
+      expect(schema6).toBe(schema4);
     });
 
     it("should analyze object properties that mix plain values and cell links", () => {
