@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, pattern, UI } from "commontools";
+import { type Cell, Default, handler, pattern, UI } from "commonfabric";
 
 interface FriendListsState {
   personalFriends: Default<
@@ -212,32 +212,32 @@ export default pattern<FriendListsState>(
             </button>
           </div>
 
-          <ct-keybind
+          <cf-keybind
             ctrl
             key="ArrowUp"
-            onct-keybind={moveUpHandler}
+            oncf-keybind={moveUpHandler}
           />
-          <ct-keybind
+          <cf-keybind
             ctrl
             key="ArrowDown"
-            onct-keybind={moveDownHandler}
+            oncf-keybind={moveDownHandler}
           />
-          <ct-keybind
+          <cf-keybind
             ctrl
             key="ArrowLeft"
-            onct-keybind={moveToPersonalHandler}
+            oncf-keybind={moveToPersonalHandler}
           />
-          <ct-keybind
+          <cf-keybind
             ctrl
             key="ArrowRight"
-            onct-keybind={moveToWorkHandler}
+            oncf-keybind={moveToWorkHandler}
           />
 
           <div style="display: flex; gap: 2rem;">
             <div>
               <h3>Personal Friends</h3>
               <ul>
-                {/* Note: key is not needed for Common Tools but linters require it */}
+                {/* Note: key is not needed for Common Fabric but linters require it */}
                 {state.personalFriends.map((friend, index) => (
                   <li
                     key={index}
@@ -255,7 +255,7 @@ export default pattern<FriendListsState>(
             <div>
               <h3>Work Friends</h3>
               <ul>
-                {/* Note: key is not needed for Common Tools but linters require it */}
+                {/* Note: key is not needed for Common Fabric but linters require it */}
                 {state.workFriends.map((friend, index) => (
                   <li
                     key={index}

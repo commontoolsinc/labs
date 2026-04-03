@@ -1,24 +1,24 @@
 /// <cts-enable />
-import { NAME, pattern, UI, Writable } from "commontools";
+import { NAME, pattern, UI, Writable } from "commonfabric";
 
 /**
- * Reproduction case for ct-select not displaying initial values from backend.
+ * Reproduction case for cf-select not displaying initial values from backend.
  *
- * Bug: When a ct-select is bound to a cell via $value, the dropdown would show
+ * Bug: When a cf-select is bound to a cell via $value, the dropdown would show
  * the placeholder "-" instead of the actual cell value on initial page load.
  * The value was present in the cell, but the component's onChange callback
  * wasn't being called when the subscription received backend updates.
  *
  * Root cause: CellController._setupCellSubscription() only called
  * host.requestUpdate() when cell values changed, but didn't call the onChange
- * callback. Components like ct-select rely on onChange to sync their DOM state.
+ * callback. Components like cf-select rely on onChange to sync their DOM state.
  *
  * Fix: In cell-controller.ts, the subscription callback now calls onChange
  * when the cell value changes from the backend.
  *
  * To test:
  * 1. Deploy this pattern with `piece new`
- * 2. Use CLI to set values: echo '"video"' | ct piece set --piece ID type ...
+ * 2. Use CLI to set values: echo '"video"' | cf piece set --piece ID type ...
  * 3. Refresh the page - the dropdown should show "🎬 Video", not "-"
  * 4. The "Current value" text should also display "video"
  */
@@ -36,12 +36,12 @@ export default pattern<Record<string, never>, Output>(() => {
   return {
     [NAME]: "Select Initial Value Repro",
     [UI]: (
-      <ct-screen>
-        <ct-vstack gap="4" style="padding: 1rem;">
-          <ct-card>
-            <ct-vstack gap="2">
-              <ct-heading level={4}>Type Select</ct-heading>
-              <ct-select
+      <cf-screen>
+        <cf-vstack gap="4" style="padding: 1rem;">
+          <cf-card>
+            <cf-vstack gap="2">
+              <cf-heading level={4}>Type Select</cf-heading>
+              <cf-select
                 $value={type}
                 items={[
                   { label: "📄 Article", value: "article" },
@@ -53,13 +53,13 @@ export default pattern<Record<string, never>, Output>(() => {
               <p>
                 <strong>Current value:</strong> {type}
               </p>
-            </ct-vstack>
-          </ct-card>
+            </cf-vstack>
+          </cf-card>
 
-          <ct-card>
-            <ct-vstack gap="2">
-              <ct-heading level={4}>Status Select</ct-heading>
-              <ct-select
+          <cf-card>
+            <cf-vstack gap="2">
+              <cf-heading level={4}>Status Select</cf-heading>
+              <cf-select
                 $value={status}
                 items={[
                   { label: "Want to read", value: "want" },
@@ -71,16 +71,16 @@ export default pattern<Record<string, never>, Output>(() => {
               <p>
                 <strong>Current value:</strong> {status}
               </p>
-            </ct-vstack>
-          </ct-card>
+            </cf-vstack>
+          </cf-card>
 
           <p style="color: gray; font-size: 0.875rem;">
             If either dropdown shows "-" instead of its value on page load, the
             bug is present. Both dropdowns should show their selected values
             immediately.
           </p>
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     type,
     status,

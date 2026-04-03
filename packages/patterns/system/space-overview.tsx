@@ -14,13 +14,13 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { type MentionablePiece } from "./backlinks-index.tsx";
 import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,
 } from "./summary-index.tsx";
-import { listMentionable, listRecent } from "./common-tools.tsx";
+import { listMentionable, listRecent } from "./common-fabric.tsx";
 
 // ===== Types =====
 
@@ -129,16 +129,16 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
   return {
     [NAME]: "Space Overview",
     [UI]: (
-      <ct-screen>
-        <ct-toolbar slot="header" sticky>
+      <cf-screen>
+        <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Space Overview</h2>
-        </ct-toolbar>
+        </cf-toolbar>
 
-        <ct-autostart onstart={triggerAnalysis({ addMessage })} />
+        <cf-autostart onstart={triggerAnalysis({ addMessage })} />
 
-        <ct-vscroll flex showScrollbar fadeEdges>
-          <ct-vstack gap="3" style="padding: 1rem;">
-            <ct-message-beads
+        <cf-vscroll flex showScrollbar fadeEdges>
+          <cf-vstack gap="3" style="padding: 1rem;">
+            <cf-message-beads
               label="overview"
               $messages={messages}
               pending={pending}
@@ -146,7 +146,7 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
 
             {ifElse(
               hasResult,
-              <ct-vstack gap="4">
+              <cf-vstack gap="4">
                 <p
                   style={{
                     fontSize: "18px",
@@ -158,12 +158,12 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                   {overview?.headline}
                 </p>
 
-                <ct-vstack gap="2">
+                <cf-vstack gap="2">
                   <h3
                     style={{
                       margin: 0,
                       fontSize: "14px",
-                      color: "var(--ct-color-gray-500)",
+                      color: "var(--cf-color-gray-500)",
                       textTransform: "uppercase",
                       letterSpacing: "0.05em",
                     }}
@@ -171,12 +171,12 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                     Themes
                   </h3>
                   {overview?.themes.map((theme) => (
-                    <ct-vstack
+                    <cf-vstack
                       gap="1"
                       style={{
                         padding: "0.75rem",
                         borderRadius: "8px",
-                        background: "var(--ct-color-gray-50)",
+                        background: "var(--cf-color-gray-50)",
                       }}
                     >
                       <strong style={{ fontSize: "14px" }}>{theme.name}</strong>
@@ -184,21 +184,21 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                         style={{
                           margin: 0,
                           fontSize: "13px",
-                          color: "var(--ct-color-gray-600)",
+                          color: "var(--cf-color-gray-600)",
                         }}
                       >
                         {theme.description}
                       </p>
-                    </ct-vstack>
+                    </cf-vstack>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
 
-                <ct-vstack gap="1">
+                <cf-vstack gap="1">
                   <h3
                     style={{
                       margin: 0,
                       fontSize: "14px",
-                      color: "var(--ct-color-gray-500)",
+                      color: "var(--cf-color-gray-500)",
                       textTransform: "uppercase",
                       letterSpacing: "0.05em",
                     }}
@@ -208,16 +208,16 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                   <p style={{ margin: 0, fontSize: "14px", lineHeight: "1.5" }}>
                     {overview?.recentActivity}
                   </p>
-                </ct-vstack>
+                </cf-vstack>
 
                 {ifElse(
                   computed(() => (overview?.connections?.length ?? 0) > 0),
-                  <ct-vstack gap="1">
+                  <cf-vstack gap="1">
                     <h3
                       style={{
                         margin: 0,
                         fontSize: "14px",
-                        color: "var(--ct-color-gray-500)",
+                        color: "var(--cf-color-gray-500)",
                         textTransform: "uppercase",
                         letterSpacing: "0.05em",
                       }}
@@ -235,16 +235,16 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                         {conn.description}
                       </p>
                     ))}
-                  </ct-vstack>,
+                  </cf-vstack>,
                   <span />,
                 )}
 
-                <ct-vstack gap="1">
+                <cf-vstack gap="1">
                   <h3
                     style={{
                       margin: 0,
                       fontSize: "14px",
-                      color: "var(--ct-color-gray-500)",
+                      color: "var(--cf-color-gray-500)",
                       textTransform: "uppercase",
                       letterSpacing: "0.05em",
                     }}
@@ -261,9 +261,9 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                   >
                     {overview?.suggestions.map((s) => <li>{s}</li>)}
                   </ul>
-                </ct-vstack>
-              </ct-vstack>,
-              <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+                </cf-vstack>
+              </cf-vstack>,
+              <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
                 {ifElse(
                   pending,
                   <span>Exploring the space...</span>,
@@ -271,9 +271,9 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
                 )}
               </div>,
             )}
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
     summary,
   };

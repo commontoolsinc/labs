@@ -7,7 +7,7 @@ Any cell result with `[UI]` renders when placed in JSX — you don't need to kno
 Use a `Writable<string>` to represent the active view. A `computed()` block maps the string to a pattern instance:
 
 ```tsx
-import { computed, handler, pattern, UI, Writable } from "commontools";
+import { computed, handler, pattern, UI, Writable } from "commonfabric";
 import EditView from "./edit-view.tsx";
 import PreviewView from "./preview-view.tsx";
 import SettingsView from "./settings-view.tsx";
@@ -30,9 +30,9 @@ export default pattern<{ activeView: Writable<string> }>(({ activeView }) => {
     [UI]: (
       <div>
         <div>
-          <ct-button onClick={setView({ id: "edit", activeView })}>Edit</ct-button>
-          <ct-button onClick={setView({ id: "preview", activeView })}>Preview</ct-button>
-          <ct-button onClick={setView({ id: "settings", activeView })}>Settings</ct-button>
+          <cf-button onClick={setView({ id: "edit", activeView })}>Edit</cf-button>
+          <cf-button onClick={setView({ id: "preview", activeView })}>Preview</cf-button>
+          <cf-button onClick={setView({ id: "settings", activeView })}>Settings</cf-button>
         </div>
         <>{view}</>
       </div>
@@ -47,10 +47,10 @@ When `activeView` changes, the `computed` re-runs and returns a different sub-pa
 
 ## Approach 2: Update a Cell Pointer
 
-Instead of mapping a string to a view, hold a direct reference to the active cell and update it. The items must be **renderable cells** (pattern instances with `[UI]`) — not plain data objects. Use `<ct-render $cell={...} />` to display whatever cell is currently selected:
+Instead of mapping a string to a view, hold a direct reference to the active cell and update it. The items must be **renderable cells** (pattern instances with `[UI]`) — not plain data objects. Use `<cf-render $cell={...} />` to display whatever cell is currently selected:
 
 ```tsx
-import { computed, equals, handler, pattern, UI, Writable } from "commontools";
+import { computed, equals, handler, pattern, UI, Writable } from "commonfabric";
 import ItemView from "./item-view.tsx";
 
 // ItemView produces cells with [UI]; this type captures what we need for the list
@@ -88,8 +88,8 @@ export default pattern<{
             {entry.item.title}
           </div>
         ))}
-        {/* ct-render extracts and displays the active cell's [UI] */}
-        <ct-render $cell={activeItem} />
+        {/* cf-render extracts and displays the active cell's [UI] */}
+        <cf-render $cell={activeItem} />
       </div>
     ),
     activeItem,
@@ -102,25 +102,25 @@ This is useful when:
 - Rendering anonymous cells — you just need to display whatever the pointer references
 - Embedding cells from other patterns or spaces
 
-**Key point:** The items stored in `activeItem` must be cells with `[UI]` (i.e., pattern instances), not plain data objects. Placing a plain data object in `activeItem` and using `<ct-render>` will render nothing. If you need to select plain data and display it, use Approach 1 (switch on a string) or render the data's fields directly in JSX.
+**Key point:** The items stored in `activeItem` must be cells with `[UI]` (i.e., pattern instances), not plain data objects. Placing a plain data object in `activeItem` and using `<cf-render>` will render nothing. If you need to select plain data and display it, use Approach 1 (switch on a string) or render the data's fields directly in JSX.
 
-**Rendering anonymous cells:** Use `<ct-render $cell={piece} />` to render any cell's `[UI]`, even if you don't know its type. See `packages/patterns/system/piece-grid.tsx` for an example rendering a grid of arbitrary pieces.
+**Rendering anonymous cells:** Use `<cf-render $cell={piece} />` to render any cell's `[UI]`, even if you don't know its type. See `packages/patterns/system/piece-grid.tsx` for an example rendering a grid of arbitrary pieces.
 
 ## Approach 3: Tabs
 
-For simple tabbed UIs, `ct-tabs` handles string-based view switching as a built-in:
+For simple tabbed UIs, `cf-tabs` handles string-based view switching as a built-in:
 
 ```tsx
 const activeTab = Writable.of("spaces").for("activeTab");
 
-<ct-tabs $value={activeTab}>
-  <ct-tab-list>
-    <ct-tab value="spaces">Spaces</ct-tab>
-    <ct-tab value="favorites">Favorites</ct-tab>
-  </ct-tab-list>
-  <ct-tab-panel value="spaces">{spacesView}</ct-tab-panel>
-  <ct-tab-panel value="favorites">{favoritesView}</ct-tab-panel>
-</ct-tabs>
+<cf-tabs $value={activeTab}>
+  <cf-tab-list>
+    <cf-tab value="spaces">Spaces</cf-tab>
+    <cf-tab value="favorites">Favorites</cf-tab>
+  </cf-tab-list>
+  <cf-tab-panel value="spaces">{spacesView}</cf-tab-panel>
+  <cf-tab-panel value="favorites">{favoritesView}</cf-tab-panel>
+</cf-tabs>
 ```
 
 The `.for("activeTab")` call makes the tab state durable (persisted by key). See `packages/patterns/system/home.tsx`.
@@ -131,8 +131,8 @@ The `.for("activeTab")` call makes the tab state durable (persisted by key). See
 |---|---|
 | Known set of views, menu/sidebar navigation | Switch on a string |
 | Selecting from dynamic data (list items, search results) | Cell pointer |
-| Simple tabbed layout with static panels | `ct-tabs` |
-| Rendering cells you don't control (grids, embeds) | Cell pointer + `ct-render` |
+| Simple tabbed layout with static panels | `cf-tabs` |
+| Rendering cells you don't control (grids, embeds) | Cell pointer + `cf-render` |
 
 ## See Also
 

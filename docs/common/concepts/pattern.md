@@ -96,7 +96,7 @@ export default pattern<TodoInput>(({ items }) => {
 When a pattern will be rendered inside another pattern (e.g., Column inside Board), include `[NAME]` and `[UI]` in the Output type:
 
 ```typescript
-import { NAME, UI, VNode, Stream } from "commontools";
+import { NAME, UI, VNode, Stream } from "commonfabric";
 
 interface ColumnOutput {
   [NAME]: string;

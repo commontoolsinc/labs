@@ -1,6 +1,6 @@
-import { ACL, ACL_TYPE, ACLUser, DID } from "@commontools/memory/acl";
-import { Capability } from "@commontools/memory/interface";
-import { Cell, Runtime } from "@commontools/runner";
+import { ACL, ACL_TYPE, ACLUser, DID } from "@commonfabric/memory/acl";
+import { Capability } from "@commonfabric/memory/interface";
+import { Cell, Runtime } from "@commonfabric/runner";
 
 export class ACLManager {
   #runtime: Runtime;

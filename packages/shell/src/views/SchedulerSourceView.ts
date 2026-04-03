@@ -1,6 +1,6 @@
 import { css, html, LitElement, TemplateResult } from "lit";
 import { property, state } from "lit/decorators.js";
-import type { PatternSourceInfo } from "@commontools/runtime-client";
+import type { PatternSourceInfo } from "@commonfabric/runtime-client";
 
 /** Parsed source location from an action ID */
 interface ActionLocation {

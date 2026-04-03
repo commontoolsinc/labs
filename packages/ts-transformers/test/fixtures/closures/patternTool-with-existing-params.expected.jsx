@@ -1,11 +1,11 @@
-import * as __ctHelpers from "commontools";
-import { cell, derive, pattern, patternTool, type PatternToolResult } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { cell, derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
 const multiplier = cell(2, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 const offset = cell(10, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 type Output = {
     tool: PatternToolResult<{
         offset: number;
@@ -25,7 +25,7 @@ export default pattern(() => {
     const tool = patternTool(({ value, offset, multiplier }: {
         value: number;
         offset: number;
-        multiplier: __ctHelpers.Cell<number>;
+        multiplier: __cfHelpers.Cell<number>;
     }) => {
         return derive({
             type: "object",
@@ -38,9 +38,9 @@ export default pattern(() => {
                 }
             },
             required: ["value", "offset"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { value, offset }, ({ value, offset }) => {
+        } as const satisfies __cfHelpers.JSONSchema, { value, offset }, ({ value, offset }) => {
             return value * multiplier.get() + offset;
         });
     }, {
@@ -52,7 +52,7 @@ export default pattern(() => {
     type: "object",
     properties: {},
     additionalProperties: false
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         tool: {
@@ -85,8 +85,8 @@ export default pattern(() => {
             required: ["argumentSchema", "resultSchema"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

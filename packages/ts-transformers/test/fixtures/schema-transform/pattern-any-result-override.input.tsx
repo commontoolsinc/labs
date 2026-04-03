@@ -4,7 +4,7 @@ import {
   pattern,
   UI,
   VNode,
-} from "commontools";
+} from "commonfabric";
 
 // Simulates `any` leaking through a generic function (like generateObject)
 declare function fetchAny(): any;

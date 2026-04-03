@@ -17,7 +17,7 @@ the browser:
 
 ```tsx
 // schemas.tsx
-import type { Stream } from "commontools";
+import type { Stream } from "commonfabric";
 
 export interface AddItemEvent {
   title: string;
@@ -53,39 +53,39 @@ export default pattern<Input, Output>(({ items }) => {
 
 ```bash
 # Deploy or update the pattern
-deno task ct piece new ... pattern.tsx
-deno task ct piece setsrc ... pattern.tsx
+deno task cf piece new ... pattern.tsx
+deno task cf piece setsrc ... pattern.tsx
 
 # Call a handler directly with JSON payload
-deno task ct piece call ... addItem '{"title": "Test Item", "category": "demo"}'
+deno task cf piece call ... addItem '{"title": "Test Item", "category": "demo"}'
 
 # Run a step to process the handler
-deno task ct piece step ...
+deno task cf piece step ...
 
 # Verify state changed
-deno task ct piece inspect ...
+deno task cf piece inspect ...
 
 # Or mount the space and execute the mounted callable file
-deno task ct fuse mount /tmp/ct ...
-head -n1 /tmp/ct/<space>/pieces/<piece>/result/addItem.handler
-deno task ct exec /tmp/ct/<space>/pieces/<piece>/result/addItem.handler --help
-deno task ct exec /tmp/ct/<space>/pieces/<piece>/result/addItem.handler --title "Test Item"
+deno task cf fuse mount /tmp/cf ...
+head -n1 /tmp/cf/<space>/pieces/<piece>/result/addItem.handler
+deno task cf exec /tmp/cf/<space>/pieces/<piece>/result/addItem.handler --help
+deno task cf exec /tmp/cf/<space>/pieces/<piece>/result/addItem.handler --title "Test Item"
 
-# Mounted tools surface as .tool files and run through ct exec
-head -n1 /tmp/ct/<space>/pieces/<piece>/result/search.tool
-deno task ct exec /tmp/ct/<space>/pieces/<piece>/result/search.tool --help
-deno task ct exec /tmp/ct/<space>/pieces/<piece>/result/search.tool --query "demo"
+# Mounted tools surface as .tool files and run through cf exec
+head -n1 /tmp/cf/<space>/pieces/<piece>/result/search.tool
+deno task cf exec /tmp/cf/<space>/pieces/<piece>/result/search.tool --help
+deno task cf exec /tmp/cf/<space>/pieces/<piece>/result/search.tool --query "demo"
 
 # The same callable files also exist under entities/<piece-id>/
-deno task ct exec /tmp/ct/<space>/entities/<piece-id>/result/search.tool --query "demo"
+deno task cf exec /tmp/cf/<space>/entities/<piece-id>/result/search.tool --query "demo"
 ```
 
 ## Workflow
 
-1. Deploy pattern: `ct piece new`
-2. Either call the handler directly with `ct piece call` or mount the space with `ct fuse mount`
-3. Use `ct exec <mounted-callable-file> --help` to inspect the mounted schema-derived interface without invoking it
-4. Execute `*.handler` or `*.tool` via `ct exec`; after the verb, schema-derived flags own the namespace, so a tool input field named `help` is parsed normally
+1. Deploy pattern: `cf piece new`
+2. Either call the handler directly with `cf piece call` or mount the space with `cf fuse mount`
+3. Use `cf exec <mounted-callable-file> --help` to inspect the mounted schema-derived interface without invoking it
+4. Execute `*.handler` or `*.tool` via `cf exec`; after the verb, schema-derived flags own the namespace, so a tool input field named `help` is parsed normally
 5. Legacy `echo ... > file.handler` still works for handlers
-6. Inspect state with `ct piece inspect` or `ct piece get`
+6. Inspect state with `cf piece inspect` or `cf piece get`
 7. Iterate until the callable works correctly, then build UI on top

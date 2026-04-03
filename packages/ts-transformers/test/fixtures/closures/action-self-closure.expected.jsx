@@ -1,9 +1,9 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * Fixture: action closing over SELF requires inputs with defaults so the
  * piece data always satisfies the output schema's required properties.
  */
-import { action, type Default, NAME, pattern, SELF, UI, type VNode, Writable } from "commontools";
+import { action, type Default, NAME, pattern, SELF, UI, type VNode, Writable } from "commonfabric";
 interface TestOutput {
     [NAME]: string;
     [UI]: VNode;
@@ -17,16 +17,16 @@ interface TestOutput {
 // Context: SELF reference requires Default<> inputs so output schema is always satisfied
 export default pattern((__ct_pattern_input) => {
     const title = __ct_pattern_input.key("title");
-    const self = __ct_pattern_input[__ctHelpers.SELF];
+    const self = __ct_pattern_input[__cfHelpers.SELF];
     const count = Writable.of(0, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     // Action closing over `self` — works because all inputs use Default<>
-    const showSelf = __ctHelpers.handler({
+    const showSelf = __cfHelpers.handler({
         type: "object",
         properties: {},
         additionalProperties: false
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             self: {
@@ -40,7 +40,7 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["self"]
-    } as const satisfies __ctHelpers.JSONSchema, (_, { self }) => {
+    } as const satisfies __cfHelpers.JSONSchema, (_, { self }) => {
         console.log("self.title:", self.title);
     })({
         self: {
@@ -48,11 +48,11 @@ export default pattern((__ct_pattern_input) => {
         }
     });
     // Action closing over both `self` and `count`
-    const incrementWithSelf = __ctHelpers.handler({
+    const incrementWithSelf = __cfHelpers.handler({
         type: "object",
         properties: {},
         additionalProperties: false
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             self: {
@@ -84,7 +84,7 @@ export default pattern((__ct_pattern_input) => {
                 required: ["title", "count", "$NAME", "$UI"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, (_, { self, count }) => {
+    } as const satisfies __cfHelpers.JSONSchema, (_, { self, count }) => {
         console.log("self:", self);
         count.set(count.get() + 1);
     })({
@@ -94,8 +94,8 @@ export default pattern((__ct_pattern_input) => {
     return {
         [NAME]: "Action SELF Test",
         [UI]: (<div>
-          <ct-button onClick={showSelf}>Show Self</ct-button>
-          <ct-button onClick={incrementWithSelf}>Increment with Self</ct-button>
+          <cf-button onClick={showSelf}>Show Self</cf-button>
+          <cf-button onClick={incrementWithSelf}>Increment with Self</cf-button>
         </div>),
         title,
         count,
@@ -109,7 +109,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["title"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         title: {
@@ -126,8 +126,8 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["title", "count", "$NAME", "$UI"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

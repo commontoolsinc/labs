@@ -1,5 +1,5 @@
-import { defer } from "@commontools/utils/defer";
-import { isDeno } from "@commontools/utils/env";
+import { defer } from "@commonfabric/utils/defer";
+import { isDeno } from "@commonfabric/utils/env";
 import {
   ErrorNotification,
   IPCClientMessage,

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commontools";
+import { cell, pattern, UI } from "commonfabric";
 
 // FIXTURE: element-access-both-opaque
 // Verifies: element access where both array and index are cell-backed OpaqueRefs is wrapped in derive()

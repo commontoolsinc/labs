@@ -14,17 +14,17 @@ keywords/features.
 - array-in-cell-with-remove-ast-nocomponents.tsx: List with add and remove
   operations on array
   - **Data types**: array of objects (text strings)
-  - **Keywords**: handler, map, array operations, get/set, ct-button
+  - **Keywords**: handler, map, array operations, get/set, cf-button
 
 - array-in-cell-with-remove-editable.tsx: Editable list with add, remove, and
   update operations
   - **Data types**: array of objects (text strings)
-  - **Keywords**: handler, map, array operations, ct-input, ct-button,
-    onct-change
+  - **Keywords**: handler, map, array operations, cf-input, cf-button,
+    oncf-change
 
 - aside.tsx: Full-screen layout demonstration with header, footer, and sidebars
   - **Data types**: none (layout only)
-  - **Keywords**: ct-screen, ct-autolayout, slots (left/right/header/footer),
+  - **Keywords**: cf-screen, cf-autolayout, slots (left/right/header/footer),
     tabNames
 
 - system/backlinks-index.tsx: Backlinks computation system for bi-directional
@@ -46,65 +46,65 @@ keywords/features.
 - chatbot-list-view.tsx: Chat application with sidebar list of chat sessions
   - **Data types**: array of objects (CharmEntry with ID and piece), selected
     piece object
-  - **Keywords**: lift, handler, navigateTo, ct-select, ct-render,
-    ct-autolayout, wish, [ID]
+  - **Keywords**: lift, handler, navigateTo, cf-select, cf-render,
+    cf-autolayout, wish, [ID]
 
 - chatbot.tsx: Full-featured chatbot with LLM integration and attachments
   - **Data types**: array of LLM messages, array of attachments (objects), array
     of pieces
-  - **Keywords**: llmDialog, handler, derive, wish, ct-chat, ct-prompt-input,
-    ct-select, Stream, generateObject
+  - **Keywords**: llmDialog, handler, derive, wish, cf-chat, cf-prompt-input,
+    cf-select, Stream, generateObject
 
 - cheeseboard.tsx: Fetch and display pizza schedule from web
   - **Data types**: array of tuples (date/pizza strings), web response object
   - **Keywords**: fetchData, lift, string parsing, map
 
-- system/common-tools.tsx: Reusable tool patterns and handlers for LLM
+- system/common-fabric.tsx: Reusable tool patterns and handlers for LLM
   integration
   - **Data types**: array of list items (objects), API response objects
   - **Keywords**: handler, pattern as tool, fetchData, derive, ifElse
 
 - counter.tsx: Basic counter with increment/decrement operations
   - **Data types**: number
-  - **Keywords**: handler, str template, derive (via pure function), ct-button,
+  - **Keywords**: handler, str template, derive (via pure function), cf-button,
     Stream
 
-- examples/ct-checkbox-cell.tsx: Checkbox component with bidirectional binding
+- examples/cf-checkbox-cell.tsx: Checkbox component with bidirectional binding
   - **Data types**: boolean
-  - **Keywords**: ct-checkbox, $checked (bidirectional binding), handler
-    (optional), ifElse, onct-change
+  - **Keywords**: cf-checkbox, $checked (bidirectional binding), handler
+    (optional), ifElse, oncf-change
 
-- ct-checkbox-handler.tsx: Checkbox with explicit handler for state changes
+- cf-checkbox-handler.tsx: Checkbox with explicit handler for state changes
   - **Data types**: boolean
-  - **Keywords**: ct-checkbox, handler, checked property, onct-change, ifElse
+  - **Keywords**: cf-checkbox, handler, checked property, oncf-change, ifElse
 
-- examples/ct-render.tsx: Rendering sub-patterns with ct-render component
+- examples/cf-render.tsx: Rendering sub-patterns with cf-render component
   - **Data types**: number (counter value)
-  - **Keywords**: ct-render, $cell, nested patterns, pattern composition,
+  - **Keywords**: cf-render, $cell, nested patterns, pattern composition,
     handler
 
-- ct-select.tsx: Dropdown select component with various value types
+- cf-select.tsx: Dropdown select component with various value types
   - **Data types**: string, number
-  - **Keywords**: ct-select, $value (bidirectional binding), items (label/value
+  - **Keywords**: cf-select, $value (bidirectional binding), items (label/value
     objects)
 
-- examples/ct-tags.tsx: Tags input component
+- examples/cf-tags.tsx: Tags input component
   - **Data types**: array of strings
-  - **Keywords**: ct-tags, handler, onct-change, array of strings
+  - **Keywords**: cf-tags, handler, oncf-change, array of strings
 
 - system/default-app.tsx: Default application with piece management and
   navigation
   - **Data types**: array of pieces (MentionableCharm objects)
-  - **Keywords**: wish, derive, navigateTo, handler, ct-table, ct-button,
+  - **Keywords**: wish, derive, navigateTo, handler, cf-table, cf-button,
     multiple pattern instantiation
 
 - dice.tsx: Dice roller with random number generation
   - **Data types**: number
-  - **Keywords**: handler, random values, ct-button, Stream
+  - **Keywords**: handler, random values, cf-button, Stream
 
 - fetch-data.tsx: GitHub repository data fetcher
   - **Data types**: complex API response object, string (URL)
-  - **Keywords**: fetchData, lift, derive, ct-input, $value, string parsing
+  - **Keywords**: fetchData, lift, derive, cf-input, $value, string parsing
 
 - instantiate-pattern.tsx: Factory pattern for creating counter instances
   - **Data types**: number, piece references
@@ -127,7 +127,7 @@ keywords/features.
 
 - examples/llm.tsx: Simple LLM question/answer interface
   - **Data types**: string (question), LLM response content, array of messages
-  - **Keywords**: llm, cell, derive, handler, ct-message-input, onct-send
+  - **Keywords**: llm, cell, derive, handler, cf-message-input, oncf-send
 
 - nested-counter.tsx: Counter with nested sub-counter instances
   - **Data types**: number
@@ -137,9 +137,9 @@ keywords/features.
 - notes/note.tsx: Note-taking app with backlinks and mentions
   - **Data types**: string (title/content), array of pieces
     (mentioned/backlinks)
-  - **Keywords**: wish, handler, navigateTo, ct-code-editor, $mentionable,
+  - **Keywords**: wish, handler, navigateTo, cf-code-editor, $mentionable,
     $mentioned, backlinks, cell
 
 - output_schema.tsx: Demonstrates explicit output schema typing
   - **Data types**: number, VNode
-  - **Keywords**: handler, output schema, type safety, ct-button
+  - **Keywords**: handler, output schema, type safety, cf-button

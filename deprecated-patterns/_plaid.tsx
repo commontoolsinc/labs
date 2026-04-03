@@ -13,7 +13,7 @@ import {
   Schema,
   str,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 const Classification = {
   Unclassified: "unclassified",
@@ -594,7 +594,7 @@ const plaidUpdater = handler(
     // Add new transactions
     if (syncResult.added.length > 0) {
       console.log(`Adding ${syncResult.added.length} new transactions`);
-      // Add ID field for Common Tools
+      // Add ID field for Common Fabric
       syncResult.added.forEach((t: any) => {
         t[ID] = t.transactionId;
       });
@@ -654,11 +654,11 @@ export default pattern(
                   <label style="display: block; margin-bottom: 5px; font-weight: 500;">
                     Days to Sync
                   </label>
-                  <ct-input
+                  <cf-input
                     customStyle="border: 1px solid #ddd; padding: 10px; border-radius: 4px; width: 200px;"
                     value={settings.daysToSync}
                     placeholder="90"
-                    onct-input={updateDaysToSync({
+                    oncf-input={updateDaysToSync({
                       daysToSync: settings.daysToSync,
                     })}
                   />
@@ -668,11 +668,11 @@ export default pattern(
                   <label style="display: block; margin-bottom: 5px; font-weight: 500;">
                     Transaction Limit
                   </label>
-                  <ct-input
+                  <cf-input
                     customStyle="border: 1px solid #ddd; padding: 10px; border-radius: 4px; width: 200px;"
                     value={settings.syncLimit}
                     placeholder="500"
-                    onct-input={updateSyncLimit({
+                    oncf-input={updateSyncLimit({
                       syncLimit: settings.syncLimit,
                     })}
                   />

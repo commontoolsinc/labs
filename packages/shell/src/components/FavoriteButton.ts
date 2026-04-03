@@ -1,8 +1,8 @@
 import { css, html, LitElement, PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { RuntimeInternals } from "../lib/runtime.ts";
-import type { CellHandle } from "@commontools/runtime-client";
-import type { FavoriteEntry } from "@commontools/home-schemas";
+import type { CellHandle } from "@commonfabric/runtime-client";
+import type { FavoriteEntry } from "@commonfabric/home-schemas";
 
 /**
  * Favorite button component.

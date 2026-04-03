@@ -1,6 +1,6 @@
 import { LitElement } from "lit";
 import { Command, createAppState, urlToAppView } from "../../shared/mod.ts";
-import { DebugController } from "@commontools/ui";
+import { DebugController } from "@commonfabric/ui";
 import { API_URL } from "../lib/env.ts";
 
 // Set to `true` to render outlines everytime a

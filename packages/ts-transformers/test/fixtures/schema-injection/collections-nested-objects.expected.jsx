@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { cell } from "commonfabric";
 // FIXTURE: collections-nested-objects
 // Verifies: deeply nested object literals produce recursively nested object schemas
 //   cell({ user: { address: { street, city } }, timestamp }) → cell(..., { type: "object", properties: { user: { type: "object", properties: { address: { type: "object", ... } } } } })
@@ -47,10 +47,10 @@ export default function TestCollectionsNestedObjects() {
             }
         },
         required: ["user", "timestamp"]
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     return _nested;
 }
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

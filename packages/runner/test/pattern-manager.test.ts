@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -45,7 +45,7 @@ describe("PatternManager program persistence", () => {
         {
           name: "/main.tsx",
           contents: [
-            "import { pattern, lift } from 'commontools';",
+            "import { pattern, lift } from 'commonfabric';",
             "import { double } from './util.ts';",
             "const dbl = lift((x:number)=>double(x));",
             "export default pattern<{ value: number }>(({ value }) => {",
@@ -99,7 +99,7 @@ describe("PatternManager program persistence", () => {
         {
           name: "/main.ts",
           contents: [
-            "import { pattern } from 'commontools';",
+            "import { pattern } from 'commonfabric';",
             "export default pattern<{ x: number }>(({ x }) => ({ x }));",
           ].join("\n"),
         },
@@ -161,7 +161,7 @@ describe("PatternManager.compileOrGetPattern", () => {
       {
         name: "/main.ts",
         contents: [
-          "import { pattern } from 'commontools';",
+          "import { pattern } from 'commonfabric';",
           "export default pattern<{ x: number }>(({ x }) => ({ doubled: x }));",
         ].join("\n"),
       },
@@ -174,7 +174,7 @@ describe("PatternManager.compileOrGetPattern", () => {
       {
         name: "/main.ts",
         contents: [
-          "import { pattern } from 'commontools';",
+          "import { pattern } from 'commonfabric';",
           "export default pattern<{ y: number }>(({ y }) => ({ tripled: y }));",
         ].join("\n"),
       },
@@ -246,7 +246,7 @@ describe("PatternManager.compileOrGetPattern", () => {
 
   it("works with string input (single file)", async () => {
     const source = [
-      "import { pattern } from 'commontools';",
+      "import { pattern } from 'commonfabric';",
       "export default pattern<{ n: number }>(({ n }) => ({ result: n }));",
     ].join("\n");
 
@@ -284,7 +284,7 @@ describe("PatternManager compilation cache integration", () => {
       {
         name: "/main.ts",
         contents: [
-          "import { pattern } from 'commontools';",
+          "import { pattern } from 'commonfabric';",
           "export default pattern<{ x: number }>(({ x }) => ({ doubled: x }));",
         ].join("\n"),
       },

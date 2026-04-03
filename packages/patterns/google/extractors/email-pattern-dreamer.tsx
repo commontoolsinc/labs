@@ -8,9 +8,9 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth email-pattern-dreamer/overrideAuth
+ * 3. Link: cf piece link google-auth/auth email-pattern-dreamer/overrideAuth
  */
-import { NAME, pattern, UI } from "commontools";
+import { NAME, pattern, UI } from "commonfabric";
 import GmailImporter, { type Auth } from "../core/gmail-importer.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
@@ -122,13 +122,13 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
     previewUI,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-heading level={3}>Email Pattern Dreamer</ct-heading>
+          <cf-heading level={3}>Email Pattern Dreamer</cf-heading>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {gmailAuth.authUI}
 
             <h3 style={{ fontSize: "18px", fontWeight: "600" }}>
@@ -141,7 +141,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 <div style={{ fontWeight: "600", fontSize: "16px" }}>
                   USPS Informed Delivery
                 </div>
-                <ct-cell-link $cell={usps}>Open</ct-cell-link>
+                <cf-cell-link $cell={usps}>Open</cf-cell-link>
               </div>
               <div style={previewBoxStyle}>{usps.previewUI as any}</div>
             </div>
@@ -152,7 +152,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 <div style={{ fontWeight: "600", fontSize: "16px" }}>
                   Berkeley Library
                 </div>
-                <ct-cell-link $cell={library}>Open</ct-cell-link>
+                <cf-cell-link $cell={library}>Open</cf-cell-link>
               </div>
               <div style={previewBoxStyle}>{library.previewUI as any}</div>
             </div>
@@ -163,7 +163,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 <div style={{ fontWeight: "600", fontSize: "16px" }}>
                   Chase Bill Tracker
                 </div>
-                <ct-cell-link $cell={chase}>Open</ct-cell-link>
+                <cf-cell-link $cell={chase}>Open</cf-cell-link>
               </div>
               <div style={previewBoxStyle}>{chase.previewUI as any}</div>
             </div>
@@ -174,7 +174,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 <div style={{ fontWeight: "600", fontSize: "16px" }}>
                   BAM School Dashboard
                 </div>
-                <ct-cell-link $cell={bam}>Open</ct-cell-link>
+                <cf-cell-link $cell={bam}>Open</cf-cell-link>
               </div>
               <div style={previewBoxStyle}>{bam.previewUI as any}</div>
             </div>
@@ -185,7 +185,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 <div style={{ fontWeight: "600", fontSize: "16px" }}>
                   Bank of America Bills
                 </div>
-                <ct-cell-link $cell={bofa}>Open</ct-cell-link>
+                <cf-cell-link $cell={bofa}>Open</cf-cell-link>
               </div>
               <div style={previewBoxStyle}>{bofa.previewUI as any}</div>
             </div>
@@ -196,7 +196,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 <div style={{ fontWeight: "600", fontSize: "16px" }}>
                   Email Ticket Finder
                 </div>
-                <ct-cell-link $cell={tickets}>Open</ct-cell-link>
+                <cf-cell-link $cell={tickets}>Open</cf-cell-link>
               </div>
               <div style={previewBoxStyle}>{tickets.previewUI as any}</div>
             </div>
@@ -207,7 +207,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 <div style={{ fontWeight: "600", fontSize: "16px" }}>
                   Calendar Change Detector
                 </div>
-                <ct-cell-link $cell={calendar}>Open</ct-cell-link>
+                <cf-cell-link $cell={calendar}>Open</cf-cell-link>
               </div>
               <div style={previewBoxStyle}>{calendar.previewUI as any}</div>
             </div>
@@ -218,7 +218,7 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 <div style={{ fontWeight: "600", fontSize: "16px" }}>
                   Email Notes
                 </div>
-                <ct-cell-link $cell={notes}>Open</ct-cell-link>
+                <cf-cell-link $cell={notes}>Open</cf-cell-link>
               </div>
               <div style={previewBoxStyle}>{notes.previewUI as any}</div>
             </div>
@@ -229,13 +229,13 @@ export default pattern<PatternInput>(({ overrideAuth }) => {
                 <div style={{ fontWeight: "600", fontSize: "16px" }}>
                   United Flight Tracker
                 </div>
-                <ct-cell-link $cell={united}>Open</ct-cell-link>
+                <cf-cell-link $cell={united}>Open</cf-cell-link>
               </div>
               <div style={previewBoxStyle}>{united.previewUI as any}</div>
             </div>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

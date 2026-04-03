@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import {
   fabricFromNativeValue,
@@ -10,14 +10,14 @@ import {
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
-} from "@commontools/data-model/fabric-value";
-import { FabricError } from "@commontools/data-model/fabric-native-instances";
+} from "@commonfabric/data-model/fabric-value";
+import { FabricError } from "@commonfabric/data-model/fabric-native-instances";
 import {
   hashOf,
   resetModernHashConfig,
   setModernHashConfig,
-} from "@commontools/data-model/value-hash";
-import { resetSchemaHashConfig } from "@commontools/data-model/schema-hash";
+} from "@commonfabric/data-model/value-hash";
+import { resetSchemaHashConfig } from "@commonfabric/data-model/schema-hash";
 
 const signer = await Identity.fromPassphrase("test experimental");
 

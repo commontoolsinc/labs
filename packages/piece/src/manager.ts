@@ -16,18 +16,18 @@ import {
   type SpaceCellContents,
   TYPE,
   URI,
-} from "@commontools/runner";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
-import { type Session } from "@commontools/identity";
-import { isRecord } from "@commontools/utils/types";
-import { ensureNotRenderThread } from "@commontools/utils/env";
+} from "@commonfabric/runner";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { type Session } from "@commonfabric/identity";
+import { isRecord } from "@commonfabric/utils/types";
+import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import {
   NameSchema,
   nameSchema,
   pieceListSchema,
   pieceSourceCellSchema,
   processSchema,
-} from "@commontools/runner/schemas";
+} from "@commonfabric/runner/schemas";
 ensureNotRenderThread();
 
 const PRIVILEGED_PIECE_LIST_SCHEMA = toDeepFrozenSchema({

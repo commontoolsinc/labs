@@ -9,7 +9,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Secret<T> = T;
 
@@ -605,12 +605,12 @@ export default pattern<Input, Output>(
                     color: loggedIn ? "#9ca3af" : "inherit",
                   }}
                 >
-                  <ct-checkbox
+                  <cf-checkbox
                     $checked={selectedScopes[key as keyof SelectedScopes]}
                     disabled={checkboxesDisabled}
                   >
                     {description}
-                  </ct-checkbox>
+                  </cf-checkbox>
                 </label>
               ))}
             </div>
@@ -731,7 +731,7 @@ export default pattern<Input, Output>(
             null,
           )}
 
-          <ct-google-oauth
+          <cf-google-oauth
             $auth={auth}
             scopes={scopes}
           />

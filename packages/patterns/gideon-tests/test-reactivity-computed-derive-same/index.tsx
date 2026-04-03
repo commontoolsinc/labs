@@ -39,7 +39,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface TestInput {
   firstName: Default<string, "John">;
@@ -95,19 +95,19 @@ export default pattern<TestInput>(({ firstName, lastName, age }) => {
           <h3>Inputs</h3>
           <div style={{ marginBottom: "10px" }}>
             <label>First Name:</label>
-            <ct-input $value={firstName} />
+            <cf-input $value={firstName} />
           </div>
           <div style={{ marginBottom: "10px" }}>
             <label>Last Name:</label>
-            <ct-input $value={lastName} />
+            <cf-input $value={lastName} />
           </div>
           <div style={{ marginBottom: "10px" }}>
             <label>Age:</label>
-            <ct-input $value={age} type="number" />
+            <cf-input $value={age} type="number" />
           </div>
-          <ct-button onClick={updateNames({ firstName, lastName })}>
+          <cf-button onClick={updateNames({ firstName, lastName })}>
             Randomize Names
-          </ct-button>
+          </cf-button>
         </div>
 
         <div

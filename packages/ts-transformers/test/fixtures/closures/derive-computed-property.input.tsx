@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, derive, pattern } from "commontools";
+import { Writable, derive, pattern } from "commonfabric";
 
 // FIXTURE: derive-computed-property
 // Verifies: computed property access with a dynamic key captures both the object and the key

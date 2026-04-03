@@ -1,4 +1,4 @@
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 
 const ClassificationSecret = "secret";
 

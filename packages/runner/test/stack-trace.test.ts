@@ -6,10 +6,10 @@ import {
   JsScript,
   TypeScriptCompiler,
   type TypeScriptCompilerOptions,
-} from "@commontools/js-compiler";
+} from "@commonfabric/js-compiler";
 import { UnsafeEvalRuntime } from "../src/harness/eval-runtime.ts";
-import { StaticCacheFS } from "@commontools/static";
-import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
+import { StaticCacheFS } from "@commonfabric/static";
+import { CommonFabricTransformerPipeline } from "@commonfabric/ts-transformers";
 
 const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
 
@@ -45,7 +45,7 @@ function compileWithCTS(
 ) {
   return compile(files, filename, {
     beforeTransformers: (program) => {
-      const pipeline = new CommonToolsTransformerPipeline();
+      const pipeline = new CommonFabricTransformerPipeline();
       return {
         factories: pipeline.toFactories(program),
         getDiagnostics: () => pipeline.getDiagnostics(),
@@ -106,9 +106,9 @@ describe("Stack trace source mapping", () => {
       "Error: compile-time boom",
       "    at fail (helper.ts:2:8)",
       "    at Object.eval (main.tsx:2:19)",
-      "    at <CT_INTERNAL>",
-      "    at <CT_INTERNAL>",
-      "    at <CT_INTERNAL>",
+      "    at <CF_INTERNAL>",
+      "    at <CF_INTERNAL>",
+      "    at <CF_INTERNAL>",
     ]);
   });
 

@@ -15,7 +15,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { type MentionablePiece } from "./backlinks-index.tsx";
 
 export type GraphEdge = {
@@ -322,39 +322,39 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
       return `Knowledge Graph (${total} links)`;
     }),
     [UI]: (
-      <ct-screen>
-        <ct-toolbar slot="header" sticky>
+      <cf-screen>
+        <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Knowledge Graph</h2>
           <div slot="end">
             {ifElse(
               hasBeenBuilt,
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={triggerRebuild({ addMessage, messages })}
               >
                 Rebuild
-              </ct-button>,
-              <ct-button
+              </cf-button>,
+              <cf-button
                 variant="primary"
                 onClick={triggerBuild({ addMessage })}
               >
                 Build Graph
-              </ct-button>,
+              </cf-button>,
             )}
           </div>
-        </ct-toolbar>
-        <ct-vstack gap="4" padding="6">
+        </cf-toolbar>
+        <cf-vstack gap="4" padding="6">
           <span
             style={{
               fontSize: "13px",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-color-text-secondary)",
             }}
           >
             {baseEdgeCount} base links, {agentEdgeCount} agent links,{" "}
             {compoundNodeCount} groups
           </span>
 
-          <ct-message-beads
+          <cf-message-beads
             label="graph analysis"
             $messages={messages}
             pending={pending}
@@ -364,7 +364,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
             computed(() => compoundNodes.length > 0),
             <div>
               <h3 style={{ margin: "0 0 8px", fontSize: "15px" }}>Groups</h3>
-              <ct-table full-width>
+              <cf-table full-width>
                 <tbody>
                   {compoundNodes.map((node: any) => (
                     <tr>
@@ -372,7 +372,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
                       <td
                         style={{
                           fontSize: "13px",
-                          color: "var(--ct-color-text-secondary)",
+                          color: "var(--cf-color-text-secondary)",
                         }}
                       >
                         {node.summary}
@@ -380,37 +380,37 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
                     </tr>
                   ))}
                 </tbody>
-              </ct-table>
+              </cf-table>
             </div>,
             null,
           )}
 
           <h3 style={{ margin: "0", fontSize: "15px" }}>Links</h3>
-          <ct-table full-width>
+          <cf-table full-width>
             <tbody>
               {allEdges.map((edge) => (
                 <tr>
                   <td style={{ fontWeight: "500", whiteSpace: "nowrap" }}>
-                    <ct-cell-link $cell={edge.from} />
+                    <cf-cell-link $cell={edge.from} />
                   </td>
                   <td
                     style={{
                       fontSize: "13px",
-                      color: "var(--ct-color-text-secondary)",
+                      color: "var(--cf-color-text-secondary)",
                       textAlign: "center",
                     }}
                   >
                     {edge.description}
                   </td>
                   <td style={{ fontWeight: "500", whiteSpace: "nowrap" }}>
-                    <ct-cell-link $cell={edge.to} />
+                    <cf-cell-link $cell={edge.to} />
                   </td>
                 </tr>
               ))}
             </tbody>
-          </ct-table>
-        </ct-vstack>
-      </ct-screen>
+          </cf-table>
+        </cf-vstack>
+      </cf-screen>
     ),
     edges: allEdges,
     compoundNodes,

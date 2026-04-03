@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 // FIXTURE: pattern-array-destructure-param
 // Verifies: top-level array destructuring in pattern params lowers to index-based key access
 //   ([first]) => <div>{first}</div> → const first = __ct_pattern_input.key("0")
@@ -11,7 +11,7 @@ export default pattern((__ct_pattern_input) => {
     items: {
         type: "string"
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     anyOf: [{
             $ref: "https://commonfabric.org/schemas/vnode.json"
         }, {
@@ -31,8 +31,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

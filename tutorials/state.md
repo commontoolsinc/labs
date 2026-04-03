@@ -1,18 +1,18 @@
 ---
 title: Working with State
 short_title: State
-description: How state is handled in the Common Tools runtime
+description: How state is handled in the Common Fabric runtime
 subject: Tutorial
 authors:
   - name: Ellyse Cedeno
     email: ellyse@common.tools
-keywords: commontools, state, Cell, database
+keywords: commonfabric, state, Cell, database
 abstract: |
   In this section, we discover how state is handled in the runtime, how persistence is related, and discuss common patterns to use.
 ---
 ## State and Cells
 
-We'll be learning how to handle state within the Common Tools runtime.
+We'll be learning how to handle state within the Common Fabric runtime.
 The most direct way to store state is via `Cells`.
 Cells store and access data. We can set data in a cell via the set() function. We can also retrieve data via the get() function, we'll demonstrate that in a later section.
 There are many ways to create cells and we'll get to all of them, but for now, we'll start with the `cell<T>()` function available in Patterns.
@@ -45,7 +45,7 @@ import {
   h,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 export default pattern(() => {
   const characterName = cell<string>("");
@@ -185,7 +185,7 @@ import {
   UI,
   lift,
   derive,
-} from "commontools";
+} from "commonfabric";
 
 export default pattern(() => {
   const characterName = cell<string>("");

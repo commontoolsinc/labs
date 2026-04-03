@@ -1,6 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-env --allow-run
 import * as path from "@std/path";
-import { build } from "@commontools/felt";
+import { build } from "@commonfabric/felt";
 
 if (Deno.args.length < 1) {
   console.error("[USAGE]: bundle.ts path/to/entry.ts [dist/output.js]");

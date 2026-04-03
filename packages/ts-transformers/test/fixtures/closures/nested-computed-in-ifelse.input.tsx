@@ -10,7 +10,7 @@
  * Bug: secondToggle.get() was returning CellImpl instead of boolean
  * Fix: Added isInsideSafeCallbackWrapper check in rewriteChildExpressions
  */
-import { computed, ifElse, pattern, UI, Writable } from "commontools";
+import { computed, ifElse, pattern, UI, Writable } from "commonfabric";
 
 // FIXTURE: nested-computed-in-ifelse
 // Verifies: computed() inside ifElse branches transforms to derive() without double-wrapping .get()

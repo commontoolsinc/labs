@@ -1,5 +1,5 @@
-import { hashOf } from "@commontools/data-model/value-hash";
-import { isRecord } from "@commontools/utils/types";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { isRecord } from "@commonfabric/utils/types";
 import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";

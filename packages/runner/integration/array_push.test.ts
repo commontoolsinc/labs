@@ -6,11 +6,11 @@
  * fast the client can render 100 mapped elements, which often ends up creating a
  * lot of vdom nodes
  */
-import { Identity, Session } from "@commontools/identity";
-import { env } from "@commontools/integration";
+import { Identity, Session } from "@commonfabric/identity";
+import { env } from "@commonfabric/integration";
 import { StorageManager } from "../src/storage/cache.ts";
 import { Runtime, Stream } from "../src/index.ts";
-import { compilePattern, PieceManager } from "@commontools/piece";
+import { compilePattern, PieceManager } from "@commonfabric/piece";
 
 (Error as any).stackTraceLimit = 100;
 

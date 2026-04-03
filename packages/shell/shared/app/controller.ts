@@ -3,7 +3,7 @@ import {
   Identity,
   KeyStore,
   TransferrableInsecureCryptoKeyPair,
-} from "@commontools/identity";
+} from "@commonfabric/identity";
 import { AppElement } from "./element.ts";
 import { Command } from "./commands.ts";
 import { AppState, AppUpdateEvent } from "./mod.ts";

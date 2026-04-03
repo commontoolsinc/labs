@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * TRANSFORM REPRO: helper-owned JSX IIFE decomposes through local aliases
  *
@@ -7,7 +7,7 @@ import * as __ctHelpers from "commontools";
  * must not hide the explicit `path -> visible` dependency when later helper-owned
  * derives are created.
  */
-import { action, Default, pattern, UI, VNode, Writable, } from "commontools";
+import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
 interface Entry {
     name: string;
 }
@@ -30,8 +30,8 @@ export default pattern((__ct_pattern_input) => {
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema);
-    const pushPath = __ctHelpers.handler({
+    } as const satisfies __cfHelpers.JSONSchema);
+    const pushPath = __cfHelpers.handler({
         type: "object",
         properties: {
             name: {
@@ -39,7 +39,7 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["name"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             path: {
@@ -51,7 +51,7 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["path"]
-    } as const satisfies __ctHelpers.JSONSchema, ({ name }, { path }) => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ name }, { path }) => {
         path.push(name);
     })({
         path: path
@@ -59,20 +59,20 @@ export default pattern((__ct_pattern_input) => {
     return {
         [UI]: (<div>
         {(() => {
-                const p = __ctHelpers.unless({
+                const p = __cfHelpers.unless({
                     type: "array",
                     items: {
                         type: "string"
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: false
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
                         type: "string"
                     }
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         path: {
@@ -84,15 +84,15 @@ export default pattern((__ct_pattern_input) => {
                         }
                     },
                     required: ["path"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
                         type: "string"
                     }
-                } as const satisfies __ctHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []);
+                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []);
                 if (p.length === 0)
                     return null;
-                return <div>{__ctHelpers.derive({
+                return <div>{__cfHelpers.derive({
                     type: "object",
                     properties: {
                         p: {
@@ -103,25 +103,25 @@ export default pattern((__ct_pattern_input) => {
                         }
                     },
                     required: ["p"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: ["string", "undefined"]
-                } as const satisfies __ctHelpers.JSONSchema, { p: p }, ({ p }) => p[p.length - 1])}</div>;
+                } as const satisfies __cfHelpers.JSONSchema, { p: p }, ({ p }) => p[p.length - 1])}</div>;
             })()}
         {(() => {
-                const p = __ctHelpers.unless({
+                const p = __cfHelpers.unless({
                     type: "array",
                     items: {
                         type: "string"
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: false
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
                         type: "string"
                     }
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         path: {
@@ -133,13 +133,13 @@ export default pattern((__ct_pattern_input) => {
                         }
                     },
                     required: ["path"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
                         type: "string"
                     }
-                } as const satisfies __ctHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []);
-                const visible = __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), []);
+                const visible = __cfHelpers.derive({
                     type: "object",
                     properties: {
                         entries: {
@@ -168,7 +168,7 @@ export default pattern((__ct_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/Entry"
@@ -184,11 +184,11 @@ export default pattern((__ct_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     entries: entries,
                     p: p
                 }, ({ entries, p }) => visibleEntries(entries, p[0] || ""));
-                return visible.map((entry) => (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+                return visible.map((entry) => (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
                     type: "object",
                     properties: {
                         pushPath: {
@@ -212,7 +212,7 @@ export default pattern((__ct_pattern_input) => {
                         }
                     },
                     required: ["pushPath", "entry"]
-                } as const satisfies __ctHelpers.JSONSchema, (_, { pushPath, entry }) => pushPath.send({ name: entry.name }))({
+                } as const satisfies __cfHelpers.JSONSchema, (_, { pushPath, entry }) => pushPath.send({ name: entry.name }))({
                     pushPath: pushPath,
                     entry: {
                         name: entry.name
@@ -247,7 +247,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["name"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -255,8 +255,8 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["$UI"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

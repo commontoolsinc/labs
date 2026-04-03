@@ -2,7 +2,7 @@
  * Public interface for the builder package. This module exports only the types
  * and functions that are part of the public pattern API.
  *
- * Workspace code should import these types via `@commontools/builder`.
+ * Workspace code should import these types via `@commonfabric/builder`.
  */
 
 // ============================================================================
@@ -138,7 +138,7 @@ export interface FabricObject extends Record<string, FabricValue> {}
 // Runtime Constants
 // ============================================================================
 
-// Runtime constants - defined by @commontools/runner/src/builder/types.ts
+// Runtime constants - defined by @commonfabric/runner/src/builder/types.ts
 // These are ambient declarations since the actual values are provided by the runtime environment
 export declare const ID: unique symbol;
 export declare const ID_FIELD: unique symbol;
@@ -709,7 +709,7 @@ export interface ICreatable<C extends AnyBrandedCell<any>> {
 /**
  * Cells that can be resolved back to a Cell.
  * Only available on full Cell<T>, not on OpaqueCell or Stream.
- * Note: Schema-typed overload available via "commontools/schema"
+ * Note: Schema-typed overload available via "commonfabric/schema"
  */
 export interface IResolvable<T, C extends AnyBrandedCell<T>> {
   resolveAsCell(): C;
@@ -1239,8 +1239,8 @@ export interface IDFields {
 /**
  * Recursively adds `readonly` to all properties of `T`.
  *
- * Mirrors the definition in `@commontools/utils/types` but is duplicated here
- * so that `@commontools/api` remains dependency-free.
+ * Mirrors the definition in `@commonfabric/utils/types` but is duplicated here
+ * so that `@commonfabric/api` remains dependency-free.
  */
 type Immutable<T> = T extends ReadonlyArray<infer U>
   ? ReadonlyArray<Immutable<U>>
@@ -1346,7 +1346,7 @@ export type JSONSchemaObj = {
   readonly $schema?: string;
   readonly $comment?: string;
 
-  // Common Tools extensions
+  // Common Fabric extensions
   readonly [ID]?: unknown;
   readonly [ID_FIELD]?: unknown;
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
@@ -1365,7 +1365,7 @@ export type JSONSchemaObj = {
 /**
  * Recursively removes `readonly` from all properties of `T`.
  *
- * Copy of `Mutable` from `@commontools/utils/types`. These two definitions
+ * Copy of `Mutable` from `@commonfabric/utils/types`. These two definitions
  * should be unified; see that module for the canonical version.
  */
 type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
@@ -1749,7 +1749,7 @@ export type ActionFunction = {
  *    - Example: derive(cell<number>(), (c) => ...) gives c: Cell<number>, not number
  * 3. Generic overload: Handles all other cases, unwrapping Opaque types
  *
- * Note: Schema-based overload is available when importing from "commontools/schema"
+ * Note: Schema-based overload is available when importing from "commonfabric/schema"
  *
  * @deprecated Use compute() instead
  */

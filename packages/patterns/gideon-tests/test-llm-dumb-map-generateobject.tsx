@@ -22,7 +22,7 @@
  * - Network tab shows requests = new/changed items only
  *
  * MANUAL VERIFICATION STEPS:
- * 1. Deploy pattern: deno task ct piece new test-llm-dumb-map-generateobject.tsx
+ * 1. Deploy pattern: deno task cf piece new test-llm-dumb-map-generateobject.tsx
  * 2. Add 3-5 items with different content (e.g., "I love this!", "This is terrible", "It's okay")
  * 3. Open browser DevTools → Network tab → filter for "anthropic" or "generate"
  * 4. Wait for all items to complete (all show sentiment results)
@@ -39,7 +39,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Item {
   id: string;
@@ -133,10 +133,10 @@ export default pattern<Input>(({ items }) => {
         </div>
 
         <div style={{ margin: "20px 0" }}>
-          <ct-message-input
+          <cf-message-input
             placeholder="Enter text to analyze sentiment (e.g., 'I love this!', 'This is terrible')..."
             appearance="rounded"
-            onct-send={addItem({ items })}
+            oncf-send={addItem({ items })}
           />
         </div>
 
@@ -173,7 +173,7 @@ export default pattern<Input>(({ items }) => {
                           borderRadius: "4px",
                         }}
                       >
-                        <ct-loader
+                        <cf-loader
                           show-elapsed
                           style={{
                             display: "inline-block",
@@ -240,9 +240,9 @@ export default pattern<Input>(({ items }) => {
               )}
 
               <div style={{ marginTop: "12px" }}>
-                <ct-button onClick={removeItem({ items, itemId: item.itemId })}>
+                <cf-button onClick={removeItem({ items, itemId: item.itemId })}>
                   Remove
-                </ct-button>
+                </cf-button>
               </div>
             </div>
           ))}

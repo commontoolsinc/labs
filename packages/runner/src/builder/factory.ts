@@ -24,7 +24,7 @@ import {
   UI,
   WebhookConfigSchema,
 } from "./types.ts";
-import { h } from "@commontools/html";
+import { h } from "@commonfabric/html";
 import { pattern } from "./pattern.ts";
 import { action, byRef, computed, derive, handler, lift } from "./module.ts";
 import {
@@ -51,12 +51,12 @@ import type { RuntimeProgram } from "../harness/types.ts";
 import {
   FabricInstance,
   FabricPrimitive,
-} from "@commontools/data-model/fabric-value";
+} from "@commonfabric/data-model/fabric-value";
 import {
   FabricEpochDays,
   FabricEpochNsec,
-} from "@commontools/data-model/fabric-epoch";
-import { FabricHash } from "@commontools/data-model/fabric-hash";
+} from "@commonfabric/data-model/fabric-epoch";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
 
 // Runtime implementation of toSchema - this should never be called
 // The TypeScript transformer should replace all calls at compile time
@@ -73,7 +73,7 @@ const toSchema: ToSchemaFunction = (_options?) => {
  * @returns An object containing all builder functions
  */
 export const createBuilder = (): {
-  commontools: BuilderFunctionsAndConstants;
+  commonfabric: BuilderFunctionsAndConstants;
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 } => {
   // Associate runtime programs with patterns after compilation and initial eval
@@ -89,7 +89,7 @@ export const createBuilder = (): {
   };
 
   return {
-    commontools: {
+    commonfabric: {
       // Pattern creation
       pattern,
       patternTool,

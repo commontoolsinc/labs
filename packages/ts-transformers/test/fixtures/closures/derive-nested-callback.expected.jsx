@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-nested-callback
 // Verifies: capture extraction works with nested .map() which is itself transformed to mapWithPattern
 //   derive(numbers, fn) → derive(schema, schema, { numbers, multiplier }, fn)
@@ -11,12 +11,12 @@ export default pattern(() => {
         items: {
             type: "number"
         }
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const multiplier = Writable.of(2, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     // Nested callback - inner array map should not capture outer multiplier
-    const result = __ctHelpers.derive({
+    const result = __cfHelpers.derive({
         type: "object",
         properties: {
             numbers: {
@@ -32,15 +32,15 @@ export default pattern(() => {
             }
         },
         required: ["numbers", "multiplier"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "number"
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         numbers,
         multiplier: multiplier
-    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
         const n = __ct_pattern_input.key("element");
         const multiplier = __ct_pattern_input.key("params", "multiplier");
         return n * multiplier.get();
@@ -62,19 +62,19 @@ export default pattern(() => {
             }
         },
         required: ["element", "params"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema), {
+    } as const satisfies __cfHelpers.JSONSchema), {
         multiplier: multiplier
     }));
     return result;
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "array",
     items: {
         type: "number"
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

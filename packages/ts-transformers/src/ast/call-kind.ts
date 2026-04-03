@@ -2,50 +2,50 @@
  * Call Kind Detection
  *
  * This module identifies compiler-significant call families. Most are
- * CommonTools-specific calls (derive, ifElse, pattern, etc.), but array-method
+ * Common Fabric-specific calls (derive, ifElse, pattern, etc.), but array-method
  * families are also classified because they establish callback/container
  * boundaries relevant to analysis and lowering.
  *
  * ## Detection Strategy
  *
- * Detection is provenance-first for CommonTools calls:
+ * Detection is provenance-first for Common Fabric calls:
  *
  * 1. **Symbol resolution**: Resolve the callee symbol and verify it comes from
- *    CommonTools declarations or imports.
+ *    Common Fabric declarations or imports.
  *
  * 2. **Alias following**: Follow stable const aliases and call signatures to
  *    preserve detection for `const alias = derive` and `declare const alias:
  *    typeof ifElse` style code.
  *
- * 3. **Synthetic helper support**: Recognize internal `__ctHelpers.*` calls
+ * 3. **Synthetic helper support**: Recognize internal `__cfHelpers.*` calls
  *    introduced by the transformer pipeline when symbol resolution is not
  *    available on synthetic nodes.
  *
  * ## Narrow Exceptions
  *
  * The remaining syntactic fallback is intentionally limited to synthetic
- * `__ctHelpers.*` calls, unresolved bare builder identifiers, and explicit
+ * `__cfHelpers.*` calls, unresolved bare builder identifiers, and explicit
  * reactive array-method receiver checks. Plain array methods share the same
  * syntax family but require separate ownership classification; consumers
  * should use `classifyArrayMethodCallSite(...)` when that distinction matters.
  */
 import ts from "typescript";
 
-import { CT_HELPERS_IDENTIFIER } from "../core/ct-helpers.ts";
-import { isCommonToolsSymbol } from "../core/common-tools-symbols.ts";
+import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
+import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 import {
-  COMMONTOOLS_BUILDER_EXPORT_NAMES,
-  COMMONTOOLS_CALL_EXPORT_NAMES,
-  COMMONTOOLS_REACTIVE_ORIGIN_BUILDER_NAMES,
-  COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES,
-  COMMONTOOLS_RUNTIME_EXPORTS_BY_NAME,
-} from "../core/commontools-runtime-registry.ts";
+  COMMONFABRIC_BUILDER_EXPORT_NAMES,
+  COMMONFABRIC_CALL_EXPORT_NAMES,
+  COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES,
+  COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES,
+  COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME,
+} from "../core/commonfabric-runtime-registry.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
 import { getTypeAtLocationWithFallback } from "./utils.ts";
 
-const BUILDER_SYMBOL_NAMES = COMMONTOOLS_BUILDER_EXPORT_NAMES;
+const BUILDER_SYMBOL_NAMES = COMMONFABRIC_BUILDER_EXPORT_NAMES;
 
 const ARRAY_OWNER_NAMES = new Set([
   "Array",
@@ -70,7 +70,7 @@ const CELL_LIKE_CLASSES = new Set([
 
 const CELL_FACTORY_NAMES = new Set(["of"]);
 const CELL_FOR_NAMES = new Set(["for"]);
-const COMMONTOOLS_CALL_NAMES = COMMONTOOLS_CALL_EXPORT_NAMES;
+const COMMONFABRIC_CALL_NAMES = COMMONFABRIC_CALL_EXPORT_NAMES;
 const WILDCARD_OBJECT_METHOD_NAMES = new Set(["keys", "values", "entries"]);
 
 export type ArrayMethodFamilyName = "map" | "filter" | "flatMap";
@@ -603,26 +603,26 @@ export function classifyArrayMethodResultSinkReceiverChainCall(
 function isReactiveOriginKind(callKind: CallKind): boolean {
   switch (callKind.kind) {
     case "builder":
-      return COMMONTOOLS_REACTIVE_ORIGIN_BUILDER_NAMES.has(
+      return COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES.has(
         callKind.builderName,
       );
     case "cell-factory":
     case "cell-for":
       return true;
     case "derive":
-      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("derive");
+      return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("derive");
     case "ifElse":
-      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("ifElse");
+      return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("ifElse");
     case "when":
-      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("when");
+      return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("when");
     case "unless":
-      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("unless");
+      return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("unless");
     case "wish":
-      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("wish");
+      return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("wish");
     case "generate-text":
-      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("generateText");
+      return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("generateText");
     case "generate-object":
-      return COMMONTOOLS_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has(
+      return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has(
         "generateObject",
       );
     case "runtime-call":
@@ -822,7 +822,7 @@ function hasReactiveCollectionProvenanceInternal(
 
     const directBuilder = detectDirectBuilderCall(target, checker);
     return !!directBuilder &&
-      COMMONTOOLS_REACTIVE_ORIGIN_BUILDER_NAMES.has(directBuilder.builderName);
+      COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES.has(directBuilder.builderName);
   }
 
   if (!ts.isIdentifier(target)) {
@@ -1306,7 +1306,7 @@ function getDirectBuilderName(expression: ts.Expression): string | undefined {
   if (
     ts.isPropertyAccessExpression(expression) &&
     ts.isIdentifier(expression.expression) &&
-    expression.expression.text === CT_HELPERS_IDENTIFIER &&
+    expression.expression.text === CF_HELPERS_IDENTIFIER &&
     BUILDER_SYMBOL_NAMES.has(expression.name.text)
   ) {
     return expression.name.text;
@@ -1324,7 +1324,7 @@ function getSyntheticHelperCallKind(
   }
   if (
     !ts.isIdentifier(expression.expression) ||
-    expression.expression.text !== CT_HELPERS_IDENTIFIER
+    expression.expression.text !== CF_HELPERS_IDENTIFIER
   ) {
     return undefined;
   }
@@ -1337,7 +1337,7 @@ function resolveBuilderSymbolKind(
   seen: Set<ts.Symbol>,
   options: { followFactoryResults: boolean },
 ): Extract<CallKind, { kind: "builder" }> | undefined {
-  const importedBuilderName = getImportedCommonToolsNamedExport(
+  const importedBuilderName = getImportedCommonFabricNamedExport(
     symbol,
     BUILDER_SYMBOL_NAMES,
   );
@@ -1351,10 +1351,10 @@ function resolveBuilderSymbolKind(
   seen.add(resolved);
 
   const name = resolved.getName();
-  if (BUILDER_SYMBOL_NAMES.has(name) && isCommonToolsSymbol(resolved)) {
+  if (BUILDER_SYMBOL_NAMES.has(name) && isCommonFabricSymbol(resolved)) {
     return { kind: "builder", symbol: resolved, builderName: name };
   }
-  if (BUILDER_SYMBOL_NAMES.has(name) && isImportedFromCommonTools(resolved)) {
+  if (BUILDER_SYMBOL_NAMES.has(name) && isImportedFromCommonFabric(resolved)) {
     return { kind: "builder", symbol: resolved, builderName: name };
   }
   if (BUILDER_SYMBOL_NAMES.has(name) && isAmbientSymbol(resolved)) {
@@ -1411,14 +1411,14 @@ function canUseBuilderSignatureFallback(symbol: ts.Symbol): boolean {
   );
 }
 
-function isImportedFromCommonTools(symbol: ts.Symbol): boolean {
+function isImportedFromCommonFabric(symbol: ts.Symbol): boolean {
   return (symbol.declarations ?? []).some((declaration) => {
     let current: ts.Node | undefined = declaration;
     while (current) {
       if (ts.isImportDeclaration(current)) {
         return ts.isStringLiteral(current.moduleSpecifier) &&
-          (current.moduleSpecifier.text === "commontools" ||
-            current.moduleSpecifier.text === "@commontools/common");
+          (current.moduleSpecifier.text === "commonfabric" ||
+            current.moduleSpecifier.text === "@commonfabric/common");
       }
       current = current.parent;
     }
@@ -1426,7 +1426,7 @@ function isImportedFromCommonTools(symbol: ts.Symbol): boolean {
   });
 }
 
-function getImportedCommonToolsNamedExport(
+function getImportedCommonFabricNamedExport(
   symbol: ts.Symbol,
   allowedNames: ReadonlySet<string>,
 ): string | undefined {
@@ -1440,8 +1440,8 @@ function getImportedCommonToolsNamedExport(
       !current ||
       !ts.isImportDeclaration(current) ||
       !ts.isStringLiteral(current.moduleSpecifier) ||
-      (current.moduleSpecifier.text !== "commontools" &&
-        current.moduleSpecifier.text !== "@commontools/common")
+      (current.moduleSpecifier.text !== "commonfabric" &&
+        current.moduleSpecifier.text !== "@commonfabric/common")
     ) {
       continue;
     }
@@ -1470,9 +1470,9 @@ function resolveSymbolKind(
   checker: ts.TypeChecker,
   seen: Set<ts.Symbol>,
 ): CallKind | undefined {
-  const importedName = getImportedCommonToolsNamedExport(
+  const importedName = getImportedCommonFabricNamedExport(
     symbol,
-    COMMONTOOLS_CALL_NAMES,
+    COMMONFABRIC_CALL_NAMES,
   );
   if (importedName) {
     return createNamedCallKind(importedName, symbol);
@@ -1521,8 +1521,8 @@ function resolveSymbolKind(
   if (
     namedCallKind &&
     (
-      isCommonToolsSymbol(resolved) ||
-      isImportedFromCommonTools(resolved) ||
+      isCommonFabricSymbol(resolved) ||
+      isImportedFromCommonFabric(resolved) ||
       isAmbientSymbol(resolved)
     )
   ) {
@@ -1538,7 +1538,7 @@ function createNamedCallKind(
 ):
   | Exclude<CallKind, { kind: "builder" | "array-method" | "cell-for" }>
   | undefined {
-  const spec = COMMONTOOLS_RUNTIME_EXPORTS_BY_NAME.get(name);
+  const spec = COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME.get(name);
   if (!spec || spec.category !== "call") {
     return undefined;
   }

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, join } from "@std/path";
-import type { JSONSchema } from "@commontools/api";
-import { PiecesController } from "@commontools/piece/ops";
+import type { JSONSchema } from "@commonfabric/api";
+import { PiecesController } from "@commonfabric/piece/ops";
 import {
   type ExecCommandSpec,
   parseExecArgs,
@@ -16,8 +16,8 @@ import {
   resolveMountedCallableFile,
 } from "../lib/exec.ts";
 import { writeMountState } from "../lib/fuse.ts";
-import { CT_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
-import { ct } from "./utils.ts";
+import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
+import { cf, withEnv } from "./utils.ts";
 
 function makeSpec(
   callableKind: "handler" | "tool",
@@ -499,10 +499,10 @@ describe("renderExecHelp", () => {
     );
 
     expect(help).toContain("Usage:");
-    expect(help).toContain("ct exec /tmp/search.tool [run] --query <string>");
-    expect(help).toContain("ct exec /tmp/search.tool [run] --json");
-    expect(help).toContain("ct exec /tmp/search.tool [run] --json-file <path>");
-    expect(help).toContain("ct exec /tmp/search.tool [run] --help --json");
+    expect(help).toContain("cf exec /tmp/search.tool [run] --query <string>");
+    expect(help).toContain("cf exec /tmp/search.tool [run] --json");
+    expect(help).toContain("cf exec /tmp/search.tool [run] --json-file <path>");
+    expect(help).toContain("cf exec /tmp/search.tool [run] --help --json");
     expect(help).toContain("--query <string>");
     expect(help).toContain('Optional input field named "help".');
     expect(help).toContain("Read the full input object from stdin.");
@@ -530,11 +530,29 @@ describe("renderExecHelp", () => {
 
     expect(help).toContain("./legacyWrite.handler [invoke] --message <string>");
     expect(help).toContain("./legacyWrite.handler [invoke] --help");
-    expect(help).not.toContain("ct exec ./legacyWrite.handler");
+    expect(help).not.toContain("cf exec ./legacyWrite.handler");
     expect(help).toContain("No output on success.");
     expect(help).toContain(
       "Alternatively, write JSON to this file to invoke the handler.",
     );
+  });
+
+  it("renders ct exec help when the compatibility alias is active", async () => {
+    await withEnv("CF_CLI_NAME", "ct", () => {
+      const help = renderExecHelp(
+        "/tmp/search.tool",
+        makeSpec("tool", {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        }),
+      );
+
+      expect(help).toContain("ct exec /tmp/search.tool [run] --query <string>");
+      expect(help).not.toContain("cf exec /tmp/search.tool [run]");
+    });
   });
 
   it("mentions explicit invoke for handlers whose inputs are all optional", () => {
@@ -594,14 +612,14 @@ describe("renderExecHelp", () => {
     );
 
     expect(help).toContain(
-      "ct exec /tmp/number.handler [invoke] --value <number>",
+      "cf exec /tmp/number.handler [invoke] --value <number>",
     );
     expect(help).toContain(
-      "ct exec /tmp/number.handler [invoke] --value-file <path>",
+      "cf exec /tmp/number.handler [invoke] --value-file <path>",
     );
-    expect(help).toContain("ct exec /tmp/number.handler [invoke] --json");
+    expect(help).toContain("cf exec /tmp/number.handler [invoke] --json");
     expect(help).toContain(
-      "ct exec /tmp/number.handler [invoke] --json-file <path>",
+      "cf exec /tmp/number.handler [invoke] --json-file <path>",
     );
     expect(help).toContain("--value <number>");
     expect(help).toContain("--value-file <path>");
@@ -659,7 +677,7 @@ describe("renderExecHelpJson", () => {
 describe("renderPieceCallHelp", () => {
   it("renders piece-call help with top-level help lines and JSON input", () => {
     const help = renderPieceCallHelp(
-      "ct piece call ... search",
+      "cf piece call ... search",
       makeSpec(
         "tool",
         {
@@ -679,11 +697,11 @@ describe("renderPieceCallHelp", () => {
       ),
     );
 
-    expect(help).toContain("ct piece call ... search --help");
-    expect(help).toContain("ct piece call ... search --help --json");
-    expect(help).toContain("ct piece call ... search <json>");
+    expect(help).toContain("cf piece call ... search --help");
+    expect(help).toContain("cf piece call ... search --help --json");
+    expect(help).toContain("cf piece call ... search <json>");
     expect(help).toContain(
-      "ct piece call ... search -- [run] --query <string>",
+      "cf piece call ... search -- [run] --query <string>",
     );
     expect(help).toContain("JSON input:");
     expect(help).toContain("Pass inline JSON as the next argument");
@@ -691,17 +709,17 @@ describe("renderPieceCallHelp", () => {
     expect(help).toContain("help?: string");
     expect(help).toContain("Flags after `--`:");
     expect(help).not.toContain("Read the full input object from stdin.");
-    expect(help).not.toContain("ct piece call ... search -- [run] --help");
+    expect(help).not.toContain("cf piece call ... search -- [run] --help");
   });
 
   it("renders bare usage for schema-less handler piece-call help", () => {
     const help = renderPieceCallHelp(
-      "ct piece call ... onAddContact",
+      "cf piece call ... onAddContact",
       makeSpec("handler", { asStream: true } as JSONSchema),
     );
 
-    expect(help).toContain("ct piece call ... onAddContact");
-    expect(help).toContain("ct piece call ... onAddContact -- invoke");
+    expect(help).toContain("cf piece call ... onAddContact");
+    expect(help).toContain("cf piece call ... onAddContact -- invoke");
     expect(help).toContain(
       "Invoke alone will call the handler without any inputs.",
     );
@@ -712,7 +730,7 @@ describe("exec command user-facing errors", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await Deno.makeTempDir({ prefix: "ct-exec-cli-test-" });
+    tmpDir = await Deno.makeTempDir({ prefix: "cf-exec-cli-test-" });
   });
 
   afterEach(async () => {
@@ -721,7 +739,7 @@ describe("exec command user-facing errors", () => {
 
   it("prints readable errors without a raw stack trace", async () => {
     const missingPath = join(tmpDir, "missing.handler");
-    const { code, stdout, stderr } = await ct(`exec ${missingPath}`);
+    const { code, stdout, stderr } = await cf(`exec ${missingPath}`);
 
     expect(code).toBe(1);
     expect(stdout).toEqual([]);
@@ -732,7 +750,7 @@ describe("exec command user-facing errors", () => {
     );
 
     expect(relevantStderr).toEqual([
-      `Path is not within a mounted ct fuse filesystem: ${missingPath}`,
+      `Path is not within a mounted cf fuse filesystem: ${missingPath}`,
     ]);
     expect(relevantStderr.join("\n")).not.toMatch(/\n\s*at\s+/);
     expect(relevantStderr.join("\n")).not.toMatch(
@@ -746,7 +764,7 @@ describe("mounted callable resolution and execution", () => {
   let stateDir: string;
 
   beforeEach(async () => {
-    tmpDir = await Deno.makeTempDir({ prefix: "ct-exec-test-" });
+    tmpDir = await Deno.makeTempDir({ prefix: "cf-exec-test-" });
     stateDir = join(tmpDir, "state");
   });
 
@@ -759,7 +777,7 @@ describe("mounted callable resolution and execution", () => {
       resolveMountedCallableFile(join(tmpDir, "outside.handler"), {
         stateDir,
       }),
-    ).rejects.toThrow(/not within a mounted ct fuse filesystem/i);
+    ).rejects.toThrow(/not within a mounted cf fuse filesystem/i);
   });
 
   it("rejects mounted non-callable files", async () => {
@@ -1779,7 +1797,7 @@ function createExecHarness(options: {
     getSpace: () => options.managerSpace ?? "home",
     synced: async () => {},
     runtime: {
-      [CT_RUNTIME_ERROR_LOG]: runtimeErrors,
+      [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
       edit: () => ({
         commit: async () => {},
       }),

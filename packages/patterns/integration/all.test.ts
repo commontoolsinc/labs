@@ -1,10 +1,10 @@
-import { env } from "@commontools/integration";
-import { PiecesController } from "@commontools/piece/ops";
+import { env } from "@commonfabric/integration";
+import { PiecesController } from "@commonfabric/piece/ops";
 import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert } from "@std/assert";
-import { Identity } from "@commontools/identity";
-import { FileSystemProgramResolver } from "@commontools/js-compiler";
+import { Identity } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 
 const { API_URL, SPACE_NAME } = env;
 

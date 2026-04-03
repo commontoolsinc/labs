@@ -2,7 +2,7 @@
  * Types for LLM-assisted extraction module
  */
 
-import type { ImageData } from "commontools";
+import type { ImageData } from "commonfabric";
 
 /**
  * Validation issue severity level

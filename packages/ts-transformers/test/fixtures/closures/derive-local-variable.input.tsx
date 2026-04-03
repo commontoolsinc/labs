@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, derive, pattern } from "commontools";
+import { Writable, derive, pattern } from "commonfabric";
 
 // FIXTURE: derive-local-variable
 // Verifies: callback-local variables are not captured, but outer cells are

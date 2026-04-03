@@ -6,7 +6,7 @@ import {
   setIframeTestHandler,
   waitForCondition,
 } from "./utils.ts";
-import { sleep } from "@commontools/utils/sleep";
+import { sleep } from "@commonfabric/utils/sleep";
 
 setIframeTestHandler();
 

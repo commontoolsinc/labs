@@ -1,10 +1,13 @@
 import ts from "typescript";
-import type { JSONSchemaMutable, JSONSchemaObjMutable } from "@commontools/api";
+import type {
+  JSONSchemaMutable,
+  JSONSchemaObjMutable,
+} from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { cloneSchemaDefinition, getNativeTypeSchema } from "../type-utils.ts";
-import { getLogger } from "@commontools/utils/logger";
-import { isRecord } from "@commontools/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isRecord } from "@commonfabric/utils/types";
 import { extractDocFromType } from "../doc-utils.ts";
 import { isCellType } from "../typescript/cell-brand.ts";
 
@@ -16,7 +19,7 @@ export class IntersectionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    // Don't handle cell types - they are intersection types but should be handled by CommonToolsFormatter
+    // Don't handle cell types - they are intersection types but should be handled by CommonFabricFormatter
     if (isCellType(type, context.typeChecker)) {
       return false;
     }

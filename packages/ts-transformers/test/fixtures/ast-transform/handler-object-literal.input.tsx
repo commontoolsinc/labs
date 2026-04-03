@@ -1,6 +1,6 @@
 /// <cts-enable />
-import { Cell, handler, pattern } from "commontools";
-import "commontools/schema";
+import { Cell, handler, pattern } from "commonfabric";
+import "commonfabric/schema";
 
 interface State {
   value: Cell<number>;

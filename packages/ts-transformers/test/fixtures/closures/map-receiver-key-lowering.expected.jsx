@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 interface Item {
     subItems: Array<{
         value: string;
@@ -15,9 +15,9 @@ interface Input {
 // Context: No captures; receiver expression item.subItems is lowered to item.key("subItems")
 const _p = pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
-    return items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+    return items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
         const item = __ct_pattern_input.key("element");
-        return item.key("subItems").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        return item.key("subItems").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
             const subItem = __ct_pattern_input.key("element");
             return subItem.key("value");
         }, {
@@ -34,9 +34,9 @@ const _p = pattern((__ct_pattern_input) => {
                 }
             },
             required: ["element"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema), {});
+        } as const satisfies __cfHelpers.JSONSchema), {});
     }, {
         type: "object",
         properties: {
@@ -65,12 +65,12 @@ const _p = pattern((__ct_pattern_input) => {
                 required: ["subItems"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema), {});
+    } as const satisfies __cfHelpers.JSONSchema), {});
 }, {
     type: "object",
     properties: {
@@ -102,7 +102,7 @@ const _p = pattern((__ct_pattern_input) => {
             required: ["subItems"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "array",
     items: {
         type: "array",
@@ -110,8 +110,8 @@ const _p = pattern((__ct_pattern_input) => {
             type: "string"
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

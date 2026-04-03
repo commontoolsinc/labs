@@ -5,7 +5,7 @@
  * Hypothesis: Direct .length access doesn't establish reactive tracking,
  * but .filter(() => true).length does (because it iterates).
  *
- * Run: deno task ct test packages/patterns/gideon-tests/array-length-repro.tsx --verbose
+ * Run: deno task cf test packages/patterns/gideon-tests/array-length-repro.tsx --verbose
  */
 import {
   action,
@@ -17,7 +17,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Item {
   name: string;

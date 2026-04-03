@@ -22,7 +22,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Import shared types
 import type {
@@ -182,50 +182,50 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
   return {
     [NAME]: computed(() => `Contacts (${count})`),
     [UI]: (
-      <ct-screen>
-        <ct-vstack slot="header" style="gap: 8px;">
-          <ct-hstack style="justify-content: space-between; align-items: center;">
-            <ct-heading level={4}>Contacts</ct-heading>
-            <ct-hstack style="gap: 8px;">
-              <ct-button
+      <cf-screen>
+        <cf-vstack slot="header" style="gap: 8px;">
+          <cf-hstack style="justify-content: space-between; align-items: center;">
+            <cf-heading level={4}>Contacts</cf-heading>
+            <cf-hstack style="gap: 8px;">
+              <cf-button
                 variant="primary"
                 onClick={addPerson({ contacts, selectedIndex })}
               >
                 + Person
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="secondary"
                 onClick={addFamilyMember({ contacts, selectedIndex })}
               >
                 + Family
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 variant="ghost"
                 size="sm"
                 onClick={addGroup({ groups })}
               >
                 + Group
-              </ct-button>
-            </ct-hstack>
-          </ct-hstack>
-        </ct-vstack>
+              </cf-button>
+            </cf-hstack>
+          </cf-hstack>
+        </cf-vstack>
 
-        <ct-resizable-panel-group direction="horizontal" style="flex: 1;">
+        <cf-resizable-panel-group direction="horizontal" style="flex: 1;">
           {/* Left: Contact List */}
-          <ct-resizable-panel default-size="35" min-size="25" max-size="50">
-            <ct-vscroll style="height: 100%;">
-              <ct-vstack style="gap: 4px; padding: 8px;">
+          <cf-resizable-panel default-size="35" min-size="25" max-size="50">
+            <cf-vscroll style="height: 100%;">
+              <cf-vstack style="gap: 4px; padding: 8px;">
                 {/* Render contact list using reactive .map() */}
                 {contacts.map((charm, index) => (
-                  <ct-card
+                  <cf-card
                     style={computed(() =>
                       selectedIndex.get() === index
-                        ? "background: var(--ct-color-blue-50, #eff6ff); border: 1px solid var(--ct-color-blue-300, #93c5fd); cursor: pointer;"
+                        ? "background: var(--cf-color-blue-50, #eff6ff); border: 1px solid var(--cf-color-blue-300, #93c5fd); cursor: pointer;"
                         : "cursor: pointer;"
                     )}
                     onClick={selectContact({ selectedIndex, index })}
                   >
-                    <ct-hstack style="gap: 8px; align-items: center;">
+                    <cf-hstack style="gap: 8px; align-items: center;">
                       <span
                         style={{
                           width: "32px",
@@ -252,7 +252,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
 
                       <span style={{ flex: "1" }}>{charm[NAME]}</span>
 
-                      <ct-button
+                      <cf-button
                         variant="ghost"
                         size="sm"
                         onClick={removeContact({
@@ -263,26 +263,26 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
                         })}
                       >
                         ×
-                      </ct-button>
-                    </ct-hstack>
-                  </ct-card>
+                      </cf-button>
+                    </cf-hstack>
+                  </cf-card>
                 ))}
-              </ct-vstack>
-            </ct-vscroll>
-          </ct-resizable-panel>
+              </cf-vstack>
+            </cf-vscroll>
+          </cf-resizable-panel>
 
-          <ct-resizable-handle />
+          <cf-resizable-handle />
 
           {/* Right: Detail View - just render the piece's [UI] */}
-          <ct-resizable-panel default-size="65" min-size="30">
+          <cf-resizable-panel default-size="65" min-size="30">
             {computed(() => {
               const idx = selectedIndex.get();
               if (idx < 0 || idx >= (contacts.get() || []).length) {
                 return (
-                  <ct-vstack style="height: 100%; align-items: center; justify-content: center; color: #6b7280;">
+                  <cf-vstack style="height: 100%; align-items: center; justify-content: center; color: #6b7280;">
                     <span style={{ fontSize: "48px" }}>←</span>
                     <span>Select a contact to view details</span>
-                  </ct-vstack>
+                  </cf-vstack>
                 );
               }
 
@@ -290,24 +290,24 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
 
               // Piece already has [UI] - just render it with wrapper
               return (
-                <ct-vstack style="height: 100%;">
-                  <ct-hstack style="padding: 8px 16px; border-bottom: 1px solid #e5e7eb; justify-content: flex-end;">
-                    <ct-button
+                <cf-vstack style="height: 100%;">
+                  <cf-hstack style="padding: 8px 16px; border-bottom: 1px solid #e5e7eb; justify-content: flex-end;">
+                    <cf-button
                       variant="outline"
                       size="sm"
                       onClick={openInNewView}
                     >
                       Open ↗
-                    </ct-button>
-                  </ct-hstack>
+                    </cf-button>
+                  </cf-hstack>
 
-                  <ct-render $cell={piece} />
-                </ct-vstack>
+                  <cf-render $cell={piece} />
+                </cf-vstack>
               );
             })}
-          </ct-resizable-panel>
-        </ct-resizable-panel-group>
-      </ct-screen>
+          </cf-resizable-panel>
+        </cf-resizable-panel-group>
+      </cf-screen>
     ),
     contacts,
     groups,

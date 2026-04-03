@@ -33,7 +33,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface TestInput {
   // Trigger value that we can change to force re-computation
@@ -142,12 +142,12 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
           <p>
             <strong>Trigger Count:</strong> {triggerCount}
           </p>
-          <ct-button
+          <cf-button
             onClick={incrementTrigger({ triggerCount })}
             style={{ padding: "10px 20px", fontSize: "16px" }}
           >
             Trigger Re-computation
-          </ct-button>
+          </cf-button>
         </div>
 
         <div

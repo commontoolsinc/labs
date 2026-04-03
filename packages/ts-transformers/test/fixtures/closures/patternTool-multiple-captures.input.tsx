@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, pattern, patternTool, type PatternToolResult, Writable } from "commontools";
+import { derive, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
 
 const multiplier = Writable.of(2);
 const prefix = Writable.of("Result: ");

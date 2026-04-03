@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, ifElse, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { computed, ifElse, pattern } from "commonfabric";
 // FIXTURE: computed-boundary-nested-ternaries
 // Verifies: outer branch lowering does not structurally lower nested ternaries inside computed callbacks
 //   show ? computed(() => bar ? "B" : "C") : "D" → outer branch lowers, inner ternary stays authored
@@ -7,15 +7,15 @@ import { computed, ifElse, pattern } from "commontools";
 export const OuterTernary = pattern((__ct_pattern_input) => {
     const show = __ct_pattern_input.key("show");
     const bar = __ct_pattern_input.key("bar");
-    return (<div>{__ctHelpers.ifElse({
+    return (<div>{__cfHelpers.ifElse({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["B", "C"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["B", "C", "D"]
-    } as const satisfies __ctHelpers.JSONSchema, show, __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.derive({
         type: "object",
         properties: {
             bar: {
@@ -23,9 +23,9 @@ export const OuterTernary = pattern((__ct_pattern_input) => {
             }
         },
         required: ["bar"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["B", "C"]
-    } as const satisfies __ctHelpers.JSONSchema, { bar: bar }, ({ bar }) => bar ? "B" : "C"), "D")}</div>);
+    } as const satisfies __cfHelpers.JSONSchema, { bar: bar }, ({ bar }) => bar ? "B" : "C"), "D")}</div>);
 }, {
     type: "object",
     properties: {
@@ -37,7 +37,7 @@ export const OuterTernary = pattern((__ct_pattern_input) => {
         }
     },
     required: ["show", "bar"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     anyOf: [{
             $ref: "https://commonfabric.org/schemas/vnode.json"
         }, {
@@ -57,20 +57,20 @@ export const OuterTernary = pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 export const AuthoredIfElse = pattern((__ct_pattern_input) => {
     const show = __ct_pattern_input.key("show");
     const foo = __ct_pattern_input.key("foo");
     const bar = __ct_pattern_input.key("bar");
     return ifElse({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["B", "C", "A"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["B", "C", "A", "D"]
-    } as const satisfies __ctHelpers.JSONSchema, show, __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.derive({
         type: "object",
         properties: {
             foo: {
@@ -81,9 +81,9 @@ export const AuthoredIfElse = pattern((__ct_pattern_input) => {
             }
         },
         required: ["foo", "bar"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["B", "C", "A"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         foo: foo,
         bar: bar
     }, ({ foo, bar }) => foo ? "A" : bar ? "B" : "C"), "D");
@@ -101,10 +101,10 @@ export const AuthoredIfElse = pattern((__ct_pattern_input) => {
         }
     },
     required: ["show", "foo", "bar"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     "enum": ["B", "C", "A", "D"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

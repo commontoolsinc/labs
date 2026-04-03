@@ -31,7 +31,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import {
   CalendarWriteClient,
   type RSVPStatus,
@@ -633,7 +633,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
             >
               Event Title <span style={{ color: "#ef4444" }}>*</span>
             </label>
-            <ct-input
+            <cf-input
               type="text"
               $value={draft.summary}
               placeholder="Team Meeting"
@@ -653,7 +653,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
               >
                 Start <span style={{ color: "#ef4444" }}>*</span>
               </label>
-              <ct-input
+              <cf-input
                 type="datetime-local"
                 $value={draft.start}
                 style="width: 100%; padding: 8px 12px;"
@@ -670,7 +670,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
               >
                 End <span style={{ color: "#ef4444" }}>*</span>
               </label>
-              <ct-input
+              <cf-input
                 type="datetime-local"
                 $value={draft.end}
                 style="width: 100%; padding: 8px 12px;"
@@ -689,7 +689,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
             >
               Location
             </label>
-            <ct-input
+            <cf-input
               type="text"
               $value={draft.location}
               placeholder="Conference Room A / Zoom link"
@@ -708,7 +708,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
             >
               Description
             </label>
-            <ct-input
+            <cf-input
               $value={draft.description}
               placeholder="Event details and agenda..."
               style="width: 100%; padding: 8px 12px; min-height: 80px;"
@@ -726,7 +726,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
             >
               Attendees (comma-separated emails)
             </label>
-            <ct-input
+            <cf-input
               type="text"
               $value={draft.attendeesText}
               placeholder="alice@example.com, bob@example.com"

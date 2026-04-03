@@ -3,13 +3,13 @@ import {
   type JSXElement,
   type RenderNode,
   type VNode,
-} from "@commontools/api";
-import { isCell, isCellResult } from "@commontools/runner";
+} from "@commonfabric/api";
+import { isCell, isCellResult } from "@commonfabric/runner";
 
 /**
  * Fragment element name used for JSX fragments.
  */
-const FRAGMENT_ELEMENT = "ct-fragment";
+const FRAGMENT_ELEMENT = "cf-fragment";
 
 /**
  * JSX factory function for creating virtual DOM nodes.
@@ -40,8 +40,8 @@ export const h: HFunction = Object.assign(
               "If invoking from within computed(), consider moving the component into a pattern: E.g.\n" +
               "```\n" +
               (key === "$checked"
-                ? "const Item = pattern<{ item: Item }>(({item}) => <div><ct-checkbox $checked={item.checked} />{item.title}</div>);"
-                : "const Item = pattern<{ item: Item }>(({item}) => <div><ct-input $value={item.value} />{item.title}</div>);") +
+                ? "const Item = pattern<{ item: Item }>(({item}) => <div><cf-checkbox $checked={item.checked} />{item.title}</div>);"
+                : "const Item = pattern<{ item: Item }>(({item}) => <div><cf-input $value={item.value} />{item.title}</div>);") +
               "\n```" +
               "\n" +
               "And then using it like `<Item {item} />`",

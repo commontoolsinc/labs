@@ -1,7 +1,10 @@
 import ts from "typescript";
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 
-import type { JSONSchemaMutable, JSONSchemaObjMutable } from "@commontools/api";
+import type {
+  JSONSchemaMutable,
+  JSONSchemaObjMutable,
+} from "@commonfabric/api";
 import type {
   GenerationContext,
   SchemaGenerator as ISchemaGenerator,
@@ -10,7 +13,7 @@ import type {
 import { PrimitiveFormatter } from "./formatters/primitive-formatter.ts";
 import { ObjectFormatter } from "./formatters/object-formatter.ts";
 import { ArrayFormatter } from "./formatters/array-formatter.ts";
-import { CommonToolsFormatter } from "./formatters/common-tools-formatter.ts";
+import { CommonFabricFormatter } from "./formatters/common-fabric-formatter.ts";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { UnionFormatter } from "./formatters/union-formatter.ts";
 import { IntersectionFormatter } from "./formatters/intersection-formatter.ts";
@@ -30,7 +33,7 @@ import { extractDocFromType } from "./doc-utils.ts";
  */
 export class SchemaGenerator implements ISchemaGenerator {
   private formatters: TypeFormatter[] = [
-    new CommonToolsFormatter(this),
+    new CommonFabricFormatter(this),
     new NativeTypeFormatter(),
     new UnionFormatter(this),
     new IntersectionFormatter(this),
@@ -157,7 +160,7 @@ export class SchemaGenerator implements ISchemaGenerator {
    *
    * EXCEPTION: Wrapper types (Default/Cell/Stream/OpaqueRef) erase to their inner type,
    * which may appear as 'any', but they should use type-based analysis because
-   * CommonToolsFormatter handles them specially via typeNode context.
+   * CommonFabricFormatter handles them specially via typeNode context.
    */
   private shouldUseNodeBasedAnalysis(
     type: ts.Type,

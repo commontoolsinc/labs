@@ -14,12 +14,12 @@ interface Deck {
 
 // In a .map() callback, deck.id is a Cell, NOT a plain string
 {decks.map((deck) => (
-  <ct-button onClick={() => {
+  <cf-button onClick={() => {
     // This fails silently - deck.id is a Cell, not "deck-1"
     goToReview.send({ deckId: deck.id });
   }}>
     Review {deck.name}
-  </ct-button>
+  </cf-button>
 ))}
 ```
 
@@ -28,7 +28,7 @@ interface Deck {
 ## The Fix: Use `equals()` Instead of ID Lookups
 
 ```typescript
-import { equals } from 'commontools';
+import { equals } from 'commonfabric';
 
 // CORRECT - No id property needed
 interface Deck {
@@ -38,7 +38,7 @@ interface Deck {
 
 // Use equals() for object identity comparison
 {decks.map((deck) => (
-  <ct-button onClick={() => {
+  <cf-button onClick={() => {
     const allDecks = decks.get();
     const idx = allDecks.findIndex((d) => equals(deck, d));
     if (idx >= 0) {
@@ -47,7 +47,7 @@ interface Deck {
     }
   }}>
     Review {deck.name}
-  </ct-button>
+  </cf-button>
 ))}
 ```
 
@@ -63,12 +63,12 @@ interface Deck {
 ```typescript
 // Even simpler - use the index from map
 {decks.map((deck, index) => (
-  <ct-button onClick={() => {
+  <cf-button onClick={() => {
     selectedDeckIndex.set(index);
     currentView.set("review");
   }}>
     Review {deck.name}
-  </ct-button>
+  </cf-button>
 ))}
 ```
 

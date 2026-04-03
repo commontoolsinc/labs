@@ -55,11 +55,11 @@ piece root. All pieces have a `.handlers` file at the piece root.
 Mounted callable reads return synthetic text whose first line is:
 
 ```text
-#!<stable-ct-shim> exec
+#!<stable-cf-shim> exec
 ```
 
 This is display-only for this change. The supported execution contract is
-`ct exec <mounted-callable-file> ...`.
+`cf exec <mounted-callable-file> ...`.
 
 Reads are served from a cache. The cache is populated eagerly for subscribed
 cells and lazily for others.
@@ -148,10 +148,10 @@ changes. Writing to `.handlers` fails with `EACCES`.
 ### `write` to `.tool` File
 
 Mounted `.tool` files are read-only. Writes fail with `EACCES`. Execute them
-through `ct exec <mounted-tool-file> [run] [flags]` instead.
+through `cf exec <mounted-tool-file> [run] [flags]` instead.
 
-Mounted handler and tool files are both accepted by `ct exec` from either the
-`pieces/` or `entities/` view. Top-level `ct exec <file> --help` always prints
+Mounted handler and tool files are both accepted by `cf exec` from either the
+`pieces/` or `entities/` view. Top-level `cf exec <file> --help` always prints
 callable help; after the verb, schema-derived flags own the namespace.
 
 ### `create` (New File)

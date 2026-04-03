@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commontools";
+import { cell, pattern, UI } from "commonfabric";
 
 // FIXTURE: opaque-ref-operations
 // Verifies: arithmetic on cell-backed OpaqueRefs in JSX is wrapped in derive() with asCell schema

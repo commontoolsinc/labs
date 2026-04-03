@@ -1,5 +1,5 @@
 import { QuickJSHandle } from "./sandbox/quick.ts";
-import { type JsScript } from "@commontools/js-compiler";
+import { type JsScript } from "@commonfabric/js-compiler";
 import { GuestMessage, SandboxValue } from "./types.ts";
 import { Sandbox, SandboxConfig, SandboxStats } from "./sandbox/mod.ts";
 

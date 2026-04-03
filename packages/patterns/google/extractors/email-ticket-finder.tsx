@@ -14,10 +14,10 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth email-ticket-finder/overrideAuth
+ * 3. Link: cf piece link google-auth/auth email-ticket-finder/overrideAuth
  */
-import { computed, JSONSchema, NAME, pattern, UI } from "commontools";
-import type { Schema } from "commontools/schema";
+import { computed, JSONSchema, NAME, pattern, UI } from "commonfabric";
+import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
@@ -627,13 +627,13 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     previewUI,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-heading level={3}>Email Ticket Finder</ct-heading>
+          <cf-heading level={3}>Email Ticket Finder</cf-heading>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {/* Auth UI from GmailExtractor */}
             {extractor.ui.authStatusUI}
 
@@ -730,7 +730,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                   {todayCount} Event{todayCount !== 1 ? "s" : ""} Today!
                 </span>
               </div>
-              <ct-vstack gap="2">
+              <cf-vstack gap="2">
                 {todayTickets.map((ticket) => (
                   <div
                     style={{
@@ -766,7 +766,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                     </div>
                   </div>
                 ))}
-              </ct-vstack>
+              </cf-vstack>
             </div>
 
             {/* Upcoming Events Section */}
@@ -785,7 +785,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
               >
                 Upcoming Events
               </h3>
-              <ct-vstack gap="3">
+              <cf-vstack gap="3">
                 {upcomingTickets.map((ticket) => {
                   const statusColors = getStatusColor(ticket.status);
                   return (
@@ -902,7 +902,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                     </div>
                   );
                 })}
-              </ct-vstack>
+              </cf-vstack>
             </div>
 
             {/* Past Events Section */}
@@ -925,7 +925,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                 >
                   Past Events ({computed(() => (pastTickets || []).length)})
                 </summary>
-                <ct-vstack gap="2">
+                <cf-vstack gap="2">
                   {pastTickets.map((ticket) => (
                     <div
                       style={{
@@ -952,7 +952,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </details>
             </div>
 
@@ -991,7 +991,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                   >
                     LLM Analysis Results:
                   </h4>
-                  <ct-vstack gap="2">
+                  <cf-vstack gap="2">
                     {rawAnalyses.map((analysisItem) => {
                       const debugResult = analysisItem.analysis?.result as
                         | TicketAnalysisResult
@@ -1033,7 +1033,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                               marginTop: "4px",
                             }}
                           >
-                            <ct-loader size="sm" />
+                            <cf-loader size="sm" />
                             <span>Analyzing...</span>
                           </div>
 
@@ -1151,13 +1151,13 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                         </div>
                       );
                     })}
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
               </details>
             </div>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

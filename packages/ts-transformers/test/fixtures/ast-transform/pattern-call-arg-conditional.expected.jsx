@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 const identity = <T,>(value: T) => value;
 // FIXTURE: pattern-call-arg-conditional
 // Verifies: top-level ordinary helper calls with reactive arguments are lifted
@@ -7,7 +7,7 @@ const identity = <T,>(value: T) => value;
 //   const label = identity(state.done ? "Done" : "Pending")
 //   → const label = derive(..., ({ state }) => identity(state.done ? "Done" : "Pending"))
 export default pattern((state) => {
-    const label = __ctHelpers.derive({
+    const label = __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -21,9 +21,9 @@ export default pattern((state) => {
             }
         },
         required: ["state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["Done", "Pending"]
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             done: state.key("done")
         } }, ({ state }) => identity(state.done ? "Done" : "Pending"));
     return { label };
@@ -35,7 +35,7 @@ export default pattern((state) => {
         }
     },
     required: ["done"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         label: {
@@ -43,8 +43,8 @@ export default pattern((state) => {
         }
     },
     required: ["label"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -1,5 +1,5 @@
 /**
- * Styles for ct-form component
+ * Styles for cf-form component
  */
 
 export const formStyles = `
@@ -33,7 +33,7 @@ export const formStyles = `
   }
 
   /* Common form field patterns */
-  ::slotted(ct-label) {
+  ::slotted(cf-label) {
     margin-bottom: var(--form-field-gap);
   }
 
@@ -84,8 +84,8 @@ export const formStyles = `
       flex-direction: column;
     }
     
-    ::slotted(.form-actions) ct-button,
-    ::slotted(.form-buttons) ct-button {
+    ::slotted(.form-actions) cf-button,
+    ::slotted(.form-buttons) cf-button {
       width: 100%;
     }
   }

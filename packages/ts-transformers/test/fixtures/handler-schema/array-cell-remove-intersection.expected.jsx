@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, handler } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, handler } from "commonfabric";
 interface Item {
     text: string;
 }
@@ -8,7 +8,7 @@ interface ListState {
 }
 const removeItem = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         items: {
@@ -34,7 +34,7 @@ const removeItem = handler({
             required: ["text"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (_, { items, index }) => {
+} as const satisfies __cfHelpers.JSONSchema, (_, { items, index }) => {
     const next = items.get().slice();
     if (index >= 0 && index < next.length)
         next.splice(index, 1);
@@ -46,7 +46,7 @@ type ListStateWithIndex = ListState & {
 };
 const removeItemAlias = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         items: {
@@ -72,7 +72,7 @@ const removeItemAlias = handler({
             required: ["text"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (_, { items, index }) => {
+} as const satisfies __cfHelpers.JSONSchema, (_, { items, index }) => {
     const next = items.get().slice();
     if (index >= 0 && index < next.length)
         next.splice(index, 1);
@@ -85,6 +85,6 @@ const removeItemAlias = handler({
 // Context: inline intersection vs type alias intersection; alias variant loses $defs (items: true)
 export { removeItem, removeItemAlias };
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

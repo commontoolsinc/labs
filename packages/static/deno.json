@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/static",
+  "name": "@commonfabric/static",
   "tasks": {
     "test": {
       "dependencies": [

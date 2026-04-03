@@ -1,19 +1,19 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { StaticCacheFS } from "@commontools/static";
+import { StaticCacheFS } from "@commonfabric/static";
 
 import { transformSource, validateSource } from "../utils.ts";
 
 const staticCache = new StaticCacheFS();
-const commontools = await staticCache.getText("types/commontools.d.ts");
+const commonfabric = await staticCache.getText("types/commonfabric.d.ts");
 
 describe("OpaqueRef transformer (runtime-style API)", () => {
-  const types = { "commontools.d.ts": commontools };
+  const types = { "commonfabric.d.ts": commonfabric };
 
   describe("error mode", () => {
     it("reports errors instead of transforming", async () => {
       const source = `/// <cts-enable />
-import { pattern, h, UI } from "commontools";
+import { pattern, h, UI } from "commonfabric";
 
 export default pattern<{ count: number }>((state) => {
   return { [UI]: <div>{state.count + 1}</div> };
@@ -33,7 +33,7 @@ export default pattern<{ count: number }>((state) => {
 
     it("reports multiple errors", async () => {
       const source = `/// <cts-enable />
-import { pattern, h, UI } from "commontools";
+import { pattern, h, UI } from "commonfabric";
 
 export default pattern<{ count: number; isActive: boolean }>((state) => {
   return {
@@ -60,7 +60,7 @@ export default pattern<{ count: number; isActive: boolean }>((state) => {
     it("logs transformation details", async () => {
       const logs: string[] = [];
       const source = `/// <cts-enable />
-import { pattern, derive, h, UI } from "commontools";
+import { pattern, derive, h, UI } from "commonfabric";
 
 export default pattern<{ count: number }>((state) => {
   return { [UI]: <div>{state.count + 1}</div> };
@@ -82,7 +82,7 @@ export default pattern<{ count: number }>((state) => {
   describe("checkWouldTransform", () => {
     it("returns true when transformation is needed", async () => {
       const source = `/// <cts-enable />
-import { pattern, h, UI } from "commontools";
+import { pattern, h, UI } from "commonfabric";
 
 export default pattern<{ count: number }>((state) => {
   return { [UI]: <div>{state.count + 1}</div> };

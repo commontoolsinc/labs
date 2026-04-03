@@ -25,7 +25,7 @@
  * 4. Verify all values update: Count=1, User="Bob", Items=4, Status="Active"
  * 5. Click multiple times to verify continuous updates
  */
-import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
+import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
 
 interface Item {
   title: string;
@@ -158,9 +158,9 @@ export default pattern<TestInput>(({ count, user, items }) => {
           </div>
         </div>
 
-        <ct-button onClick={updateAllValues({ count, user, items })}>
+        <cf-button onClick={updateAllValues({ count, user, items })}>
           Update All Values
-        </ct-button>
+        </cf-button>
 
         <div
           style={{

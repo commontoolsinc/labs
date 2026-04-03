@@ -46,7 +46,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Handler WITH await (supposedly blocks UI)
 const testWithAwait = handler<
@@ -177,21 +177,21 @@ export default pattern<PatternState>((state) => {
             Test Buttons (click test, then spam counter)
           </h3>
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <ct-button id="test-with-await" onClick={testWithAwait(state)}>
+            <cf-button id="test-with-await" onClick={testWithAwait(state)}>
               WITH await (3s)
-            </ct-button>
-            <ct-button
+            </cf-button>
+            <cf-button
               id="test-without-await"
               onClick={testWithoutAwait(state)}
             >
               WITHOUT await (3s)
-            </ct-button>
-            <ct-button id="increment-counter" onClick={incrementCounter(state)}>
+            </cf-button>
+            <cf-button id="increment-counter" onClick={incrementCounter(state)}>
               Counter: {state.counter}
-            </ct-button>
-            <ct-button id="reset-all" onClick={resetAll(state)}>
+            </cf-button>
+            <cf-button id="reset-all" onClick={resetAll(state)}>
               Reset
-            </ct-button>
+            </cf-button>
           </div>
           <p style="margin: 10px 0 0 0; font-size: 13px; color: #666;">
             Click a test button, then immediately spam the Counter button to

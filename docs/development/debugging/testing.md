@@ -4,31 +4,31 @@
 
 ```bash
 # Check syntax only (fast)
-deno task ct check pattern.tsx --no-run
+deno task cf check pattern.tsx --no-run
 
 # Run locally
-deno task ct check pattern.tsx
+deno task cf check pattern.tsx
 
 # View transformer output (debug compile issues)
-deno task ct check pattern.tsx --show-transformed
+deno task cf check pattern.tsx --show-transformed
 ```
 
 ## Deployed Testing
 
 ```bash
 # Deploy
-deno task ct piece new --identity key.json --api-url URL --space SPACE pattern.tsx
+deno task cf piece new --identity key.json --api-url URL --space SPACE pattern.tsx
 # Returns: piece-id
 
 # Set test data
 echo '{"title": "Test", "done": false}' | \
-  deno task ct piece set --identity key.json --api-url URL --space SPACE --piece ID testItem
+  deno task cf piece set --identity key.json --api-url URL --space SPACE --piece ID testItem
 
 # Inspect full state
-deno task ct piece inspect --identity key.json --api-url URL --space SPACE --piece ID
+deno task cf piece inspect --identity key.json --api-url URL --space SPACE --piece ID
 
 # Get specific field
-deno task ct piece get --identity key.json --api-url URL --space SPACE --piece ID items/0/title
+deno task cf piece get --identity key.json --api-url URL --space SPACE --piece ID items/0/title
 ```
 
 ## Iterate Quickly with setsrc
@@ -36,7 +36,7 @@ deno task ct piece get --identity key.json --api-url URL --space SPACE --piece I
 Use `setsrc` to update existing piece without creating new one:
 
 ```bash
-deno task ct piece setsrc --identity key.json --api-url URL --space SPACE --piece ID pattern.tsx
+deno task cf piece setsrc --identity key.json --api-url URL --space SPACE --piece ID pattern.tsx
 ```
 
 This keeps you working with the same piece instance, preserving any test data you've set up.

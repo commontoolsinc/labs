@@ -9,7 +9,7 @@ import {
   pattern,
   str,
   type Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface DerivedDifferenceArgs {
   primary: Default<number, 0>;

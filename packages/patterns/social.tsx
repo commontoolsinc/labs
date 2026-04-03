@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Stores social platform, handle, and profile URL.
  */
-import { computed, type Default, NAME, pattern, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -83,28 +83,28 @@ export const SocialModule = pattern<SocialModuleInput, SocialModuleInput>(
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Social: ${displayText}`),
       [UI]: (
-        <ct-vstack style={{ gap: "12px" }}>
-          <ct-vstack style={{ gap: "4px" }}>
+        <cf-vstack style={{ gap: "12px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Platform
             </label>
-            <ct-select $value={platform} items={PLATFORM_OPTIONS} />
-          </ct-vstack>
-          <ct-vstack style={{ gap: "4px" }}>
+            <cf-select $value={platform} items={PLATFORM_OPTIONS} />
+          </cf-vstack>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Handle</label>
-            <ct-input $value={handle} placeholder="@username" />
-          </ct-vstack>
-          <ct-vstack style={{ gap: "4px" }}>
+            <cf-input $value={handle} placeholder="@username" />
+          </cf-vstack>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Profile URL
             </label>
-            <ct-input
+            <cf-input
               type="url"
               $value={profileUrl}
               placeholder="https://..."
             />
-          </ct-vstack>
-        </ct-vstack>
+          </cf-vstack>
+        </cf-vstack>
       ),
       platform,
       handle,

@@ -7,7 +7,7 @@ subtitle: A gentle tutorial into using the llm() function in a pattern
 authors:
   - name: Ellyse Cedeno
     email: ellyse@common.tools
-keywords: commontools, patterns, llm, builtins
+keywords: commonfabric, patterns, llm, builtins
 abstract: |
   In this section, we will create patterns to make LLM calls. We'll iterate on them to make new features, making sure you understand the changes each step of the way.
 ---
@@ -34,9 +34,9 @@ import {
   NAME,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 ```
-Notice line 1 begins with `/// <cts-enable`, which is important because it enables the Common Tools AST Transformer. This allows you to use TypeScript types for many of the function parameters instead of passing in JSONSchema which can be quite verbose and difficult to read; it also enables automatic transformation of patterns you write to forms that use the reactive wrappers `derive` and `ifElse` without you having to write them yourself. We generally have this at the start of all patterns.
+Notice line 1 begins with `/// <cts-enable`, which is important because it enables the Common Fabric AST Transformer. This allows you to use TypeScript types for many of the function parameters instead of passing in JSONSchema which can be quite verbose and difficult to read; it also enables automatic transformation of patterns you write to forms that use the reactive wrappers `derive` and `ifElse` without you having to write them yourself. We generally have this at the start of all patterns.
 
 The next step is to append our pattern function to the code, right after the imports. You can see `pattern` imported on line 32 in the code snippet above ([](#imports)). This is the main entry point for your pattern, you can think of it like *main()* in many languages.
 Normally, the pattern function takes in extra arguments, but for now, we'll leave it empty.
@@ -93,11 +93,11 @@ export default pattern(() => {
         <h2>My LLM Test</h2>
         <div>User Message: {userMessage}</div>
         <div>
-          <ct-message-input
+          <cf-message-input
             name="Send"
             placeholder="Type a message..."
             appearance="rounded"
-            onct-send={textInputHandler({ userMessage })}
+            oncf-send={textInputHandler({ userMessage })}
           />
         </div>
       </div>
@@ -109,8 +109,8 @@ export default pattern(() => {
 On line 2, we have a call to cell(). This will create a Cell with the default value passed in.
 We'll use this cell to store the text the user types in our user input component.
 
-On line 11, we've added the `<ct-message-input>` component. Note that regular HTML forms are not allowed in the pattern UI. These restrictions are there for data privacy and security reasons.
-The `placeholder` property (line 13) shows faded text in the input form as its default value. The `onct-send` property (line 15) is called when the user submits their message (presses enter or clicks on the submit button). The value for `onct-send` is the function that gets executed to handle the event. We'll define that next. The parameters you send must be wrapped in an object. Example: `{ userMessage }`. Additional parameters would be comma separated.
+On line 11, we've added the `<cf-message-input>` component. Note that regular HTML forms are not allowed in the pattern UI. These restrictions are there for data privacy and security reasons.
+The `placeholder` property (line 13) shows faded text in the input form as its default value. The `oncf-send` property (line 15) is called when the user submits their message (presses enter or clicks on the submit button). The value for `oncf-send` is the function that gets executed to handle the event. We'll define that next. The parameters you send must be wrapped in an object. Example: `{ userMessage }`. Additional parameters would be comma separated.
 
 
 Before this code will actually work, we'll need to define the textInputHandler function. This should be at the same level as the `pattern` function. 
@@ -229,7 +229,7 @@ Technically, the `llm()` built-in is called once with the undefined userMessage 
 The piece then renders the code in the [UI] section and the system sets the reactive node to display the llmResponse with the conditional expression we wrote (`{llmResponse.result ? ... : ""}`) and the user's message with `{userMessage}`.
 These initially don't show anything since the values are undefined.
 
-The user types a prompt into the `<ct-message-input>` component which triggers the `textInputHandler()`. The handler gets passed in the event, which contains the user's message (as a normal js object), and also the `userMessage` which is a Cell. The handler sets the cell's value with the event message.
+The user types a prompt into the `<cf-message-input>` component which triggers the `textInputHandler()`. The handler gets passed in the event, which contains the user's message (as a normal js object), and also the `userMessage` which is a Cell. The handler sets the cell's value with the event message.
 
 The `userMessage` has been updated now and therefore kicks off the reactive system.
 We re-render the portion of the UI that contains `User Message: {userMessage}` since the cell contained within the braces has changed.
@@ -238,7 +238,7 @@ In a few seconds, it gets a response back from the LLM.
 This sets `llmResponse.result`, which triggers the generated `ifElse(derive(...))` wrapper behind that conditional expression.
 And finally we see the `llmResponse: ...` in the [UI].
 
-There's a lot more to discover with the llm() function call (such as sending a list of user and agent messages for history or even tool use) and even more to learn about the Common Tools runtime system.
+There's a lot more to discover with the llm() function call (such as sending a list of user and agent messages for history or even tool use) and even more to learn about the Common Fabric runtime system.
 
 
 ```{code-block} typescript
@@ -260,7 +260,7 @@ import {
   NAME,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 const textInputHandler = handler<
   { detail: { message: string } },
@@ -289,11 +289,11 @@ export default pattern(() => {
           {llmResponse.result ? JSON.stringify(llmResponse.result) : ""}
         </div>
         <div>
-          <ct-message-input
+          <cf-message-input
             name="Send"
             placeholder="Type a message..."
             appearance="rounded"
-            onct-send={textInputHandler({ userMessage })}
+            oncf-send={textInputHandler({ userMessage })}
           />
         </div>
       </div>

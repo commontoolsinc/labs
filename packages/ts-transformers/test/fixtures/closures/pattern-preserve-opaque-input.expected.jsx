@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, type Writable, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, type Writable, UI } from "commonfabric";
 interface State {
     foo: string;
     bar: string;
@@ -12,7 +12,7 @@ interface State {
 //   reactive context, so it gets wrapped in a derive.
 export default pattern((input: Writable<State>) => {
     return {
-        [UI]: <div>{__ctHelpers.derive({
+        [UI]: <div>{__cfHelpers.derive({
             type: "object",
             properties: {
                 input: {
@@ -35,9 +35,9 @@ export default pattern((input: Writable<State>) => {
                     required: ["foo", "bar"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { input: input }, ({ input: input_1 }) => input.key("foo").get())}</div>,
+        } as const satisfies __cfHelpers.JSONSchema, { input: input }, ({ input: input_1 }) => input.key("foo").get())}</div>,
     };
 }, {
     $ref: "#/$defs/State",
@@ -55,7 +55,7 @@ export default pattern((input: Writable<State>) => {
             required: ["foo", "bar"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -84,8 +84,8 @@ export default pattern((input: Writable<State>) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

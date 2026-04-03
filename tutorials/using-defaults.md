@@ -6,7 +6,7 @@ subject: Tutorial
 authors:
   - name: Ellyse Cedeno
     email: ellyse@common.tools
-keywords: commontools, state, Cell, Default, pattern inputs
+keywords: commonfabric, state, Cell, Default, pattern inputs
 abstract: |
   In this section, we learn how to use Default<> to automatically create and initialize
   Cells for pattern inputs. This is the recommended pattern for managing pattern state.
@@ -36,7 +36,7 @@ instead of `cell()`.
 3. **Schema generation** - Generates proper JSON schema for your pattern
 4. **Works** - also at the time of this writing, `cell()` has some bugs, this is
    a huge reason to avoid it. When you use `Default<>` in a pattern's input
-   interface, the Common Tools runtime automatically creates a Cell and
+   interface, the Common Fabric runtime automatically creates a Cell and
    initializes it with your default value.
 
 ## A Simple Counter with Default
@@ -87,7 +87,7 @@ import {
   pattern,
   UI,
   type Cell,
-} from "commontools";
+} from "commonfabric";
 
 interface CounterState {
   count: Default<number, 100>;
@@ -156,7 +156,7 @@ import {
   pattern,
   UI,
   type Cell,
-} from "commontools";
+} from "commonfabric";
 
 interface TodoListState {
   items: Default<string[], ["Pay bill", "Write code", "Dinner with friends"]>;
@@ -191,7 +191,7 @@ const addItem = handler<
 ```
 
 This handler receives an event with `{detail: {message: string}}` - this is the
-shape we'll need for the `<ct-message-input>` component we'll use later. The
+shape we'll need for the `<cf-message-input>` component we'll use later. The
 handler gets the message text, trims whitespace, and adds it to the array if
 it's not empty.
 
@@ -209,7 +209,7 @@ import {
   pattern,
   UI,
   type Cell,
-} from "commontools";
+} from "commonfabric";
 
 interface TodoListState {
   items: Default<string[], ["Pay bill", "Write code", "Dinner with friends"]>;
@@ -233,10 +233,10 @@ export default pattern<TodoListState>((state) => {
     [UI]: (
       <div>
         <h2>My Todos</h2>
-        <ct-message-input
+        <cf-message-input
           name="Add"
           placeholder="Add a todo..."
-          onct-send={addItem({ items: state.items })}
+          oncf-send={addItem({ items: state.items })}
         />
         <ul>
           {state.items.map((item) => (
@@ -255,8 +255,8 @@ export default pattern<TodoListState>((state) => {
 **Line 28** receives `state` which has an `items` property that's already a
 `Cell<string[]>`.
 
-**Lines 33-36** use the `<ct-message-input>` component for input, which
-provides a text field with a submit button. The `onct-send` event fires when
+**Lines 33-36** use the `<cf-message-input>` component for input, which
+provides a text field with a submit button. The `oncf-send` event fires when
 the user submits.
 
 **Lines 39-41** use `.map()` to render each item in the list.
@@ -348,7 +348,7 @@ import {
   pattern,
   UI,
   type Cell,
-} from "commontools";
+} from "commonfabric";
 
 interface Player {
   playerName: string;

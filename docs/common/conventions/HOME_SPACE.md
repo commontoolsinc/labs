@@ -53,7 +53,7 @@ import {
   removeFavorite,
   isFavorite,
   getHomeFavorites,
-} from "@commontools/piece";
+} from "@commonfabric/piece";
 
 await addFavorite(runtime, piece);
 await removeFavorite(runtime, piece);
@@ -72,14 +72,14 @@ navigates to it (creating it if it doesn't exist yet).
 
 The home space's default pattern is the home experience itself — by default,
 `/api/patterns/system/home.tsx`. You can replace it with a custom pattern using
-the CT CLI:
+the CF CLI:
 
 ```bash
 # Deploy a custom home pattern
-ct piece set-home -i ./my.key -a http://localhost:8000 ./my-home.tsx
+cf piece set-home -i ./my.key -a http://localhost:8000 ./my-home.tsx
 
 # Reset to the system default
-ct piece set-home -i ./my.key -a http://localhost:8000 --reset
+cf piece set-home -i ./my.key -a http://localhost:8000 --reset
 ```
 
 Under the hood, `set-home` calls `PiecesController.recreateDefaultPattern()`
@@ -94,7 +94,7 @@ must match the browser identity** for `set-home` to affect what the browser
 displays.
 
 The browser shell derives identity from a mnemonic via
-`Identity.fromMnemonic()`, while `ct id derive` uses
+`Identity.fromMnemonic()`, while `cf id derive` uses
 `Identity.fromPassphrase()`. These are different algorithms — the same input
 produces different DIDs.
 
@@ -110,11 +110,11 @@ const id = await Identity.fromMnemonic(mnemonic, { implementation: "noble" });
 await Deno.writeFile("./browser.key", id.toPkcs8());
 '
 
-# 3. Use that key with ct
-ct piece set-home -i ./browser.key -a http://localhost:8000 ./my-home.tsx
+# 3. Use that key with cf
+cf piece set-home -i ./browser.key -a http://localhost:8000 ./my-home.tsx
 ```
 
-Note: `ct id derive <passphrase>` will NOT produce the same identity as the
+Note: `cf id derive <passphrase>` will NOT produce the same identity as the
 browser. You must use `fromMnemonic` with `implementation: "noble"` to get a
 PKCS8 key that matches the browser's identity.
 
@@ -142,7 +142,7 @@ Both the home pattern and the default app pattern follow the same mechanism:
      `/api/patterns/system/default-app.tsx`
 3. The pattern is compiled, run, and linked as `spaceCell.defaultPattern`
 4. `recreateDefaultPattern()` can replace it — either with a URL-based system
-   pattern or a custom `RuntimeProgram` (used by `ct piece set-home`)
+   pattern or a custom `RuntimeProgram` (used by `cf piece set-home`)
 
 ## Implementation Details
 

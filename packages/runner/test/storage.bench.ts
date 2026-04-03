@@ -1,11 +1,11 @@
 /**
  * Storage layer benchmarks - measuring raw transaction read/write performance
  */
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { deepEqual } from "@commontools/utils/deep-equal";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   largeStringA,
   largeStringB,

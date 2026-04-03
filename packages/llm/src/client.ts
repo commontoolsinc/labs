@@ -141,7 +141,7 @@ const mockCatalog = new MockCatalog();
  *
  * Example:
  * ```ts
- * import { enableMockMode, addMockResponse } from "@commontools/llm/client";
+ * import { enableMockMode, addMockResponse } from "@commonfabric/llm/client";
  *
  * enableMockMode();
  * addMockResponse(
@@ -344,7 +344,7 @@ function runAssertions(
  *
  * Example:
  * ```ts
- * import { loadConversationFixture } from "@commontools/llm/client";
+ * import { loadConversationFixture } from "@commonfabric/llm/client";
  *
  * loadConversationFixture({
  *   responses: [
@@ -545,7 +545,7 @@ export class LLMClient {
       throw new Error("No response body");
     }
 
-    const id = response.headers.get("x-ct-llm-trace-id") as string;
+    const id = response.headers.get("x-cf-llm-trace-id") as string;
 
     // the server might return cached data instead of a stream
     if (response.headers.get("content-type") === "application/json") {

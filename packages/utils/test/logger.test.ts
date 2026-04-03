@@ -24,10 +24,10 @@ describe("logger", () => {
   afterEach(() => {
     // Clean up global logger registry after each test
     const global = globalThis as unknown as {
-      commontools?: { logger?: Record<string, unknown> };
+      commonfabric?: { logger?: Record<string, unknown> };
     };
-    if (global.commontools?.logger) {
-      global.commontools.logger = {};
+    if (global.commonfabric?.logger) {
+      global.commonfabric.logger = {};
     }
   });
 
@@ -775,13 +775,13 @@ describe("logger", () => {
       expect(logger2.level).toBe("info"); // Original options preserved
     });
 
-    it("should be accessible via globalThis.commontools.logger", () => {
+    it("should be accessible via globalThis.commonfabric.logger", () => {
       const logger = getLogger("global-test");
       const global = globalThis as unknown as {
-        commontools: { logger: Record<string, typeof logger> };
+        commonfabric: { logger: Record<string, typeof logger> };
       };
 
-      expect(global.commontools.logger["global-test"]).toBe(logger);
+      expect(global.commonfabric.logger["global-test"]).toBe(logger);
     });
   });
 
@@ -819,10 +819,10 @@ describe("logger", () => {
     it("should handle empty logger registry gracefully", () => {
       // Clean up registry
       const global = globalThis as unknown as {
-        commontools?: { logger?: Record<string, unknown> };
+        commonfabric?: { logger?: Record<string, unknown> };
       };
-      if (global.commontools?.logger) {
-        global.commontools.logger = {};
+      if (global.commonfabric?.logger) {
+        global.commonfabric.logger = {};
       }
 
       // Should not throw
@@ -884,10 +884,10 @@ describe("logger", () => {
     it("should return 0 when no loggers exist", () => {
       // Clean up registry
       const global = globalThis as unknown as {
-        commontools?: { logger?: Record<string, unknown> };
+        commonfabric?: { logger?: Record<string, unknown> };
       };
-      if (global.commontools?.logger) {
-        global.commontools.logger = {};
+      if (global.commonfabric?.logger) {
+        global.commonfabric.logger = {};
       }
 
       expect(getTotalLoggerCounts()).toBe(0);
@@ -956,10 +956,10 @@ describe("logger", () => {
     it("should return empty breakdown with 0 total when no loggers exist", () => {
       // Clean up registry
       const global = globalThis as unknown as {
-        commontools?: { logger?: Record<string, unknown> };
+        commonfabric?: { logger?: Record<string, unknown> };
       };
-      if (global.commontools?.logger) {
-        global.commontools.logger = {};
+      if (global.commonfabric?.logger) {
+        global.commonfabric.logger = {};
       }
 
       const breakdown = getLoggerCountsBreakdown();
@@ -1646,10 +1646,10 @@ describe("logger", () => {
       it("should handle empty logger registry gracefully", () => {
         // Clean up registry
         const global = globalThis as unknown as {
-          commontools?: { logger?: Record<string, unknown> };
+          commonfabric?: { logger?: Record<string, unknown> };
         };
-        if (global.commontools?.logger) {
-          global.commontools.logger = {};
+        if (global.commonfabric?.logger) {
+          global.commonfabric.logger = {};
         }
 
         expect(() => resetAllTimingStats()).not.toThrow();

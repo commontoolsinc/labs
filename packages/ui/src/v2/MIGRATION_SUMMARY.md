@@ -4,24 +4,24 @@
 
 ### Layout Components (4)
 
-1. **ct-vgroup** - Vertical group with gap management
-2. **ct-hgroup** - Horizontal group with gap management
-3. **ct-hscroll** - Horizontal scroll container with fade edges
-4. **ct-vscroll** - Vertical scroll container with fade edges
+1. **cf-vgroup** - Vertical group with gap management
+2. **cf-hgroup** - Horizontal group with gap management
+3. **cf-hscroll** - Horizontal scroll container with fade edges
+4. **cf-vscroll** - Vertical scroll container with fade edges
 
 ### Form/Input Components (5)
 
-1. **ct-aspect-ratio** - Maintains aspect ratio for content
-2. **ct-collapsible** - Expandable/collapsible content section
-3. **ct-progress** - Progress bar with determinate/indeterminate states
-4. **ct-input-otp** - One-time password input with individual digits
-5. **ct-radio-group** - Radio button group container
+1. **cf-aspect-ratio** - Maintains aspect ratio for content
+2. **cf-collapsible** - Expandable/collapsible content section
+3. **cf-progress** - Progress bar with determinate/indeterminate states
+4. **cf-input-otp** - One-time password input with individual digits
+5. **cf-radio-group** - Radio button group container
 
 ### Interactive Components (3)
 
-1. **ct-toggle** - Toggle button with pressed state
-2. **ct-toggle-group** - Toggle group for single/multiple selection
-3. **ct-scroll-area** - Custom scrollable area with styled scrollbars
+1. **cf-toggle** - Toggle button with pressed state
+2. **cf-toggle-group** - Toggle group for single/multiple selection
+3. **cf-scroll-area** - Custom scrollable area with styled scrollbars
 
 ## Migration Pattern Applied
 

@@ -1,11 +1,11 @@
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import {
   type FabricObject,
   type FabricValue,
   isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
-} from "@commontools/data-model/fabric-value";
-import { getLogger } from "@commontools/utils/logger";
+} from "@commonfabric/data-model/fabric-value";
+import { getLogger } from "@commonfabric/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { createRef } from "./create-ref.ts";
 import { CellImpl, isCell } from "./cell.ts";

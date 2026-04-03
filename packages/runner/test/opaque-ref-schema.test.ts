@@ -2,18 +2,18 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createBuilder } from "../src/builder/factory.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Identity } from "@commontools/identity";
-import { isRecord } from "@commontools/utils/types";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { isRecord } from "@commonfabric/utils/types";
 
 const signer = await Identity.fromPassphrase("test operator");
 
 describe("OpaqueRef Schema Support", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let cell: ReturnType<typeof createBuilder>["commontools"]["cell"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let cell: ReturnType<typeof createBuilder>["commonfabric"]["cell"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -23,8 +23,8 @@ describe("OpaqueRef Schema Support", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    const { commontools } = createBuilder();
-    ({ pattern, cell } = commontools);
+    const { commonfabric } = createBuilder();
+    ({ pattern, cell } = commonfabric);
   });
 
   afterEach(async () => {

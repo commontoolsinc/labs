@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * Test case for nested map transformation inside ternary.
  *
@@ -10,7 +10,7 @@ import * as __ctHelpers from "commontools";
  * `mapWithPattern` because `item` comes from a mapWithPattern element,
  * NOT from the derive's captures.
  */
-import { Cell, computed, Default, pattern, UI } from "commontools";
+import { Cell, computed, Default, pattern, UI } from "commonfabric";
 interface Tag {
     name: string;
 }
@@ -34,7 +34,7 @@ interface PatternInput {
 //   both the outer and inner levels.
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
-    const hasItems = __ctHelpers.derive({
+    const hasItems = __cfHelpers.derive({
         type: "object",
         properties: {
             items: {
@@ -75,22 +75,22 @@ export default pattern((__ct_pattern_input) => {
                 required: ["name"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0);
+    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0);
     return {
         [UI]: (<div>
-        {__ctHelpers.ifElse({
+        {__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "array",
             items: {}
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
@@ -98,25 +98,25 @@ export default pattern((__ct_pattern_input) => {
                     type: "array",
                     items: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        } as const satisfies __cfHelpers.JSONSchema, hasItems, items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
             return (<div>
               <strong>{item.key("label")}</strong>
               <ul>
-                {item.key("tags").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                {item.key("tags").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                     const tag = __ct_pattern_input.key("element");
                     const i = __ct_pattern_input.key("index");
                     const item = __ct_pattern_input.key("params", "item");
                     return (<li>
-                    {__ctHelpers.ifElse({
+                    {__cfHelpers.ifElse({
                         type: "boolean"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": ["", "* "]
-                    } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                         type: "object",
                         properties: {
                             i: {
@@ -133,9 +133,9 @@ export default pattern((__ct_pattern_input) => {
                             }
                         },
                         required: ["i", "item"]
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "boolean"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         i: i,
                         item: {
                             selectedIndex: item.key("selectedIndex")
@@ -180,7 +180,7 @@ export default pattern((__ct_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{
                             $ref: "https://commonfabric.org/schemas/vnode.json"
                         }, {
@@ -200,7 +200,7 @@ export default pattern((__ct_pattern_input) => {
                             required: ["$UI"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema), {
+                } as const satisfies __cfHelpers.JSONSchema), {
                     item: {
                         selectedIndex: item.key("selectedIndex")
                     }
@@ -244,7 +244,7 @@ export default pattern((__ct_pattern_input) => {
                     required: ["name"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
@@ -264,7 +264,7 @@ export default pattern((__ct_pattern_input) => {
                     required: ["$UI"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema), {}), <p>No items</p>)}
+        } as const satisfies __cfHelpers.JSONSchema), {}), <p>No items</p>)}
       </div>),
     };
 }, {
@@ -308,7 +308,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["name"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -337,8 +337,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

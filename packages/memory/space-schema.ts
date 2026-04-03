@@ -2,8 +2,8 @@ import {
   ContextualFlowControl,
   type JSONObject,
   type JSONSchema,
-} from "@commontools/runner";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+} from "@commonfabric/runner";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   type BaseMemoryAddress,
   CompoundCycleTracker,
@@ -18,9 +18,9 @@ import {
   type PointerCycleTracker,
   type SchemaMemo,
   SchemaObjectTraverser,
-} from "@commontools/runner/traverse";
-import { type Immutable, isRecord } from "@commontools/utils/types";
-import { getLogger } from "@commontools/utils/logger";
+} from "@commonfabric/runner/traverse";
+import { type Immutable, isRecord } from "@commonfabric/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
 import { COMMIT_LOG_TYPE } from "./commit.ts";
 import type { CommitData, SchemaPathSelector } from "./consumer.ts";
 import { TheAuthorizationError } from "./error.ts";

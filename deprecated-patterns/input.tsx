@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { JSONSchema, NAME, pattern, UI } from "commontools";
+import { JSONSchema, NAME, pattern, UI } from "commonfabric";
 
 const InputSchema = {
   type: "object",
@@ -18,24 +18,24 @@ const OutputSchema = InputSchema;
 export default pattern(
   ({ content }: any) => {
     return {
-      [NAME]: "<ct-input /> test",
+      [NAME]: "<cf-input /> test",
       [UI]: (
         <div style="padding: 1rem; max-width: 1200px; margin: 0 auto;">
           <label>Text (Default - Debounced):</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="text"
             placeholder="Search..."
           />
           <label>Text (Blur):</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="text"
             timingStrategy="blur"
             placeholder="Enter value"
           />
           <label>Text (Throttled):</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="text"
             timingStrategy="throttle"
@@ -43,98 +43,98 @@ export default pattern(
             placeholder="Enter something..."
           />
           <label>Text (Immediate):</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="text"
             timingStrategy="immediate"
             placeholder="Updates instantly..."
           />
           <label>Email:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="email"
             placeholder="Enter something..."
           />
           <label>Password:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="password"
             placeholder="Enter something..."
           />
           <label>Number:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="number"
             placeholder="Enter something..."
           />
           <label>Search:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="search"
             placeholder="Enter something..."
           />
           <label>Tel:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="tel"
             placeholder="Enter something..."
           />
           <label>URL:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="url"
             placeholder="Enter something..."
           />
           <label>Date:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="date"
             placeholder="Enter something..."
           />
           <label>Time:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="time"
             placeholder="Enter something..."
           />
           <label>DateTime Local:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="datetime-local"
             placeholder="Enter something..."
           />
           <label>Month:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="month"
             placeholder="Enter something..."
           />
           <label>Week:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="week"
             placeholder="Enter something..."
           />
           <label>Color:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="color"
             placeholder="Enter something..."
           />
           <label>File:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="file"
             placeholder="Enter something..."
           />
           <label>Range:</label>
-          <ct-input
+          <cf-input
             $value={content}
             type="range"
             placeholder="Enter something..."
           />
           <hr />
-          <ct-code-editor
+          <cf-code-editor
             $value={content}
             language="text/markdown"
             placeholder="Enter something..."

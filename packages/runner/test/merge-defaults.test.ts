@@ -3,9 +3,9 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { isDeepFrozen } from "@commontools/data-model/deep-freeze";
-import { deepFreeze } from "@commontools/data-model/deep-freeze";
-import { isNontrivialSchema } from "@commontools/data-model/schema-utils";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { mergeDefaults } from "../src/schema.ts";
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 

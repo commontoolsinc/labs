@@ -13,8 +13,8 @@
  * 1. Static fetchData at top level (control - should work)
  * 2. fetchData inside .map() with expression callback (claimed to fail)
  */
-import { computed, Default, NAME, pattern, UI } from "commontools";
-import { fetchData } from "commontools";
+import { computed, Default, NAME, pattern, UI } from "commonfabric";
+import { fetchData } from "commonfabric";
 
 interface Repo {
   id: string;

@@ -5,7 +5,7 @@ export type {
   TransformationOptions,
   TransformMode,
 } from "./core/mod.ts";
-export { Pipeline, transformCtDirective, Transformer } from "./core/mod.ts";
+export { Pipeline, transformCfDirective, Transformer } from "./core/mod.ts";
 
 export {
   CastValidationTransformer,
@@ -16,7 +16,7 @@ export {
   SchemaInjectionTransformer,
 } from "./transformers/mod.ts";
 export { ClosureTransformer } from "./closures/transformer.ts";
-export { CommonToolsTransformerPipeline } from "./ct-pipeline.ts";
+export { CommonFabricTransformerPipeline } from "./cf-pipeline.ts";
 export {
   CompositeDiagnosticTransformer,
   type DiagnosticMessageTransformer,

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { computed, pattern } from "commonfabric";
 const config = { bar: "module-level" };
 // FIXTURE: computed-in-computed-scoped-no-false-rewrite
 // Verifies: a block-scoped computed() result named `config` does NOT cause
@@ -9,18 +9,18 @@ const config = { bar: "module-level" };
 // Context: The pre-scan collects opaque roots by name; it must not leak
 //   across lexical scopes and incorrectly rewrite unrelated same-named accesses.
 export default pattern(() => {
-    const outer = __ctHelpers.derive({
+    const outer = __cfHelpers.derive({
         type: "object",
         properties: {}
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: ["number", "string"]
-    } as const satisfies __ctHelpers.JSONSchema, {}, () => {
+    } as const satisfies __cfHelpers.JSONSchema, {}, () => {
         const condition = 1 > 0;
         if (condition) {
-            const config = __ctHelpers.derive({
+            const config = __cfHelpers.derive({
                 type: "object",
                 properties: {}
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 type: "object",
                 properties: {
                     bar: {
@@ -28,16 +28,16 @@ export default pattern(() => {
                     }
                 },
                 required: ["bar"]
-            } as const satisfies __ctHelpers.JSONSchema, {}, () => ({ bar: 1 }));
+            } as const satisfies __cfHelpers.JSONSchema, {}, () => ({ bar: 1 }));
             return config.key("bar");
         }
         return config.bar;
     });
     return outer;
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "string"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

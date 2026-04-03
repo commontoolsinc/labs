@@ -27,8 +27,8 @@
  *
  * STEPS TO REPRODUCE:
  * 1. Deploy this pattern:
- *    CT_API_URL=http://localhost:8000 CT_IDENTITY=./claude.key \
- *    deno task ct piece new packages/patterns/battleship/multiplayer/repro-minimal.tsx \
+ *    CF_API_URL=http://localhost:8000 CF_IDENTITY=./claude.key \
+ *    deno task cf piece new packages/patterns/battleship/multiplayer/repro-minimal.tsx \
  *    --root packages/patterns/battleship --space gideon
  *
  * 2. Open the piece URL in Browser Tab 1
@@ -52,7 +52,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // ============================================================================
 // Types - Nested structure similar to battleship's Ship type
@@ -142,12 +142,12 @@ const Child = pattern<ChildInput, object>(
         >
           <h2>Child Pattern - Player {whichPlayer}</h2>
           <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
-            <ct-button onClick={() => checkMine.send()}>
+            <cf-button onClick={() => checkMine.send()}>
               Check MY Data
-            </ct-button>
-            <ct-button onClick={() => checkOther.send()}>
+            </cf-button>
+            <cf-button onClick={() => checkOther.send()}>
               Check OTHER Data
-            </ct-button>
+            </cf-button>
           </div>
         </div>
       ),
@@ -231,8 +231,8 @@ const Parent = pattern<ParentInput, object>(({ data1, data2 }) => ({
       <h1>Two-Cell Repro (like Battleship)</h1>
       <p>Join as one player, then check the OTHER player's data</p>
       <div style={{ display: "flex", gap: "20px", marginTop: "20px" }}>
-        <ct-button onClick={joinAsP1({ data1, data2 })}>Join as P1</ct-button>
-        <ct-button onClick={joinAsP2({ data1, data2 })}>Join as P2</ct-button>
+        <cf-button onClick={joinAsP1({ data1, data2 })}>Join as P1</cf-button>
+        <cf-button onClick={joinAsP2({ data1, data2 })}>Join as P2</cf-button>
       </div>
     </div>
   ),

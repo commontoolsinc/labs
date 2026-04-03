@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // Tests mixed && and || operators: (a && b) || c
 // The && should use when, the || should use unless
 // FIXTURE: logical-mixed-and-or
@@ -22,20 +22,20 @@ export default pattern((_state) => {
             }
         },
         required: ["name", "age"]
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const defaultMessage = cell("Guest", {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {/* (condition && value) || fallback pattern */}
-        <span>{__ctHelpers.unless({
+        <span>{__cfHelpers.unless({
             type: ["boolean", "string"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -50,14 +50,14 @@ export default pattern((_state) => {
                 }
             },
             required: ["user"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{
                     type: "string"
                 }, {
                     type: "boolean",
                     "enum": [false]
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => (user.get().name.length > 0 && user.get().name)), __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => (user.get().name.length > 0 && user.get().name)), __cfHelpers.derive({
             type: "object",
             properties: {
                 defaultMessage: {
@@ -66,18 +66,18 @@ export default pattern((_state) => {
                 }
             },
             required: ["defaultMessage"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { defaultMessage: defaultMessage }, ({ defaultMessage }) => defaultMessage.get()))}</span>
+        } as const satisfies __cfHelpers.JSONSchema, { defaultMessage: defaultMessage }, ({ defaultMessage }) => defaultMessage.get()))}</span>
 
         {/* condition && (value || fallback) pattern */}
-        <span>{__ctHelpers.when({
+        <span>{__cfHelpers.when({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["boolean", "string"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -92,15 +92,15 @@ export default pattern((_state) => {
                 }
             },
             required: ["user"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().age > 18), __ctHelpers.unless({
+        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => user.get().age > 18), __cfHelpers.unless({
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -115,19 +115,19 @@ export default pattern((_state) => {
                 }
             },
             required: ["user"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name), "Anonymous Adult"))}</span>
+        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name), "Anonymous Adult"))}</span>
 
         {/* Complex: (a && b) || (c && d) */}
         <span>
-          {__ctHelpers.unless({
+          {__cfHelpers.unless({
             type: ["boolean", "string"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -145,19 +145,19 @@ export default pattern((_state) => {
                 }
             },
             required: ["user"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{
                     type: "string"
                 }, {
                     type: "boolean",
                     "enum": [false]
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => (user.get().name.length > 0 && `Hello ${user.get().name}`) ||
+        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => (user.get().name.length > 0 && `Hello ${user.get().name}`) ||
             (user.get().age > 0 && `Age: ${user.get().age}`)), "Unknown user")}
         </span>
       </div>),
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -186,8 +186,8 @@ export default pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

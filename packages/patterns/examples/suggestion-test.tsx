@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, NAME, pattern, UI, Writable } from "commontools";
+import { Default, NAME, pattern, UI, Writable } from "commonfabric";
 import Suggestion from "../system/suggestion.tsx";
 import Summary from "../suggestable/summary.tsx";
 import Checklist from "../suggestable/checklist.tsx";
@@ -32,14 +32,14 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
         <div>
           <h1>Suggestion Tester</h1>
           <h2>Counter</h2>
-          <ct-cell-context $cell={suggestion} label="Counter Suggestion">
+          <cf-cell-context $cell={suggestion} label="Counter Suggestion">
             {suggestion}
-          </ct-cell-context>
+          </cf-cell-context>
 
           <h2>Note</h2>
-          <ct-cell-context $cell={suggestion2} label="Note Suggestion">
+          <cf-cell-context $cell={suggestion2} label="Note Suggestion">
             {suggestion2}
-          </ct-cell-context>
+          </cf-cell-context>
           <hr />
 
           <Summary

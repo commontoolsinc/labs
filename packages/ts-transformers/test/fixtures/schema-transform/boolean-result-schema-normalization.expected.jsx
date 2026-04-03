@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 // FIXTURE: boolean-result-schema-normalization
 // Verifies: boolean result schemas stay normalized as `type: "boolean"` instead
 // of expanding into literal `true` / `false` enums.
@@ -8,21 +8,21 @@ export default pattern((state: {
     score: number;
 }) => {
     return {
-        [UI]: <div>{__ctHelpers.ifElse({
+        [UI]: <div>{__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Premium", "Regular"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.unless({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.unless({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, state.key("isPremium"), __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, state.key("isPremium"), __cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -36,9 +36,9 @@ export default pattern((state: {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 score: state.key("score")
             } }, ({ state }) => state.score > 100)), "Premium", "Regular")}</div>,
     };
@@ -53,7 +53,7 @@ export default pattern((state: {
         }
     },
     required: ["isPremium", "score"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -82,8 +82,8 @@ export default pattern((state: {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

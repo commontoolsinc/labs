@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Tracks prep, cook, and rest times with auto-calculated total.
  */
-import { computed, type Default, NAME, pattern, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -58,7 +58,7 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Timing: ${displayText}`),
       [UI]: (
-        <ct-vstack style={{ gap: "16px" }}>
+        <cf-vstack style={{ gap: "16px" }}>
           <div
             style={{
               display: "grid",
@@ -66,12 +66,12 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
               gap: "12px",
             }}
           >
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 Prep Time
               </label>
-              <ct-hstack style={{ alignItems: "center", gap: "4px" }}>
-                <ct-input
+              <cf-hstack style={{ alignItems: "center", gap: "4px" }}>
+                <cf-input
                   type="number"
                   $value={prepTime}
                   placeholder="0"
@@ -79,15 +79,15 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
                   style={{ width: "70px" }}
                 />
                 <span style={{ fontSize: "12px", color: "#6b7280" }}>min</span>
-              </ct-hstack>
-            </ct-vstack>
+              </cf-hstack>
+            </cf-vstack>
 
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 Cook Time
               </label>
-              <ct-hstack style={{ alignItems: "center", gap: "4px" }}>
-                <ct-input
+              <cf-hstack style={{ alignItems: "center", gap: "4px" }}>
+                <cf-input
                   type="number"
                   $value={cookTime}
                   placeholder="0"
@@ -95,15 +95,15 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
                   style={{ width: "70px" }}
                 />
                 <span style={{ fontSize: "12px", color: "#6b7280" }}>min</span>
-              </ct-hstack>
-            </ct-vstack>
+              </cf-hstack>
+            </cf-vstack>
 
-            <ct-vstack style={{ gap: "4px" }}>
+            <cf-vstack style={{ gap: "4px" }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
                 Rest Time
               </label>
-              <ct-hstack style={{ alignItems: "center", gap: "4px" }}>
-                <ct-input
+              <cf-hstack style={{ alignItems: "center", gap: "4px" }}>
+                <cf-input
                   type="number"
                   $value={restTime}
                   placeholder="0"
@@ -111,8 +111,8 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
                   style={{ width: "70px" }}
                 />
                 <span style={{ fontSize: "12px", color: "#6b7280" }}>min</span>
-              </ct-hstack>
-            </ct-vstack>
+              </cf-hstack>
+            </cf-vstack>
           </div>
 
           {/* Total time display */}
@@ -131,7 +131,7 @@ export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
               {displayText}
             </span>
           </div>
-        </ct-vstack>
+        </cf-vstack>
       ),
       prepTime,
       cookTime,

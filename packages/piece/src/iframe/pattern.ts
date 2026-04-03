@@ -1,4 +1,4 @@
-import { Cell, type JSONSchema, type Runtime } from "@commontools/runner";
+import { Cell, type JSONSchema, type Runtime } from "@commonfabric/runner";
 import { getPatternIdFromPiece } from "../manager.ts";
 
 export type IFramePattern = {
@@ -19,7 +19,7 @@ export const buildFullPattern = (iframe: IFramePattern) => {
     `    ${key}: data.${key},\n`
   ).join("\n");
 
-  return `import { h, pattern, type JSONSchema, UI, NAME } from "commontools";
+  return `import { h, pattern, type JSONSchema, UI, NAME } from "commonfabric";
 
   type IFramePattern = {
     src: string,
@@ -39,7 +39,7 @@ export const buildFullPattern = (iframe: IFramePattern) => {
   pattern((data) => ({
     [NAME]: name,
     [UI]: (
-      <ct-iframe src={src} $context={data}></ct-iframe>
+      <cf-iframe src={src} $context={data}></cf-iframe>
     ),
 ${result}
   }), argumentSchema, resultSchema);

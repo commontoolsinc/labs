@@ -1,13 +1,13 @@
-import { createJsonSchema, type JSONSchema, NAME } from "@commontools/runner";
-import { DEFAULT_MODEL_NAME, fixPatternPrompt } from "@commontools/llm";
-import { Cell } from "@commontools/runner";
+import { createJsonSchema, type JSONSchema, NAME } from "@commonfabric/runner";
+import { DEFAULT_MODEL_NAME, fixPatternPrompt } from "@commonfabric/llm";
+import { Cell } from "@commonfabric/runner";
 
 import { getIframePattern } from "./iframe/pattern.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
 import { WorkflowForm } from "./index.ts";
 import { compileAndRunPattern, generateNewPatternVersion } from "./iterate.ts";
 import { PieceManager } from "./manager.ts";
-import { nameSchema } from "@commontools/runner/schemas";
+import { nameSchema } from "@commonfabric/runner/schemas";
 import { processWorkflow, ProcessWorkflowOptions } from "./workflow.ts";
 
 export const castSpellAsPiece = async (
@@ -47,8 +47,8 @@ export const createDataPiece = (
     `    ${key}: data.${key},\n`
   ).join("\n");
 
-  const dataPatternSrc = `import { h } from "@commontools/html";
-  import { pattern, UI, NAME, derive, type JSONSchema } from "@commontools/runner";
+  const dataPatternSrc = `import { h } from "@commonfabric/html";
+  import { pattern, UI, NAME, derive, type JSONSchema } from "@commonfabric/runner";
 
   const schema = ${schemaString};
 

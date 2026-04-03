@@ -1,7 +1,7 @@
-import { Cell, JSONSchema, parseLink, SigilLink } from "@commontools/runner";
+import { Cell, JSONSchema, parseLink, SigilLink } from "@commonfabric/runner";
 import { CellRef, PageRef } from "../protocol/types.ts";
-import { Runtime } from "@commontools/runner";
-import { LINK_V1_TAG } from "@commontools/runner/shared";
+import { Runtime } from "@commonfabric/runner";
+import { LINK_V1_TAG } from "@commonfabric/runner/shared";
 import { isCellRef } from "../protocol/mod.ts";
 
 export function mapCellRefsToSigilLinks(value: unknown): any {

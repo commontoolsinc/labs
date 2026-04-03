@@ -12,7 +12,7 @@
 
 ## 1. Executive Summary
 
-This specification describes a security architecture for sandboxing untrusted JavaScript execution in the Common Tools pattern runtime using **SES (Secure ECMAScript)** Compartments. The goal is to prevent malicious or buggy pattern code from escaping its sandbox while maintaining high performance by reusing Compartments rather than creating new ones for each invocation.
+This specification describes a security architecture for sandboxing untrusted JavaScript execution in the Common Fabric pattern runtime using **SES (Secure ECMAScript)** Compartments. The goal is to prevent malicious or buggy pattern code from escaping its sandbox while maintaining high performance by reusing Compartments rather than creating new ones for each invocation.
 
 ### Key Principles
 
@@ -146,7 +146,7 @@ Only these calls are permitted at module scope:
 
 ```typescript
 // ALLOWED at module scope
-import { pattern, pattern, lift, handler } from "@commontools/common-builder";
+import { pattern, pattern, lift, handler } from "@commonfabric/common-builder";
 
 // Pattern/Pattern definitions - these call their inner functions at load time
 // but user data is not available yet, so this is safe
@@ -412,8 +412,8 @@ function createPatternCompartment(
   // Execute the AMD bundle in the Compartment
   const moduleExports = compartment.evaluate(compiledAMD)({
     // Runtime dependencies injection
-    "@commontools/common-builder": harden(builderExports),
-    "@commontools/common-html": harden(htmlExports),
+    "@commonfabric/common-builder": harden(builderExports),
+    "@commonfabric/common-html": harden(htmlExports),
     // ... other runtime modules
   });
 
@@ -1915,6 +1915,6 @@ The existing AMD loader in `js-compiler` is compatible with SES Compartments. Th
 1. [SES (Secure ECMAScript)](https://github.com/endojs/endo/tree/master/packages/ses)
 2. [Hardened JavaScript](https://hardenedjs.org/)
 3. [Compartment API](https://github.com/tc39/proposal-compartments)
-4. [Common Tools Pattern Documentation](../common/INTRODUCTION.md)
+4. [Common Fabric Pattern Documentation](../common/INTRODUCTION.md)
 5. [ts-transformers Package](../../packages/ts-transformers/)
 6. [js-compiler Package](../../packages/js-compiler/)

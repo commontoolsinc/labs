@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * FIXTURE: nested-writable-pattern-branches
  * Verifies: pattern-owned maps on explicit Writable inputs stay pattern-lowered
@@ -10,7 +10,7 @@ import * as __ctHelpers from "commontools";
  * - nested ternaries inside task/tag callbacks lower without extra derive noise
  * - handler captures preserve section/task/index/local Writable references
  */
-import { computed, handler, ifElse, pattern, UI, Writable } from "commontools";
+import { computed, handler, ifElse, pattern, UI, Writable } from "commonfabric";
 interface Task {
     id: string;
     label: string;
@@ -28,7 +28,7 @@ interface Section {
 // [TRANSFORM] handler: event schema (true=unknown) and state schema injected
 const selectTask = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         selectedTaskId: {
@@ -51,19 +51,19 @@ const selectTask = handler({
         }
     },
     required: ["selectedTaskId", "hoveredSectionId", "sectionId", "taskId", "sectionIndex", "taskIndex"]
-} as const satisfies __ctHelpers.JSONSchema, (_event, state) => state);
+} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
 // [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern((state) => {
     // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
     const selectedTaskId = Writable.of<string | undefined>(undefined, {
         type: ["string", "undefined"]
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
     const hoveredSectionId = Writable.of<string | undefined>(undefined, {
         type: ["string", "undefined"]
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     // [TRANSFORM] computed() → derive(): captures state.sections (asCell — Writable<Section[]>)
-    const hasSections = __ctHelpers.derive({
+    const hasSections = __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -81,9 +81,9 @@ export default pattern((state) => {
             }
         },
         required: ["state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             sections: state.key("sections")
         } }, ({ state }) => state.sections.get().length > 0);
     return {
@@ -91,20 +91,20 @@ export default pattern((state) => {
         {/* [TRANSFORM] ifElse: schema-injected authored ifElse(hasSections, ..., ...) */}
         {ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, hasSections, <div>
+        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, hasSections, <div>
             {/* [TRANSFORM] .map() → mapWithPattern: state.sections is Writable<Section[]> — reactive, pattern context */}
             {/* [TRANSFORM] closure captures: state (reactive), selectedTaskId (Writable), hoveredSectionId (Writable) */}
-            {state.key("sections").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            {state.key("sections").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const section = __ct_pattern_input.key("element");
                 const sectionIndex = __ct_pattern_input.key("index");
                 const state = __ct_pattern_input.key("params", "state");
@@ -113,35 +113,35 @@ export default pattern((state) => {
                 return (<section>
                 <h2 style={{
                     // [TRANSFORM] ternary lowered: section.accent ? section.accent : state.globalAccent → ifElse(...)
-                    color: __ctHelpers.ifElse({
+                    color: __cfHelpers.ifElse({
                         type: ["string", "undefined"]
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, section.key("accent"), section.key("accent"), state.key("globalAccent")),
+                    } as const satisfies __cfHelpers.JSONSchema, section.key("accent"), section.key("accent"), state.key("globalAccent")),
                 }}>
                   {section.key("title")}
                 </h2>
                 {/* [TRANSFORM] ifElse: schema-injected authored ifElse(section.expanded, ..., ...) */}
                 {ifElse({
                         type: "boolean"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         anyOf: [{}, {
                                 type: "object",
                                 properties: {}
                             }]
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         anyOf: [{}, {
                                 type: "object",
                                 properties: {}
                             }]
-                    } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, section.key("expanded"), <div>
+                    } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, section.key("expanded"), <div>
                     {/* [TRANSFORM] .map() → mapWithPattern: section.tasks is reactive pattern-owned data */}
                     {/* [TRANSFORM] closure captures: selectedTaskId, hoveredSectionId, section, sectionIndex, state (all via params) */}
-                    {section.key("tasks").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                    {section.key("tasks").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                             const task = __ct_pattern_input.key("element");
                             const taskIndex = __ct_pattern_input.key("index");
                             const selectedTaskId = __ct_pattern_input.key("params", "selectedTaskId");
@@ -159,37 +159,37 @@ export default pattern((state) => {
                                     taskIndex,
                                 })}>
                           {/* [TRANSFORM] ternary lowered: task.done ? <span>...</span> : ifElse(...) → ifElse(task.done, ..., ...) */}
-                          {__ctHelpers.ifElse({
+                          {__cfHelpers.ifElse({
                                     type: "boolean"
-                                } as const satisfies __ctHelpers.JSONSchema, {
+                                } as const satisfies __cfHelpers.JSONSchema, {
                                     anyOf: [{}, {
                                             type: "object",
                                             properties: {}
                                         }]
-                                } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, {
+                                } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, {
                                     anyOf: [{}, {
                                             type: "object",
                                             properties: {}
                                         }]
-                                } as const satisfies __ctHelpers.JSONSchema, task.key("done"), <span>{task.key("label")}</span>, ifElse({
+                                } as const satisfies __cfHelpers.JSONSchema, task.key("done"), <span>{task.key("label")}</span>, ifElse({
                                     type: "boolean"
-                                } as const satisfies __ctHelpers.JSONSchema, {
+                                } as const satisfies __cfHelpers.JSONSchema, {
                                     anyOf: [{}, {
                                             type: "object",
                                             properties: {}
                                         }]
-                                } as const satisfies __ctHelpers.JSONSchema, {
+                                } as const satisfies __cfHelpers.JSONSchema, {
                                     anyOf: [{}, {
                                             type: "object",
                                             properties: {}
                                         }]
-                                } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, __ctHelpers.when({
+                                } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.when({
                                     type: "boolean"
-                                } as const satisfies __ctHelpers.JSONSchema, {
+                                } as const satisfies __cfHelpers.JSONSchema, {
                                     type: "boolean"
-                                } as const satisfies __ctHelpers.JSONSchema, {
+                                } as const satisfies __cfHelpers.JSONSchema, {
                                     type: "boolean"
-                                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                                     type: "object",
                                     properties: {
                                         task: {
@@ -202,11 +202,11 @@ export default pattern((state) => {
                                         }
                                     },
                                     required: ["task"]
-                                } as const satisfies __ctHelpers.JSONSchema, {
+                                } as const satisfies __cfHelpers.JSONSchema, {
                                     type: "boolean"
-                                } as const satisfies __ctHelpers.JSONSchema, { task: {
+                                } as const satisfies __cfHelpers.JSONSchema, { task: {
                                         note: task.key("note")
-                                    } }, ({ task }) => task.note !== undefined), __ctHelpers.derive({
+                                    } }, ({ task }) => task.note !== undefined), __cfHelpers.derive({
                                     type: "object",
                                     properties: {
                                         task: {
@@ -219,16 +219,16 @@ export default pattern((state) => {
                                         }
                                     },
                                     required: ["task"]
-                                } as const satisfies __ctHelpers.JSONSchema, {
+                                } as const satisfies __cfHelpers.JSONSchema, {
                                     type: "boolean"
-                                } as const satisfies __ctHelpers.JSONSchema, { task: {
+                                } as const satisfies __cfHelpers.JSONSchema, { task: {
                                         note: task.key("note")
                                     } }, ({ task }) => task.note !== "")), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
                         </button>
                         {/* [TRANSFORM] .map() → mapWithPattern: task.tags is reactive pattern-owned data (nested inside sections map) */}
                         {/* [TRANSFORM] closure captures: taskIndex, section, state, task (all via params) */}
                         {/* [TRANSFORM] ternary lowered: tagIndex===taskIndex ? `${section.title}:${tag}` : (showCompleted||!task.done ? tag : "") */}
-                        {task.key("tags").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                        {task.key("tags").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                                     const tag = __ct_pattern_input.key("element");
                                     const tagIndex = __ct_pattern_input.key("index");
                                     const taskIndex = __ct_pattern_input.key("params", "taskIndex");
@@ -236,15 +236,15 @@ export default pattern((state) => {
                                     const state = __ct_pattern_input.key("params", "state");
                                     const task = __ct_pattern_input.key("params", "task");
                                     return (<span>
-                            {__ctHelpers.ifElse({
+                            {__cfHelpers.ifElse({
                                             type: "boolean"
-                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"
-                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"
-                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"
-                                        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                                        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                                             type: "object",
                                             properties: {
                                                 tagIndex: {
@@ -255,12 +255,12 @@ export default pattern((state) => {
                                                 }
                                             },
                                             required: ["tagIndex", "taskIndex"]
-                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "boolean"
-                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             tagIndex: tagIndex,
                                             taskIndex: taskIndex
-                                        }, ({ tagIndex, taskIndex }) => tagIndex === taskIndex), __ctHelpers.derive({
+                                        }, ({ tagIndex, taskIndex }) => tagIndex === taskIndex), __cfHelpers.derive({
                                             type: "object",
                                             properties: {
                                                 section: {
@@ -277,28 +277,28 @@ export default pattern((state) => {
                                                 }
                                             },
                                             required: ["section", "tag"]
-                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"
-                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             section: {
                                                 title: section.key("title")
                                             },
                                             tag: tag
-                                        }, ({ section, tag }) => `${section.title}:${tag}`), __ctHelpers.ifElse({
+                                        }, ({ section, tag }) => `${section.title}:${tag}`), __cfHelpers.ifElse({
                                             type: "boolean"
-                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"
-                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"
-                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"
-                                        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.unless({
+                                        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.unless({
                                             type: "boolean"
-                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "boolean"
-                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "boolean"
-                                        } as const satisfies __ctHelpers.JSONSchema, state.key("showCompleted"), __ctHelpers.derive({
+                                        } as const satisfies __cfHelpers.JSONSchema, state.key("showCompleted"), __cfHelpers.derive({
                                             type: "object",
                                             properties: {
                                                 task: {
@@ -312,9 +312,9 @@ export default pattern((state) => {
                                                 }
                                             },
                                             required: ["task"]
-                                        } as const satisfies __ctHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "boolean"
-                                        } as const satisfies __ctHelpers.JSONSchema, { task: {
+                                        } as const satisfies __cfHelpers.JSONSchema, { task: {
                                                 done: task.key("done")
                                             } }, ({ task }) => !task.done)), tag, ""))}
                           </span>);
@@ -365,7 +365,7 @@ export default pattern((state) => {
                                         }
                                     },
                                     required: ["element", "params"]
-                                } as const satisfies __ctHelpers.JSONSchema, {
+                                } as const satisfies __cfHelpers.JSONSchema, {
                                     anyOf: [{
                                             $ref: "https://commonfabric.org/schemas/vnode.json"
                                         }, {
@@ -385,7 +385,7 @@ export default pattern((state) => {
                                             required: ["$UI"]
                                         }
                                     }
-                                } as const satisfies __ctHelpers.JSONSchema), {
+                                } as const satisfies __cfHelpers.JSONSchema), {
                                     taskIndex: taskIndex,
                                     section: {
                                         title: section.key("title")
@@ -473,7 +473,7 @@ export default pattern((state) => {
                                     required: ["id", "label", "done", "tags"]
                                 }
                             }
-                        } as const satisfies __ctHelpers.JSONSchema, {
+                        } as const satisfies __cfHelpers.JSONSchema, {
                             anyOf: [{
                                     $ref: "https://commonfabric.org/schemas/vnode.json"
                                 }, {
@@ -493,7 +493,7 @@ export default pattern((state) => {
                                     required: ["$UI"]
                                 }
                             }
-                        } as const satisfies __ctHelpers.JSONSchema), {
+                        } as const satisfies __cfHelpers.JSONSchema), {
                             selectedTaskId: selectedTaskId,
                             hoveredSectionId: hoveredSectionId,
                             section: {
@@ -505,7 +505,7 @@ export default pattern((state) => {
                                 showCompleted: state.key("showCompleted")
                             }
                         })}
-                  </div>, __ctHelpers.derive({
+                  </div>, __cfHelpers.derive({
                         type: "object",
                         properties: {
                             section: {
@@ -528,7 +528,7 @@ export default pattern((state) => {
                             }
                         },
                         required: ["section"]
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         anyOf: [{
                                 $ref: "https://commonfabric.org/schemas/vnode.json"
                             }, {
@@ -548,7 +548,7 @@ export default pattern((state) => {
                                 required: ["$UI"]
                             }
                         }
-                    } as const satisfies __ctHelpers.JSONSchema, { section: {
+                    } as const satisfies __cfHelpers.JSONSchema, { section: {
                             tasks: {
                                 length: section.key("tasks", "length")
                             },
@@ -648,7 +648,7 @@ export default pattern((state) => {
                         required: ["id", "label", "done", "tags"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -668,7 +668,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {
+            } as const satisfies __cfHelpers.JSONSchema), {
                 state: {
                     globalAccent: state.key("globalAccent"),
                     showCompleted: state.key("showCompleted")
@@ -679,15 +679,15 @@ export default pattern((state) => {
           </div>, 
         // [TRANSFORM] false-branch of ifElse(hasSections): ternary showCompleted ? "No completed sections" : "No sections"
         //   → local ifElse(...) inside the <p> JSX expression
-        <p>{__ctHelpers.ifElse({
+        <p>{__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["No completed sections", "No sections"]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("showCompleted"), "No completed sections", "No sections")}</p>)}
+        } as const satisfies __cfHelpers.JSONSchema, state.key("showCompleted"), "No completed sections", "No sections")}</p>)}
       </div>),
     };
 }, {
@@ -758,7 +758,7 @@ export default pattern((state) => {
             required: ["id", "label", "done", "tags"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -787,8 +787,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

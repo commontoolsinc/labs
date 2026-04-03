@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { handler } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { handler } from "commonfabric";
 interface IncrementEvent {
     amount: number;
 }
@@ -19,7 +19,7 @@ export const incrementer = handler({
         }
     },
     required: ["amount"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         count: {
@@ -27,10 +27,10 @@ export const incrementer = handler({
         }
     },
     required: ["count"]
-} as const satisfies __ctHelpers.JSONSchema, (event: IncrementEvent, state: CounterState) => {
+} as const satisfies __cfHelpers.JSONSchema, (event: IncrementEvent, state: CounterState) => {
     state.count += event.amount;
 });
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

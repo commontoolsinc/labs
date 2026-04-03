@@ -9,7 +9,7 @@ import type {
   FabricValue,
   JSONSchemaObj,
   JSONSchemaTypes,
-} from "@commontools/api";
+} from "@commonfabric/api";
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 import {
   cloneSchemaMutable,

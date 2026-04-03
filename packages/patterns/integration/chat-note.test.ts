@@ -1,11 +1,11 @@
-import { env } from "@commontools/integration";
-import { sleep } from "@commontools/utils/sleep";
-import { PiecesController } from "@commontools/piece/ops";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env } from "@commonfabric/integration";
+import { sleep } from "@commonfabric/utils/sleep";
+import { PiecesController } from "@commonfabric/piece/ops";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import { TEST_LLM } from "./flags.ts";
 
 const { API_URL, FRONTEND_URL } = env;
@@ -74,14 +74,14 @@ describe("Chat Note pattern test", () => {
       assert(titleElement, "Should find title element");
 
       // Check for the code editor
-      const editor = await page.waitForSelector("ct-code-editor", {
+      const editor = await page.waitForSelector("cf-code-editor", {
         strategy: "pierce",
       });
       assert(editor, "Should find code editor element");
 
       // Check for the Generate button
       const generateButton = await page.waitForSelector(
-        'ct-button[variant="primary"]',
+        'cf-button[variant="primary"]',
         { strategy: "pierce" },
       );
       assert(generateButton, "Should find Generate button");
@@ -135,7 +135,7 @@ describe("Chat Note pattern test", () => {
 
       // Find the Generate button
       const generateButton = await page.waitForSelector(
-        'ct-button[variant="primary"]',
+        'cf-button[variant="primary"]',
         { strategy: "pierce" },
       );
       assert(generateButton, "Should find Generate button");
@@ -158,7 +158,7 @@ describe("Chat Note pattern test", () => {
 
       // Click the Generate button
       const generateButton = await page.waitForSelector(
-        'ct-button[variant="primary"]',
+        'cf-button[variant="primary"]',
         { strategy: "pierce" },
       );
       assert(generateButton, "Should find Generate button");
@@ -184,7 +184,7 @@ describe("Chat Note pattern test", () => {
       // The Cancel button should appear during generation
       try {
         const cancelButton = await page.waitForSelector(
-          'ct-button:has-text("Cancel")',
+          'cf-button:has-text("Cancel")',
           { strategy: "pierce", timeout: 5000 },
         );
         if (cancelButton) {
@@ -255,7 +255,7 @@ Say hello`;
 
       // Click Generate
       const generateButton = await page.waitForSelector(
-        'ct-button[variant="primary"]',
+        'cf-button[variant="primary"]',
         { strategy: "pierce" },
       );
       await generateButton?.click();

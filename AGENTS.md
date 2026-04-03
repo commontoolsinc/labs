@@ -1,6 +1,6 @@
 # Repository Guidelines for AI Agents
 
-This repository represents the Common Tools runtime: a fully integrated,
+This repository represents the Common Fabric runtime: a fully integrated,
 reactive runtime and execution environment for user-created programs. These
 programs are known as patterns and somewhat similar to Solid.js components. Each
 pattern is comprised of reactive `Cell`s stored in `Space`s (defined by a DID).
@@ -11,7 +11,7 @@ signatures.
 ## Pace Layers
 
 This repository contains many packages that compose and stack to create the
-Common Tools product.
+Common Fabric product.
 
 1. Foundation: api, runtime, identity, memory
 2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler,

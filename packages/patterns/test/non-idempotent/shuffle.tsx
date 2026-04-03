@@ -2,7 +2,7 @@
 // WARNING: This pattern is INTENTIONALLY non-idempotent.
 // It exists to test detectNonIdempotent() diagnosis tooling.
 // Do NOT use as a reference for correct pattern development.
-import { computed, Default, pattern, UI, Writable } from "commontools";
+import { computed, Default, pattern, UI, Writable } from "commonfabric";
 
 export default pattern<{
   items: Writable<

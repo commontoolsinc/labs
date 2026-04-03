@@ -11,9 +11,9 @@
  * - Edge cases: regular markdown links, special characters, missing checkboxes, empty content
  * - sourceNoteRef and goToEdit action
  *
- * Run: deno task ct test packages/patterns/notes/note-md.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/notes/note-md.test.tsx --verbose
  */
-import { action, computed, NAME, pattern, Writable } from "commontools";
+import { action, computed, NAME, pattern, Writable } from "commonfabric";
 import NoteMd from "./note-md.tsx";
 import Note from "./note.tsx";
 

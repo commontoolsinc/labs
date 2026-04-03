@@ -17,7 +17,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { type CategoryBudget, type Expense, getTodayDate } from "./schemas.tsx";
 
 // ============ INPUT/OUTPUT TYPES ============
@@ -129,10 +129,10 @@ export default pattern<Input>(({ expenses, budgets }) => {
             marginBottom: "1rem",
           }}
         >
-          <ct-input $value={newDescription} placeholder="Description" />
-          <ct-input $value={newAmount} placeholder="Amount" />
-          <ct-input $value={newCategory} placeholder="Category" />
-          <ct-button
+          <cf-input $value={newDescription} placeholder="Description" />
+          <cf-input $value={newAmount} placeholder="Amount" />
+          <cf-input $value={newCategory} placeholder="Category" />
+          <cf-button
             onClick={() => {
               const desc = newDescription.get().trim();
               const amt = parseFloat(newAmount.get());
@@ -153,7 +153,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
             }}
           >
             Add Expense
-          </ct-button>
+          </cf-button>
         </div>
 
         {/* Expense List with Remove */}
@@ -172,7 +172,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
               <span>
                 {expense.description} - ${expense.amount} ({expense.category})
               </span>
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={() => {
                   const current = expenses.get();
@@ -183,7 +183,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
                 }}
               >
                 ×
-              </ct-button>
+              </cf-button>
             </div>
           ))}
         </div>
@@ -198,12 +198,12 @@ export default pattern<Input>(({ expenses, budgets }) => {
             marginBottom: "1rem",
           }}
         >
-          <ct-input
+          <cf-input
             $value={budgetCategory}
             placeholder="Category (e.g. Food)"
           />
-          <ct-input $value={budgetLimit} placeholder="Monthly limit" />
-          <ct-button
+          <cf-input $value={budgetLimit} placeholder="Monthly limit" />
+          <cf-button
             onClick={() => {
               const cat = budgetCategory.get().trim();
               const limitVal = parseFloat(budgetLimit.get());
@@ -231,7 +231,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
             }}
           >
             Set Budget
-          </ct-button>
+          </cf-button>
         </div>
 
         {/* Budget List */}
@@ -250,7 +250,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
               <span>
                 {budget.category}: ${budget.limit}
               </span>
-              <ct-button
+              <cf-button
                 variant="ghost"
                 onClick={() => {
                   const current = budgets.get();
@@ -261,7 +261,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
                 }}
               >
                 ×
-              </ct-button>
+              </cf-button>
             </div>
           ))}
         </div>

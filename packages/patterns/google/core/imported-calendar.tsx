@@ -24,7 +24,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Type matching CalendarEvent from google-calendar-importer.tsx
 type CalendarEvent = {
@@ -489,7 +489,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   return {
     [NAME]: computed(() => `${title} (${eventCount})`),
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         {/* Header */}
         <div
           slot="header"
@@ -559,7 +559,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
           }}
         >
           {/* New Event Modal */}
-          <ct-modal
+          <cf-modal
             $open={showNewEventPrompt}
             dismissable
             size="sm"
@@ -577,7 +577,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               {/* Title Input */}
               <div>
                 <label style={STYLES.label}>Title</label>
-                <ct-input
+                <cf-input
                   $value={newEventTitle}
                   placeholder="Event title..."
                   style={{ width: "100%" }}
@@ -587,7 +587,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               {/* Date Input */}
               <div>
                 <label style={STYLES.label}>Date</label>
-                <ct-input
+                <cf-input
                   $value={newEventDate}
                   type="date"
                   style={{ width: "100%" }}
@@ -598,16 +598,16 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               <div style={{ display: "flex", gap: "8px" }}>
                 <div style={{ flex: 1 }}>
                   <label style={STYLES.label}>Start</label>
-                  <ct-input
+                  <cf-input
                     $value={newEventStartTime}
                     type="time"
                     style={{ width: "100%" }}
-                    onct-change={onStartTimeChange}
+                    oncf-change={onStartTimeChange}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={STYLES.label}>End</label>
-                  <ct-input
+                  <cf-input
                     $value={newEventEndTime}
                     type="time"
                     style={{ width: "100%" }}
@@ -689,10 +689,10 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                 Create
               </button>
             </div>
-          </ct-modal>
+          </cf-modal>
 
           {/* Edit Event Modal */}
-          <ct-modal
+          <cf-modal
             $open={showEditModal}
             dismissable
             size="sm"
@@ -710,7 +710,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               {/* Title Input */}
               <div>
                 <label style={STYLES.label}>Title</label>
-                <ct-input
+                <cf-input
                   $value={editEventTitle}
                   placeholder="Event title..."
                   style={{ width: "100%" }}
@@ -720,7 +720,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               {/* Date Input */}
               <div>
                 <label style={STYLES.label}>Date</label>
-                <ct-input
+                <cf-input
                   $value={editEventDate}
                   type="date"
                   style={{ width: "100%" }}
@@ -731,16 +731,16 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               <div style={{ display: "flex", gap: "8px" }}>
                 <div style={{ flex: 1 }}>
                   <label style={STYLES.label}>Start</label>
-                  <ct-input
+                  <cf-input
                     $value={editEventStartTime}
                     type="time"
                     style={{ width: "100%" }}
-                    onct-change={onEditStartTimeChange}
+                    oncf-change={onEditStartTimeChange}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={STYLES.label}>End</label>
-                  <ct-input
+                  <cf-input
                     $value={editEventEndTime}
                     type="time"
                     style={{ width: "100%" }}
@@ -803,7 +803,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                 Save
               </button>
             </div>
-          </ct-modal>
+          </cf-modal>
 
           {/* Calendar Grid */}
           <div
@@ -815,7 +815,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               userSelect: "none",
             }}
           >
-            <ct-vscroll flex showScrollbar fadeEdges>
+            <cf-vscroll flex showScrollbar fadeEdges>
               <div
                 style={{
                   display: "flex",
@@ -1000,9 +1000,9 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       </div>
 
                       {/* Time Grid with Drop Zone */}
-                      <ct-drop-zone
+                      <cf-drop-zone
                         accept="local-event,local-event-resize"
-                        onct-drop={handleDayDrop}
+                        oncf-drop={handleDayDrop}
                         style={{ position: "relative", flex: "1" }}
                       >
                         {HOURS.map((hour, hourIdx) => (
@@ -1019,7 +1019,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                             onClick={hourClickActions[hourIdx]}
                           />
                         ))}
-                      </ct-drop-zone>
+                      </cf-drop-zone>
                     </div>
                   );
                 })}
@@ -1329,7 +1329,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       </div>
 
                       {/* Drag Source for Moving */}
-                      <ct-drag-source
+                      <cf-drag-source
                         $cell={evt}
                         type="local-event"
                         onClick={openEvent}
@@ -1344,10 +1344,10 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                         }}
                       >
                         {dragAreaContent}
-                      </ct-drag-source>
+                      </cf-drag-source>
 
                       {/* Resize Drag Source */}
-                      <ct-drag-source
+                      <cf-drag-source
                         $cell={evt}
                         type="local-event-resize"
                         style={{
@@ -1364,12 +1364,12 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                         }}
                       >
                         {resizeHandleLines}
-                      </ct-drag-source>
+                      </cf-drag-source>
                     </div>
                   );
                 })}
               </div>
-            </ct-vscroll>
+            </cf-vscroll>
           </div>
         </div>
 
@@ -1391,7 +1391,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
           </div>,
           null,
         )}
-      </ct-screen>
+      </cf-screen>
     ),
     title,
     eventCount,

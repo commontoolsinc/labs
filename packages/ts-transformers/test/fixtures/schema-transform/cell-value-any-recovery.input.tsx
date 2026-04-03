@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell } from "commontools";
+import { cell } from "commonfabric";
 
 declare function fetchAny(): any;
 

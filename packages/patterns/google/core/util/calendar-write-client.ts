@@ -31,7 +31,7 @@
  * });
  * ```
  */
-import { getPatternEnvironment, Writable } from "commontools";
+import { getPatternEnvironment, Writable } from "commonfabric";
 
 const env = getPatternEnvironment();
 

@@ -1,6 +1,6 @@
 ---
 name: lit-component
-description: Guide for developing Lit web components in the Common UI v2 system (@commontools/ui/v2). Use when creating or modifying ct- prefixed components, implementing theme integration, working with Cell abstractions, or building reactive UI components that integrate with the Common Tools runtime.
+description: Guide for developing Lit web components in the Common UI v2 system (@commonfabric/ui/v2). Use when creating or modifying cf- prefixed components, implementing theme integration, working with Cell abstractions, or building reactive UI components that integrate with the Common Fabric runtime.
 ---
 
 # Lit Component Development for Common UI
@@ -12,7 +12,7 @@ UI v2 component library (`packages/ui/src/v2`).
 
 Use this skill when:
 
-- Creating new `ct-` prefixed components in the UI package
+- Creating new `cf-` prefixed components in the UI package
 - Modifying existing Common UI v2 components
 - Implementing theme-aware components
 - Integrating components with Cell abstractions from the runtime
@@ -60,8 +60,8 @@ and `references/advanced-patterns.md` for complex integration patterns.
 Create the component directory structure:
 
 ```
-packages/ui/src/v2/components/ct-component-name/
-├── ct-component-name.ts    # Component implementation
+packages/ui/src/v2/components/cf-component-name/
+├── cf-component-name.ts    # Component implementation
 ├── index.ts                # Export and registration
 └── styles.ts               # Optional: for complex components
 ```
@@ -74,7 +74,7 @@ Basic template:
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
-export class CTComponentName extends BaseElement {
+export class CFComponentName extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -107,19 +107,19 @@ export class CTComponentName extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-component-name", CTComponentName);
+globalThis.customElements.define("cf-component-name", CFComponentName);
 ```
 
 ### 4. Create Index File
 
 ```typescript
-import { CTComponentName } from "./ct-component-name.ts";
+import { CFComponentName } from "./cf-component-name.ts";
 
-if (!customElements.get("ct-component-name")) {
-  customElements.define("ct-component-name", CTComponentName);
+if (!customElements.get("cf-component-name")) {
+  customElements.define("cf-component-name", CFComponentName);
 }
 
-export { CTComponentName };
+export { CFComponentName };
 export type {}; /* exported types */
 ```
 
@@ -132,15 +132,15 @@ import { consume } from "@lit/context";
 import { property } from "lit/decorators.js";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 
 export class MyComponent extends BaseElement {
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CTTheme;
+  declare theme?: CFTheme;
 
   override firstUpdated(changed: Map<string | number | symbol, unknown>) {
     super.firstUpdated(changed);
@@ -166,14 +166,14 @@ Then use theme CSS variables with fallbacks:
 ```css
 .button {
   background-color: var(
-    --ct-theme-color-primary,
-    var(--ct-colors-primary-500, #3b82f6)
+    --cf-theme-color-primary,
+    var(--cf-colors-primary-500, #3b82f6)
   );
   border-radius: var(
-    --ct-theme-border-radius,
-    var(--ct-border-radius-md, 0.375rem)
+    --cf-theme-border-radius,
+    var(--cf-border-radius-md, 0.375rem)
   );
-  font-family: var(--ct-theme-font-family, inherit);
+  font-family: var(--cf-theme-font-family, inherit);
 }
 ```
 
@@ -186,8 +186,8 @@ For components that work with reactive runtime data:
 
 ```typescript
 import { property } from "lit/decorators.js";
-import type { Cell } from "@commontools/runner";
-import { isCell } from "@commontools/runner";
+import type { Cell } from "@commonfabric/runner";
+import { isCell } from "@commonfabric/runner";
 
 export class MyComponent extends BaseElement {
   @property({ attribute: false })
@@ -253,7 +253,7 @@ For reusable component behaviors, use reactive controllers. Example:
 ```typescript
 import { InputTimingController } from "../../core/input-timing-controller.ts";
 
-export class CTInput extends BaseElement {
+export class CFInput extends BaseElement {
   @property()
   timingStrategy: "immediate" | "debounce" | "throttle" | "blur" = "debounce";
 
@@ -269,7 +269,7 @@ export class CTInput extends BaseElement {
     const value = (event.target as HTMLInputElement).value;
 
     this.inputTiming.schedule(() => {
-      this.emit("ct-change", { value });
+      this.emit("cf-change", { value });
     });
   }
 }
@@ -283,7 +283,7 @@ Use the `emit()` helper from `BaseElement`:
 
 ```typescript
 private handleChange(newValue: string) {
-  this.emit("ct-change", { value: newValue });
+  this.emit("cf-change", { value: newValue });
 }
 ```
 
@@ -331,18 +331,18 @@ return html`
 Colocate tests with components:
 
 ```typescript
-// ct-button.test.ts
+// cf-button.test.ts
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { CTButton } from "./ct-button.ts";
+import { CFButton } from "./cf-button.ts";
 
-describe("CTButton", () => {
+describe("CFButton", () => {
   it("should be defined", () => {
-    expect(CTButton).toBeDefined();
+    expect(CFButton).toBeDefined();
   });
 
   it("should have default properties", () => {
-    const element = new CTButton();
+    const element = new CFButton();
     expect(element.variant).toBe("primary");
   });
 });
@@ -352,12 +352,12 @@ Run with: `deno task test` (includes required flags)
 
 ## Package Structure
 
-Components are exported from `@commontools/ui/v2`:
+Components are exported from `@commonfabric/ui/v2`:
 
 ```typescript
 // packages/ui/src/v2/index.ts
-export { CTButton } from "./components/ct-button/index.ts";
-export type { ButtonVariant } from "./components/ct-button/index.ts";
+export { CFButton } from "./components/cf-button/index.ts";
+export type { ButtonVariant } from "./components/cf-button/index.ts";
 ```
 
 ## Reference Documentation
@@ -367,8 +367,8 @@ Load these references as needed for detailed guidance:
 - **`references/component-patterns.md`** - Detailed patterns for each component
   category, file structure, type safety, styling conventions, event handling,
   and lifecycle methods
-- **`references/theme-system.md`** - Theme philosophy, `ct-theme` provider,
-  CTTheme interface, CSS variables, and theming patterns
+- **`references/theme-system.md`** - Theme philosophy, `cf-theme` provider,
+  CFTheme interface, CSS variables, and theming patterns
 - **`references/cell-integration.md`** - Comprehensive Cell integration patterns
   including subscriptions, mutations, array handling, and common pitfalls
 - **`references/advanced-patterns.md`** - Advanced architectural patterns
@@ -408,20 +408,21 @@ Study these components to understand architectural patterns:
 
 **Basic patterns:**
 
-- **Simple visual:** `ct-separator` - Minimal component, CSS parts, ARIA
-- **Layout:** `ct-vstack` - Flexbox abstraction, utility classes with `classMap`
-- **Themed input:** `ct-button` - Theme consumption, event emission, variants
+- **Simple visual:** `cf-separator` - Minimal component, CSS parts, ARIA
+- **Layout:** `cf-vstack` - Flexbox abstraction, utility classes with `classMap`
+- **Themed input:** `cf-button` - Theme consumption, event emission, variants
 
 **Advanced patterns:**
 
-- **Context provider:** `ct-theme` - Ambient configuration with `@provide`,
+- **Context provider:** `cf-theme` - Ambient configuration with `@provide`,
   `display: contents`, reactive Cell subscriptions
-- **Runtime rendering:** `ct-render` - Pattern loading, UI extraction, lifecycle
+- **Runtime rendering:** `cf-render` - Pattern loading, UI extraction, lifecycle
   management
-- **Third-party integration:** `ct-code-editor` - CodeMirror lifecycle,
+- **Third-party integration:** `cf-code-editor` - CodeMirror lifecycle,
   Compartments, bidirectional sync, CellController
-- **Tree operations:** `ct-outliner` - Path-based operations, diff-based
-  rendering, keyboard commands, MentionController
+- **Legacy tree editor patterns:** historical outliner implementation -
+  Path-based operations, diff-based rendering, keyboard commands,
+  MentionController
 
 Each component reveals deeper patterns - study them not just for API but for
 architectural principles.

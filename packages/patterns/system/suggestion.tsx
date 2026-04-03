@@ -16,13 +16,13 @@ import {
   wish,
   type WishState,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import {
   bash,
   fetchAndRunPattern,
   listMentionable,
   listRecent,
-} from "./common-tools.tsx";
+} from "./common-fabric.tsx";
 import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,
@@ -222,58 +222,58 @@ Use the user context above to personalize your suggestions when relevant.`;
   // reconciler to re-mount the DOM, losing inner subscriptions).
   const freeformUI = (
     <div style="display:contents">
-      <ct-autostart
+      <cf-autostart
         onstart={triggerGeneration({
           addMessage,
           situation,
           result: llmResult,
         })}
       />
-      <ct-cell-link
+      <cf-cell-link
         $cell={llmResult}
         style={computed(() => (llmResult ? "" : "display:none"))}
       />
-      <ct-cell-context $cell={llmResult}>
+      <cf-cell-context $cell={llmResult}>
         {ifElse(
           computed(() => !!llmResult),
           computed(() => llmResult),
           undefined,
         )}
-      </ct-cell-context>
-      <ct-message-beads
+      </cf-cell-context>
+      <cf-message-beads
         label="suggestion"
         $messages={messages}
         pending={pending}
-        onct-refine={showRefineInput({ showRefine })}
+        oncf-refine={showRefineInput({ showRefine })}
       />
 
-      <ct-question
+      <cf-question
         question={computed(() => pendingQuestion.get()?.question ?? "")}
         options={computed(() => pendingQuestion.get()?.options ?? [])}
         allow-custom
         style={computed(() => (hasPendingQuestion ? "" : "display:none"))}
-        onct-answer={onQuestionAnswer({ addMessage, pendingQuestion })}
+        oncf-answer={onQuestionAnswer({ addMessage, pendingQuestion })}
       />
-      <ct-prompt-input
+      <cf-prompt-input
         placeholder="Refine suggestion..."
         pending={pending}
         style={computed(() => (showRefine.get() ? "" : "display:none"))}
-        onct-send={sendMessage({ addMessage })}
+        oncf-send={sendMessage({ addMessage })}
       />
     </div>
   );
 
   const pickerUI = (
-    <ct-card>
+    <cf-card>
       <h2>Choose Result ({initialResults.length})</h2>
-      <ct-picker $items={initialResults} $selectedIndex={selectedIndex} />
-      <ct-button
+      <cf-picker $items={initialResults} $selectedIndex={selectedIndex} />
+      <cf-button
         variant="primary"
         onClick={() => userConfirmedIndex.set(selectedIndex.get())}
       >
         Confirm Selection
-      </ct-button>
-    </ct-card>
+      </cf-button>
+    </cf-card>
   );
 
   return {

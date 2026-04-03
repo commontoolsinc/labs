@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { JSONSchemaMutable } from "@commontools/api";
+import type { JSONSchemaMutable } from "@commonfabric/api";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { getPropertyNameText } from "./typescript/property-name.ts";
 
@@ -721,7 +721,7 @@ export function isDefaultTypeRef(
  * - Aliases to wrappers: type MyDefault<T> = Default<T, T>
  *
  * Note: This only checks via typeNode. For structural detection of Cell/Stream/OpaqueRef
- * based on type identity, see CommonToolsFormatter.getWrapperTypeInfo().
+ * based on type identity, see CommonFabricFormatter.getWrapperTypeInfo().
  */
 export function detectWrapperViaNode(
   typeNode: ts.TypeNode | undefined,

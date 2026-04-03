@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { cell, pattern } from "commonfabric";
 // FIXTURE: cell-pattern-input-structure-recovery
 // Verifies: `cell(state.values)` preserves array/item structure when the source
 // comes from a typed pattern input.
@@ -9,7 +9,7 @@ export default pattern((state) => {
         items: {
             type: "number"
         }
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     return { typedValues };
 }, {
     type: "object",
@@ -22,7 +22,7 @@ export default pattern((state) => {
         }
     },
     required: ["values"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         typedValues: {
@@ -34,8 +34,8 @@ export default pattern((state) => {
         }
     },
     required: ["typedValues"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

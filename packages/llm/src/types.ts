@@ -1,10 +1,10 @@
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import { LlmPrompt } from "./prompts/prompting.ts";
 import type {
   BuiltInLLMContent,
   BuiltInLLMMessage,
   JSONSchema,
-} from "@commontools/api";
+} from "@commonfabric/api";
 
 export const DEFAULT_MODEL_NAME: ModelName = "anthropic:claude-sonnet-4-5";
 

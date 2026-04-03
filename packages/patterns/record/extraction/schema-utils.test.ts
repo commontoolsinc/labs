@@ -3,7 +3,7 @@
  *
  * Tests the pure schema discovery and building functions.
  * These functions only use stored schema (no registry fallback),
- * so they can run without the full commontools runtime.
+ * so they can run without the full Common Fabric runtime.
  */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

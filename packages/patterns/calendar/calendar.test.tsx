@@ -11,9 +11,9 @@
  * - Update notes via piece action
  * - Removing events
  *
- * Run: deno task ct test packages/patterns/calendar/calendar.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/calendar/calendar.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commonfabric";
 import Calendar from "./calendar.tsx";
 
 export default pattern(() => {

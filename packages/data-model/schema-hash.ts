@@ -15,7 +15,7 @@
  * `fabric-value.ts`.
  */
 
-import type { JSONSchema, JSONSchemaObj } from "@commontools/api";
+import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
 import { SchemaAndHash } from "./schema-and-hash.ts";

@@ -1,11 +1,11 @@
 // cell-bridge.ts — Bridge PieceManager → FsTree
 //
-// Populates the filesystem tree with piece data from Common Tools spaces.
+// Populates the filesystem tree with piece data from Common Fabric spaces.
 // Supports multiple spaces with on-demand connection.
 // Subscribes to cell changes and rebuilds subtrees on updates.
 
-import type { Cell, PatternMeta } from "@commontools/runner";
-import { schemaToTypeString } from "@commontools/runner";
+import type { Cell, PatternMeta } from "@commonfabric/runner";
+import { schemaToTypeString } from "@commonfabric/runner";
 import { FsTree } from "./tree.ts";
 import {
   buildCallableScript,
@@ -23,9 +23,12 @@ import {
   isVNode,
   safeStringify,
 } from "./tree-builder.ts";
-import type { JSONSchema } from "@commontools/api";
-import type { PieceManager } from "@commontools/piece";
-import type { PieceController, PiecesController } from "@commontools/piece/ops";
+import type { JSONSchema } from "@commonfabric/api";
+import type { PieceManager } from "@commonfabric/piece";
+import type {
+  PieceController,
+  PiecesController,
+} from "@commonfabric/piece/ops";
 
 /** Strip asStream/asCell markers from a schema for display as input schema. */
 function getInputSchema(
@@ -1071,7 +1074,7 @@ export class CellBridge {
     spaceName: string,
     manager: PieceManager,
   ): Promise<SpaceState> {
-    const { PiecesController } = await import("@commontools/piece/ops");
+    const { PiecesController } = await import("@commonfabric/piece/ops");
     const pieces = new PiecesController(manager);
 
     // Create space directory structure

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // FIXTURE: map-array-length-conditional
 // Verifies: length-guard && map pattern is transformed to when() wrapping mapWithPattern()
 //   list.get().length > 0 && (<div>{list.map(...)}</div>) → when(derive(...length), <div>{list.mapWithPattern(...)}</div>)
@@ -9,24 +9,24 @@ export default pattern((_state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
-        {__ctHelpers.when({
+        {__cfHelpers.when({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean"
                 }, {}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 list: {
@@ -38,10 +38,10 @@ export default pattern((_state) => {
                 }
             },
             required: ["list"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => list.get().length > 0), <div>
-            {list.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        } as const satisfies __cfHelpers.JSONSchema, { list: list }, ({ list }) => list.get().length > 0), <div>
+            {list.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const name = __ct_pattern_input.key("element");
                 return (<span>{name}</span>);
             }, {
@@ -52,7 +52,7 @@ export default pattern((_state) => {
                     }
                 },
                 required: ["element"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -72,11 +72,11 @@ export default pattern((_state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            } as const satisfies __cfHelpers.JSONSchema), {})}
           </div>)}
       </div>),
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -105,8 +105,8 @@ export default pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

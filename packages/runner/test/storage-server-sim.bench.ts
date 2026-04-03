@@ -10,8 +10,8 @@
  * preserves original references when values are deepEqual. A real server
  * would re-serialize data, breaking reference equality.
  */
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { Nursery, Replica } from "../src/storage/cache.ts";
 import {

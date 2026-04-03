@@ -72,15 +72,19 @@ Ternaries are valid in JSX. The transformer auto-converts them to `ifElse()`.
 | `checked={item.done}` | `$checked={item.done}` |
 | `value={title}` | `$value={title}` |
 | `$checked={item}` | `$checked={item.done}` |
-| wrong event name | Use `onct-send`, `onct-input`, or `onct-change` |
+| wrong event name | Use `oncf-send`, `oncf-input`, or `oncf-change` |
 
-### 6. Custom component props
+### 6. Style Syntax
 
-Check that custom component props use the correct camelCase names.
+HTML elements require object style syntax. Custom `cf-*` elements require
+string style syntax. Also check that custom component props use the correct
+camelCase names.
 
 | Violation | Fix |
 |-----------|-----|
-| kebab-case props on `ct-*` | Use camelCase, for example `allowCustom` |
+| string style on HTML | Convert to object syntax |
+| object style on `cf-*` | Convert to string syntax |
+| kebab-case props on `cf-*` | Use camelCase, for example `allowCustom` |
 
 ### 7. Handler Binding
 

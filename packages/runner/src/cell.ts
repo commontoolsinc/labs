@@ -3,14 +3,14 @@ import {
   isFunction,
   isObject,
   isRecord,
-} from "@commontools/utils/types";
+} from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
   type FabricValue,
   isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
-} from "@commontools/data-model/fabric-value";
-import type { MemorySpace } from "@commontools/memory/interface";
+} from "@commonfabric/data-model/fabric-value";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {
@@ -92,8 +92,8 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { getLogger } from "@commontools/utils/logger";
-import { ensureNotRenderThread } from "@commontools/utils/env";
+import { getLogger } from "@commonfabric/utils/logger";
+import { ensureNotRenderThread } from "@commonfabric/utils/env";
 ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
@@ -115,7 +115,7 @@ const cellNodes = new WeakMap<OpaqueCell<unknown>, Set<NodeRef>>();
  * These augmentations add implementation details specific to the runner runtime.
  */
 
-declare module "@commontools/api" {
+declare module "@commonfabric/api" {
   /**
    * Augment Writable to add runtime-specific write methods with onCommit callbacks
    */
@@ -273,9 +273,9 @@ declare module "@commontools/api" {
   }
 }
 
-export type { AnyCell, Cell, Stream } from "@commontools/api";
+export type { AnyCell, Cell, Stream } from "@commonfabric/api";
 
-export type { MemorySpace } from "@commontools/memory/interface";
+export type { MemorySpace } from "@commonfabric/memory/interface";
 
 const cellMethods = new Set<
   | keyof ICell<unknown>

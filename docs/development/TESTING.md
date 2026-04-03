@@ -41,10 +41,10 @@ Integration tests are executable scripts that connect to a real backend and test
 ```typescript
 #!/usr/bin/env -S deno run -A
 
-import { Runtime } from "@commontools/runner";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { env } from "@commontools/integration";
+import { Runtime } from "@commonfabric/runner";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { env } from "@commonfabric/integration";
 const { API_URL } = env;
 
 console.log("=== TEST: My Integration Test ===");
@@ -75,7 +75,7 @@ Deno.exit(0);
 
 **Key characteristics of integration tests:**
 - Start with shebang: `#!/usr/bin/env -S deno run -A`
-- Connect to real API using `env.API_URL` from `@commontools/integration`
+- Connect to real API using `env.API_URL` from `@commonfabric/integration`
 - Test complete workflows (runtime, storage, pieces)
 - Use `console.log` for output and `Deno.exit(1)` for failures
 - Run as part of CI against deployed backend

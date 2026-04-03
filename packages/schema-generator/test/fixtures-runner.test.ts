@@ -6,7 +6,7 @@ import ts from "typescript";
 import {
   createUnifiedDiff,
   defineFixtureSuite,
-} from "@commontools/test-support/fixture-runner";
+} from "@commonfabric/test-support/fixture-runner";
 import { createSchemaTransformerV2 } from "../src/plugin.ts";
 import {
   batchTypeCheckFixtures,

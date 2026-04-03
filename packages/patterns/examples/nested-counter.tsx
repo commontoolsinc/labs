@@ -7,7 +7,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Types =====
 
@@ -55,15 +55,15 @@ export const Counter = pattern<CounterInput>((state) => {
     [NAME]: computed(() => `Simple counter: ${state.value}`),
     [UI]: (
       <div>
-        <ct-button onClick={() => boundDecrement.send()}>
+        <cf-button onClick={() => boundDecrement.send()}>
           dec to {prevValue}
-        </ct-button>
+        </cf-button>
         <span id="counter-result">
           Counter is the {ordinalDisplay} number
         </span>
-        <ct-button onClick={() => boundIncrement.send()}>
+        <cf-button onClick={() => boundIncrement.send()}>
           inc to {nextValue}
-        </ct-button>
+        </cf-button>
       </div>
     ),
     value: state.value,

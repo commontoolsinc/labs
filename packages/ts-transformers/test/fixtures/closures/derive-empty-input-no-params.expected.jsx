@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-empty-input-no-params
 // Verifies: zero-parameter callback with empty `{}` input still captures closed-over cells
 //   derive({}, () => ...) → derive(schema, schema, { a, b }, ({ a, b }) => ...)
@@ -7,12 +7,12 @@ import { Writable, derive, pattern } from "commontools";
 export default pattern(() => {
     const a = Writable.of(10, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const b = Writable.of(20, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     // Zero-parameter callback that closes over a and b
-    const result = __ctHelpers.derive({
+    const result = __cfHelpers.derive({
         type: "object",
         properties: {
             a: {
@@ -25,17 +25,17 @@ export default pattern(() => {
             }
         },
         required: ["a", "b"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         a: a,
         b: b
     }, ({ a, b }) => a.get() + b.get());
     return result;
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

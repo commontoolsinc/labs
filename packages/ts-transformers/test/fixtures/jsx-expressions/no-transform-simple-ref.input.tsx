@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, OpaqueRef, pattern } from "commontools";
+import { NAME, OpaqueRef, pattern } from "commonfabric";
 const count: OpaqueRef<number> = {} as any;
 const _element = <div>{count}</div>;
 

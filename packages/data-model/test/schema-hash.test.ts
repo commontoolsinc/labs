@@ -19,7 +19,7 @@ import { SchemaAndHash } from "../schema-and-hash.ts";
 import { FabricHash } from "../fabric-hash.ts";
 import { isDeepFrozen } from "../deep-freeze.ts";
 import { toDeepFrozenSchema } from "../schema-utils.ts";
-import type { JSONSchema, JSONSchemaObj } from "@commontools/api";
+import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 
 describe("schema-hash dispatch", () => {
   afterEach(() => {

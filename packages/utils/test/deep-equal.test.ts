@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { deepEqual } from "@commontools/utils/deep-equal";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 describe("deepEqual", () => {
   describe("primitives", () => {

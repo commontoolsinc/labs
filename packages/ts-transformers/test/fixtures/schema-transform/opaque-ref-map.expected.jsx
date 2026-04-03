@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 interface TodoItem {
     title: string;
     done: boolean;
@@ -12,7 +12,7 @@ interface TodoItem {
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
     // Map on opaque ref arrays should be transformed to mapWithPattern
-    const mapped = items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+    const mapped = items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
         const item = __ct_pattern_input.key("element");
         return item.key("title");
     }, {
@@ -37,11 +37,11 @@ export default pattern((__ct_pattern_input) => {
                 required: ["title", "done"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema), {});
+    } as const satisfies __cfHelpers.JSONSchema), {});
     // This should also be transformed
-    const filtered = items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+    const filtered = items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
         const item = __ct_pattern_input.key("element");
         const index = __ct_pattern_input.key("index");
         return ({
@@ -74,7 +74,7 @@ export default pattern((__ct_pattern_input) => {
                 required: ["title", "done"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             title: {
@@ -88,7 +88,7 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["title", "done", "position"]
-    } as const satisfies __ctHelpers.JSONSchema), {});
+    } as const satisfies __cfHelpers.JSONSchema), {});
     return { mapped, filtered };
 }, {
     type: "object",
@@ -115,7 +115,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["title", "done"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         mapped: {
@@ -144,8 +144,8 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["mapped", "filtered"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

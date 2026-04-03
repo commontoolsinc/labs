@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, derive, pattern } from "commontools";
+import { Writable, derive, pattern } from "commonfabric";
 
 interface State {
   counter: { value: number };

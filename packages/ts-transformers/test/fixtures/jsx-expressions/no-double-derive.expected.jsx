@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { derive, pattern, UI } from "commonfabric";
 interface State {
     items: {
         id: number;
@@ -25,9 +25,9 @@ export default pattern((__ct_pattern_input) => {
         {/* User-written derive with simple parameter transformation - should NOT be double-wrapped */}
         <span>Count: {derive({
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, items.key("length"), (n) => n + 1)}</span>
+        } as const satisfies __cfHelpers.JSONSchema, items.key("length"), (n) => n + 1)}</span>
 
         {/* User-written derive accessing opaque ref property - should NOT be double-wrapped */}
         <span>Name: {derive({
@@ -37,21 +37,21 @@ export default pattern((__ct_pattern_input) => {
                     type: "string"
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, cellRef, (ref) => ref.name || "Unknown")}</span>
+        } as const satisfies __cfHelpers.JSONSchema, cellRef, (ref) => ref.name || "Unknown")}</span>
 
         {/* Nested in map with user-written derive - derives should NOT be double-wrapped */}
-        {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const index = __ct_pattern_input.key("index");
                 return (<li key={item.key("id")}>
             {/* These user-written derives should remain as-is, not wrapped in another derive */}
             Item {derive({
                     type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, index, (i) => i + 1)}: {derive({
+                } as const satisfies __cfHelpers.JSONSchema, index, (i) => i + 1)}: {derive({
                     type: "object",
                     properties: {
                         title: {
@@ -59,9 +59,9 @@ export default pattern((__ct_pattern_input) => {
                         }
                     },
                     required: ["title"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, item, (it) => it.title)}
+                } as const satisfies __cfHelpers.JSONSchema, item, (it) => it.title)}
           </li>);
             }, {
                 type: "object",
@@ -83,7 +83,7 @@ export default pattern((__ct_pattern_input) => {
                     }
                 },
                 required: ["element"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -103,7 +103,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            } as const satisfies __cfHelpers.JSONSchema), {})}
 
         {/* Simple property access - should NOT be transformed */}
         <span>Direct access: {cellRef.key("value")}</span>
@@ -141,7 +141,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["items", "cellRef"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -170,8 +170,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

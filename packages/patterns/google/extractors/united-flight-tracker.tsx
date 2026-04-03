@@ -15,10 +15,10 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth united-flight-tracker/overrideAuth
+ * 3. Link: cf piece link google-auth/auth united-flight-tracker/overrideAuth
  */
-import { computed, ifElse, JSONSchema, NAME, pattern, UI } from "commontools";
-import type { Schema } from "commontools/schema";
+import { computed, ifElse, JSONSchema, NAME, pattern, UI } from "commonfabric";
+import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
@@ -872,13 +872,13 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
     previewUI,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-heading level={3}>United Flight Tracker</ct-heading>
+          <cf-heading level={3}>United Flight Tracker</cf-heading>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {/* Auth UI */}
             {extractor.ui.authStatusUI}
 
@@ -995,7 +995,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                     Check-In Available
                   </span>
                 </div>
-                <ct-vstack gap="3">
+                <cf-vstack gap="3">
                   {checkInAvailable.map((flight) => (
                     <div
                       style={{
@@ -1076,7 +1076,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                       </a>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
             </div>
 
@@ -1119,7 +1119,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                     Flight Alerts
                   </span>
                 </div>
-                <ct-vstack gap="3">
+                <cf-vstack gap="3">
                   {activeAlerts.map((flight) => (
                     <div
                       style={{
@@ -1223,7 +1223,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
             </div>
 
@@ -1249,7 +1249,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
               >
                 Upcoming Flights
               </h3>
-              <ct-vstack gap="3">
+              <cf-vstack gap="3">
                 {upcomingFlights.map((flight) => (
                   <div
                     style={{
@@ -1462,7 +1462,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                     </div>
                   </div>
                 ))}
-              </ct-vstack>
+              </cf-vstack>
             </div>
 
             {
@@ -1489,7 +1489,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                 >
                   Past Flights ({computed(() => pastFlights?.length || 0)})
                 </summary>
-                <ct-vstack gap="2">
+                <cf-vstack gap="2">
                   {pastFlights.map((flight) => (
                     <div
                       style={{
@@ -1543,7 +1543,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </details>
             </div>
 
@@ -1588,7 +1588,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                   >
                     LLM Analysis Results:
                   </h4>
-                  <ct-vstack gap="2">
+                  <cf-vstack gap="2">
                     {emailAnalyses.map((item) => {
                       const debugResult = item.result as
                         | EmailAnalysisResult
@@ -1633,7 +1633,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                               color: "#f59e0b",
                             }}
                           >
-                            <ct-loader size="sm" />
+                            <cf-loader size="sm" />
                             <span>Analyzing...</span>
                           </div>
 
@@ -1728,7 +1728,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                         </div>
                       );
                     })}
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
               </details>
             </div>
@@ -1753,9 +1753,9 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                 Open United Website
               </a>
             </div>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

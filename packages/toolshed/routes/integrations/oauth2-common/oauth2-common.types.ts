@@ -1,4 +1,4 @@
-import type { JSONSchema } from "@commontools/runner";
+import type { JSONSchema } from "@commonfabric/runner";
 
 /**
  * Configuration for an OAuth2 provider.

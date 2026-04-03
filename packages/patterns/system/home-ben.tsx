@@ -10,7 +10,7 @@ import {
   toSchema,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import FavoritesManager from "./favorites-manager.tsx";
 import Journal from "./journal.tsx";
 import { EMPTY_LEARNED, type Fact, type LearnedSection } from "../profile.tsx";
@@ -222,7 +222,7 @@ const removeSpaceHandler = handler<
 });
 
 // Handler to submit an answer to a question (reads question from learned state)
-// Uses ct-message-input event format: { detail: { message: string } }
+// Uses cf-message-input event format: { detail: { message: string } }
 const submitAnswerHandler = handler<
   { detail: { message: string } },
   { learned: Writable<LearnedSection> }
@@ -717,27 +717,27 @@ IMPORTANT:
   return {
     [NAME]: `Home`,
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <h1>
           home<strong>space</strong>
         </h1>
 
-        <ct-tabs $value={activeTab}>
-          <ct-tab-list>
-            <ct-tab value="spaces">Spaces</ct-tab>
-            <ct-tab value="journal">Journal</ct-tab>
-            <ct-tab value="favorites">Favorites</ct-tab>
-            <ct-tab value="profile">Profile</ct-tab>
-          </ct-tab-list>
-          <ct-tab-panel value="journal">{journalComponent}</ct-tab-panel>
-          <ct-tab-panel value="favorites">{favoritesComponent}</ct-tab-panel>
-          <ct-tab-panel value="profile">
-            <ct-vstack gap="4" style={{ padding: "1rem" }}>
+        <cf-tabs $value={activeTab}>
+          <cf-tab-list>
+            <cf-tab value="spaces">Spaces</cf-tab>
+            <cf-tab value="journal">Journal</cf-tab>
+            <cf-tab value="favorites">Favorites</cf-tab>
+            <cf-tab value="profile">Profile</cf-tab>
+          </cf-tab-list>
+          <cf-tab-panel value="journal">{journalComponent}</cf-tab-panel>
+          <cf-tab-panel value="favorites">{favoritesComponent}</cf-tab-panel>
+          <cf-tab-panel value="profile">
+            <cf-vstack gap="4" style={{ padding: "1rem" }}>
               <h2 style={{ margin: 0, fontSize: "16px" }}>Profile Summary</h2>
 
               {/* Editable Summary */}
-              <ct-vstack gap="1">
-                <ct-textarea
+              <cf-vstack gap="1">
+                <cf-textarea
                   $value={learned.key("summary")}
                   placeholder="Your profile summary will appear here as I learn about you from your activity..."
                   rows={6}
@@ -755,11 +755,11 @@ IMPORTANT:
                 <span style={{ fontSize: "11px", color: "#888" }}>
                   This summary is auto-generated but you can edit it freely.
                 </span>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* Question Answering */}
               {computed(() => topQuestion !== null) && (
-                <ct-vstack
+                <cf-vstack
                   gap="2"
                   style={{
                     padding: "16px",
@@ -774,15 +774,15 @@ IMPORTANT:
                   <p style={{ margin: 0, fontSize: "14px" }}>
                     {computed(() => topQuestion?.question || "")}
                   </p>
-                  <ct-message-input
+                  <cf-message-input
                     placeholder="Type your answer..."
                     appearance="rounded"
-                    onct-send={submitAnswer}
+                    oncf-send={submitAnswer}
                   />
                   <span style={{ fontSize: "11px", color: "#92400e" }}>
                     Category: {computed(() => topQuestion?.category || "")}
                   </span>
-                </ct-vstack>
+                </cf-vstack>
               )}
 
               <hr
@@ -798,7 +798,7 @@ IMPORTANT:
               </h3>
 
               {/* Facts Table */}
-              <ct-vstack gap="2">
+              <cf-vstack gap="2">
                 <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
                   Facts ({computed(() => learned.get().facts.length)})
                 </h3>
@@ -885,11 +885,11 @@ IMPORTANT:
                     </tbody>
                   </table>
                 )}
-              </ct-vstack>
+              </cf-vstack>
 
               {/* Preferences */}
               {computed(() => learned.get().preferences.length > 0) && (
-                <ct-vstack gap="2">
+                <cf-vstack gap="2">
                   <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
                     Preferences
                   </h3>
@@ -947,16 +947,16 @@ IMPORTANT:
                       ))}
                     </tbody>
                   </table>
-                </ct-vstack>
+                </cf-vstack>
               )}
 
               {/* Questions */}
               {computed(() => learned.get().openQuestions.length > 0) && (
-                <ct-vstack gap="2">
+                <cf-vstack gap="2">
                   <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
                     Open Questions
                   </h3>
-                  <ct-vstack
+                  <cf-vstack
                     gap="1"
                     style={{
                       padding: "12px",
@@ -973,17 +973,17 @@ IMPORTANT:
                         {q.question}
                       </div>
                     ))}
-                  </ct-vstack>
-                </ct-vstack>
+                  </cf-vstack>
+                </cf-vstack>
               )}
 
               {/* Personas */}
               {computed(() => learned.get().personas.length > 0) && (
-                <ct-vstack gap="2">
+                <cf-vstack gap="2">
                   <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
                     Personas
                   </h3>
-                  <ct-hstack gap="2" style={{ flexWrap: "wrap" }}>
+                  <cf-hstack gap="2" style={{ flexWrap: "wrap" }}>
                     {computed(() => learned.get().personas).map((persona) => (
                       <span
                         style={{
@@ -997,32 +997,32 @@ IMPORTANT:
                         {persona}
                       </span>
                     ))}
-                  </ct-hstack>
-                </ct-vstack>
+                  </cf-hstack>
+                </cf-vstack>
               )}
-            </ct-vstack>
-          </ct-tab-panel>
-          <ct-tab-panel value="spaces">
-            <ct-vstack gap="4" style={{ padding: "1rem" }}>
+            </cf-vstack>
+          </cf-tab-panel>
+          <cf-tab-panel value="spaces">
+            <cf-vstack gap="4" style={{ padding: "1rem" }}>
               <h2 style={{ margin: 0, fontSize: "16px" }}>My Spaces</h2>
 
-              <ct-vstack gap="2">
+              <cf-vstack gap="2">
                 {spaces.map((space) => (
-                  <ct-hstack gap="2" align="center">
+                  <cf-hstack gap="2" align="center">
                     <div style={{ flex: "1" }}>
-                      <ct-space-link
+                      <cf-space-link
                         spaceName={space.name}
                         spaceDid={space.did}
                       />
                     </div>
-                    <ct-button
+                    <cf-button
                       size="sm"
                       variant="ghost"
                       onClick={removeSpaceHandler({ name: space.name, spaces })}
                     >
                       ✕
-                    </ct-button>
-                  </ct-hstack>
+                    </cf-button>
+                  </cf-hstack>
                 ))}
                 {computed(() => spaces.get().length === 0) && (
                   <p
@@ -1035,23 +1035,23 @@ IMPORTANT:
                     No spaces yet. Add one below.
                   </p>
                 )}
-              </ct-vstack>
+              </cf-vstack>
 
               <hr style={{ border: "none", borderTop: "1px solid #e5e5e7" }} />
 
-              <ct-vstack gap="1">
+              <cf-vstack gap="1">
                 <h3 style={{ margin: 0, fontSize: "14px" }}>
                   Add or Create Space
                 </h3>
-                <ct-message-input
+                <cf-message-input
                   placeholder="Space name..."
                   appearance="rounded"
-                  onct-send={addSpaceHandler({ spaces })}
+                  oncf-send={addSpaceHandler({ spaces })}
                 />
                 <span style={{ fontSize: "11px", color: "#888" }}>
                   Type a name and press enter. Click the link to navigate.
                 </span>
-              </ct-vstack>
+              </cf-vstack>
 
               <hr
                 style={{
@@ -1061,12 +1061,12 @@ IMPORTANT:
                 }}
               />
 
-              <ct-vstack gap="1">
+              <cf-vstack gap="1">
                 <h3 style={{ margin: 0, fontSize: "14px" }}>Settings</h3>
                 <label style={{ fontSize: "13px", color: "#666" }}>
                   Default App Pattern URL
                 </label>
-                <ct-input
+                <cf-input
                   $value={defaultAppUrl}
                   placeholder="/api/patterns/system/default-app.tsx"
                   style={{
@@ -1078,11 +1078,11 @@ IMPORTANT:
                 <span style={{ fontSize: "11px", color: "#888" }}>
                   Pattern URL for new spaces. Leave empty for system default.
                 </span>
-              </ct-vstack>
-            </ct-vstack>
-          </ct-tab-panel>
-        </ct-tabs>
-      </ct-screen>
+              </cf-vstack>
+            </cf-vstack>
+          </cf-tab-panel>
+        </cf-tabs>
+      </cf-screen>
     ),
 
     // Exported data

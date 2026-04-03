@@ -1,16 +1,16 @@
-import * as __ctHelpers from "commontools";
-import { Default, computed, lift, pattern, wish } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Default, computed, lift, pattern, wish } from "commonfabric";
 const passthrough = lift({
     type: "array",
     items: {
         type: "string"
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "array",
     items: {
         type: "string"
     }
-} as const satisfies __ctHelpers.JSONSchema, (items: string[]) => items);
+} as const satisfies __cfHelpers.JSONSchema, (items: string[]) => items);
 // FIXTURE: map-regains-reactive-aliases
 // Verifies: compute-owned aliases that still resolve to reactive array roots
 // are rewritten back to mapWithPattern/filterWithPattern when used in pattern
@@ -24,7 +24,7 @@ const passthrough = lift({
 // Context: contrasts with the existing plain-array compute fixtures where the
 // callback receiver really is compute-owned plain JS data.
 export default pattern((state) => {
-    const inner = __ctHelpers.derive({
+    const inner = __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -41,15 +41,15 @@ export default pattern((state) => {
             }
         },
         required: ["state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             items: state.key("items")
         } }, ({ state }) => state.items);
-    const fromComputed = __ctHelpers.derive({
+    const fromComputed = __cfHelpers.derive({
         type: "object",
         properties: {
             inner: {
@@ -60,13 +60,13 @@ export default pattern((state) => {
             }
         },
         required: ["inner"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema, { inner: inner }, ({ inner }) => {
-        const foo = __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => {
+        const foo = __cfHelpers.derive({
             type: "object",
             properties: {
                 inner: {
@@ -77,13 +77,13 @@ export default pattern((state) => {
                 }
             },
             required: ["inner"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "array",
             items: {
                 type: "string"
             }
-        } as const satisfies __ctHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
-        return foo.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
+        return foo.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
             return item + "!";
         }, {
@@ -94,11 +94,11 @@ export default pattern((state) => {
                 }
             },
             required: ["element"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema), {});
+        } as const satisfies __cfHelpers.JSONSchema), {});
     });
-    const fromLift = __ctHelpers.derive({
+    const fromLift = __cfHelpers.derive({
         type: "object",
         properties: {
             inner: {
@@ -109,14 +109,14 @@ export default pattern((state) => {
             }
         },
         required: ["inner"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema, { inner: inner }, ({ inner }) => {
+    } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => {
         const foo = passthrough(inner);
-        return foo.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        return foo.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
             return item + "!";
         }, {
@@ -127,19 +127,19 @@ export default pattern((state) => {
                 }
             },
             required: ["element"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema), {});
+        } as const satisfies __cfHelpers.JSONSchema), {});
     });
-    const fromWish = __ctHelpers.derive({
+    const fromWish = __cfHelpers.derive({
         type: "object",
         properties: {}
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema, {}, () => {
+    } as const satisfies __cfHelpers.JSONSchema, {}, () => {
         const foo = wish<Default<string[], [
         ]>>({ query: "#items" }, {
             type: "array",
@@ -147,8 +147,8 @@ export default pattern((state) => {
                 type: "string"
             },
             "default": []
-        } as const satisfies __ctHelpers.JSONSchema).result!;
-        return foo.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        } as const satisfies __cfHelpers.JSONSchema).result!;
+        return foo.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
             return item + "!";
         }, {
@@ -159,11 +159,11 @@ export default pattern((state) => {
                 }
             },
             required: ["element"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema), {});
+        } as const satisfies __cfHelpers.JSONSchema), {});
     });
-    const fromFiltered = __ctHelpers.derive({
+    const fromFiltered = __cfHelpers.derive({
         type: "object",
         properties: {
             inner: {
@@ -174,13 +174,13 @@ export default pattern((state) => {
             }
         },
         required: ["inner"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema, { inner: inner }, ({ inner }) => {
-        const foo = __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => {
+        const foo = __cfHelpers.derive({
             type: "object",
             properties: {
                 inner: {
@@ -191,13 +191,13 @@ export default pattern((state) => {
                 }
             },
             required: ["inner"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "array",
             items: {
                 type: "string"
             }
-        } as const satisfies __ctHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
-        const filtered = foo.filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
+        const filtered = foo.filterWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
             return item.key("length") > 1;
         }, {
@@ -208,10 +208,10 @@ export default pattern((state) => {
                 }
             },
             required: ["element"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema), {});
-        return filtered.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        } as const satisfies __cfHelpers.JSONSchema), {});
+        return filtered.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
             return item + "!";
         }, {
@@ -222,11 +222,11 @@ export default pattern((state) => {
                 }
             },
             required: ["element"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema), {});
+        } as const satisfies __cfHelpers.JSONSchema), {});
     });
-    const fromFilteredReceiverMethod = __ctHelpers.derive({
+    const fromFilteredReceiverMethod = __cfHelpers.derive({
         type: "object",
         properties: {
             inner: {
@@ -237,13 +237,13 @@ export default pattern((state) => {
             }
         },
         required: ["inner"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema, { inner: inner }, ({ inner }) => {
-        const foo = __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => {
+        const foo = __cfHelpers.derive({
             type: "object",
             properties: {
                 inner: {
@@ -254,13 +254,13 @@ export default pattern((state) => {
                 }
             },
             required: ["inner"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "array",
             items: {
                 type: "string"
             }
-        } as const satisfies __ctHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
-        const filtered = foo.filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        } as const satisfies __cfHelpers.JSONSchema, { inner: inner }, ({ inner }) => inner);
+        const filtered = foo.filterWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
             return item.key("length") > 1;
         }, {
@@ -271,12 +271,12 @@ export default pattern((state) => {
                 }
             },
             required: ["element"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema), {});
-        return filtered.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        } as const satisfies __cfHelpers.JSONSchema), {});
+        return filtered.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
-            return __ctHelpers.derive({
+            return __cfHelpers.derive({
                 type: "object",
                 properties: {
                     item: {
@@ -284,9 +284,9 @@ export default pattern((state) => {
                     }
                 },
                 required: ["item"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase());
+            } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase());
         }, {
             type: "object",
             properties: {
@@ -295,9 +295,9 @@ export default pattern((state) => {
                 }
             },
             required: ["element"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema), {});
+        } as const satisfies __cfHelpers.JSONSchema), {});
     });
     return {
         fromComputed,
@@ -317,7 +317,7 @@ export default pattern((state) => {
         }
     },
     required: ["items"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         fromComputed: {
@@ -352,8 +352,8 @@ export default pattern((state) => {
         }
     },
     required: ["fromComputed", "fromLift", "fromWish", "fromFiltered", "fromFilteredReceiverMethod"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

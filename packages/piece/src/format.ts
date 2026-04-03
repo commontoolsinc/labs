@@ -1,7 +1,7 @@
-import { Module, NAME, Pattern } from "@commontools/runner";
-import { nameSchema } from "@commontools/runner/schemas";
+import { Module, NAME, Pattern } from "@commonfabric/runner";
+import { nameSchema } from "@commonfabric/runner/schemas";
 import { PieceManager } from "./manager.ts";
-import { Cell } from "@commontools/runner";
+import { Cell } from "@commonfabric/runner";
 
 /**
  * Converts a string of multiple words into camelCase format

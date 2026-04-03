@@ -16,7 +16,7 @@ import {
   TransformationDiagnostic,
   TransformationOptions,
 } from "./transformers.ts";
-import { CTHelpers } from "./ct-helpers.ts";
+import { CFHelpers } from "./cf-helpers.ts";
 
 const DEFAULT_OPTIONS: TransformationOptions = {
   mode: "transform",
@@ -43,7 +43,7 @@ export class TransformationContext {
   readonly factory: ts.NodeFactory;
   readonly sourceFile: ts.SourceFile;
   readonly options: TransformationOptions;
-  readonly ctHelpers: CTHelpers;
+  readonly cfHelpers: CFHelpers;
   readonly diagnostics: TransformationDiagnostic[] = [];
   readonly tsContext: ts.TransformationContext;
 
@@ -53,7 +53,7 @@ export class TransformationContext {
     this.tsContext = config.tsContext;
     this.factory = config.tsContext.factory;
     this.sourceFile = config.sourceFile;
-    this.ctHelpers = new CTHelpers({
+    this.cfHelpers = new CFHelpers({
       factory: this.factory,
       sourceFile: this.sourceFile,
     });

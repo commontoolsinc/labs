@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/data-model",
+  "name": "@commonfabric/data-model",
   "tasks": {
     "check": "deno check .",
     "just-test": {

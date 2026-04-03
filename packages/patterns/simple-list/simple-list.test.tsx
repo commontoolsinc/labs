@@ -10,9 +10,9 @@
  * - Set indent directly
  * - Empty string handling
  *
- * Run: deno task ct test packages/patterns/simple-list/simple-list.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/simple-list/simple-list.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commonfabric";
 import SimpleListModule from "./simple-list.tsx";
 
 export default pattern(() => {

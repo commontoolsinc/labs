@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/background-charm",
+  "name": "@commonfabric/background-charm",
   "tasks": {
     "start": "deno run -A --unstable-worker-options src/main.ts",
     "help": "deno run -A src/main.ts --help",

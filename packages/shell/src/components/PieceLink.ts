@@ -1,6 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
-import { type DID } from "@commontools/identity";
+import { type DID } from "@commonfabric/identity";
 import { navigate } from "../../shared/mod.ts";
 
 export class PieceLinkElement extends LitElement {

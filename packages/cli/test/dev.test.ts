@@ -1,10 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { bytesToLines, checkStderr, ct } from "./utils.ts";
+import { bytesToLines, cf, checkStderr } from "./utils.ts";
 
 describe("cli dev", () => {
   it("Executes a package", async () => {
-    const { code, stdout, stderr } = await ct(
+    const { code, stdout, stderr } = await cf(
       "dev fixtures/pow-5.tsx --pattern-json",
     );
     checkStderr(stderr);
@@ -12,8 +12,8 @@ describe("cli dev", () => {
     expect(code).toBe(0);
   });
 
-  it("Runs a pattern with commontools+3P modules", async () => {
-    const { code, stdout, stderr } = await ct(
+  it("Runs a pattern with commonfabric+3P modules", async () => {
+    const { code, stdout, stderr } = await cf(
       "dev fixtures/3p-modules.tsx --pattern-json",
     );
     checkStderr(stderr);
@@ -23,7 +23,7 @@ describe("cli dev", () => {
 
   it("Generates output file with correct filename", async () => {
     const temp = await Deno.makeTempFile();
-    const { code, stdout, stderr } = await ct(
+    const { code, stdout, stderr } = await cf(
       `dev fixtures/pattern.tsx --no-run --filename test-file.js --output ${temp}`,
     );
     checkStderr(stderr);
@@ -34,7 +34,7 @@ describe("cli dev", () => {
   });
 
   it("Uses default export when no --main-export specified", async () => {
-    const { code, stdout, stderr } = await ct(
+    const { code, stdout, stderr } = await cf(
       "dev fixtures/named-export.tsx --pattern-json",
     );
     checkStderr(stderr);
@@ -44,7 +44,7 @@ describe("cli dev", () => {
   });
 
   it("Uses specified named export with --main-export", async () => {
-    const { code, stdout, stderr } = await ct(
+    const { code, stdout, stderr } = await cf(
       "dev fixtures/named-export.tsx --main-export myNamedPattern --pattern-json",
     );
     checkStderr(stderr);
@@ -57,14 +57,14 @@ describe("cli dev", () => {
   });
 
   it("Produces no output on success by default", async () => {
-    const { code, stdout, stderr } = await ct("dev fixtures/pow-5.tsx");
+    const { code, stdout, stderr } = await cf("dev fixtures/pow-5.tsx");
     checkStderr(stderr);
     expect(stdout.length).toBe(0);
     expect(code).toBe(0);
   });
 
   it("Resolves imports with --root flag", async () => {
-    const { code, stdout, stderr } = await ct(
+    const { code, stdout, stderr } = await cf(
       "dev --root fixtures fixtures/pow-5.tsx --pattern-json",
     );
     checkStderr(stderr);

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, VNode, wish } from "commontools";
+import { NAME, pattern, UI, VNode, wish } from "commonfabric";
 
 export default pattern<Record<string, never>>((_) => {
   // bf: is this desirable to have to specify [UI] here if you want the UI

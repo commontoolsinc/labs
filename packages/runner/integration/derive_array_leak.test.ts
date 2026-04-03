@@ -9,11 +9,11 @@
  * Expected behavior: Memory should stabilize or grow modestly
  * Actual behavior: Memory grows by gigabytes (1GB+ per 100 increments)
  */
-import { Identity, Session } from "@commontools/identity";
-import { env } from "@commontools/integration";
+import { Identity, Session } from "@commonfabric/identity";
+import { env } from "@commonfabric/integration";
 import { StorageManager } from "../src/storage/cache.ts";
 import { Runtime } from "../src/index.ts";
-import { compilePattern, PieceManager } from "@commontools/piece";
+import { compilePattern, PieceManager } from "@commonfabric/piece";
 
 (Error as any).stackTraceLimit = 100;
 

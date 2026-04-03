@@ -1,6 +1,6 @@
 import { createContext } from "@lit/context";
-import type { RuntimeClient } from "@commontools/runtime-client";
-import { DID } from "@commontools/identity";
+import type { RuntimeClient } from "@commonfabric/runtime-client";
+import { DID } from "@commonfabric/identity";
 
 export const runtimeContext = createContext<RuntimeClient | undefined>(
   "runtime",

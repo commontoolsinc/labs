@@ -31,7 +31,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import GmailExtractor, {
   type Auth,
   type Email,
@@ -45,7 +45,7 @@ import {
   type GmailLabel,
   GmailSendClient,
 } from "../core/util/gmail-send-client.ts";
-import type { Stream } from "commontools";
+import type { Stream } from "commonfabric";
 
 /** Email draft shape matching gmail-sender's expected input */
 type EmailDraft = {
@@ -893,19 +893,19 @@ Write only the email body, no subject line or greeting line (the greeting will b
     dueCount,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-hstack align="center" gap="2">
-            <ct-heading level={3}>Expect Response</ct-heading>
+          <cf-hstack align="center" gap="2">
+            <cf-heading level={3}>Expect Response</cf-heading>
             <span style={{ color: "#6b7280", fontSize: "14px" }}>
               ({dueCount} due / {threadCount} total)
             </span>
-            <ct-checkbox $checked={sortOldestFirst}>Oldest first</ct-checkbox>
-          </ct-hstack>
+            <cf-checkbox $checked={sortOldestFirst}>Oldest first</cf-checkbox>
+          </cf-hstack>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {/* Auth UI - handles authentication via wish system */}
             {authUI}
 
@@ -1023,7 +1023,7 @@ Write only the email body, no subject line or greeting line (the greeting will b
                   Add the "expect-response" label to emails you're waiting on.
                 </div>
               </div>,
-              <ct-vstack gap="3">
+              <cf-vstack gap="3">
                 {threads.map((thread) => {
                   const uiThreadId = thread.threadId;
                   const isExpanded = computed(() =>
@@ -1655,11 +1655,11 @@ Write only the email body, no subject line or greeting line (the greeting will b
                     </div>
                   );
                 })}
-              </ct-vstack>,
+              </cf-vstack>,
             )}
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

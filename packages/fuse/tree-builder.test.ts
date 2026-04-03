@@ -550,7 +550,7 @@ Deno.test("FsTree - addCallable creates callable handler node", () => {
     "handler",
     "addItem",
     "result",
-    buildCallableScript("/tmp/ct-exec"),
+    buildCallableScript("/tmp/cf-exec"),
   );
 
   const node = tree.getNode(handlerIno);
@@ -575,7 +575,7 @@ Deno.test("FsTree - handler nodes coexist with regular files", () => {
     "handler",
     "addItem",
     "result",
-    buildCallableScript("/tmp/ct-exec"),
+    buildCallableScript("/tmp/cf-exec"),
   );
   tree.addCallable(
     dirIno,
@@ -583,7 +583,7 @@ Deno.test("FsTree - handler nodes coexist with regular files", () => {
     "handler",
     "reset",
     "result",
-    buildCallableScript("/tmp/ct-exec"),
+    buildCallableScript("/tmp/cf-exec"),
   );
 
   const children = tree.getChildren(dirIno);
@@ -600,7 +600,7 @@ Deno.test("FsTree - clear removes handler nodes", () => {
     "handler",
     "add",
     "result",
-    buildCallableScript("/tmp/ct-exec"),
+    buildCallableScript("/tmp/cf-exec"),
   );
 
   tree.clear(dirIno);
@@ -634,7 +634,7 @@ Deno.test("buildJsonTree - .tool callables appear beside ordinary fields", () =>
     0,
     (value) => isPatternToolValue(value),
   );
-  const script = buildCallableScript("/tmp/ct-exec");
+  const script = buildCallableScript("/tmp/cf-exec");
   const callableIno = tree.addCallable(
     resultIno,
     "search.tool",
@@ -694,7 +694,7 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
   assertEquals(parsed.search, { "/tool": "search" });
 });
 
-Deno.test("callable scripts begin with a ct exec shebang and shell fallback", () => {
+Deno.test("callable scripts begin with a cf exec shebang and shell fallback", () => {
   const tree = new FsTree();
   const resultIno = tree.addDir(tree.rootIno, "result", "object");
   const callableIno = tree.addCallable(
@@ -703,7 +703,7 @@ Deno.test("callable scripts begin with a ct exec shebang and shell fallback", ()
     "tool",
     "search",
     "result",
-    buildCallableScript("/tmp/ct-exec"),
+    buildCallableScript("/tmp/cf-exec"),
   );
 
   const node = tree.getNode(callableIno);
@@ -752,7 +752,7 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
   const pieceResultIno = tree.addDir(pieceIno, "result", "object");
   const entityIno = tree.addDir(entitiesIno, "entity-123");
   const entityResultIno = tree.addDir(entityIno, "result", "object");
-  const script = buildCallableScript("/tmp/ct-exec");
+  const script = buildCallableScript("/tmp/cf-exec");
 
   const piecesHandlerIno = tree.addCallable(
     pieceResultIno,
@@ -873,7 +873,7 @@ Deno.test("CellBridge.sendToHandlerTarget survives callable inode rebuilds", asy
 
 Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse result roots", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
 
   interface FakeCell {
     schema: Record<string, unknown> | undefined;
@@ -989,7 +989,7 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
 
 Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populated result fields", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
 
   interface FakeCell {
     schema: Record<string, unknown> | undefined;

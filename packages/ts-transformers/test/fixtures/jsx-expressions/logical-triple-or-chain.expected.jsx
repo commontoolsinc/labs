@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // Tests triple || chain: a || b || c
 // Should produce nested unless calls
 // FIXTURE: logical-triple-or-chain
@@ -8,26 +8,26 @@ import { cell, pattern, UI } from "commontools";
 export default pattern((_state) => {
     const primary = cell("", {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const secondary = cell("", {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const items = cell<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {/* Triple || chain - first truthy wins */}
-        <span>{__ctHelpers.unless({
+        <span>{__cfHelpers.unless({
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "string"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 primary: {
@@ -40,21 +40,21 @@ export default pattern((_state) => {
                 }
             },
             required: ["primary", "secondary"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             primary: primary,
             secondary: secondary
         }, ({ primary, secondary }) => primary.get().length || secondary.get().length), "no content")}</span>
 
         {/* Triple || with mixed types */}
-        <span>{__ctHelpers.unless({
+        <span>{__cfHelpers.unless({
             type: ["number", "undefined"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 items: {
@@ -66,12 +66,12 @@ export default pattern((_state) => {
                 }
             },
             required: ["items"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "undefined"]
-        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get()[0]?.length || items.get()[1]?.length), 0)}</span>
+        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get()[0]?.length || items.get()[1]?.length), 0)}</span>
       </div>),
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -100,8 +100,8 @@ export default pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

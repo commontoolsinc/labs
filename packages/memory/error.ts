@@ -13,7 +13,7 @@ import type {
   TransactionError,
 } from "./interface.ts";
 import { MemorySpace } from "./interface.ts";
-import { hashOf } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 
 export const unauthorized = (
   message: string,

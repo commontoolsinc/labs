@@ -2,8 +2,8 @@ import {
   StaticCache,
   StaticCacheFS,
   StaticCacheHTTP,
-} from "@commontools/static";
-import { RuntimeTelemetry } from "@commontools/runner";
+} from "@commonfabric/static";
+import { RuntimeTelemetry } from "@commonfabric/runner";
 import type { NonIdempotentReport } from "./telemetry.ts";
 import type {
   AnyCell,
@@ -17,19 +17,19 @@ import { ContextualFlowControl } from "./cfc.ts";
 import {
   resetDataModelConfig,
   setDataModelConfig,
-} from "@commontools/data-model/fabric-value";
+} from "@commonfabric/data-model/fabric-value";
 import {
   resetModernHashConfig,
   setModernHashConfig,
-} from "@commontools/data-model/value-hash";
+} from "@commonfabric/data-model/value-hash";
 import {
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
-} from "@commontools/data-model/json-encoding";
+} from "@commonfabric/data-model/json-encoding";
 import {
   resetSchemaHashConfig,
   setSchemaHashConfig,
-} from "@commontools/data-model/schema-hash";
+} from "@commonfabric/data-model/schema-hash";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
@@ -53,14 +53,14 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { toURI } from "./uri-utils.ts";
-import { isDeno } from "@commontools/utils/env";
+import { isDeno } from "@commonfabric/utils/env";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type { Frame } from "./builder/types.ts";
 import type { ConsoleMessage } from "./interface.ts";

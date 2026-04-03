@@ -1,5 +1,5 @@
 import { assert } from "@std/assert";
-import { decode } from "@commontools/utils/encoding";
+import { decode } from "@commonfabric/utils/encoding";
 import { runDenoWebTest } from "./utils.ts";
 
 Deno.test("config is applied", async function () {

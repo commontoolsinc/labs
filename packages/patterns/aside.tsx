@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI } from "commontools";
+import { NAME, pattern, UI } from "commonfabric";
 
 // note: you may need to zoom in our out in the browser to see the
 // content and/or tabs
@@ -7,22 +7,22 @@ export default pattern(() => {
   return {
     [NAME]: "Aside",
     [UI]: (
-      // ct-screen provides a full-height layout with header/main/footer areas
-      <ct-screen>
+      // cf-screen provides a full-height layout with header/main/footer areas
+      <cf-screen>
         {/* Header slot - fixed at top */}
         <div slot="header">
           <h2>Header Section</h2>
         </div>
 
-        {/* ct-autolayout creates responsive multi-panel layout with optional sidebars */}
+        {/* cf-autolayout creates responsive multi-panel layout with optional sidebars */}
         {/* tabNames: Labels for main content panels (shown as tabs on mobile) */}
         {/* Shows all panels side-by-side in a grid */}
-        <ct-autolayout tabNames={["Main", "Second"]}>
+        <cf-autolayout tabNames={["Main", "Second"]}>
           {/* Left sidebar - use slot="left" */}
           <aside slot="left">
             <h3>Left Sidebar</h3>
             <p>Left content</p>
-            <ct-button>Left Button</ct-button>
+            <cf-button>Left Button</cf-button>
           </aside>
 
           {/* Main content panels - no slot attribute needed */}
@@ -30,28 +30,28 @@ export default pattern(() => {
           <div>
             <h1>Main Content Area</h1>
             <p>This is the main content with sidebars</p>
-            <ct-button>Main Button</ct-button>
+            <cf-button>Main Button</cf-button>
           </div>
 
           <div>
             <h1>Second Content Area</h1>
             <p>This is the second content with sidebars</p>
-            <ct-button>Second Button</ct-button>
+            <cf-button>Second Button</cf-button>
           </div>
 
           {/* Right sidebar - use slot="right" */}
           <aside slot="right">
             <h3>Right Sidebar</h3>
             <p>Right content</p>
-            <ct-button>Right Button</ct-button>
+            <cf-button>Right Button</cf-button>
           </aside>
-        </ct-autolayout>
+        </cf-autolayout>
 
         {/* Footer slot - fixed at bottom */}
         <div slot="footer">
           <p>Footer Section</p>
         </div>
-      </ct-screen>
+      </cf-screen>
     ),
   };
 });

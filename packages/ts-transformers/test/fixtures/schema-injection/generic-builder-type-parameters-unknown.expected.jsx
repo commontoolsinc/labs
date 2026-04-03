@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { handler, lift } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { handler, lift } from "commonfabric";
 // FIXTURE: generic-builder-type-parameters-unknown
 // Verifies: generic definition-site builder wrappers degrade builder schemas to unknown
 //   lift<T, U>(fn) → lift({ type: "unknown" }, { type: "unknown" }, fn)
@@ -7,23 +7,23 @@ import { handler, lift } from "commontools";
 export function buildLift<T, U>() {
     return lift({
         type: "unknown"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "unknown"
-    } as const satisfies __ctHelpers.JSONSchema, (_value) => {
+    } as const satisfies __cfHelpers.JSONSchema, (_value) => {
         throw new Error("not executed");
     });
 }
 export function buildHandler<E, S>() {
     return handler({
         type: "unknown"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "unknown"
-    } as const satisfies __ctHelpers.JSONSchema, (event, state) => {
+    } as const satisfies __cfHelpers.JSONSchema, (event, state) => {
         void event;
         void state;
     });
 }
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -2,9 +2,9 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
-import { HttpProgramResolver } from "@commontools/js-compiler";
-import { resolveProgram, TARGET } from "@commontools/js-compiler/typescript";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { HttpProgramResolver } from "@commonfabric/js-compiler";
+import { resolveProgram, TARGET } from "@commonfabric/js-compiler/typescript";
 import { computeInputHash } from "./fetch-utils.ts";
 
 const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution

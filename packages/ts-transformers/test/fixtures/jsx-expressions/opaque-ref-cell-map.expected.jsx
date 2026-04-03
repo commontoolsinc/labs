@@ -1,10 +1,10 @@
-import * as __ctHelpers from "commontools";
-import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, pattern, UI, } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, pattern, UI, } from "commonfabric";
 // the simple charm (to which we'll store references within a cell)
 const SimplePattern = pattern(() => ({
     [NAME]: "Some Simple Pattern",
     [UI]: <div>Some Simple Pattern</div>,
-}), false as const satisfies __ctHelpers.JSONSchema, {
+}), false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -36,7 +36,7 @@ const SimplePattern = pattern(() => ({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // Create a cell to store an array of charms
 const createCellRef = lift({
     type: "object",
@@ -50,7 +50,7 @@ const createCellRef = lift({
         const newCellRef = Cell.for<any[]>("charmsArray").asSchema({
             type: "array",
             items: true
-        } as const satisfies __ctHelpers.JSONSchema);
+        } as const satisfies __cfHelpers.JSONSchema);
         newCellRef.set([]);
         storedCellRef.set(newCellRef);
         isInitialized.set(true);
@@ -94,7 +94,7 @@ const addCharmAndNavigate = lift({
 // Create a new SimplePattern and add it to the array
 const createSimplePattern = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         cellRef: {
@@ -104,11 +104,11 @@ const createSimplePattern = handler({
         }
     },
     required: ["cellRef"]
-} as const satisfies __ctHelpers.JSONSchema, (_, { cellRef }) => {
+} as const satisfies __cfHelpers.JSONSchema, (_, { cellRef }) => {
     // Create isInitialized cell for this charm addition
     const isInitialized = cell(false, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     // Create the charm
     const charm = SimplePattern({});
     // Store the charm in the array and navigate
@@ -117,13 +117,13 @@ const createSimplePattern = handler({
 // Handler to navigate to a specific charm from the list
 const goToCharm = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         charm: true
     },
     required: ["charm"]
-} as const satisfies __ctHelpers.JSONSchema, (_, { charm }) => {
+} as const satisfies __cfHelpers.JSONSchema, (_, { charm }) => {
     console.log("goToCharm clicked");
     return navigateTo(charm);
 });
@@ -140,7 +140,7 @@ export default pattern(() => {
     const { cellRef } = createCellRef({
         isInitialized: cell(false, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema),
+        } as const satisfies __cfHelpers.JSONSchema),
         storedCellRef: cell(),
     }) as {
         cellRef: any[];
@@ -151,17 +151,17 @@ export default pattern(() => {
         <h3>Stored Charms:</h3>
         {ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 cellRef: {
@@ -172,15 +172,15 @@ export default pattern(() => {
                 }
             },
             required: ["cellRef"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { cellRef: cellRef }, ({ cellRef }) => !cellRef?.length), <div>No charms created yet</div>, <ul>
-            {cellRef.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        } as const satisfies __cfHelpers.JSONSchema, { cellRef: cellRef }, ({ cellRef }) => !cellRef?.length), <div>No charms created yet</div>, <ul>
+            {cellRef.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const charm = __ct_pattern_input.key("element");
                 const index = __ct_pattern_input.key("index");
                 return (<li>
-                <ct-button onClick={goToCharm({ charm })}>
-                  Go to Charm {__ctHelpers.derive({
+                <cf-button onClick={goToCharm({ charm })}>
+                  Go to Charm {__cfHelpers.derive({
                     type: "object",
                     properties: {
                         index: {
@@ -188,11 +188,11 @@ export default pattern(() => {
                         }
                     },
                     required: ["index"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}
-                </ct-button>
-                <span>Charm {__ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}
+                </cf-button>
+                <span>Charm {__cfHelpers.derive({
                     type: "object",
                     properties: {
                         index: {
@@ -200,17 +200,17 @@ export default pattern(() => {
                         }
                     },
                     required: ["index"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}: {__ctHelpers.unless(true as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}: {__cfHelpers.unless(true as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         charm: true
                     },
                     required: ["charm"]
-                } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[NAME]), "Unnamed")}</span>
+                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[NAME]), "Unnamed")}</span>
               </li>);
             }, {
                 type: "object",
@@ -221,7 +221,7 @@ export default pattern(() => {
                     }
                 },
                 required: ["element"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -241,16 +241,16 @@ export default pattern(() => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            } as const satisfies __cfHelpers.JSONSchema), {})}
           </ul>)}
 
-        <ct-button onClick={createSimplePattern({ cellRef })}>
+        <cf-button onClick={createSimplePattern({ cellRef })}>
           Create New Charm
-        </ct-button>
+        </cf-button>
       </div>),
         cellRef,
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         cellRef: {
@@ -259,8 +259,8 @@ export default pattern(() => {
         }
     },
     required: ["cellRef"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -11,7 +11,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import EventDetail, { type EventPiece } from "./event-detail.tsx";
 
@@ -59,7 +59,7 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
   const newDate = Writable.of(todayDate);
   const newTime = Writable.of("");
 
-  const eventCount = computed(() => events.get().length);
+  const eventCount = computed(() => events.get()?.length ?? 0);
 
   const sortedEvents = computed((): EventPiece[] => {
     const all = events.get();
@@ -101,23 +101,23 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
   return {
     [NAME]: "Calendar",
     [UI]: (
-      <ct-screen>
-        <ct-vstack slot="header" gap="1">
-          <ct-hstack justify="between" align="center">
-            <ct-heading level={4}>Calendar ({eventCount})</ct-heading>
-            <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+      <cf-screen>
+        <cf-vstack slot="header" gap="1">
+          <cf-hstack justify="between" align="center">
+            <cf-heading level={4}>Calendar ({eventCount})</cf-heading>
+            <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
               {todayDate}
             </span>
-          </ct-hstack>
-        </ct-vstack>
+          </cf-hstack>
+        </cf-vstack>
 
-        <ct-vscroll flex showScrollbar fadeEdges>
-          <ct-vstack gap="3" style="padding: 1rem;">
+        <cf-vscroll flex showScrollbar fadeEdges>
+          <cf-vstack gap="3" style="padding: 1rem;">
             {computed(() => {
               const sorted = sortedEvents;
               if (sorted.length === 0) {
                 return (
-                  <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+                  <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
                     No events yet. Add one below!
                   </div>
                 );
@@ -133,81 +133,81 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
                   const dateIsToday = isToday(date);
                   const dateIsPast = isPast(date);
                   items.push(
-                    <ct-hstack gap="2" align="center">
+                    <cf-hstack gap="2" align="center">
                       <span
                         style={{
                           fontWeight: "600",
                           fontSize: "0.875rem",
                           color: dateIsToday
-                            ? "var(--ct-color-primary-500)"
+                            ? "var(--cf-color-primary-500)"
                             : dateIsPast
-                            ? "var(--ct-color-gray-400)"
-                            : "var(--ct-color-gray-700)",
+                            ? "var(--cf-color-gray-400)"
+                            : "var(--cf-color-gray-700)",
                         }}
                       >
                         {formatDate(date)}
                       </span>
                       {dateIsToday
                         ? (
-                          <span style="font-size: 0.75rem; background: var(--ct-color-primary-100); color: var(--ct-color-primary-700); padding: 0.125rem 0.5rem; border-radius: 999px;">
+                          <span style="font-size: 0.75rem; background: var(--cf-color-primary-100); color: var(--cf-color-primary-700); padding: 0.125rem 0.5rem; border-radius: 999px;">
                             Today
                           </span>
                         )
                         : null}
-                    </ct-hstack>,
+                    </cf-hstack>,
                   );
                 }
 
                 items.push(
-                  <ct-card>
-                    <ct-hstack gap="2" align="center">
+                  <cf-card>
+                    <cf-hstack gap="2" align="center">
                       {event.time && (
-                        <span style="font-size: 0.875rem; color: var(--ct-color-gray-500); min-width: 50px;">
+                        <span style="font-size: 0.875rem; color: var(--cf-color-gray-500); min-width: 50px;">
                           {event.time}
                         </span>
                       )}
-                      <ct-vstack gap="0" style="flex: 1;">
+                      <cf-vstack gap="0" style="flex: 1;">
                         <span style="font-weight: 500;">
                           {event.title || "(untitled)"}
                         </span>
                         {event.notes && (
-                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
+                          <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
                             {event.notes}
                           </span>
                         )}
-                      </ct-vstack>
-                      <ct-button
+                      </cf-vstack>
+                      <cf-button
                         variant="secondary"
                         onClick={() => navigateTo(event)}
                       >
                         Edit
-                      </ct-button>
-                      <ct-button
+                      </cf-button>
+                      <cf-button
                         variant="ghost"
                         onClick={() => removeEvent.send({ event })}
                       >
                         ×
-                      </ct-button>
-                    </ct-hstack>
-                  </ct-card>,
+                      </cf-button>
+                    </cf-hstack>
+                  </cf-card>,
                 );
 
                 return items;
               });
             })}
-          </ct-vstack>
-        </ct-vscroll>
+          </cf-vstack>
+        </cf-vscroll>
 
-        <ct-vstack slot="footer" gap="2" style="padding: 1rem;">
-          <ct-hstack gap="2">
-            <ct-input
+        <cf-vstack slot="footer" gap="2" style="padding: 1rem;">
+          <cf-hstack gap="2">
+            <cf-input
               $value={newTitle}
               placeholder="Event title..."
               style="flex: 1;"
             />
-            <ct-input $value={newDate} type="date" style="width: 140px;" />
-            <ct-input $value={newTime} type="time" style="width: 100px;" />
-            <ct-button
+            <cf-input $value={newDate} type="date" style="width: 140px;" />
+            <cf-input $value={newTime} type="time" style="width: 100px;" />
+            <cf-button
               variant="primary"
               onClick={() =>
                 addEvent.send({
@@ -217,10 +217,10 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
                 })}
             >
               Add
-            </ct-button>
-          </ct-hstack>
-        </ct-vstack>
-      </ct-screen>
+            </cf-button>
+          </cf-hstack>
+        </cf-vstack>
+      </cf-screen>
     ),
     events,
     sortedEvents,

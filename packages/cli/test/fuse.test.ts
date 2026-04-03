@@ -16,22 +16,23 @@ import {
   readMountState,
   writeMountState,
 } from "../lib/fuse.ts";
+import { withEnv } from "./utils.ts";
 
 describe("mountpointHash", () => {
   it("returns a 16-char hex string", async () => {
-    const hash = await mountpointHash("/tmp/ct-fuse");
+    const hash = await mountpointHash("/tmp/cf-fuse");
     expect(hash).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it("is deterministic", async () => {
-    const a = await mountpointHash("/tmp/ct-fuse");
-    const b = await mountpointHash("/tmp/ct-fuse");
+    const a = await mountpointHash("/tmp/cf-fuse");
+    const b = await mountpointHash("/tmp/cf-fuse");
     expect(a).toBe(b);
   });
 
   it("differs for different paths", async () => {
-    const a = await mountpointHash("/tmp/ct-fuse-a");
-    const b = await mountpointHash("/tmp/ct-fuse-b");
+    const a = await mountpointHash("/tmp/cf-fuse-a");
+    const b = await mountpointHash("/tmp/cf-fuse-b");
     expect(a).not.toBe(b);
   });
 });
@@ -40,7 +41,7 @@ describe("mount state operations", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await Deno.makeTempDir({ prefix: "ct-fuse-test-" });
+    tmpDir = await Deno.makeTempDir({ prefix: "cf-fuse-test-" });
   });
 
   afterEach(async () => {
@@ -172,40 +173,40 @@ describe("mount state operations", () => {
   it("findMountForPath prefers the longest matching mountpoint", async () => {
     await writeMountState(tmpDir, {
       pid: Deno.pid,
-      mountpoint: "/tmp/ct-fuse",
+      mountpoint: "/tmp/cf-fuse",
       apiUrl: "http://localhost:8000",
       identity: "/tmp/base.pem",
       startedAt: "2026-02-24T00:00:00.000Z",
     });
     await writeMountState(tmpDir, {
       pid: Deno.pid,
-      mountpoint: "/tmp/ct-fuse/nested",
+      mountpoint: "/tmp/cf-fuse/nested",
       apiUrl: "http://localhost:9000",
       identity: "/tmp/nested.pem",
       startedAt: "2026-02-24T01:00:00.000Z",
     });
 
     const match = await findMountForPath(
-      "/tmp/ct-fuse/nested/space/pieces/example/result/add.handler",
+      "/tmp/cf-fuse/nested/space/pieces/example/result/add.handler",
       tmpDir,
     );
 
     expect(match).not.toBeNull();
-    expect(match!.entry.mountpoint).toBe("/tmp/ct-fuse/nested");
+    expect(match!.entry.mountpoint).toBe("/tmp/cf-fuse/nested");
     expect(match!.entry.apiUrl).toBe("http://localhost:9000");
   });
 
   it("findMountForPath ignores stale entries and removes them", async () => {
     const stalePath = await writeMountState(tmpDir, {
       pid: 1073741824,
-      mountpoint: "/tmp/ct-fuse",
+      mountpoint: "/tmp/cf-fuse",
       apiUrl: "http://localhost:8000",
       identity: "/tmp/stale.pem",
       startedAt: "2026-02-24T00:00:00.000Z",
     });
 
     const match = await findMountForPath(
-      "/tmp/ct-fuse/space/pieces/example/result/add.handler",
+      "/tmp/cf-fuse/space/pieces/example/result/add.handler",
       tmpDir,
     );
 
@@ -330,16 +331,40 @@ describe("mount state operations", () => {
     const repoRoot = join(tmpDir, "repo");
     const importMetaUrl = toFileUrl(join(repoRoot, "packages/cli/lib/fuse.ts"))
       .href;
-    const shimPath = await ensureExecShim(stateDir, importMetaUrl);
-    const shim = await Deno.readTextFile(shimPath);
+    let shimPath = "";
+    let shim = "";
 
-    expect(shimPath).toBe(join(repoRoot, ".ct", "fuse", "ct-exec"));
-    expect(shimPath).not.toBe(join(stateDir, "ct-exec"));
+    await withEnv("CF_CLI_NAME", "ct", async () => {
+      shimPath = await ensureExecShim(stateDir, importMetaUrl);
+      shim = await Deno.readTextFile(shimPath);
+    });
+
+    expect(shimPath).toBe(join(repoRoot, ".cf", "fuse", "cf-exec"));
+    expect(shimPath).not.toBe(join(stateDir, "cf-exec"));
     expect(shim).toContain("#!/usr/bin/env bash");
-    expect(shim).toContain("export CT_EXEC_SHEBANG=1");
+    expect(shim).toContain("export CF_EXEC_SHEBANG=1");
+    expect(shim).toContain("export CF_CLI_NAME=ct");
     expect(shim).toContain('" run --allow-net');
     expect(shim).toContain(join(repoRoot, "packages/cli/mod.ts"));
     expect(shim).toContain('"$@"');
+  });
+
+  it("normalizes invalid CF_CLI_NAME values before writing the exec shim", async () => {
+    const stateDir = join(tmpDir, "state");
+    const repoRoot = join(tmpDir, "repo");
+    const importMetaUrl = toFileUrl(join(repoRoot, "packages/cli/lib/fuse.ts"))
+      .href;
+    let shim = "";
+
+    await withEnv("CF_CLI_NAME", '$(touch "/tmp/pwned")', async () => {
+      const shimPath = await ensureExecShim(stateDir, importMetaUrl);
+      shim = await Deno.readTextFile(shimPath);
+    });
+
+    expect(shim).toContain("export CF_CLI_NAME=cf");
+    expect(shim).not.toContain("touch");
+    expect(shim).not.toContain("$(");
+    expect(shim).not.toContain("`");
   });
 
   it("ensureExecShim falls back to stateDir when repo root is not writable", async () => {
@@ -355,11 +380,11 @@ describe("mount state operations", () => {
       const shimPath = await ensureExecShim(stateDir, importMetaUrl);
       const shim = await Deno.readTextFile(shimPath);
 
-      expect(shimPath.startsWith(join(stateDir, "ct-exec-"))).toBe(true);
-      expect(shimPath).not.toBe(join(stateDir, "ct-exec"));
-      expect(basename(shimPath)).toMatch(/^ct-exec-[0-9a-f]{16}$/);
+      expect(shimPath.startsWith(join(stateDir, "cf-exec-"))).toBe(true);
+      expect(shimPath).not.toBe(join(stateDir, "cf-exec"));
+      expect(basename(shimPath)).toMatch(/^cf-exec-[0-9a-f]{16}$/);
       expect(shim).toContain("#!/usr/bin/env bash");
-      expect(shim).toContain("export CT_EXEC_SHEBANG=1");
+      expect(shim).toContain("export CF_EXEC_SHEBANG=1");
       expect(shim).toContain(join(repoRoot, "packages/cli/mod.ts"));
     } finally {
       await Deno.chmod(repoRoot, 0o755);
@@ -502,14 +527,14 @@ describe("buildDenoArgs", () => {
       mountpoint: "/mnt",
       apiUrl: "http://localhost:8000",
       identity: "./key.pem",
-      execCli: "/tmp/ct-exec",
+      execCli: "/tmp/cf-exec",
     });
     expect(args).toContain("--api-url");
     expect(args).toContain("http://localhost:8000");
     expect(args).toContain("--identity");
     expect(args).toContain("./key.pem");
     expect(args).toContain("--exec-cli");
-    expect(args).toContain("/tmp/ct-exec");
+    expect(args).toContain("/tmp/cf-exec");
   });
 
   it("omits api-url, identity, and exec-cli when empty", () => {

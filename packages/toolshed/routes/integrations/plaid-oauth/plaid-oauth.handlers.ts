@@ -15,12 +15,12 @@ import {
   removePlaidItem,
   upsertPlaidItem,
 } from "./plaid-oauth.utils.ts";
-import { setBGCharm } from "@commontools/background-charm";
+import { setBGCharm } from "@commonfabric/background-charm";
 import {
   type NormalizedLink,
   parseLink,
   type SigilLink,
-} from "@commontools/runner";
+} from "@commonfabric/runner";
 import { runtime } from "@/index.ts";
 import env from "@/env.ts";
 import {
@@ -30,7 +30,7 @@ import {
   Transaction,
   TransactionsSyncRequest,
 } from "plaid";
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 
 /**
  * Plaid Create Link Token Handler
@@ -53,14 +53,14 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
     const plaidClient = createPlaidClient();
 
     // Create a user ID for Plaid (can be any stable string)
-    const userId = "commontools-user";
+    const userId = "commonfabric-user";
 
     // Create link token request
     const linkTokenRequest: LinkTokenCreateRequest = {
       user: {
         client_user_id: userId,
       },
-      client_name: "Common Tools",
+      client_name: "Common Fabric",
       products: payload.products || ["transactions"],
       country_codes: (payload.countryCodes || ["US"]) as CountryCode[],
       language: "en",

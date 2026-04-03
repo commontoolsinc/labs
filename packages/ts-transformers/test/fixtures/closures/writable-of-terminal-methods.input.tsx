@@ -5,7 +5,7 @@
  * of opaque classification — Writable.of() is an opaque origin and
  * .get()/.set() are terminal methods.
  */
-import { action, pattern, UI, Writable } from "commontools";
+import { action, pattern, UI, Writable } from "commonfabric";
 
 interface State {
   title: string;
@@ -32,7 +32,7 @@ export default pattern<State>(({ title }) => {
     [UI]: (
       <div>
         <span>{title} {label}: {counter}</span>
-        <ct-button onClick={reset}>Reset</ct-button>
+        <cf-button onClick={reset}>Reset</cf-button>
       </div>
     ),
     counter,

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 interface Reaction {
     emoji: string;
     userNames: string[];
@@ -20,10 +20,10 @@ export default pattern((__ct_pattern_input) => {
     const messages = __ct_pattern_input.key("messages");
     return {
         [UI]: (<div>
-        {messages.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {messages.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const msg = __ct_pattern_input.key("element");
                 return (<section>
-            {(msg.key("reactions") ?? []).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            {(msg.key("reactions") ?? []).mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                         const reaction = __ct_pattern_input.key("element");
                         const msg = __ct_pattern_input.key("params", "msg");
                         return (<button type="button" data-msg-id={msg.key("id")}>
@@ -69,7 +69,7 @@ export default pattern((__ct_pattern_input) => {
                                 required: ["emoji", "userNames"]
                             }
                         }
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         anyOf: [{
                                 $ref: "https://commonfabric.org/schemas/vnode.json"
                             }, {
@@ -89,12 +89,12 @@ export default pattern((__ct_pattern_input) => {
                                 required: ["$UI"]
                             }
                         }
-                    } as const satisfies __ctHelpers.JSONSchema), {
+                    } as const satisfies __cfHelpers.JSONSchema), {
                         msg: {
                             id: msg.key("id")
                         }
                     })}
-            {(msg.key("reactions") || []).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            {(msg.key("reactions") || []).mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                         const reaction = __ct_pattern_input.key("element");
                         const msg = __ct_pattern_input.key("params", "msg");
                         return (<span>
@@ -140,7 +140,7 @@ export default pattern((__ct_pattern_input) => {
                                 required: ["emoji", "userNames"]
                             }
                         }
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         anyOf: [{
                                 $ref: "https://commonfabric.org/schemas/vnode.json"
                             }, {
@@ -160,7 +160,7 @@ export default pattern((__ct_pattern_input) => {
                                 required: ["$UI"]
                             }
                         }
-                    } as const satisfies __ctHelpers.JSONSchema), {
+                    } as const satisfies __cfHelpers.JSONSchema), {
                         msg: {
                             id: msg.key("id")
                         }
@@ -206,7 +206,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["emoji", "userNames"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -226,7 +226,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            } as const satisfies __cfHelpers.JSONSchema), {})}
       </div>),
     };
 }, {
@@ -272,7 +272,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["emoji", "userNames"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -301,8 +301,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

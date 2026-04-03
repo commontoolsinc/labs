@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { generateObject, type WishState, wish, } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { generateObject, type WishState, wish, } from "commonfabric";
 const existingLabelSchema = {
     type: "object",
     properties: {
@@ -15,7 +15,7 @@ const existingLabelSchema = {
 export default function TestWishAndGenerateObjectContextual() {
     const explicitWish = wish<string>({ query: "#greeting" }, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const contextualWish: WishState<{
         title: string;
     }> = wish({
@@ -54,7 +54,7 @@ export default function TestWishAndGenerateObjectContextual() {
             }
         },
         required: ["result", "candidates"]
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const explicitObject = generateObject<{
         title: string;
     }>({
@@ -68,7 +68,7 @@ export default function TestWishAndGenerateObjectContextual() {
                 }
             },
             required: ["title"]
-        } as const satisfies __ctHelpers.JSONSchema
+        } as const satisfies __cfHelpers.JSONSchema
     });
     const preSchemaObject = generateObject<{
         label: string;
@@ -85,6 +85,6 @@ export default function TestWishAndGenerateObjectContextual() {
     };
 }
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

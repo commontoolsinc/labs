@@ -11,9 +11,9 @@ describe("jsx dom fragments support", () => {
 
     assert.matchObject(
       fragment,
-      <ct-fragment>
+      <cf-fragment>
         <p>Hello world</p>
-      </ct-fragment>,
+      </cf-fragment>,
     );
   });
 
@@ -29,12 +29,12 @@ describe("jsx dom fragments support", () => {
 
     assert.matchObject(
       fragment,
-      <ct-fragment>
+      <cf-fragment>
         <p>Grocery List</p>
         <ul>
           <li>Buy Milk</li>
         </ul>
-      </ct-fragment>,
+      </cf-fragment>,
     );
   });
 
@@ -51,12 +51,12 @@ describe("jsx dom fragments support", () => {
     assert.matchObject(
       <div>{grocery}</div>,
       <div>
-        <ct-fragment>
+        <cf-fragment>
           <p>Grocery List</p>
           <ul>
             <li>Buy Milk</li>
           </ul>
-        </ct-fragment>
+        </cf-fragment>
       </div>,
     );
   });

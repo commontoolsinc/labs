@@ -1,12 +1,12 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 // FIXTURE: pattern-object-prefix-not
 // Verifies: top-level non-JSX unary boolean negation in an object property is
 //   lowered after closure normalization into a direct derive wrapper.
 //   return { hidden: !state.done }
 //   → return { hidden: derive(!state.done) }
 export default pattern((state) => ({
-    hidden: __ctHelpers.derive({
+    hidden: __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -20,9 +20,9 @@ export default pattern((state) => ({
             }
         },
         required: ["state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             done: state.key("done")
         } }, ({ state }) => !state.done),
 }), {
@@ -33,7 +33,7 @@ export default pattern((state) => ({
         }
     },
     required: ["done"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         hidden: {
@@ -41,8 +41,8 @@ export default pattern((state) => ({
         }
     },
     required: ["hidden"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

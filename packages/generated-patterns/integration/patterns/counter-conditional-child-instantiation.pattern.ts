@@ -7,7 +7,7 @@ import {
   handler,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 const sanitizeCount = (value: number | undefined): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;

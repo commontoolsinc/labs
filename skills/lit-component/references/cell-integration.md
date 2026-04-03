@@ -1,12 +1,12 @@
 # Cell Integration Patterns
 
-This document covers patterns for integrating Common Tools runtime Cell
+This document covers patterns for integrating Common Fabric runtime Cell
 abstractions with Lit components.
 
 ## What are Cells?
 
-Cells are reactive data containers from the Common Tools runtime
-(`@commontools/runner`). They provide:
+Cells are reactive data containers from the Common Fabric runtime
+(`@commonfabric/runner`). They provide:
 
 - Reactive updates via subscriptions
 - Transactional mutations
@@ -35,7 +35,7 @@ Declare Cell properties using `@property({ attribute: false })`:
 
 ```typescript
 import { property } from "lit/decorators.js";
-import type { Cell } from "@commontools/runner";
+import type { Cell } from "@commonfabric/runner";
 
 export class MyComponent extends BaseElement {
   @property({ attribute: false })
@@ -207,14 +207,14 @@ override render() {
 
 ### Rendering UI from Cells
 
-The `ct-render` component handles rendering cells with `[UI]` properties:
+The `cf-render` component handles rendering cells with `[UI]` properties:
 
 ```typescript
-import { UI } from "@commontools/api";
+import { UI } from "@commonfabric/api";
 
 // In render()
 return html`
-  <ct-render .cell="${myCharmCell}"></ct-render>
+  <cf-render .cell="${myCharmCell}"></cf-render>
 `;
 ```
 
@@ -227,7 +227,7 @@ The component automatically:
 ### Cell Type Checking
 
 ```typescript
-import { isCell } from "@commontools/runner";
+import { isCell } from "@commonfabric/runner";
 
 if (isCell(this.value)) {
   // It's a Cell, use .get(), .key(), etc.
@@ -292,6 +292,7 @@ repeat(items, (item, index) => `${index}-${item.title}`, ...)
 See these components for complete examples demonstrating Cell integration
 patterns:
 
-- `ct-outliner` - Path-based operations, diff-based rendering with Cells
-- `ct-code-editor` - Bidirectional sync between Cell values and CodeMirror state
-- `ct-render` - Pattern loading and UI extraction with Cell subscriptions
+- Legacy outliner implementations - Path-based operations, diff-based rendering
+  with Cells
+- `cf-code-editor` - Bidirectional sync between Cell values and CodeMirror state
+- `cf-render` - Pattern loading and UI extraction with Cell subscriptions

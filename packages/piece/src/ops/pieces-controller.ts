@@ -4,16 +4,16 @@ import {
   Runtime,
   RuntimeProgram,
   type Schema,
-} from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache";
-import { type NameSchema, nameSchema } from "@commontools/runner/schemas";
+} from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
+import { type NameSchema, nameSchema } from "@commonfabric/runner/schemas";
 import { PieceManager } from "../index.ts";
 import { PieceController } from "./piece-controller.ts";
 import { compileProgram } from "./utils.ts";
-import { createSession, Identity } from "@commontools/identity";
-import { HttpProgramResolver } from "@commontools/js-compiler";
+import { createSession, Identity } from "@commonfabric/identity";
+import { HttpProgramResolver } from "@commonfabric/js-compiler";
 import { ACLManager } from "./acl-manager.ts";
-import { homeSchema } from "@commontools/home-schemas";
+import { homeSchema } from "@commonfabric/home-schemas";
 
 export interface CreatePieceOptions {
   input?: object;

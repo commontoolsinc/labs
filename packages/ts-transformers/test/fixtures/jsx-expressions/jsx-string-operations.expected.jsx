@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 interface State {
     firstName: string;
     lastName: string;
@@ -16,7 +16,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>String Concatenation</h3>
-        <h1>{__ctHelpers.derive({
+        <h1>{__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -36,14 +36,14 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 title: state.key("title"),
                 firstName: state.key("firstName"),
                 lastName: state.key("lastName")
             } }, ({ state }) => state.title + ": " + state.firstName + " " + state.lastName)}</h1>
-        <p>{__ctHelpers.derive({
+        <p>{__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -60,13 +60,13 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 firstName: state.key("firstName"),
                 lastName: state.key("lastName")
             } }, ({ state }) => state.firstName + state.lastName)}</p>
-        <p>{__ctHelpers.derive({
+        <p>{__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -80,14 +80,14 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 firstName: state.key("firstName")
             } }, ({ state }) => "Hello, " + state.firstName + "!")}</p>
 
         <h3>Template Literals</h3>
-        <p>{__ctHelpers.derive({
+        <p>{__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -101,12 +101,12 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 firstName: state.key("firstName")
             } }, ({ state }) => `Welcome, ${state.firstName}!`)}</p>
-        <p>{__ctHelpers.derive({
+        <p>{__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -123,13 +123,13 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 firstName: state.key("firstName"),
                 lastName: state.key("lastName")
             } }, ({ state }) => `Full name: ${state.firstName} ${state.lastName}`)}</p>
-        <p>{__ctHelpers.derive({
+        <p>{__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -149,16 +149,16 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 title: state.key("title"),
                 firstName: state.key("firstName"),
                 lastName: state.key("lastName")
             } }, ({ state }) => `${state.title}: ${state.firstName} ${state.lastName}`)}</p>
 
         <h3>String Methods</h3>
-        <p>Uppercase: {__ctHelpers.derive({
+        <p>Uppercase: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -172,12 +172,12 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 firstName: state.key("firstName")
             } }, ({ state }) => state.firstName.toUpperCase())}</p>
-        <p>Lowercase: {__ctHelpers.derive({
+        <p>Lowercase: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -191,13 +191,13 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 title: state.key("title")
             } }, ({ state }) => state.title.toLowerCase())}</p>
         <p>Length: {state.key("message", "length")}</p>
-        <p>Substring: {__ctHelpers.derive({
+        <p>Substring: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -211,14 +211,14 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 message: state.key("message")
             } }, ({ state }) => state.message.substring(0, 5))}</p>
 
         <h3>Mixed String and Number</h3>
-        <p>{__ctHelpers.derive({
+        <p>{__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -235,13 +235,13 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 firstName: state.key("firstName"),
                 count: state.key("count")
             } }, ({ state }) => state.firstName + " has " + state.count + " items")}</p>
-        <p>{__ctHelpers.derive({
+        <p>{__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -258,13 +258,13 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 firstName: state.key("firstName"),
                 count: state.key("count")
             } }, ({ state }) => `${state.firstName} has ${state.count} items`)}</p>
-        <p>Count as string: {__ctHelpers.derive({
+        <p>Count as string: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -278,9 +278,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 count: state.key("count")
             } }, ({ state }) => "Count: " + state.count)}</p>
       </div>),
@@ -305,7 +305,7 @@ export default pattern((state) => {
         }
     },
     required: ["firstName", "lastName", "title", "message", "count"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -334,8 +334,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

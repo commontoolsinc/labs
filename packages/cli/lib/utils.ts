@@ -1,5 +1,6 @@
 import { isAbsolute, join } from "@std/path";
-import type { ExperimentalOptions } from "@commontools/runner";
+import type { ExperimentalOptions } from "@commonfabric/runner";
+import { cliName } from "./cli-name.ts";
 
 export function absPath(relpath: string, cwd = Deno.cwd()): string {
   // TODO(js): homedir check is not cross platform
@@ -36,7 +37,7 @@ export function experimentalOptionsFromEnv(): ExperimentalOptions {
     .map(([k, v]) => `${k}=${v}`);
   if (overrideFlags.length > 0) {
     console.error(
-      `[ct] Experimental flag overrides: ${overrideFlags.join(", ")}`,
+      `[${cliName()}] Experimental flag overrides: ${overrideFlags.join(", ")}`,
     );
   }
 

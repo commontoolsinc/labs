@@ -3,7 +3,7 @@ import {
   Identity,
   serializeKeyPairRaw,
   TransferrableInsecureCryptoKeyPair,
-} from "@commontools/identity";
+} from "@commonfabric/identity";
 import { Command } from "./commands.ts";
 import { AppView } from "./view.ts";
 

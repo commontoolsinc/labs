@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, derive, lift } from "commontools";
+import { cell, derive, lift } from "commonfabric";
 
 const stage = cell<string>("initial");
 const attemptCount = cell<number>(0);

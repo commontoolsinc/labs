@@ -30,7 +30,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { GmailSendClient } from "../util/gmail-send-client.ts";
 import { type Auth, createGoogleAuth } from "../util/google-auth-manager.tsx";
 
@@ -337,7 +337,7 @@ export default pattern<Input, Output>(({ draft }) => {
             >
               To <span style={{ color: "#ef4444" }}>*</span>
             </label>
-            <ct-input
+            <cf-input
               type="email"
               $value={draft.to}
               placeholder="recipient@example.com"
@@ -357,7 +357,7 @@ export default pattern<Input, Output>(({ draft }) => {
               >
                 CC
               </label>
-              <ct-input
+              <cf-input
                 type="text"
                 $value={draft.cc}
                 placeholder="cc@example.com"
@@ -375,7 +375,7 @@ export default pattern<Input, Output>(({ draft }) => {
               >
                 BCC
               </label>
-              <ct-input
+              <cf-input
                 type="text"
                 $value={draft.bcc}
                 placeholder="bcc@example.com"
@@ -395,7 +395,7 @@ export default pattern<Input, Output>(({ draft }) => {
             >
               Subject <span style={{ color: "#ef4444" }}>*</span>
             </label>
-            <ct-input
+            <cf-input
               type="text"
               $value={draft.subject}
               placeholder="Email subject"
@@ -414,7 +414,7 @@ export default pattern<Input, Output>(({ draft }) => {
             >
               Message <span style={{ color: "#ef4444" }}>*</span>
             </label>
-            <ct-input
+            <cf-input
               $value={draft.body}
               placeholder="Write your message..."
               style="width: 100%; padding: 8px 12px; min-height: 150px;"

@@ -19,9 +19,9 @@ ambient context that flows down the tree like CSS inheritance.
 5. **CSS-native:** Emit CSS variables for performance and browser devtools
    visibility
 
-## The `ct-theme` Provider Component
+## The `cf-theme` Provider Component
 
-The `<ct-theme>` component wraps children and provides theme context using
+The `<cf-theme>` component wraps children and provides theme context using
 `@lit/context`.
 
 **Key characteristics:**
@@ -33,17 +33,17 @@ The `<ct-theme>` component wraps children and provides theme context using
 
 ```typescript
 // Wrap any subtree to theme it
-<ct-theme .theme=${{ accentColor: cell("#3b82f6") }}>
-  <ct-button>Themed Button</ct-button>
-</ct-theme>
+<cf-theme .theme=${{ accentColor: cell("#3b82f6") }}>
+  <cf-button>Themed Button</cf-button>
+</cf-theme>
 
 // Nest providers for refinement
-<ct-theme .theme=${{ colorScheme: "dark" }}>
+<cf-theme .theme=${{ colorScheme: "dark" }}>
   <div>Dark section</div>
-  <ct-theme .theme=${{ accentColor: cell("#ff0000") }}>
+  <cf-theme .theme=${{ accentColor: cell("#ff0000") }}>
     <div>Dark section with red accent</div>
-  </ct-theme>
-</ct-theme>
+  </cf-theme>
+</cf-theme>
 ```
 
 ## Theme Context
@@ -51,10 +51,10 @@ The `<ct-theme>` component wraps children and provides theme context using
 The theme system uses `@lit/context` to provide theme values throughout the
 component tree.
 
-### CTTheme Interface
+### CFTheme Interface
 
 ```typescript
-interface CTTheme {
+interface CFTheme {
   fontFamily: string;
   monoFontFamily: string;
   borderRadius: string;
@@ -98,15 +98,15 @@ import { consume } from "@lit/context";
 import { property } from "lit/decorators.js";
 import {
   applyThemeToElement,
-  type CTTheme,
+  type CFTheme,
+  cfThemeContext,
   defaultTheme,
-  themeContext,
 } from "../theme-context.ts";
 
 export class MyComponent extends BaseElement {
-  @consume({ context: themeContext, subscribe: true })
+  @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
-  declare theme?: CTTheme;
+  declare theme?: CFTheme;
 
   override firstUpdated(changed: Map<string | number | symbol, unknown>) {
     super.firstUpdated(changed);
@@ -134,42 +134,42 @@ available:
 
 **Typography:**
 
-- `--ct-theme-font-family`
-- `--ct-theme-mono-font-family`
-- `--ct-theme-font-size`
-- `--ct-theme-border-radius`
-- `--ct-theme-animation-duration`
+- `--cf-theme-font-family`
+- `--cf-theme-mono-font-family`
+- `--cf-theme-font-size`
+- `--cf-theme-border-radius`
+- `--cf-theme-animation-duration`
 
 **Colors:**
 
-- `--ct-theme-color-primary`
-- `--ct-theme-color-primary-foreground`
-- `--ct-theme-color-secondary`
-- `--ct-theme-color-secondary-foreground`
-- `--ct-theme-color-background`
-- `--ct-theme-color-surface`
-- `--ct-theme-color-surface-hover`
-- `--ct-theme-color-text`
-- `--ct-theme-color-text-muted`
-- `--ct-theme-color-border`
-- `--ct-theme-color-border-muted`
-- `--ct-theme-color-success`
-- `--ct-theme-color-success-foreground`
-- `--ct-theme-color-error`
-- `--ct-theme-color-error-foreground`
-- `--ct-theme-color-warning`
-- `--ct-theme-color-warning-foreground`
-- `--ct-theme-color-accent`
-- `--ct-theme-color-accent-foreground`
+- `--cf-theme-color-primary`
+- `--cf-theme-color-primary-foreground`
+- `--cf-theme-color-secondary`
+- `--cf-theme-color-secondary-foreground`
+- `--cf-theme-color-background`
+- `--cf-theme-color-surface`
+- `--cf-theme-color-surface-hover`
+- `--cf-theme-color-text`
+- `--cf-theme-color-text-muted`
+- `--cf-theme-color-border`
+- `--cf-theme-color-border-muted`
+- `--cf-theme-color-success`
+- `--cf-theme-color-success-foreground`
+- `--cf-theme-color-error`
+- `--cf-theme-color-error-foreground`
+- `--cf-theme-color-warning`
+- `--cf-theme-color-warning-foreground`
+- `--cf-theme-color-accent`
+- `--cf-theme-color-accent-foreground`
 
 **Spacing:**
 
-- `--ct-theme-spacing-tight`
-- `--ct-theme-spacing-normal`
-- `--ct-theme-spacing-loose`
-- `--ct-theme-spacing-padding-message`
-- `--ct-theme-spacing-padding-code`
-- `--ct-theme-spacing-padding-block`
+- `--cf-theme-spacing-tight`
+- `--cf-theme-spacing-normal`
+- `--cf-theme-spacing-loose`
+- `--cf-theme-spacing-padding-message`
+- `--cf-theme-spacing-padding-code`
+- `--cf-theme-spacing-padding-block`
 
 ### CSS Variable Fallback Pattern
 
@@ -179,13 +179,13 @@ without theme context:
 ```css
 .button {
   background-color: var(
-    --ct-theme-color-primary,
-    var(--ct-colors-primary-500, #3b82f6)
+    --cf-theme-color-primary,
+    var(--cf-colors-primary-500, #3b82f6)
   );
-  font-family: var(--ct-theme-font-family, inherit);
+  font-family: var(--cf-theme-font-family, inherit);
   border-radius: var(
-    --ct-theme-border-radius,
-    var(--ct-border-radius-md, 0.375rem)
+    --cf-theme-border-radius,
+    var(--cf-border-radius-md, 0.375rem)
   );
 }
 ```
@@ -199,38 +199,38 @@ defined in `packages/ui/src/v2/styles/variables.ts`.
 
 **Colors:**
 
-- `--ct-colors-primary-{50-900}`: Primary color scale
-- `--ct-colors-gray-{50-900}`: Gray color scale
-- `--ct-colors-success`, `--ct-colors-warning`, `--ct-colors-error`,
-  `--ct-colors-info`
+- `--cf-colors-primary-{50-900}`: Primary color scale
+- `--cf-colors-gray-{50-900}`: Gray color scale
+- `--cf-colors-success`, `--cf-colors-warning`, `--cf-colors-error`,
+  `--cf-colors-info`
 
 **Typography:**
 
-- `--ct-font-family-sans`, `--ct-font-family-mono`
-- `--ct-font-size-{xs,sm,base,lg,xl,2xl,3xl,4xl}`
-- `--ct-font-weight-{light,normal,medium,semibold,bold}`
-- `--ct-line-height-{none,tight,snug,normal,relaxed,loose}`
+- `--cf-font-family-sans`, `--cf-font-family-mono`
+- `--cf-font-size-{xs,sm,base,lg,xl,2xl,3xl,4xl}`
+- `--cf-font-weight-{light,normal,medium,semibold,bold}`
+- `--cf-line-height-{none,tight,snug,normal,relaxed,loose}`
 
 **Spacing:**
 
-- `--ct-spacing-{0,1,2,3,4,5,6,8,10,12,16,20,24}`
+- `--cf-spacing-{0,1,2,3,4,5,6,8,10,12,16,20,24}`
 
 **Border Radius:**
 
-- `--ct-border-radius-{none,sm,base,md,lg,xl,2xl,3xl,full}`
+- `--cf-border-radius-{none,sm,base,md,lg,xl,2xl,3xl,full}`
 
 **Shadows:**
 
-- `--ct-shadow-{sm,base,md,lg,xl,none}`
+- `--cf-shadow-{sm,base,md,lg,xl,none}`
 
 **Transitions:**
 
-- `--ct-transition-duration-{fast,base,slow}`
-- `--ct-transition-timing-{ease,ease-in,ease-out,ease-in-out}`
+- `--cf-transition-duration-{fast,base,slow}`
+- `--cf-transition-timing-{ease,ease-in,ease-out,ease-in-out}`
 
 **Z-index:**
 
-- `--ct-z-index-{auto,0,10,20,30,40,50,100,1000}`
+- `--cf-z-index-{auto,0,10,20,30,40,50,100,1000}`
 
 ## Theme Helper Functions
 
@@ -242,23 +242,23 @@ Resolves "auto" to actual color scheme based on system preference.
 
 Resolves a ColorToken to a concrete color value.
 
-### getThemeColor(value: keyof CTTheme["colors"] | ColorToken | string, theme: CTTheme): string
+### getThemeColor(value: keyof CFTheme["colors"] | ColorToken | string, theme: CFTheme): string
 
 Gets a color that can be semantic (theme key), a token, or a specific value.
 
-### getThemeSpacing(value: string, theme: CTTheme): string
+### getThemeSpacing(value: string, theme: CFTheme): string
 
 Gets spacing that can be semantic or specific.
 
-### getAnimationDuration(speed: CTTheme["animationSpeed"]): string
+### getAnimationDuration(speed: CFTheme["animationSpeed"]): string
 
 Returns CSS duration value based on animation speed setting.
 
-### createThemeVariant(baseTheme: CTTheme, overrides: Partial<CTTheme>): CTTheme
+### createThemeVariant(baseTheme: CFTheme, overrides: Partial<CFTheme>): CFTheme
 
 Creates a theme override with granular control.
 
-### mergeWithDefaultTheme(partialTheme: any, baseTheme?: CTTheme): CTTheme
+### mergeWithDefaultTheme(partialTheme: any, baseTheme?: CFTheme): CFTheme
 
 Merges partial theme with default, supporting pattern-style properties like
 `accentColor`, `fontFace`, and `borderRadius`.

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 
 interface Item {
   maybe?: { value: number };

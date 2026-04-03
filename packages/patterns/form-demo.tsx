@@ -21,7 +21,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Types =====
 
@@ -48,7 +48,7 @@ const createEmptyPerson = (): Person => ({
 });
 
 // Form submit handler - must be at module scope
-// ct-form flushes buffered values to bound cells before emitting ct-submit,
+// cf-form flushes buffered values to bound cells before emitting cf-submit,
 // so handlers read from the cells directly (type-safe, no reconstruction needed)
 const handleFormSubmit = handler<
   unknown,
@@ -98,48 +98,48 @@ export const EditPerson = pattern<
 
     return {
       [UI]: (
-        <ct-form
-          onct-submit={handleFormSubmit({
+        <cf-form
+          oncf-submit={handleFormSubmit({
             formData,
             people,
             editing,
             modalOpen,
           })}
         >
-          <ct-vstack gap="3">
+          <cf-vstack gap="3">
             {/* Name field */}
-            <ct-vstack gap="1">
+            <cf-vstack gap="1">
               <label style="font-weight: 500; font-size: 0.875rem;">
                 Name *
               </label>
-              <ct-input
+              <cf-input
                 name="name"
                 $value={formData.key("name")}
                 placeholder="Enter full name"
                 required
               />
-            </ct-vstack>
+            </cf-vstack>
 
             {/* Email field */}
-            <ct-vstack gap="1">
+            <cf-vstack gap="1">
               <label style="font-weight: 500; font-size: 0.875rem;">
                 Email *
               </label>
-              <ct-input
+              <cf-input
                 name="email"
                 $value={formData.key("email")}
                 type="email"
                 placeholder="email@example.com"
                 required
               />
-            </ct-vstack>
+            </cf-vstack>
 
             {/* Role field */}
-            <ct-vstack gap="1">
+            <cf-vstack gap="1">
               <label style="font-weight: 500; font-size: 0.875rem;">
                 Role
               </label>
-              <ct-select
+              <cf-select
                 name="role"
                 $value={formData.key("role")}
                 items={[
@@ -147,28 +147,28 @@ export const EditPerson = pattern<
                   { label: "Admin", value: "admin" },
                 ]}
               />
-            </ct-vstack>
+            </cf-vstack>
 
             {/* Form actions */}
-            <ct-hstack gap="2" style="margin-top: 1rem;">
-              <ct-button
+            <cf-hstack gap="2" style="margin-top: 1rem;">
+              <cf-button
                 type="reset"
                 variant="secondary"
                 onClick={handleCancel}
                 style="flex: 1;"
               >
                 Cancel
-              </ct-button>
-              <ct-button
+              </cf-button>
+              <cf-button
                 type="submit"
                 variant="primary"
                 style="flex: 1;"
               >
                 {isEditMode ? "Save" : "Create"}
-              </ct-button>
-            </ct-hstack>
-          </ct-vstack>
-        </ct-form>
+              </cf-button>
+            </cf-hstack>
+          </cf-vstack>
+        </cf-form>
       ),
     };
   },
@@ -233,23 +233,23 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
   return {
     [NAME]: computed(() => `People Directory (${people.get().length})`),
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         {/* Header */}
-        <ct-vstack slot="header" gap="2">
-          <ct-hstack justify="between" align="center">
-            <ct-heading level={4}>People Directory</ct-heading>
-            <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+        <cf-vstack slot="header" gap="2">
+          <cf-hstack justify="between" align="center">
+            <cf-heading level={4}>People Directory</cf-heading>
+            <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
               {peopleCount}{" "}
               {computed(() => people.get().length === 1 ? "person" : "people")}
             </span>
-          </ct-hstack>
-        </ct-vstack>
+          </cf-hstack>
+        </cf-vstack>
 
         {/* Main content - list of people */}
-        <ct-vscroll flex showScrollbar fadeEdges>
-          <ct-vstack gap="2" style="padding: 1rem;">
+        <cf-vscroll flex showScrollbar fadeEdges>
+          <cf-vstack gap="2" style="padding: 1rem;">
             {people.map((person) => (
-              <ct-card
+              <cf-card
                 style="cursor: pointer;"
                 onClick={startEdit({
                   person,
@@ -259,12 +259,12 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                   modalOpen,
                 })}
               >
-                <ct-hstack gap="2" align="center">
-                  <ct-vstack gap="1" style="flex: 1;">
+                <cf-hstack gap="2" align="center">
+                  <cf-vstack gap="1" style="flex: 1;">
                     <span style="font-weight: 600; font-size: 1rem;">
                       {person.name || "(unnamed)"}
                     </span>
-                    <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                    <span style="font-size: 0.875rem; color: var(--cf-color-gray-600);">
                       {person.email}
                     </span>
                     <span
@@ -274,57 +274,57 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                         borderRadius: "4px",
                         background: ifElse(
                           computed(() => person.role === "admin"),
-                          "var(--ct-color-blue-100)",
-                          "var(--ct-color-gray-100)",
+                          "var(--cf-color-blue-100)",
+                          "var(--cf-color-gray-100)",
                         ),
                         color: ifElse(
                           computed(() => person.role === "admin"),
-                          "var(--ct-color-blue-700)",
-                          "var(--ct-color-gray-700)",
+                          "var(--cf-color-blue-700)",
+                          "var(--cf-color-gray-700)",
                         ),
                         width: "fit-content",
                       }}
                     >
                       {person.role}
                     </span>
-                  </ct-vstack>
-                  <ct-button
+                  </cf-vstack>
+                  <cf-button
                     variant="ghost"
                     onClick={deletePerson({ person, people })}
                   >
                     ×
-                  </ct-button>
-                </ct-hstack>
-              </ct-card>
+                  </cf-button>
+                </cf-hstack>
+              </cf-card>
             ))}
 
             {ifElse(
               computed(() => people.get().length === 0),
-              <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+              <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
                 No people yet. Click "Add Person" to create one!
               </div>,
               null,
             )}
-          </ct-vstack>
-        </ct-vscroll>
+          </cf-vstack>
+        </cf-vscroll>
 
         {/* Footer - Add button */}
-        <ct-hstack slot="footer" gap="2" style="padding: 1rem;">
-          <ct-button
+        <cf-hstack slot="footer" gap="2" style="padding: 1rem;">
+          <cf-button
             variant="primary"
             onClick={startCreate}
             style="flex: 1;"
           >
             + Add Person
-          </ct-button>
-        </ct-hstack>
+          </cf-button>
+        </cf-hstack>
 
         {/* Modal form */}
-        <ct-modal
+        <cf-modal
           $open={modalOpen}
           dismissable
           size="md"
-          onct-modal-close={action(() => {
+          oncf-modal-close={action(() => {
             modalOpen.set(false);
             editing.set({ editing: null });
           })}
@@ -340,8 +340,8 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
             />,
             null,
           )}
-        </ct-modal>
-      </ct-screen>
+        </cf-modal>
+      </cf-screen>
     ),
     people,
   };

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { JSONSchemaObj } from "@commontools/api";
-import { Identity } from "@commontools/identity";
+import { JSONSchemaObj } from "@commonfabric/api";
+import { Identity } from "@commonfabric/identity";
 import {
   type Frame,
   isModule,
@@ -392,7 +392,7 @@ describe("module", () => {
     it("maps computed callsites through the CTS pipeline", async () => {
       const source = [
         "/// <cts-enable />",
-        'import { computed, pattern } from "commontools";',
+        'import { computed, pattern } from "commonfabric";',
         "export default pattern<{ items: boolean[] }>(({ items }) => {",
         "  const visible = computed(() => items.filter(Boolean));",
         "  return { visible };",
@@ -416,7 +416,7 @@ describe("module", () => {
     it("maps action callsites through the CTS pipeline", async () => {
       const source = [
         "/// <cts-enable />",
-        'import { action, pattern } from "commontools";',
+        'import { action, pattern } from "commonfabric";',
         "export default pattern<{ value: number }>(({ value }) => {",
         "  const inc = action(() => value + 1);",
         "  return { inc };",
@@ -437,7 +437,7 @@ describe("module", () => {
     it("maps synthetic JSX compute callsites through the CTS pipeline", async () => {
       const source = [
         "/// <cts-enable />",
-        'import { pattern, UI } from "commontools";',
+        'import { pattern, UI } from "commonfabric";',
         "export default pattern<{ value: number }>(({ value }) => ({",
         "  [UI]: <div>{value + 1}</div>,",
         "}));",
@@ -457,7 +457,7 @@ describe("module", () => {
           label: "lift",
           source: [
             "/// <cts-enable />",
-            'import { lift, pattern } from "commontools";',
+            'import { lift, pattern } from "commonfabric";',
             "const doubler = lift((value: number) => value * 2);",
             "export default pattern<{ value: number }>(({ value }) => ({ doubled: doubler(value) }));",
           ].join("\n"),
@@ -469,7 +469,7 @@ describe("module", () => {
           label: "handler",
           source: [
             "/// <cts-enable />",
-            'import { handler, pattern } from "commontools";',
+            'import { handler, pattern } from "commonfabric";',
             "const click = handler((event: { delta: number }, state: { value: number }) => state.value + event.delta);",
             "export default pattern<{ value: number }>(({ value }) => ({ click: click({ value }) }));",
           ].join("\n"),
@@ -482,7 +482,7 @@ describe("module", () => {
           label: "pattern",
           source: [
             "/// <cts-enable />",
-            'import { computed, pattern } from "commontools";',
+            'import { computed, pattern } from "commonfabric";',
             "export const Child = pattern<{ value: number }>(({ value }) => ({ doubled: computed(() => value * 2) }));",
             "export default pattern<{ value: number }>(({ value }) => ({ child: Child({ value }) }));",
           ].join("\n"),

@@ -12,7 +12,7 @@ import {
   pattern,
   str,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 // User object for better data modeling
 interface User {
@@ -140,11 +140,11 @@ export const UserSession = pattern<
             }}
           >
             <label style={{ whiteSpace: "nowrap" }}>Your username:</label>
-            <ct-input
+            <cf-input
               name="Update"
               value={user.name}
               placeholder="Enter new name"
-              onct-change={setUsername({
+              oncf-change={setUsername({
                 user,
               })}
               style="flex: 1; max-width: 400px"
@@ -152,14 +152,14 @@ export const UserSession = pattern<
           </div>
           <hr />
           <div>
-            <ct-canvas
+            <cf-canvas
               width="800"
               height="600"
-              onct-canvas-click={handleCanvasClick({ messages, user })}
+              oncf-canvas-click={handleCanvasClick({ messages, user })}
             >
               {messages.map((m, index) => {
                 return (
-                  <ct-draggable
+                  <cf-draggable
                     key={index}
                     x={derive(m, (msg) => msg.x)}
                     y={derive(m, (msg) => msg.y)}
@@ -174,29 +174,29 @@ export const UserSession = pattern<
                     })}
                   >
                     <div style="position: relative;">
-                      <ct-button
+                      <cf-button
                         onClick={deleteMessage({ messages, index })}
                         style="position: absolute; right: -5px; top: -5px; background: #ff4444; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; min-width: 20px; min-height: 20px; padding: 0; font-size: 16px; line-height: 1;"
                         title="Delete note"
                       >
                         ×
-                      </ct-button>
+                      </cf-button>
                       <div style="font-size: 12px; color: #666;">
                         <b>{m.author.name}</b>
                         <span>· {derive(m.timestamp, formatTime)}</span>
                       </div>
-                      <ct-input
+                      <cf-input
                         name="Save"
                         placeholder="Type message..."
                         value={m.message}
-                        onct-change={updateMessage({ messages, index })}
+                        oncf-change={updateMessage({ messages, index })}
                         style="margin-top: 5px;"
                       />
                     </div>
-                  </ct-draggable>
+                  </cf-draggable>
                 );
               })}
-            </ct-canvas>
+            </cf-canvas>
           </div>
         </div>
       ),
@@ -229,9 +229,9 @@ export default pattern<MainPatternInput>(
           <h2>Canvas</h2>
           <p>Messages: {messages.length}</p>
           <p>Click below to create your personal session:</p>
-          <ct-button onClick={createUserSession({ messages })}>
+          <cf-button onClick={createUserSession({ messages })}>
             Generate User Session
-          </ct-button>
+          </cf-button>
         </div>
       ),
       messages,

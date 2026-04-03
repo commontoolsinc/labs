@@ -1,19 +1,19 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { computed, pattern } from "commonfabric";
 // FIXTURE: pattern-vs-computed-logical-and
 // Verifies: top-level pattern JSX logical roots lower structurally, but computed-owned logical roots stay authored
-//   <div>{foo && name}</div> in a pattern body → __ctHelpers.when(...)
+//   <div>{foo && name}</div> in a pattern body → __cfHelpers.when(...)
 //   <div>{computed(() => foo && bar)}</div> keeps the authored && inside the computed callback
 export const PatternLogicalAnd = pattern((__ct_pattern_input) => {
     const foo = __ct_pattern_input.key("foo");
     const name = __ct_pattern_input.key("user", "name");
-    return (<div>{__ctHelpers.when({
+    return (<div>{__cfHelpers.when({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: ["boolean", "string"]
-    } as const satisfies __ctHelpers.JSONSchema, foo, name)}</div>);
+    } as const satisfies __cfHelpers.JSONSchema, foo, name)}</div>);
 }, {
     type: "object",
     properties: {
@@ -31,7 +31,7 @@ export const PatternLogicalAnd = pattern((__ct_pattern_input) => {
         }
     },
     required: ["foo", "user"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     anyOf: [{
             $ref: "https://commonfabric.org/schemas/vnode.json"
         }, {
@@ -51,11 +51,11 @@ export const PatternLogicalAnd = pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 export const ComputedLogicalAnd = pattern((__ct_pattern_input) => {
     const foo = __ct_pattern_input.key("foo");
     const bar = __ct_pattern_input.key("bar");
-    return (<div>{__ctHelpers.derive({
+    return (<div>{__cfHelpers.derive({
         type: "object",
         properties: {
             foo: {
@@ -66,14 +66,14 @@ export const ComputedLogicalAnd = pattern((__ct_pattern_input) => {
             }
         },
         required: ["foo", "bar"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
                 type: "string"
             }, {
                 type: "boolean",
                 "enum": [false]
             }]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         foo: foo,
         bar: bar
     }, ({ foo, bar }) => foo && bar)}</div>);
@@ -88,7 +88,7 @@ export const ComputedLogicalAnd = pattern((__ct_pattern_input) => {
         }
     },
     required: ["foo", "bar"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     anyOf: [{
             $ref: "https://commonfabric.org/schemas/vnode.json"
         }, {
@@ -108,8 +108,8 @@ export const ComputedLogicalAnd = pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

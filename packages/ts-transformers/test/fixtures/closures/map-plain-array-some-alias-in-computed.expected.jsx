@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, computed, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Writable, computed, pattern, UI } from "commonfabric";
 interface Habit {
     name: string;
 }
@@ -23,11 +23,11 @@ export default pattern((__ct_pattern_input) => {
     const logs = __ct_pattern_input.key("logs");
     const todayDate = __ct_pattern_input.key("todayDate");
     return {
-        [UI]: <div>{habits.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        [UI]: <div>{habits.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const habit = __ct_pattern_input.key("element");
                 const logs = __ct_pattern_input.key("params", "logs");
                 const todayDate = __ct_pattern_input.key("params", "todayDate");
-                const doneToday = __ctHelpers.derive({
+                const doneToday = __cfHelpers.derive({
                     type: "object",
                     properties: {
                         logs: {
@@ -68,9 +68,9 @@ export default pattern((__ct_pattern_input) => {
                             required: ["habitName", "date", "completed"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     logs: logs,
                     habit: {
                         name: habit.key("name")
@@ -82,15 +82,15 @@ export default pattern((__ct_pattern_input) => {
                         log.date === todayDate &&
                         log.completed);
                 });
-                return <span>{__ctHelpers.ifElse({
+                return <span>{__cfHelpers.ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     "enum": ["yes", "no"]
-                } as const satisfies __ctHelpers.JSONSchema, doneToday, "yes", "no")}</span>;
+                } as const satisfies __cfHelpers.JSONSchema, doneToday, "yes", "no")}</span>;
             }, {
                 type: "object",
                 properties: {
@@ -141,7 +141,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["name"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -161,7 +161,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {
+            } as const satisfies __cfHelpers.JSONSchema), {
                 logs: logs,
                 todayDate: todayDate
             })}</div>,
@@ -213,7 +213,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["name"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -242,8 +242,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

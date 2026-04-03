@@ -1,4 +1,4 @@
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import { type JSONSchema, type NodeRef, type Opaque } from "./types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { traverseValue } from "./traverse-utils.ts";

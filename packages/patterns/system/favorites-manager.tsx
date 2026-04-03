@@ -10,7 +10,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Favorite = {
   cell: Writable<{ [NAME]?: string }>;
@@ -44,13 +44,13 @@ export default pattern<Record<string, never>>((_) => {
   return {
     [NAME]: "Favorites Manager",
     [UI]: (
-      <ct-vstack gap="3">
+      <cf-vstack gap="3">
         {favorites!.map((item) => (
-          <ct-cell-context $cell={item.cell}>
-            <ct-vstack gap="2">
-              <ct-hstack gap="2" align="center">
-                <ct-cell-link $cell={item.cell} spaceName={item.spaceName} />
-                <ct-button
+          <cf-cell-context $cell={item.cell}>
+            <cf-vstack gap="2">
+              <cf-hstack gap="2" align="center">
+                <cf-cell-link $cell={item.cell} spaceName={item.spaceName} />
+                <cf-button
                   variant="destructive"
                   size="sm"
                   onClick={onRemoveFavorite({
@@ -59,17 +59,17 @@ export default pattern<Record<string, never>>((_) => {
                   })}
                 >
                   Remove
-                </ct-button>
-              </ct-hstack>
-              <ct-tags
+                </cf-button>
+              </cf-hstack>
+              <cf-tags
                 tags={item.userTags}
-                onct-change={onUpdateUserTags({ userTags: item.userTags })}
+                oncf-change={onUpdateUserTags({ userTags: item.userTags })}
               />
-            </ct-vstack>
-          </ct-cell-context>
+            </cf-vstack>
+          </cf-cell-context>
         ))}
-        {favorites!.length === 0 && <ct-text>No favorites yet.</ct-text>}
-      </ct-vstack>
+        {favorites!.length === 0 && <p>No favorites yet.</p>}
+      </cf-vstack>
     ),
   };
 });

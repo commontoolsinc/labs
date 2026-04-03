@@ -8,9 +8,9 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
-// Type definition for transcription data (from ct-voice-input component)
+// Type definition for transcription data (from cf-voice-input component)
 interface TranscriptionChunk {
   timestamp: [number, number];
   text: string;
@@ -65,30 +65,30 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
   return {
     [NAME]: title,
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-input
+          <cf-input
             $value={title}
             placeholder="Voice Note"
             readonly
           />
         </div>
 
-        <ct-vstack gap="3">
-          <ct-card>
+        <cf-vstack gap="3">
+          <cf-card>
             <div style={{ padding: "1rem" }}>
               <h3 style={{ marginTop: 0 }}>Record a Voice Note</h3>
-              <p style={{ color: "var(--ct-color-gray-600)" }}>
+              <p style={{ color: "var(--cf-color-gray-600)" }}>
                 Hold the microphone button to record. Release to transcribe.
               </p>
 
-              <ct-voice-input
+              <cf-voice-input
                 $transcription={transcription}
                 recordingMode="hold"
                 autoTranscribe
                 maxDuration={120}
                 showWaveform
-                onct-transcription-complete={handleTranscriptionComplete}
+                oncf-transcription-complete={handleTranscriptionComplete}
               />
 
               {hasTranscription && (
@@ -96,21 +96,21 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                   style={{
                     marginTop: "1rem",
                     padding: "1rem",
-                    backgroundColor: "var(--ct-color-blue-50)",
+                    backgroundColor: "var(--cf-color-blue-50)",
                     borderRadius: "0.375rem",
                   }}
                 >
                   <strong>Latest Transcription:</strong>
                   <p>{transcriptionText}</p>
-                  <small style={{ color: "var(--ct-color-gray-600)" }}>
+                  <small style={{ color: "var(--cf-color-gray-600)" }}>
                     Duration: {transcriptionDuration.toFixed(1)}s
                   </small>
                 </div>
               )}
             </div>
-          </ct-card>
+          </cf-card>
 
-          <ct-card>
+          <cf-card>
             <div style={{ padding: "1rem" }}>
               <h3 style={{ marginTop: 0 }}>
                 Saved Notes ({notesCount})
@@ -118,17 +118,17 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
 
               {!hasNotes
                 ? (
-                  <p style={{ color: "var(--ct-color-gray-500)" }}>
+                  <p style={{ color: "var(--cf-color-gray-500)" }}>
                     No voice notes yet. Record one above!
                   </p>
                 )
                 : (
-                  <ct-vstack gap="2">
+                  <cf-vstack gap="2">
                     {notes.map((note) => (
                       <div
                         style={{
                           padding: "0.75rem",
-                          border: "1px solid var(--ct-color-gray-200)",
+                          border: "1px solid var(--cf-color-gray-200)",
                           borderRadius: "0.375rem",
                           position: "relative",
                         }}
@@ -147,7 +147,7 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                             </p>
                             <small
                               style={{
-                                color: "var(--ct-color-gray-600)",
+                                color: "var(--cf-color-gray-600)",
                                 display: "block",
                               }}
                             >
@@ -155,7 +155,7 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                               {note.duration.toFixed(1)}s
                             </small>
                           </div>
-                          <ct-button
+                          <cf-button
                             variant="ghost"
                             size="sm"
                             onClick={handleDeleteNote({
@@ -164,16 +164,16 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                             })}
                           >
                             ×
-                          </ct-button>
+                          </cf-button>
                         </div>
                       </div>
                     ))}
-                  </ct-vstack>
+                  </cf-vstack>
                 )}
             </div>
-          </ct-card>
-        </ct-vstack>
-      </ct-screen>
+          </cf-card>
+        </cf-vstack>
+      </cf-screen>
     ),
     transcription,
     notes,

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell } from "commontools";
+import { cell } from "commonfabric";
 
 // FIXTURE: collections-array-of-objects
 // Verifies: schema injection generates array-of-objects schema with typed items and required keys

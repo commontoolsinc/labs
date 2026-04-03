@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, Writable } from "commontools";
+import { NAME, pattern, UI, Writable } from "commonfabric";
 
 /**
  * Reproduction case for late subscriber initial value bug.
@@ -9,7 +9,7 @@ import { NAME, pattern, UI, Writable } from "commontools";
  * because the subscription was already established, so no new backend request
  * was made, and the late subscriber's CellHandle never received the cached value.
  *
- * Example: ct-input binds to a cell with stringSchema, creating a new CellHandle.
+ * Example: cf-input binds to a cell with stringSchema, creating a new CellHandle.
  * Text interpolation {value} also subscribes to the same cell with the same schema.
  * On initial page load, the text interpolation would show blank because it subscribed
  * after the initial value was already sent to the first subscriber.
@@ -38,44 +38,44 @@ export default pattern<Record<string, never>, Output>(() => {
   return {
     [NAME]: "Late Subscriber Repro",
     [UI]: (
-      <ct-screen>
-        <ct-vstack gap="4" style="padding: 1rem;">
-          <ct-card>
-            <ct-vstack gap="2">
-              <ct-heading level={4}>ct-input</ct-heading>
-              <ct-input $value={textValue} placeholder="Type here..." />
+      <cf-screen>
+        <cf-vstack gap="4" style="padding: 1rem;">
+          <cf-card>
+            <cf-vstack gap="2">
+              <cf-heading level={4}>cf-input</cf-heading>
+              <cf-input $value={textValue} placeholder="Type here..." />
               <p>
                 <strong>Interpolated:</strong> {textValue}
               </p>
-            </ct-vstack>
-          </ct-card>
+            </cf-vstack>
+          </cf-card>
 
-          <ct-card>
-            <ct-vstack gap="2">
-              <ct-heading level={4}>ct-textarea</ct-heading>
-              <ct-textarea $value={textareaValue} placeholder="Type here..." />
+          <cf-card>
+            <cf-vstack gap="2">
+              <cf-heading level={4}>cf-textarea</cf-heading>
+              <cf-textarea $value={textareaValue} placeholder="Type here..." />
               <p>
                 <strong>Interpolated:</strong> {textareaValue}
               </p>
-            </ct-vstack>
-          </ct-card>
+            </cf-vstack>
+          </cf-card>
 
-          <ct-card>
-            <ct-vstack gap="2">
-              <ct-heading level={4}>ct-checkbox</ct-heading>
-              <ct-checkbox $checked={checkboxValue}>Toggle me</ct-checkbox>
+          <cf-card>
+            <cf-vstack gap="2">
+              <cf-heading level={4}>cf-checkbox</cf-heading>
+              <cf-checkbox $checked={checkboxValue}>Toggle me</cf-checkbox>
               <p>
                 <strong>Interpolated:</strong> [{checkboxValue}]
               </p>
-            </ct-vstack>
-          </ct-card>
+            </cf-vstack>
+          </cf-card>
 
           <p style="color: gray; font-size: 0.875rem;">
             If any "Interpolated" value is blank on initial page load, the late
             subscriber bug is present. All values should appear immediately.
           </p>
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     textValue,
     textareaValue,

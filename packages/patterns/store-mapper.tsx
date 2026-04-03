@@ -18,12 +18,11 @@ import {
   generateObject,
   handler,
   ifElse,
-  ImageData,
   NAME,
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Types for store layout
 type WallPosition =
@@ -92,7 +91,13 @@ type ItemsByPos = Record<
   { depts: Department[]; entrances: Entrance[] }
 >;
 
-// ImageData imported from commontools — matches ct-image-input's FileData schema
+// Types for AI photo-based aisle import
+interface ImageData {
+  id: string;
+  name: string;
+  url?: string; // data URL (preferred)
+  data?: string; // data URL (for compatibility)
+}
 
 interface ExtractedAisle {
   name: string;
@@ -484,7 +489,7 @@ export default pattern<Input, Output>(
     return {
       [NAME]: storeName,
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           {/* Header */}
           <div
             slot="header"
@@ -496,16 +501,16 @@ export default pattern<Input, Output>(
               boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
             }}
           >
-            <ct-hstack justify="between" align="center">
-              <ct-hstack gap="2" align="center">
+            <cf-hstack justify="between" align="center">
+              <cf-hstack gap="2" align="center">
                 <span style={{ fontSize: "1.5rem" }}>🗺️</span>
-                <ct-input
+                <cf-input
                   $value={storeName}
                   placeholder="Store name..."
                   customStyle="font-size: 1.25rem; font-weight: bold; background: transparent; border: none; color: white;"
                 />
-              </ct-hstack>
-            </ct-hstack>
+              </cf-hstack>
+            </cf-hstack>
             <div
               style={{
                 fontSize: "13px",
@@ -520,19 +525,19 @@ export default pattern<Input, Output>(
           </div>
 
           {/* Navigation tabs */}
-          <ct-tabs $value={currentSection}>
-            <ct-tab-list>
-              <ct-tab value="map">Map</ct-tab>
-              <ct-tab value="aisles">Aisles</ct-tab>
-              <ct-tab value="departments">Depts</ct-tab>
-              <ct-tab value="corrections">Fixes</ct-tab>
-              <ct-tab value="outline">Outline</ct-tab>
-            </ct-tab-list>
+          <cf-tabs $value={currentSection}>
+            <cf-tab-list>
+              <cf-tab value="map">Map</cf-tab>
+              <cf-tab value="aisles">Aisles</cf-tab>
+              <cf-tab value="departments">Depts</cf-tab>
+              <cf-tab value="corrections">Fixes</cf-tab>
+              <cf-tab value="outline">Outline</cf-tab>
+            </cf-tab-list>
 
             {/* MAP SECTION */}
-            <ct-tab-panel value="map">
-              <ct-vscroll flex showScrollbar fadeEdges>
-                <ct-vstack gap="3" style="padding: 1rem; max-width: 800px;">
+            <cf-tab-panel value="map">
+              <cf-vscroll flex showScrollbar fadeEdges>
+                <cf-vstack gap="3" style="padding: 1rem; max-width: 800px;">
                   {/* CSS for store map */}
                   <style>
                     {`
@@ -630,8 +635,8 @@ export default pattern<Input, Output>(
                   </style>
 
                   {/* Visual Store Map */}
-                  <ct-card>
-                    <ct-vstack gap="2">
+                  <cf-card>
+                    <cf-vstack gap="2">
                       <span style={{ fontWeight: 600, fontSize: "16px" }}>
                         🏪 Store Layout
                       </span>
@@ -1046,7 +1051,7 @@ export default pattern<Input, Output>(
                         style={{
                           textAlign: "center",
                           fontSize: "12px",
-                          color: "var(--ct-color-gray-500)",
+                          color: "var(--cf-color-gray-500)",
                         }}
                       >
                         <span style={{ color: "#3b82f6" }}>■</span>{" "}
@@ -1055,12 +1060,12 @@ export default pattern<Input, Output>(
                         <span style={{ color: "#10b981" }}>■</span> Left{" "}
                         <span style={{ color: "#a855f7" }}>■</span> Right
                       </div>
-                    </ct-vstack>
-                  </ct-card>
+                    </cf-vstack>
+                  </cf-card>
 
                   {/* Add Entrances Section */}
-                  <ct-card style="background: #fef3c7; border: 1px solid #fbbf24;">
-                    <ct-vstack gap="2">
+                  <cf-card style="background: #fef3c7; border: 1px solid #fbbf24;">
+                    <cf-vstack gap="2">
                       <span style={{ fontWeight: 600, color: "#92400e" }}>
                         🚪 Mark Store Entrances
                       </span>
@@ -1092,7 +1097,7 @@ export default pattern<Input, Output>(
                         >
                           Front:
                         </span>
-                        <ct-button
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-front"
@@ -1106,8 +1111,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Left
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-front"
@@ -1121,8 +1126,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Center
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-front"
@@ -1136,7 +1141,7 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Right
-                        </ct-button>
+                        </cf-button>
                       </div>
 
                       {/* Back wall buttons */}
@@ -1158,7 +1163,7 @@ export default pattern<Input, Output>(
                         >
                           Back:
                         </span>
-                        <ct-button
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-back"
@@ -1172,8 +1177,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Left
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-back"
@@ -1187,8 +1192,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Center
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-back"
@@ -1202,7 +1207,7 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Right
-                        </ct-button>
+                        </cf-button>
                       </div>
 
                       {/* Left wall buttons */}
@@ -1224,7 +1229,7 @@ export default pattern<Input, Output>(
                         >
                           Left:
                         </span>
-                        <ct-button
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-left"
@@ -1238,8 +1243,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Front
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-left"
@@ -1253,8 +1258,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Center
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-left"
@@ -1268,7 +1273,7 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Back
-                        </ct-button>
+                        </cf-button>
                       </div>
 
                       {/* Right wall buttons */}
@@ -1290,7 +1295,7 @@ export default pattern<Input, Output>(
                         >
                           Right:
                         </span>
-                        <ct-button
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-right"
@@ -1304,8 +1309,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Front
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-right"
@@ -1319,8 +1324,8 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Center
-                        </ct-button>
-                        <ct-button
+                        </cf-button>
+                        <cf-button
                           size="sm"
                           variant="outline"
                           className="wall-btn-right"
@@ -1334,7 +1339,7 @@ export default pattern<Input, Output>(
                           })}
                         >
                           Back
-                        </ct-button>
+                        </cf-button>
                       </div>
 
                       {/* Show added entrances */}
@@ -1372,7 +1377,7 @@ export default pattern<Input, Output>(
                                 }}
                               >
                                 🚪 {entrance.position}
-                                <ct-button
+                                <cf-button
                                   size="sm"
                                   variant="ghost"
                                   onClick={removeEntrance({
@@ -1382,59 +1387,59 @@ export default pattern<Input, Output>(
                                   style="padding: 2px 4px; min-height: 0;"
                                 >
                                   ×
-                                </ct-button>
+                                </cf-button>
                               </div>
                             ))}
                           </div>
                         </div>,
                         null,
                       )}
-                    </ct-vstack>
-                  </ct-card>
+                    </cf-vstack>
+                  </cf-card>
 
                   {/* Quick Actions */}
-                  <ct-hstack gap="2">
-                    <ct-button
+                  <cf-hstack gap="2">
+                    <cf-button
                       variant="secondary"
                       onClick={() => currentSection.set("aisles")}
                       style="flex: 1;"
                     >
                       + Add Aisles
-                    </ct-button>
-                    <ct-button
+                    </cf-button>
+                    <cf-button
                       variant="secondary"
                       onClick={() => currentSection.set("departments")}
                       style="flex: 1;"
                     >
                       + Add Departments
-                    </ct-button>
-                  </ct-hstack>
-                </ct-vstack>
-              </ct-vscroll>
-            </ct-tab-panel>
+                    </cf-button>
+                  </cf-hstack>
+                </cf-vstack>
+              </cf-vscroll>
+            </cf-tab-panel>
 
             {/* AISLES SECTION */}
-            <ct-tab-panel value="aisles">
-              <ct-vscroll flex showScrollbar fadeEdges>
-                <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
+            <cf-tab-panel value="aisles">
+              <cf-vscroll flex showScrollbar fadeEdges>
+                <cf-vstack gap="2" style="padding: 1rem; max-width: 800px;">
                   {/* Gap warning */}
                   {ifElse(
                     derive(detectedGaps, (gaps: number[]) => gaps.length > 0),
-                    <ct-card style="background: #fef3c7; border: 1px solid #fbbf24;">
-                      <ct-vstack gap="1">
+                    <cf-card style="background: #fef3c7; border: 1px solid #fbbf24;">
+                      <cf-vstack gap="1">
                         <span style={{ fontWeight: 500, color: "#92400e" }}>
                           ⚠️ Missing aisle(s) detected:{" "}
                           {derive(detectedGaps, (g: number[]) => g.join(", "))}
                         </span>
-                      </ct-vstack>
-                    </ct-card>,
+                      </cf-vstack>
+                    </cf-card>,
                     null,
                   )}
 
                   {/* Aisle list */}
                   {sortedAisles.map((aisle) => (
-                    <ct-card>
-                      <ct-hstack gap="2" align="start">
+                    <cf-card>
+                      <cf-hstack gap="2" align="start">
                         <div
                           style={{
                             fontWeight: 600,
@@ -1445,22 +1450,22 @@ export default pattern<Input, Output>(
                         >
                           Aisle {aisle.name}
                         </div>
-                        <ct-vstack gap="1" style="flex: 1;">
-                          <ct-textarea
+                        <cf-vstack gap="1" style="flex: 1;">
+                          <cf-textarea
                             $value={aisle.description}
                             placeholder="Description (e.g., Bread & Cereal)"
                             rows={3}
                             auto-resize
                           />
-                        </ct-vstack>
-                        <ct-button
+                        </cf-vstack>
+                        <cf-button
                           variant="ghost"
                           onClick={removeAisle({ aisles, aisle })}
                         >
                           ×
-                        </ct-button>
-                      </ct-hstack>
-                    </ct-card>
+                        </cf-button>
+                      </cf-hstack>
+                    </cf-card>
                   ))}
 
                   {/* Empty state */}
@@ -1469,7 +1474,7 @@ export default pattern<Input, Output>(
                     <div
                       style={{
                         textAlign: "center",
-                        color: "var(--ct-color-gray-500)",
+                        color: "var(--cf-color-gray-500)",
                         padding: "2rem",
                       }}
                     >
@@ -1479,21 +1484,21 @@ export default pattern<Input, Output>(
                   )}
 
                   {/* Add aisle input */}
-                  <ct-message-input
+                  <cf-message-input
                     placeholder="Enter aisle number (e.g., 1, 2, 5A)..."
                     appearance="rounded"
-                    onct-send={addAisle({ aisles })}
+                    oncf-send={addAisle({ aisles })}
                   />
 
                   {/* AI Photo Import Section */}
-                  <ct-card style="background: #f0fdf4; border: 1px solid #86efac; margin-top: 1rem;">
-                    <ct-vstack gap="2">
-                      <ct-hstack gap="2" align="center">
+                  <cf-card style="background: #f0fdf4; border: 1px solid #86efac; margin-top: 1rem;">
+                    <cf-vstack gap="2">
+                      <cf-hstack gap="2" align="center">
                         <span style={{ fontSize: "1.2rem" }}>📷</span>
                         <span style={{ fontWeight: 600, color: "#166534" }}>
                           Import Aisles from Photos
                         </span>
-                      </ct-hstack>
+                      </cf-hstack>
                       <div
                         style={{
                           fontSize: "13px",
@@ -1503,7 +1508,7 @@ export default pattern<Input, Output>(
                         Take photos of aisle signs - AI will extract aisle
                         numbers and products automatically.
                       </div>
-                      <ct-image-input
+                      <cf-image-input
                         multiple
                         maxImages={20}
                         maxSizeBytes={4000000}
@@ -1529,7 +1534,7 @@ export default pattern<Input, Output>(
                               marginTop: "0.5rem",
                             }}
                           >
-                            <ct-hstack
+                            <cf-hstack
                               justify="between"
                               align="center"
                               style="margin-bottom: 0.5rem;"
@@ -1543,7 +1548,7 @@ export default pattern<Input, Output>(
                               >
                                 📷 {extraction.photoName}
                               </span>
-                              <ct-button
+                              <cf-button
                                 size="sm"
                                 variant="ghost"
                                 onClick={hidePhoto({
@@ -1552,15 +1557,9 @@ export default pattern<Input, Output>(
                                 })}
                               >
                                 ×
-                              </ct-button>
-                            </ct-hstack>
+                              </cf-button>
+                            </cf-hstack>
 
-                            {
-                              /* Status: pending / error / results
-                                 Uses nested ifElse with static JSX branches.
-                                 Note: computed() returning JSX does not render
-                                 inside ifElse branches within mapWithPattern. */
-                            }
                             {ifElse(
                               extraction.pending,
                               <div
@@ -1584,82 +1583,158 @@ export default pattern<Input, Output>(
                                   Error analyzing photo. Please try removing and
                                   re-uploading.
                                 </div>,
-                                <div>
-                                  <ct-button
-                                    size="sm"
-                                    variant="primary"
-                                    onClick={addAllExtractedAisles({
-                                      aisles,
-                                      extractedList:
-                                        extraction.extractedAisles.aisles,
-                                      hiddenPhotoIds,
-                                      photoId: extraction.photo.id,
-                                    })}
-                                    style="margin-bottom: 0.5rem;"
-                                  >
-                                    + Add Detected Aisles
-                                  </ct-button>
-                                  {extraction.extractedAisles.aisles.map(
-                                    (extractedAisle: ExtractedAisle) => (
-                                      <ct-hstack
-                                        gap="2"
-                                        align="center"
-                                        style="padding: 0.5rem; background: #dcfce7; border-radius: 4px; margin-top: 0.25rem;"
+                                computed(() => {
+                                  const extracted: {
+                                    aisles: ExtractedAisle[];
+                                  } = extraction.extractedAisles;
+                                  const currentAisles = aisles.get();
+                                  if (
+                                    !extracted?.aisles ||
+                                    extracted.aisles.length === 0
+                                  ) {
+                                    return (
+                                      <div
+                                        style={{
+                                          fontSize: "12px",
+                                          color: "#999",
+                                        }}
                                       >
-                                        <div style={{ flex: 1 }}>
-                                          <strong>
-                                            Aisle {extractedAisle.name}
-                                          </strong>
-                                          <div
-                                            style={{
-                                              fontSize: "12px",
-                                              color: "#6b7280",
-                                            }}
-                                          >
-                                            {(extractedAisle.products ||
-                                              []).join(", ") ||
-                                              "(no products)"}
-                                          </div>
-                                        </div>
-                                        <ct-button
+                                        No aisles detected in photo
+                                      </div>
+                                    );
+                                  }
+
+                                  // Helper function to check if aisle exists
+                                  // Uses .some() directly on currentAisles (works with reactive proxies)
+                                  const aisleExists = (name: string) => {
+                                    try {
+                                      return currentAisles.some(
+                                        (existing: Aisle) =>
+                                          existing?.name?.toLowerCase?.() ===
+                                            name.toLowerCase(),
+                                      );
+                                    } catch {
+                                      return false;
+                                    }
+                                  };
+
+                                  // Count new aisles
+                                  const newCount = extracted.aisles.filter(
+                                    (e) => !aisleExists(e.name),
+                                  ).length;
+
+                                  return (
+                                    <cf-vstack gap="1">
+                                      {/* Batch add button */}
+                                      {newCount > 0 && (
+                                        <cf-button
                                           size="sm"
                                           variant="primary"
-                                          onClick={addExtractedAisle({
+                                          onClick={addAllExtractedAisles({
                                             aisles,
-                                            extracted: extractedAisle,
+                                            extractedList: extracted.aisles,
+                                            hiddenPhotoIds,
+                                            photoId: extraction.photo.id,
                                           })}
+                                          style="margin-bottom: 0.5rem;"
                                         >
-                                          Add
-                                        </ct-button>
-                                        <ct-button
-                                          size="sm"
-                                          variant="secondary"
-                                          onClick={mergeExtractedAisle({
-                                            aisles,
-                                            extracted: extractedAisle,
-                                          })}
-                                        >
-                                          Merge
-                                        </ct-button>
-                                      </ct-hstack>
-                                    ),
-                                  )}
-                                </div>,
+                                          + Add All {newCount} New Aisles
+                                        </cf-button>
+                                      )}
+
+                                      {/* Individual aisle results */}
+                                      {extracted.aisles.map(
+                                        (extractedAisle: ExtractedAisle) => {
+                                          const exists = aisleExists(
+                                            extractedAisle.name,
+                                          );
+                                          return (
+                                            <cf-hstack
+                                              gap="2"
+                                              align="center"
+                                              style={`padding: 0.5rem; background: ${
+                                                exists ? "#fef3c7" : "#dcfce7"
+                                              }; border-radius: 4px;`}
+                                            >
+                                              <div style={{ flex: 1 }}>
+                                                <strong>
+                                                  Aisle {extractedAisle.name}
+                                                </strong>
+                                                {exists && (
+                                                  <span
+                                                    style={{
+                                                      color: "#92400e",
+                                                      marginLeft: "0.5rem",
+                                                      fontSize: "11px",
+                                                    }}
+                                                  >
+                                                    (exists)
+                                                  </span>
+                                                )}
+                                                <div
+                                                  style={{
+                                                    fontSize: "12px",
+                                                    color: "#6b7280",
+                                                  }}
+                                                >
+                                                  {(extractedAisle.products ||
+                                                    []).join(", ") ||
+                                                    "(no products)"}
+                                                </div>
+                                              </div>
+                                              {exists
+                                                ? (
+                                                  <cf-button
+                                                    size="sm"
+                                                    variant="secondary"
+                                                    onClick={mergeExtractedAisle(
+                                                      {
+                                                        aisles,
+                                                        extracted:
+                                                          extractedAisle,
+                                                      },
+                                                    )}
+                                                  >
+                                                    Merge
+                                                  </cf-button>
+                                                )
+                                                : (
+                                                  <cf-button
+                                                    size="sm"
+                                                    variant="primary"
+                                                    onClick={addExtractedAisle(
+                                                      {
+                                                        aisles,
+                                                        extracted:
+                                                          extractedAisle,
+                                                      },
+                                                    )}
+                                                  >
+                                                    Add
+                                                  </cf-button>
+                                                )}
+                                            </cf-hstack>
+                                          );
+                                        },
+                                      )}
+                                    </cf-vstack>
+                                  );
+                                }),
                               ),
                             )}
                           </div>,
                         )
                       )}
-                    </ct-vstack>
-                  </ct-card>
-                </ct-vstack>
-              </ct-vscroll>
-            </ct-tab-panel>
+                    </cf-vstack>
+                  </cf-card>
+                </cf-vstack>
+              </cf-vscroll>
+            </cf-tab-panel>
 
             {/* DEPARTMENTS SECTION */}
-            <ct-tab-panel value="departments">
-              <ct-vscroll flex showScrollbar fadeEdges>
-                <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
+            <cf-tab-panel value="departments">
+              <cf-vscroll flex showScrollbar fadeEdges>
+                <cf-vstack gap="2" style="padding: 1rem; max-width: 800px;">
                   {/* Department list - unassigned shown first, assigned at bottom */}
                   {computed(() => {
                     const depts = departments.get();
@@ -1671,9 +1746,9 @@ export default pattern<Input, Output>(
                       return aAssigned ? 1 : -1;
                     });
                   }).map((dept) => (
-                    <ct-card>
-                      <ct-vstack gap="2">
-                        <ct-hstack gap="2" align="center">
+                    <cf-card>
+                      <cf-vstack gap="2">
+                        <cf-hstack gap="2" align="center">
                           <span style={{ fontSize: "1.5rem" }}>
                             {dept.icon}
                           </span>
@@ -1690,16 +1765,16 @@ export default pattern<Input, Output>(
                                   dept.location,
                                   (l: string) => l === "unassigned",
                                 ),
-                                "var(--ct-color-yellow-100)",
-                                "var(--ct-color-green-100)",
+                                "var(--cf-color-yellow-100)",
+                                "var(--cf-color-green-100)",
                               ),
                             }}
                           >
                             {dept.location}
                           </span>
-                        </ct-hstack>
+                        </cf-hstack>
                         {/* Location button grid */}
-                        <ct-vstack gap="1">
+                        <cf-vstack gap="1">
                           {/* Front wall */}
                           <div
                             style={{
@@ -1719,7 +1794,7 @@ export default pattern<Input, Output>(
                             >
                               Front:
                             </span>
-                            <ct-button
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1734,8 +1809,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Left
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1750,8 +1825,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Center
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1766,7 +1841,7 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Right
-                            </ct-button>
+                            </cf-button>
                           </div>
                           {/* Back wall */}
                           <div
@@ -1787,7 +1862,7 @@ export default pattern<Input, Output>(
                             >
                               Back:
                             </span>
-                            <ct-button
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1802,8 +1877,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Left
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1818,8 +1893,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Center
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1834,7 +1909,7 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Right
-                            </ct-button>
+                            </cf-button>
                           </div>
                           {/* Left wall */}
                           <div
@@ -1855,7 +1930,7 @@ export default pattern<Input, Output>(
                             >
                               Left:
                             </span>
-                            <ct-button
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1870,8 +1945,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Front
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1886,8 +1961,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Center
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1902,7 +1977,7 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Back
-                            </ct-button>
+                            </cf-button>
                           </div>
                           {/* Right wall */}
                           <div
@@ -1923,7 +1998,7 @@ export default pattern<Input, Output>(
                             >
                               Right:
                             </span>
-                            <ct-button
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1938,8 +2013,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Front
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1954,8 +2029,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Center
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -1970,7 +2045,7 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Back
-                            </ct-button>
+                            </cf-button>
                           </div>
                           {/* Special locations */}
                           <div
@@ -1991,7 +2066,7 @@ export default pattern<Input, Output>(
                             >
                               Other:
                             </span>
-                            <ct-button
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -2007,8 +2082,8 @@ export default pattern<Input, Output>(
                               })}
                             >
                               Normal Aisle
-                            </ct-button>
-                            <ct-button
+                            </cf-button>
+                            <cf-button
                               size="sm"
                               variant={derive(
                                 dept.location,
@@ -2022,47 +2097,47 @@ export default pattern<Input, Output>(
                               })}
                             >
                               N/A
-                            </ct-button>
+                            </cf-button>
                           </div>
-                        </ct-vstack>
-                        <ct-input
+                        </cf-vstack>
+                        <cf-input
                           $value={dept.description}
                           placeholder="Description (optional)"
                         />
-                      </ct-vstack>
-                    </ct-card>
+                      </cf-vstack>
+                    </cf-card>
                   ))}
-                </ct-vstack>
-              </ct-vscroll>
-            </ct-tab-panel>
+                </cf-vstack>
+              </cf-vscroll>
+            </cf-tab-panel>
 
             {/* CORRECTIONS SECTION */}
-            <ct-tab-panel value="corrections">
-              <ct-vscroll flex showScrollbar fadeEdges>
-                <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
-                  <ct-card>
-                    <ct-vstack gap="2">
+            <cf-tab-panel value="corrections">
+              <cf-vscroll flex showScrollbar fadeEdges>
+                <cf-vstack gap="2" style="padding: 1rem; max-width: 800px;">
+                  <cf-card>
+                    <cf-vstack gap="2">
                       <span style={{ fontWeight: 500 }}>
                         Add Item Correction
                       </span>
                       <p
                         style={{
                           fontSize: "14px",
-                          color: "var(--ct-color-gray-500)",
+                          color: "var(--cf-color-gray-500)",
                         }}
                       >
                         Record where items are actually located for future
                         reference.
                       </p>
-                      <ct-input
+                      <cf-input
                         $value={newCorrectionItem}
                         placeholder="Item name (e.g., coffee)"
                       />
-                      <ct-input
+                      <cf-input
                         $value={newCorrectionAisle}
                         placeholder="Correct location (e.g., Aisle 9 or Bakery)"
                       />
-                      <ct-button
+                      <cf-button
                         variant="primary"
                         onClick={() => {
                           const item = newCorrectionItem.get().trim();
@@ -2086,29 +2161,29 @@ export default pattern<Input, Output>(
                         }}
                       >
                         Save Correction
-                      </ct-button>
-                    </ct-vstack>
-                  </ct-card>
+                      </cf-button>
+                    </cf-vstack>
+                  </cf-card>
 
                   {/* Existing corrections */}
                   {ifElse(
                     computed(() => itemLocations.get().length > 0),
-                    <ct-card>
-                      <ct-vstack gap="2">
+                    <cf-card>
+                      <cf-vstack gap="2">
                         <span style={{ fontWeight: 500 }}>
                           Saved Corrections
                         </span>
                         {itemLocations.map((loc) => (
-                          <ct-hstack
+                          <cf-hstack
                             gap="2"
                             align="center"
-                            style="padding: 0.5rem; background: var(--ct-color-gray-50); border-radius: 6px;"
+                            style="padding: 0.5rem; background: var(--cf-color-gray-50); border-radius: 6px;"
                           >
                             <span style={{ flex: 1 }}>
                               <strong>{loc.itemName}</strong> →{" "}
                               {loc.correctAisle}
                             </span>
-                            <ct-button
+                            <cf-button
                               variant="ghost"
                               onClick={() => {
                                 const current = itemLocations.get();
@@ -2122,38 +2197,38 @@ export default pattern<Input, Output>(
                               }}
                             >
                               ×
-                            </ct-button>
-                          </ct-hstack>
+                            </cf-button>
+                          </cf-hstack>
                         ))}
-                      </ct-vstack>
-                    </ct-card>,
+                      </cf-vstack>
+                    </cf-card>,
                     <div
                       style={{
                         textAlign: "center",
-                        color: "var(--ct-color-gray-500)",
+                        color: "var(--cf-color-gray-500)",
                         padding: "2rem",
                       }}
                     >
                       No corrections saved yet.
                     </div>,
                   )}
-                </ct-vstack>
-              </ct-vscroll>
-            </ct-tab-panel>
+                </cf-vstack>
+              </cf-vscroll>
+            </cf-tab-panel>
 
             {/* OUTLINE SECTION */}
-            <ct-tab-panel value="outline">
-              <ct-vscroll flex showScrollbar fadeEdges>
-                <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
-                  <ct-card>
-                    <ct-vstack gap="2">
+            <cf-tab-panel value="outline">
+              <cf-vscroll flex showScrollbar fadeEdges>
+                <cf-vstack gap="2" style="padding: 1rem; max-width: 800px;">
+                  <cf-card>
+                    <cf-vstack gap="2">
                       <span style={{ fontWeight: 500 }}>
                         Store Layout Outline
                       </span>
                       <p
                         style={{
                           fontSize: "14px",
-                          color: "var(--ct-color-gray-500)",
+                          color: "var(--cf-color-gray-500)",
                         }}
                       >
                         This outline is used by the Shopping List for AI-powered
@@ -2161,7 +2236,7 @@ export default pattern<Input, Output>(
                       </p>
                       <pre
                         style={{
-                          background: "var(--ct-color-gray-50)",
+                          background: "var(--cf-color-gray-50)",
                           padding: "1rem",
                           borderRadius: "6px",
                           fontSize: "13px",
@@ -2171,13 +2246,13 @@ export default pattern<Input, Output>(
                       >
                         {outline}
                       </pre>
-                    </ct-vstack>
-                  </ct-card>
-                </ct-vstack>
-              </ct-vscroll>
-            </ct-tab-panel>
-          </ct-tabs>
-        </ct-screen>
+                    </cf-vstack>
+                  </cf-card>
+                </cf-vstack>
+              </cf-vscroll>
+            </cf-tab-panel>
+          </cf-tabs>
+        </cf-screen>
       ),
       storeName,
       aisles,

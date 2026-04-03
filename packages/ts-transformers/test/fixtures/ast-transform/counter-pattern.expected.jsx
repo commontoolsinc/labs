@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, Default, handler, NAME, pattern, str, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, Default, handler, NAME, pattern, str, UI } from "commonfabric";
 interface CounterState {
     value: Cell<number>;
 }
@@ -8,7 +8,7 @@ interface PatternState {
 }
 const increment = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -17,10 +17,10 @@ const increment = handler({
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, (_e, state) => {
+} as const satisfies __cfHelpers.JSONSchema, (_e, state) => {
     state.value.set(state.value.get() + 1);
 });
-const decrement = handler(false as const satisfies __ctHelpers.JSONSchema, {
+const decrement = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -29,7 +29,7 @@ const decrement = handler(false as const satisfies __ctHelpers.JSONSchema, {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, (_, state: {
+} as const satisfies __cfHelpers.JSONSchema, (_, state: {
     value: Cell<number>;
 }) => {
     state.value.set(state.value.get() - 1);
@@ -39,24 +39,24 @@ const decrement = handler(false as const satisfies __ctHelpers.JSONSchema, {
 //   handler<unknown, CounterState>(fn) → handler(true, stateSchema, fn)
 //   handler((_, state: {...}) => ...)  → handler(false, stateSchema, fn)
 //   pattern<PatternState>(fn)          → pattern(fn, inputSchema, outputSchema)
-//   state.value ? a : b (in JSX)      → __ctHelpers.ifElse(...schemas, state.key("value"), derive(...), "unknown")
+//   state.value ? a : b (in JSX)      → __cfHelpers.ifElse(...schemas, state.key("value"), derive(...), "unknown")
 //   state.value                        → state.key("value")
 // Context: Combines handler schema injection, pattern schema generation, ternary-to-ifElse, and str template transforms
 export default pattern((state) => {
     return {
         [NAME]: str `Simple counter: ${state.key("value")}`,
         [UI]: (<div>
-        <ct-button onClick={decrement(state)}>-</ct-button>
+        <cf-button onClick={decrement(state)}>-</cf-button>
         <ul>
-          <li>next number: {__ctHelpers.ifElse({
+          <li>next number: {__cfHelpers.ifElse({
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "string"]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("value"), __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, state.key("value"), __cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -70,13 +70,13 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 value: state.key("value")
             } }, ({ state }) => state.value + 1), "unknown")}</li>
         </ul>
-        <ct-button onClick={increment({ value: state.key("value") })}>+</ct-button>
+        <cf-button onClick={increment({ value: state.key("value") })}>+</cf-button>
       </div>),
         value: state.key("value"),
     };
@@ -89,7 +89,7 @@ export default pattern((state) => {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -124,8 +124,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

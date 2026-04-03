@@ -15,11 +15,11 @@
  */
 
 import { assertEquals } from "@std/assert";
-import { Runtime, type RuntimeProgram } from "@commontools/runner";
-import { Identity, type IdentityCreateConfig } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import type { Cell, JSONSchema, MemorySpace } from "@commontools/runner";
-import { env } from "@commontools/integration";
+import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
+import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { Cell, JSONSchema, MemorySpace } from "@commonfabric/runner";
+import { env } from "@commonfabric/integration";
 
 const API_URL = new URL(env.API_URL);
 
@@ -46,7 +46,7 @@ const patternProgram: RuntimeProgram = {
     {
       name: "/main.tsx",
       contents: [
-        "import { pattern, lift } from 'commontools';",
+        "import { pattern, lift } from 'commonfabric';",
         "",
         "// Define lifts outside the pattern body",
         "const computeSum = lift((data: { values: number[] }) => {",

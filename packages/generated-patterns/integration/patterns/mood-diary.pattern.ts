@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 const MOOD_SCORE_TABLE = {
   radiant: 2,

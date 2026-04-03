@@ -24,7 +24,7 @@ export const provider = new BasicTracerProvider({
     "service.name": env.OTEL_SERVICE_NAME || "toolshed-dev",
     "service.version": "1.0.0",
     "deployment.environment": env.ENV || "development",
-    "openinference.project.name": env.CTTS_AI_LLM_PHOENIX_PROJECT,
+    "openinference.project.name": env.CFTS_AI_LLM_PHOENIX_PROJECT,
   }),
 });
 

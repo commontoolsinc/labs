@@ -1,6 +1,6 @@
-import { UI } from "@commontools/runner";
-import type { Runtime } from "@commontools/runner";
-import { isRecord } from "@commontools/utils/types";
+import { UI } from "@commonfabric/runner";
+import type { Runtime } from "@commonfabric/runner";
+import { isRecord } from "@commonfabric/utils/types";
 
 export interface Spell {
   id: string;
@@ -102,7 +102,7 @@ export async function saveSpell(
   runtime: Runtime,
 ): Promise<boolean> {
   try {
-    // Get all the required data from commontools first
+    // Get all the required data from commonfabric first
     const patternMetaResult = runtime.patternManager.getPatternMeta(
       spell as any,
     );

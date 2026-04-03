@@ -6,7 +6,7 @@ import {
   parseSpaceOptions,
 } from "../commands/piece.ts";
 
-const API_URL = "https://ct.dev";
+const API_URL = "https://cf.dev";
 const SPACE = "common-knowledge";
 const PIECE = "abcdefghijklmnopqrstuvwxyz";
 const ID = "~/.my.key";

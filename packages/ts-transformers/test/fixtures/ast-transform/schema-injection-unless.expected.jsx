@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { unless, pattern, UI, NAME } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { unless, pattern, UI, NAME } from "commonfabric";
 interface State {
     value: string | null;
     defaultValue: string;
@@ -19,15 +19,15 @@ export default pattern((__ct_pattern_input) => {
             }, {
                 type: "null"
             }]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
                 type: "string"
             }, {
                 type: "null"
             }]
-    } as const satisfies __ctHelpers.JSONSchema, value, defaultValue);
+    } as const satisfies __cfHelpers.JSONSchema, value, defaultValue);
     return {
         [NAME]: "unless schema test",
         [UI]: <div>{result}</div>,
@@ -47,7 +47,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["value", "defaultValue"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -79,8 +79,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -7,7 +7,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * MINIMAL BUG REPRODUCTION
@@ -52,20 +52,20 @@ export default pattern<Input, Output>(({ items }) => {
   return {
     [NAME]: "Computed Array Bug",
     [UI]: (
-      <ct-screen>
-        <ct-vstack slot="header" gap="2">
-          <ct-tabs $value={filter}>
-            <ct-tab-list>
-              <ct-tab value="all">All</ct-tab>
-              <ct-tab value="pending">Pending</ct-tab>
-              <ct-tab value="done">Done</ct-tab>
-            </ct-tab-list>
-          </ct-tabs>
-        </ct-vstack>
+      <cf-screen>
+        <cf-vstack slot="header" gap="2">
+          <cf-tabs $value={filter}>
+            <cf-tab-list>
+              <cf-tab value="all">All</cf-tab>
+              <cf-tab value="pending">Pending</cf-tab>
+              <cf-tab value="done">Done</cf-tab>
+            </cf-tab-list>
+          </cf-tabs>
+        </cf-vstack>
 
-        <ct-vscroll flex>
-          <ct-vstack gap="2" style="padding: 1rem;">
-            <ct-button
+        <cf-vscroll flex>
+          <cf-vstack gap="2" style="padding: 1rem;">
+            <cf-button
               variant="secondary"
               onClick={() => {
                 const c = counter.get();
@@ -74,7 +74,7 @@ export default pattern<Input, Output>(({ items }) => {
               }}
             >
               Add Pending Item
-            </ct-button>
+            </cf-button>
 
             <p>
               Filter: {filter} | Total: {computed(() => items.get().length)}
@@ -94,9 +94,9 @@ export default pattern<Input, Output>(({ items }) => {
                   </div>
                 ))
             )}
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
     items,
   };

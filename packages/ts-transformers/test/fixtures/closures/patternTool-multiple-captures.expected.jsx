@@ -1,11 +1,11 @@
-import * as __ctHelpers from "commontools";
-import { derive, pattern, patternTool, type PatternToolResult, Writable } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { derive, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
 const multiplier = Writable.of(2, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 const prefix = Writable.of("Result: ", {
     type: "string"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 type Output = {
     tool: PatternToolResult<Record<string, never>>;
 };
@@ -19,8 +19,8 @@ type Output = {
 export default pattern(() => {
     const tool = patternTool(({ value, prefix, multiplier }: {
         value: number;
-        prefix: __ctHelpers.Cell<string>;
-        multiplier: __ctHelpers.Cell<number>;
+        prefix: __cfHelpers.Cell<string>;
+        multiplier: __cfHelpers.Cell<number>;
     }) => {
         return derive({
             type: "object",
@@ -30,9 +30,9 @@ export default pattern(() => {
                 }
             },
             required: ["value"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { value }, ({ value }) => {
+        } as const satisfies __cfHelpers.JSONSchema, { value }, ({ value }) => {
             return prefix.get() + String(value * multiplier.get());
         });
     }, {
@@ -44,7 +44,7 @@ export default pattern(() => {
     type: "object",
     properties: {},
     additionalProperties: false
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         tool: {
@@ -73,8 +73,8 @@ export default pattern(() => {
             required: ["argumentSchema", "resultSchema"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

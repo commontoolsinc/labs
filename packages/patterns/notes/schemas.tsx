@@ -5,7 +5,7 @@
  * This file contains types shared across note.tsx, notebook.tsx, and note-md.tsx.
  */
 
-import { type Default, NAME, type Stream, type Writable } from "commontools";
+import { type Default, NAME, type Stream, type Writable } from "commonfabric";
 
 // ===== Core Entity Types =====
 //

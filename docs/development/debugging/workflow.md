@@ -5,7 +5,7 @@
 ### 1. Check TypeScript Errors
 
 ```bash
-deno task ct check pattern.tsx --no-run
+deno task cf check pattern.tsx --no-run
 ```
 
 Fix all type errors before deploying. Most issues are caught here.
@@ -19,12 +19,12 @@ Fix all type errors before deploying. Most issues are caught here.
 
 ### 3. Inspect Cell Values
 
-Use `<ct-cell-context>` for on-demand value inspection:
+Use `<cf-cell-context>` for on-demand value inspection:
 
 ```tsx
-<ct-cell-context $cell={result} label="Result">
+<cf-cell-context $cell={result} label="Result">
   <div>{result.value}</div>
-</ct-cell-context>
+</cf-cell-context>
 ```
 
 Hold **Alt** and hover to access debugging toolbar (val, id, watch/unwatch).
@@ -32,7 +32,7 @@ Hold **Alt** and hover to access debugging toolbar (val, id, watch/unwatch).
 ### 4. Inspect Deployed Piece
 
 ```bash
-deno task ct piece inspect --identity key.json --api-url URL --space SPACE --piece ID
+deno task cf piece inspect --identity key.json --api-url URL --space SPACE --piece ID
 ```
 
 ### 5. Simplify Until It Works
@@ -61,11 +61,11 @@ the runtime is doing under the hood.
 
 ```javascript
 // Enable a logger and set it to debug level — this produces console output
-commontools.logger["runner"].disabled = false
-commontools.logger["runner"].level = "debug"
+commonfabric.logger["runner"].disabled = false
+commonfabric.logger["runner"].level = "debug"
 
 // Turn it back off when done to reduce noise
-commontools.logger["runner"].disabled = true
+commonfabric.logger["runner"].disabled = true
 ```
 
 Even when loggers are disabled, call counts and timing stats are still tracked.
@@ -73,13 +73,13 @@ You can inspect these without turning on console output:
 
 ```javascript
 // See which loggers exist and their call counts
-commontools.getLoggerCountsBreakdown()
+commonfabric.getLoggerCountsBreakdown()
 
 // Check timing stats (IPC latency, cell operations, etc.)
-commontools.getTimingStatsBreakdown()
+commonfabric.getTimingStatsBreakdown()
 
 // Check for actions with invalid inputs (schema mismatches)
-commontools.getLoggerFlagsBreakdown()
+commonfabric.getLoggerFlagsBreakdown()
 ```
 
 See [console-commands](./console-commands.md) for the full reference.

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // FIXTURE: logical-and-simple-ref
 // Verifies: simple opaque ref && <JSX> is transformed to when() for short-circuit rendering
 //   showPanel && <div>Panel content</div> → when(showPanel, <div>Panel content</div>)
@@ -7,46 +7,46 @@ import { cell, pattern, UI } from "commontools";
 export default pattern((_state) => {
     const showPanel = cell(true, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const userName = cell("Alice", {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {/* Simple opaque ref with JSX on right - SHOULD use when for short-circuit optimization */}
-        {__ctHelpers.when({
+        {__cfHelpers.when({
             type: "boolean",
             asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, showPanel, <div>Panel content</div>)}
+        } as const satisfies __cfHelpers.JSONSchema, showPanel, <div>Panel content</div>)}
 
         {/* Another simple ref */}
-        {__ctHelpers.when({
+        {__cfHelpers.when({
             type: "string",
             asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, userName, <span>Hello {userName}</span>)}
+        } as const satisfies __cfHelpers.JSONSchema, userName, <span>Hello {userName}</span>)}
       </div>),
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -75,8 +75,8 @@ export default pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

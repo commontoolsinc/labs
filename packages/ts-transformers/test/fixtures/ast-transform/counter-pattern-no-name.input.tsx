@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, NAME, pattern, str, UI } from "commontools";
+import { Cell, Default, handler, NAME, pattern, str, UI } from "commonfabric";
 
 interface CounterState {
   value: Cell<number>;
@@ -22,18 +22,18 @@ const decrement = handler((_, state: { value: Cell<number> }) => {
 //   handler<unknown, CounterState>(fn) → handler(true, stateSchema, fn)
 //   handler((_, state: {...}) => ...)  → handler(false, stateSchema, fn)
 //   pattern<PatternState>(fn)          → pattern(fn, inputSchema, outputSchema)
-//   state.value ? a : b (in JSX)      → __ctHelpers.ifElse(...schemas, state.key("value"), derive(...), "unknown")
+//   state.value ? a : b (in JSX)      → __cfHelpers.ifElse(...schemas, state.key("value"), derive(...), "unknown")
 // Context: Identical to counter-pattern; verifies no-name patterns still transform correctly
 export default pattern<PatternState>((state) => {
   return {
     [NAME]: str`Simple counter: ${state.value}`,
     [UI]: (
       <div>
-        <ct-button onClick={decrement(state)}>-</ct-button>
+        <cf-button onClick={decrement(state)}>-</cf-button>
         <ul>
           <li>next number: {state.value ? state.value + 1 : "unknown"}</li>
         </ul>
-        <ct-button onClick={increment({ value: state.value })}>+</ct-button>
+        <cf-button onClick={increment({ value: state.value })}>+</cf-button>
       </div>
     ),
     value: state.value,

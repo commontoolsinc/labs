@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // FIXTURE: map-with-array-param
 // Verifies: .map() on reactive array is transformed when the third parameter (array) is used
 //   .map((item, index, array) => ...) → .mapWithPattern(pattern(...), {})
@@ -11,10 +11,10 @@ export default pattern((_state) => {
         items: {
             type: "number"
         }
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
-        {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const index = __ct_pattern_input.key("index");
                 const array = __ct_pattern_input.key("array");
@@ -38,7 +38,7 @@ export default pattern((_state) => {
                     }
                 },
                 required: ["element"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -58,10 +58,10 @@ export default pattern((_state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            } as const satisfies __cfHelpers.JSONSchema), {})}
       </div>),
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -90,8 +90,8 @@ export default pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

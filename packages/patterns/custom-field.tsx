@@ -19,7 +19,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Types =====
@@ -198,36 +198,36 @@ export const CustomFieldModule = pattern<
       return `${MODULE_METADATA.icon} ${n}: ${dv}`;
     }),
     [UI]: (
-      <ct-vstack style={{ gap: "12px" }}>
+      <cf-vstack style={{ gap: "12px" }}>
         {/* Field name + type selector row */}
-        <ct-hstack style={{ gap: "8px", alignItems: "flex-end" }}>
-          <ct-vstack style={{ flex: 1, gap: "4px" }}>
+        <cf-hstack style={{ gap: "8px", alignItems: "flex-end" }}>
+          <cf-vstack style={{ flex: 1, gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Field Name
             </label>
-            <ct-input $value={name} placeholder="e.g., Employee ID..." />
-          </ct-vstack>
-          <ct-vstack style={{ width: "110px", gap: "4px" }}>
+            <cf-input $value={name} placeholder="e.g., Employee ID..." />
+          </cf-vstack>
+          <cf-vstack style={{ width: "110px", gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Type</label>
-            <ct-select $value={valueType} items={VALUE_TYPE_OPTIONS} />
-          </ct-vstack>
-        </ct-hstack>
+            <cf-select $value={valueType} items={VALUE_TYPE_OPTIONS} />
+          </cf-vstack>
+        </cf-hstack>
 
         {/* Value input - type-specific */}
-        <ct-vstack style={{ gap: "4px" }}>
+        <cf-vstack style={{ gap: "4px" }}>
           <label style={{ fontSize: "12px", color: "#6b7280" }}>Value</label>
 
           {/* Text input */}
           {ifElse(
             isText,
-            <ct-input $value={value} placeholder="Enter text..." />,
+            <cf-input $value={value} placeholder="Enter text..." />,
             null,
           )}
 
           {/* Number input */}
           {ifElse(
             isNumber,
-            <ct-input
+            <cf-input
               type="number"
               $value={value}
               placeholder="Enter number..."
@@ -236,7 +236,7 @@ export const CustomFieldModule = pattern<
           )}
 
           {/* Date input */}
-          {ifElse(isDate, <ct-input type="date" $value={value} />, null)}
+          {ifElse(isDate, <cf-input type="date" $value={value} />, null)}
 
           {/* Boolean checkbox */}
           {ifElse(
@@ -258,8 +258,8 @@ export const CustomFieldModule = pattern<
           {/* URL input with preview */}
           {ifElse(
             isUrl,
-            <ct-vstack style={{ gap: "8px" }}>
-              <ct-input $value={value} placeholder="https://..." />
+            <cf-vstack style={{ gap: "8px" }}>
+              <cf-input $value={value} placeholder="https://..." />
               {ifElse(
                 computed(() => !!safeUrl),
                 <a
@@ -276,18 +276,18 @@ export const CustomFieldModule = pattern<
                 </a>,
                 null,
               )}
-            </ct-vstack>,
+            </cf-vstack>,
             null,
           )}
 
           {/* Fallback for invalid valueType */}
           {ifElse(
             isFallback,
-            <ct-input $value={value} placeholder="Enter value..." />,
+            <cf-input $value={value} placeholder="Enter value..." />,
             null,
           )}
-        </ct-vstack>
-      </ct-vstack>
+        </cf-vstack>
+      </cf-vstack>
     ),
     name,
     value,

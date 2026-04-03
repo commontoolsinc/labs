@@ -1,5 +1,11 @@
 import type ts from "typescript";
-import type { JSONSchemaMutable } from "@commontools/api";
+import type { JSONSchema } from "@commonfabric/api";
+import { type Mutable } from "@commonfabric/utils/types";
+
+/**
+ * JSON Schema object type - mutable version of the Common Fabric JSONSchema interface
+ */
+export type SchemaDefinition = Mutable<JSONSchema>;
 
 /**
  * Unified context for schema generation - contains all state in one place
@@ -15,7 +21,7 @@ export interface GenerationContext {
 
   // Accumulating state (grows during generation)
   /** Named type definitions for $refs */
-  definitions: Record<string, JSONSchemaMutable>;
+  definitions: Record<string, SchemaDefinition>;
   /** Which $refs have been emitted */
   emittedRefs: Set<string>;
 
@@ -53,7 +59,7 @@ export interface TypeFormatter {
   formatType(
     type: ts.Type,
     context: GenerationContext,
-  ): JSONSchemaMutable;
+  ): SchemaDefinition;
 }
 
 /**
@@ -69,7 +75,7 @@ export interface SchemaGenerator {
     typeNode?: ts.TypeNode,
     options?: { widenLiterals?: boolean },
     schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
-  ): JSONSchemaMutable;
+  ): SchemaDefinition;
 
   /**
    * Generate schema from a synthetic TypeNode that doesn't resolve to a proper Type.
@@ -85,5 +91,5 @@ export interface SchemaGenerator {
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
     schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
-  ): JSONSchemaMutable;
+  ): SchemaDefinition;
 }

@@ -1,5 +1,5 @@
-import { defer, Deferred } from "@commontools/utils/defer";
-import { sleep } from "@commontools/utils/sleep";
+import { defer, Deferred } from "@commonfabric/utils/defer";
+import { sleep } from "@commonfabric/utils/sleep";
 
 export class HealthCheckTimeout extends Error {
   override name = "HealthCheckTimeout";

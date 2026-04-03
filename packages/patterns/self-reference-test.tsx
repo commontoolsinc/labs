@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, pattern, SELF, UI, Writable } from "commontools";
+import { Default, pattern, SELF, UI, Writable } from "commonfabric";
 
 interface Input {
   label: Default<string, "Untitled">;
@@ -35,12 +35,12 @@ const Node = pattern<Input, Output>(
           >
             Add to Registry
           </button>
-          <div>{parent ? <ct-cell-link $cell={parent} /> : "No parent"}</div>
+          <div>{parent ? <cf-cell-link $cell={parent} /> : "No parent"}</div>
           <div>
-            Registry: {registry.map((node) => <ct-cell-link $cell={node} />)}
+            Registry: {registry.map((node) => <cf-cell-link $cell={node} />)}
           </div>
           <div>
-            Children: {children.map((node) => <ct-cell-link $cell={node} />)}
+            Children: {children.map((node) => <cf-cell-link $cell={node} />)}
           </div>
         </div>
       ),

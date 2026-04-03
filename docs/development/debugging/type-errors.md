@@ -7,13 +7,13 @@
 **Problem:** Trying to bind the whole item instead of a property
 
 ```typescript
-<ct-checkbox $checked={item} />  {/* Trying to bind entire item */}
+<cf-checkbox $checked={item} />  {/* Trying to bind entire item */}
 ```
 
 **Solution:** Bind the specific property
 
 ```typescript
-<ct-checkbox $checked={item.done} />  {/* Bind the boolean property */}
+<cf-checkbox $checked={item.done} />  {/* Bind the boolean property */}
 ```
 
 ## Writable<T[]> vs Writable<Array<Writable<T>>>

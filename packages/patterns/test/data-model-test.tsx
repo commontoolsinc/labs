@@ -9,7 +9,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 const VERSION = "v26";
 
@@ -112,14 +112,14 @@ export default pattern<Input, Output>(
     return {
       [NAME]: "Data Model Test",
       [UI]: (
-        <ct-vstack gap={1} style="padding: 1rem; max-width: 500px;">
+        <cf-vstack gap={1} style="padding: 1rem; max-width: 500px;">
           <h3>Data Model Test</h3>
-          <ct-textarea
+          <cf-textarea
             $value={inputText}
             placeholder='JS expression, e.g. 42, "hello", undefined, {a: [1,2]}'
           />
-          <ct-button onClick={boundEvalAndStore}>Evaluate & Store</ct-button>
-          <ct-button onClick={boundRerenderDisplay}>Rerender Display</ct-button>
+          <cf-button onClick={boundEvalAndStore}>Evaluate & Store</cf-button>
+          <cf-button onClick={boundRerenderDisplay}>Rerender Display</cf-button>
           <pre
             style={{
               padding: "12px",
@@ -134,7 +134,7 @@ export default pattern<Input, Output>(
           </pre>
           <div style={{ color: "red", fontSize: "0.875rem" }}>{errorMsg}</div>
           <div style={{ color: "grey", fontSize: "9pt" }}>{VERSION}</div>
-        </ct-vstack>
+        </cf-vstack>
       ),
       value,
       evalAndStore: boundEvalAndStore,

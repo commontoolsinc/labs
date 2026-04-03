@@ -27,7 +27,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * Tag event posted by folksonomy-tags instances.
@@ -167,18 +167,18 @@ export default pattern<Input, Output>(({ events }) => {
   return {
     [NAME]: computed(() => `🏷️ Folksonomy Aggregator (${totalEvents} events)`),
     [UI]: (
-      <ct-vstack gap="4" style={{ padding: "16px" }}>
-        <ct-vstack gap="2">
+      <cf-vstack gap="4" style={{ padding: "16px" }}>
+        <cf-vstack gap="2">
           <h2 style={{ margin: 0 }}>🏷️ Folksonomy Aggregator</h2>
           <p style={{ color: "#666", margin: 0, fontSize: "14px" }}>
             Community tag telemetry collector. Favorite this charm with tag
             "folksonomy-aggregator" for discovery.
           </p>
-        </ct-vstack>
+        </cf-vstack>
 
         {/* Stats */}
-        <ct-hstack gap="4" style={{ marginTop: "8px" }}>
-          <ct-vstack
+        <cf-hstack gap="4" style={{ marginTop: "8px" }}>
+          <cf-vstack
             style={{
               padding: "12px",
               background: "#f0f9ff",
@@ -192,8 +192,8 @@ export default pattern<Input, Output>(({ events }) => {
             <span style={{ fontSize: "12px", color: "#666" }}>
               Total Events
             </span>
-          </ct-vstack>
-          <ct-vstack
+          </cf-vstack>
+          <cf-vstack
             style={{
               padding: "12px",
               background: "#f0fdf4",
@@ -207,11 +207,11 @@ export default pattern<Input, Output>(({ events }) => {
             <span style={{ fontSize: "12px", color: "#666" }}>
               Unique Scopes
             </span>
-          </ct-vstack>
-        </ct-hstack>
+          </cf-vstack>
+        </cf-hstack>
 
         {/* Top Tags */}
-        <ct-vstack gap="2" style={{ marginTop: "12px" }}>
+        <cf-vstack gap="2" style={{ marginTop: "12px" }}>
           <span
             style={{
               fontWeight: "600",
@@ -222,7 +222,7 @@ export default pattern<Input, Output>(({ events }) => {
           >
             Top Tags (All Scopes)
           </span>
-          <ct-hstack gap="2" wrap>
+          <cf-hstack gap="2" wrap>
             {topTags.map(
               (item: { tag: string; count: number }, idx: number) => (
                 <span
@@ -238,11 +238,11 @@ export default pattern<Input, Output>(({ events }) => {
                 </span>
               ),
             )}
-          </ct-hstack>
-        </ct-vstack>
+          </cf-hstack>
+        </cf-vstack>
 
         {/* Recent Events */}
-        <ct-vstack gap="2" style={{ marginTop: "12px" }}>
+        <cf-vstack gap="2" style={{ marginTop: "12px" }}>
           <span
             style={{
               fontWeight: "600",
@@ -253,7 +253,7 @@ export default pattern<Input, Output>(({ events }) => {
           >
             Recent Events
           </span>
-          <ct-vstack
+          <cf-vstack
             gap="1"
             style={{
               maxHeight: "200px",
@@ -271,7 +271,7 @@ export default pattern<Input, Output>(({ events }) => {
               )
               : (
                 recentEvents.map((event: TagEvent, idx: number) => (
-                  <ct-hstack
+                  <cf-hstack
                     key={idx}
                     gap="2"
                     style={{ fontSize: "12px", padding: "4px 0" }}
@@ -309,11 +309,11 @@ export default pattern<Input, Output>(({ events }) => {
                     >
                       {event.scope}
                     </span>
-                  </ct-hstack>
+                  </cf-hstack>
                 ))
               )}
-          </ct-vstack>
-        </ct-vstack>
+          </cf-vstack>
+        </cf-vstack>
 
         {/* CFC Notice */}
         <div
@@ -331,7 +331,7 @@ export default pattern<Input, Output>(({ events }) => {
           community suggestions if 5+ independent users have added them,
           protecting individual choices while enabling collective wisdom.
         </div>
-      </ct-vstack>
+      </cf-vstack>
     ),
     events,
     suggestions,

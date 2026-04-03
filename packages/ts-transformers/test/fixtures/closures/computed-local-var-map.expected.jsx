@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * Regression: .map() on a computed result assigned to a local variable
  * inside another computed() should NOT be transformed to .mapWithPattern().
@@ -6,7 +6,7 @@ import * as __ctHelpers from "commontools";
  * Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
  * so `localVar` is a plain array and .mapWithPattern() doesn't exist on it.
  */
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
 interface Item {
     name: string;
     price: number;
@@ -19,7 +19,7 @@ interface Item {
 //   This is a negative test for reactive .map() detection on local aliases.
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
-    const filtered = __ctHelpers.derive({
+    const filtered = __cfHelpers.derive({
         type: "object",
         properties: {
             items: {
@@ -44,7 +44,7 @@ export default pattern((__ct_pattern_input) => {
                 required: ["name", "price"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             $ref: "#/$defs/Item"
@@ -63,10 +63,10 @@ export default pattern((__ct_pattern_input) => {
                 required: ["name", "price"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.filter((i) => i.price > 100));
+    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.filter((i) => i.price > 100));
     return {
         [UI]: (<div>
-        {__ctHelpers.derive({
+        {__cfHelpers.derive({
                 type: "object",
                 properties: {
                     filtered: {
@@ -91,7 +91,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["name", "price"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 type: "array",
                 items: {
                     $ref: "#/$defs/JSXElement"
@@ -117,7 +117,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, { filtered: filtered }, ({ filtered }) => {
+            } as const satisfies __cfHelpers.JSONSchema, { filtered: filtered }, ({ filtered }) => {
                 const localVar = filtered;
                 return localVar.map((item) => <li>{item.name}</li>);
             })}
@@ -148,7 +148,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["name", "price"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -177,8 +177,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

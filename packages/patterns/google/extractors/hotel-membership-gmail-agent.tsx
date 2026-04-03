@@ -17,7 +17,7 @@ import {
   UI,
   Writable,
   // wish,  // TEMPORARILY DISABLED - may cause self-referential loop
-} from "commontools";
+} from "commonfabric";
 import GmailAgenticSearch, {
   type SearchProgress,
 } from "../core/experimental/gmail-agentic-search.tsx";
@@ -577,15 +577,15 @@ Report memberships as you find them. Don't wait until the end.`,
       count: totalMemberships,
 
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           {/* WORKAROUND (CT-1090): Wish import disabled - see superstition about self-referential wish loops */}
 
           <div slot="header">
             <h2 style={{ margin: "0", fontSize: "18px" }}>Hotel Memberships</h2>
           </div>
 
-          <ct-vscroll flex showScrollbar>
-            <ct-vstack style="padding: 16px; gap: 16px;">
+          <cf-vscroll flex showScrollbar>
+            <cf-vstack style="padding: 16px; gap: 16px;">
               {/* Auth UI from base pattern */}
               {searcher.ui.auth}
 
@@ -611,15 +611,15 @@ Report memberships as you find them. Don't wait until the end.`,
                     Scan Mode
                   </div>
                   <div style={{ display: "flex", gap: "8px" }}>
-                    <ct-button
+                    <cf-button
                       onClick={startFullScan}
                       size="lg"
                       style="flex: 1;"
                       disabled={buttonsDisabled}
                     >
                       {fullScanLabel}
-                    </ct-button>
-                    <ct-button
+                    </cf-button>
+                    <cf-button
                       onClick={startRecentScan}
                       variant="secondary"
                       size="lg"
@@ -627,7 +627,7 @@ Report memberships as you find them. Don't wait until the end.`,
                       disabled={buttonsDisabled}
                     >
                       📅 Check Recent
-                    </ct-button>
+                    </cf-button>
                   </div>
                   <div
                     style={{
@@ -646,14 +646,14 @@ Report memberships as you find them. Don't wait until the end.`,
               {/* Stop button when scanning */}
               {ifElse(
                 isScanning,
-                <ct-button
+                <cf-button
                   onClick={searcher.stopScan}
                   variant="secondary"
                   size="lg"
                   style="width: 100%;"
                 >
                   ⏹ Stop Scan
-                </ct-button>,
+                </cf-button>,
                 null,
               )}
 
@@ -830,7 +830,7 @@ Report memberships as you find them. Don't wait until the end.`,
                       >
                         {brand || "Unknown Brand"} ({groups[brand].length})
                       </summary>
-                      <ct-vstack gap={2} style="paddingLeft: 16px;">
+                      <cf-vstack gap={2} style="paddingLeft: 16px;">
                         {groups[brand].map((m: MembershipRecord) => (
                           <div
                             style={{
@@ -901,7 +901,7 @@ Report memberships as you find them. Don't wait until the end.`,
                             </div>
                           </div>
                         ))}
-                      </ct-vstack>
+                      </cf-vstack>
                     </details>
                   ));
                 })}
@@ -924,7 +924,7 @@ Report memberships as you find them. Don't wait until the end.`,
                 >
                   🔧 Debug Info
                 </summary>
-                <ct-vstack gap={2} style="padding: 12px; fontSize: 12px;">
+                <cf-vstack gap={2} style="padding: 12px; fontSize: 12px;">
                   <div style={{ fontFamily: "monospace" }}>
                     Is Authenticated: {derive(
                       searcher.isAuthenticated,
@@ -967,11 +967,11 @@ Report memberships as you find them. Don't wait until the end.`,
                       (p) => (p || []).length,
                     )}
                   </div>
-                </ct-vstack>
+                </cf-vstack>
               </details>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
     };
   },

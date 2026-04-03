@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, NAME, pattern, UI, wish } from "commontools";
+import { Default, NAME, pattern, UI, wish } from "commonfabric";
 
 export default pattern<Record<string, never>>((_) => {
   const { result: mentionable } = wish<Default<Array<{ [NAME]: string }>, []>>({
@@ -9,9 +9,9 @@ export default pattern<Record<string, never>>((_) => {
   return {
     [NAME]: "Mentionable Inspector",
     [UI]: (
-      <ct-vstack gap="3">
-        {mentionable!.map((item) => <ct-cell-link $cell={item} />)}
-      </ct-vstack>
+      <cf-vstack gap="3">
+        {mentionable!.map((item) => <cf-cell-link $cell={item} />)}
+      </cf-vstack>
     ),
   };
 });

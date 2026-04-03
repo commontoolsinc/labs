@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { computed, pattern } from "commonfabric";
 // CT-1334: computed() with template literal capturing pattern parameter.
 // The `token` from pattern destructuring must be captured as an explicit
 // input to the derived derive() call, so the callback receives the
@@ -8,7 +8,7 @@ export default pattern((__ct_pattern_input: {
     token: string;
 }) => {
     const token = __ct_pattern_input.key("token");
-    const url = __ctHelpers.derive({
+    const url = __cfHelpers.derive({
         type: "object",
         properties: {
             token: {
@@ -16,10 +16,10 @@ export default pattern((__ct_pattern_input: {
             }
         },
         required: ["token"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, { token: token }, ({ token }) => `http://api.example.com?token=${token}`);
-    const options = __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, { token: token }, ({ token }) => `http://api.example.com?token=${token}`);
+    const options = __cfHelpers.derive({
         type: "object",
         properties: {
             token: {
@@ -27,7 +27,7 @@ export default pattern((__ct_pattern_input: {
             }
         },
         required: ["token"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             headers: {
@@ -41,7 +41,7 @@ export default pattern((__ct_pattern_input: {
             }
         },
         required: ["headers"]
-    } as const satisfies __ctHelpers.JSONSchema, { token: token }, ({ token }) => ({
+    } as const satisfies __cfHelpers.JSONSchema, { token: token }, ({ token }) => ({
         headers: { Authorization: `Bearer ${token}` },
     }));
     return { url, options };
@@ -53,7 +53,7 @@ export default pattern((__ct_pattern_input: {
         }
     },
     required: ["token"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         url: {
@@ -76,8 +76,8 @@ export default pattern((__ct_pattern_input: {
         }
     },
     required: ["url", "options"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

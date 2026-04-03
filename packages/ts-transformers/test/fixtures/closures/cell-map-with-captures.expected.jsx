@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, cell, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, cell, pattern, UI } from "commonfabric";
 interface State {
     values: number[];
     multiplier: number;
@@ -18,13 +18,13 @@ export default pattern((state) => {
         items: {
             type: "number"
         }
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
-        {typedValues.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {typedValues.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const value = __ct_pattern_input.key("element");
                 const state = __ct_pattern_input.key("params", "state");
-                return (<span>{__ctHelpers.derive({
+                return (<span>{__cfHelpers.derive({
                     type: "object",
                     properties: {
                         value: {
@@ -41,9 +41,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["value", "state"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     value: value,
                     state: {
                         multiplier: state.key("multiplier")
@@ -72,7 +72,7 @@ export default pattern((state) => {
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -92,7 +92,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {
+            } as const satisfies __cfHelpers.JSONSchema), {
                 state: {
                     multiplier: state.key("multiplier")
                 }
@@ -113,7 +113,7 @@ export default pattern((state) => {
         }
     },
     required: ["values", "multiplier"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -142,8 +142,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

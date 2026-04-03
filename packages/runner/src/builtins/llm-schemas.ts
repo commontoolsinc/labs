@@ -1,4 +1,4 @@
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 
 /** Runtime schema for {@link BuiltInLLMContent} (packages/api/index.ts). */
 export const LLMContentSchema = toDeepFrozenSchema(

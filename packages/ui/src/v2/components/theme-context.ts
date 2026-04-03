@@ -14,9 +14,9 @@ export type ColorToken = string | {
 };
 
 /**
- * Comprehensive theme configuration for CT components
+ * Comprehensive theme configuration for CF components
  */
-export interface CTTheme {
+export interface CFTheme {
   /** Font family for text content */
   fontFamily: string;
   /** Monospace font family for code */
@@ -137,7 +137,7 @@ export function resolveColor(
  * @returns CSS custom property with fallback
  */
 export function getSemanticSpacing(
-  density: CTTheme["density"],
+  density: CFTheme["density"],
   size: keyof typeof BASE_SPACING,
   context: "tight" | "normal" | "loose" = "normal",
 ): string {
@@ -145,17 +145,17 @@ export function getSemanticSpacing(
   const baseValue = BASE_SPACING[size];
   const scaledValue = baseValue * scale;
 
-  // Map to closest ct-spacing level for compatibility
+  // Map to the closest spacing level for compatibility
   const spacingLevel = Math.min(4, Math.round(scaledValue * 4));
   const fallback = `${scaledValue}rem`;
 
-  return `var(--ct-spacing-${spacingLevel}, ${fallback})`;
+  return `var(--cf-spacing-${spacingLevel}, ${fallback})`;
 }
 
 /**
  * Default theme values with SwiftUI-style adaptive colors
  */
-export const defaultTheme: CTTheme = {
+export const defaultTheme: CFTheme = {
   fontFamily: "system-ui, -apple-system, sans-serif",
   monoFontFamily:
     "ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace",
@@ -251,14 +251,14 @@ export const defaultTheme: CTTheme = {
  * @returns Resolved color string
  */
 export function getThemeColor(
-  value: keyof CTTheme["colors"] | ColorToken | string,
-  theme: CTTheme,
+  value: keyof CFTheme["colors"] | ColorToken | string,
+  theme: CFTheme,
 ): string {
   const colorScheme = resolveColorScheme(theme.colorScheme);
 
   // If it's a semantic color key, resolve from theme
   if (typeof value === "string" && value in theme.colors) {
-    const semanticToken = theme.colors[value as keyof CTTheme["colors"]];
+    const semanticToken = theme.colors[value as keyof CFTheme["colors"]];
     return resolveColor(semanticToken, colorScheme);
   }
 
@@ -283,16 +283,16 @@ export function getThemeColor(
 export function getThemeSpacing(
   value:
     | `${keyof typeof BASE_SPACING}-${keyof typeof DENSITY_SCALES[
-      CTTheme["density"]
+      CFTheme["density"]
     ]}`
     | string,
-  theme: CTTheme,
+  theme: CFTheme,
 ): string {
   // If it's a semantic spacing descriptor (e.g., "lg-normal", "sm-tight")
   if (typeof value === "string" && value.includes("-")) {
     const [sizeStr, contextStr] = value.split("-") as [
       keyof typeof BASE_SPACING,
-      keyof typeof DENSITY_SCALES[CTTheme["density"]],
+      keyof typeof DENSITY_SCALES[CFTheme["density"]],
     ];
     if (
       sizeStr in BASE_SPACING && contextStr in DENSITY_SCALES[theme.density]
@@ -312,11 +312,11 @@ export function getThemeSpacing(
  * @returns New theme with applied overrides
  */
 export function createThemeVariant(
-  baseTheme: CTTheme,
-  overrides: Partial<CTTheme> & {
-    colors?: Partial<CTTheme["colors"]> & Record<string, ColorToken | string>;
+  baseTheme: CFTheme,
+  overrides: Partial<CFTheme> & {
+    colors?: Partial<CFTheme["colors"]> & Record<string, ColorToken | string>;
   },
-): CTTheme {
+): CFTheme {
   return {
     ...baseTheme,
     ...overrides,
@@ -331,12 +331,12 @@ export function createThemeVariant(
  * Merge a partial theme with the default theme, supporting pattern-style partial objects
  * @param partialTheme - Partial theme object that may contain pattern-style properties
  * @param baseTheme - Base theme to merge with (defaults to defaultTheme)
- * @returns Full CTTheme with merged properties
+ * @returns Full CFTheme with merged properties
  */
 export function mergeWithDefaultTheme(
   partialTheme: any,
-  baseTheme: CTTheme = defaultTheme,
-): CTTheme {
+  baseTheme: CFTheme = defaultTheme,
+): CFTheme {
   if (!partialTheme || typeof partialTheme !== "object") {
     return baseTheme;
   }
@@ -344,7 +344,7 @@ export function mergeWithDefaultTheme(
   // Handle pattern-style theme objects with specific properties
   const mergedTheme = { ...baseTheme };
 
-  // Map common pattern theme properties to CTTheme properties
+  // Map common pattern theme properties to CFTheme properties
   if (partialTheme.accentColor) {
     mergedTheme.colors = {
       ...mergedTheme.colors,
@@ -361,7 +361,7 @@ export function mergeWithDefaultTheme(
     mergedTheme.borderRadius = partialTheme.borderRadius;
   }
 
-  // Also handle direct CTTheme properties
+  // Also handle direct CFTheme properties
   if (partialTheme.fontFamily) {
     mergedTheme.fontFamily = partialTheme.fontFamily;
   }
@@ -401,7 +401,7 @@ export function mergeWithDefaultTheme(
  * @param speed - Theme animation speed setting
  * @returns CSS duration value
  */
-export function getAnimationDuration(speed: CTTheme["animationSpeed"]): string {
+export function getAnimationDuration(speed: CFTheme["animationSpeed"]): string {
   switch (speed) {
     case "none":
       return "0ms";
@@ -424,7 +424,7 @@ export function getAnimationDuration(speed: CTTheme["animationSpeed"]): string {
  */
 export function applyThemeToElement(
   element: HTMLElement,
-  theme: CTTheme,
+  theme: CFTheme,
   options: {
     includeSpacing?: boolean;
     includeColors?: boolean;
@@ -443,15 +443,15 @@ export function applyThemeToElement(
 
   // Typography and base properties
   if (includeTypography) {
-    element.style.setProperty("--ct-theme-font-family", theme.fontFamily);
+    element.style.setProperty("--cf-theme-font-family", theme.fontFamily);
     element.style.setProperty(
-      "--ct-theme-mono-font-family",
+      "--cf-theme-mono-font-family",
       theme.monoFontFamily,
     );
-    element.style.setProperty("--ct-theme-font-size", theme.fontSize);
-    element.style.setProperty("--ct-theme-border-radius", theme.borderRadius);
+    element.style.setProperty("--cf-theme-font-size", theme.fontSize);
+    element.style.setProperty("--cf-theme-border-radius", theme.borderRadius);
     element.style.setProperty(
-      "--ct-theme-animation-duration",
+      "--cf-theme-animation-duration",
       getAnimationDuration(theme.animationSpeed),
     );
   }
@@ -482,7 +482,7 @@ export function applyThemeToElement(
 
     Object.entries(colorMap).forEach(([key, token]) => {
       element.style.setProperty(
-        `--ct-theme-color-${key}`,
+        `--cf-theme-color-${key}`,
         resolveColor(token, colorScheme),
       );
     });
@@ -501,12 +501,12 @@ export function applyThemeToElement(
     };
 
     Object.entries(spacingMap).forEach(([key, value]) => {
-      element.style.setProperty(`--ct-theme-spacing-${key}`, value);
+      element.style.setProperty(`--cf-theme-spacing-${key}`, value);
     });
   }
 }
 
 /**
- * Context for sharing theme across CT components
+ * Context for sharing theme across Common Fabric components
  */
-export const themeContext = createContext<CTTheme>("ct-theme");
+export const cfThemeContext = createContext<CFTheme>("cf-theme");

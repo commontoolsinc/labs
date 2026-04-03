@@ -37,7 +37,8 @@
   ],
   "tasks": {
     "check": "./tasks/check.sh",
-    "ct": "ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && deno run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\"",
+    "cf": "bash -lc 'ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && CF_CLI_NAME=cf deno run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\" \"$@\"' --",
+    "ct": "bash -lc 'ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && CF_CLI_NAME=ct deno run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\" \"$@\"' --",
     "test": "./tasks/test.ts",
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
     "build-binaries": "./tasks/build-binaries.ts",
@@ -45,11 +46,12 @@
     "initialize-db": "./tasks/initialize-db.sh",
     "integration": "./tasks/integration.ts",
     "profile": "./scripts/restart-local-dev.sh --inspect-brk",
-    "ct-profile": "ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && deno run --inspect-brk --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\""
+    "cf-profile": "bash -lc 'ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && CF_CLI_NAME=cf deno run --inspect-brk --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\" \"$@\"' --",
+    "ct-profile": "bash -lc 'ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && CF_CLI_NAME=ct deno run --inspect-brk --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\" \"$@\"' --"
   },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@commontools/html",
+    "jsxImportSource": "@commonfabric/html",
     "types": [
       "./packages/html/src/jsx.d.ts"
     ],
@@ -76,7 +78,6 @@
       ".claude/",
       ".beads/",
       "./packages/static/assets",
-      "./packages/ui/src/v2/components/ct-outliner",
       "./packages/vendor-astral",
       "./packages/patterns-saves-backup/",
       "./tmp/",
@@ -116,16 +117,16 @@
       "packages/static/assets/",
       "packages/ts-transformers/test/fixtures",
       "packages/schema-generator/test/fixtures",
-      "packages/ui/src/v2/components/ct-chart/ct-chart.ts",
-      "packages/ui/src/v2/components/ct-chart/lib/axes.ts",
-      "packages/ui/src/v2/components/ct-chart/lib/render.ts",
+      "packages/ui/src/v2/components/cf-chart/cf-chart.ts",
+      "packages/ui/src/v2/components/cf-chart/lib/axes.ts",
+      "packages/ui/src/v2/components/cf-chart/lib/render.ts",
       "packages/vendor-astral",
       "tutorials/"
     ]
   },
   "imports": {
-    "commontools": "./packages/api/index.ts",
-    "commontools/schema": "./packages/api/schema.ts",
+    "commonfabric": "./packages/api/index.ts",
+    "commonfabric/schema": "./packages/api/schema.ts",
     "core-js/proposals/explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/explicit-resource-management",
     "core-js/proposals/async-explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/async-explicit-resource-management",
     "@commontools/ports": "./ports.json",

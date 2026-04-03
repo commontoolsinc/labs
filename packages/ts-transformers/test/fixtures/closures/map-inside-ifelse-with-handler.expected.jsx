@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, handler, ifElse, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, handler, ifElse, pattern, UI } from "commonfabric";
 interface Item {
     id: number;
     name: string;
@@ -7,7 +7,7 @@ interface Item {
 // Handler that closes over both items array and individual item
 const removeItem = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         items: {
@@ -38,7 +38,7 @@ const removeItem = handler({
             required: ["id", "name"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (_event, { items, item }) => {
+} as const satisfies __cfHelpers.JSONSchema, (_event, { items, item }) => {
     const currentItems = items.get();
     const index = currentItems.findIndex((el) => el.equals(item));
     if (index >= 0) {
@@ -59,18 +59,18 @@ export default pattern((__ct_pattern_input) => {
         [UI]: (<div>
           {ifElse({
                 type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{}, {
                         type: "object",
                         properties: {}
                     }]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{}, {
                         type: "object",
                         properties: {}
                     }]
-            } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, hasItems, <div>
-              {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, hasItems, <div>
+              {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                     const item = __ct_pattern_input.key("element");
                     const items = __ct_pattern_input.key("params", "items");
                     return (<div>
@@ -111,7 +111,7 @@ export default pattern((__ct_pattern_input) => {
                             required: ["id", "name"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{
                             $ref: "https://commonfabric.org/schemas/vnode.json"
                         }, {
@@ -131,7 +131,7 @@ export default pattern((__ct_pattern_input) => {
                             required: ["$UI"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema), {
+                } as const satisfies __cfHelpers.JSONSchema), {
                     items: items
                 })}
             </div>, <div>No items</div>)}
@@ -165,7 +165,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["id", "name"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -194,8 +194,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

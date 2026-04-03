@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI } from "commontools";
+import { NAME, pattern, UI } from "commonfabric";
 
 interface Node {
   label: string;

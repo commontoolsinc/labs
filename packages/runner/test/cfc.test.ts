@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { JSONSchemaObj } from "@commontools/api";
+import type { JSONSchemaObj } from "@commonfabric/api";
 
 describe("ContextualFlowControl.schemaAtPath array index validation", () => {
   it("rejects leading-zero array index like '01'", () => {

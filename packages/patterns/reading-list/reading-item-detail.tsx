@@ -9,7 +9,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 export type ItemType = "book" | "article" | "paper" | "video";
 export type ItemStatus = "want" | "reading" | "finished" | "abandoned";
@@ -76,48 +76,48 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
     return {
       [NAME]: computed(() => `Reading: ${title.get() || "New Item"}`),
       [UI]: (
-        <ct-screen>
-          <ct-vstack slot="header">
-            <ct-heading level={4}>
+        <cf-screen>
+          <cf-vstack slot="header">
+            <cf-heading level={4}>
               {computed(() => title.get() || "New Item")}
-            </ct-heading>
-          </ct-vstack>
+            </cf-heading>
+          </cf-vstack>
 
-          <ct-vscroll flex showScrollbar fadeEdges>
-            <ct-vstack gap="3" style="padding: 1rem;">
-              <ct-card>
-                <ct-vstack gap="2">
-                  <ct-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+          <cf-vscroll flex showScrollbar fadeEdges>
+            <cf-vstack gap="3" style="padding: 1rem;">
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-vstack gap="1">
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                       Title
                     </label>
-                    <ct-input $value={title} placeholder="Title" />
-                  </ct-vstack>
+                    <cf-input $value={title} placeholder="Title" />
+                  </cf-vstack>
 
-                  <ct-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                  <cf-vstack gap="1">
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                       Author
                     </label>
-                    <ct-input $value={author} placeholder="Author name" />
-                  </ct-vstack>
+                    <cf-input $value={author} placeholder="Author name" />
+                  </cf-vstack>
 
-                  <ct-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                  <cf-vstack gap="1">
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                       URL
                     </label>
-                    <ct-input
+                    <cf-input
                       $value={url}
                       placeholder="https://..."
                       type="url"
                     />
-                  </ct-vstack>
+                  </cf-vstack>
 
-                  <ct-hstack gap="2">
-                    <ct-vstack gap="1" style="flex: 1;">
-                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                  <cf-hstack gap="2">
+                    <cf-vstack gap="1" style="flex: 1;">
+                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                         Type
                       </label>
-                      <ct-select
+                      <cf-select
                         $value={type}
                         items={[
                           { label: "📄 Article", value: "article" },
@@ -126,13 +126,13 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                           { label: "🎬 Video", value: "video" },
                         ]}
                       />
-                    </ct-vstack>
+                    </cf-vstack>
 
-                    <ct-vstack gap="1" style="flex: 1;">
-                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    <cf-vstack gap="1" style="flex: 1;">
+                      <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                         Status
                       </label>
-                      <ct-select
+                      <cf-select
                         $value={status}
                         items={[
                           { label: "Want to read", value: "want" },
@@ -141,14 +141,14 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                           { label: "Abandoned", value: "abandoned" },
                         ]}
                       />
-                    </ct-vstack>
-                  </ct-hstack>
+                    </cf-vstack>
+                  </cf-hstack>
 
-                  <ct-vstack gap="1">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                  <cf-vstack gap="1">
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                       Rating
                     </label>
-                    <ct-select
+                    <cf-select
                       $value={rating}
                       items={[
                         { label: "No rating", value: null },
@@ -159,25 +159,25 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
                         { label: "★★★★★ (5)", value: 5 },
                       ]}
                     />
-                  </ct-vstack>
-                </ct-vstack>
-              </ct-card>
+                  </cf-vstack>
+                </cf-vstack>
+              </cf-card>
 
-              <ct-card>
-                <ct-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+              <cf-card>
+                <cf-vstack gap="1">
+                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--cf-color-gray-500);">
                     Notes
                   </label>
-                  <ct-textarea
+                  <cf-textarea
                     $value={notes}
                     placeholder="Your thoughts, highlights, quotes..."
                     rows={8}
                   />
-                </ct-vstack>
-              </ct-card>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+                </cf-vstack>
+              </cf-card>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
       title,
       author,

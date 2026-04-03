@@ -27,8 +27,8 @@ export default pattern<Input, Input>(({ items }) => {
   return {
     [UI]: (
       <div>
-        <ct-input $value={itemTitle} />
-        <ct-button onClick={addItem({ items, itemTitle })}>Add</ct-button>
+        <cf-input $value={itemTitle} />
+        <cf-button onClick={addItem({ items, itemTitle })}>Add</cf-button>
       </div>
     ),
     items,
@@ -66,7 +66,7 @@ export default pattern(({ searchQuery }) => {
         {loading && <span>Loading...</span>}
         {error && <span>Error: {error}</span>}
         {result && <div>{result}</div>}
-        <ct-message-input onct-send={handleSearch({ searchQuery })} />
+        <cf-message-input oncf-send={handleSearch({ searchQuery })} />
       </div>
     ),
   };

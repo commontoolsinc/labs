@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, derive, pattern } from "commontools";
+import { Writable, derive, pattern } from "commonfabric";
 
 // FIXTURE: derive-reserved-names
 // Verifies: variables with __ct_ prefixed names are captured without special treatment

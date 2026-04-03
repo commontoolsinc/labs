@@ -1,6 +1,6 @@
-import { DID, Identity, type Session } from "@commontools/identity";
-import { PieceManager } from "@commontools/piece";
-import { PiecesController } from "@commontools/piece/ops";
+import { DID, Identity, type Session } from "@commonfabric/identity";
+import { PieceManager } from "@commonfabric/piece";
+import { PiecesController } from "@commonfabric/piece/ops";
 import {
   getLoggerCountsBreakdown,
   getLoggerFlagsBreakdown,
@@ -8,7 +8,7 @@ import {
   Logger,
   resetAllCountBaselines,
   resetAllTimingBaselines,
-} from "@commontools/utils/logger";
+} from "@commonfabric/utils/logger";
 import {
   type Cancel,
   type Cell,
@@ -21,16 +21,16 @@ import {
   RuntimeTelemetryEvent,
   setPatternEnvironment,
   type SigilLink,
-} from "@commontools/runner";
+} from "@commonfabric/runner";
 import {
   CachedCompiler,
   IDBCompilationCache,
-} from "@commontools/runner/compilation-cache";
+} from "@commonfabric/runner/compilation-cache";
 import {
   NameSchema,
   nameSchema,
   rendererVDOMSchema,
-} from "@commontools/runner/schemas";
+} from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
   type NormalizedFullLink,
@@ -95,8 +95,8 @@ import {
   type VDomUnmountRequest,
   type WriteStackTraceResponse,
 } from "../protocol/mod.ts";
-import { HttpProgramResolver, Program } from "@commontools/js-compiler";
-import { setLLMUrl } from "@commontools/llm";
+import { HttpProgramResolver, Program } from "@commonfabric/js-compiler";
+import { setLLMUrl } from "@commonfabric/llm";
 import {
   createCellRef,
   createPageRef,
@@ -104,8 +104,8 @@ import {
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
 import { cellRefToKey } from "../shared/utils.ts";
-import { RemoteResponse } from "@commontools/runtime-client";
-import { WorkerReconciler } from "@commontools/html/worker";
+import { RemoteResponse } from "@commonfabric/runtime-client";
+import { WorkerReconciler } from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
@@ -714,11 +714,11 @@ export class RuntimeProcessor {
 
   #getLoggerMetadata(): LoggerMetadata {
     const global = globalThis as unknown as {
-      commontools?: { logger?: Record<string, Logger> };
+      commonfabric?: { logger?: Record<string, Logger> };
     };
     const result: LoggerMetadata = {};
-    if (global.commontools?.logger) {
-      for (const [name, logger] of Object.entries(global.commontools.logger)) {
+    if (global.commonfabric?.logger) {
+      for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
         result[name] = {
           enabled: !logger.disabled,
           level: (logger.level ?? "info") as LogLevel,
@@ -753,16 +753,16 @@ export class RuntimeProcessor {
 
   #getLoggers(loggerName?: string): Logger[] {
     const global = globalThis as unknown as {
-      commontools?: { logger?: Record<string, Logger> };
+      commonfabric?: { logger?: Record<string, Logger> };
     };
-    if (!global.commontools?.logger) {
+    if (!global.commonfabric?.logger) {
       return [];
     }
     if (loggerName) {
-      const logger = global.commontools.logger[loggerName];
+      const logger = global.commonfabric.logger[loggerName];
       return logger ? [logger] : [];
     }
-    return Object.values(global.commontools.logger);
+    return Object.values(global.commonfabric.logger);
   }
 
   #onTelemetry = (event: Event) => {

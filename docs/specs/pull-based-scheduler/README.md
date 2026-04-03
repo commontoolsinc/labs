@@ -3,7 +3,7 @@
 > **Status**: Implemented and enabled by default
 > **Location**: `packages/runner/src/scheduler.ts`
 
-This document describes how the pull-based scheduler works in the CommonTools runtime.
+This document describes how the pull-based scheduler works in the Common Fabric runtime.
 
 ## Background: Why Pull-Based?
 

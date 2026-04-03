@@ -27,7 +27,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import GmailExtractor, { type Email } from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/util/google-auth-manager.tsx";
 import {
@@ -39,7 +39,7 @@ import {
   type ScopeKey,
 } from "../core/util/google-auth-manager.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
-import type { Stream } from "commontools";
+import type { Stream } from "commonfabric";
 
 // Debug flag for development
 const DEBUG_NOTES = false;
@@ -336,19 +336,19 @@ export default pattern<PatternInput, PatternOutput>(() => {
     previewUI,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-hstack align="center" gap="2">
-            <ct-heading level={3}>Email Notes</ct-heading>
+          <cf-hstack align="center" gap="2">
+            <cf-heading level={3}>Email Notes</cf-heading>
             <span style={{ color: "#6b7280", fontSize: "14px" }}>
               ({noteCount} notes)
             </span>
-            <ct-checkbox $checked={sortNewestFirst}>Newest first</ct-checkbox>
-          </ct-hstack>
+            <cf-checkbox $checked={sortNewestFirst}>Newest first</cf-checkbox>
+          </cf-hstack>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {/* Auth UI */}
             {authUI}
 
@@ -467,7 +467,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                   "task-current" to see it here.
                 </div>
               </div>,
-              <ct-vstack gap="3">
+              <cf-vstack gap="3">
                 {notes.map((note) => {
                   // Check if this note is being processed
                   // Extract noteId before computed to avoid OpaqueRef issues
@@ -505,7 +505,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                         </span>
                         <div style={{ display: "flex", gap: "8px" }}>
                           {/* Copy button - copies both plain text and HTML for rich pasting */}
-                          <ct-copy-button
+                          <cf-copy-button
                             text={derive(note, (n) => ({
                               "text/plain": n.content,
                               "text/html": n.htmlContent,
@@ -559,7 +559,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                       </div>
 
                       {/* Note content - rendered as markdown */}
-                      <ct-markdown
+                      <cf-markdown
                         content={derive(note, (n) => n.content)}
                         compact
                         style="font-size: 14px; line-height: 1.5; color: #374151;"
@@ -567,11 +567,11 @@ export default pattern<PatternInput, PatternOutput>(() => {
                     </div>
                   );
                 })}
-              </ct-vstack>,
+              </cf-vstack>,
             )}
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

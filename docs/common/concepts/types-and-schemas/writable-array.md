@@ -4,7 +4,7 @@
 **Use `Writable<T[]>` by default:**
 
 ```typescript
-import { handler, Writable } from 'commontools';
+import { handler, Writable } from 'commonfabric';
 
 interface Item {
   title: string;
@@ -22,7 +22,7 @@ const addItem = handler<unknown, { items: Writable<Item[]> }>(
 **Use `Writable<Array<Writable<T>>>` only when you need `.equals()` on elements:**
 
 ```typescript
-import { handler, Writable } from 'commontools';
+import { handler, Writable } from 'commonfabric';
 
 interface Item {
   title: string;

@@ -5,7 +5,7 @@
  * `fabric-value.ts`.
  */
 import * as Reference from "merkle-reference";
-import { LRUCache } from "@commontools/utils/cache";
+import { LRUCache } from "@commonfabric/utils/cache";
 import { sha256 } from "./sha256-impl.ts";
 import type { HashObject } from "./value-hash.ts";
 import type { FabricValue } from "./interface.ts";

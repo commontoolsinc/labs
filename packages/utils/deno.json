@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/utils",
+  "name": "@commonfabric/utils",
   "tasks": {
     "test": "deno test"
   },

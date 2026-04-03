@@ -15,7 +15,7 @@ to be transformed:
 
 ```typescript
 /// <cts-enable />
-import { cell, derive, ifElse, toSchema } from "commontools";
+import { cell, derive, ifElse, toSchema } from "commonfabric";
 ```
 
 Without this directive, the transformers will not modify your code.
@@ -24,7 +24,7 @@ Without this directive, the transformers will not modify your code.
 
 ### What is OpaqueRef?
 
-OpaqueRef is a type representing reactive values in CommonTools. It wraps:
+OpaqueRef is a type representing reactive values in Common Fabric. It wraps:
 
 - The actual value type (e.g., `string`, `number`, `{ name: string }`)
 - Methods for reactivity (`.get()`, `.set()`, etc.) used inside
@@ -191,7 +191,7 @@ Transform TypeScript interfaces to JSON Schema at compile time:
 
 ```typescript
 /// <cts-enable />
-import { toSchema } from "commontools";
+import { toSchema } from "commonfabric";
 
 interface User {
   name: string;
@@ -220,7 +220,7 @@ arguments:
 
 ```typescript
 /// <cts-enable />
-import { Cell, handler, pattern } from "commontools";
+import { Cell, handler, pattern } from "commonfabric";
 
 // Handler with type arguments
 const myHandler = handler<ClickEvent, { count: Cell<number> }>(
@@ -342,7 +342,7 @@ const schema = {
 
 A critical aspect of the AST system is semantic validation that runs
 **regardless of transformation mode**. This validation ensures patterns follow
-CommonTools patterns correctly and provides helpful error messages for both
+Common Fabric patterns correctly and provides helpful error messages for both
 humans and LLMs.
 
 NOTE: this is not yet implemented.
@@ -570,7 +570,7 @@ interface TransformerOptions {
 
 ```typescript
 /// <cts-enable />
-import { Cell, cell, derive, ifElse, pattern, toSchema, UI } from "commontools";
+import { Cell, cell, derive, ifElse, pattern, toSchema, UI } from "commonfabric";
 
 interface TodoItem {
   id: string;

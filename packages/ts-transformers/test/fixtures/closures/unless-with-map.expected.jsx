@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * Test case for unless() with a reactive array map as the fallback.
  *
@@ -6,7 +6,7 @@ import * as __ctHelpers from "commontools";
  * When fallback is items.map(...), the map gets transformed to mapWithPattern.
  * Schema injection needs to know the type of the mapWithPattern result.
  */
-import { Cell, Default, pattern, UI } from "commontools";
+import { Cell, Default, pattern, UI } from "commonfabric";
 interface Item {
     label: string;
 }
@@ -28,14 +28,14 @@ export default pattern((__ct_pattern_input) => {
     return {
         [UI]: (<div>
         {/* unless(condition, fallback) where fallback is a reactive map */}
-        {__ctHelpers.unless({
+        {__cfHelpers.unless({
             asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "array",
             items: {}
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, customContent, items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        } as const satisfies __cfHelpers.JSONSchema, customContent, items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
             const item = __ct_pattern_input.key("element");
             return <li>{item.key("label")}</li>;
         }, {
@@ -57,7 +57,7 @@ export default pattern((__ct_pattern_input) => {
                     required: ["label"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
@@ -77,7 +77,7 @@ export default pattern((__ct_pattern_input) => {
                     required: ["$UI"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema), {}))}
+        } as const satisfies __cfHelpers.JSONSchema), {}))}
       </div>),
     };
 }, {
@@ -107,7 +107,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["label"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -136,8 +136,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -24,7 +24,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import { createSubPiece, getDefinition } from "./record/registry.ts";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
@@ -98,7 +98,7 @@ interface RecordPiece {
 /**
  * Coerce data types to match schema expectations
  * Handles common type mismatches (e.g., "1986" string → 1986 number)
- * Used by both export (to fix ct-input storing numbers as strings)
+ * Used by both export (to fix cf-input storing numbers as strings)
  * and import (to handle JSON that may have wrong types)
  */
 function coerceDataTypes(
@@ -163,7 +163,7 @@ function extractModuleData(
     }
   }
 
-  // Coerce types to match schema (fixes ct-input storing numbers as strings)
+  // Coerce types to match schema (fixes cf-input storing numbers as strings)
   return coerceDataTypes(type, data);
 }
 
@@ -647,24 +647,24 @@ export default pattern<Input, Output>(({ importJson }) => {
   return {
     [NAME]: computed(() => `Record Backup (${recordCount} records)`),
     [UI]: (
-      <ct-screen>
-        <ct-toolbar slot="header" sticky>
+      <cf-screen>
+        <cf-toolbar slot="header" sticky>
           <div slot="start">
             <span style={{ fontWeight: "bold" }}>Record Backup</span>
           </div>
-        </ct-toolbar>
+        </cf-toolbar>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack gap="6" padding="6">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack gap="6" padding="6">
             {/* Export Section */}
-            <ct-card>
-              <ct-vstack gap="4">
+            <cf-card>
+              <cf-vstack gap="4">
                 <h2>Export Records</h2>
                 <p>
                   Found <strong>{recordCount}</strong>{" "}
                   records in this space. Copy the JSON below to save your data.
                 </p>
-                <ct-file-download
+                <cf-file-download
                   $data={exportedJson}
                   filename={`record-backup-${
                     new Date().toISOString().slice(0, 10)
@@ -674,8 +674,8 @@ export default pattern<Input, Output>(({ importJson }) => {
                   allowAutosave
                 >
                   Download Backup
-                </ct-file-download>
-                <ct-code-editor
+                </cf-file-download>
+                <cf-code-editor
                   $value={exportedJson}
                   language="application/json"
                   theme="light"
@@ -688,23 +688,23 @@ export default pattern<Input, Output>(({ importJson }) => {
                   }}
                   readonly
                 />
-              </ct-vstack>
-            </ct-card>
+              </cf-vstack>
+            </cf-card>
 
             {/* Import Section */}
-            <ct-card>
-              <ct-vstack gap="4">
+            <cf-card>
+              <cf-vstack gap="4">
                 <h2>Import Records</h2>
                 <p>
                   Upload a backup file or paste JSON to restore your records.
                 </p>
-                <ct-file-input
+                <cf-file-input
                   accept=".json,application/json"
                   buttonText="📤 Upload Backup File"
                   showPreview={false}
-                  onct-change={handleFileUpload({ importJson })}
+                  oncf-change={handleFileUpload({ importJson })}
                 />
-                <ct-code-editor
+                <cf-code-editor
                   $value={importJson}
                   language="application/json"
                   theme="light"
@@ -721,7 +721,7 @@ export default pattern<Input, Output>(({ importJson }) => {
   "records": [...]
 }`}
                 />
-                <ct-button
+                <cf-button
                   onClick={importRecords({
                     importJson,
                     allPieces,
@@ -730,7 +730,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                   variant="primary"
                 >
                   Import Records
-                </ct-button>
+                </cf-button>
 
                 {/* Import Result Display */}
                 {ifElse(
@@ -743,25 +743,25 @@ export default pattern<Input, Output>(({ importJson }) => {
                       border: importResultBorder,
                     }}
                   >
-                    <ct-vstack gap="2">
+                    <cf-vstack gap="2">
                       <strong>{importResultTitle}</strong>
                       <p>{importResultMessage}</p>
-                      <ct-button
+                      <cf-button
                         size="sm"
                         variant="ghost"
                         onClick={clearImportResult({ importResult })}
                       >
                         Dismiss
-                      </ct-button>
-                    </ct-vstack>
+                      </cf-button>
+                    </cf-vstack>
                   </div>,
                   null,
                 )}
-              </ct-vstack>
-            </ct-card>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+              </cf-vstack>
+            </cf-card>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
     exportedJson,
     importJson,

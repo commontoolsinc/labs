@@ -1,4 +1,4 @@
-import { build } from "@commontools/felt";
+import { build } from "@commonfabric/felt";
 import { LaunchOptions } from "@astral/astral";
 import * as path from "@std/path";
 import { exists } from "@std/fs/exists";

@@ -3,7 +3,7 @@
 Handlers exposed in Output interfaces must be typed as `Stream<T>`.
 
 ```typescript
-import { Stream } from 'commontools';
+import { Stream } from 'commonfabric';
 
 interface Output {
   count: number;
@@ -21,7 +21,7 @@ interface Output {
 A bound handler IS a `Stream<EventType>`. Don't try to create streams directly:
 
 ```typescript
-import { handler, pattern, Writable, Stream } from 'commontools';
+import { handler, pattern, Writable, Stream } from 'commonfabric';
 
 interface Item { title: string }
 

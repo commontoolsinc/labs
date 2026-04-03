@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 type SelectedScopes = {
     gmail: boolean;
     calendar: boolean;
@@ -15,13 +15,13 @@ interface Input {
 // Verifies: plain-array callback roots stay plain while dynamic JSX bindings still derive
 //   Object.entries(...).map(fn)                     -> plain .map() remains plain
 //   selectedScopes[key as keyof SelectedScopes]     -> derived binding with selectedScopes and key captures
-// Context: Dynamic property access in a plain array callback used as a ct-checkbox binding
+// Context: Dynamic property access in a plain array callback used as a cf-checkbox binding
 export default pattern((__ct_pattern_input) => {
     const selectedScopes = __ct_pattern_input.key("selectedScopes");
     return {
         [UI]: (<div>
         {Object.entries(SCOPE_DESCRIPTIONS).map(([key, description]) => (<label>
-            <ct-checkbox $checked={__ctHelpers.derive({
+            <cf-checkbox $checked={__cfHelpers.derive({
                 type: "object",
                 properties: {
                     selectedScopes: {
@@ -46,14 +46,14 @@ export default pattern((__ct_pattern_input) => {
                         required: ["gmail", "calendar"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 selectedScopes: selectedScopes,
                 key: key
             }, ({ selectedScopes, key }) => selectedScopes[key as keyof SelectedScopes])}>
               {description}
-            </ct-checkbox>
+            </cf-checkbox>
           </label>))}
       </div>),
     };
@@ -79,7 +79,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["gmail", "calendar"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -108,8 +108,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -9,7 +9,7 @@ import {
   str,
   Stream,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 // How many times to increment per click
 const INCREMENTS_PER_CLICK = 50;
@@ -68,15 +68,15 @@ export default pattern<PatternState, PatternOutput>((state) => {
     [UI]: (
       <div>
         <div>
-          <ct-button onClick={decrement(state)}>
+          <cf-button onClick={decrement(state)}>
             dec to {previous(state.value)}
-          </ct-button>
+          </cf-button>
           <span id="counter-result">
             Counter is the {nth(state.value)} number
           </span>
-          <ct-button onClick={increment({ value: state.value })}>
+          <cf-button onClick={increment({ value: state.value })}>
             inc to {state.value + 1}
-          </ct-button>
+          </cf-button>
         </div>
         <div>
           {array.map((v: number, i: number) => <span key={i}>{v % 10}</span>)}

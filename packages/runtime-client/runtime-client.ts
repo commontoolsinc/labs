@@ -5,7 +5,7 @@
  * for interacting with cells across the worker boundary.
  */
 
-import type { DID, Identity } from "@commontools/identity";
+import type { DID, Identity } from "@commonfabric/identity";
 import type {
   ActionRunTraceEntry,
   JSONSchema,
@@ -17,8 +17,8 @@ import type {
   TriggerTraceEntry,
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
-} from "@commontools/runner/shared";
-import { Program } from "@commontools/js-compiler/interface";
+} from "@commonfabric/runner/shared";
+import { Program } from "@commonfabric/js-compiler/interface";
 import { CellHandle } from "./cell-handle.ts";
 import {
   type CellRef,
@@ -36,7 +36,7 @@ import {
   RequestType,
   TelemetryNotification,
 } from "./protocol/mod.ts";
-import { NameSchema } from "@commontools/runner/schemas";
+import { NameSchema } from "@commonfabric/runner/schemas";
 import { RuntimeTransport } from "./client/transport.ts";
 import { EventEmitter } from "./client/emitter.ts";
 import {

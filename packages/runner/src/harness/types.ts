@@ -3,7 +3,7 @@ import type {
   Program,
   ProgramResolver,
   Source,
-} from "@commontools/js-compiler";
+} from "@commonfabric/js-compiler";
 
 export type HarnessedFunction = (input: any) => void;
 

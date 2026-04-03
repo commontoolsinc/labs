@@ -1,6 +1,6 @@
 import { SourceMap } from "../../interface.ts";
 import { getAMDLoader } from "./amd-loader.ts";
-import { encode } from "@commontools/utils/encoding";
+import { encode } from "@commonfabric/utils/encoding";
 
 const MAIN = "$MAIN";
 const BUNDLE_PRE = stripNewLines(`

@@ -9,7 +9,7 @@
  * in favor of properly typed Cell values.
  */
 
-import { Default, Stream, Writable } from "commontools";
+import { Default, Stream, Writable } from "commonfabric";
 
 // ============ RE-EXPORT SHARED TYPES ============
 export type {

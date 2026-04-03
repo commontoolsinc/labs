@@ -3,7 +3,7 @@ import { Manifest } from "./manifest.ts";
 import { tsToJs } from "./utils.ts";
 import { TestResult } from "./interface.ts";
 import { extractAstralConfig } from "./config.ts";
-import { sleep } from "@commontools/utils/sleep";
+import { sleep } from "@commonfabric/utils/sleep";
 
 export class BrowserController extends EventTarget {
   private manifest: Manifest;

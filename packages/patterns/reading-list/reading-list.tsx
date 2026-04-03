@@ -11,7 +11,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import ReadingItemDetail, {
   type ItemStatus,
@@ -159,99 +159,99 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
   return {
     [NAME]: computed(() => `Reading List (${asArray(items.get()).length})`),
     [UI]: (
-      <ct-screen>
-        <ct-vstack slot="header" gap="2">
-          <ct-hstack justify="between" align="center">
-            <ct-heading level={4}>Reading List ({totalCount})</ct-heading>
-          </ct-hstack>
+      <cf-screen>
+        <cf-vstack slot="header" gap="2">
+          <cf-hstack justify="between" align="center">
+            <cf-heading level={4}>Reading List ({totalCount})</cf-heading>
+          </cf-hstack>
 
-          <ct-tabs $value={filterStatus}>
-            <ct-tab-list>
-              <ct-tab value="all">All</ct-tab>
-              <ct-tab value="want">Want</ct-tab>
-              <ct-tab value="reading">Reading</ct-tab>
-              <ct-tab value="finished">Done</ct-tab>
-              <ct-tab value="abandoned">Dropped</ct-tab>
-            </ct-tab-list>
-          </ct-tabs>
-        </ct-vstack>
+          <cf-tabs $value={filterStatus}>
+            <cf-tab-list>
+              <cf-tab value="all">All</cf-tab>
+              <cf-tab value="want">Want</cf-tab>
+              <cf-tab value="reading">Reading</cf-tab>
+              <cf-tab value="finished">Done</cf-tab>
+              <cf-tab value="abandoned">Dropped</cf-tab>
+            </cf-tab-list>
+          </cf-tabs>
+        </cf-vstack>
 
-        <ct-vscroll flex showScrollbar fadeEdges>
-          <ct-vstack gap="2" style="padding: 1rem;">
+        <cf-vscroll flex showScrollbar fadeEdges>
+          <cf-vstack gap="2" style="padding: 1rem;">
             {computed(() => {
               return filteredItems.filter((item) => item).map((
                 item: ReadingItemPiece,
               ) => (
-                <ct-card>
-                  <ct-hstack gap="2" align="center">
+                <cf-card>
+                  <cf-hstack gap="2" align="center">
                     <span style="font-size: 1.5rem;">
                       {getTypeEmoji(item.type)}
                     </span>
-                    <ct-vstack gap="0" style="flex: 1;">
+                    <cf-vstack gap="0" style="flex: 1;">
                       <span style="font-weight: 500;">
                         {item.title || "(untitled)"}
                       </span>
                       {item.author && (
-                        <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+                        <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
                           by {item.author}
                         </span>
                       )}
-                      <ct-hstack gap="2" align="center">
-                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                      <cf-hstack gap="2" align="center">
+                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-400);">
                           {item.status}
                         </span>
                         {renderStars(item.rating) && (
-                          <span style="font-size: 0.75rem; color: var(--ct-color-warning-500);">
+                          <span style="font-size: 0.75rem; color: var(--cf-color-warning-500);">
                             {renderStars(item.rating)}
                           </span>
                         )}
-                      </ct-hstack>
+                      </cf-hstack>
                       {item.notes && (
-                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); font-style: italic; margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
+                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); font-style: italic; margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
                           {item.notes}
                         </span>
                       )}
-                    </ct-vstack>
-                    <ct-button
+                    </cf-vstack>
+                    <cf-button
                       variant="secondary"
                       onClick={() => navigateTo(item)}
                     >
                       Edit
-                    </ct-button>
-                    <ct-button
+                    </cf-button>
+                    <cf-button
                       variant="ghost"
                       onClick={() => removeItem.send({ item })}
                     >
                       ×
-                    </ct-button>
-                  </ct-hstack>
-                </ct-card>
+                    </cf-button>
+                  </cf-hstack>
+                </cf-card>
               ));
             })}
 
             {hasNoFilteredItems
               ? (
-                <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+                <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
                   No items yet. Add something to read!
                 </div>
               )
               : null}
-          </ct-vstack>
-        </ct-vscroll>
+          </cf-vstack>
+        </cf-vscroll>
 
-        <ct-vstack slot="footer" gap="2" style="padding: 1rem;">
-          <ct-hstack gap="2">
-            <ct-input
+        <cf-vstack slot="footer" gap="2" style="padding: 1rem;">
+          <cf-hstack gap="2">
+            <cf-input
               $value={newTitle}
               placeholder="Title..."
               style="flex: 1;"
             />
-            <ct-input
+            <cf-input
               $value={newAuthor}
               placeholder="Author..."
               style="width: 150px;"
             />
-            <ct-select
+            <cf-select
               $value={newType}
               items={[
                 { label: "📄 Article", value: "article" },
@@ -261,7 +261,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
               ]}
               style="width: 120px;"
             />
-            <ct-button
+            <cf-button
               variant="primary"
               onClick={() =>
                 addItem.send({
@@ -271,10 +271,10 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
                 })}
             >
               Add
-            </ct-button>
-          </ct-hstack>
-        </ct-vstack>
-      </ct-screen>
+            </cf-button>
+          </cf-hstack>
+        </cf-vstack>
+      </cf-screen>
     ),
     items,
     mentionable: items,

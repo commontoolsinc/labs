@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell } from "commontools";
+import { cell } from "commonfabric";
 
 // FIXTURE: literal-widen-string
 // Verifies: string literals (normal, empty, multiline, with spaces) are all widened to { type: "string" }

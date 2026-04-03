@@ -5,7 +5,7 @@
  * sent to the worker thread for dispatch to the appropriate handler.
  */
 
-import type { JSONValue } from "@commontools/runtime-client";
+import type { JSONValue } from "@commonfabric/runtime-client";
 
 /**
  * Serialized DOM event data.

@@ -1,7 +1,7 @@
 # TypeScript Transformers Current Behavior Specification
 
 **Status:** Implemented (current behavior)\
-**Package:** `@commontools/ts-transformers`\
+**Package:** `@commonfabric/ts-transformers`\
 **Effective date:** March 17, 2026\
 **Scope:** Compile-time behavior implemented in `packages/ts-transformers/src`
 and exercised by current tests/fixtures. **Related:**
@@ -27,13 +27,13 @@ If this document conflicts with code or passing tests, code/tests win.
 
 ### 2.1 `/// <cts-enable />` pre-transform
 
-Before AST transforms, `transformCtDirective()`:
+Before AST transforms, `transformCfDirective()`:
 
 1. Requires the first source line to match `/// <cts-enable />`.
 2. Rewrites source by injecting:
-   - `import * as __ctHelpers from "commontools";`
-   - helper `h(...)` forwarding to `__ctHelpers.h`.
-3. Rejects sources that contain identifier `__ctHelpers` anywhere in the AST.
+   - `import * as __cfHelpers from "commonfabric";`
+   - helper `h(...)` forwarding to `__cfHelpers.h`.
+3. Rejects sources that contain identifier `__cfHelpers` anywhere in the AST.
 
 If `/// <cts-enable />` is absent, no helper import is injected and most
 transformers effectively no-op.
@@ -46,7 +46,7 @@ Current rollout note:
 
 ### 2.2 Pipeline object
 
-`CommonToolsTransformerPipeline` constructs one ordered pipeline with shared
+`CommonFabricTransformerPipeline` constructs one ordered pipeline with shared
 mutable registries:
 
 - `typeRegistry: WeakMap<ts.Node, ts.Type>`
@@ -105,10 +105,10 @@ Current mode-sensitive behavior:
 
 Detection is provenance-first:
 
-1. symbol resolution against CommonTools declarations/imports
+1. symbol resolution against Common Fabric declarations/imports
 2. stable alias/signature following (`const alias = computed`,
    `declare const alias: typeof ifElse`)
-3. synthetic helper support for `__ctHelpers.*` nodes introduced by earlier
+3. synthetic helper support for `__cfHelpers.*` nodes introduced by earlier
    passes
 
 Remaining fallback behavior is intentionally narrow:
@@ -116,7 +116,7 @@ Remaining fallback behavior is intentionally narrow:
 - unresolved bare builder identifiers can still match builders
 - ambient builder declarations and ambient call-signature aliases can still
   classify as builders in type-only environments
-- shadowed local helpers and object methods with CommonTools-like names are not
+- shadowed local helpers and object methods with Common Fabric-like names are not
   classified
 
 Builder-placement validation uses `detectDirectBuilderCall()`, so calls to
@@ -177,7 +177,7 @@ On call `receiver.get()` (no args):
     reads require `.get()`.
 
 Same-named local helpers are not treated as reactive origins unless the call
-itself resolves through the CommonTools provenance rules in §5.
+itself resolves through the Common Fabric provenance rules in §5.
 
 ### 6.4 Schema shrink validation
 
@@ -386,9 +386,9 @@ for later schema injection.
 
 ## 8. Computed Lowering
 
-`ComputedTransformer` rewrites CommonTools `computed(...)` calls:
+`ComputedTransformer` rewrites Common Fabric `computed(...)` calls:
 
-- `computed(arg)` -> `__ctHelpers.derive({}, arg)` (exactly one argument)
+- `computed(arg)` -> `__cfHelpers.derive({}, arg)` (exactly one argument)
 - preserves call type arguments
 - does not additionally validate callback shape in this pass
 - preserves type information through `typeRegistry`
@@ -666,7 +666,7 @@ schema literals.
 Recognized call forms:
 
 - `toSchema<T>()`
-- `__ctHelpers.toSchema<T>()`
+- `__cfHelpers.toSchema<T>()`
 
 Behavior:
 
@@ -676,7 +676,7 @@ Behavior:
 4. generate schema via `createSchemaTransformerV2`
 5. merge non-generation options into resulting schema object
 6. emit literal as:
-   - `<schemaAst> as const satisfies __ctHelpers.JSONSchema`
+   - `<schemaAst> as const satisfies __cfHelpers.JSONSchema`
 
 Special path:
 

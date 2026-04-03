@@ -7,9 +7,9 @@ import {
   Proof,
   Signer,
 } from "./interface.ts";
-import { type HashObject, hashOf } from "@commontools/data-model/value-hash";
+import { type HashObject, hashOf } from "@commonfabric/data-model/value-hash";
 import { unauthorized } from "./error.ts";
-import { type DID } from "@commontools/identity";
+import { type DID } from "@commonfabric/identity";
 import { fromDID } from "./util.ts";
 import { checkACL } from "./acl.ts";
 

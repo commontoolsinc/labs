@@ -1,6 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run
 import * as path from "@std/path";
-import { decode, encode } from "@commontools/utils/encoding";
+import { decode, encode } from "@commonfabric/utils/encoding";
 
 export const ALL_DISABLED = [
   "background-charm-service", // no tests yet

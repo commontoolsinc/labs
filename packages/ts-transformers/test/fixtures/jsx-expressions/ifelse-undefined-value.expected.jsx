@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, fetchData, ifElse, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { computed, fetchData, ifElse, pattern, UI } from "commonfabric";
 // Tests ifElse where ifTrue is explicitly undefined
 // This pattern is common: ifElse(pending, undefined, { result })
 // The transformer must handle this correctly - the undefined is a VALUE, not a missing argument
@@ -16,9 +16,9 @@ export default pattern(() => {
     // Pattern 1: undefined as ifTrue (waiting state returns nothing)
     const output1 = ifElse({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "undefined"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             result: {
@@ -26,7 +26,7 @@ export default pattern(() => {
             }
         },
         required: ["result"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
                 type: "undefined"
             }, {
@@ -38,7 +38,7 @@ export default pattern(() => {
                 },
                 required: ["result"]
             }]
-    } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
         type: "object",
         properties: {
             pending: {
@@ -49,16 +49,16 @@ export default pattern(() => {
             }
         },
         required: ["pending", "result"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         pending: pending,
         result: result
     }, ({ pending, result }) => pending || !result), undefined, { result });
     // Pattern 2: undefined as ifFalse (error state returns nothing)
     const output2 = ifElse({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             data: {
@@ -66,9 +66,9 @@ export default pattern(() => {
             }
         },
         required: ["data"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "undefined"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
                 type: "undefined"
             }, {
@@ -80,7 +80,7 @@ export default pattern(() => {
                 },
                 required: ["data"]
             }]
-    } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
         type: "object",
         properties: {
             result: {
@@ -88,9 +88,9 @@ export default pattern(() => {
             }
         },
         required: ["result"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, { result: result }, ({ result }) => !!result), { data: result }, undefined);
+    } as const satisfies __cfHelpers.JSONSchema, { result: result }, ({ result }) => !!result), { data: result }, undefined);
     return {
         [UI]: (<div>
         <span>{output1}</span>
@@ -101,7 +101,7 @@ export default pattern(() => {
     type: "object",
     properties: {},
     additionalProperties: false
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -130,8 +130,8 @@ export default pattern(() => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

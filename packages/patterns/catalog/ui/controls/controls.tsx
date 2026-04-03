@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, type VNode } from "commontools";
+import { NAME, pattern, UI, type VNode } from "commonfabric";
 
 interface ControlsInput {
   children?: VNode;

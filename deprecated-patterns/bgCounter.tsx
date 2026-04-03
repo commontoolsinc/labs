@@ -8,7 +8,7 @@ import {
   pattern,
   str,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 const updater = handler<
   { delta: number },
@@ -47,12 +47,12 @@ export default pattern<
             Update Counter
           </button>
           <p>If error is set, the update function will throw an error</p>
-          <ct-input
+          <cf-input
             value={error}
             placeholder="Error"
-            onct-input={updateError({ error })}
+            oncf-input={updateError({ error })}
           />
-          <ct-updater
+          <cf-updater
             id="registerBgCounter"
             $state={counter}
             integration="counter"

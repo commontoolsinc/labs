@@ -17,7 +17,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Confidential<T> = T;
 
@@ -163,7 +163,7 @@ export default pattern<{
   return {
     [NAME]: derive(eventCount, (count: number) => `Calendar (${count} events)`),
     [UI]: (
-      <ct-screen
+      <cf-screen
         style={{
           display: "flex",
           flexDirection: "column",
@@ -370,7 +370,7 @@ export default pattern<{
             </div>,
           )}
         </div>
-      </ct-screen>
+      </cf-screen>
     ),
     events,
   };

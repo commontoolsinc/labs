@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 
 interface TagEvent {
   label: string;
@@ -20,9 +20,9 @@ export default pattern<{ recentEvents: TagEvent[] }>(({ recentEvents }) => ({
         : (
           <div>
             {recentEvents.map((event: TagEvent, idx: number) => (
-              <ct-hstack key={idx} gap="2">
+              <cf-hstack key={idx} gap="2">
                 <span>{event.label}</span>
-              </ct-hstack>
+              </cf-hstack>
             ))}
           </div>
         )}

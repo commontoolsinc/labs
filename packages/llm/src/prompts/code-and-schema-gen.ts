@@ -1,13 +1,13 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
-import type { JSONSchema, JSONSchemaObjMutable } from "@commontools/runner";
-import { WorkflowForm } from "@commontools/piece";
+import type { JSONSchema, JSONSchemaObjMutable } from "@commonfabric/runner";
+import { WorkflowForm } from "@commonfabric/piece";
 import { systemMdConcise } from "../../../piece/src/iframe/static.ts";
 import { formatForm } from "./spec-and-schema-gen.ts";
 import { llmPrompt } from "../index.ts";
 import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
-import { JSONSchemaObj } from "@commontools/api";
-import { isRecord } from "@commontools/utils/types";
+import { JSONSchemaObj } from "@commonfabric/api";
+import { isRecord } from "@commonfabric/utils/types";
 
 // This is for the 'imagine-single-phase' workflow
 

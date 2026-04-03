@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { getCellKind } from "@commontools/schema-generator/cell-brand";
+import { getCellKind } from "@commonfabric/schema-generator/cell-brand";
 import type { ReactiveContextInfo } from "../ast/reactive-context.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";

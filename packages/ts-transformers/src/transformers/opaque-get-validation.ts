@@ -10,7 +10,7 @@
  */
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
-import { getCellKind } from "@commontools/schema-generator/cell-brand";
+import { getCellKind } from "@commonfabric/schema-generator/cell-brand";
 import { detectCallKind, isReactiveOriginCall } from "../ast/call-kind.ts";
 
 export class OpaqueGetValidationTransformer extends Transformer {

@@ -1,4 +1,4 @@
-import { Cell, RuntimeProgram } from "@commontools/runner";
+import { Cell, RuntimeProgram } from "@commonfabric/runner";
 import { PieceManager } from "../manager.ts";
 import { compilePattern } from "../iterate.ts";
 

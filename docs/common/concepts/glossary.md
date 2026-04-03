@@ -110,7 +110,7 @@ AI-generated outputs.
 
 ## Reactive Framework
 
-The runtime engine behind Common Tools that computes state updates in a
+The runtime engine behind Common Fabric that computes state updates in a
 deterministic way, using dependency graphs of reactive cells.
 
 ## Pattern

@@ -9,18 +9,18 @@
  * 5. Workflow steps and execution
  */
 
-import { Cell, type JSONSchema, NAME, Runtime } from "@commontools/runner";
+import { Cell, type JSONSchema, NAME, Runtime } from "@commonfabric/runner";
 import { PieceManager } from "./manager.ts";
-import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
+import { classifyWorkflow, generateWorkflowPlan } from "@commonfabric/llm";
 import { iterate } from "./iterate.ts";
 import { getIframePattern } from "./iframe/pattern.ts";
 import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
 import { castNewPattern } from "./iterate.ts";
-import { applyDefaults, GenerationOptions } from "@commontools/llm";
+import { applyDefaults, GenerationOptions } from "@commonfabric/llm";
 import { PieceSearchResult, searchPieces } from "./search.ts";
 import { console } from "./conditional-console.ts";
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 
 // Types for workflow classification
 export type WorkflowType =

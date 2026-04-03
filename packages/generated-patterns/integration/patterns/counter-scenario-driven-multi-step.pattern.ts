@@ -8,7 +8,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface MultiStepArgs {
   value: Default<number, 0>;

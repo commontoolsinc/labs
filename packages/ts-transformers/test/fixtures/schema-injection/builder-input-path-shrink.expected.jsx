@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { action, derive, handler, lift, pattern, type Writable } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { action, derive, handler, lift, pattern, type Writable } from "commonfabric";
 // FIXTURE: builder-input-path-shrink
 // Verifies: builder input schemas shrink to observed paths when reads/writes are specific,
 // including explicit type arguments and interprocedural helper calls.
@@ -11,9 +11,9 @@ const liftOptional = lift({
         }
     },
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __ctHelpers.JSONSchema, (input: Writable<{
+} as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
     foo: string | undefined;
     bar: string;
 }>) => input.key("foo").get());
@@ -30,9 +30,9 @@ const deriveObserved = derive({
     },
     required: ["foo"],
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __ctHelpers.JSONSchema, deriveInput, (input: Writable<{
+} as const satisfies __cfHelpers.JSONSchema, deriveInput, (input: Writable<{
     foo: string;
     bar: string;
 }>) => input.key("foo").get());
@@ -45,10 +45,10 @@ const deriveExplicit = derive({
     },
     required: ["foo"],
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __ctHelpers.JSONSchema, deriveInput, (value) => value.key("foo").get());
-const handlerObserved = handler(false as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, deriveInput, (value) => value.key("foo").get());
+const handlerObserved = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         foo: {
@@ -57,7 +57,7 @@ const handlerObserved = handler(false as const satisfies __ctHelpers.JSONSchema,
     },
     required: ["foo"],
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema, (_event: {
+} as const satisfies __cfHelpers.JSONSchema, (_event: {
     id: string;
 }, state: Writable<{
     foo: string;
@@ -79,7 +79,7 @@ const handlerExplicit = handler({
         }
     },
     required: ["detail"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         foo: {
@@ -88,7 +88,7 @@ const handlerExplicit = handler({
     },
     required: ["foo"],
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema, (event, state) => {
+} as const satisfies __cfHelpers.JSONSchema, (event, state) => {
     event.detail.message;
     state.key("foo").get();
 });
@@ -105,9 +105,9 @@ const liftInterprocedural = lift({
     },
     required: ["foo"],
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __ctHelpers.JSONSchema, (input: Writable<{
+} as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
     foo: string;
     bar: string;
 }>) => helper(input));
@@ -120,9 +120,9 @@ const liftWriteOnly = lift({
     },
     required: ["foo"],
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema, (input: Writable<{
+} as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
     foo: string;
     bar: string;
 }>) => {
@@ -138,14 +138,14 @@ const liftExplicit = lift({
     },
     required: ["foo"],
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __ctHelpers.JSONSchema, (input) => input.key("foo").get());
+} as const satisfies __cfHelpers.JSONSchema, (input) => input.key("foo").get());
 const actionPattern = pattern((input: Writable<{
     foo: string;
     bar: string;
 }>) => {
-    const a = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+    const a = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             input: {
@@ -160,7 +160,7 @@ const actionPattern = pattern((input: Writable<{
             }
         },
         required: ["input"]
-    } as const satisfies __ctHelpers.JSONSchema, (_, { input }) => input.key("foo").get())({
+    } as const satisfies __cfHelpers.JSONSchema, (_, { input }) => input.key("foo").get())({
         input: input
     });
     return a;
@@ -175,9 +175,9 @@ const actionPattern = pattern((input: Writable<{
         }
     },
     required: ["foo", "bar"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     asStream: true
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 export default {
     liftOptional,
     deriveObserved,
@@ -190,6 +190,6 @@ export default {
     actionPattern,
 };
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

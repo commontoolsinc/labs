@@ -1,10 +1,10 @@
 import ts from "typescript";
 import { join } from "@std/path";
-import { StaticCacheFS } from "@commontools/static";
+import { StaticCacheFS } from "@commonfabric/static";
 import {
-  CommonToolsTransformerPipeline,
+  CommonFabricTransformerPipeline,
   TransformationDiagnostic,
-  transformCtDirective,
+  transformCfDirective,
 } from "../src/mod.ts";
 import { assert } from "@std/assert";
 
@@ -52,9 +52,9 @@ export async function batchTypeCheckFixtures(
     sourceFileCache = new Map();
   }
 
-  // Apply transformCtDirective to all input files (like transformFiles does)
+  // Apply transformCfDirective to all input files (like transformFiles does)
   const transformedFiles = Object.entries(files).reduce((acc, [key, value]) => {
-    acc[key] = transformCtDirective(value);
+    acc[key] = transformCfDirective(value);
     return acc;
   }, {} as Record<string, string>);
 
@@ -163,25 +163,25 @@ export async function batchTypeCheckFixtures(
     getDefaultLibFileName: () => "lib.d.ts",
     resolveModuleNames: (moduleNames) => {
       return moduleNames.map((name) => {
-        if (name === "commontools" && types["commontools.d.ts"]) {
+        if (name === "commonfabric" && types["commonfabric.d.ts"]) {
           return {
-            resolvedFileName: "commontools.d.ts",
+            resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
         }
         if (
-          name === "commontools/schema" && types["commontools-schema.d.ts"]
+          name === "commonfabric/schema" && types["commonfabric-schema.d.ts"]
         ) {
           return {
-            resolvedFileName: "commontools-schema.d.ts",
+            resolvedFileName: "commonfabric-schema.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
         }
-        if (name === "@commontools/common" && types["commontools.d.ts"]) {
+        if (name === "@commonfabric/common" && types["commonfabric.d.ts"]) {
           return {
-            resolvedFileName: "commontools.d.ts",
+            resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
@@ -276,7 +276,7 @@ export async function transformFiles(
 
   // Pretransform
   const files = Object.entries(inFiles).reduce((files, [key, value]) => {
-    files[key] = transformCtDirective(value);
+    files[key] = transformCfDirective(value);
     return files;
   }, {} as Record<string, string>);
 
@@ -386,25 +386,25 @@ export async function transformFiles(
     getDefaultLibFileName: () => "lib.d.ts",
     resolveModuleNames: (moduleNames) => {
       return moduleNames.map((name) => {
-        if (name === "commontools" && types["commontools.d.ts"]) {
+        if (name === "commonfabric" && types["commonfabric.d.ts"]) {
           return {
-            resolvedFileName: "commontools.d.ts",
+            resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
         }
         if (
-          name === "commontools/schema" && types["commontools-schema.d.ts"]
+          name === "commonfabric/schema" && types["commonfabric-schema.d.ts"]
         ) {
           return {
-            resolvedFileName: "commontools-schema.d.ts",
+            resolvedFileName: "commonfabric-schema.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
         }
-        if (name === "@commontools/common" && types["commontools.d.ts"]) {
+        if (name === "@commonfabric/common" && types["commonfabric.d.ts"]) {
           return {
-            resolvedFileName: "commontools.d.ts",
+            resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
@@ -498,10 +498,12 @@ export async function transformFiles(
             errors.push(`  Error TS${diagnostic.code}: ${message}\n`);
           }
         });
-        errors.push("\nThis input fixture contains invalid CommonTools code.");
+        errors.push(
+          "\nThis input fixture contains invalid Common Fabric code.",
+        );
         errors.push("To fix:");
         errors.push(
-          "1. Update the input fixture to use valid CommonTools patterns",
+          "1. Update the input fixture to use valid Common Fabric patterns",
         );
         errors.push(
           "   (e.g., use Cell<T> for mutable state, OpaqueRef<T> for references)",
@@ -515,7 +517,7 @@ export async function transformFiles(
     }
   }
 
-  const pipeline = new CommonToolsTransformerPipeline({
+  const pipeline = new CommonFabricTransformerPipeline({
     mode,
     logger,
   });
@@ -612,7 +614,7 @@ export async function validateFiles(
 
   // Pretransform
   const files = Object.entries(inFiles).reduce((files, [key, value]) => {
-    files[key] = transformCtDirective(value);
+    files[key] = transformCfDirective(value);
     return files;
   }, {} as Record<string, string>);
 
@@ -717,16 +719,16 @@ export async function validateFiles(
     getDefaultLibFileName: () => "lib.d.ts",
     resolveModuleNames: (moduleNames) => {
       return moduleNames.map((name) => {
-        if (name === "commontools" && types["commontools.d.ts"]) {
+        if (name === "commonfabric" && types["commonfabric.d.ts"]) {
           return {
-            resolvedFileName: "commontools.d.ts",
+            resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
         }
-        if (name === "@commontools/common" && types["commontools.d.ts"]) {
+        if (name === "@commonfabric/common" && types["commonfabric.d.ts"]) {
           return {
-            resolvedFileName: "commontools.d.ts",
+            resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };
@@ -757,7 +759,7 @@ export async function validateFiles(
   const rootFiles = [...Object.keys(files), ...typeDefFiles];
 
   const program = ts.createProgram(rootFiles, compilerOptions, host);
-  const pipeline = new CommonToolsTransformerPipeline({
+  const pipeline = new CommonFabricTransformerPipeline({
     mode,
     logger,
   });

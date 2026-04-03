@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { cell } from "commonfabric";
 const existingSchema = { type: "number" } as const;
 // FIXTURE: double-inject-already-has-schema
 // Verifies: cell() calls that already have a schema argument are NOT double-injected
@@ -14,6 +14,6 @@ export default function TestDoubleInjectAlreadyHasSchema() {
     return null;
 }
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

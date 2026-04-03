@@ -6,7 +6,7 @@ user-invocable: false
 
 # Deploy Phase
 
-Use the `ct` skill, or read `skills/ct/SKILL.md`, for comprehensive CLI
+Use the `cf` skill, or read `skills/cf/SKILL.md`, for comprehensive CLI
 documentation.
 
 ## Read First
@@ -17,7 +17,7 @@ documentation.
 ## Find Identity Key
 
 ```bash
-ls -la ./ct.key ./identity.key 2>/dev/null || ls -la *.key 2>/dev/null || find . -name "*.key" -maxdepth 2 2>/dev/null
+ls -la ./cf.key ./identity.key 2>/dev/null || ls -la *.key 2>/dev/null || find . -name "*.key" -maxdepth 2 2>/dev/null
 ```
 
 ## Commands
@@ -25,33 +25,33 @@ ls -la ./ct.key ./identity.key 2>/dev/null || ls -la *.key 2>/dev/null || find .
 **Check syntax without deploying:**
 
 ```bash
-deno task ct check pattern.tsx --no-run
+deno task cf check pattern.tsx --no-run
 ```
 
 **Deploy new pattern:**
 
 ```bash
-deno task ct piece new packages/patterns/[name]/main.tsx --identity PATH_TO_KEY
+deno task cf piece new packages/patterns/[name]/main.tsx --identity PATH_TO_KEY
 ```
 
 **Inspect piece state:**
 
 ```bash
-deno task ct piece inspect
+deno task cf piece inspect
 ```
 
 **Update deployed pattern:**
 
 ```bash
-deno task ct piece setsrc packages/patterns/[name]/main.tsx
+deno task cf piece setsrc packages/patterns/[name]/main.tsx
 ```
 
 **Test handler via CLI:**
 
 ```bash
-deno task ct piece call handlerName --piece PIECE_ID
-deno task ct piece step --piece PIECE_ID    # Required! Triggers recomputation
-deno task ct piece inspect --piece PIECE_ID  # Now shows updated state
+deno task cf piece call handlerName --piece PIECE_ID
+deno task cf piece step --piece PIECE_ID    # Required! Triggers recomputation
+deno task cf piece inspect --piece PIECE_ID  # Now shows updated state
 ```
 
 **Important:** Always run `piece step` after `piece call` or `piece set`.
@@ -60,8 +60,8 @@ Without it, computed values remain stale and `inspect`/`get` return old data.
 ## Get Help
 
 ```bash
-deno task ct --help
-deno task ct piece --help
+deno task cf --help
+deno task cf piece --help
 ```
 
 ## Done When

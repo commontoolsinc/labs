@@ -1,4 +1,4 @@
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 
 export class AssertionError<A, E> extends Error {
   actual: A | undefined;

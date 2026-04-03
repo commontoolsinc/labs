@@ -11,7 +11,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import ContactDetail, { type Contact } from "./contact-detail.tsx";
 
@@ -96,19 +96,19 @@ export default pattern<ContactBookInput, ContactBookOutput>(
     return {
       [NAME]: "Contact Book",
       [UI]: (
-        <ct-screen>
-          <ct-vstack slot="header" gap="2">
-            <ct-hstack justify="between" align="center">
-              <ct-heading level={4}>Contacts ({contactCount})</ct-heading>
-            </ct-hstack>
-            <ct-input
+        <cf-screen>
+          <cf-vstack slot="header" gap="2">
+            <cf-hstack justify="between" align="center">
+              <cf-heading level={4}>Contacts ({contactCount})</cf-heading>
+            </cf-hstack>
+            <cf-input
               $value={searchQuery}
               placeholder="Search contacts..."
             />
-          </ct-vstack>
+          </cf-vstack>
 
-          <ct-vscroll flex showScrollbar fadeEdges>
-            <ct-vstack gap="2" style="padding: 1rem;">
+          <cf-vscroll flex showScrollbar fadeEdges>
+            <cf-vstack gap="2" style="padding: 1rem;">
               {contacts.map((contact) => {
                 const isVisible = computed(() =>
                   matchesSearch(contact, searchQuery.get())
@@ -139,93 +139,93 @@ export default pattern<ContactBookInput, ContactBookOutput>(
 
                 return ifElse(
                   isVisible,
-                  <ct-card
+                  <cf-card
                     style="cursor: pointer;"
                     onClick={onClick}
                   >
-                    <ct-hstack gap="2" align="start">
-                      <ct-vstack gap="1" style="flex: 1;">
+                    <cf-hstack gap="2" align="start">
+                      <cf-vstack gap="1" style="flex: 1;">
                         <span style="font-weight: 600; font-size: 1rem;">
                           {contact.name || "(unnamed)"}
                         </span>
                         {contact.email && (
-                          <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                          <span style="font-size: 0.875rem; color: var(--cf-color-gray-600);">
                             {contact.email}
                           </span>
                         )}
                         {contact.company && (
-                          <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+                          <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
                             {contact.company}
                           </span>
                         )}
                         {/* Show relationships */}
                         {contactRelations.map((rel: Relationship) => (
-                          <span style="font-size: 0.75rem; color: var(--ct-color-primary-500);">
+                          <span style="font-size: 0.75rem; color: var(--cf-color-primary-500);">
                             ↔ {rel.fromName === contact.name
                               ? rel.toName
                               : rel.fromName}
                             {rel.label && <span>({rel.label})</span>}
                           </span>
                         ))}
-                      </ct-vstack>
-                      <ct-button
+                      </cf-vstack>
+                      <cf-button
                         variant="ghost"
                         onClick={onDelete}
                       >
                         ×
-                      </ct-button>
-                    </ct-hstack>
-                  </ct-card>,
+                      </cf-button>
+                    </cf-hstack>
+                  </cf-card>,
                   null,
                 );
               })}
 
               {ifElse(
                 computed(() => contacts.get().length === 0),
-                <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+                <div style="text-align: center; color: var(--cf-color-gray-500); padding: 2rem;">
                   No contacts yet. Add one below!
                 </div>,
                 null,
               )}
-            </ct-vstack>
-          </ct-vscroll>
+            </cf-vstack>
+          </cf-vscroll>
 
-          <ct-vstack slot="footer" gap="2" style="padding: 1rem;">
-            <ct-hstack gap="2">
-              <ct-button
+          <cf-vstack slot="footer" gap="2" style="padding: 1rem;">
+            <cf-hstack gap="2">
+              <cf-button
                 variant="primary"
                 onClick={onAddContact}
               >
                 Add Contact
-              </ct-button>
-            </ct-hstack>
+              </cf-button>
+            </cf-hstack>
 
-            <ct-hstack gap="2">
-              <ct-select
+            <cf-hstack gap="2">
+              <cf-select
                 $value={newRelationFrom}
                 items={contactSelectItems}
                 placeholder="From..."
                 style="flex: 1;"
               />
-              <ct-select
+              <cf-select
                 $value={newRelationTo}
                 items={contactSelectItems}
                 placeholder="To..."
                 style="flex: 1;"
               />
-              <ct-input
+              <cf-input
                 $value={newRelationLabel}
                 placeholder="Label..."
                 style="width: 100px;"
               />
-              <ct-button
+              <cf-button
                 onClick={onNewRelation}
               >
                 Link
-              </ct-button>
-            </ct-hstack>
-          </ct-vstack>
-        </ct-screen>
+              </cf-button>
+            </cf-hstack>
+          </cf-vstack>
+        </cf-screen>
       ),
       contacts,
       relationships,

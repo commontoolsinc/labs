@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, pattern } from "commontools";
+import { computed, pattern } from "commonfabric";
 
 // FIXTURE: computed-in-computed-property-access
 // Verifies: property access on a computed() result declared INSIDE another computed()

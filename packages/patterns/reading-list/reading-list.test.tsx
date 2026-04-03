@@ -12,9 +12,9 @@
  * - Modifying item properties (status, rating, notes)
  * - Composition: items are ReadingItemDetail pieces with their own state
  *
- * Run: deno task ct test packages/patterns/reading-list/reading-list.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/reading-list/reading-list.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commonfabric";
 import ReadingList from "./reading-list.tsx";
 
 export default pattern(() => {

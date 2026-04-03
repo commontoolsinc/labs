@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { ifElse, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { ifElse, pattern, UI } from "commonfabric";
 interface State {
     matrix: number[][];
     row: number;
@@ -31,7 +31,7 @@ export default pattern((state) => {
         [UI]: (<div>
         <h3>Nested Element Access</h3>
         {/* Double indexing into matrix */}
-        <p>Matrix value: {__ctHelpers.derive({
+        <p>Matrix value: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -57,16 +57,16 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "undefined"]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 matrix: state.key("matrix"),
                 row: state.key("row"),
                 col: state.key("col")
             } }, ({ state }) => state.matrix[state.row]![state.col])}</p>
 
         {/* Triple nested access */}
-        <p>Deep nested: {__ctHelpers.derive({
+        <p>Deep nested: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -98,9 +98,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 nested: {
                     arrays: state.key("nested", "arrays"),
                     index: state.key("nested", "index")
@@ -112,7 +112,7 @@ export default pattern((state) => {
         {/* Same array accessed multiple times with different indices */}
         <p>
           First and last: {state.key("items", "0")} and{" "}
-          {__ctHelpers.derive({
+          {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -129,15 +129,15 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 items: state.key("items")
             } }, ({ state }) => state.items[state.items.length - 1])}
         </p>
 
         {/* Array used in computation and access */}
-        <p>Sum of ends: {__ctHelpers.derive({
+        <p>Sum of ends: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -154,15 +154,15 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 arr: state.key("arr")
             } }, ({ state }) => state.arr[0]! + state.arr[state.arr.length - 1]!)}</p>
 
         <h3>Computed Indices</h3>
         {/* Index from multiple state values */}
-        <p>Computed index: {__ctHelpers.derive({
+        <p>Computed index: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -185,16 +185,16 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "undefined"]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 arr: state.key("arr"),
                 a: state.key("a"),
                 b: state.key("b")
             } }, ({ state }) => state.arr[state.a + state.b])}</p>
 
         {/* Index from computation involving array */}
-        <p>Modulo index: {__ctHelpers.derive({
+        <p>Modulo index: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -214,15 +214,15 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 row: state.key("row")
             } }, ({ state }) => state.items[state.row % state.items.length])}</p>
 
         {/* Complex index expression */}
-        <p>Complex: {__ctHelpers.derive({
+        <p>Complex: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -242,9 +242,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "undefined"]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 arr: state.key("arr"),
                 a: state.key("a")
             } }, ({ state }) => state.arr[Math.min(state.a * 2, state.arr.length - 1)])}</p>
@@ -253,7 +253,7 @@ export default pattern((state) => {
         {/* Element access returning array, then accessing that */}
         <p>
           User score:{" "}
-          {__ctHelpers.derive({
+          {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -288,9 +288,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "undefined"]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 users: state.key("users"),
                 selectedUser: state.key("selectedUser"),
                 selectedScore: state.key("selectedScore")
@@ -298,7 +298,7 @@ export default pattern((state) => {
         </p>
 
         {/* Using one array element as index for another */}
-        <p>Indirect: {__ctHelpers.derive({
+        <p>Indirect: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -321,15 +321,15 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 indices: state.key("indices")
             } }, ({ state }) => state.items[state.indices[0]!])}</p>
 
         {/* Array element used as index for same array */}
-        <p>Self reference: {__ctHelpers.derive({
+        <p>Self reference: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -346,15 +346,15 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "undefined"]
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 arr: state.key("arr")
             } }, ({ state }) => state.arr[state.arr[0]!])}</p>
 
         <h3>Mixed Property and Element Access</h3>
         {/* Property access followed by element access with computed index */}
-        <p>Mixed: {__ctHelpers.derive({
+        <p>Mixed: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -383,9 +383,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 nested: {
                     arrays: state.key("nested", "arrays"),
                     index: state.key("nested", "index")
@@ -393,7 +393,7 @@ export default pattern((state) => {
             } }, ({ state }) => state.nested.arrays[state.nested.index]!.length)}</p>
 
         {/* Element access followed by property access */}
-        <p>User name length: {__ctHelpers.derive({
+        <p>User name length: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -425,9 +425,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 users: state.key("users"),
                 selectedUser: state.key("selectedUser")
             } }, ({ state }) => state.users[state.selectedUser]!.name.length)}</p>
@@ -436,15 +436,15 @@ export default pattern((state) => {
         {/* Element access in ternary */}
         <p>
           Conditional:{" "}
-          {__ctHelpers.ifElse({
+          {__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -464,12 +464,12 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 arr: state.key("arr"),
                 a: state.key("a")
-            } }, ({ state }) => state.arr[state.a]! > 10), __ctHelpers.derive({
+            } }, ({ state }) => state.arr[state.a]! > 10), __cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -489,9 +489,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 b: state.key("b")
             } }, ({ state }) => state.items[state.b]!), state.key("items", "0")!)}
@@ -501,13 +501,13 @@ export default pattern((state) => {
         <p>
           Has value: {ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["positive", "non-positive"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -533,9 +533,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 matrix: state.key("matrix"),
                 row: state.key("row"),
                 col: state.key("col")
@@ -544,7 +544,7 @@ export default pattern((state) => {
 
         <h3>Element Access with Operators</h3>
         {/* Element access with arithmetic */}
-        <p>Product: {__ctHelpers.derive({
+        <p>Product: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -567,16 +567,16 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 arr: state.key("arr"),
                 a: state.key("a"),
                 b: state.key("b")
             } }, ({ state }) => state.arr[state.a]! * state.arr[state.b]!)}</p>
 
         {/* Element access with string concatenation */}
-        <p>Concat: {__ctHelpers.derive({
+        <p>Concat: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -599,15 +599,15 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 indices: state.key("indices")
             } }, ({ state }) => state.items[0]! + " - " + state.items[state.indices[0]!]!)}</p>
 
         {/* Multiple element accesses in single expression */}
-        <p>Sum: {__ctHelpers.derive({
+        <p>Sum: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -624,9 +624,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 arr: state.key("arr")
             } }, ({ state }) => state.arr[0]! + state.arr[1]! + state.arr[2]!)}</p>
       </div>),
@@ -717,7 +717,7 @@ export default pattern((state) => {
         }
     },
     required: ["matrix", "row", "col", "items", "arr", "a", "b", "indices", "nested", "users", "selectedUser", "selectedScore"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -746,8 +746,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

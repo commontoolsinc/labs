@@ -6,12 +6,12 @@ Use `handler()` when you need to define event-handling logic once and bind it to
 
 1. **Same logic, different state** - You want to reuse identical handler logic with different state
 2. **Exported streams** - Other patterns need to call your handler via linking
-3. **CLI testing** - You want to test handlers via `ct piece call` before building UI
+3. **CLI testing** - You want to test handlers via `cf piece call` before building UI
 
 ## Basic Structure
 
 ```typescript
-import { handler, Writable } from "commontools";
+import { handler, Writable } from "commonfabric";
 
 // Define at module scope (outside pattern body)
 const increment = handler<EventType, StateType>((event, state) => {
@@ -25,7 +25,7 @@ const increment = handler<EventType, StateType>((event, state) => {
 ## Example: Reusable Counter Logic
 
 ```tsx
-import { handler, pattern, Writable, UI } from "commontools";
+import { handler, pattern, Writable, UI } from "commonfabric";
 
 // Define once at module scope
 const increment = handler<void, { count: Writable<number> }>(
@@ -46,13 +46,13 @@ export default pattern(() => {
         {/* Same logic bound to different state */}
         <div>
           Counter A: {counterA}
-          <ct-button onClick={increment({ count: counterA })}>+</ct-button>
-          <ct-button onClick={decrement({ count: counterA })}>-</ct-button>
+          <cf-button onClick={increment({ count: counterA })}>+</cf-button>
+          <cf-button onClick={decrement({ count: counterA })}>-</cf-button>
         </div>
         <div>
           Counter B: {counterB}
-          <ct-button onClick={increment({ count: counterB })}>+</ct-button>
-          <ct-button onClick={decrement({ count: counterB })}>-</ct-button>
+          <cf-button onClick={increment({ count: counterB })}>+</cf-button>
+          <cf-button onClick={decrement({ count: counterB })}>-</cf-button>
         </div>
       </div>
     ),
@@ -71,7 +71,7 @@ const addItem = handler<{ title: string }, { items: Writable<Item[]> }>(
 );
 
 export default pattern(({ items }) => ({
-  [UI]: <ct-button onClick={addItem({ items })}>Add</ct-button>,
+  [UI]: <cf-button onClick={addItem({ items })}>Add</cf-button>,
   items,
 }));
 
@@ -89,7 +89,7 @@ export default pattern(({ items }) => {
 Bound handlers become `Stream<T>` and can be exported for other patterns to call:
 
 ```tsx
-import { handler, pattern, Stream, Writable, UI } from "commontools";
+import { handler, pattern, Stream, Writable, UI } from "commonfabric";
 
 interface Output {
   addItem: Stream<{ title: string }>;  // Exported stream
@@ -142,13 +142,13 @@ Export handlers to test them via CLI during development:
 
 ```bash
 # Call a handler with JSON payload
-deno task ct piece call addItem '{"title": "Test"}' --piece <ID>
+deno task cf piece call addItem '{"title": "Test"}' --piece <ID>
 
 # Step to process
-deno task ct piece step --piece <ID>
+deno task cf piece step --piece <ID>
 
 # Verify state
-deno task ct piece inspect --piece <ID>
+deno task cf piece inspect --piece <ID>
 ```
 
 See [Testing Handlers via CLI](../workflows/handlers-cli-testing.md) for the full workflow.

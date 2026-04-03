@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 interface State {
     counter: {
         value: number;
@@ -12,9 +12,9 @@ interface State {
 export default pattern((state: State) => {
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     // Capture property before method call
-    const result = __ctHelpers.derive({
+    const result = __cfHelpers.derive({
         type: "object",
         properties: {
             value: {
@@ -38,9 +38,9 @@ export default pattern((state: State) => {
             }
         },
         required: ["value", "state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         value,
         state: {
             counter: {
@@ -63,10 +63,10 @@ export default pattern((state: State) => {
         }
     },
     required: ["counter"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

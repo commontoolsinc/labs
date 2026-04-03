@@ -9,7 +9,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * Group Chat Room Pattern v9
@@ -775,8 +775,8 @@ export default pattern<RoomInput, RoomOutput>(
                           {computed(() => getInitials(myNameResolved))}
                         </div>,
                       )}
-                      {/* Hidden ct-image-input overlaid on avatar */}
-                      <ct-image-input
+                      {/* Hidden cf-image-input overlaid on avatar */}
+                      <cf-image-input
                         $images={avatarImages}
                         maxImages={1}
                         showPreview={false}
@@ -801,7 +801,7 @@ export default pattern<RoomInput, RoomOutput>(
                     </div>
 
                     {/* Attachment button for sending images to chat */}
-                    <ct-image-input
+                    <cf-image-input
                       $images={chatImages}
                       maxImages={1}
                       showPreview={false}
@@ -932,22 +932,22 @@ export default pattern<RoomInput, RoomOutput>(
                   </div>
 
                   <div style={{ display: "flex", gap: "0.5rem" }}>
-                    <ct-input
+                    <cf-input
                       $value={contentInput}
                       placeholder="Type your message..."
                       style="flex: 1;"
                       timingStrategy="immediate"
-                      onct-submit={sendMessage({
+                      oncf-submit={sendMessage({
                         messages,
                         myName,
                         contentInput,
                       })}
                     />
-                    <ct-button
+                    <cf-button
                       onClick={sendMessage({ messages, myName, contentInput })}
                     >
                       Send
-                    </ct-button>
+                    </cf-button>
                   </div>
                 </div>
               </div>

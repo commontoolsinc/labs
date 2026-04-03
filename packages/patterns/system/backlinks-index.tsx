@@ -8,7 +8,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 /**
  * Type for pieces used in the mentionable/backlinks system.
@@ -131,22 +131,22 @@ type Entry = {
 const EntryRow = pattern<Entry, { [UI]: VNode }>(({ piece, backlinks }) => {
   return {
     [UI]: (
-      <ct-card>
-        <ct-vstack gap="1">
-          <ct-cell-link $cell={piece} />
-          <ct-hstack gap="2" style={{ paddingLeft: "8px", flexWrap: "wrap" }}>
+      <cf-card>
+        <cf-vstack gap="1">
+          <cf-cell-link $cell={piece} />
+          <cf-hstack gap="2" style={{ paddingLeft: "8px", flexWrap: "wrap" }}>
             {backlinks.map((link) => (
-              <ct-cell-link
+              <cf-cell-link
                 $cell={link}
                 style={{
                   fontSize: "12px",
-                  color: "var(--ct-color-text-secondary)",
+                  color: "var(--cf-color-text-secondary)",
                 }}
               />
             ))}
-          </ct-hstack>
-        </ct-vstack>
-      </ct-card>
+          </cf-hstack>
+        </cf-vstack>
+      </cf-card>
     ),
   };
 });
@@ -185,17 +185,17 @@ const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
   return {
     [NAME]: "BacklinksIndex",
     [UI]: (
-      <ct-screen>
-        <ct-toolbar slot="header" sticky>
+      <cf-screen>
+        <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Mentions</h2>
-        </ct-toolbar>
+        </cf-toolbar>
 
-        <ct-vstack gap="4" padding="6">
-          <ct-input $value={query} placeholder="Filter by name..." />
+        <cf-vstack gap="4" padding="6">
+          <cf-input $value={query} placeholder="Filter by name..." />
           <span
             style={{
               fontSize: "13px",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-color-text-secondary)",
             }}
           >
             {filteredCount} of {totalCount} pieces
@@ -209,8 +209,8 @@ const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
             });
             return row[UI];
           })}
-        </ct-vstack>
-      </ct-screen>
+        </cf-vstack>
+      </cf-screen>
     ),
     mentionable,
   };

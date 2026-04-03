@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, pattern } from "commontools";
+import { computed, pattern } from "commonfabric";
 
 const config = { bar: "module-level" };
 

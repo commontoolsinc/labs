@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Writable, pattern } from "commonfabric";
 // FIXTURE: collections-empty
 // Verifies: empty arrays and objects produce valid degenerate schemas
 //   cell([]) → cell([], { type: "array", items: false })
@@ -11,17 +11,17 @@ export default pattern(() => {
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     // Empty object
     const _emptyObject = Writable.of({}, {
         type: "object",
         properties: {}
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     return {
         emptyArray: _emptyArray,
         emptyObject: _emptyObject,
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         emptyArray: {
@@ -38,8 +38,8 @@ export default pattern(() => {
         }
     },
     required: ["emptyArray", "emptyObject"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

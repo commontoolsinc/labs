@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 interface TagEvent {
     label: string;
 }
@@ -14,24 +14,24 @@ export default pattern((__ct_pattern_input) => {
     const recentEvents = __ct_pattern_input.key("recentEvents");
     return ({
         [UI]: (<div>
-      {__ctHelpers.ifElse({
+      {__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 recentEvents: {
@@ -42,15 +42,15 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["recentEvents"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { recentEvents: recentEvents }, ({ recentEvents }) => recentEvents.length === 0), <span>No events yet</span>, <div>
-            {recentEvents.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        } as const satisfies __cfHelpers.JSONSchema, { recentEvents: recentEvents }, ({ recentEvents }) => recentEvents.length === 0), <span>No events yet</span>, <div>
+            {recentEvents.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const event = __ct_pattern_input.key("element");
                 const idx = __ct_pattern_input.key("index");
-                return (<ct-hstack key={idx} gap="2">
+                return (<cf-hstack key={idx} gap="2">
                 <span>{event.key("label")}</span>
-              </ct-hstack>);
+              </cf-hstack>);
             }, {
                 type: "object",
                 properties: {
@@ -73,7 +73,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["label"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -93,7 +93,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            } as const satisfies __cfHelpers.JSONSchema), {})}
           </div>)}
     </div>),
     });
@@ -119,7 +119,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["label"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -148,8 +148,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

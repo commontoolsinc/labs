@@ -1,4 +1,4 @@
-import { isInstance, isRecord } from "@commontools/utils/types";
+import { isInstance, isRecord } from "@commonfabric/utils/types";
 import {
   FabricInstance,
   type FabricNativeObject,

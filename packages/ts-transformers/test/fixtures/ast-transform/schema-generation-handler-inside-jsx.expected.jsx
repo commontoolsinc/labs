@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { handler } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { handler } from "commonfabric";
 interface ClickEvent {
     x: number;
     y: number;
@@ -27,7 +27,7 @@ export const result = (<div>
             }
         },
         required: ["x", "y"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             clicks: {
@@ -35,12 +35,12 @@ export const result = (<div>
             }
         },
         required: ["clicks"]
-    } as const satisfies __ctHelpers.JSONSchema, (event: ClickEvent, state: AppState) => ({
+    } as const satisfies __cfHelpers.JSONSchema, (event: ClickEvent, state: AppState) => ({
         clicks: state.clicks + 1,
         lastPosition: { x: event.x, y: event.y },
     }))}
   </div>);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

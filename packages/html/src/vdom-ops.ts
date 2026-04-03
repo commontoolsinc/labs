@@ -5,7 +5,7 @@
  * on the main thread. They are batched and sent as a single message.
  */
 
-import type { CellRef, JSONValue } from "@commontools/runtime-client";
+import type { CellRef, JSONValue } from "@commonfabric/runtime-client";
 
 /**
  * Create a new DOM element.

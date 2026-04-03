@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-local-variable
 // Verifies: callback-local variables are not captured, but outer cells are
 //   derive(a, fn) → derive(schema, schema, { a, b, c }, fn)
@@ -7,14 +7,14 @@ import { Writable, derive, pattern } from "commontools";
 export default pattern(() => {
     const a = Writable.of(10, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const b = Writable.of(20, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const c = Writable.of(30, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const result = __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema);
+    const result = __cfHelpers.derive({
         type: "object",
         properties: {
             a: {
@@ -31,9 +31,9 @@ export default pattern(() => {
             }
         },
         required: ["a", "b", "c"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         a,
         b: b,
         c: c
@@ -42,10 +42,10 @@ export default pattern(() => {
         return sum * c.get();
     });
     return result;
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

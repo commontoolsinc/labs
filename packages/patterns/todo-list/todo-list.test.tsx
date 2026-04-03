@@ -10,9 +10,9 @@
  * - Multiple items
  * - Empty string handling (should not add)
  *
- * Run: deno task ct test packages/patterns/todo-list/todo-list.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/todo-list/todo-list.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commonfabric";
 import TodoList from "./todo-list.tsx";
 
 export default pattern(() => {

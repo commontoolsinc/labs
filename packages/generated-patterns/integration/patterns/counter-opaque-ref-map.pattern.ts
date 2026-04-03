@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface OpaqueMapArgs {
   value: Default<number, 0>;

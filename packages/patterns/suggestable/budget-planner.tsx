@@ -8,7 +8,7 @@ import {
   pattern,
   UI,
   type VNode,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Types =====
 
@@ -87,52 +87,52 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
     return {
       [NAME]: computed(() => (topic ? `Budget: ${topic}` : "Budget Planner")),
       [UI]: (
-        <ct-screen>
-          <ct-vstack slot="header" gap="1">
-            <ct-heading level={4}>
+        <cf-screen>
+          <cf-vstack slot="header" gap="1">
+            <cf-heading level={4}>
               {computed(() => topic || "Budget Planner")}
-            </ct-heading>
-            <span style="color: var(--ct-color-text-secondary); font-size: 0.85rem;">
+            </cf-heading>
+            <span style="color: var(--cf-color-text-secondary); font-size: 0.85rem;">
               Budget: ${maxAmount}
             </span>
-          </ct-vstack>
+          </cf-vstack>
 
-          <ct-vstack gap="3" style="padding: 1.5rem;">
+          <cf-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
               response.pending,
-              <div style="color: var(--ct-color-text-secondary);">
-                <ct-loader show-elapsed /> Generating budget...
+              <div style="color: var(--cf-color-text-secondary);">
+                <cf-loader show-elapsed /> Generating budget...
               </div>,
-              <ct-vstack gap="3">
+              <cf-vstack gap="3">
                 {items.map((item) => (
-                  <ct-hstack gap="2" align="center">
+                  <cf-hstack gap="2" align="center">
                     <span style={{ flex: "1", fontWeight: "500" }}>
                       {item.name}
                     </span>
-                    <ct-hstack gap="1" align="center">
-                      <span style="color: var(--ct-color-text-secondary); font-size: 0.85rem;">
+                    <cf-hstack gap="1" align="center">
+                      <span style="color: var(--cf-color-text-secondary); font-size: 0.85rem;">
                         $
                       </span>
-                      <ct-input
+                      <cf-input
                         $value={item.amount}
                         style="width: 5rem; text-align: right;"
                       />
-                    </ct-hstack>
-                  </ct-hstack>
+                    </cf-hstack>
+                  </cf-hstack>
                 ))}
 
                 <div
                   style={{
-                    borderTop: "2px solid var(--ct-color-border, #e5e7eb)",
+                    borderTop: "2px solid var(--cf-color-border, #e5e7eb)",
                     paddingTop: "0.75rem",
                     marginTop: "0.25rem",
                   }}
                 >
-                  <ct-hstack gap="2" align="center">
+                  <cf-hstack gap="2" align="center">
                     <span style={{ flex: "1", fontWeight: "700" }}>Total</span>
                     <span style={{ fontWeight: "700" }}>${total}</span>
-                  </ct-hstack>
-                  <ct-hstack
+                  </cf-hstack>
+                  <cf-hstack
                     gap="2"
                     align="center"
                     style="margin-top: 0.25rem;"
@@ -140,7 +140,7 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
                     <span
                       style={{
                         flex: "1",
-                        color: "var(--ct-color-text-secondary)",
+                        color: "var(--cf-color-text-secondary)",
                         fontSize: "0.85rem",
                       }}
                     >
@@ -151,19 +151,19 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
                         fontSize: "0.85rem",
                         color: computed(() =>
                           remaining < 0
-                            ? "var(--ct-color-danger, #ef4444)"
-                            : "var(--ct-color-text-secondary)"
+                            ? "var(--cf-color-danger, #ef4444)"
+                            : "var(--cf-color-text-secondary)"
                         ),
                       }}
                     >
                       ${remaining}
                     </span>
-                  </ct-hstack>
+                  </cf-hstack>
                 </div>
-              </ct-vstack>,
+              </cf-vstack>,
             )}
-          </ct-vstack>
-        </ct-screen>
+          </cf-vstack>
+        </cf-screen>
       ),
       topic,
       items,

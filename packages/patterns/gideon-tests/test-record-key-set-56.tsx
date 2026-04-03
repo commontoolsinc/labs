@@ -9,7 +9,7 @@
  *
  * Error observed: "Value at path value/argument/corrections/0-Technical_Expertise is not an object"
  */
-import { Cell, Default, handler, NAME, pattern, UI } from "commontools";
+import { Cell, Default, handler, NAME, pattern, UI } from "commonfabric";
 
 interface Item {
   value: string;
@@ -185,19 +185,19 @@ export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
           <h3 style={{ color: "blue" }}>Tests on Empty Record</h3>
 
           <div style={{ marginBottom: "0.5rem" }}>
-            <ct-button
+            <cf-button
               onClick={testEmptySimpleKey({ record: emptyRecord, logs })}
             >
               A: Simple key on empty
-            </ct-button>
+            </cf-button>
           </div>
 
           <div style={{ marginBottom: "0.5rem" }}>
-            <ct-button
+            <cf-button
               onClick={testEmptyHyphenKey({ record: emptyRecord, logs })}
             >
               B: Hyphen key on empty (the problematic case)
-            </ct-button>
+            </cf-button>
           </div>
         </div>
 
@@ -212,19 +212,19 @@ export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
           <h3 style={{ color: "green" }}>Tests on Populated Record</h3>
 
           <div style={{ marginBottom: "0.5rem" }}>
-            <ct-button
+            <cf-button
               onClick={testPopulatedUpdate({ record: populatedRecord, logs })}
             >
               C: Update existing key
-            </ct-button>
+            </cf-button>
           </div>
 
           <div style={{ marginBottom: "0.5rem" }}>
-            <ct-button
+            <cf-button
               onClick={testPopulatedNew({ record: populatedRecord, logs })}
             >
               D: New hyphen key on populated
-            </ct-button>
+            </cf-button>
           </div>
         </div>
 
@@ -239,11 +239,11 @@ export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
           <h3 style={{ color: "purple" }}>Workaround</h3>
 
           <div style={{ marginBottom: "0.5rem" }}>
-            <ct-button
+            <cf-button
               onClick={testSpreadWorkaround({ record: emptyRecord, logs })}
             >
               E: Spread workaround on empty
-            </ct-button>
+            </cf-button>
           </div>
         </div>
 
@@ -264,7 +264,7 @@ export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
             }}
           >
             <h3>Test Results</h3>
-            <ct-button onClick={clearLogs({ logs })}>Clear</ct-button>
+            <cf-button onClick={clearLogs({ logs })}>Clear</cf-button>
           </div>
           <div
             style={{

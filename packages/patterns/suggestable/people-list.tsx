@@ -7,7 +7,7 @@ import {
   UI,
   type VNode,
   wish,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Types =====
 
@@ -38,16 +38,16 @@ const PersonList = pattern<PersonListInput, PersonListOutput>(() => {
         : "People"
     ),
     [UI]: (
-      <ct-vstack gap="2" style="padding: 1.5rem;">
+      <cf-vstack gap="2" style="padding: 1.5rem;">
         <div>
           {people.candidates.map((person) => (
-            <ct-hstack gap="2" align="center">
+            <cf-hstack gap="2" align="center">
               <span>{person.contact.name}</span>
               <span>{person.contact.email}</span>
-            </ct-hstack>
+            </cf-hstack>
           ))}
         </div>
-      </ct-vstack>
+      </cf-vstack>
     ),
     people: people.candidates,
   };

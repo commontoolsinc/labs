@@ -2,12 +2,12 @@ import { assert, assertEquals, assertMatch } from "@std/assert";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { alice, bob, mallory, space } from "./principal.ts";
 import * as Access from "../access.ts";
-import { type DID } from "@commontools/identity";
+import { type DID } from "@commonfabric/identity";
 import {
   hashOf,
   resetModernHashConfig,
   setModernHashConfig,
-} from "@commontools/data-model/value-hash";
+} from "@commonfabric/data-model/value-hash";
 import { Invocation } from "../interface.ts";
 
 // Some generated service key.

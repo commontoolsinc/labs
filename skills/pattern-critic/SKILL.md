@@ -34,8 +34,8 @@ export default pattern<MyInput, MyOutput>(({ items, title }) => {
   return {
     [UI]: (
       <>
-        <ct-button onClick={toggleMenu}>Menu</ct-button>
-        <ct-button onClick={addItem}>Add</ct-button>
+        <cf-button onClick={toggleMenu}>Menu</cf-button>
+        <cf-button onClick={addItem}>Add</cf-button>
       </>
     ),
     items,
@@ -64,7 +64,7 @@ export default pattern<MyInput, MyOutput>(({ items }) => ({
         <li>
           {item.name}
           {/* Each item gets its own binding */}
-          <ct-button onClick={deleteItem({ item, items })}>Delete</ct-button>
+          <cf-button onClick={deleteItem({ item, items })}>Delete</cf-button>
         </li>
       ))}
     </ul>
@@ -88,4 +88,14 @@ export default pattern<Input>(({ deck }) => ({
 // Both are valid - ternaries auto-transform to ifElse()
 return <>{showDetails ? <div>Details content</div> : null}</>;
 return <>{ifElse(showDetails, <div>Details content</div>, null)}</>;
+```
+
+### Correct Style Syntax
+
+```typescript
+<div style={{ display: "flex", gap: "1rem" }}>
+  <cf-vstack style="flex: 1; padding: 1rem;">
+    Content
+  </cf-vstack>
+</div>;
 ```

@@ -17,7 +17,7 @@ import type { Cell } from "../cell.ts";
 import type {
   BuiltInGenerateObjectParams,
   BuiltInGenerateTextParams,
-} from "@commontools/api";
+} from "@commonfabric/api";
 import { llmDialog } from "./llm-dialog.ts";
 
 /**

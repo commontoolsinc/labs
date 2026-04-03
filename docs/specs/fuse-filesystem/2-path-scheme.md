@@ -2,7 +2,7 @@
 
 ## Addressing Model
 
-The fundamental address of a cell in Common Tools is:
+The fundamental address of a cell in Common Fabric is:
 
 ```
 (space: MemorySpace, entity: URI, path: string[])
@@ -226,7 +226,7 @@ root (`[FS]` layout).
 
 Only top-level callable children under `input/` and `result/` are surfaced as
 `*.handler` and `*.tool`. These callable files are readable; the first line is
-a stable `ct exec` shebang, and the same paths are valid under both
+a stable `cf exec` shebang, and the same paths are valid under both
 `pieces/<piece-name>/...` and `entities/<piece-id>/...`. Tool internals such as
 `pattern/` and `extraParams/` do not appear as ordinary mounted directories.
 
@@ -269,7 +269,7 @@ entities/
 Entity IDs are truncated in the directory listing but can be accessed by prefix
 match (the filesystem resolves the shortest unambiguous prefix).
 
-Mounted callable paths accepted by `ct exec` are limited to the top-level
+Mounted callable paths accepted by `cf exec` are limited to the top-level
 callable forms:
 
 ```text

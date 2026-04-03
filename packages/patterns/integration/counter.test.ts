@@ -1,11 +1,11 @@
-import { env, waitFor } from "@commontools/integration";
-import { PieceController, PiecesController } from "@commontools/piece/ops";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env, waitFor } from "@commonfabric/integration";
+import { PieceController, PiecesController } from "@commonfabric/piece/ops";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assertEquals } from "@std/assert";
-import { Identity } from "@commontools/identity";
-import { FileSystemProgramResolver } from "@commontools/js-compiler";
+import { Identity } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 

@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/home-schemas",
+  "name": "@commonfabric/home-schemas",
   "exports": "./mod.ts",
   "tasks": {
     "test": "echo 'No tests defined.'"

@@ -15,7 +15,7 @@
  * Usage:
  * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct piece link google-auth/auth bam-school-dashboard/overrideAuth
+ * 3. Link: cf piece link google-auth/auth bam-school-dashboard/overrideAuth
  */
 import {
   computed,
@@ -27,8 +27,8 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
-import type { Schema } from "commontools/schema";
+} from "commonfabric";
+import type { Schema } from "commonfabric/schema";
 import GmailExtractor, { type Email } from "../core/gmail-extractor.tsx";
 import type { Auth } from "../core/gmail-extractor.tsx";
 import ProcessingStatus from "../core/processing-status.tsx";
@@ -567,16 +567,16 @@ Extract:
       previewUI,
 
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           <div slot="header">
-            <ct-heading level={3}>{settings.schoolName} Dashboard</ct-heading>
+            <cf-heading level={3}>{settings.schoolName} Dashboard</cf-heading>
             <div style={{ fontSize: "12px", color: "#6b7280" }}>
               {settings.childName} - {settings.grade} - {settings.teacher}
             </div>
           </div>
 
-          <ct-vscroll flex showScrollbar>
-            <ct-vstack padding="6" gap="4">
+          <cf-vscroll flex showScrollbar>
+            <cf-vstack padding="6" gap="4">
               {/* Auth UI from GmailExtractor */}
               {extractor.ui.authStatusUI}
 
@@ -600,7 +600,7 @@ Extract:
                     gap: "12px",
                   }}
                 >
-                  <ct-loader size="sm" />
+                  <cf-loader size="sm" />
                   <span>
                     Analyzing emails... {completedCount}/{emailCount} complete
                   </span>
@@ -632,7 +632,7 @@ Extract:
                   Action Required ({urgentCount})
                 </h3>
 
-                <ct-vstack gap="3">
+                <cf-vstack gap="3">
                   {urgentEvents.map((event: SchoolEvent) => (
                     <div
                       style={{
@@ -830,7 +830,7 @@ Extract:
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
 
               {/* ============================================================ */}
@@ -860,7 +860,7 @@ Extract:
                   )})
                 </h3>
 
-                <ct-vstack gap="3">
+                <cf-vstack gap="3">
                   {teacherMessages.map((event: SchoolEvent) => (
                     <div
                       style={{
@@ -959,7 +959,7 @@ Extract:
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
 
               {/* ============================================================ */}
@@ -988,7 +988,7 @@ Extract:
                   )
                 </h3>
 
-                <ct-vstack gap="2">
+                <cf-vstack gap="2">
                   {upcomingEvents.map((event: SchoolEvent) => (
                     <div
                       style={{
@@ -1093,7 +1093,7 @@ Extract:
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </div>
 
               {/* ============================================================ */}
@@ -1111,7 +1111,7 @@ Extract:
                   All Updates ({computed(() => allEvents?.length || 0)})
                 </summary>
 
-                <ct-vstack gap="2" style={{ marginTop: "12px" }}>
+                <cf-vstack gap="2" style={{ marginTop: "12px" }}>
                   {allEvents.map((event: SchoolEvent) => (
                     <div
                       style={{
@@ -1194,7 +1194,7 @@ Extract:
                       </div>
                     </div>
                   ))}
-                </ct-vstack>
+                </cf-vstack>
               </details>
 
               {/* ============================================================ */}
@@ -1218,7 +1218,7 @@ Extract:
                   >
                     Dismissed ({dismissedCount})
                   </summary>
-                  <ct-vstack gap="2" style={{ marginTop: "8px" }}>
+                  <cf-vstack gap="2" style={{ marginTop: "8px" }}>
                     {allEmails.map((email: Email) => (
                       <div
                         style={{
@@ -1266,7 +1266,7 @@ Extract:
                         </button>
                       </div>
                     ))}
-                  </ct-vstack>
+                  </cf-vstack>
                 </details>
               </div>
 
@@ -1307,9 +1307,9 @@ Extract:
                   </div>
                 </div>
               </details>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
     };
   },

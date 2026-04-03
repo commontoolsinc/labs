@@ -1,5 +1,5 @@
-import { hydratePrompt, LlmPrompt, llmPrompt } from "@commontools/llm";
-import { type StaticCache } from "@commontools/static";
+import { hydratePrompt, LlmPrompt, llmPrompt } from "@commonfabric/llm";
+import { type StaticCache } from "@commonfabric/static";
 
 const libraries = {
   "imports": {

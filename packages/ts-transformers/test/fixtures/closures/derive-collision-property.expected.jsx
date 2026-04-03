@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-collision-property
 // Verifies: name collision renames the capture variable but preserves object property names
 //   derive(multiplier, fn) → derive(schema, schema, { multiplier, multiplier_1 }, fn)
@@ -8,11 +8,11 @@ import { Writable, derive, pattern } from "commontools";
 export default pattern(() => {
     const multiplier = Writable.of(2, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     // Input name 'multiplier' collides with captured variable 'multiplier'
     // The callback returns an object with a property named 'multiplier'
     // Only the variable reference should be renamed, NOT the property name
-    const result = __ctHelpers.derive({
+    const result = __cfHelpers.derive({
         type: "object",
         properties: {
             multiplier_1: {
@@ -25,7 +25,7 @@ export default pattern(() => {
             }
         },
         required: ["multiplier_1", "multiplier"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             multiplier: {
@@ -36,7 +36,7 @@ export default pattern(() => {
             }
         },
         required: ["multiplier", "value"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         multiplier,
         multiplier_1: multiplier
     }, ({ multiplier: m, multiplier_1 }) => ({
@@ -44,7 +44,7 @@ export default pattern(() => {
         value: m.get() * 3,
     }));
     return result;
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         multiplier: {
@@ -55,8 +55,8 @@ export default pattern(() => {
         }
     },
     required: ["multiplier", "value"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

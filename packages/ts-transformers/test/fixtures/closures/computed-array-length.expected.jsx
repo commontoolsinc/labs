@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * Regression test for array.length access inside computed().
  *
@@ -9,7 +9,7 @@ import * as __ctHelpers from "commontools";
  * The fix ensures the schema is { type: "array", items: { not: true } }
  * rather than { type: "object", properties: { length: { type: "number" } } }
  */
-import { computed, NAME, pattern, UI, wish } from "commontools";
+import { computed, NAME, pattern, UI, wish } from "commonfabric";
 interface Charm {
     id: string;
     name: string;
@@ -48,9 +48,9 @@ export default pattern(() => {
                 required: ["id", "name"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema).result!;
+    } as const satisfies __cfHelpers.JSONSchema).result!;
     return {
-        [NAME]: __ctHelpers.derive({
+        [NAME]: __cfHelpers.derive({
             type: "object",
             properties: {
                 allCharms: {
@@ -64,13 +64,13 @@ export default pattern(() => {
                 }
             },
             required: ["allCharms"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { allCharms: {
+        } as const satisfies __cfHelpers.JSONSchema, { allCharms: {
                 length: allCharms.length
             } }, ({ allCharms }) => `Charms (${allCharms.length})`),
         [UI]: (<div>
-        <span>Count: {__ctHelpers.derive({
+        <span>Count: {__cfHelpers.derive({
             type: "object",
             properties: {
                 allCharms: {
@@ -84,13 +84,13 @@ export default pattern(() => {
                 }
             },
             required: ["allCharms"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { allCharms: {
+        } as const satisfies __cfHelpers.JSONSchema, { allCharms: {
                 length: allCharms.length
             } }, ({ allCharms }) => allCharms.length)}</span>
         <ul>
-          {allCharms.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+          {allCharms.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const charm = __ct_pattern_input.key("element");
                 return (<li>{charm.key("name")}</li>);
             }, {
@@ -115,7 +115,7 @@ export default pattern(() => {
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -135,11 +135,11 @@ export default pattern(() => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            } as const satisfies __cfHelpers.JSONSchema), {})}
         </ul>
       </div>),
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -171,8 +171,8 @@ export default pattern(() => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

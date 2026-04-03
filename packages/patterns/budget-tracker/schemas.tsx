@@ -4,7 +4,7 @@
  *
  * Type definitions used across all budget tracker sub-patterns.
  */
-import { Default } from "commontools";
+import { Default } from "commonfabric";
 
 // ============ CORE TYPES ============
 

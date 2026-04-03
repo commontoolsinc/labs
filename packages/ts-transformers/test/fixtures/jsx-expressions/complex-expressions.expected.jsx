@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 interface Problem {
     price: number;
     discount: number;
@@ -16,7 +16,7 @@ export default pattern((__ct_pattern_input) => {
     return {
         [UI]: (<div>
           <p>Price: {price}</p>
-          <p>Discount: {__ctHelpers.derive({
+          <p>Discount: {__cfHelpers.derive({
             type: "object",
             properties: {
                 price: {
@@ -27,13 +27,13 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["price", "discount"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             price: price,
             discount: discount
         }, ({ price, discount }) => price - discount)}</p>
-          <p>With tax: {__ctHelpers.derive({
+          <p>With tax: {__cfHelpers.derive({
             type: "object",
             properties: {
                 price: {
@@ -47,9 +47,9 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["price", "discount", "tax"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             price: price,
             discount: discount,
             tax: tax
@@ -70,7 +70,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["price", "discount", "tax"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -99,8 +99,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

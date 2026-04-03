@@ -1,6 +1,6 @@
 import { CommonIframeSandboxElement } from "../src/common-iframe-sandbox.ts";
 import { setIframeContextHandler } from "../src/index.ts";
-import { sleep } from "@commontools/utils/sleep";
+import { sleep } from "@commonfabric/utils/sleep";
 
 type Callback = (key: string, value: unknown) => void;
 interface Context {

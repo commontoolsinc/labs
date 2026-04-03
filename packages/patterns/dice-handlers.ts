@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, handler, Writable } from "commontools";
+import { Default, handler, Writable } from "commonfabric";
 
 export const roll = handler<
   { sides?: Default<number, 6> },

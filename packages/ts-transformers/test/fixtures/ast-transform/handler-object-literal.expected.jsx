@@ -1,11 +1,11 @@
-import * as __ctHelpers from "commontools";
-import { Cell, handler, pattern } from "commontools";
-import "commontools/schema";
+import * as __cfHelpers from "commonfabric";
+import { Cell, handler, pattern } from "commonfabric";
+import "commonfabric/schema";
 interface State {
     value: Cell<number>;
     name?: Cell<string>;
 }
-const myHandler = handler(false as const satisfies __ctHelpers.JSONSchema, {
+const myHandler = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -14,7 +14,7 @@ const myHandler = handler(false as const satisfies __ctHelpers.JSONSchema, {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, (_, state: State) => {
+} as const satisfies __cfHelpers.JSONSchema, (_, state: State) => {
     state.value.set(state.value.get() + 1);
 });
 // FIXTURE: handler-object-literal
@@ -45,7 +45,7 @@ export default pattern((state) => {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         onClick1: {
@@ -62,8 +62,8 @@ export default pattern((state) => {
         }
     },
     required: ["onClick1", "onClick2", "onClick3"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

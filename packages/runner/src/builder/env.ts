@@ -1,4 +1,4 @@
-import { isDeno } from "@commontools/utils/env";
+import { isDeno } from "@commonfabric/utils/env";
 import ports from "@commontools/ports" with { type: "json" };
 
 // Environment configuration provided to patterns. Could

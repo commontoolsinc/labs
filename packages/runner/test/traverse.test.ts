@@ -4,15 +4,15 @@ import {
   hashOf,
   resetModernHashConfig,
   setModernHashConfig,
-} from "@commontools/data-model/value-hash";
+} from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
   SchemaPathSelector,
   State,
   URI,
-} from "@commontools/memory/interface";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+} from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   canBranchMatch,
   CompoundCycleTracker,
@@ -28,8 +28,8 @@ import { StoreObjectManager } from "../src/storage/query.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { Immutable } from "@commontools/utils/types";
-import { ContextualFlowControl } from "@commontools/runner";
+import { Immutable } from "@commonfabric/utils/types";
+import { ContextualFlowControl } from "@commonfabric/runner";
 import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 
 // Helper function to get the SchemaObjectTraverser backed by a store map
@@ -1207,6 +1207,46 @@ for (const modernHash of [false, true]) {
             value: docValue,
           });
 
+        expect(error).toBeDefined();
+      });
+
+      it("does not silently replace a mismatched item with undefined when items schema is a $ref", () => {
+        // Before the isValidType $ref fix, isValidType called with a schema of the
+        // form { $ref: "...", $defs: {...} } would skip $ref resolution and fall
+        // through with all validities undefined, returning TypeValidity.True. This
+        // caused the array element fallback (lines 2632-2634 in traverse.ts) to
+        // accept `undefined` as a replacement for any item that failed traversal —
+        // even when the $ref resolved to a typed schema that excluded undefined.
+        //
+        // schemaAtPath returns the items schema object directly, so when items is
+        // { $ref: "#/$defs/Str", $defs: { Str: { type: "string" } } } the fallback
+        // receives that self-contained schema and must resolve the $ref before
+        // deciding whether undefined is a valid substitute.
+        const docValue = ["hello", true];
+        const { store, docUri, type } = makeArrayDoc(docValue as FabricValue[]);
+
+        const schema = {
+          type: "array",
+          items: {
+            $ref: "#/$defs/Str",
+          },
+          $defs: { Str: { type: "string" } },
+        } as JSONSchema;
+
+        const { error } = getTraverser(store, { path: ["value"], schema })
+          .traverse({
+            address: {
+              space: "did:null:null",
+              id: docUri,
+              type,
+              path: ["value"],
+            },
+            value: docValue as FabricValue[],
+          });
+
+        // After fix: $ref is resolved to { type: "string" }, which does not allow
+        // undefined, so the boolean item cannot be silently replaced and the array
+        // traversal fails instead of returning ["hello", undefined].
         expect(error).toBeDefined();
       });
     });

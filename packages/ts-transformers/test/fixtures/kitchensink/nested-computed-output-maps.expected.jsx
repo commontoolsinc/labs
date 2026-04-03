@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * FIXTURE: nested-computed-output-maps
  * Verifies: nested computed outputs can flow back into later pattern-owned
@@ -15,7 +15,7 @@ import * as __ctHelpers from "commontools";
  * - threadRows.map(...) lowers once the flow re-enters pattern-owned UI
  * - closures preserve thread/comment indices, state.lane, and local Writables
  */
-import { computed, handler, ifElse, lift, pattern, UI, Writable, } from "commontools";
+import { computed, handler, ifElse, lift, pattern, UI, Writable, } from "commonfabric";
 interface Comment {
     id: string;
     text: string;
@@ -31,7 +31,7 @@ interface Thread {
 // [TRANSFORM] handler: event schema (true=unknown) and state schema injected
 const jumpToComment = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         selectedCommentId: {
@@ -54,28 +54,28 @@ const jumpToComment = handler({
         }
     },
     required: ["selectedCommentId", "threadId", "commentId", "lane", "outerIndex", "innerIndex"]
-} as const satisfies __ctHelpers.JSONSchema, (_event, state) => state);
+} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
 // [TRANSFORM] lift: input and output schemas injected
 const passthroughLabels = lift({
     type: "array",
     items: {
         type: "string"
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "array",
     items: {
         type: "string"
     }
-} as const satisfies __ctHelpers.JSONSchema, (labels: string[]) => labels);
+} as const satisfies __cfHelpers.JSONSchema, (labels: string[]) => labels);
 // [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern((state) => {
     // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
     const selectedCommentId = Writable.of<string | undefined>(undefined, {
         type: ["string", "undefined"]
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const laneLabels = passthroughLabels(["lane", "detail", "summary"]);
     // [TRANSFORM] computed() → derive(): captures state.threads, state.showFlagged
-    const visibleThreads = __ctHelpers.derive({
+    const visibleThreads = __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -139,7 +139,7 @@ export default pattern((state) => {
                 required: ["id", "text", "flagged", "reactions"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "object",
@@ -203,7 +203,7 @@ export default pattern((state) => {
                 required: ["id", "title", "muted", "comments"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             threads: state.key("threads"),
             showFlagged: state.key("showFlagged")
         } }, ({ state }) => 
@@ -216,7 +216,7 @@ export default pattern((state) => {
             : thread.comments,
     })));
     // [TRANSFORM] computed() → derive(): captures visibleThreads (asOpaque), selectedCommentId (asCell — Writable), state.lane
-    const threadRows = __ctHelpers.derive({
+    const threadRows = __cfHelpers.derive({
         type: "object",
         properties: {
             visibleThreads: {
@@ -299,7 +299,7 @@ export default pattern((state) => {
                 required: ["id", "title", "muted", "comments"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             $ref: "#/$defs/JSXElement"
@@ -325,7 +325,7 @@ export default pattern((state) => {
                 required: ["$UI"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         visibleThreads: visibleThreads,
         selectedCommentId: selectedCommentId,
         state: {
@@ -338,7 +338,7 @@ export default pattern((state) => {
         const plainSeparators = ["top", "bottom"].map((edge) => `${thread.title}-${edge}`);
         const liftedSeparators = passthroughLabels(plainSeparators);
         // [TRANSFORM] computed() → derive() (nested): captures visibleComments from outer derive scope
-        const reboundComments = __ctHelpers.derive({
+        const reboundComments = __cfHelpers.derive({
             type: "object",
             properties: {
                 visibleComments: {
@@ -372,7 +372,7 @@ export default pattern((state) => {
                     required: ["id", "text", "flagged", "reactions"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "array",
             items: {
                 $ref: "#/$defs/Comment"
@@ -400,7 +400,7 @@ export default pattern((state) => {
                     required: ["id", "text", "flagged", "reactions"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, { visibleComments: visibleComments }, ({ visibleComments }) => visibleComments);
+        } as const satisfies __cfHelpers.JSONSchema, { visibleComments: visibleComments }, ({ visibleComments }) => visibleComments);
         return (<article>
           <h2>{thread.title}</h2>
           {/* [TRANSFORM] .map() stays plain: visibleComments is destructured from captured derive input */}
@@ -417,17 +417,17 @@ export default pattern((state) => {
                     ? <strong>{comment.text}</strong>
                     : /* [TRANSFORM] ifElse: schema-injected authored ifElse(thread.muted, ..., ...) */ ifElse({
                         type: "boolean"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         anyOf: [{}, {
                                 type: "object",
                                 properties: {}
                             }]
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         anyOf: [{}, {
                                 type: "object",
                                 properties: {}
                             }]
-                    } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, thread.muted, <em>{comment.text}</em>, <span>{comment.text}</span>)}
+                    } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, thread.muted, <em>{comment.text}</em>, <span>{comment.text}</span>)}
               </button>
               {/* [TRANSFORM] .map() stays plain: comment.reactions is compute-owned nested array data */}
               {comment.reactions.map((reaction, reactionIndex) => (<span>
@@ -438,21 +438,21 @@ export default pattern((state) => {
             </div>))}
           {/* [TRANSFORM] .map() → mapWithPattern: reboundComments is output of nested derive() — reactive even inside outer derive */}
           {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
-          {reboundComments.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+          {reboundComments.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const comment = __ct_pattern_input.key("element");
                 const reboundIndex = __ct_pattern_input.key("index");
                 const outerIndex = __ct_pattern_input.params.outerIndex;
                 const state = __ct_pattern_input.key("params", "state");
                 return (<aside>
-              {__ctHelpers.ifElse({
+              {__cfHelpers.ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         reboundIndex: {
@@ -463,12 +463,12 @@ export default pattern((state) => {
                         }
                     },
                     required: ["reboundIndex", "outerIndex"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     reboundIndex: reboundIndex,
                     outerIndex: outerIndex
-                }, ({ reboundIndex, outerIndex }) => reboundIndex === outerIndex), __ctHelpers.derive({
+                }, ({ reboundIndex, outerIndex }) => reboundIndex === outerIndex), __cfHelpers.derive({
                     type: "object",
                     properties: {
                         state: {
@@ -491,9 +491,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["state", "comment"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     state: {
                         lane: state.key("lane")
                     },
@@ -554,7 +554,7 @@ export default pattern((state) => {
                         required: ["id", "text", "flagged", "reactions"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -574,7 +574,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {
+            } as const satisfies __cfHelpers.JSONSchema), {
                 outerIndex: outerIndex,
                 state: {
                     lane: state.lane
@@ -582,21 +582,21 @@ export default pattern((state) => {
             })}
           {/* [TRANSFORM] .map() → mapWithPattern: liftedSeparators is output of lift() — reactive even inside outer derive */}
           {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
-          {liftedSeparators.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+          {liftedSeparators.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const edge = __ct_pattern_input.key("element");
                 const edgeIndex = __ct_pattern_input.key("index");
                 const outerIndex = __ct_pattern_input.params.outerIndex;
                 const state = __ct_pattern_input.key("params", "state");
                 return (<small>
-              {__ctHelpers.ifElse({
+              {__cfHelpers.ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         edgeIndex: {
@@ -607,12 +607,12 @@ export default pattern((state) => {
                         }
                     },
                     required: ["edgeIndex", "outerIndex"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     edgeIndex: edgeIndex,
                     outerIndex: outerIndex
-                }, ({ edgeIndex, outerIndex }) => edgeIndex === outerIndex), __ctHelpers.derive({
+                }, ({ edgeIndex, outerIndex }) => edgeIndex === outerIndex), __cfHelpers.derive({
                     type: "object",
                     properties: {
                         state: {
@@ -629,9 +629,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["state", "edge"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     state: {
                         lane: state.key("lane")
                     },
@@ -667,7 +667,7 @@ export default pattern((state) => {
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -687,7 +687,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {
+            } as const satisfies __cfHelpers.JSONSchema), {
                 outerIndex: outerIndex,
                 state: {
                     lane: state.lane
@@ -701,20 +701,20 @@ export default pattern((state) => {
         [UI]: (<div>
         {/* [TRANSFORM] .map() → mapWithPattern: laneLabels is output of lift() in pattern context — reactive */}
         {/* [TRANSFORM] ternary lowered: labelIndex===0 ? `${state.lane}:${label}` : label → ifElse(derive(cond), derive(true-branch), label) */}
-        {laneLabels.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {laneLabels.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const label = __ct_pattern_input.key("element");
                 const labelIndex = __ct_pattern_input.key("index");
                 const state = __ct_pattern_input.key("params", "state");
                 return (<header data-lane-label={labelIndex}>
-            {__ctHelpers.ifElse({
+            {__cfHelpers.ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         labelIndex: {
@@ -722,9 +722,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["labelIndex"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, { labelIndex: labelIndex }, ({ labelIndex }) => labelIndex === 0), __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, { labelIndex: labelIndex }, ({ labelIndex }) => labelIndex === 0), __cfHelpers.derive({
                     type: "object",
                     properties: {
                         state: {
@@ -741,9 +741,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["state", "label"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     state: {
                         lane: state.key("lane")
                     },
@@ -776,7 +776,7 @@ export default pattern((state) => {
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -796,13 +796,13 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {
+            } as const satisfies __cfHelpers.JSONSchema), {
                 state: {
                     lane: state.key("lane")
                 }
             })}
         {/* [TRANSFORM] .map() → mapWithPattern: threadRows is output of derive() — reactive, back in pattern-owned UI */}
-        {threadRows.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {threadRows.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const row = __ct_pattern_input.key("element");
                 const rowIndex = __ct_pattern_input.key("index");
                 return (<section data-row={rowIndex}>{row}</section>);
@@ -838,7 +838,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -858,7 +858,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            } as const satisfies __cfHelpers.JSONSchema), {})}
       </div>),
     };
 }, {
@@ -922,7 +922,7 @@ export default pattern((state) => {
             required: ["id", "text", "flagged", "reactions"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -951,8 +951,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

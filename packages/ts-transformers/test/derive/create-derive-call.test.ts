@@ -2,7 +2,7 @@ import { assertStringIncludes } from "@std/assert";
 import ts from "typescript";
 
 import { createDeriveCall } from "../../src/transformers/builtins/derive.ts";
-import { CTHelpers } from "../../src/core/ct-helpers.ts";
+import { CFHelpers } from "../../src/core/cf-helpers.ts";
 
 Deno.test("createDeriveCall keeps fallback refs synced when names collide", () => {
   const source = ts.createSourceFile(
@@ -18,10 +18,10 @@ Deno.test("createDeriveCall keeps fallback refs synced when names collide", () =
   const transformer: ts.TransformerFactory<ts.SourceFile> = (context) => {
     const { factory } = context;
 
-    const ctHelpers = {
+    const cfHelpers = {
       getHelperExpr(name: string) {
         return factory.createPropertyAccessExpression(
-          factory.createIdentifier("__ctHelpers"),
+          factory.createIdentifier("__cfHelpers"),
           name,
         );
       },
@@ -33,14 +33,14 @@ Deno.test("createDeriveCall keeps fallback refs synced when names collide", () =
       ) {
         return factory.createCallExpression(
           factory.createPropertyAccessExpression(
-            factory.createIdentifier("__ctHelpers"),
+            factory.createIdentifier("__cfHelpers"),
             name,
           ),
           typeArguments,
           argumentsArray,
         );
       },
-    } as unknown as CTHelpers;
+    } as unknown as CFHelpers;
 
     // Create a minimal program for type checking
     const program = ts.createProgram(["test.tsx"], {
@@ -54,7 +54,7 @@ Deno.test("createDeriveCall keeps fallback refs synced when names collide", () =
       tsContext: context,
       checker,
       sourceFile: source,
-      ctHelpers,
+      cfHelpers,
       options: {
         typeRegistry: new WeakMap(),
       },
@@ -69,7 +69,7 @@ Deno.test("createDeriveCall keeps fallback refs synced when names collide", () =
     ], {
       factory,
       tsContext: context,
-      ctHelpers,
+      cfHelpers,
       context: transformContext,
     });
 

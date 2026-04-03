@@ -7,7 +7,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import FavoritesManager from "./favorites-manager.tsx";
 import { EMPTY_LEARNED, type LearnedSection } from "../profile.tsx";
 
@@ -119,24 +119,24 @@ export default pattern((_) => {
   return {
     [NAME]: `Home`,
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <h1>
           home<strong>space</strong>
         </h1>
 
-        <ct-tabs $value={activeTab}>
-          <ct-tab-list>
-            <ct-tab value="spaces">Spaces</ct-tab>
-            <ct-tab value="favorites">Favorites</ct-tab>
-            <ct-tab value="profile">Profile</ct-tab>
-          </ct-tab-list>
-          <ct-tab-panel value="favorites">{favoritesComponent}</ct-tab-panel>
-          <ct-tab-panel value="profile">
-            <ct-vstack gap="4" style={{ padding: "1rem" }}>
+        <cf-tabs $value={activeTab}>
+          <cf-tab-list>
+            <cf-tab value="spaces">Spaces</cf-tab>
+            <cf-tab value="favorites">Favorites</cf-tab>
+            <cf-tab value="profile">Profile</cf-tab>
+          </cf-tab-list>
+          <cf-tab-panel value="favorites">{favoritesComponent}</cf-tab-panel>
+          <cf-tab-panel value="profile">
+            <cf-vstack gap="4" style={{ padding: "1rem" }}>
               <h2 style={{ margin: 0, fontSize: "16px" }}>Profile Summary</h2>
 
-              <ct-vstack gap="1">
-                <ct-textarea
+              <cf-vstack gap="1">
+                <cf-textarea
                   $value={learned.key("summary")}
                   placeholder="Write a short profile summary about yourself..."
                   rows={6}
@@ -154,30 +154,30 @@ export default pattern((_) => {
                 <span style={{ fontSize: "11px", color: "#888" }}>
                   Edit your profile summary above.
                 </span>
-              </ct-vstack>
-            </ct-vstack>
-          </ct-tab-panel>
-          <ct-tab-panel value="spaces">
-            <ct-vstack gap="4" style={{ padding: "1rem" }}>
+              </cf-vstack>
+            </cf-vstack>
+          </cf-tab-panel>
+          <cf-tab-panel value="spaces">
+            <cf-vstack gap="4" style={{ padding: "1rem" }}>
               <h2 style={{ margin: 0, fontSize: "16px" }}>My Spaces</h2>
 
-              <ct-vstack gap="2">
+              <cf-vstack gap="2">
                 {spaces.map((space) => (
-                  <ct-hstack gap="2" align="center">
+                  <cf-hstack gap="2" align="center">
                     <div style={{ flex: "1" }}>
-                      <ct-space-link
+                      <cf-space-link
                         spaceName={space.name}
                         spaceDid={space.did}
                       />
                     </div>
-                    <ct-button
+                    <cf-button
                       size="sm"
                       variant="ghost"
                       onClick={removeSpaceHandler({ name: space.name, spaces })}
                     >
                       ✕
-                    </ct-button>
-                  </ct-hstack>
+                    </cf-button>
+                  </cf-hstack>
                 ))}
                 {computed(() => spaces.get().length === 0) && (
                   <p
@@ -190,23 +190,23 @@ export default pattern((_) => {
                     No spaces yet. Add one below.
                   </p>
                 )}
-              </ct-vstack>
+              </cf-vstack>
 
               <hr style={{ border: "none", borderTop: "1px solid #e5e5e7" }} />
 
-              <ct-vstack gap="1">
+              <cf-vstack gap="1">
                 <h3 style={{ margin: 0, fontSize: "14px" }}>
                   Add or Create Space
                 </h3>
-                <ct-message-input
+                <cf-message-input
                   placeholder="Space name..."
                   appearance="rounded"
-                  onct-send={addSpaceHandler({ spaces })}
+                  oncf-send={addSpaceHandler({ spaces })}
                 />
                 <span style={{ fontSize: "11px", color: "#888" }}>
                   Type a name and press enter. Click the link to navigate.
                 </span>
-              </ct-vstack>
+              </cf-vstack>
 
               <hr
                 style={{
@@ -216,12 +216,12 @@ export default pattern((_) => {
                 }}
               />
 
-              <ct-vstack gap="1">
+              <cf-vstack gap="1">
                 <h3 style={{ margin: 0, fontSize: "14px" }}>Settings</h3>
                 <label style={{ fontSize: "13px", color: "#666" }}>
                   Default App Pattern URL
                 </label>
-                <ct-input
+                <cf-input
                   $value={defaultAppUrl}
                   placeholder="/api/patterns/system/default-app.tsx"
                   style={{
@@ -233,11 +233,11 @@ export default pattern((_) => {
                 <span style={{ fontSize: "11px", color: "#888" }}>
                   Pattern URL for new spaces. Leave empty for system default.
                 </span>
-              </ct-vstack>
-            </ct-vstack>
-          </ct-tab-panel>
-        </ct-tabs>
-      </ct-screen>
+              </cf-vstack>
+            </cf-vstack>
+          </cf-tab-panel>
+        </cf-tabs>
+      </cf-screen>
     ),
 
     // Exported data

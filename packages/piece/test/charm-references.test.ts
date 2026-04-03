@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { EntityId } from "@commontools/runner";
-import { isRecord } from "@commontools/utils/types";
+import { EntityId } from "@commonfabric/runner";
+import { isRecord } from "@commonfabric/utils/types";
 
 type MockDoc = {
   get: () => unknown;

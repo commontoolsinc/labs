@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * Regression test: action() result used in same ternary branch as computed()
  *
@@ -6,7 +6,7 @@ import * as __ctHelpers from "commontools";
  * the nested computed expression should still lower locally in JSX without forcing
  * the whole JSX branch through an extra derive wrapper.
  */
-import { action, Cell, computed, pattern, UI } from "commontools";
+import { action, Cell, computed, pattern, UI } from "commonfabric";
 interface Card {
     title: string;
     description: string;
@@ -24,8 +24,8 @@ export default pattern((__ct_pattern_input) => {
     const card = __ct_pattern_input.key("card");
     const isEditing = Cell.of(false, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const startEditing = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema);
+    const startEditing = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             isEditing: {
@@ -34,12 +34,12 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["isEditing"]
-    } as const satisfies __ctHelpers.JSONSchema, (_, { isEditing }) => {
+    } as const satisfies __cfHelpers.JSONSchema, (_, { isEditing }) => {
         isEditing.set(true);
     })({
         isEditing: isEditing
     });
-    const hasDescription = __ctHelpers.derive({
+    const hasDescription = __cfHelpers.derive({
         type: "object",
         properties: {
             card: {
@@ -53,58 +53,58 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["card"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         "enum": [false, true, ""]
-    } as const satisfies __ctHelpers.JSONSchema, { card: {
+    } as const satisfies __cfHelpers.JSONSchema, { card: {
             description: card.key("description")
         } }, ({ card }) => {
         const desc = card.description;
         return desc && desc.length > 0;
     });
     return {
-        [UI]: (<ct-card>
-        {__ctHelpers.ifElse({
+        [UI]: (<cf-card>
+        {__cfHelpers.ifElse({
             type: "boolean",
             asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, isEditing, <div>Editing</div>, <div>
+        } as const satisfies __cfHelpers.JSONSchema, isEditing, <div>Editing</div>, <div>
             <span>{card.key("title")}</span>
             {/* Nested ternary with computed - lowers locally inside JSX */}
-            {__ctHelpers.ifElse({
+            {__cfHelpers.ifElse({
             "enum": [false, true, ""]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "null"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{
                     type: "null"
                 }, {}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, hasDescription, <span>{card.key("description")}</span>, null)}
+        } as const satisfies __cfHelpers.JSONSchema, hasDescription, <span>{card.key("description")}</span>, null)}
             {/* Action in SAME branch stays direct while JSX-local rewrites handle the computed value */}
-            <ct-button onClick={startEditing}>Edit</ct-button>
+            <cf-button onClick={startEditing}>Edit</cf-button>
           </div>)}
-      </ct-card>),
+      </cf-card>),
         card,
     };
 }, {
@@ -129,7 +129,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["title", "description"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -173,8 +173,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

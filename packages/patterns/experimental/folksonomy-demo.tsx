@@ -27,7 +27,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Import the FolksonomyTags sub-pattern
 import { FolksonomyTags } from "./folksonomy-tags.tsx";
@@ -96,9 +96,9 @@ export default pattern<Input, Output>(
     return {
       [NAME]: "Folksonomy Demo",
       [UI]: (
-        <ct-vstack gap="4" style={{ padding: "16px", maxWidth: "800px" }}>
+        <cf-vstack gap="4" style={{ padding: "16px", maxWidth: "800px" }}>
           {/* Header */}
-          <ct-vstack gap="2">
+          <cf-vstack gap="2">
             <h1 style={{ margin: 0, fontSize: "24px" }}>
               🏷️ Folksonomy Tags Demo
             </h1>
@@ -107,7 +107,7 @@ export default pattern<Input, Output>(
               added here flow to the aggregator and become suggestions for
               others.
             </p>
-          </ct-vstack>
+          </cf-vstack>
 
           {/* Aggregator Status */}
           <div
@@ -118,7 +118,7 @@ export default pattern<Input, Output>(
               borderRadius: "8px",
             }}
           >
-            <ct-hstack gap="2" align="center">
+            <cf-hstack gap="2" align="center">
               <span style={{ fontSize: "18px" }}>
                 {hasAggregator ? "✓" : "⚠"}
               </span>
@@ -127,11 +127,11 @@ export default pattern<Input, Output>(
                   ? "Connected to folksonomy-aggregator - community features active!"
                   : "Aggregator not found. Deploy and favorite folksonomy-aggregator with tag 'folksonomy-aggregator' for community features."}
               </span>
-            </ct-hstack>
+            </cf-hstack>
           </div>
 
           {/* Shared Scope Section */}
-          <ct-vstack
+          <cf-vstack
             gap="3"
             style={{
               padding: "16px",
@@ -140,7 +140,7 @@ export default pattern<Input, Output>(
               border: "1px solid #e5e7eb",
             }}
           >
-            <ct-vstack gap="1">
+            <cf-vstack gap="1">
               <h2 style={{ margin: 0, fontSize: "18px" }}>
                 Shared Scope: Recipe Items A & B
               </h2>
@@ -163,11 +163,11 @@ export default pattern<Input, Output>(
               >
                 Scope: {sharedScope}
               </code>
-            </ct-vstack>
+            </cf-vstack>
 
-            <ct-hstack gap="4" wrap>
+            <cf-hstack gap="4" wrap>
               {/* Item A */}
-              <ct-vstack
+              <cf-vstack
                 gap="2"
                 style={{
                   flex: 1,
@@ -186,11 +186,11 @@ export default pattern<Input, Output>(
                 >
                   Item A: Pasta Recipe
                 </span>
-                <ct-render $cell={tagsA} />
-              </ct-vstack>
+                <cf-render $cell={tagsA} />
+              </cf-vstack>
 
               {/* Item B */}
-              <ct-vstack
+              <cf-vstack
                 gap="2"
                 style={{
                   flex: 1,
@@ -209,13 +209,13 @@ export default pattern<Input, Output>(
                 >
                   Item B: Pizza Recipe
                 </span>
-                <ct-render $cell={tagsB} />
-              </ct-vstack>
-            </ct-hstack>
-          </ct-vstack>
+                <cf-render $cell={tagsB} />
+              </cf-vstack>
+            </cf-hstack>
+          </cf-vstack>
 
           {/* Isolated Scope Section */}
-          <ct-vstack
+          <cf-vstack
             gap="3"
             style={{
               padding: "16px",
@@ -224,7 +224,7 @@ export default pattern<Input, Output>(
               border: "1px solid #f0abfc",
             }}
           >
-            <ct-vstack gap="1">
+            <cf-vstack gap="1">
               <h2 style={{ margin: 0, fontSize: "18px" }}>
                 Isolated Scope: Project Tasks
               </h2>
@@ -247,9 +247,9 @@ export default pattern<Input, Output>(
               >
                 Scope: demo-isolated
               </code>
-            </ct-vstack>
+            </cf-vstack>
 
-            <ct-vstack
+            <cf-vstack
               gap="2"
               style={{
                 padding: "12px",
@@ -266,12 +266,12 @@ export default pattern<Input, Output>(
               >
                 Item C: Task Tracker
               </span>
-              <ct-render $cell={tagsC} />
-            </ct-vstack>
-          </ct-vstack>
+              <cf-render $cell={tagsC} />
+            </cf-vstack>
+          </cf-vstack>
 
           {/* How It Works */}
-          <ct-vstack
+          <cf-vstack
             gap="2"
             style={{
               padding: "16px",
@@ -310,7 +310,7 @@ export default pattern<Input, Output>(
                 Check the aggregator charm to see all events and top tags
               </li>
             </ol>
-          </ct-vstack>
+          </cf-vstack>
 
           {/* Preferential Attachment Note */}
           <div
@@ -327,7 +327,7 @@ export default pattern<Input, Output>(
             creates a natural convergence toward useful vocabulary without
             top-down control.
           </div>
-        </ct-vstack>
+        </cf-vstack>
       ),
       itemATags,
       itemBTags,

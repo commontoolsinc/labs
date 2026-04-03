@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Cell, Default, handler, NAME, pattern, UI } from "commontools";
+import { Cell, Default, handler, NAME, pattern, UI } from "commonfabric";
 
 const incCounter = handler<undefined, { counter: Cell<number> }>(
   (_, { counter }) => {

@@ -1,8 +1,8 @@
-import * as __ctHelpers from "commontools";
-import { computed, generateText, pattern, patternTool, type PatternToolResult, Writable } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { computed, generateText, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
 const content = Writable.of("Hello world", {
     type: "string"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 type Output = {
     tool: PatternToolResult<{
         content: string;
@@ -24,7 +24,7 @@ export default pattern(() => {
         content: string;
     }) => {
         const genResult = generateText({
-            system: __ctHelpers.derive({
+            system: __cfHelpers.derive({
                 type: "object",
                 properties: {
                     language: {
@@ -32,10 +32,10 @@ export default pattern(() => {
                     }
                 },
                 required: ["language"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, { language: language }, ({ language }) => `Translate to ${language}.`),
-            prompt: __ctHelpers.derive({
+            } as const satisfies __cfHelpers.JSONSchema, { language: language }, ({ language }) => `Translate to ${language}.`),
+            prompt: __cfHelpers.derive({
                 type: "object",
                 properties: {
                     content: {
@@ -43,11 +43,11 @@ export default pattern(() => {
                     }
                 },
                 required: ["content"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, { content: content }, ({ content }) => content),
+            } as const satisfies __cfHelpers.JSONSchema, { content: content }, ({ content }) => content),
         });
-        return __ctHelpers.derive({
+        return __cfHelpers.derive({
             type: "object",
             properties: {
                 genResult: {
@@ -64,9 +64,9 @@ export default pattern(() => {
                 }
             },
             required: ["genResult"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __ctHelpers.JSONSchema, { genResult: {
+        } as const satisfies __cfHelpers.JSONSchema, { genResult: {
                 pending: genResult.pending,
                 result: genResult.result
             } }, ({ genResult }) => {
@@ -80,7 +80,7 @@ export default pattern(() => {
     type: "object",
     properties: {},
     additionalProperties: false
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         tool: {
@@ -113,8 +113,8 @@ export default pattern(() => {
             required: ["argumentSchema", "resultSchema"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

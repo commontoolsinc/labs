@@ -20,8 +20,8 @@ import type {
   SchemaPathSelector,
   State,
   URI,
-} from "@commontools/memory/interface";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+} from "@commonfabric/memory/interface";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   combineSchema,
   IMemorySpaceValueAttestation,
@@ -33,7 +33,7 @@ import { StoreObjectManager } from "../src/storage/query.ts";
 import { ManagedStorageTransaction } from "../src/traverse.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { JSONSchemaObj } from "@commontools/api";
+import type { JSONSchemaObj } from "@commonfabric/api";
 
 // ---------------------------------------------------------------------------
 // Helpers (same pattern as traverse-anyof.bench.ts)

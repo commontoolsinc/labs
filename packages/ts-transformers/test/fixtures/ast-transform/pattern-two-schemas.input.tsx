@@ -1,6 +1,6 @@
 /// <cts-enable />
-import { computed, pattern, type JSONSchema } from "commontools";
-import "commontools/schema";
+import { computed, pattern, type JSONSchema } from "commonfabric";
+import "commonfabric/schema";
 
 // Test that pattern with both schemas already present is not transformed
 interface Input { count: number }

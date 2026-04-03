@@ -11,7 +11,7 @@ import {
   toSchema,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Piece = {
   [NAME]: string;
@@ -99,11 +99,11 @@ export default pattern<PatternInOutput, PatternInOutput>(
             <ul>
               {cellRef.map((piece: any, index: number) => (
                 <li>
-                  <ct-button
+                  <cf-button
                     onClick={goToPiece({ piece })}
                   >
                     Go to Piece {computed(() => index + 1)}
-                  </ct-button>
+                  </cf-button>
                   <span>
                     Piece {computed(() => index + 1)}:{" "}
                     {piece[NAME] || "Unnamed"}
@@ -113,11 +113,11 @@ export default pattern<PatternInOutput, PatternInOutput>(
             </ul>,
           )}
 
-          <ct-button
+          <cf-button
             onClick={createSimplePiece({ cellRef })}
           >
             Create New Piece
-          </ct-button>
+          </cf-button>
         </div>
       ),
       cellRef,

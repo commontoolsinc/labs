@@ -1,4 +1,7 @@
-import { hashObjectFromJson, hashOf } from "@commontools/data-model/value-hash";
+import {
+  hashObjectFromJson,
+  hashOf,
+} from "@commonfabric/data-model/value-hash";
 
 export interface Entity<T extends null | NonNullable<unknown>> {
   "@": ToString<Entity<T>>;

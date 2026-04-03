@@ -40,7 +40,7 @@ import {
 /**
  * Schema Injection Transformer - TypeRegistry Integration
  *
- * This transformer injects JSON schemas for CommonTools core functions (pattern, derive,
+ * This transformer injects JSON schemas for Common Fabric core functions (pattern, derive,
  * pattern, handler, lift) by analyzing TypeScript types and converting them to runtime schemas.
  *
  * ## TypeRegistry Integration (Unified Approach)
@@ -489,14 +489,14 @@ function collectFunctionSchemaTypeNodes(
 }
 
 function createToSchemaCall(
-  { ctHelpers, factory }: Pick<
+  { cfHelpers, factory }: Pick<
     TransformationContext,
-    "ctHelpers" | "factory"
+    "cfHelpers" | "factory"
   >,
   typeNode: ts.TypeNode,
   options?: { widenLiterals?: boolean },
 ): ts.CallExpression {
-  const expr = ctHelpers.getHelperExpr("toSchema");
+  const expr = cfHelpers.getHelperExpr("toSchema");
 
   // Build arguments array if options are provided
   const args: ts.Expression[] = [];
@@ -622,7 +622,7 @@ function resolveInjectableSchemaType(
  * @returns CallExpression for toSchema() with TypeRegistry entry transferred
  */
 function createSchemaCallWithRegistryTransfer(
-  context: Pick<TransformationContext, "factory" | "ctHelpers" | "sourceFile">,
+  context: Pick<TransformationContext, "factory" | "cfHelpers" | "sourceFile">,
   typeNode: ts.TypeNode,
   checker: ts.TypeChecker,
   typeRegistry?: TypeRegistry,
@@ -649,7 +649,7 @@ function createSchemaCallWithRegistryTransfer(
 }
 
 function createRegisteredSchemaCallFromResolvedType(
-  context: Pick<TransformationContext, "factory" | "ctHelpers" | "sourceFile">,
+  context: Pick<TransformationContext, "factory" | "cfHelpers" | "sourceFile">,
   resolved: ResolvedInjectableSchemaType,
   checker: ts.TypeChecker,
   typeRegistry?: TypeRegistry,
@@ -893,7 +893,7 @@ function visitInjectedDualSchemaBuilderCall(
 
 function createRegisteredWidenedSchemaCall(
   type: ts.Type,
-  context: Pick<TransformationContext, "factory" | "ctHelpers" | "sourceFile">,
+  context: Pick<TransformationContext, "factory" | "cfHelpers" | "sourceFile">,
   checker: ts.TypeChecker,
   typeRegistry?: TypeRegistry,
 ): ts.CallExpression {
@@ -1401,7 +1401,7 @@ function isIntentionallyUnusedSchemaParameter(
 }
 
 function prependSchemaArguments(
-  context: Pick<TransformationContext, "factory" | "ctHelpers" | "sourceFile">,
+  context: Pick<TransformationContext, "factory" | "cfHelpers" | "sourceFile">,
   node: ts.CallExpression,
   argumentTypeNode: ts.TypeNode,
   argumentType: ts.Type | undefined,

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -14,9 +14,9 @@ describe("fetch-data mutex mechanism", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let computed: ReturnType<typeof createBuilder>["commontools"]["computed"];
-  let byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let computed: ReturnType<typeof createBuilder>["commonfabric"]["computed"];
+  let byRef: ReturnType<typeof createBuilder>["commonfabric"]["byRef"];
   let originalFetch: typeof globalThis.fetch;
   let fetchCalls: Array<{ url: string; init?: RequestInit }>;
 
@@ -28,10 +28,10 @@ describe("fetch-data mutex mechanism", () => {
     });
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
-    pattern = commontools.pattern;
-    computed = commontools.computed;
-    byRef = commontools.byRef;
+    const { commonfabric } = createBuilder();
+    pattern = commonfabric.pattern;
+    computed = commonfabric.computed;
+    byRef = commonfabric.byRef;
 
     // Set up pattern environment with a mock base URL
     setPatternEnvironment({

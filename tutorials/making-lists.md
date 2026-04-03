@@ -1,12 +1,12 @@
 ---
 title: Making Lists
 short_title: Making Lists
-description: Creating and working with lists in Common Tools
+description: Creating and working with lists in Common Fabric
 subject: Tutorial
 authors:
   - name: Ellyse Cedeno
     email: ellyse@common.tools
-keywords: commontools, lists, arrays, state
+keywords: commonfabric, lists, arrays, state
 abstract: |
   In this section, we learn how to create and work with lists in the Common
   Tools runtime. We'll especially focus on displaying lists and manipulating them.
@@ -24,7 +24,7 @@ a contact list, or a feed of messages.
 
 **Important Concept: Bidirectional Binding**
 
-Before we dive in, know that CommonTools components support **bidirectional binding** with the `$` prefix (`$value`, `$checked`, etc.). This automatically updates cells when users interact with components, often eliminating the need for handlers! We'll introduce this concept as we go, but keep in mind: if you're just syncing UI ↔ data with no additional logic, bidirectional binding is usually simpler than using handlers.
+Before we dive in, know that Common Fabric components support **bidirectional binding** with the `$` prefix (`$value`, `$checked`, etc.). This automatically updates cells when users interact with components, often eliminating the need for handlers! We'll introduce this concept as we go, but keep in mind: if you're just syncing UI ↔ data with no additional logic, bidirectional binding is usually simpler than using handlers.
 
 ## Our First List
 
@@ -43,7 +43,7 @@ import {
   h,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 ```
 
 Now we define our state interface with `Default<>` to hold our list of friends:
@@ -139,7 +139,7 @@ import {
   handler,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 ```
 
 Next, we'll create a handler that removes an item from the array. Note we currently have a bug in the runtime and therefore we reconstruct the array.
@@ -412,7 +412,7 @@ simpler. Here's how the editing section would look using `$value`:
 // No edit handler needed!
 
 <li>
-  <ct-input $value={state.names[index]} />
+  <cf-input $value={state.names[index]} />
   <button type="button" onclick={removeItem({ names: state.names, index })}>
     Delete
   </button>
@@ -445,7 +445,7 @@ We've demonstrated:
 
 Some friends are more important than others, so let's allow users to reorder the
 list. Instead of adding an up and down button next to each item, we'll introduce
-the `<ct-keybind>` component that lets us register keyboard shortcuts.
+the `<cf-keybind>` component that lets us register keyboard shortcuts.
 
 We'll use Ctrl+Up Arrow to move an item up in the list, and Ctrl+Down Arrow to
 move it down. First, we need to track which item is currently selected.
@@ -527,27 +527,27 @@ new position.
 
 Line 18 updates the selected index to follow the moved item.
 
-Now we can use the `<ct-keybind>` component to register our keyboard shortcuts.
-The `<ct-keybind>` component listens for keyboard events at the document level,
+Now we can use the `<cf-keybind>` component to register our keyboard shortcuts.
+The `<cf-keybind>` component listens for keyboard events at the document level,
 so it works regardless of which element has focus.
 
 ```{code-block} typescript
 :label: making_lists_keybinds
 :linenos: true
 :emphasize-lines: 1-14
-<ct-keybind
+<cf-keybind
   ctrl
   key="ArrowUp"
-  onct-keybind={moveItem({
+  oncf-keybind={moveItem({
     names: state.names,
     selectedIndex: state.selectedIndex,
     direction: "UP"
   })}
 />
-<ct-keybind
+<cf-keybind
   ctrl
   key="ArrowDown"
-  onct-keybind={moveItem({
+  oncf-keybind={moveItem({
     names: state.names,
     selectedIndex: state.selectedIndex,
     direction: "DOWN"
@@ -559,15 +559,15 @@ Line 2 specifies that the Ctrl key must be held.
 
 Line 3 specifies which key to listen for (ArrowUp or ArrowDown).
 
-Lines 4-8 attach our handler to the `onct-keybind` event, passing both Cells and
+Lines 4-8 attach our handler to the `oncf-keybind` event, passing both Cells and
 `direction: "UP"` for the up arrow.
 
 Lines 13-17 do the same for the down arrow, passing `direction: "DOWN"`.
 
-:::{dropdown} More about ct-keybind
+:::{dropdown} More about cf-keybind
 :animate: fade-in
 
-The `<ct-keybind>` component supports many options for creating keyboard
+The `<cf-keybind>` component supports many options for creating keyboard
 shortcuts:
 
 **Modifier Keys**
@@ -576,19 +576,19 @@ You can require any combination of modifier keys:
 
 ```typescript
 // Ctrl+S
-<ct-keybind ctrl key="s" onct-keybind={save()} />
+<cf-keybind ctrl key="s" oncf-keybind={save()} />
 
 // Cmd+K (Meta key is Cmd on Mac, Win on Windows)
-<ct-keybind meta key="k" onct-keybind={openSearch()} />
+<cf-keybind meta key="k" oncf-keybind={openSearch()} />
 
 // Shift+Enter
-<ct-keybind shift key="Enter" onct-keybind={submitWithShift()} />
+<cf-keybind shift key="Enter" oncf-keybind={submitWithShift()} />
 
 // Ctrl+Shift+P
-<ct-keybind ctrl shift key="p" onct-keybind={commandPalette()} />
+<cf-keybind ctrl shift key="p" oncf-keybind={commandPalette()} />
 
 // Alt+Arrow keys
-<ct-keybind alt key="ArrowLeft" onct-keybind={navigateBack()} />
+<cf-keybind alt key="ArrowLeft" oncf-keybind={navigateBack()} />
 ```
 
 **Key Codes vs Key Values**
@@ -597,10 +597,10 @@ You can use either `key` or `code`:
 
 ```typescript
 // Use 'key' for the character value
-<ct-keybind ctrl key="o" onct-keybind={openFile()} />
+<cf-keybind ctrl key="o" oncf-keybind={openFile()} />
 
 // Use 'code' for the physical key position
-<ct-keybind ctrl code="KeyO" onct-keybind={openFile()} />
+<cf-keybind ctrl code="KeyO" oncf-keybind={openFile()} />
 ```
 
 The difference: `key` gives you the character (affected by keyboard layout),
@@ -611,33 +611,33 @@ layout).
 
 ```typescript
 // Prevent default browser behavior
-<ct-keybind
+<cf-keybind
   ctrl
   key="s"
   prevent-default
-  onct-keybind={save()}
+  oncf-keybind={save()}
 />
 
 // Allow when focused in input fields (default: disabled in inputs)
-<ct-keybind
+<cf-keybind
   ctrl
   key="Enter"
   ignore-editable={false}
-  onct-keybind={submit()}
+  oncf-keybind={submit()}
 />
 
 // Allow key repeat (when key is held down)
-<ct-keybind
+<cf-keybind
   key="ArrowUp"
   allow-repeat
-  onct-keybind={scrollUp()}
+  oncf-keybind={scrollUp()}
 />
 
 // Stop event from bubbling
-<ct-keybind
+<cf-keybind
   key="Escape"
   stop-propagation
-  onct-keybind={closeModal()}
+  oncf-keybind={closeModal()}
 />
 ```
 
@@ -648,7 +648,7 @@ layout).
 - Special keys: `"Enter"`, `"Escape"`, `"Tab"`, `"Space"`
 - Function keys: `"F1"`, `"F2"`, etc.
 
-The `onct-keybind` event receives a detail object containing the event and key
+The `oncf-keybind` event receives a detail object containing the event and key
 information. :::
 
 Finally, we need to update our list items to be selectable:
@@ -681,7 +681,7 @@ We've demonstrated:
 
 - How to track selected items with a cell
 - Use array destructuring to swap elements in an array
-- Register keyboard shortcuts with the `<ct-keybind>` component
+- Register keyboard shortcuts with the `<cf-keybind>` component
 - Listen for modifier keys (Ctrl) combined with arrow keys
 - Use TypeScript string literal types to create type-safe direction parameters
 - Update multiple cells in response to a single event (names and selectedIndex)

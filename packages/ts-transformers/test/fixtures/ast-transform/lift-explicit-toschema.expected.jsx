@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { lift, Cell, toSchema } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { lift, Cell, toSchema } from "commonfabric";
 interface CharmEntry {
     id: string;
     name: string;
@@ -32,7 +32,7 @@ const logCharmsList = lift({
             required: ["id", "name"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, undefined, ({ charmsList }) => {
+} as const satisfies __cfHelpers.JSONSchema, undefined, ({ charmsList }) => {
     console.log("logCharmsList: ", charmsList.get());
     return charmsList;
 });
@@ -42,6 +42,6 @@ const logCharmsList = lift({
 // Context: The toSchema() call is compiled away and replaced with the actual JSON schema object
 export default logCharmsList;
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

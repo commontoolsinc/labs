@@ -8,10 +8,10 @@
 
 ```typescript
 // Not bidirectional - won't update automatically
-<ct-checkbox checked={item.done} />
+<cf-checkbox checked={item.done} />
 
 // Bidirectional - updates automatically
-<ct-checkbox $checked={item.done} />
+<cf-checkbox $checked={item.done} />
 ```
 
 **Check 2:** Using handler when bidirectional binding would work?
@@ -21,10 +21,10 @@
 const toggle = handler(({ detail }, { item }) => {
   item.set.key("done").set(detail.checked);
 });
-<ct-checkbox checked={item.done} onct-change={toggle({ item })} />
+<cf-checkbox checked={item.done} oncf-change={toggle({ item })} />
 
 // Use bidirectional binding instead
-<ct-checkbox $checked={item.done} />
+<cf-checkbox $checked={item.done} />
 ```
 
 **Check 3:** Wrong event name for handler?
@@ -33,10 +33,10 @@ Each component has specific event names. Check @common/components/COMPONENTS.md 
 
 ```typescript
 // Wrong event name
-<ct-checkbox onChange={...} />
+<cf-checkbox onChange={...} />
 
 // Correct event name
-<ct-checkbox onct-change={...} />
+<cf-checkbox oncf-change={...} />
 ```
 
 ## Filtered/Sorted List Not Updating

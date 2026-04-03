@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, derive, pattern } from "commontools";
+import { Writable, derive, pattern } from "commonfabric";
 
 // FIXTURE: derive-conditional-expression
 // Verifies: captures used in both branches of a ternary are extracted

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell } from "commontools";
+import { cell } from "commonfabric";
 
 // FIXTURE: literal-widen-nested-structure
 // Verifies: nested object+array literal produces a fully recursive schema with widened leaf types

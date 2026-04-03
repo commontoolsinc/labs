@@ -7,7 +7,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface LinkedList {
   value: string;
@@ -70,11 +70,11 @@ export default pattern<InputSchema>(({ title }) => {
       <div>
         <h3>{title}</h3>
         <p>Super Simple LinkedList</p>
-        <ct-message-input
+        <cf-message-input
           name="Send"
           placeholder="Type a message..."
           appearance="rounded"
-          onct-send={addItem({ items_list })}
+          oncf-send={addItem({ items_list })}
         />
         <div
           style={{

@@ -6,13 +6,13 @@
  * and handles bidirectional bindings and event dispatch.
  */
 
-import type { CellRef, RuntimeClient } from "@commontools/runtime-client";
+import type { CellRef, RuntimeClient } from "@commonfabric/runtime-client";
 import { serializeEvent } from "./events.ts";
 import type { DomEventMessage } from "./events.ts";
 import type { VDomBatch, VDomOp } from "../vdom-ops.ts";
-import { CellHandle } from "@commontools/runtime-client";
+import { CellHandle } from "@commonfabric/runtime-client";
 import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("vdom-applicator", { enabled: false, level: "debug" });
 
@@ -377,7 +377,7 @@ export class DomApplicator {
     const cellHandle = new CellHandle(this.runtimeClient, cellRef);
 
     // Set the CellHandle on the element's property
-    // Custom elements like ct-input and ct-checkbox expect this
+    // Custom elements like cf-input and cf-checkbox expect this
     (node as any)[propName] = cellHandle;
   }
 

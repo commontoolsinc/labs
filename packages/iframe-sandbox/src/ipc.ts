@@ -1,5 +1,5 @@
-import { type JSONSchema } from "@commontools/runner";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { type JSONSchema } from "@commonfabric/runner";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 
 export const isJSONSchema = (source: unknown): source is JSONSchema => {
   if (!isRecord(source)) {

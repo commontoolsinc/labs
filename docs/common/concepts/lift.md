@@ -3,7 +3,7 @@
 This is lift in the sense of [lifted functions](https://en.wikipedia.org/wiki/Lift_(mathematics))
 
 ```tsx
-import { lift, Writable, pattern } from 'commontools'
+import { lift, Writable, pattern } from 'commonfabric'
 
 // Lifted functions will automatically be reactively re-computed based on their inputs
 const addCells = lift(({ a, b }: { a: number, b: number }) => {

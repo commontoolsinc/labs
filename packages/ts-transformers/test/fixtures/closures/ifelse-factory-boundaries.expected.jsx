@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { handler, ifElse, lift, pattern, UI, Writable } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { handler, ifElse, lift, pattern, UI, Writable } from "commonfabric";
 const moduleHasSettings = lift({
     type: "object",
     properties: {
@@ -13,16 +13,16 @@ const moduleHasSettings = lift({
         }
     },
     required: ["piece"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __ctHelpers.JSONSchema, ({ piece }: {
+} as const satisfies __cfHelpers.JSONSchema, ({ piece }: {
     piece: {
         settingsUI?: string;
     };
 }) => !!piece?.settingsUI);
 const selectMessage = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         selectedId: {
@@ -34,7 +34,7 @@ const selectMessage = handler({
         }
     },
     required: ["selectedId", "msgId"]
-} as const satisfies __ctHelpers.JSONSchema, (_event, { selectedId, msgId }) => {
+} as const satisfies __cfHelpers.JSONSchema, (_event, { selectedId, msgId }) => {
     selectedId.set(msgId);
 });
 interface Entry {
@@ -55,25 +55,25 @@ export default pattern((__ct_pattern_input) => {
     const messages = __ct_pattern_input.key("messages");
     const selectedId = Writable.of("", {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
-          {entries.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+          {entries.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const entry = __ct_pattern_input.key("element");
                 return ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{}, {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "null"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{
                             type: "null"
                         }, {}]
-                } as const satisfies __ctHelpers.JSONSchema, moduleHasSettings({ piece: entry.key("piece") }), <span>settings</span>, null);
+                } as const satisfies __cfHelpers.JSONSchema, moduleHasSettings({ piece: entry.key("piece") }), <span>settings</span>, null);
             }, {
                 type: "object",
                 properties: {
@@ -98,7 +98,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["piece"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         type: "null"
                     }, {
@@ -117,23 +117,23 @@ export default pattern((__ct_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
-          {messages.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            } as const satisfies __cfHelpers.JSONSchema), {})}
+          {messages.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const msg = __ct_pattern_input.key("element");
                 const selectedId = __ct_pattern_input.key("params", "selectedId");
                 return ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{}, {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{}, {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         msg: {
@@ -147,9 +147,9 @@ export default pattern((__ct_pattern_input) => {
                         }
                     },
                     required: ["msg"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, { msg: {
+                } as const satisfies __cfHelpers.JSONSchema, { msg: {
                         type: msg.key("type")
                     } }, ({ msg }) => msg.type === "system"), <span>{msg.key("id")}</span>, <button type="button" onClick={selectMessage({ selectedId, msgId: msg.key("id") })}>
                 open
@@ -186,7 +186,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["id", "type"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -203,7 +203,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {
+            } as const satisfies __cfHelpers.JSONSchema), {
                 selectedId: selectedId
             })}
         </div>),
@@ -253,7 +253,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["piece"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -282,8 +282,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

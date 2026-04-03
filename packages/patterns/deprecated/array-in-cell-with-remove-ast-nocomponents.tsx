@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
+import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
 
 interface Item {
   text: Default<string, "">;
@@ -45,22 +45,22 @@ export default pattern<InputSchema>(
           <ul>
             {items.map((item, index) => (
               <li key={index}>
-                <ct-button
+                <cf-button
                   variant="destructive"
                   size="sm"
                   onClick={removeItem({ items, index })}
                 >
                   Remove
-                </ct-button>{" "}
+                </cf-button>{" "}
                 <span>{item.text}</span>
               </li>
             ))}
           </ul>
-          <ct-message-input
+          <cf-message-input
             name="Send"
             placeholder="Type a message..."
             appearance="rounded"
-            onct-send={addItem({ items })}
+            oncf-send={addItem({ items })}
           />
         </div>
       ),

@@ -7,7 +7,7 @@
  * 2. Set selectedItem to that value
  * 3. Check if it creates links/aliases vs copies
  */
-import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
+import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
 
 interface Item {
   title: string;
@@ -106,11 +106,11 @@ export default pattern<DiagInput, DiagInput>(
               flexWrap: "wrap",
             }}
           >
-            <ct-button onClick={addItem({ items, log })}>Add Item</ct-button>
-            <ct-button onClick={clearSelection({ selectedItem, log })}>
+            <cf-button onClick={addItem({ items, log })}>Add Item</cf-button>
+            <cf-button onClick={clearSelection({ selectedItem, log })}>
               Clear Selection
-            </ct-button>
-            <ct-button onClick={clearLog({ log })}>Clear Log</ct-button>
+            </cf-button>
+            <cf-button onClick={clearLog({ log })}>Clear Log</cf-button>
           </div>
 
           <div style={{ marginBottom: "1rem" }}>
@@ -132,11 +132,11 @@ export default pattern<DiagInput, DiagInput>(
                   }}
                 >
                   <span>[{index}] {item.title}: {item.value}</span>
-                  <ct-button
+                  <cf-button
                     onClick={selectByIndex({ items, selectedItem, log, index })}
                   >
                     Select
-                  </ct-button>
+                  </cf-button>
                 </div>
               ))}
             </div>

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, ifElse, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, ifElse, pattern, UI } from "commonfabric";
 // Reproduction of bug: .get() called on Cell inside ifElse predicate
 // The transformer wraps predicates in derive(), which unwraps Cells,
 // but fails to remove the .get() calls
@@ -15,17 +15,17 @@ export default pattern((__ct_pattern_input) => {
         [UI]: (<div>
         {ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 showHistory: {
@@ -40,9 +40,9 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["showHistory", "messageCount", "dismissedIndex"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             showHistory: showHistory,
             messageCount: messageCount,
             dismissedIndex: dismissedIndex
@@ -64,7 +64,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["showHistory", "messageCount", "dismissedIndex"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -93,8 +93,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

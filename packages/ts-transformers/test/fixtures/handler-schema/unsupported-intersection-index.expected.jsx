@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, handler } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, handler } from "commonfabric";
 interface Item {
     text: string;
 }
@@ -12,11 +12,11 @@ type Indexed = {
 };
 const removeItem = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     additionalProperties: true,
     $comment: "Unsupported intersection pattern: index signature on constituent"
-} as const satisfies __ctHelpers.JSONSchema, (_, { items }) => {
+} as const satisfies __cfHelpers.JSONSchema, (_, { items }) => {
     // noop
     items.get();
 });
@@ -26,6 +26,6 @@ const removeItem = handler({
 // Context: negative test -- index signatures cannot be safely merged, so transformer emits a fallback schema
 export { removeItem };
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

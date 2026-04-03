@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 interface State {
     sortedTags: string[];
     tagCounts: Record<string, number>;
@@ -12,11 +12,11 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("sortedTags").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("sortedTags").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const tag = __ct_pattern_input.key("element");
                 const state = __ct_pattern_input.key("params", "state");
                 return (<span>
-            {tag}: {__ctHelpers.derive({
+            {tag}: {__cfHelpers.derive({
                     type: "object",
                     properties: {
                         state: {
@@ -37,9 +37,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["state", "tag"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: ["number", "undefined"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     state: {
                         tagCounts: state.key("tagCounts")
                     },
@@ -73,7 +73,7 @@ export default pattern((state) => {
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -93,7 +93,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {
+            } as const satisfies __cfHelpers.JSONSchema), {
                 state: {
                     tagCounts: state.key("tagCounts")
                 }
@@ -118,7 +118,7 @@ export default pattern((state) => {
         }
     },
     required: ["sortedTags", "tagCounts"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -147,8 +147,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

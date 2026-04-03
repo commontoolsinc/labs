@@ -19,16 +19,16 @@ strategy**.
 1. **Add data attributes to the actual HTML elements** (not the custom element
    wrapper)
    ```typescript
-   // In ct-input component's render():
+   // In cf-input component's render():
    <input 
-     data-ct-input  // ← Unique identifier on the native element
+     data-cf-input  // ← Unique identifier on the native element
      type="text"
      ...
    />
 
-   // In ct-button component's render():
+   // In cf-button component's render():
    <button
-     data-ct-button  // ← Unique identifier on the native element
+     data-cf-button  // ← Unique identifier on the native element
      ...
    >
    ```
@@ -36,11 +36,11 @@ strategy**.
 2. **Use pierce strategy to find elements**
    ```typescript
    // This will find the input element no matter how deeply nested in shadow DOMs
-   const input = await page.$("[data-ct-input]", {
+   const input = await page.$("[data-cf-input]", {
      strategy: "pierce",
    });
 
-   const button = await page.$("[data-ct-button]", {
+   const button = await page.$("[data-cf-button]", {
      strategy: "pierce",
    });
    ```
@@ -59,7 +59,7 @@ strategy**.
 
    // Use waitFor() for reliable async assertions (not sleep!)
    await waitFor(async () => {
-     const element = await page.waitForSelector("[data-ct-input]", {
+     const element = await page.waitForSelector("[data-cf-input]", {
        strategy: "pierce"
      });
      return element !== null;
@@ -78,24 +78,24 @@ strategy**.
 ❌ **Don't** put data attributes only on custom elements:
 
 ```html
-<ct-button data-my-button>  <!-- Pierce won't find this reliably -->
+<cf-button data-my-button>  <!-- Pierce won't find this reliably -->
 ```
 
 ❌ **Don't** try to navigate shadow paths manually:
 
 ```typescript
 // This is fragile and breaks easily
-const path = ["x-root", "#shadow-root", "ct-input", "#shadow-root", "input"];
+const path = ["x-root", "#shadow-root", "cf-input", "#shadow-root", "input"];
 ```
 
 ## Example Test
 
 ```typescript
-import { env, waitFor } from "@commontools/integration";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env, waitFor } from "@commonfabric/integration";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
-import { Identity } from "@commontools/identity";
-import { PiecesController } from "@commontools/piece/ops";
+import { Identity } from "@commonfabric/identity";
+import { PiecesController } from "@commonfabric/piece/ops";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -134,7 +134,7 @@ describe("shadow DOM component test", () => {
 
     // Use waitFor() for reliable async assertions
     await waitFor(async () => {
-      const input = await page.waitForSelector("[data-ct-input]", {
+      const input = await page.waitForSelector("[data-cf-input]", {
         strategy: "pierce",
       });
       await input.type("Hello World");
@@ -142,7 +142,7 @@ describe("shadow DOM component test", () => {
     });
 
     // Click button
-    const button = await page.waitForSelector("[data-ct-button]", {
+    const button = await page.waitForSelector("[data-cf-button]", {
       strategy: "pierce",
     });
     await button.click();
@@ -161,7 +161,7 @@ describe("shadow DOM component test", () => {
 
 ## Best Practices
 
-1. **Use semantic data attributes**: `data-ct-input`, `data-ct-submit-button`,
+1. **Use semantic data attributes**: `data-cf-input`, `data-cf-submit-button`,
    etc.
 2. **Put attributes on the actual interactive element**: The `<input>`,
    `<button>`, not their wrappers

@@ -14,8 +14,8 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
-import { readWebpage, searchWeb } from "./system/common-tools.tsx";
+} from "commonfabric";
+import { readWebpage, searchWeb } from "./system/common-fabric.tsx";
 
 type ResearchResult = {
   summary: string;
@@ -108,18 +108,18 @@ When done, call presentResult with your structured findings.`,
     result,
     [UI]: (
       <div style="display:contents">
-        <ct-autostart
+        <cf-autostart
           onstart={triggerGeneration({
             addMessage,
             situation,
             result,
           })}
         />
-        <ct-message-beads
+        <cf-message-beads
           label="research"
           $messages={messages}
           pending={pending}
-          onct-refine={showRefineInput({ showRefine })}
+          oncf-refine={showRefineInput({ showRefine })}
         />
         <div>
           <h3>{computed(() => (result?.summary ? "Summary" : ""))}</h3>
@@ -144,11 +144,11 @@ When done, call presentResult with your structured findings.`,
           <h3>{computed(() => (result?.sources?.length ? "Sources" : ""))}</h3>
           <p>{computed(() => result?.sources?.join("\n") ?? "")}</p>
         </div>
-        <ct-prompt-input
+        <cf-prompt-input
           placeholder="Refine research..."
           pending={pending}
           style={computed(() => (showRefine.get() ? "" : "display:none"))}
-          onct-send={sendMessage({ addMessage })}
+          oncf-send={sendMessage({ addMessage })}
         />
       </div>
     ),

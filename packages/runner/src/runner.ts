@@ -1,9 +1,9 @@
-import { hashOf } from "@commontools/data-model/value-hash";
-import { getLogger } from "@commontools/utils/logger";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { getLogger } from "@commonfabric/utils/logger";
 import { patternBreakpoint } from "./pattern-breakpoint.ts";
-import { isRecord, type Mutable } from "@commontools/utils/types";
+import { isRecord, type Mutable } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   type Frame,
   isModule,
@@ -42,7 +42,7 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import { deepEqual } from "@commontools/utils/deep-equal";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { LINK_V1_TAG, type SigilLink } from "./sigil-types.ts";

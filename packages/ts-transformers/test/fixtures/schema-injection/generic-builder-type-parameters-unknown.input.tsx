@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, lift } from "commontools";
+import { handler, lift } from "commonfabric";
 
 // FIXTURE: generic-builder-type-parameters-unknown
 // Verifies: generic definition-site builder wrappers degrade builder schemas to unknown

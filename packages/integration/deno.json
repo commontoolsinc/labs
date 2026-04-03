@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/integration",
+  "name": "@commonfabric/integration",
   "tasks": {
     "test": "echo 'No tests to run.'"
   },

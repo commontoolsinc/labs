@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import * as Journal from "../src/storage/transaction/journal.ts";
-import { assert } from "@commontools/memory/fact";
+import { assert } from "@commonfabric/memory/fact";
 
 const signer = await Identity.fromPassphrase("journal test");
 const signer2 = await Identity.fromPassphrase("journal test 2");

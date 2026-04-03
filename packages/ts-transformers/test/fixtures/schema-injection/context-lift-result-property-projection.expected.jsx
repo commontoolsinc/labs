@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, derive, lift, pattern, Writable } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, derive, lift, pattern, Writable } from "commonfabric";
 const liftSummary = lift({
     type: "object",
     properties: {
@@ -13,7 +13,7 @@ const liftSummary = lift({
         }
     },
     required: ["primary", "secondary"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         primary: {
@@ -27,7 +27,7 @@ const liftSummary = lift({
         }
     },
     required: ["primary", "secondary", "difference"]
-} as const satisfies __ctHelpers.JSONSchema, ({ primary, secondary }) => {
+} as const satisfies __cfHelpers.JSONSchema, ({ primary, secondary }) => {
     const primaryValue = primary.get();
     const secondaryValue = secondary.get();
     return {
@@ -52,9 +52,9 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["difference"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, summary, (snapshot) => snapshot.difference);
+    } as const satisfies __cfHelpers.JSONSchema, summary, (snapshot) => snapshot.difference);
     return {
         summary,
         difference,
@@ -72,7 +72,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["primary", "secondary"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         summary: {
@@ -95,8 +95,8 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["summary", "difference"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

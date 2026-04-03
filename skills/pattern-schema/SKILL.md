@@ -4,7 +4,7 @@ description: Design schemas.tsx with Input/Output types for patterns
 user-invocable: false
 ---
 
-Use the `ct` skill, or read `skills/ct/SKILL.md`, for CLI documentation when
+Use the `cf` skill, or read `skills/cf/SKILL.md`, for CLI documentation when
 running commands.
 
 # Schema Design Phase
@@ -33,7 +33,7 @@ pattern code.
 ## Template
 
 ```tsx
-import { Default, NAME, Stream, UI, VNode, Writable } from "commontools";
+import { Default, NAME, Stream, UI, VNode, Writable } from "commonfabric";
 
 // ============ DATA TYPES ============
 export interface Item {
@@ -58,4 +58,4 @@ export interface ItemOutput {
 
 - All data types defined with correct Writable/Default wrapping
 - All Input/Output types defined for each sub-pattern
-- No TypeScript errors: `deno task ct check schemas.tsx --no-run`
+- No TypeScript errors: `deno task cf check schemas.tsx --no-run`

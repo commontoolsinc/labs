@@ -9,7 +9,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import { type MentionablePiece } from "./backlinks-index.tsx";
 
 export type SummarizablePiece = MentionablePiece & { summary?: string };
@@ -97,33 +97,33 @@ const SummaryIndex = pattern<Input, Output>(() => {
   return {
     [NAME]: "SummaryIndex",
     [UI]: (
-      <ct-screen>
-        <ct-toolbar slot="header" sticky>
+      <cf-screen>
+        <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Search</h2>
-        </ct-toolbar>
+        </cf-toolbar>
 
-        <ct-vstack gap="4" padding="6">
-          <ct-input $value={query} placeholder="Search summaries..." />
+        <cf-vstack gap="4" padding="6">
+          <cf-input $value={query} placeholder="Search summaries..." />
           <span
             style={{
               fontSize: "13px",
-              color: "var(--ct-color-text-secondary)",
+              color: "var(--cf-color-text-secondary)",
             }}
           >
             {filteredCount} of {entryCount} pieces
           </span>
 
-          <ct-table full-width>
+          <cf-table full-width>
             <tbody>
               {filtered.map((entry) => (
                 <tr>
                   <td style={{ fontWeight: "500", whiteSpace: "nowrap" }}>
-                    <ct-cell-link $cell={entry.piece} />
+                    <cf-cell-link $cell={entry.piece} />
                   </td>
                   <td
                     style={{
                       fontSize: "13px",
-                      color: "var(--ct-color-text-secondary)",
+                      color: "var(--cf-color-text-secondary)",
                     }}
                   >
                     {entry.summary}
@@ -131,9 +131,9 @@ const SummaryIndex = pattern<Input, Output>(() => {
                 </tr>
               ))}
             </tbody>
-          </ct-table>
-        </ct-vstack>
-      </ct-screen>
+          </cf-table>
+        </cf-vstack>
+      </cf-screen>
     ),
     entries,
     search: patternTool(searchPattern, { entries }),

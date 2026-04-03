@@ -1,4 +1,4 @@
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import { type AnyCell, type JSONSchema } from "./builder/types.ts";
 import {
   type Cell,

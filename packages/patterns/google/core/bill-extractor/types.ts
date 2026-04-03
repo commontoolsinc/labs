@@ -1,8 +1,8 @@
 /**
  * Type definitions for BillExtractor building block.
  */
-import type { JSONSchema } from "commontools";
-import type { Schema } from "commontools/schema";
+import type { JSONSchema } from "commonfabric";
+import type { Schema } from "commonfabric/schema";
 
 // =============================================================================
 // SCHEMA

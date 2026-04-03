@@ -1,12 +1,12 @@
-import { render } from "@commontools/html/client";
-import { UI } from "@commontools/runner";
-import { rendererVDOMSchema } from "@commontools/runner/schemas";
+import { render } from "@commonfabric/html/client";
+import { UI } from "@commonfabric/runner";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { loadManager } from "./piece.ts";
-import { PiecesController } from "@commontools/piece/ops";
+import { PiecesController } from "@commonfabric/piece/ops";
 import type { PieceConfig } from "./piece.ts";
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 import { MockDoc } from "../../html/src/mock-doc.ts";
-import { CellHandle, VNode } from "@commontools/runtime-client";
+import { CellHandle, VNode } from "@commonfabric/runtime-client";
 
 const logger = getLogger("piece-render", { level: "info", enabled: false });
 

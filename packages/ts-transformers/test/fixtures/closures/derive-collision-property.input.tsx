@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, derive, pattern } from "commontools";
+import { Writable, derive, pattern } from "commonfabric";
 
 // FIXTURE: derive-collision-property
 // Verifies: name collision renames the capture variable but preserves object property names

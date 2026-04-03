@@ -9,9 +9,9 @@
  * - Removing items
  * - Statistics (totalCount, doneCount, remainingCount)
  *
- * Run: deno task ct test packages/patterns/shopping-list.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/shopping-list.test.tsx --verbose
  */
-import { computed, handler, pattern, Writable } from "commontools";
+import { computed, handler, pattern, Writable } from "commonfabric";
 import ShoppingList from "./shopping-list.tsx";
 
 interface ShoppingItem {

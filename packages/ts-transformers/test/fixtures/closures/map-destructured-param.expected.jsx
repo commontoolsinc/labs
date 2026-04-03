@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 interface Point {
     x: number;
     y: number;
@@ -17,12 +17,12 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with destructured parameter and capture */}
-        {state.key("points").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("points").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const x = __ct_pattern_input.key("element", "x");
                 const y = __ct_pattern_input.key("element", "y");
                 const state = __ct_pattern_input.key("params", "state");
                 return (<div>
-            Point: ({__ctHelpers.derive({
+            Point: ({__cfHelpers.derive({
                     type: "object",
                     properties: {
                         x: {
@@ -39,14 +39,14 @@ export default pattern((state) => {
                         }
                     },
                     required: ["x", "state"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     x: x,
                     state: {
                         scale: state.key("scale")
                     }
-                }, ({ x, state }) => x * state.scale)}, {__ctHelpers.derive({
+                }, ({ x, state }) => x * state.scale)}, {__cfHelpers.derive({
                     type: "object",
                     properties: {
                         y: {
@@ -63,9 +63,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["y", "state"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     y: y,
                     state: {
                         scale: state.key("scale")
@@ -104,7 +104,7 @@ export default pattern((state) => {
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -124,7 +124,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {
+            } as const satisfies __cfHelpers.JSONSchema), {
                 state: {
                     scale: state.key("scale")
                 }
@@ -159,7 +159,7 @@ export default pattern((state) => {
             required: ["x", "y"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -188,8 +188,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

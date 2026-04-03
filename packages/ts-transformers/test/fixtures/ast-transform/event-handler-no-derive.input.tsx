@@ -1,10 +1,10 @@
 /// <cts-enable />
-import { Cell, Default, handler, pattern, UI } from "commontools";
+import { Cell, Default, handler, pattern, UI } from "commonfabric";
 
 declare global {
   namespace JSX {
     interface IntrinsicElements {
-      "ct-button": any;
+      "cf-button": any;
     }
   }
 }
@@ -17,7 +17,7 @@ const handleClick = handler<unknown, { count: Cell<number> }>(
 
 // FIXTURE: event-handler-no-derive
 // Verifies: handler invocations in JSX are NOT wrapped in derive(), while expressions are
-//   count + 1 (in JSX <span>)                → __ctHelpers.derive(...schemas, { count }, ({ count }) => count + 1)
+//   count + 1 (in JSX <span>)                → __cfHelpers.derive(...schemas, { count }, ({ count }) => count + 1)
 //   handleClick({ count }) (onClick attr)     → left as-is (not wrapped in derive)
 //   handleClick({ count }) (inside .map())    → left as-is (not wrapped in derive)
 //   pattern<{ count: Default<number, 0> }>    → pattern(fn, inputSchema, outputSchema)
@@ -31,15 +31,15 @@ export default pattern<{ count: Default<number, 0> }>(
           <span>Count: {count + 1}</span>
 
           {/* Event handler with OpaqueRef - should NOT be wrapped in derive */}
-          <ct-button onClick={handleClick({ count })}>
+          <cf-button onClick={handleClick({ count })}>
             Click me
-          </ct-button>
+          </cf-button>
 
           {/* Event handler inside map - should NOT be wrapped in derive */}
           {[1, 2, 3].map((n) => (
-            <ct-button key={n} onClick={handleClick({ count })}>
+            <cf-button key={n} onClick={handleClick({ count })}>
               Button {n}
-            </ct-button>
+            </cf-button>
           ))}
         </div>
       ),

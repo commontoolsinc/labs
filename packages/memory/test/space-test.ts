@@ -10,8 +10,8 @@ import {
   hashOf,
   resetModernHashConfig,
   setModernHashConfig,
-} from "@commontools/data-model/value-hash";
-import type { JSONSchema } from "@commontools/runner";
+} from "@commonfabric/data-model/value-hash";
+import type { JSONSchema } from "@commonfabric/runner";
 import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
 import * as Fact from "../fact.ts";

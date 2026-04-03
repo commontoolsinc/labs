@@ -15,7 +15,7 @@ import {
   UI,
   VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Secret<T> = T;
 type Confidential<T> = T;
@@ -1107,7 +1107,7 @@ export default pattern<
       }
     >;
     // Optional: Link auth directly from a Google Auth piece when wish() is unavailable
-    // Use: ct piece link googleAuthPiece/auth gmailImporterPiece/overrideAuth
+    // Use: cf piece link googleAuthPiece/auth gmailImporterPiece/overrideAuth
     overrideAuth?: Auth;
   },
   Output
@@ -1203,13 +1203,13 @@ export default pattern<
   return {
     [NAME]: str`GMail Importer ${currentEmail}`,
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-heading level={3}>Gmail Importer</ct-heading>
+          <cf-heading level={3}>Gmail Importer</cf-heading>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {/* Auth management UI */}
             {authUI}
 
@@ -1221,7 +1221,7 @@ export default pattern<
               historyId: {historyId || "none"}
             </div>
 
-            <ct-vstack gap="4">
+            <cf-vstack gap="4">
               <div>
                 <label
                   style={{
@@ -1232,7 +1232,7 @@ export default pattern<
                 >
                   Import Limit
                 </label>
-                <ct-input
+                <cf-input
                   type="number"
                   $value={settings.limit}
                   placeholder="count of emails to import"
@@ -1249,7 +1249,7 @@ export default pattern<
                 >
                   Gmail Filter Query
                 </label>
-                <ct-input
+                <cf-input
                   type="text"
                   $value={settings.gmailFilterQuery}
                   placeholder="in:INBOX"
@@ -1311,7 +1311,7 @@ export default pattern<
               </div>
               {ifElse(
                 isReady,
-                <ct-button
+                <cf-button
                   type="button"
                   onClick={googleUpdaterStream}
                   disabled={fetching}
@@ -1325,15 +1325,15 @@ export default pattern<
                         gap: "8px",
                       }}
                     >
-                      <ct-loader size="sm" show-elapsed></ct-loader>
+                      <cf-loader size="sm" show-elapsed></cf-loader>
                       Fetching...
                     </span>,
                     "Fetch Emails",
                   )}
-                </ct-button>,
+                </cf-button>,
                 null,
               )}
-            </ct-vstack>
+            </cf-vstack>
 
             <div>
               <table>
@@ -1386,9 +1386,9 @@ export default pattern<
                 </tbody>
               </table>
             </div>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
     authUI,
     emails,

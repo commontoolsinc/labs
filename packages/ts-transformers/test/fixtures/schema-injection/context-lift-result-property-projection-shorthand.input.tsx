@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, derive, lift, pattern, Writable } from "commontools";
+import { Cell, derive, lift, pattern, Writable } from "commonfabric";
 
 const liftSummary = lift<
   { primary: Writable<number>; secondary: Writable<number> }

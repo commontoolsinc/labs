@@ -8,7 +8,7 @@ import {
   lift,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface CounterChecksumArgs {
   value: Default<number, 0>;

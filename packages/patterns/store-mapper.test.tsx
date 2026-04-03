@@ -15,9 +15,9 @@
  * - AI photo import: addExtractedAisle duplicate prevention
  * - AI photo import: mergeExtractedAisle product merging
  *
- * Run: deno task ct test packages/patterns/store-mapper.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/store-mapper.test.tsx --verbose
  */
-import { computed, handler, pattern, Writable } from "commontools";
+import { computed, handler, pattern, Writable } from "commonfabric";
 import StoreMapper from "./store-mapper.tsx";
 
 interface Aisle {

@@ -12,8 +12,8 @@ import { checkLLMHealth } from "./llm-health.service.ts";
 import {
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
-} from "@commontools/utils/logger";
-import { Provider } from "@commontools/memory";
+} from "@commonfabric/utils/logger";
+import { Provider } from "@commonfabric/memory";
 
 export const HealthResponseSchema = z.object({
   status: z.literal("OK"),

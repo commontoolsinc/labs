@@ -10,7 +10,7 @@
  * replaced by canonical hashing (via `hashOfModern`) behind a flag.
  */
 
-import type { JSONSchema } from "@commontools/api";
+import type { JSONSchema } from "@commonfabric/api";
 import { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
 

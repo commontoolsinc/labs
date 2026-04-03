@@ -1,6 +1,6 @@
 # README
 
-Docker container to run the Common Tools servers
+Docker container to run the Common Fabric servers
 
 Ability to run [Ralph](https://ghuntley.com/ralph/)
 

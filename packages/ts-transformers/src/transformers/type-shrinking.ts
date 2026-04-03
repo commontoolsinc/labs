@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { getPropertyNameText } from "@commontools/schema-generator/property-name";
+import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
 import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import { uniquePaths } from "../utils/path-serialization.ts";
@@ -969,7 +969,7 @@ export function wrapTypeNodeWithCapability(
 
   return factory.createTypeReferenceNode(
     factory.createQualifiedName(
-      factory.createIdentifier("__ctHelpers"),
+      factory.createIdentifier("__cfHelpers"),
       factory.createIdentifier(wrapperName),
     ),
     [node],
@@ -983,7 +983,7 @@ function wrapTypeNodeWithDefault(
 ): ts.TypeNode {
   return factory.createTypeReferenceNode(
     factory.createQualifiedName(
-      factory.createIdentifier("__ctHelpers"),
+      factory.createIdentifier("__cfHelpers"),
       factory.createIdentifier("Default"),
     ),
     [node, defaultType],

@@ -9,7 +9,7 @@ import {
   HealthCheckAbort,
   HealthCheckTimeout,
 } from "./health-check.ts";
-import { sleep } from "@commontools/utils/sleep";
+import { sleep } from "@commonfabric/utils/sleep";
 
 let FRAME_IDS = 0;
 

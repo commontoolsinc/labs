@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 declare function fetchAny(): any;
 // FIXTURE: pattern-any-result-structural-recovery
 // Verifies: inferred pattern results can still emit concrete object schemas when
@@ -17,7 +17,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["prompt"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         title: true,
@@ -26,8 +26,8 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["title", "prompt"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

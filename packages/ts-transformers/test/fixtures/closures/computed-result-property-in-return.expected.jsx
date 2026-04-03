@@ -1,11 +1,11 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * computed() result property access in derive captures should use
  * .key("length"). The computed() return is an OpaqueRef, so
  * rewritePatternBody correctly rewrites summary.length to
  * summary.key("length").
  */
-import { computed, pattern } from "commontools";
+import { computed, pattern } from "commonfabric";
 interface State {
     items: string[];
 }
@@ -16,7 +16,7 @@ interface State {
 //   When the second computed() accesses summary.length, the capture is rewritten
 //   to summary.key("length") because summary is an OpaqueRef, not a plain value.
 export default pattern((state) => {
-    const summary = __ctHelpers.derive({
+    const summary = __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -33,14 +33,14 @@ export default pattern((state) => {
             }
         },
         required: ["state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             items: state.key("items")
         } }, ({ state }) => state.items.join(", "));
     return {
         summary,
-        charCount: __ctHelpers.derive({
+        charCount: __cfHelpers.derive({
             type: "object",
             properties: {
                 summary: {
@@ -54,9 +54,9 @@ export default pattern((state) => {
                 }
             },
             required: ["summary"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { summary: {
+        } as const satisfies __cfHelpers.JSONSchema, { summary: {
                 length: summary.key("length")
             } }, ({ summary }) => summary.length),
     };
@@ -71,7 +71,7 @@ export default pattern((state) => {
         }
     },
     required: ["items"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         summary: {
@@ -82,8 +82,8 @@ export default pattern((state) => {
         }
     },
     required: ["summary", "charCount"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

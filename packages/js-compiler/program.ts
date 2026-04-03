@@ -1,4 +1,4 @@
-import { isDeno } from "@commontools/utils/env";
+import { isDeno } from "@commonfabric/utils/env";
 import { ProgramResolver, Source } from "./interface.ts";
 import { dirname, join, normalize } from "@std/path/posix";
 

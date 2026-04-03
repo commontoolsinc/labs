@@ -1,9 +1,9 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { compilePattern, PieceManager } from "@commontools/piece";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { type DID } from "@commontools/identity";
-import { createSession } from "@commontools/identity";
+import { compilePattern, PieceManager } from "@commonfabric/piece";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { type DID } from "@commonfabric/identity";
+import { createSession } from "@commonfabric/identity";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,

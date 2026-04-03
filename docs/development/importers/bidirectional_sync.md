@@ -1,7 +1,7 @@
 # Bidirectional Sync with External Canonical Source
 
 This guide covers how to build reliable bidirectional synchronization between
-Common Tools cells and an external system (filesystem, API, etc.) where the
+Common Fabric cells and an external system (filesystem, API, etc.) where the
 **external source is canonical** — meaning it is the source of truth, and local
 state is a reflection of it.
 
@@ -9,7 +9,7 @@ state is a reflection of it.
 
 ### 1. Atomic Transactions with CAS Semantics
 
-All actions in the Common Tools runtime (`computed()`, `action()`, `handler()`)
+All actions in the Common Fabric runtime (`computed()`, `action()`, `handler()`)
 are atomic and have compare-and-swap (CAS) transaction guarantees. When code
 reads data and then writes data, the runtime collects all mutations (`.set()`,
 `.push()`, etc.) and applies them atomically at commit time. If any value that
@@ -99,8 +99,8 @@ directory and keeps cells in sync with the filesystem.
 ### Daemon Setup
 
 ```typescript
-import { Runtime } from "@commontools/runner";
-import { popFrame, pushFrameFromCause } from "@commontools/runner/builder";
+import { Runtime } from "@commonfabric/runner";
+import { popFrame, pushFrameFromCause } from "@commonfabric/runner/builder";
 
 const runtime = new Runtime(/* storage config */);
 

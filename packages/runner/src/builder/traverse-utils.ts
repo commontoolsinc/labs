@@ -1,4 +1,4 @@
-import { isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import { isOpaqueRef, isPattern, type Opaque } from "./types.ts";
 import { isCell } from "../cell.ts";
 import { isCellResultForDereferencing } from "../query-result-proxy.ts";

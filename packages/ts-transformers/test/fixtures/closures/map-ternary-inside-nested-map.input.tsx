@@ -9,7 +9,7 @@
  * This structure mirrors pattern-nested-jsx-map: outer ternary wraps items.map,
  * causing ifElse → derive, then inner ternary is inside nested .map callback.
  */
-import { Cell, computed, Default, pattern, UI } from "commontools";
+import { Cell, computed, Default, pattern, UI } from "commonfabric";
 
 interface Tag {
   name: string;

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, pattern } from "commontools";
+import { computed, pattern } from "commonfabric";
 
 // FIXTURE: pattern-computed-opaque-ref-map
 // Verifies: .map() on an OpaqueRef inside computed() is NOT transformed to mapWithPattern

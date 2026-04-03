@@ -147,7 +147,7 @@ export abstract class Transformer {
 
 export abstract class HelpersOnlyTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
-    return context.ctHelpers.sourceHasHelpers();
+    return context.cfHelpers.sourceHasHelpers();
   }
 }
 

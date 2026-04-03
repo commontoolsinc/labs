@@ -2,7 +2,7 @@
 //
 // Usage:
 //   deno run --unstable-ffi --allow-ffi --allow-read --allow-write --allow-env --allow-net \
-//     packages/fuse/mod.ts /tmp/ct-fuse [--api-url URL --space NAME --identity PATH]
+//     packages/fuse/mod.ts /tmp/cf-fuse [--api-url URL --space NAME --identity PATH]
 //
 // Supports multiple spaces. --space can be repeated or omitted (defaults to "home").
 // Unknown space names are resolved on-demand via lookup.
@@ -82,9 +82,9 @@ export async function main(argv: string[] = Deno.args) {
     boolean: ["debug"],
     collect: ["space"],
     default: {
-      "api-url": Deno.env.get("CT_API_URL") ?? "",
+      "api-url": Deno.env.get("CF_API_URL") ?? "",
       space: [] as string[],
-      identity: Deno.env.get("CT_IDENTITY") ?? "",
+      identity: Deno.env.get("CF_IDENTITY") ?? "",
       "exec-cli": "",
       "log-file": "",
       debug: false,

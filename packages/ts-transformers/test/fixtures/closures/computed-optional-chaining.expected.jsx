@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, computed, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 // FIXTURE: computed-optional-chaining
 // Verifies: computed() with optional chaining and nullish coalescing on captured cells
 //   computed(() => value.get() * (config.get()?.multiplier ?? 1)) → derive(..., { value, config }, ({ value, config }) => ...)
@@ -18,11 +18,11 @@ export default pattern(() => {
             }, {
                 type: "null"
             }]
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const result = __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema);
+    const result = __cfHelpers.derive({
         type: "object",
         properties: {
             value: {
@@ -34,17 +34,17 @@ export default pattern(() => {
             }
         },
         required: ["value", "config"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         value: value,
         config: config
     }, ({ value, config }) => value.get() * (config.get()?.multiplier ?? 1));
     return result;
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

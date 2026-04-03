@@ -95,7 +95,7 @@ export class DeriveStrategy implements ClosureTransformationStrategy {
 }
 
 /**
- * Check if a call expression is a derive() call from commontools
+ * Check if a call expression is a derive() call from commonfabric
  */
 export function isDeriveCall(
   node: ts.CallExpression,
@@ -465,7 +465,7 @@ export function transformDeriveCall(
   );
 
   // Build the derive call expression
-  const newDeriveCall = context.ctHelpers.createHelperCall(
+  const newDeriveCall = context.cfHelpers.createHelperCall(
     "derive",
     deriveCall,
     hasTypeParameter

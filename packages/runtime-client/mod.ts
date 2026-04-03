@@ -11,4 +11,4 @@ export * from "./client/transport.ts";
 export * from "./client/connection.ts";
 export * from "./protocol/mod.ts";
 export * from "./vnode-types.ts";
-export * from "@commontools/runner/shared";
+export * from "@commonfabric/runner/shared";

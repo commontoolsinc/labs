@@ -13,7 +13,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -60,8 +60,8 @@ export const RatingModule = pattern<RatingModuleInput, RatingModuleInput>(
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Rating: ${displayText}`),
       [UI]: (
-        <ct-vstack style={{ gap: "8px" }}>
-          <ct-hstack style={{ gap: "4px", justifyContent: "center" }}>
+        <cf-vstack style={{ gap: "8px" }}>
+          <cf-hstack style={{ gap: "4px", justifyContent: "center" }}>
             {[1, 2, 3, 4, 5].map((value, index) => (
               <button
                 type="button"
@@ -81,13 +81,13 @@ export const RatingModule = pattern<RatingModuleInput, RatingModuleInput>(
                 {MODULE_METADATA.icon}
               </button>
             ))}
-          </ct-hstack>
+          </cf-hstack>
           <div
             style={{ textAlign: "center", color: "#6b7280", fontSize: "14px" }}
           >
             {displayText}
           </div>
-        </ct-vstack>
+        </cf-vstack>
       ),
       rating,
     };

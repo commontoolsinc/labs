@@ -3,7 +3,7 @@
 **Within JSX, reactivity is automatic—you don't need `computed()`:**
 
 ```tsx
-import { computed, UI, pattern } from 'commontools';
+import { computed, UI, pattern } from 'commonfabric';
 
 interface Input {
   userName: string;

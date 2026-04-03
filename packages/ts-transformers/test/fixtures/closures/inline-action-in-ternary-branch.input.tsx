@@ -7,7 +7,7 @@
  * to a handler, and the Cell reference (state.isEditing) must be properly
  * captured in the derive wrapper created for the computed.
  */
-import { Cell, computed, pattern, UI } from "commontools";
+import { Cell, computed, pattern, UI } from "commonfabric";
 
 interface Card {
   title: string;
@@ -21,12 +21,12 @@ interface State {
 
 // FIXTURE: inline-action-in-ternary-branch
 // Verifies: inline arrow handler inside explicit computed() in a ternary branch is extracted and captured in derive
-//   computed(() => <ct-button onClick={() => state.isEditing.set(true)} />) → derive({ state: { isEditing: asCell } }, ..., handler(...)(...))
+//   computed(() => <cf-button onClick={() => state.isEditing.set(true)} />) → derive({ state: { isEditing: asCell } }, ..., handler(...)(...))
 // Context: Regression -- inline handler inside computed() must have its Cell ref captured in the derive wrapper
 export default pattern<State>((state) => {
   return {
     [UI]: (
-      <ct-card>
+      <cf-card>
         {state.isEditing ? (
           <div>Editing</div>
         ) : (
@@ -35,11 +35,11 @@ export default pattern<State>((state) => {
             {/* Explicit computed() wrapping a button with inline handler */}
             {/* The Cell ref in the handler must be captured in the derive */}
             {computed(() => (
-              <ct-button onClick={() => state.isEditing.set(true)}>Edit</ct-button>
+              <cf-button onClick={() => state.isEditing.set(true)}>Edit</cf-button>
             ))}
           </div>
         )}
-      </ct-card>
+      </cf-card>
     ),
     card: state.card,
   };

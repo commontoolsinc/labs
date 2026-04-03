@@ -11,7 +11,7 @@ import {
   toSchema,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // full pattern state
 interface PatternState {
@@ -118,18 +118,18 @@ export default pattern<PatternInOutput, PatternInOutput>(
               return cellRef.piece[UI] || "piece has no UI";
             })}
           </div>
-          <ct-button
+          <cf-button
             onClick={createSimplePiece({ cellRef })}
           >
             Create Sub Piece
-          </ct-button>
+          </cf-button>
 
           {ifElse(
             cellRef.piece,
             (
-              <ct-button onClick={goToStoredPiece({ cellRef })}>
+              <cf-button onClick={goToStoredPiece({ cellRef })}>
                 Go to Stored Piece
-              </ct-button>
+              </cf-button>
             ),
             (
               <div>no subpiece</div>

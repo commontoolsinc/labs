@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 interface State {
     items: number[];
     threshold: number;
@@ -17,7 +17,7 @@ export default pattern((state) => {
         [UI]: (<div>
         <p>
           Filter joined:{" "}
-          {__ctHelpers.derive({
+          {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -37,16 +37,16 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 threshold: state.key("threshold")
             } }, ({ state }) => state.items.filter((x) => x > state.threshold).join(", "))}
         </p>
         <p>
           Filter map joined:{" "}
-          {__ctHelpers.derive({
+          {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -69,9 +69,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 threshold: state.key("threshold"),
                 factor: state.key("factor")
@@ -79,7 +79,7 @@ export default pattern((state) => {
         </p>
         <p>
           Filter joined upper:{" "}
-          {__ctHelpers.derive({
+          {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -99,16 +99,16 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 threshold: state.key("threshold")
             } }, ({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase())}
         </p>
         <p>
           Filter joined upper trimmed:{" "}
-          {__ctHelpers.derive({
+          {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -128,9 +128,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 threshold: state.key("threshold")
             } }, ({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase()
@@ -155,7 +155,7 @@ export default pattern((state) => {
         }
     },
     required: ["items", "threshold", "factor"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -184,8 +184,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

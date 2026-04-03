@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern } from "commontools";
+import { pattern } from "commonfabric";
 
 // FIXTURE: pattern-array-destructure-param
 // Verifies: top-level array destructuring in pattern params lowers to index-based key access

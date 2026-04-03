@@ -7,7 +7,7 @@ import {
   handler,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 type DraftPriority = "high" | "medium" | "low";
 

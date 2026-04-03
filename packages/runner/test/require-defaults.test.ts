@@ -11,8 +11,8 @@ import type {
   RequireDefaults,
   StripDefaultBrand,
 } from "../src/builder/types.ts";
-import type { Default } from "@commontools/api";
-import type { Cell } from "@commontools/runner";
+import type { Default } from "@commonfabric/api";
+import type { Cell } from "@commonfabric/runner";
 
 // ============================================================================
 // Helpers

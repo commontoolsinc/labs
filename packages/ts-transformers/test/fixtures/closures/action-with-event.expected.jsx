@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, pattern, action } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, pattern, action } from "commonfabric";
 interface MyEvent {
     data: string;
 }
@@ -13,7 +13,7 @@ interface State {
 export default pattern((__ct_pattern_input) => {
     const value = __ct_pattern_input.key("value");
     return {
-        update: __ctHelpers.handler({
+        update: __cfHelpers.handler({
             type: "object",
             properties: {
                 data: {
@@ -21,7 +21,7 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["data"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
             properties: {
                 value: {
@@ -30,7 +30,7 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["value"]
-        } as const satisfies __ctHelpers.JSONSchema, (e, { value }) => value.set(e.data))({
+        } as const satisfies __cfHelpers.JSONSchema, (e, { value }) => value.set(e.data))({
             value: value
         }),
     };
@@ -43,7 +43,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         update: {
@@ -63,8 +63,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["data"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

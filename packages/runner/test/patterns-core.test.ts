@@ -3,10 +3,10 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import "@commontools/utils/equal-ignoring-symbols";
+import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -19,8 +19,8 @@ describe("Pattern Runner - Core", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -31,11 +31,11 @@ describe("Pattern Runner - Core", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
+    const { commonfabric } = createBuilder();
     ({
       lift,
       pattern,
-    } = commontools);
+    } = commonfabric);
   });
 
   afterEach(async () => {

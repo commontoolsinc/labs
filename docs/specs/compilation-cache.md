@@ -50,7 +50,7 @@ each pattern:
                ~5% of total time
 
 2. Compile     TypeScriptCompiler.compile()
-               Type-checking, CommonToolsTransformerPipeline, TS emit, AMD bundling
+               Type-checking, CommonFabricTransformerPipeline, TS emit, AMD bundling
                ~90% of total time → produces JsScript { js, sourceMap, filename }
 
 3. Evaluate    isolate.execute(jsScript).invoke(runtimeExports)
@@ -177,7 +177,7 @@ invalidation mechanism.
 oldest entries when it exceeds the limit (default 500). This prevents unbounded
 growth in IndexedDB or the filesystem.
 
-**Separate IndexedDB database.** The browser cache uses `ct-compilation-cache`,
+**Separate IndexedDB database.** The browser cache uses `cf-compilation-cache`,
 not the runtime storage IDB, to keep the cache independently evictable and avoid
 schema migration coordination.
 

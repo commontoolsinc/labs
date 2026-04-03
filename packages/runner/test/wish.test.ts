@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -16,8 +16,8 @@ describe("wish built-in", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: ReturnType<Runtime["edit"]>;
-  let wish: ReturnType<typeof createBuilder>["commontools"]["wish"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let wish: ReturnType<typeof createBuilder>["commonfabric"]["wish"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -28,8 +28,8 @@ describe("wish built-in", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder();
-    ({ wish, pattern } = commontools);
+    const { commonfabric } = createBuilder();
+    ({ wish, pattern } = commonfabric);
   });
 
   afterEach(async () => {
@@ -708,7 +708,7 @@ describe("wish built-in", () => {
       expect(missingResult?.error).toMatch(/no query/);
     });
 
-    it("returns cell UI or ct-cell-link fallback on success", async () => {
+    it("returns cell UI or cf-cell-link fallback on success", async () => {
       const spaceCell = runtime.getCell(space, space).withTx(tx);
       const spaceData = { testField: "space cell value" };
       spaceCell.set(spaceData);
@@ -743,10 +743,10 @@ describe("wish built-in", () => {
       expect(wishResult?.error).toBeUndefined();
       expect(wishResult?.result).toEqual(spaceData);
 
-      // Plain data has no [UI], so falls back to ct-cell-link
+      // Plain data has no [UI], so falls back to cf-cell-link
       const ui = wishResult?.[UI] as { type: string; name: string; props: any };
       expect(ui?.type).toEqual("vnode");
-      expect(ui?.name).toEqual("ct-cell-link");
+      expect(ui?.name).toEqual("cf-cell-link");
       expect(ui?.props?.$cell).toBeDefined();
     });
 
@@ -847,8 +847,8 @@ describe("wish built-in", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;
     let tx: ReturnType<Runtime["edit"]>;
-    let wish: ReturnType<typeof createBuilder>["commontools"]["wish"];
-    let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+    let wish: ReturnType<typeof createBuilder>["commonfabric"]["wish"];
+    let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
     beforeEach(async () => {
       userIdentity = await Identity.fromPassphrase("scope-test-user");
@@ -860,8 +860,8 @@ describe("wish built-in", () => {
       });
       tx = runtime.edit();
 
-      const { commontools } = createBuilder();
-      ({ wish, pattern } = commontools);
+      const { commonfabric } = createBuilder();
+      ({ wish, pattern } = commonfabric);
     });
 
     afterEach(async () => {
@@ -2068,7 +2068,7 @@ describe("wish built-in", () => {
           {
             name: "/main.tsx",
             contents: [
-              "import { pattern, wish } from 'commontools';",
+              "import { pattern, wish } from 'commonfabric';",
               "export default pattern<{}>(() => {",
               "  const spaceResult = wish({ query: '/' });",
               "  return { spaceResult };",
@@ -2123,7 +2123,7 @@ describe("wish built-in", () => {
           {
             name: "/main.tsx",
             contents: [
-              "import { pattern, wish } from 'commontools';",
+              "import { pattern, wish } from 'commonfabric';",
               "export default pattern<{}>(() => {",
               "  const deepValue = wish({ query: '/', path: ['nested', 'deep', 'value'] });",
               "  return { deepValue };",
@@ -2168,8 +2168,8 @@ describe("wish built-in", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;
     let tx: ReturnType<Runtime["edit"]>;
-    let wish: ReturnType<typeof createBuilder>["commontools"]["wish"];
-    let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+    let wish: ReturnType<typeof createBuilder>["commonfabric"]["wish"];
+    let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
     beforeEach(async () => {
       userIdentity = await Identity.fromPassphrase("user-home-space");
@@ -2183,8 +2183,8 @@ describe("wish built-in", () => {
       });
       tx = runtime.edit();
 
-      const { commontools } = createBuilder();
-      ({ wish, pattern } = commontools);
+      const { commonfabric } = createBuilder();
+      ({ wish, pattern } = commonfabric);
     });
 
     afterEach(async () => {
@@ -2374,7 +2374,7 @@ describe("wish built-in", () => {
 
     it("resolves hashtag using computed query (GoogleAuthManager pattern)", async () => {
       // This test mimics GoogleAuthManager which uses computed() for the wish query
-      const { commontools: { computed } } = createBuilder();
+      const { commonfabric: { computed } } = createBuilder();
 
       // Setup: Favorites with #googleAuth tag in home space
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);

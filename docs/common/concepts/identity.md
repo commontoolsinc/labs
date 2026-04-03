@@ -4,7 +4,7 @@
 
 In traditional web development, you often model data like a database: objects have `id` fields, and you look things up by ID. This works because you're constantly serializing and deserializing data—fetching from APIs, storing in localStorage, passing through JSON.
 
-**Common Tools works differently.** The reactive fabric is an in-memory object graph with direct references (pointers), not a database with keyed records. When you have a reference to an object, you *have* that object—you don't need an ID to find it later.
+**Common Fabric works differently.** The reactive fabric is an in-memory object graph with direct references (pointers), not a database with keyed records. When you have a reference to an object, you *have* that object—you don't need an ID to find it later.
 
 ```tsx
 // Object graph (no id!)
@@ -31,7 +31,7 @@ This shift has several benefits:
 Use `equals()` to compare cells or values. For cells, this checks reference equality (same object in the graph). For plain values, it checks structural equality.
 
 ```typescript
-import { equals, Writable } from 'commontools';
+import { equals, Writable } from 'commonfabric';
 
 const data = Writable.of({ name: "Ben" });
 
@@ -59,7 +59,7 @@ equals(deepData.key("address", "street"), deepData.get().address.street); // => 
 The most common use case is finding items in arrays:
 
 ```typescript
-import { equals, handler, Writable } from 'commontools';
+import { equals, handler, Writable } from 'commonfabric';
 
 interface Item {
   name: string;
@@ -80,9 +80,9 @@ When iterating with `.map()`, you have a reference to each item. Use that refere
 
 ```tsx
 {items.map((item) => (
-  <ct-card>
+  <cf-card>
     <span>{item.name}</span>
-    <ct-button onClick={() => {
+    <cf-button onClick={() => {
       // Use the reference you already have
       const allItems = items.get(); // If items is a Writable<Item[]>, otherwise use directly
       const idx = allItems.findIndex(i => equals(item, i));
@@ -91,8 +91,8 @@ When iterating with `.map()`, you have a reference to each item. Use that refere
       }
     }}>
       Select
-    </ct-button>
-  </ct-card>
+    </cf-button>
+  </cf-card>
 ))}
 ```
 

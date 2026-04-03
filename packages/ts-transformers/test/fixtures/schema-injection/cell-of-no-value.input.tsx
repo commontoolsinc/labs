@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, cell, ComparableCell } from "commontools";
+import { Cell, cell, ComparableCell } from "commonfabric";
 
 // FIXTURE: cell-of-no-value
 // Verifies: Cell.of/cell with type arg but no value injects undefined as first arg plus schema

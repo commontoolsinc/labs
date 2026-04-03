@@ -1,6 +1,6 @@
-import { sleep } from "@commontools/utils/sleep";
-import { Cell } from "@commontools/runner";
-import { type Cancel, useCancelGroup } from "@commontools/runner";
+import { sleep } from "@commonfabric/utils/sleep";
+import { Cell } from "@commonfabric/runner";
+import { type Cancel, useCancelGroup } from "@commonfabric/runner";
 import {
   WorkerController,
   WorkerControllerErrorEvent,

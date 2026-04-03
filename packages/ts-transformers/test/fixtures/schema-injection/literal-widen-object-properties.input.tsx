@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell } from "commontools";
+import { cell } from "commonfabric";
 
 // FIXTURE: literal-widen-object-properties
 // Verifies: object literal properties are widened to typed schema with required keys

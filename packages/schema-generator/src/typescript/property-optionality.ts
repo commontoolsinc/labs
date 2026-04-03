@@ -52,7 +52,7 @@ export function isOptionalSymbol(symbol: ts.Symbol): boolean {
 }
 
 /**
- * Returns true if `symbol` is the `Default` type alias from `@commontools/api`.
+ * Returns true if `symbol` is the `Default` type alias from `@commonfabric/api`.
  *
  * Checks both the symbol name AND its declaring source file so that any
  * user-defined type that happens to be named "Default" is not treated as the
@@ -63,12 +63,12 @@ export function isDefaultAliasSymbol(symbol: ts.Symbol | undefined): boolean {
   const decl = symbol.declarations?.[0];
   if (!decl) return false;
   const fileName = decl.getSourceFile().fileName;
-  // The canonical Default<T,V> is declared in @commontools/api (packages/api/index.ts).
+  // The canonical Default<T,V> is declared in @commonfabric/api (packages/api/index.ts).
   // Cover both workspace-resolved paths (".../packages/api/index.ts") and any
-  // future npm-published form ("@commontools/api").
-  // Also accept "commontools.d.ts" which is the filename used in test environments
+  // future npm-published form ("@commonfabric/api").
+  // Also accept "commonfabric.d.ts" which is the filename used in test environments
   // where the types are registered under a synthetic path.
   return fileName.endsWith("/packages/api/index.ts") ||
-    fileName.includes("@commontools/api") ||
-    fileName.endsWith("commontools.d.ts");
+    fileName.includes("@commonfabric/api") ||
+    fileName.endsWith("commonfabric.d.ts");
 }

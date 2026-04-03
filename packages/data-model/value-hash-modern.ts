@@ -16,9 +16,9 @@ import { FabricBytes } from "./fabric-bytes.ts";
 import { DECONSTRUCT, type FabricInstance } from "./interface.ts";
 import { shallowFabricFromNativeValueModern } from "./fabric-value-modern.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
-import { encodeULEB128 } from "@commontools/leb128";
+import { encodeULEB128 } from "@commonfabric/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
-import { LRUCache } from "@commontools/utils/cache";
+import { LRUCache } from "@commonfabric/utils/cache";
 
 // ---------------------------------------------------------------------------
 // Type tag bytes (Section 2 of the byte-level spec)

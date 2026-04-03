@@ -1,7 +1,7 @@
-# @commontools/ts-transformers
+# @commonfabric/ts-transformers
 
 TypeScript AST transformers that bridge authored TypeScript patterns and the
-CommonTools runtime. Pattern authors write natural TypeScript; the transformer
+Common Fabric runtime. Pattern authors write natural TypeScript; the transformer
 pipeline rewrites supported reactive constructs into explicit schema-annotated
 form for reactivity and information-flow control.
 
@@ -83,7 +83,7 @@ env FIXTURE=map-single-capture deno task test
 To see transformed output:
 
 ```bash
-deno task ct check --show-transformed test/fixtures/closures/map-single-capture.input.tsx
+deno task cf check --show-transformed test/fixtures/closures/map-single-capture.input.tsx
 ```
 
 ### Adding New Transformations

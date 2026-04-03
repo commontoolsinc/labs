@@ -4,7 +4,7 @@ import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { Task } from "@lit/task";
 import { navigate } from "../../shared/mod.ts";
-import { PageHandle } from "@commontools/runtime-client";
+import { PageHandle } from "@commonfabric/runtime-client";
 
 type PieceItem = { id: string; name: string };
 

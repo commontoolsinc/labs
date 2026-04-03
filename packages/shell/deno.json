@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/shell",
+  "name": "@commonfabric/shell",
   "tasks": {
     "clean": "rm -rf dist",
     "build": "deno task clean && deno run -A ../felt/cli.ts build .",

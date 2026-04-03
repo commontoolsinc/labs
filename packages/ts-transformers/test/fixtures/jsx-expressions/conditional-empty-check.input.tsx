@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, NAME, pattern, UI } from "commontools";
+import { cell, NAME, pattern, UI } from "commonfabric";
 
 // FIXTURE: conditional-empty-check
 // Verifies: !cell.get().length && <JSX> is transformed to when() with derive() predicate

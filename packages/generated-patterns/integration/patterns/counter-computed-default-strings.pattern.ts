@@ -8,7 +8,7 @@ import {
   handler,
   pattern,
   str,
-} from "commontools";
+} from "commonfabric";
 
 interface ComputedDefaultStringsArgs {
   value: Default<number, 0>;

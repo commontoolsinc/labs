@@ -14,7 +14,7 @@
       "na_count": 0,
       "failures": [],
       "positive_evidence": [
-        "Compiles cleanly with ct check --no-run (verified)",
+        "Compiles cleanly with cf check --no-run (verified)",
         "38/38 tests pass (verified)",
         "All 16 acceptance criteria verified PASS by manual tester post-fix",
         "Runtime error from undefined elements in computed filter was fixed (s != null guard added)",
@@ -92,7 +92,7 @@
         "Requesting a spot takes 1-3 interactions: person is pre-populated if returning user, date defaults to today, click Request Spot.",
         "Admin section is hidden behind a clearly-labeled toggle, keeping primary view uncluttered (progressive disclosure).",
         "Add Person and Add Spot forms are collapsed by default — further progressive disclosure.",
-        "All form inputs use ct-select, ct-input, ct-checkbox correctly (no native HTML inputs).",
+        "All form inputs use cf-select, cf-input, cf-checkbox correctly (no native HTML inputs).",
         "Color coding (green=available, blue=allocated, amber=today highlight) provides at-a-glance scanning in both today strip and week grid.",
         "Empty roster state shows 'No team members yet. Add people in admin mode to get started.' — guides user explicitly.",
         "Long name truncation with ellipsis in week grid cells handles edge case gracefully.",

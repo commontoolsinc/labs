@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { when, pattern, UI, NAME } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { when, pattern, UI, NAME } from "commonfabric";
 interface State {
     enabled: boolean;
     message: string;
@@ -15,11 +15,11 @@ export default pattern((__ct_pattern_input) => {
     // when(condition, value) - returns value if condition is truthy, else condition
     const result = when({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: ["boolean", "string"]
-    } as const satisfies __ctHelpers.JSONSchema, enabled, message);
+    } as const satisfies __cfHelpers.JSONSchema, enabled, message);
     return {
         [NAME]: "when schema test",
         [UI]: <div>{result}</div>,
@@ -35,7 +35,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["enabled", "message"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -67,8 +67,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

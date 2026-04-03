@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Writable, computed, pattern } from "commontools";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: computed-complex-expression
 // Verifies: computed(() => expr) with three cell captures in an arithmetic expression

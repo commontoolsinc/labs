@@ -1,13 +1,13 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 
-import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { transformSource } from "./utils.ts";
 
 Deno.test(
   "Transform guards: nested block shadowing does not leak opaque alias roots",
   async () => {
     const source = `/// <cts-enable />
-import { pattern } from "commontools";
+import { pattern } from "commonfabric";
 const p = pattern((input: { user: { name: string }; value: { foo: number } }) => {
   const value = { foo: 1 };
   {
@@ -30,7 +30,7 @@ Deno.test(
   "Transform guards: plain callback parameter map is not rewritten in pattern",
   async () => {
     const source = `/// <cts-enable />
-import { pattern } from "commontools";
+import { pattern } from "commonfabric";
 const p = pattern((input: { ok: boolean }) => {
   const out = ((arr: number[]) => arr.map((x) => x + 1))([1, 2]);
   return <div>{out.length}</div>;
@@ -48,7 +48,7 @@ Deno.test(
   "Transform guards: rewritten mapWithPattern callback uses key(...) canonicalization",
   async () => {
     const source = `/// <cts-enable />
-import { pattern, derive } from "commontools";
+import { pattern, derive } from "commonfabric";
 const p = pattern((input: { list: Array<{ name: string; age: number }> }) => <div>{derive(input.list, (v) => v).map(({ name }) => <span>{name}</span>)}</div>);
 `;
 
@@ -77,14 +77,14 @@ Deno.test(
       ]
     ) {
       const source = `/// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 interface State { ${property}: string; items?: string[] }
 const p = pattern<State>((state) => ({
   [UI]: <div>{state.${property}}</div>,
 }));
 `;
       const output = await transformSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertStringIncludes(output, `state.key("${property}")`);
       extraAssert(output);
@@ -96,7 +96,7 @@ Deno.test(
   "Transform guards: unsupported reactive array find() does not lower to findWithPattern",
   async () => {
     const source = `/// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 interface Item { id: number; name: string }
 interface State { items: Item[] }
 const p = pattern<State>((state) => ({
@@ -104,7 +104,7 @@ const p = pattern<State>((state) => ({
 }));
 `;
 
-    const output = await transformSource(source, { types: COMMONTOOLS_TYPES });
+    const output = await transformSource(source, { types: COMMONFABRIC_TYPES });
 
     assert(!output.includes("findWithPattern"));
   },
@@ -114,7 +114,7 @@ Deno.test(
   "Transform guards: aliased get-result callbacks inside computed stay plain",
   async () => {
     const source = `/// <cts-enable />
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
 
 interface Habit {
   name: string;
@@ -151,7 +151,7 @@ export default pattern<Input>(({ habits, logs, todayDate }) => {
 `;
 
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
 
     assertStringIncludes(output, "const logList = logs.get();");
@@ -160,7 +160,7 @@ export default pattern<Input>(({ habits, logs, todayDate }) => {
       "return logList.some((log) => log.habitName === habit.name &&",
     );
     assert(
-      !output.includes("return logList.some((log) => __ctHelpers.when("),
+      !output.includes("return logList.some((log) => __cfHelpers.when("),
       "aliased plain array some() callback should stay plain inside computed()/derive()",
     );
   },
@@ -170,7 +170,7 @@ Deno.test(
   "Transform guards: ternary branch derive absorbs inner arithmetic instead of nesting",
   async () => {
     const source = `/// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 
 interface Item {
   id: number;
@@ -199,13 +199,13 @@ export default pattern<State>((state) => ({
 `;
 
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
 
-    assertEquals(output.match(/__ctHelpers\.derive\(/g)?.length ?? 0, 2);
+    assertEquals(output.match(/__cfHelpers\.derive\(/g)?.length ?? 0, 2);
     assertStringIncludes(output, "item.price * (1 - state.discount)");
     assert(
-      !output.includes("item.price * (__ctHelpers.derive("),
+      !output.includes("item.price * (__cfHelpers.derive("),
       "expected ternary branch derive to absorb inner arithmetic instead of nesting a second derive",
     );
   },
@@ -215,7 +215,7 @@ Deno.test(
   "Transform guards: ifElse predicate binary is not treated as a pattern-owned branch",
   async () => {
     const source = `/// <cts-enable />
-import { ifElse, pattern, UI } from "commontools";
+import { ifElse, pattern, UI } from "commonfabric";
 
 interface Field {
   name: string;
@@ -240,7 +240,7 @@ export default pattern<{ fields: Field[] }>((state) => ({
 `;
 
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
 
     assertStringIncludes(output, "ifElse(");
@@ -252,7 +252,7 @@ Deno.test(
   "Transform guards: helper-owned non-cell get() calls are not force-wrapped",
   async () => {
     const source = `/// <cts-enable />
-import { ifElse, pattern, UI } from "commontools";
+import { ifElse, pattern, UI } from "commonfabric";
 
 interface State {
   show: boolean;
@@ -274,12 +274,12 @@ export default pattern<State>((state) => {
 `;
 
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
 
     assertStringIncludes(output, "lookup.get(");
     assert(
-      !/__ctHelpers\.(?:computed|derive)\([\s\S]{0,160}lookup\.get\(/.test(
+      !/__cfHelpers\.(?:computed|derive)\([\s\S]{0,160}lookup\.get\(/.test(
         output,
       ),
       "expected non-cell helper-owned get() calls to remain plain method calls",
@@ -291,7 +291,7 @@ Deno.test(
   "Transform guards: helper-owned child key references stay structural",
   async () => {
     const source = `/// <cts-enable />
-import { Cell, Default, handler, lift, pattern, Stream } from "commontools";
+import { Cell, Default, handler, lift, pattern, Stream } from "commonfabric";
 
 const childIncrement = handler(
   (event: { amount?: number } | undefined, context: { value: Cell<number> }) => {
@@ -330,7 +330,7 @@ export default pattern<{ left: Default<number, 0>; right: Default<number, 0> }>(
 `;
 
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
 
     assertStringIncludes(output, 'left: leftChild.key("value")');
@@ -338,13 +338,13 @@ export default pattern<{ left: Default<number, 0>; right: Default<number, 0> }>(
     assertStringIncludes(output, 'increment: rightChild.key("increment")');
     assert(
       !output.includes(
-        '__ctHelpers.computed((): any => leftChild.key("value"))',
+        '__cfHelpers.computed((): any => leftChild.key("value"))',
       ),
       "expected child value cell reference to stay structural inside helper-owned arguments",
     );
     assert(
       !output.includes(
-        '__ctHelpers.computed((): any => rightChild.key("increment"))',
+        '__cfHelpers.computed((): any => rightChild.key("increment"))',
       ),
       "expected child stream reference to stay structural inside helper-owned arguments",
     );
@@ -355,7 +355,7 @@ Deno.test(
   "Transform guards: ordinary helper calls with child key references stay structural",
   async () => {
     const source = `/// <cts-enable />
-import { Cell, Default, handler, pattern, type Stream } from "commontools";
+import { Cell, Default, handler, pattern, type Stream } from "commonfabric";
 
 const asIncrementStream = (
   ref: unknown,
@@ -387,7 +387,7 @@ export default pattern<{ child: Default<number, 0> }>(({ child }) => {
 `;
 
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
 
     assertStringIncludes(
@@ -395,7 +395,7 @@ export default pattern<{ child: Default<number, 0> }>(({ child }) => {
       'childIncrement: asIncrementStream(childState.key("increment"))',
     );
     assert(
-      !/__ctHelpers\.(?:computed|derive)\([\s\S]{0,240}asIncrementStream\(childState\.key\("increment"\)\)/
+      !/__cfHelpers\.(?:computed|derive)\([\s\S]{0,240}asIncrementStream\(childState\.key\("increment"\)\)/
         .test(
           output,
         ),

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Default, handler, NAME, pattern, UI, wish, Writable, } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Default, handler, NAME, pattern, UI, wish, Writable, } from "commonfabric";
 type Item = {
     name: string;
     value: number;
@@ -8,7 +8,7 @@ const removeItem = handler({
     type: "object",
     properties: {},
     additionalProperties: false
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         items: {
@@ -37,7 +37,7 @@ const removeItem = handler({
             required: ["name", "value"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (_, { items, item }) => {
+} as const satisfies __cfHelpers.JSONSchema, (_, { items, item }) => {
     items.remove(item);
 });
 // FIXTURE: map-wish-default-handler-capture
@@ -67,11 +67,11 @@ export default pattern((_) => {
                 required: ["name", "value"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema).result!;
+    } as const satisfies __cfHelpers.JSONSchema).result!;
     return {
         [NAME]: "Test",
         [UI]: (<ul>
-        {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const items = __ct_pattern_input.params.items;
                 return (<li>
@@ -114,7 +114,7 @@ export default pattern((_) => {
                         required: ["name", "value"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -134,7 +134,7 @@ export default pattern((_) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {
+            } as const satisfies __cfHelpers.JSONSchema), {
                 items: items
             })}
       </ul>),
@@ -143,7 +143,7 @@ export default pattern((_) => {
     type: "object",
     properties: {},
     additionalProperties: false
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -175,8 +175,8 @@ export default pattern((_) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

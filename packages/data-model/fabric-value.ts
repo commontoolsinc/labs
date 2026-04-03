@@ -22,8 +22,8 @@ import type {
   FabricValue,
   FabricValueLayer,
 } from "./interface.ts";
-import { deepEqual } from "@commontools/utils/deep-equal";
-import type { Immutable } from "@commontools/utils/types";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import type { Immutable } from "@commonfabric/utils/types";
 import {
   cloneIfNecessaryModern,
   type CloneOptions,

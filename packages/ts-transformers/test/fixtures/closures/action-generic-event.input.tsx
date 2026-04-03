@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, pattern, action } from "commontools";
+import { Cell, pattern, action } from "commonfabric";
 
 interface MyEvent {
   data: string;

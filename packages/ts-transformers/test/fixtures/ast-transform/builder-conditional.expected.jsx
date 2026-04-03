@@ -1,36 +1,36 @@
-import * as __ctHelpers from "commontools";
-import { Default, NAME, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Default, NAME, pattern, UI } from "commonfabric";
 interface PatternState {
     count: Default<number, 0>;
     label: Default<string, "">;
 }
 // FIXTURE: builder-conditional
 // Verifies: ternary in JSX is transformed to ifElse() with derive() for the condition
-//   state.count > 0 ? <p>A</p> : <p>B</p> → __ctHelpers.ifElse(...schemas, derive(..., state.count > 0), <p>A</p>, <p>B</p>)
+//   state.count > 0 ? <p>A</p> : <p>B</p> → __cfHelpers.ifElse(...schemas, derive(..., state.count > 0), <p>A</p>, <p>B</p>)
 //   pattern<PatternState>                  → pattern(..., inputSchema, outputSchema)
 //   state.label                            → state.key("label")
 export default pattern((state) => {
     return {
         [NAME]: state.key("label"),
         [UI]: (<section>
-        {__ctHelpers.ifElse({
+        {__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -44,9 +44,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 count: state.key("count")
             } }, ({ state }) => state.count > 0), <p>Positive</p>, <p>Non-positive</p>)}
       </section>),
@@ -64,7 +64,7 @@ export default pattern((state) => {
         }
     },
     required: ["count", "label"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -96,8 +96,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

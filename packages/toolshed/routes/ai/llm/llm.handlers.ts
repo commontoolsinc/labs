@@ -13,8 +13,8 @@ import { generateText as generateTextCore } from "./generateText.ts";
 import { generateObject as generateObjectCore } from "./generateObject.ts";
 import { findModel } from "./models.ts";
 import env from "@/env.ts";
-import { isLLMRequest } from "@commontools/llm/types";
-import { type BuiltInLLMMessage } from "@commontools/api";
+import { isLLMRequest } from "@commonfabric/llm/types";
+import { type BuiltInLLMMessage } from "@commonfabric/api";
 
 const removeNonCacheableFields = (
   obj: object,
@@ -211,7 +211,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
       await persistCache(result.messages);
       const response = c.json(result.message);
       if (result.spanId) {
-        response.headers.set("x-ct-llm-trace-id", result.spanId);
+        response.headers.set("x-cf-llm-trace-id", result.spanId);
       }
       return response;
     }
@@ -222,7 +222,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
         "Transfer-Encoding": "chunked",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
-        ...(result.spanId ? { "x-ct-llm-trace-id": result.spanId } : {}),
+        ...(result.spanId ? { "x-cf-llm-trace-id": result.spanId } : {}),
       },
     });
   } catch (error) {
@@ -257,13 +257,13 @@ export const submitFeedback: AppRouteHandler<FeedbackRoute> = async (c) => {
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "Authorization": `Bearer ${env.CTTS_AI_LLM_PHOENIX_API_KEY}`,
+        "Authorization": `Bearer ${env.CFTS_AI_LLM_PHOENIX_API_KEY}`,
       },
       body: JSON.stringify(phoenixPayload),
     };
 
     const response = await fetch(
-      `${env.CTTS_AI_LLM_PHOENIX_API_URL}/span_annotations?sync=false`,
+      `${env.CFTS_AI_LLM_PHOENIX_API_URL}/span_annotations?sync=false`,
       phoenixAnnotationPayload,
     );
 

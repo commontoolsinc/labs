@@ -1,4 +1,4 @@
-import { type JSONSchema, NAME } from "@commontools/runner/shared";
+import { type JSONSchema, NAME } from "@commonfabric/runner/shared";
 
 export interface Mentionable {
   [NAME]: string;

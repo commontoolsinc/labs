@@ -16,7 +16,7 @@
  * />
  * ```
  */
-import { computed, pattern, UI } from "commontools";
+import { computed, pattern, UI } from "commonfabric";
 
 interface ProcessingStatusProps {
   totalCount: number;
@@ -52,7 +52,7 @@ export default pattern<ProcessingStatusProps>(
               gap: "6px",
             }}
           >
-            <ct-loader size="sm" />
+            <cf-loader size="sm" />
             <span style={{ fontSize: "11px", color: "#6b7280" }}>
               Loading...
             </span>
@@ -71,7 +71,7 @@ export default pattern<ProcessingStatusProps>(
               flex: 1,
             }}
           >
-            <ct-progress
+            <cf-progress
               value={completedCount}
               max={totalCount}
               style="width: 60px; height: 6px;"

@@ -67,7 +67,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Secret<T> = T;
 
@@ -568,12 +568,12 @@ export default pattern<Input, Output>(
                     color: loggedIn ? "#9ca3af" : "inherit",
                   }}
                 >
-                  <ct-checkbox
+                  <cf-checkbox
                     $checked={selectedScopes[key as keyof SelectedScopes]}
                     disabled={checkboxesDisabled}
                   >
                     {description}
-                  </ct-checkbox>
+                  </cf-checkbox>
                 </label>
               ))}
             </div>
@@ -693,7 +693,7 @@ export default pattern<Input, Output>(
             null,
           )}
 
-          <ct-oauth
+          <cf-oauth
             $auth={auth}
             scopes={scopes}
             provider="airtable"
@@ -1032,7 +1032,7 @@ const AIRTABLE_CLIENT_SOURCE = `/**
  * const records = await client.listRecords(baseId, tableId);
  * \\\`\\\`\\\`
  */
-import { getPatternEnvironment, Writable } from "commontools";
+import { getPatternEnvironment, Writable } from "commonfabric";
 
 const env = getPatternEnvironment();
 
@@ -1360,7 +1360,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 import {
   AirtableAuthManager,
@@ -2036,11 +2036,11 @@ export function generateImporterPrompt(ctx: PromptContext): string {
   // SECTION 1: System context — Pattern framework overview
   // =========================================================================
   sections.push(`<system>
-You are generating Common Tools pattern files for the "${providerLabel}" API integration.
+You are generating Common Fabric pattern files for the "${providerLabel}" API integration.
 
-## Common Tools Pattern Framework
+## Common Fabric Pattern Framework
 
-Common Tools patterns are reactive programs (similar to Solid.js components)
+Common Fabric patterns are reactive programs (similar to Solid.js components)
 that define a reactive graph once upfront. They are NOT re-invoked like React
 components.
 
@@ -2052,7 +2052,7 @@ All patterns start with:
 import {
   computed, Default, handler, ifElse, NAME, pattern,
   Stream, UI, Writable, getPatternEnvironment, wish, action, navigateTo,
-} from "commontools";
+} from "commonfabric";
 
 // Local no-op type alias for marking sensitive fields
 type Secret<T> = T;
@@ -2091,19 +2091,19 @@ Import only what you need from the above list. Define \`type Secret<T> = T;\` lo
 
 ### UI Components
 
-Use \`ct-*\` custom elements:
+Use \`cf-*\` custom elements:
 
-- \`<ct-oauth $auth={auth} scopes={scopes} provider="..." providerLabel="..." brandColor="..." loginEndpoint="..." tokenField="...">\` — OAuth flow component
-- \`<ct-checkbox $checked={cell}>Label</ct-checkbox>\` — Checkbox with bidirectional binding
-- \`<ct-input $value={cell} placeholder="..." />\` — Text input with bidirectional binding
-- \`<ct-select $value={cell} items={[{label, value}]} />\` — Select dropdown
-- \`<ct-button onClick={handler}>Label</ct-button>\` — Button
-- \`<ct-card>...</ct-card>\` — Styled card container
-- \`<ct-vstack gap={N}>...</ct-vstack>\` — Vertical stack layout
-- \`<ct-render $cell={patternInstance} />\` — Render a sub-pattern
+- \`<cf-oauth $auth={auth} scopes={scopes} provider="..." providerLabel="..." brandColor="..." loginEndpoint="..." tokenField="...">\` — OAuth flow component
+- \`<cf-checkbox $checked={cell}>Label</cf-checkbox>\` — Checkbox with bidirectional binding
+- \`<cf-input $value={cell} placeholder="..." />\` — Text input with bidirectional binding
+- \`<cf-select $value={cell} items={[{label, value}]} />\` — Select dropdown
+- \`<cf-button onClick={handler}>Label</cf-button>\` — Button
+- \`<cf-card>...</cf-card>\` — Styled card container
+- \`<cf-vstack gap={N}>...</cf-vstack>\` — Vertical stack layout
+- \`<cf-render $cell={patternInstance} />\` — Render a sub-pattern
 
 Native HTML elements (\`<div>\`, \`<table>\`, \`<button>\`) work with object-style
-\`style={{ camelCase: "value" }}\`. Custom \`ct-*\` elements use string-style
+\`style={{ camelCase: "value" }}\`. Custom \`cf-*\` elements use string-style
 \`style="kebab-case: value;"\`.
 
 ### Anti-Patterns to Avoid
@@ -2123,7 +2123,7 @@ For a provider named "acme":
 packages/patterns/acme/
   acme-importer.tsx          # Main importer pattern
   core/
-    acme-auth.tsx            # Auth pattern (thin, uses ct-oauth)
+    acme-auth.tsx            # Auth pattern (thin, uses cf-oauth)
     util/
       acme-auth-manager.tsx  # Auth manager (token lifecycle, wish-based discovery)
       acme-client.ts         # Typed API client with pagination + retry
@@ -2272,7 +2272,7 @@ file in a fenced code block with the file path as a comment on the first line.
 
 ## File 1: \`packages/patterns/${providerName}/core/${providerName}-auth.tsx\`
 
-A thin auth pattern that wraps the \`<ct-oauth>\` component. Follow the Airtable
+A thin auth pattern that wraps the \`<cf-oauth>\` component. Follow the Airtable
 auth reference exactly, adapting for ${providerLabel}. Uses shared utilities
 from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
 
@@ -2288,7 +2288,7 @@ from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
 - Use the \`#${
     hashTag.slice(1)
   }\` tag in the Output interface JSDoc comment for wish() discovery
-- Use \`<ct-oauth>\` with:
+- Use \`<cf-oauth>\` with:
   - \`provider="${providerName}"\`
   - \`providerLabel="${providerLabel}"\`
   - \`brandColor="${brandColor}"\`
@@ -2321,7 +2321,7 @@ Auth manager utility pattern. Uses the shared \`createAuthManager()\` factory �
 
 Typed API client class. Follow the Airtable client reference:
 
-- Import \`getPatternEnvironment\` and \`Writable\` from "commontools"
+- Import \`getPatternEnvironment\` and \`Writable\` from "commonfabric"
 - Import auth type from the auth pattern
 - Base URL: \`${api.baseUrl}\`
 - Implement:
@@ -2350,7 +2350,7 @@ ${
 Main importer pattern. Follow the Airtable importer reference:
 
 - First line: \`/// <cts-enable />\`
-- Import from \`"commontools"\`: computed, Default, handler, ifElse, NAME, pattern, UI, Writable
+- Import from \`"commonfabric"\`: computed, Default, handler, ifElse, NAME, pattern, UI, Writable
 - Import the auth manager and client
 - Define module-scope \`handler()\` functions for each API call:
   - Each handler takes \`auth\`, relevant state cells (\`loading\`, \`error\`, result cells)
@@ -2384,7 +2384,7 @@ Main importer pattern. Follow the Airtable importer reference:
 7. **No React patterns** — No useState, useEffect, hooks, or re-rendering
 8. **Data in <table>** — Use standard HTML table with inline styles for data display
 9. **First line: \`/// <cts-enable />\`** — Required for all .tsx pattern files
-10. **Import from "commontools"** — Not from individual packages
+10. **Import from "commonfabric"** — Not from individual packages
 </instructions>`);
 
   return sections.join("\n\n");

@@ -2,8 +2,8 @@ import { z } from "zod";
 import { createRoute } from "@hono/zod-openapi";
 import { jsonContent } from "stoker/openapi/helpers";
 import * as HttpStatusCodes from "stoker/http-status-codes";
-import * as Codec from "@commontools/memory/codec";
-import { isDID } from "@commontools/identity";
+import * as Codec from "@commonfabric/memory/codec";
+import { isDID } from "@commonfabric/identity";
 export const tags = ["Memory Storage"];
 
 export const Null = z.literal(null);

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { lift, pattern, type Writable } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { lift, pattern, type Writable } from "commonfabric";
 // FIXTURE: builder-input-full-shape-continuity
 // Verifies: builder input schemas stay conservative/full-shape when the authored contract
 // does not justify path shrinking.
@@ -12,9 +12,9 @@ const liftWrapped = lift({
     },
     required: ["foo"],
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __ctHelpers.JSONSchema, (input: Writable<{
+} as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
     foo: string;
     bar: string;
 }>) => input.get().foo);
@@ -32,10 +32,10 @@ const patternFullShape = pattern((input: Writable<{
         }
     },
     required: ["foo", "bar"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "string",
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 const patternExplicit = pattern((input) => input.key("foo"), {
     type: "object",
     properties: {
@@ -47,10 +47,10 @@ const patternExplicit = pattern((input) => input.key("foo"), {
         }
     },
     required: ["foo", "bar"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "string",
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 const liftPassthrough = lift({
     type: "object",
     properties: {
@@ -62,7 +62,7 @@ const liftPassthrough = lift({
         }
     },
     required: ["foo", "bar"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         foo: {
@@ -74,7 +74,7 @@ const liftPassthrough = lift({
     },
     required: ["foo", "bar"],
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema, (input: Writable<{
+} as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
     foo: string;
     bar: string;
 }>) => input);
@@ -85,7 +85,7 @@ const helper = (value: Writable<{
 const patternHelper = pattern((input: Writable<{
     foo: string;
     bar: string;
-}>) => __ctHelpers.derive({
+}>) => __cfHelpers.derive({
     type: "object",
     properties: {
         input: {
@@ -103,10 +103,10 @@ const patternHelper = pattern((input: Writable<{
         }
     },
     required: ["input"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "string",
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema, { input: input }, ({ input }) => helper(input)), {
+} as const satisfies __cfHelpers.JSONSchema, { input: input }, ({ input }) => helper(input)), {
     type: "object",
     properties: {
         foo: {
@@ -117,10 +117,10 @@ const patternHelper = pattern((input: Writable<{
         }
     },
     required: ["foo", "bar"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "string",
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 const wildcardLift = lift({
     type: "object",
     properties: {
@@ -133,9 +133,9 @@ const wildcardLift = lift({
     },
     required: ["foo", "bar"],
     asCell: true
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __ctHelpers.JSONSchema, (input: Writable<{
+} as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
     foo: string;
     bar: string;
 }>) => {
@@ -152,6 +152,6 @@ export default {
     wildcardLift,
 };
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, type Default, NAME, pattern, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commonfabric";
 
 type Input = { url: Default<string, "/api/patterns/index.md"> };
 
@@ -11,9 +11,9 @@ const PatternIndexUrl = pattern<Input, Output>(
     return {
       [NAME]: computed(() => `Pattern Index: ${url}`),
       [UI]: (
-        <ct-screen>
-          <ct-input $value={url} />
-        </ct-screen>
+        <cf-screen>
+          <cf-input $value={url} />
+        </cf-screen>
       ),
       url,
     };

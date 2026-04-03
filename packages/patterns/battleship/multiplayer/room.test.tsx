@@ -10,9 +10,9 @@
  * - Cannot fire when game is finished
  * - Win detection when all ships sunk
  *
- * Run: deno task ct test packages/patterns/battleship/multiplayer/room.test.tsx --root packages/patterns/battleship --verbose
+ * Run: deno task cf test packages/patterns/battleship/multiplayer/room.test.tsx --root packages/patterns/battleship --verbose
  */
-import { action, computed, pattern, Writable } from "commontools";
+import { action, computed, pattern, Writable } from "commonfabric";
 import BattleshipRoom from "./room.tsx";
 import {
   createInitialShots,

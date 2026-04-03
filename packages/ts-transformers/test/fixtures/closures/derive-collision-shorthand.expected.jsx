@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, derive, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Writable, derive, pattern } from "commonfabric";
 // FIXTURE: derive-collision-shorthand
 // Verifies: shorthand property `{ multiplier }` expands correctly when the capture is renamed
 //   derive(multiplier, fn) → derive(schema, schema, { multiplier, multiplier_1 }, fn)
@@ -8,11 +8,11 @@ import { Writable, derive, pattern } from "commontools";
 export default pattern(() => {
     const multiplier = Writable.of(2, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     // Input name 'multiplier' collides with captured variable 'multiplier'
     // The callback uses shorthand property { multiplier }
     // This should expand to { multiplier: multiplier_1 } after renaming
-    const result = __ctHelpers.derive({
+    const result = __cfHelpers.derive({
         type: "object",
         properties: {
             multiplier: {
@@ -25,7 +25,7 @@ export default pattern(() => {
             }
         },
         required: ["multiplier", "multiplier_1"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             value: {
@@ -43,7 +43,7 @@ export default pattern(() => {
             }
         },
         required: ["value", "data"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         multiplier,
         multiplier_1: multiplier
     }, ({ multiplier: m, multiplier_1 }) => ({
@@ -51,7 +51,7 @@ export default pattern(() => {
         data: { multiplier: multiplier_1 },
     }));
     return result;
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -69,8 +69,8 @@ export default pattern(() => {
         }
     },
     required: ["value", "data"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

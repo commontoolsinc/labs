@@ -87,7 +87,7 @@ export const emitBinaryExpression: Emitter = ({
         condition,
         value,
         factory: context.factory,
-        ctHelpers: context.ctHelpers,
+        cfHelpers: context.cfHelpers,
       });
 
       if (context.options.typeRegistry) {
@@ -137,7 +137,7 @@ export const emitBinaryExpression: Emitter = ({
         condition,
         value,
         factory: context.factory,
-        ctHelpers: context.ctHelpers,
+        cfHelpers: context.cfHelpers,
       });
 
       if (context.options.typeRegistry) {

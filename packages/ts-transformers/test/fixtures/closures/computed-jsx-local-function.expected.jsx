@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { computed, pattern, UI } from "commonfabric";
 // FIXTURE: computed-jsx-local-function
 // Verifies: computed() with a locally-defined function inside the callback is closure-extracted
 //   computed(() => { const format = ...; return <span>{format(count)}</span> }) → derive(captureSchema, resultSchema, { count }, ({ count }) => { ... })
@@ -8,7 +8,7 @@ export default pattern((__ct_pattern_input) => {
     const count = __ct_pattern_input.key("count");
     return {
         [UI]: (<div>
-        {__ctHelpers.derive({
+        {__cfHelpers.derive({
                 type: "object",
                 properties: {
                     count: {
@@ -16,7 +16,7 @@ export default pattern((__ct_pattern_input) => {
                     }
                 },
                 required: ["count"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -36,7 +36,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => {
+            } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => {
                 const format = (value: number) => `Count: ${value}`;
                 return <span>{format(count)}</span>;
             })}
@@ -50,7 +50,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["count"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -79,8 +79,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

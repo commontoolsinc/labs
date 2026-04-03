@@ -5,13 +5,13 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import { transformSource, validateSource } from "./utils.ts";
-import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
 Deno.test(
   "Pipeline regression: manual mapWithPattern preserves computed plain-capture keys",
   async () => {
     const source = `/// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 const key = "small" as const;
 const p = pattern<{ items: string[] }>((state) => ({
   [UI]: (
@@ -28,10 +28,10 @@ const p = pattern<{ items: string[] }>((state) => ({
 `;
 
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
@@ -49,7 +49,7 @@ Deno.test(
   "Pipeline regression: nested authored ifElse predicate in helper-owned branch lowers to derive",
   async () => {
     const source = `/// <cts-enable />
-import { computed, ifElse, pattern, UI } from "commontools";
+import { computed, ifElse, pattern, UI } from "commonfabric";
 
 interface ValidationIssue {
   message: string;
@@ -157,7 +157,7 @@ export default pattern<{
 `;
 
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
 
     assertStringIncludes(
@@ -166,7 +166,7 @@ export default pattern<{
     );
     assertMatch(
       output,
-      /__ctHelpers\.derive\([\s\S]*validationIssue: f(?:\.validationIssue|\.key\("validationIssue"\))[\s\S]*\(\{ f \}\) => f\.validationIssue !== undefined\)/,
+      /__cfHelpers\.derive\([\s\S]*validationIssue: f(?:\.validationIssue|\.key\("validationIssue"\))[\s\S]*\(\{ f \}\) => f\.validationIssue !== undefined\)/,
     );
   },
 );
@@ -175,7 +175,7 @@ Deno.test(
   "Pipeline regression: dynamic key access in helper-owned map callback initializer lowers without computation diagnostics",
   async () => {
     const source = `/// <cts-enable />
-import { computed, ifElse, pattern, UI } from "commontools";
+import { computed, ifElse, pattern, UI } from "commonfabric";
 
 interface Field {
   targetModule: string;
@@ -209,10 +209,10 @@ export default pattern<{
 
     const { diagnostics } = await validateSource(source, {
       mode: "error",
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
 
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
@@ -237,7 +237,7 @@ Deno.test(
       new URL("../../patterns/self-improving-classifier.tsx", import.meta.url),
     );
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
 
     const mapStart = output.indexOf("{examples.mapWithPattern(");
@@ -269,7 +269,7 @@ Deno.test(
       new URL("../../patterns/shopping-list.tsx", import.meta.url),
     );
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
 
     assertStringIncludes(output, "itemsWithAisles.mapWithPattern(");

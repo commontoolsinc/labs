@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { JSONSchema } from "commontools";
-import { Identity } from "@commontools/identity";
-import * as Memory from "@commontools/memory";
-import * as Consumer from "@commontools/memory/consumer";
-import type { URI } from "@commontools/memory/interface";
-import type { BaseMemoryAddress } from "@commontools/runner/traverse";
+import type { JSONSchema } from "commonfabric";
+import { Identity } from "@commonfabric/identity";
+import * as Memory from "@commonfabric/memory";
+import * as Consumer from "@commonfabric/memory/consumer";
+import type { URI } from "@commonfabric/memory/interface";
+import type { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Provider } from "../src/storage/cache.ts";
 import * as Subscription from "../src/storage/subscription.ts";
 

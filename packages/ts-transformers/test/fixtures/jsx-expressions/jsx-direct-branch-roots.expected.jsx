@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 // FIXTURE: jsx-direct-branch-roots
 // Verifies: direct JSX branch roots lower structurally without leaving raw
 //   child expressions in place.
@@ -9,21 +9,21 @@ import { pattern, UI } from "commontools";
 //   label ?? "Pending"                           -> top-level JSX nullish lowering
 export default pattern((state) => ({
     [UI]: (<div>
-      <p>{__ctHelpers.ifElse({
+      <p>{__cfHelpers.ifElse({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["", "Visible"]
-    } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.unless({
+    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.unless({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, state.key("showCompleted"), __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, state.key("showCompleted"), __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -43,46 +43,46 @@ export default pattern((state) => ({
             }
         },
         required: ["state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             task: {
                 done: state.key("task", "done")
             }
         } }, ({ state }) => !state.task.done)), "Visible", "")}</p>
-      <p>{__ctHelpers.ifElse({
+      <p>{__cfHelpers.ifElse({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["B", "C"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["B", "C", "A"]
-    } as const satisfies __ctHelpers.JSONSchema, state.key("primary"), "A", __ctHelpers.ifElse({
+    } as const satisfies __cfHelpers.JSONSchema, state.key("primary"), "A", __cfHelpers.ifElse({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["B", "C"]
-    } as const satisfies __ctHelpers.JSONSchema, state.key("secondary"), "B", "C"))}</p>
-      <p>{__ctHelpers.ifElse({
+    } as const satisfies __cfHelpers.JSONSchema, state.key("secondary"), "B", "C"))}</p>
+      <p>{__cfHelpers.ifElse({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, state.key("primary"), "A", __ctHelpers.unless({
+    } as const satisfies __cfHelpers.JSONSchema, state.key("primary"), "A", __cfHelpers.unless({
         type: ["string", "undefined"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, state.key("fallbackLabel"), "C"))}</p>
-      <p>{__ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, state.key("fallbackLabel"), "C"))}</p>
+      <p>{__cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -95,9 +95,9 @@ export default pattern((state) => ({
             }
         },
         required: ["state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             label: state.key("label")
         } }, ({ state }) => state.label ?? "Pending")}</p>
     </div>),
@@ -134,7 +134,7 @@ export default pattern((state) => ({
         }
     },
     required: ["showCompleted", "task", "primary", "secondary"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -163,8 +163,8 @@ export default pattern((state) => ({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

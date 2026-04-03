@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { type Cell, Default, handler, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { type Cell, Default, handler, pattern } from "commonfabric";
 interface OptionalBranch {
     counter?: number;
     label?: string;
@@ -14,7 +14,7 @@ interface NestedOptionalArgs {
     // deno-lint-ignore ban-types
     state: Default<NestedOptionalState, {}>;
 }
-const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
+const increment = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         state: {
@@ -52,7 +52,7 @@ const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (_, context: {
+} as const satisfies __cfHelpers.JSONSchema, (_, context: {
     state: Cell<NestedOptionalState>;
 }) => {
     const current = context.state.get() ?? {};
@@ -111,7 +111,7 @@ export default pattern((__ct_pattern_input) => {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         state: {
@@ -152,8 +152,8 @@ export default pattern((__ct_pattern_input) => {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

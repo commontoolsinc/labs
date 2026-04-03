@@ -1,8 +1,8 @@
-import type { JSONSchema } from "@commontools/api";
-import type { MemorySpace } from "@commontools/memory/interface";
-import type { URI } from "@commontools/memory/interface";
+import type { JSONSchema } from "@commonfabric/api";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { URI } from "@commonfabric/memory/interface";
 
-export type { URI } from "@commontools/memory/interface";
+export type { URI } from "@commonfabric/memory/interface";
 
 /**
  * Generic sigil value type for future extensions

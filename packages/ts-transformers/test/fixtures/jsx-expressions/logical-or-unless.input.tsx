@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commontools";
+import { cell, pattern, UI } from "commonfabric";
 
 // FIXTURE: logical-or-unless
 // Verifies: || with JSX fallback on right side is transformed to unless()

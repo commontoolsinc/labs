@@ -16,7 +16,7 @@ import {
   Stream,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // Simple random ID generator
 const generateId = () =>
@@ -271,17 +271,17 @@ const Event = pattern<Input, Output>(
     return {
       [NAME]: computed(() => `${title.get()}`),
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           {/* Header */}
-          <ct-vstack
+          <cf-vstack
             slot="header"
             gap="2"
             padding="4"
             style={{
-              borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
+              borderBottom: "1px solid var(--cf-color-border, #e5e5e7)",
             }}
           >
-            <ct-hstack gap="3" style={{ alignItems: "center" }}>
+            <cf-hstack gap="3" style={{ alignItems: "center" }}>
               {/* Editable Title - click to edit */}
               <div
                 style={{
@@ -319,35 +319,35 @@ const Event = pattern<Input, Output>(
                   marginRight: "12px",
                 }}
               >
-                <ct-input
+                <cf-input
                   $value={title}
                   placeholder="Event title..."
                   style={{ flex: 1 }}
-                  onct-blur={stopEditingTitle({ isEditingTitle })}
-                  onct-keydown={handleTitleKeydown({ isEditingTitle })}
+                  oncf-blur={stopEditingTitle({ isEditingTitle })}
+                  oncf-keydown={handleTitleKeydown({ isEditingTitle })}
                 />
               </div>
-            </ct-hstack>
+            </cf-hstack>
 
             {/* Date/Time summary */}
-            <ct-hstack gap="2" style={{ alignItems: "center" }}>
+            <cf-hstack gap="2" style={{ alignItems: "center" }}>
               <span
                 style={{
                   fontSize: "0.875rem",
-                  color: "var(--ct-color-text-secondary, #6e6e73)",
+                  color: "var(--cf-color-text-secondary, #6e6e73)",
                 }}
               >
                 {dateDisplay} | {timeDisplay} ({durationDisplay})
               </span>
-            </ct-hstack>
-          </ct-vstack>
+            </cf-hstack>
+          </cf-vstack>
 
           {/* Main Content */}
-          <ct-vstack padding="4" gap="4" style={{ flex: 1, overflow: "auto" }}>
+          <cf-vstack padding="4" gap="4" style={{ flex: 1, overflow: "auto" }}>
             {/* Date Input */}
             <div>
               <label style={STYLES.label}>Date</label>
-              <ct-input
+              <cf-input
                 $value={date}
                 type="date"
                 style={{ width: "100%" }}
@@ -358,16 +358,16 @@ const Event = pattern<Input, Output>(
             <div style={{ display: "flex", gap: "8px" }}>
               <div style={{ flex: 1 }}>
                 <label style={STYLES.label}>Start Time</label>
-                <ct-input
+                <cf-input
                   $value={startTime}
                   type="time"
                   style={{ width: "100%" }}
-                  onct-change={onStartTimeChange({ startTime, endTime })}
+                  oncf-change={onStartTimeChange({ startTime, endTime })}
                 />
               </div>
               <div style={{ flex: 1 }}>
                 <label style={STYLES.label}>End Time</label>
-                <ct-input
+                <cf-input
                   $value={endTime}
                   type="time"
                   style={{ width: "100%" }}
@@ -399,16 +399,16 @@ const Event = pattern<Input, Output>(
             {/* Notes */}
             <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
               <label style={STYLES.label}>Notes</label>
-              <ct-textarea
+              <cf-textarea
                 $value={notes}
                 placeholder="Add notes about this event..."
                 style={{ flex: 1, minHeight: "100px" }}
               />
             </div>
-          </ct-vstack>
+          </cf-vstack>
 
           {/* Backlinks footer */}
-          <ct-hstack
+          <cf-hstack
             slot="footer"
             gap="2"
             padding="3"
@@ -417,7 +417,7 @@ const Event = pattern<Input, Output>(
                 backlinks.get().length > 0 ? "flex" : "none"
               ),
               alignItems: "center",
-              borderTop: "1px solid var(--ct-color-border, #e5e5e7)",
+              borderTop: "1px solid var(--cf-color-border, #e5e5e7)",
               flexWrap: "wrap",
             }}
           >
@@ -425,23 +425,23 @@ const Event = pattern<Input, Output>(
               style={{
                 fontSize: "12px",
                 lineHeight: "28px",
-                color: "var(--ct-color-text-secondary, #666)",
+                color: "var(--cf-color-text-secondary, #666)",
               }}
             >
               Linked from:
             </span>
             {backlinks.map((piece) => (
-              <ct-button
+              <cf-button
                 variant="ghost"
                 size="sm"
                 onClick={handleBacklinkClick({ piece })}
                 style={{ fontSize: "12px" }}
               >
                 {piece?.[NAME]}
-              </ct-button>
+              </cf-button>
             ))}
-          </ct-hstack>
-        </ct-screen>
+          </cf-hstack>
+        </cf-screen>
       ),
       title,
       date,

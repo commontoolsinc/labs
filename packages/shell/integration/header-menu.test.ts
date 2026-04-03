@@ -1,9 +1,9 @@
-import { env, waitFor } from "@commontools/integration";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env, waitFor } from "@commonfabric/integration";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
-import { Identity } from "@commontools/identity";
-import type { Page } from "@commontools/integration";
+import { Identity } from "@commonfabric/identity";
+import type { Page } from "@commonfabric/integration";
 import "../src/globals.ts";
 
 const { FRONTEND_URL, SPACE_NAME } = env;

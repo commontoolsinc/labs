@@ -3,7 +3,7 @@ import { assertEquals } from "@std/assert";
 import { Runtime } from "../src/runtime.ts";
 import { lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("test operator");

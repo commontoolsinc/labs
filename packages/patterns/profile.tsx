@@ -20,7 +20,7 @@ import {
   UI,
   type VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 // ============================================================================
 // ATOMIC TYPES - Keep simple, use string for editable fields
@@ -304,8 +304,8 @@ const sectionHeaderStyle = {
   gap: "8px",
   width: "100%",
   padding: "12px 16px",
-  background: "var(--ct-color-bg-secondary, #f9fafb)",
-  border: "1px solid var(--ct-color-border, #e5e5e7)",
+  background: "var(--cf-color-bg-secondary, #f9fafb)",
+  border: "1px solid var(--cf-color-border, #e5e5e7)",
   borderRadius: "8px",
   cursor: "pointer",
   fontSize: "15px",
@@ -314,8 +314,8 @@ const sectionHeaderStyle = {
 
 const sectionContentStyle = {
   padding: "12px",
-  background: "var(--ct-color-bg, white)",
-  border: "1px solid var(--ct-color-border, #e5e5e7)",
+  background: "var(--cf-color-bg, white)",
+  border: "1px solid var(--cf-color-border, #e5e5e7)",
   borderRadius: "8px",
 };
 
@@ -331,8 +331,8 @@ const removeButtonStyle = {
 
 const bigAddButtonStyle = {
   padding: "12px 24px",
-  background: "var(--ct-color-bg-secondary, #f3f4f6)",
-  border: "1px dashed var(--ct-color-border, #e5e5e7)",
+  background: "var(--cf-color-bg-secondary, #f3f4f6)",
+  border: "1px dashed var(--cf-color-border, #e5e5e7)",
   borderRadius: "8px",
   cursor: "pointer",
   fontSize: "14px",
@@ -391,13 +391,13 @@ const Profile = pattern<ProfileInput, Output>(
     return {
       [NAME]: computed(() => `👤 ${displayName}`),
       [UI]: (
-        <ct-screen>
-          <ct-vstack
+        <cf-screen>
+          <cf-vstack
             slot="header"
             gap="2"
             padding="4"
             style={{
-              borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
+              borderBottom: "1px solid var(--cf-color-border, #e5e5e7)",
             }}
           >
             <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "600" }}>
@@ -406,19 +406,19 @@ const Profile = pattern<ProfileInput, Output>(
             <span
               style={{
                 fontSize: "13px",
-                color: "var(--ct-color-text-secondary, #6b7280)",
+                color: "var(--cf-color-text-secondary, #6b7280)",
               }}
             >
               Personal data blackboard - tag with #profile for discovery
             </span>
-          </ct-vstack>
+          </cf-vstack>
 
-          <ct-vscroll style={{ flex: 1, padding: "16px" }}>
-            <ct-vstack
+          <cf-vscroll style={{ flex: 1, padding: "16px" }}>
+            <cf-vstack
               style={{ gap: "16px", maxWidth: "800px", margin: "0 auto" }}
             >
               {/* === SELF === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -426,7 +426,7 @@ const Profile = pattern<ProfileInput, Output>(
                 >
                   <span style={{ fontSize: "18px" }}>👤</span>
                   <span style={{ flex: 1, textAlign: "left" }}>About Me</span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => selfExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -438,57 +438,57 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
-                    <ct-hstack style={{ gap: "8px" }}>
-                      <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                  <cf-vstack style={{ gap: "12px" }}>
+                    <cf-hstack style={{ gap: "8px" }}>
+                      <cf-vstack style={{ gap: "4px", flex: 1 }}>
                         <label style={labelStyle}>Your Name</label>
-                        <ct-input
+                        <cf-input
                           $value={self.key("name")}
                           placeholder="Your full name"
                         />
-                      </ct-vstack>
-                      <ct-vstack style={{ gap: "4px", width: "150px" }}>
+                      </cf-vstack>
+                      <cf-vstack style={{ gap: "4px", width: "150px" }}>
                         <label style={labelStyle}>Nickname</label>
-                        <ct-input
+                        <cf-input
                           $value={self.key("nickname")}
                           placeholder="Nickname"
                         />
-                      </ct-vstack>
-                    </ct-hstack>
-                    <ct-vstack style={{ gap: "4px" }}>
+                      </cf-vstack>
+                    </cf-hstack>
+                    <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Birthday</label>
-                      <ct-hstack style={{ gap: "8px" }}>
-                        <ct-input
+                      <cf-hstack style={{ gap: "8px" }}>
+                        <cf-input
                           $value={self.key("birthday", "month")}
                           placeholder="Month"
                           style={{ width: "80px" }}
                         />
-                        <ct-input
+                        <cf-input
                           $value={self.key("birthday", "day")}
                           placeholder="Day"
                           style={{ width: "60px" }}
                         />
-                        <ct-input
+                        <cf-input
                           $value={self.key("birthday", "year")}
                           placeholder="Year"
                           style={{ width: "80px" }}
                         />
-                      </ct-hstack>
-                    </ct-vstack>
-                    <ct-vstack style={{ gap: "4px" }}>
+                      </cf-hstack>
+                    </cf-vstack>
+                    <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Notes</label>
-                      <ct-textarea
+                      <cf-textarea
                         $value={self.key("notes")}
                         placeholder="Notes..."
                         rows={2}
                       />
-                    </ct-vstack>
-                  </ct-vstack>
+                    </cf-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === PARTNER === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -496,7 +496,7 @@ const Profile = pattern<ProfileInput, Output>(
                 >
                   <span style={{ fontSize: "18px" }}>💑</span>
                   <span style={{ flex: 1, textAlign: "left" }}>Partner</span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => partnerExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -508,37 +508,37 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
-                    <ct-hstack style={{ gap: "8px" }}>
-                      <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                  <cf-vstack style={{ gap: "12px" }}>
+                    <cf-hstack style={{ gap: "8px" }}>
+                      <cf-vstack style={{ gap: "4px", flex: 1 }}>
                         <label style={labelStyle}>Name</label>
-                        <ct-input
+                        <cf-input
                           $value={partner.key("name")}
                           placeholder="Partner's name"
                         />
-                      </ct-vstack>
-                      <ct-vstack style={{ gap: "4px", width: "120px" }}>
+                      </cf-vstack>
+                      <cf-vstack style={{ gap: "4px", width: "120px" }}>
                         <label style={labelStyle}>Relationship</label>
-                        <ct-select
+                        <cf-select
                           $value={partner.key("relationship")}
                           items={RELATIONSHIP_OPTIONS}
                         />
-                      </ct-vstack>
-                    </ct-hstack>
-                    <ct-vstack style={{ gap: "4px" }}>
+                      </cf-vstack>
+                    </cf-hstack>
+                    <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Notes</label>
-                      <ct-textarea
+                      <cf-textarea
                         $value={partner.key("notes")}
                         placeholder="Notes..."
                         rows={2}
                       />
-                    </ct-vstack>
-                  </ct-vstack>
+                    </cf-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === CHILDREN === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -549,15 +549,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => children.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => childrenExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -569,27 +569,27 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {children.map((child) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "12px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "12px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Name</label>
-                              <ct-input
+                              <cf-input
                                 $value={child.name}
                                 placeholder="Child's name"
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", width: "120px" }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", width: "120px" }}>
                               <label style={labelStyle}>Nickname</label>
-                              <ct-input
+                              <cf-input
                                 $value={child.nickname}
                                 placeholder="Nickname"
                               />
-                            </ct-vstack>
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -597,33 +597,33 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-hstack style={{ gap: "8px" }}>
-                            <ct-vstack style={{ gap: "4px", flex: 2 }}>
+                          </cf-hstack>
+                          <cf-hstack style={{ gap: "8px" }}>
+                            <cf-vstack style={{ gap: "4px", flex: 2 }}>
                               <label style={labelStyle}>School</label>
-                              <ct-input
+                              <cf-input
                                 $value={child.school.name}
                                 placeholder="School name"
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Grade</label>
-                              <ct-input
+                              <cf-input
                                 $value={child.school.gradeLevel}
                                 placeholder="Grade"
                               />
-                            </ct-vstack>
-                          </ct-hstack>
-                          <ct-vstack style={{ gap: "4px" }}>
+                            </cf-vstack>
+                          </cf-hstack>
+                          <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
-                            <ct-textarea
+                            <cf-textarea
                               $value={child.notes}
                               placeholder="Notes..."
                               rows={2}
                             />
-                          </ct-vstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-vstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -632,12 +632,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add Child
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === PARENTS === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -648,15 +648,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => parents.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => parentsExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -668,27 +668,27 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {parents.map((person) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "12px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "12px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Name</label>
-                              <ct-input
+                              <cf-input
                                 $value={person.name}
                                 placeholder="Name"
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", width: "120px" }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", width: "120px" }}>
                               <label style={labelStyle}>Relationship</label>
-                              <ct-select
+                              <cf-select
                                 $value={person.relationship}
                                 items={RELATIONSHIP_OPTIONS}
                               />
-                            </ct-vstack>
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -696,17 +696,17 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-vstack style={{ gap: "4px" }}>
+                          </cf-hstack>
+                          <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
-                            <ct-textarea
+                            <cf-textarea
                               $value={person.notes}
                               placeholder="Notes..."
                               rows={2}
                             />
-                          </ct-vstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-vstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -715,12 +715,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add Parent
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === IN-LAWS === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -731,15 +731,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => inlaws.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => inlawsExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -751,27 +751,27 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {inlaws.map((person) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "12px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "12px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Name</label>
-                              <ct-input
+                              <cf-input
                                 $value={person.name}
                                 placeholder="Name"
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", width: "120px" }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", width: "120px" }}>
                               <label style={labelStyle}>Relationship</label>
-                              <ct-select
+                              <cf-select
                                 $value={person.relationship}
                                 items={RELATIONSHIP_OPTIONS}
                               />
-                            </ct-vstack>
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -779,17 +779,17 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-vstack style={{ gap: "4px" }}>
+                          </cf-hstack>
+                          <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
-                            <ct-textarea
+                            <cf-textarea
                               $value={person.notes}
                               placeholder="Notes..."
                               rows={2}
                             />
-                          </ct-vstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-vstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -798,12 +798,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add In-Law
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === ADDRESSES === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -815,15 +815,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => addresses.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => addressesExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -835,27 +835,27 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {addresses.map((addr) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "8px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "8px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", width: "100px" }}>
+                            <cf-vstack style={{ gap: "4px", width: "100px" }}>
                               <label style={labelStyle}>Label</label>
-                              <ct-select
+                              <cf-select
                                 $value={addr.label}
                                 items={ADDRESS_LABELS}
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Street</label>
-                              <ct-input
+                              <cf-input
                                 $value={addr.street}
                                 placeholder="123 Main St"
                               />
-                            </ct-vstack>
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -863,23 +863,23 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-hstack style={{ gap: "8px" }}>
-                            <ct-vstack style={{ gap: "4px", flex: 2 }}>
+                          </cf-hstack>
+                          <cf-hstack style={{ gap: "8px" }}>
+                            <cf-vstack style={{ gap: "4px", flex: 2 }}>
                               <label style={labelStyle}>City</label>
-                              <ct-input $value={addr.city} placeholder="City" />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                              <cf-input $value={addr.city} placeholder="City" />
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>State</label>
-                              <ct-input $value={addr.state} placeholder="CA" />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                              <cf-input $value={addr.state} placeholder="CA" />
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>ZIP</label>
-                              <ct-input $value={addr.zip} placeholder="12345" />
-                            </ct-vstack>
-                          </ct-hstack>
-                        </ct-vstack>
-                      </ct-card>
+                              <cf-input $value={addr.zip} placeholder="12345" />
+                            </cf-vstack>
+                          </cf-hstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -888,12 +888,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add Address
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === VEHICLES === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -904,15 +904,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => vehicles.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => vehiclesExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -924,25 +924,25 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {vehicles.map((v) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "8px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "8px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", width: "80px" }}>
+                            <cf-vstack style={{ gap: "4px", width: "80px" }}>
                               <label style={labelStyle}>Year</label>
-                              <ct-input $value={v.year} placeholder="2024" />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                              <cf-input $value={v.year} placeholder="2024" />
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Make</label>
-                              <ct-input $value={v.make} placeholder="Toyota" />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                              <cf-input $value={v.make} placeholder="Toyota" />
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Model</label>
-                              <ct-input $value={v.model} placeholder="Camry" />
-                            </ct-vstack>
+                              <cf-input $value={v.model} placeholder="Camry" />
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -950,30 +950,30 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-hstack style={{ gap: "8px" }}>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                          </cf-hstack>
+                          <cf-hstack style={{ gap: "8px" }}>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>License Plate</label>
-                              <ct-input
+                              <cf-input
                                 $value={v.licensePlate}
                                 placeholder="ABC 1234"
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>VIN</label>
-                              <ct-input $value={v.vin} placeholder="VIN" />
-                            </ct-vstack>
-                          </ct-hstack>
-                          <ct-vstack style={{ gap: "4px" }}>
+                              <cf-input $value={v.vin} placeholder="VIN" />
+                            </cf-vstack>
+                          </cf-hstack>
+                          <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
-                            <ct-textarea
+                            <cf-textarea
                               $value={v.notes}
                               placeholder="Notes..."
                               rows={2}
                             />
-                          </ct-vstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-vstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -982,12 +982,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add Vehicle
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === MEMBERSHIPS === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -1001,15 +1001,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => memberships.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => membershipsExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -1021,27 +1021,27 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {memberships.map((m) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "8px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "8px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", flex: 2 }}>
+                            <cf-vstack style={{ gap: "4px", flex: 2 }}>
                               <label style={labelStyle}>Program</label>
-                              <ct-input
+                              <cf-input
                                 $value={m.program}
                                 placeholder="United MileagePlus"
                               />
-                            </ct-vstack>
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            </cf-vstack>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Member #</label>
-                              <ct-input
+                              <cf-input
                                 $value={m.memberNumber}
                                 placeholder="12345678"
                               />
-                            </ct-vstack>
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -1049,17 +1049,17 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-vstack style={{ gap: "4px" }}>
+                          </cf-hstack>
+                          <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
-                            <ct-textarea
+                            <cf-textarea
                               $value={m.notes}
                               placeholder="Notes..."
                               rows={2}
                             />
-                          </ct-vstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-vstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -1068,12 +1068,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add Membership
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === BANKS === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -1086,15 +1086,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => banks.get().length)}
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => banksExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -1106,20 +1106,20 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
+                  <cf-vstack style={{ gap: "12px" }}>
                     {banks.map((b) => (
-                      <ct-card>
-                        <ct-vstack style={{ gap: "8px" }}>
-                          <ct-hstack
+                      <cf-card>
+                        <cf-vstack style={{ gap: "8px" }}>
+                          <cf-hstack
                             style={{ gap: "8px", alignItems: "flex-end" }}
                           >
-                            <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                            <cf-vstack style={{ gap: "4px", flex: 1 }}>
                               <label style={labelStyle}>Bank Name</label>
-                              <ct-input
+                              <cf-input
                                 $value={b.name}
                                 placeholder="Chase, Wells Fargo..."
                               />
-                            </ct-vstack>
+                            </cf-vstack>
                             <button
                               type="button"
                               style={removeButtonStyle}
@@ -1127,25 +1127,25 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               ✕
                             </button>
-                          </ct-hstack>
-                          <ct-hstack style={{ gap: "16px" }}>
-                            <ct-checkbox $checked={b.hasCheckingAccount}>
+                          </cf-hstack>
+                          <cf-hstack style={{ gap: "16px" }}>
+                            <cf-checkbox $checked={b.hasCheckingAccount}>
                               Checking Account
-                            </ct-checkbox>
-                            <ct-checkbox $checked={b.hasCreditCard}>
+                            </cf-checkbox>
+                            <cf-checkbox $checked={b.hasCreditCard}>
                               Credit Card
-                            </ct-checkbox>
-                          </ct-hstack>
-                          <ct-vstack style={{ gap: "4px" }}>
+                            </cf-checkbox>
+                          </cf-hstack>
+                          <cf-vstack style={{ gap: "4px" }}>
                             <label style={labelStyle}>Notes</label>
-                            <ct-textarea
+                            <cf-textarea
                               $value={b.notes}
                               placeholder="Notes..."
                               rows={2}
                             />
-                          </ct-vstack>
-                        </ct-vstack>
-                      </ct-card>
+                          </cf-vstack>
+                        </cf-vstack>
+                      </cf-card>
                     ))}
                     <button
                       type="button"
@@ -1154,12 +1154,12 @@ const Profile = pattern<ProfileInput, Output>(
                     >
                       + Add Bank
                     </button>
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === EMPLOYMENT === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -1168,7 +1168,7 @@ const Profile = pattern<ProfileInput, Output>(
                 >
                   <span style={{ fontSize: "18px" }}>💼</span>
                   <span style={{ flex: 1, textAlign: "left" }}>Employment</span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => employmentExpanded.get() ? "▼" : "▶")}
                   </span>
                 </button>
@@ -1180,57 +1180,57 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "12px" }}>
-                    <ct-hstack style={{ gap: "8px" }}>
-                      <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                  <cf-vstack style={{ gap: "12px" }}>
+                    <cf-hstack style={{ gap: "8px" }}>
+                      <cf-vstack style={{ gap: "4px", flex: 1 }}>
                         <label style={labelStyle}>Employer</label>
-                        <ct-input
+                        <cf-input
                           $value={employment.key("employer")}
                           placeholder="Company name"
                         />
-                      </ct-vstack>
-                      <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                      </cf-vstack>
+                      <cf-vstack style={{ gap: "4px", flex: 1 }}>
                         <label style={labelStyle}>Title</label>
-                        <ct-input
+                        <cf-input
                           $value={employment.key("title")}
                           placeholder="Job title"
                         />
-                      </ct-vstack>
-                    </ct-hstack>
-                    <ct-vstack style={{ gap: "4px" }}>
+                      </cf-vstack>
+                    </cf-hstack>
+                    <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Work Address</label>
-                      <ct-hstack style={{ gap: "8px" }}>
-                        <ct-input
+                      <cf-hstack style={{ gap: "8px" }}>
+                        <cf-input
                           $value={employment.key("street")}
                           placeholder="Street"
                           style={{ flex: 2 }}
                         />
-                        <ct-input
+                        <cf-input
                           $value={employment.key("city")}
                           placeholder="City"
                           style={{ flex: 1 }}
                         />
-                        <ct-input
+                        <cf-input
                           $value={employment.key("state")}
                           placeholder="State"
                           style={{ width: "60px" }}
                         />
-                      </ct-hstack>
-                    </ct-vstack>
-                    <ct-vstack style={{ gap: "4px" }}>
+                      </cf-hstack>
+                    </cf-vstack>
+                    <cf-vstack style={{ gap: "4px" }}>
                       <label style={labelStyle}>Notes</label>
-                      <ct-textarea
+                      <cf-textarea
                         $value={employment.key("notes")}
                         placeholder="Notes..."
                         rows={2}
                       />
-                    </ct-vstack>
-                  </ct-vstack>
+                    </cf-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === LEARNED === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <button
                   type="button"
                   style={sectionHeaderStyle}
@@ -1243,15 +1243,15 @@ const Profile = pattern<ProfileInput, Output>(
                   <span
                     style={{
                       fontSize: "12px",
-                      color: "var(--ct-color-text-secondary)",
-                      background: "var(--ct-color-bg)",
+                      color: "var(--cf-color-text-secondary)",
+                      background: "var(--cf-color-bg)",
                       padding: "2px 8px",
                       borderRadius: "12px",
                     }}
                   >
                     {computed(() => learned.key("facts").get().length)} facts
                   </span>
-                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
                     {computed(() => (learnedExpanded.get() ? "▼" : "▶"))}
                   </span>
                 </button>
@@ -1263,20 +1263,20 @@ const Profile = pattern<ProfileInput, Output>(
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "20px" }}>
+                  <cf-vstack style={{ gap: "20px" }}>
                     {/* Personas */}
                     {computed(() => learned.key("personas").get().length > 0) &&
                       (
-                        <ct-vstack style={{ gap: "8px" }}>
+                        <cf-vstack style={{ gap: "8px" }}>
                           <label style={labelStyle}>Personas</label>
-                          <ct-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
+                          <cf-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
                             {learned.key("personas").map((persona) => (
                               <span
                                 style={{
                                   padding: "4px 12px",
                                   background:
-                                    "var(--ct-color-primary-surface, #eff6ff)",
-                                  color: "var(--ct-color-primary, #3b82f6)",
+                                    "var(--cf-color-primary-surface, #eff6ff)",
+                                  color: "var(--cf-color-primary, #3b82f6)",
                                   borderRadius: "16px",
                                   fontSize: "13px",
                                 }}
@@ -1284,12 +1284,12 @@ const Profile = pattern<ProfileInput, Output>(
                                 {persona}
                               </span>
                             ))}
-                          </ct-hstack>
-                        </ct-vstack>
+                          </cf-hstack>
+                        </cf-vstack>
                       )}
 
                     {/* Facts Table */}
-                    <ct-vstack style={{ gap: "8px" }}>
+                    <cf-vstack style={{ gap: "8px" }}>
                       <label style={labelStyle}>Learned Facts</label>
                       {computed(() =>
                         learned.key("facts").get().length === 0
@@ -1297,7 +1297,7 @@ const Profile = pattern<ProfileInput, Output>(
                         <p
                           style={{
                             fontSize: "13px",
-                            color: "var(--ct-color-text-secondary)",
+                            color: "var(--cf-color-text-secondary)",
                             fontStyle: "italic",
                           }}
                         >
@@ -1311,7 +1311,7 @@ const Profile = pattern<ProfileInput, Output>(
                             style={{
                               overflowX: "auto",
                               border:
-                                "1px solid var(--ct-color-border, #e5e5e7)",
+                                "1px solid var(--cf-color-border, #e5e5e7)",
                               borderRadius: "8px",
                             }}
                           >
@@ -1326,7 +1326,7 @@ const Profile = pattern<ProfileInput, Output>(
                                 <tr
                                   style={{
                                     background:
-                                      "var(--ct-color-bg-secondary, #f9fafb)",
+                                      "var(--cf-color-bg-secondary, #f9fafb)",
                                   }}
                                 >
                                   <th
@@ -1335,7 +1335,7 @@ const Profile = pattern<ProfileInput, Output>(
                                       textAlign: "left",
                                       fontWeight: "600",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                     }}
                                   >
                                     Fact
@@ -1346,7 +1346,7 @@ const Profile = pattern<ProfileInput, Output>(
                                       textAlign: "center",
                                       fontWeight: "600",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                       width: "80px",
                                     }}
                                   >
@@ -1358,7 +1358,7 @@ const Profile = pattern<ProfileInput, Output>(
                                       textAlign: "left",
                                       fontWeight: "600",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                       width: "140px",
                                     }}
                                   >
@@ -1370,7 +1370,7 @@ const Profile = pattern<ProfileInput, Output>(
                                       textAlign: "left",
                                       fontWeight: "600",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                       width: "100px",
                                     }}
                                   >
@@ -1385,7 +1385,7 @@ const Profile = pattern<ProfileInput, Output>(
                                       style={{
                                         padding: "10px 12px",
                                         borderBottom:
-                                          "1px solid var(--ct-color-border, #e5e5e7)",
+                                          "1px solid var(--cf-color-border, #e5e5e7)",
                                       }}
                                     >
                                       {fact.content}
@@ -1394,7 +1394,7 @@ const Profile = pattern<ProfileInput, Output>(
                                       style={{
                                         padding: "10px 12px",
                                         borderBottom:
-                                          "1px solid var(--ct-color-border, #e5e5e7)",
+                                          "1px solid var(--cf-color-border, #e5e5e7)",
                                         textAlign: "center",
                                       }}
                                     >
@@ -1432,8 +1432,8 @@ const Profile = pattern<ProfileInput, Output>(
                                       style={{
                                         padding: "10px 12px",
                                         borderBottom:
-                                          "1px solid var(--ct-color-border, #e5e5e7)",
-                                        color: "var(--ct-color-text-secondary)",
+                                          "1px solid var(--cf-color-border, #e5e5e7)",
+                                        color: "var(--cf-color-text-secondary)",
                                         fontSize: "12px",
                                       }}
                                     >
@@ -1443,8 +1443,8 @@ const Profile = pattern<ProfileInput, Output>(
                                       style={{
                                         padding: "10px 12px",
                                         borderBottom:
-                                          "1px solid var(--ct-color-border, #e5e5e7)",
-                                        color: "var(--ct-color-text-secondary)",
+                                          "1px solid var(--cf-color-border, #e5e5e7)",
+                                        color: "var(--cf-color-text-secondary)",
                                         fontSize: "12px",
                                       }}
                                     >
@@ -1463,18 +1463,18 @@ const Profile = pattern<ProfileInput, Output>(
                             </table>
                           </div>
                         )}
-                    </ct-vstack>
+                    </cf-vstack>
 
                     {/* Preferences Table */}
                     {computed(() =>
                       learned.key("preferences").get().length > 0
                     ) && (
-                      <ct-vstack style={{ gap: "8px" }}>
+                      <cf-vstack style={{ gap: "8px" }}>
                         <label style={labelStyle}>Preferences</label>
                         <div
                           style={{
                             overflowX: "auto",
-                            border: "1px solid var(--ct-color-border, #e5e5e7)",
+                            border: "1px solid var(--cf-color-border, #e5e5e7)",
                             borderRadius: "8px",
                           }}
                         >
@@ -1489,7 +1489,7 @@ const Profile = pattern<ProfileInput, Output>(
                               <tr
                                 style={{
                                   background:
-                                    "var(--ct-color-bg-secondary, #f9fafb)",
+                                    "var(--cf-color-bg-secondary, #f9fafb)",
                                 }}
                               >
                                 <th
@@ -1498,7 +1498,7 @@ const Profile = pattern<ProfileInput, Output>(
                                     textAlign: "left",
                                     fontWeight: "600",
                                     borderBottom:
-                                      "1px solid var(--ct-color-border, #e5e5e7)",
+                                      "1px solid var(--cf-color-border, #e5e5e7)",
                                   }}
                                 >
                                   Key
@@ -1509,7 +1509,7 @@ const Profile = pattern<ProfileInput, Output>(
                                     textAlign: "left",
                                     fontWeight: "600",
                                     borderBottom:
-                                      "1px solid var(--ct-color-border, #e5e5e7)",
+                                      "1px solid var(--cf-color-border, #e5e5e7)",
                                   }}
                                 >
                                   Value
@@ -1520,7 +1520,7 @@ const Profile = pattern<ProfileInput, Output>(
                                     textAlign: "center",
                                     fontWeight: "600",
                                     borderBottom:
-                                      "1px solid var(--ct-color-border, #e5e5e7)",
+                                      "1px solid var(--cf-color-border, #e5e5e7)",
                                     width: "80px",
                                   }}
                                 >
@@ -1535,7 +1535,7 @@ const Profile = pattern<ProfileInput, Output>(
                                     style={{
                                       padding: "10px 12px",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                       fontWeight: "500",
                                     }}
                                   >
@@ -1545,7 +1545,7 @@ const Profile = pattern<ProfileInput, Output>(
                                     style={{
                                       padding: "10px 12px",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                     }}
                                   >
                                     {pref.value}
@@ -1554,7 +1554,7 @@ const Profile = pattern<ProfileInput, Output>(
                                     style={{
                                       padding: "10px 12px",
                                       borderBottom:
-                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                        "1px solid var(--cf-color-border, #e5e5e7)",
                                       textAlign: "center",
                                     }}
                                   >
@@ -1593,7 +1593,7 @@ const Profile = pattern<ProfileInput, Output>(
                             </tbody>
                           </table>
                         </div>
-                      </ct-vstack>
+                      </cf-vstack>
                     )}
 
                     {/* Open Questions - Plain Text */}
@@ -1604,7 +1604,7 @@ const Profile = pattern<ProfileInput, Output>(
                       );
                       return pending.length > 0;
                     }) && (
-                      <ct-vstack style={{ gap: "8px" }}>
+                      <cf-vstack style={{ gap: "8px" }}>
                         <label style={labelStyle}>
                           Pending Questions ({computed(() =>
                             learned
@@ -1613,11 +1613,11 @@ const Profile = pattern<ProfileInput, Output>(
                               .filter((q) => q.status === "pending").length
                           )})
                         </label>
-                        <ct-vstack
+                        <cf-vstack
                           style={{
                             gap: "4px",
                             padding: "12px",
-                            background: "var(--ct-color-bg-secondary, #f9fafb)",
+                            background: "var(--cf-color-bg-secondary, #f9fafb)",
                             borderRadius: "8px",
                             fontFamily: "monospace",
                             fontSize: "13px",
@@ -1633,7 +1633,7 @@ const Profile = pattern<ProfileInput, Output>(
                             >
                               <span
                                 style={{
-                                  color: "var(--ct-color-text-secondary)",
+                                  color: "var(--cf-color-text-secondary)",
                                 }}
                               >
                                 [{q.category}]
@@ -1646,37 +1646,37 @@ const Profile = pattern<ProfileInput, Output>(
                               )}
                             </div>
                           ))}
-                        </ct-vstack>
-                      </ct-vstack>
+                        </cf-vstack>
+                      </cf-vstack>
                     )}
-                  </ct-vstack>
+                  </cf-vstack>
                 </div>
-              </ct-vstack>
+              </cf-vstack>
 
               {/* === NOTES === */}
-              <ct-vstack style={{ gap: "8px" }}>
+              <cf-vstack style={{ gap: "8px" }}>
                 <label
                   style={{
                     fontSize: "14px",
                     fontWeight: "600",
-                    color: "var(--ct-color-text, #111827)",
+                    color: "var(--cf-color-text, #111827)",
                   }}
                 >
                   📝 General Notes
                 </label>
-                <ct-textarea
+                <cf-textarea
                   $value={notes}
                   placeholder="Any other notes or information..."
                   rows={4}
                   style={{
-                    border: "1px solid var(--ct-color-border, #e5e5e7)",
+                    border: "1px solid var(--cf-color-border, #e5e5e7)",
                     borderRadius: "8px",
                   }}
                 />
-              </ct-vstack>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
+              </cf-vstack>
+            </cf-vstack>
+          </cf-vscroll>
+        </cf-screen>
       ),
 
       // Pass through all data

@@ -1,11 +1,11 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * Writable.of() result accessed via .get()/.set() in action
  * callbacks. These are terminal methods handled correctly regardless
  * of opaque classification — Writable.of() is an opaque origin and
  * .get()/.set() are terminal methods.
  */
-import { action, pattern, UI, Writable } from "commontools";
+import { action, pattern, UI, Writable } from "commonfabric";
 interface State {
     title: string;
 }
@@ -21,11 +21,11 @@ export default pattern((__ct_pattern_input) => {
     const title = __ct_pattern_input.key("title");
     const counter = Writable.of(0, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const label = Writable.of("Count", {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const reset = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema);
+    const reset = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             counter: {
@@ -38,7 +38,7 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["counter", "label"]
-    } as const satisfies __ctHelpers.JSONSchema, (_, { counter, label }) => {
+    } as const satisfies __cfHelpers.JSONSchema, (_, { counter, label }) => {
         counter.set(0);
         label.set("Count");
     })({
@@ -48,7 +48,7 @@ export default pattern((__ct_pattern_input) => {
     return {
         [UI]: (<div>
         <span>{title} {label}: {counter}</span>
-        <ct-button onClick={reset}>Reset</ct-button>
+        <cf-button onClick={reset}>Reset</cf-button>
       </div>),
         counter,
         label,
@@ -61,7 +61,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["title"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -98,8 +98,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

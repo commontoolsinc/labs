@@ -1,5 +1,5 @@
-import { isRecord } from "@commontools/utils/types";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+import { isRecord } from "@commonfabric/utils/types";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   isPattern,
   type Pattern,

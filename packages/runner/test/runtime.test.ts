@@ -5,9 +5,9 @@ import {
   InMemoryProgram,
   JsScript,
   TypeScriptCompiler,
-} from "@commontools/js-compiler";
+} from "@commonfabric/js-compiler";
 import { UnsafeEvalRuntime } from "../src/harness/eval-runtime.ts";
-import { StaticCacheFS } from "@commontools/static";
+import { StaticCacheFS } from "@commonfabric/static";
 
 const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
 
@@ -81,9 +81,9 @@ describe("Runtime", () => {
         "Error: throwing!",
         "    at doubleOrThrow (utils.ts:6:14)",
         "    at Object.eval (main.tsx:4:35)",
-        "    at <CT_INTERNAL>",
-        "    at <CT_INTERNAL>",
-        "    at <CT_INTERNAL>",
+        "    at <CF_INTERNAL>",
+        "    at <CF_INTERNAL>",
+        "    at <CF_INTERNAL>",
       ];
 
       expect(stack.join("\n")).toBe(expected.join("\n"));

@@ -9,7 +9,7 @@
  * 1. Pre-hoc: Create this directly, log in, and favorite
  * 2. Post-hoc: Created by google-auth-switcher after login
  */
-import { computed, Default, ifElse, NAME, pattern, UI } from "commontools";
+import { computed, Default, ifElse, NAME, pattern, UI } from "commonfabric";
 import GoogleAuth, {
   Auth,
   createPreviewUI,

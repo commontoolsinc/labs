@@ -3,9 +3,9 @@ import { WorkerReconciler } from "../src/worker/reconciler.ts";
 import type { WorkerVNode } from "../src/worker/types.ts";
 
 import type { VDomOp } from "../src/vdom-ops.ts";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Runtime } from "@commontools/runner";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Runtime } from "@commonfabric/runner";
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -385,7 +385,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     });
     const rootCell = new MockCell({
       type: "vnode",
-      name: "ct-input",
+      name: "cf-input",
       props: propsCell,
       children: [],
     });
@@ -577,7 +577,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     });
     const rootCell = new MockCell({
       type: "vnode",
-      name: "ct-input",
+      name: "cf-input",
       props: propsCell,
       children: [],
     });

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, derive, pattern, toSchema, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, derive, pattern, toSchema, UI } from "commonfabric";
 interface State {
     value: Cell<number>;
 }
@@ -15,7 +15,7 @@ const model = {
     "default": {
         value: 0
     }
-} as const satisfies __ctHelpers.JSONSchema;
+} as const satisfies __cfHelpers.JSONSchema;
 // FIXTURE: with-opaque-ref
 // Verifies: Cell<> fields generate asCell in schema and derive() gets input/output type schemas injected
 //   Cell<number> → { type: "number", asCell: true }
@@ -24,9 +24,9 @@ const model = {
 export default pattern((cell) => {
     const doubled = derive({
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, cell.key("value"), (v: number) => v * 2);
+    } as const satisfies __cfHelpers.JSONSchema, cell.key("value"), (v: number) => v * 2);
     return {
         [UI]: (<div>
         <p>Value: {cell.key("value")}</p>
@@ -43,7 +43,7 @@ export default pattern((cell) => {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -52,8 +52,8 @@ export default pattern((cell) => {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

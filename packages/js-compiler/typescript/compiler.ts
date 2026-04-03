@@ -19,7 +19,7 @@ import type {
 } from "typescript";
 import ts from "typescript";
 import * as path from "@std/path";
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 import { getCompilerOptions, TARGET } from "./options.ts";
 import { bundleAMDOutput } from "./bundler/mod.ts";
 import { parseSourceMap } from "../source-map.ts";
@@ -195,7 +195,7 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
         };
       }
       // This module could not be found in the input
-      // e.g. `@commontools/foo`. If a type definition was provided
+      // e.g. `@commonfabric/foo`. If a type definition was provided
       // with the same identifier with a `.d.ts` extension, that will be used
       // for types, leaving the module implementation resolution to runtime.
       if (this.allowedRuntimeModules.includes(name)) {
@@ -238,7 +238,7 @@ export interface TypeScriptCompilerOptions {
   noCheck?: boolean;
   // Extra scripts to inject into the output bundle.
   injectedScript?: string;
-  // Optional mapping of runtime module name e.g. `"@commontools/framework"`,
+  // Optional mapping of runtime module name e.g. `"@commonfabric/framework"`,
   // and its corresponding type definitions.
   runtimeModules?: string[];
   // Transformations to run before JS transforms.
@@ -358,7 +358,7 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     );
     checker.check(diagnostics);
 
-    // Check for transformer diagnostics (from CommonTools pipeline)
+    // Check for transformer diagnostics (from Common Fabric pipeline)
     if (getDiagnostics) {
       const transformerDiagnostics = getDiagnostics();
       const errors = transformerDiagnostics.filter((d) =>
@@ -418,7 +418,7 @@ function validateSource(artifact: Program) {
     }
     // Sources must be root paths, unless they are type files,
     // which could be included for runtime dependencies,
-    // e.g. `@commontools/builder.d.ts`
+    // e.g. `@commonfabric/builder.d.ts`
     if (name[0] !== "/" && !name.endsWith(".d.ts")) {
       //throw new Error(`File "${name}" must have a "/" root.`);
     }

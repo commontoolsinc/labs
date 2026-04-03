@@ -4,7 +4,7 @@
 If your `computed()` has side effects (like setting another cell), they should be idempotent. Non-idempotent side effects cause the scheduler to re-run repeatedly until it hits the 101-iteration limit.
 
 ```typescript
-import { computed, pattern, Writable } from 'commontools';
+import { computed, pattern, Writable } from 'commonfabric';
 
 interface Props {}
 

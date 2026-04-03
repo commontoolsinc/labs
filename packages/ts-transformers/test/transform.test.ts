@@ -3,7 +3,7 @@ import { assert, assertRejects } from "@std/assert";
 import { transformFiles } from "./utils.ts";
 
 const fixture = `
-import { toSchema } from "commontools";
+import { toSchema } from "commonfabric";
 
 interface Config {
   value: number;
@@ -16,32 +16,32 @@ const configSchema = toSchema<Config>({
 export { configSchema };
 `;
 
-describe("CommonToolsTransformerPipeline", () => {
+describe("CommonFabricTransformerPipeline", () => {
   it("Filters transformations if <cts-enabled /> not provided", async () => {
     const disabled = await transformFiles({
       "/main.ts": fixture,
     });
     assert(
-      !/import \* as __ctHelpers/.test(disabled["/main.ts"]!),
+      !/import \* as __cfHelpers/.test(disabled["/main.ts"]!),
       "no replacements without <cts-enable />",
     );
     const enabled = await transformFiles({
       "/main.ts": `/// <cts-enable />\n` + fixture,
     });
     assert(
-      /import \* as __ctHelpers/.test(enabled["/main.ts"]!),
+      /import \* as __cfHelpers/.test(enabled["/main.ts"]!),
       "no replacements without <cts-enable />",
     );
   });
 });
 
-describe("CTHelpers handling", () => {
-  it("Throws if __ctHelpers variable is used in source", async () => {
+describe("CFHelpers handling", () => {
+  it("Throws if __cfHelpers variable is used in source", async () => {
     const statements = [
-      "function __ctHelpers() {}",
-      "function foo(): number { var __ctHelpers = 5; return __ctHelpers; }",
-      "var __ctHelpers: number = 5;",
-      "declare global { var __ctHelpers: any; }\nglobalThis.__ctHelpers = 5;",
+      "function __cfHelpers() {}",
+      "function foo(): number { var __cfHelpers = 5; return __cfHelpers; }",
+      "var __cfHelpers: number = 5;",
+      "declare global { var __cfHelpers: any; }\nglobalThis.__cfHelpers = 5;",
     ];
 
     for (const statement of statements) {
@@ -53,13 +53,13 @@ describe("CTHelpers handling", () => {
     }
   });
 
-  it("Allows '__ctHelpers' in comments and in other forms", async () => {
+  it("Allows '__cfHelpers' in comments and in other forms", async () => {
     const statements = [
-      "var x = 5; // __ctHelpers",
-      "// __ctHelpers",
-      "/* __ctHelpers */",
-      "var __ctHelpers123: number = 5;",
-      "declare global {\nvar __ctHelpers1: any;\n}\nglobalThis.__ctHelpers1 = 5;",
+      "var x = 5; // __cfHelpers",
+      "// __cfHelpers",
+      "/* __cfHelpers */",
+      "var __cfHelpers123: number = 5;",
+      "declare global {\nvar __cfHelpers1: any;\n}\nglobalThis.__cfHelpers1 = 5;",
     ];
     for (const statement of statements) {
       await transformFiles({

@@ -28,9 +28,9 @@
  * - Submarine (3): rows 7-9, col 4 (vertical)
  * - Destroyer (2): row 9, cols 8-9 (horizontal)
  *
- * Run: deno task ct test packages/patterns/battleship/pass-and-play/main.test.tsx --verbose
+ * Run: deno task cf test packages/patterns/battleship/pass-and-play/main.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commonfabric";
 import Battleship, { type SquareState } from "./main.tsx";
 
 export default pattern(() => {

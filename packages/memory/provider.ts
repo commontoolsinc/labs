@@ -33,14 +33,14 @@ import {
   Transaction,
   UCAN,
 } from "./interface.ts";
-import { FabricValue } from "@commontools/data-model/fabric-value";
+import { FabricValue } from "@commonfabric/data-model/fabric-value";
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
 import {
   type HashObject,
   hashObjectFromString as causeFromString,
   hashOf,
-} from "@commontools/data-model/value-hash";
+} from "@commonfabric/data-model/value-hash";
 import {
   redactCommitData,
   selectFact,
@@ -49,14 +49,14 @@ import {
 import { evaluateDocumentLinks, ServerObjectManager } from "./space-schema.ts";
 import * as Subscription from "./subscription.ts";
 import * as FactModule from "./fact.ts";
-import { setRevision } from "@commontools/memory/selection";
-import { getLogger } from "@commontools/utils/logger";
+import { setRevision } from "@commonfabric/memory/selection";
+import { getLogger } from "@commonfabric/utils/logger";
 import { ACL_TYPE, isACL } from "./acl.ts";
 import { COMMIT_LOG_TYPE } from "./commit.ts";
 import {
   createSchemaMemo,
   MapSetStringToPathSelectors,
-} from "@commontools/runner/traverse";
+} from "@commonfabric/runner/traverse";
 import type { SchemaPathSelector } from "./consumer.ts";
 
 const logger = getLogger("memory-provider", {

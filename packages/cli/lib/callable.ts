@@ -1,11 +1,11 @@
-import type { JSONSchema } from "@commontools/api";
+import type { JSONSchema } from "@commonfabric/api";
 import {
   type CallableKind,
   classifyCallableEntry,
 } from "../../fuse/callables.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
 
-export const CT_RUNTIME_ERROR_LOG = Symbol.for("ct.cli.runtimeErrorLog");
+export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
 
 export interface CliRuntimeErrorRecord {
   message: string;
@@ -40,8 +40,8 @@ function runtimeErrorLog(runtime: unknown): CliRuntimeErrorRecord[] {
   if (typeof runtime !== "object" || runtime === null) {
     return [];
   }
-  const log = (runtime as { [CT_RUNTIME_ERROR_LOG]?: unknown })[
-    CT_RUNTIME_ERROR_LOG
+  const log = (runtime as { [CF_RUNTIME_ERROR_LOG]?: unknown })[
+    CF_RUNTIME_ERROR_LOG
   ];
   return Array.isArray(log) ? log as CliRuntimeErrorRecord[] : [];
 }

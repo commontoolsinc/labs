@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Stores one email with a label (Personal, Work, School, etc.)
  */
-import { computed, type Default, NAME, pattern, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Standard Labels =====
@@ -56,26 +56,26 @@ export const EmailModule = pattern<EmailModuleInput, EmailModuleInput>(
         () => `${MODULE_METADATA.icon} ${label}: ${displayText}`,
       ),
       [UI]: (
-        <ct-vstack style={{ gap: "12px" }}>
-          <ct-vstack style={{ gap: "4px" }}>
+        <cf-vstack style={{ gap: "12px" }}>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Label</label>
-            <ct-autocomplete
+            <cf-autocomplete
               $value={label}
               items={labelItems}
               placeholder="Select or type label..."
               allowCustom
               style={{ width: "100%" }}
             />
-          </ct-vstack>
-          <ct-vstack style={{ gap: "4px" }}>
+          </cf-vstack>
+          <cf-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Email</label>
-            <ct-input
+            <cf-input
               type="email"
               $value={address}
               placeholder="email@example.com"
             />
-          </ct-vstack>
-        </ct-vstack>
+          </cf-vstack>
+        </cf-vstack>
       ),
       label,
       address,

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, NAME, pattern, UI } from "commontools";
+import { cell, NAME, pattern, UI } from "commonfabric";
 
 // FIXTURE: optional-element-access
 // Verifies: optional element access (?.[0]) in a negated && guard is transformed to when(derive(...))

@@ -11,7 +11,7 @@ on:
 # Define the list of binaries we're building
 # This makes it easy to add more binaries in the future
 env:
-  BINARIES: "toolshed bg-charm-service ct"
+  BINARIES: "toolshed bg-charm-service cf"
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -96,6 +96,7 @@ jobs:
           path: |
             ./dist/toolshed
             ./dist/bg-charm-service
+            ./dist/cf
             ./dist/ct
 
   generated-patterns-integration-test:
@@ -239,10 +240,10 @@ jobs:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
           TOOLSHED_URL: http://localhost:${{ matrix.toolshed_port }}
         run: |
-          chmod +x ./common-binaries/ct
+          chmod +x ./common-binaries/cf
           chmod +x ./common-binaries/toolshed
           # Set tools to path
-          # Integration script needs `ct`
+          # Integration script needs `cf`
           echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
           MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
 
@@ -355,9 +356,9 @@ jobs:
 
       - name: 🧪 Run pattern unit tests
         run: |
-          chmod +x ./common-binaries/ct
+          chmod +x ./common-binaries/cf
           mkdir -p test-results
-          CT_BINARY=./common-binaries/ct deno task integration --junit-dir=test-results pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
+          CF_BINARY=./common-binaries/cf deno task integration --junit-dir=test-results pattern-tests ${{ matrix.chunk }}/${{ matrix.total }}
 
       - name: 📤 Upload test timing data
         if: always()
@@ -467,17 +468,24 @@ jobs:
           cp ./dist/bg-charm-service ./signed/
           cp ./dist/bg-charm-service.sig ./signed/
 
-          # Process ct binary
-          echo "Processing binary: ct"
-          sha256sum ./dist/ct > ./dist/ct.hash.txt
-          CT_HASH=$(cat ./dist/ct.hash.txt | awk '{print $1}')
-          echo "ct hash: $CT_HASH"
-          echo "ct_hash=$CT_HASH" >> $GITHUB_OUTPUT
+          # Process cf binary
+          echo "Processing binary: cf"
+          sha256sum ./dist/cf > ./dist/cf.hash.txt
+          CF_HASH=$(cat ./dist/cf.hash.txt | awk '{print $1}')
+          echo "cf hash: $CF_HASH"
+          echo "cf_hash=$CF_HASH" >> $GITHUB_OUTPUT
 
-          # Sign the ct binary
-          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/ct.sig ./dist/ct
+          # Sign the cf binary
+          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/cf.sig ./dist/cf
 
           # Copy to signed directory
+          cp ./dist/cf ./signed/
+          cp ./dist/cf.sig ./signed/
+
+          # Keep a ct-named copy in the release bundle until the bastion deploy
+          # scripts stop expecting that filename.
+          cp ./dist/cf ./dist/ct
+          cp ./dist/cf.sig ./dist/ct.sig
           cp ./dist/ct ./signed/
           cp ./dist/ct.sig ./signed/
 
@@ -505,12 +513,12 @@ jobs:
           subject-name: ./dist/bg-charm-service
           subject-digest: sha256:${{ steps.binary_processing.outputs.bg_charm_service_hash }}
 
-      - name: 📝 Generate attestation for ct binary
-        id: attest_ct
+      - name: 📝 Generate attestation for cf binary
+        id: attest_cf
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: ./dist/ct
-          subject-digest: sha256:${{ steps.binary_processing.outputs.ct_hash }}
+          subject-name: ./dist/cf
+          subject-digest: sha256:${{ steps.binary_processing.outputs.cf_hash }}
 
       - name: 📝 Generate attestation for tarball
         id: attest_tarball
@@ -527,7 +535,7 @@ jobs:
           path: |
             ${{ steps.attest_toolshed.outputs.bundle-path }}
             ${{ steps.attest_bg_charm_service.outputs.bundle-path }}
-            ${{ steps.attest_ct.outputs.bundle-path }}
+            ${{ steps.attest_cf.outputs.bundle-path }}
             ${{ steps.attest_tarball.outputs.bundle-path }}
 
       - name: 🔍 Verify binary attestations
@@ -567,14 +575,14 @@ jobs:
             exit 1
           fi
 
-          # Verify ct binary attestation
-          echo "::group::ct attestation details"
-          gh attestation verify ./dist/ct -R ${{ github.repository }} --format json | jq
+          # Verify cf binary attestation
+          echo "::group::cf attestation details"
+          gh attestation verify ./dist/cf -R ${{ github.repository }} --format json | jq
           echo "::endgroup::"
           if [ $? -eq 0 ]; then
-            echo -e "\033[32m✓ ct attestation verified successfully\033[0m"
+            echo -e "\033[32m✓ cf attestation verified successfully\033[0m"
           else
-            echo -e "\033[31m✗ ct attestation verification failed\033[0m"
+            echo -e "\033[31m✗ cf attestation verification failed\033[0m"
             exit 1
           fi
 

@@ -1,6 +1,6 @@
 import * as Path from "@std/path";
 import { AsyncResult, DID, DIDKey } from "./interface.ts";
-import { VerifierIdentity } from "@commontools/identity";
+import { VerifierIdentity } from "@commonfabric/identity";
 
 /**
  * Returns file URL for the current working directory.

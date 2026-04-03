@@ -4,7 +4,7 @@ description: Build sub-patterns with minimal UI
 user-invocable: false
 ---
 
-Use the `ct` skill, or read `skills/ct/SKILL.md`, for CLI documentation when
+Use the `cf` skill, or read `skills/cf/SKILL.md`, for CLI documentation when
 running commands.
 
 # Implement Sub-Pattern
@@ -64,6 +64,6 @@ return <>{items.map((item) => <ItemPattern item={item} />)}</>;
 
 ## Done When
 
-- Pattern compiles: `deno task ct check pattern.tsx --no-run`
+- Pattern compiles: `deno task cf check pattern.tsx --no-run`
 - Minimal UI renders inputs/buttons
 - Ready for testing

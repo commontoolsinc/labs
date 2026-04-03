@@ -8,7 +8,7 @@ import {
   pattern,
   UI,
   type VNode,
-} from "commontools";
+} from "commonfabric";
 
 // ===== Types =====
 
@@ -76,29 +76,29 @@ const Checklist = pattern<ChecklistInput, ChecklistOutput>(
     return {
       [NAME]: computed(() => (topic ? `Checklist: ${topic}` : "Checklist")),
       [UI]: (
-        <ct-screen>
-          <ct-vstack slot="header" gap="1">
-            <ct-heading level={4}>
+        <cf-screen>
+          <cf-vstack slot="header" gap="1">
+            <cf-heading level={4}>
               {computed(() => topic || "Checklist")}
-            </ct-heading>
-          </ct-vstack>
+            </cf-heading>
+          </cf-vstack>
 
-          <ct-vstack gap="2" style="padding: 1.5rem;">
+          <cf-vstack gap="2" style="padding: 1.5rem;">
             {ifElse(
               response.pending,
-              <div style="color: var(--ct-color-text-secondary);">
-                <ct-loader show-elapsed /> Generating checklist...
+              <div style="color: var(--cf-color-text-secondary);">
+                <cf-loader show-elapsed /> Generating checklist...
               </div>,
               <div>
                 {items.map((item) => (
-                  <ct-hstack gap="2" align="center">
-                    <ct-checkbox $checked={item.done}>{item.label}</ct-checkbox>
-                  </ct-hstack>
+                  <cf-hstack gap="2" align="center">
+                    <cf-checkbox $checked={item.done}>{item.label}</cf-checkbox>
+                  </cf-hstack>
                 ))}
               </div>,
             )}
-          </ct-vstack>
-        </ct-screen>
+          </cf-vstack>
+        </cf-screen>
       ),
       topic,
       items,

@@ -1,10 +1,10 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * action() results used as event handlers in JSX. action() is an
  * opaque origin but handler results are typically used directly
  * (no property access), so opaque classification doesn't affect them.
  */
-import { action, pattern, UI, Writable } from "commontools";
+import { action, pattern, UI, Writable } from "commonfabric";
 interface State {
     label: string;
 }
@@ -16,8 +16,8 @@ export default pattern((__ct_pattern_input) => {
     const label = __ct_pattern_input.key("label");
     const count = Writable.of(0, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const increment = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema);
+    const increment = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             count: {
@@ -26,12 +26,12 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["count"]
-    } as const satisfies __ctHelpers.JSONSchema, (_, { count }) => {
+    } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
         count.set(count.get() + 1);
     })({
         count: count
     });
-    const decrement = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+    const decrement = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             count: {
@@ -40,7 +40,7 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["count"]
-    } as const satisfies __ctHelpers.JSONSchema, (_, { count }) => {
+    } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
         count.set(count.get() - 1);
     })({
         count: count
@@ -48,8 +48,8 @@ export default pattern((__ct_pattern_input) => {
     return {
         [UI]: (<div>
         <span>{label}: {count}</span>
-        <ct-button onClick={increment}>+</ct-button>
-        <ct-button onClick={decrement}>-</ct-button>
+        <cf-button onClick={increment}>+</cf-button>
+        <cf-button onClick={decrement}>-</cf-button>
       </div>),
         count,
     };
@@ -61,7 +61,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["label"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -94,8 +94,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

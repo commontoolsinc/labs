@@ -1,6 +1,6 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern, type JSONSchema } from "commontools";
-import "commontools/schema";
+import * as __cfHelpers from "commonfabric";
+import { computed, pattern, type JSONSchema } from "commonfabric";
+import "commonfabric/schema";
 // Test that pattern with both schemas already present is not transformed
 interface Input {
     count: number;
@@ -16,7 +16,7 @@ interface Result {
 export default pattern((__ct_pattern_input) => {
     const count = __ct_pattern_input.key("count");
     return {
-        doubled: __ctHelpers.derive({
+        doubled: __cfHelpers.derive({
             type: "object",
             properties: {
                 count: {
@@ -24,9 +24,9 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["count"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count * 2)
+        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count * 2)
     };
 }, {
     type: "object",
@@ -36,7 +36,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["count"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         doubled: {
@@ -44,8 +44,8 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["doubled"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

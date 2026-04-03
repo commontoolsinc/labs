@@ -1,9 +1,9 @@
-import * as __ctHelpers from "commontools";
-import { Cell, handler, NAME, pattern, str, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, handler, NAME, pattern, str, UI } from "commonfabric";
 interface PatternState {
     value: number;
 }
-const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
+const increment = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -12,12 +12,12 @@ const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, (_e, state: {
+} as const satisfies __cfHelpers.JSONSchema, (_e, state: {
     value: Cell<number>;
 }) => {
     state.value.set(state.value.get() + 1);
 });
-const decrement = handler(false as const satisfies __ctHelpers.JSONSchema, {
+const decrement = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -26,7 +26,7 @@ const decrement = handler(false as const satisfies __ctHelpers.JSONSchema, {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, (_e, state: {
+} as const satisfies __cfHelpers.JSONSchema, (_e, state: {
     value: Cell<number>;
 }) => {
     state.value.set(state.value.get() - 1);
@@ -42,12 +42,12 @@ export default pattern((state) => {
         // This template literal SHOULD be transformed (builder function context)
         [NAME]: str `Simple counter: ${state.key("value")}`,
         [UI]: (<div>
-        <ct-button onClick={decrement(state)}>-</ct-button>
+        <cf-button onClick={decrement(state)}>-</cf-button>
         <p>
           {/* These SHOULD be transformed (JSX expression context) */}
           Current: {state.key("value")}
           <br />
-          Next number: {__ctHelpers.derive({
+          Next number: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -61,13 +61,13 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 value: state.key("value")
             } }, ({ state }) => state.value + 1)}
           <br />
-          Previous: {__ctHelpers.derive({
+          Previous: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -81,13 +81,13 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 value: state.key("value")
             } }, ({ state }) => state.value - 1)}
           <br />
-          Doubled: {__ctHelpers.derive({
+          Doubled: {__cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -101,21 +101,21 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 value: state.key("value")
             } }, ({ state }) => state.value * 2)}
           <br />
-          Status: {__ctHelpers.ifElse({
+          Status: {__cfHelpers.ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["High", "Low"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -129,13 +129,13 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 value: state.key("value")
             } }, ({ state }) => state.value > 10), "High", "Low")}
         </p>
-        <ct-button onClick={increment({ value: state.key("value") })}>+</ct-button>
+        <cf-button onClick={increment({ value: state.key("value") })}>+</cf-button>
       </div>),
         // Direct property access - no transformation needed
         value: state.key("value"),
@@ -148,7 +148,7 @@ export default pattern((state) => {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -183,8 +183,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

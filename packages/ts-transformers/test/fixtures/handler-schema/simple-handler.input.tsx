@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, Cell } from "commontools";
+import { handler, Cell } from "commonfabric";
 
 interface CounterEvent {
   increment: number;

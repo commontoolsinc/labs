@@ -1,6 +1,6 @@
-import * as __ctHelpers from "commontools";
-import { Cell, derive, handler, NAME, pattern, str, UI } from "commontools";
-const adder = handler(false as const satisfies __ctHelpers.JSONSchema, {
+import * as __cfHelpers from "commonfabric";
+import { Cell, derive, handler, NAME, pattern, str, UI } from "commonfabric";
+const adder = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         values: {
@@ -12,7 +12,7 @@ const adder = handler(false as const satisfies __ctHelpers.JSONSchema, {
         }
     },
     required: ["values"]
-} as const satisfies __ctHelpers.JSONSchema, (_, state: {
+} as const satisfies __cfHelpers.JSONSchema, (_, state: {
     values: Cell<string[]>;
 }) => {
     state.values.push(Math.random().toString(36).substring(2, 15));
@@ -31,7 +31,7 @@ export default pattern((__ct_pattern_input) => {
         items: {
             type: "unknown"
         }
-    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, values, (values) => {
+    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, values, (values) => {
         console.log("values#", values?.length);
     });
     return {
@@ -39,7 +39,7 @@ export default pattern((__ct_pattern_input) => {
         [UI]: (<div>
           <button type="button" onClick={adder({ values })}>Add Value</button>
           <div>
-            {values.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            {values.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const value = __ct_pattern_input.key("element");
                 const index = __ct_pattern_input.key("index");
                 return (<div>
@@ -56,7 +56,7 @@ export default pattern((__ct_pattern_input) => {
                     }
                 },
                 required: ["element"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -76,7 +76,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            } as const satisfies __cfHelpers.JSONSchema), {})}
           </div>
         </div>),
         values,
@@ -92,7 +92,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["values"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -130,8 +130,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -1,4 +1,5 @@
 import { Command } from "@cliffy/command";
+import { cliText } from "../lib/cli-name.ts";
 import { render } from "../lib/render.ts";
 import {
   getDidFromFile,
@@ -12,16 +13,22 @@ export const identity = new Command()
   .default("help")
   /* id new */
   .command("new", "Output a new identity keyfile to stdout.")
-  .example("ct id create > ./my.key", "Create and store a keyfile at ./my.key")
+  .example(
+    cliText("cf id create > ./my.key"),
+    "Create and store a keyfile at ./my.key",
+  )
   .action(createIdentity)
   /* id did */
   .command("did <keypath:string>", "Output the DID of a keyfile to stdout.")
-  .example("ct id did ./my.key", "Outputs the DID of ./my.key to stdout.")
+  .example(
+    cliText("cf id did ./my.key"),
+    "Outputs the DID of ./my.key to stdout.",
+  )
   .action(getDid)
   /* id derive */
   .command("derive", "Derives a keyfile from the provided passphrase.")
   .example(
-    'ct id derive "common user" > ./my.key',
+    cliText('cf id derive "common user" > ./my.key'),
     'Create and store a keyfile at ./my.key derived from the string "common user".',
   )
   .arguments("<passphrase:string>")

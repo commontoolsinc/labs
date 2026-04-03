@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { derive, pattern } from "commonfabric";
 interface Preference {
     ingredient: string;
     preference: "liked" | "disliked";
@@ -40,9 +40,9 @@ export default pattern((state) => {
                 required: ["ingredient", "preference"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, { food: state.key("foodDescription"), prefs: state.key("preferences") }, ({ food, prefs }) => {
+    } as const satisfies __cfHelpers.JSONSchema, { food: state.key("foodDescription"), prefs: state.key("preferences") }, ({ food, prefs }) => {
         // Filter-map chain inside derive callback
         // The .map() should NOT be transformed to .mapWithPattern() because:
         // - Inside derive, `prefs` is unwrapped to a plain array
@@ -83,7 +83,7 @@ export default pattern((state) => {
             required: ["ingredient", "preference"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         wishQuery: {
@@ -91,8 +91,8 @@ export default pattern((state) => {
         }
     },
     required: ["wishQuery"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

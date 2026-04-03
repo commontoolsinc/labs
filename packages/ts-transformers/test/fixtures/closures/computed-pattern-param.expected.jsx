@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, computed, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 // FIXTURE: computed-pattern-param
 // Verifies: computed() inside a pattern captures the pattern parameter as a structured object
 //   computed(() => value.get() * config.multiplier) → derive(..., { value, config: { multiplier: config.key("multiplier") } }, ({ value, config }) => ...)
@@ -11,8 +11,8 @@ export default pattern((config: {
 }) => {
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const result = __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema);
+    const result = __cfHelpers.derive({
         type: "object",
         properties: {
             value: {
@@ -30,9 +30,9 @@ export default pattern((config: {
             }
         },
         required: ["value", "config"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         value: value,
         config: {
             multiplier: config.key("multiplier")
@@ -47,10 +47,10 @@ export default pattern((config: {
         }
     },
     required: ["multiplier"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

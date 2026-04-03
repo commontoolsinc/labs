@@ -36,7 +36,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface ShoppingItem {
   title: string;
@@ -100,7 +100,7 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {items.map((item) => (
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <ct-checkbox $checked={item.done}>
+              <cf-checkbox $checked={item.done}>
                 <span
                   style={computed(
                     () => (item.done ? { textDecoration: "line-through" } : {}),
@@ -108,15 +108,15 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
                 >
                   {item.title} ({item.category})
                 </span>
-              </ct-checkbox>
-              <ct-button onClick={removeItem({ items, item })}>x</ct-button>
+              </cf-checkbox>
+              <cf-button onClick={removeItem({ items, item })}>x</cf-button>
             </div>
           ))}
         </div>
 
-        <ct-message-input
+        <cf-message-input
           placeholder="Add item (e.g., Apples:Produce)..."
-          onct-send={addItem({ items })}
+          oncf-send={addItem({ items })}
         />
       </div>
     ),
@@ -169,7 +169,7 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
                     marginLeft: "16px",
                   }}
                 >
-                  <ct-checkbox $checked={item.done}>
+                  <cf-checkbox $checked={item.done}>
                     <span
                       style={computed(() => (item.done
                         ? { textDecoration: "line-through" }
@@ -178,8 +178,8 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
                     >
                       {item.title}
                     </span>
-                  </ct-checkbox>
-                  <ct-button onClick={removeItem({ items, item })}>x</ct-button>
+                  </cf-checkbox>
+                  <cf-button onClick={removeItem({ items, item })}>x</cf-button>
                 </div>,
                 null,
               )

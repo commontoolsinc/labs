@@ -1,10 +1,10 @@
-import { hashOf } from "@commontools/data-model/value-hash";
-import { fabricFromNativeValue } from "@commontools/data-model/fabric-value";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 
 export const REQUEST_TIMEOUT = 1000 * 5; // 5 seconds
 

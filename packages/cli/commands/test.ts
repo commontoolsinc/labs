@@ -1,6 +1,7 @@
 import { Command } from "@cliffy/command";
 import { resolve } from "@std/path";
 import { expandGlob } from "@std/fs";
+import { cliText } from "../lib/cli-name.ts";
 import { discoverTestFiles, runTests } from "../lib/test-runner.ts";
 
 const schedulerModes = ["default", "push", "pull"] as const;
@@ -9,23 +10,25 @@ export const test = new Command()
   .name("test")
   .description("Run pattern tests (.test.tsx files).")
   .example(
-    "ct test ./counter.test.tsx",
+    cliText("cf test ./counter.test.tsx"),
     "Run a single test pattern file.",
   )
   .example(
-    "ct test ./patterns/",
+    cliText("cf test ./patterns/"),
     "Run all .test.tsx files in a directory (recursive).",
   )
   .example(
-    "ct test './*.test.tsx'",
+    cliText("cf test './*.test.tsx'"),
     "Run all test files matching a glob pattern.",
   )
   .example(
-    "ct test ./counter.test.tsx --timeout 10000",
+    cliText("cf test ./counter.test.tsx --timeout 10000"),
     "Run with custom timeout (10 seconds).",
   )
   .example(
-    "ct test ./battleship/pass-and-play/main.test.tsx --root ./battleship",
+    cliText(
+      "cf test ./battleship/pass-and-play/main.test.tsx --root ./battleship",
+    ),
     "Run with custom root for resolving imports from sibling directories.",
   )
   .option(

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern, UI, VNode, } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { computed, pattern, UI, VNode, } from "commonfabric";
 // Simulates `any` leaking through a generic function (like generateObject)
 declare function fetchAny(): any;
 // FIXTURE: pattern-any-result-override
@@ -11,7 +11,7 @@ declare function fetchAny(): any;
 export const TypedFromAny = pattern((__ct_pattern_input) => {
     const prompt = __ct_pattern_input.key("prompt");
     const result = fetchAny();
-    return __ctHelpers.derive({
+    return __cfHelpers.derive({
         type: "object",
         properties: {
             result: true,
@@ -20,7 +20,7 @@ export const TypedFromAny = pattern((__ct_pattern_input) => {
             }
         },
         required: ["result", "prompt"]
-    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, {
         result: result,
         prompt: prompt
     }, ({ result, prompt }) => result?.title || prompt || "Untitled");
@@ -32,9 +32,9 @@ export const TypedFromAny = pattern((__ct_pattern_input) => {
         }
     },
     required: ["prompt"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // Case 2: { [UI]: VNode } Output type instead of { [UI]: any }
 type Entry = {
     name: string;
@@ -52,7 +52,7 @@ export const TypedUIOutput = pattern((__ct_pattern_input) => {
         }
     },
     required: ["name"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -60,8 +60,8 @@ export const TypedUIOutput = pattern((__ct_pattern_input) => {
         }
     },
     required: ["$UI"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -7,7 +7,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type GithubResponse = {
   id: number;
@@ -189,14 +189,14 @@ export default pattern<
     [UI]: (
       <div>
         <div>
-          <ct-input
+          <cf-input
             $value={state.repoUrl}
             placeholder="https://github.com/owner/repo"
             customStyle="width: 100%; padding: 8px; font-size: 14px;"
           />
         </div>
 
-        <ct-cell-context $cell={validData}>
+        <cf-cell-context $cell={validData}>
           <div>
             <h3 id="github-title">
               {validData.name}
@@ -228,7 +228,7 @@ export default pattern<
               </div>
             </div>
           </div>
-        </ct-cell-context>
+        </cf-cell-context>
       </div>
     ),
     repo: validData,

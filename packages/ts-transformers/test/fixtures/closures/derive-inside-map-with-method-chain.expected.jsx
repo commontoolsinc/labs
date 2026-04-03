@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { derive, pattern, UI } from "commonfabric";
 interface SubItem {
     id: number;
     name: string;
@@ -26,7 +26,7 @@ export default pattern((state) => {
                 - subs is a derive callback parameter (unwrapped at runtime)
                 - .filter() returns a plain JS array
                 - Plain arrays don't have .mapWithPattern() */}
-        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 return (<div>
             <h2>{item.key("title")}</h2>
@@ -54,9 +54,9 @@ export default pattern((state) => {
                                 required: ["id", "name", "active"]
                             }
                         }
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, item.key("subItems"), (subs) => subs
+                    } as const satisfies __cfHelpers.JSONSchema, item.key("subItems"), (subs) => subs
                         .filter((s) => s.active)
                         .map((s) => s.name)
                         .join(", "))}
@@ -105,7 +105,7 @@ export default pattern((state) => {
                         required: ["id", "name", "active"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -125,7 +125,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            } as const satisfies __cfHelpers.JSONSchema), {})}
       </div>),
     };
 }, {
@@ -174,7 +174,7 @@ export default pattern((state) => {
             required: ["id", "name", "active"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -203,8 +203,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

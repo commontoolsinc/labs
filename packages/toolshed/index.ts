@@ -1,13 +1,13 @@
 import app from "@/app.ts";
 import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   CachedCompiler,
   computeGitFingerprint,
   FileSystemCompilationCache,
-} from "@commontools/runner/compilation-cache";
+} from "@commonfabric/runner/compilation-cache";
 import { memory } from "@/routes/storage/memory.ts";
 
 // Create a global runtime instance for the server

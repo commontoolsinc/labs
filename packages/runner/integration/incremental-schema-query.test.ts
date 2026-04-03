@@ -1,11 +1,11 @@
 #!/usr/bin/env -S deno run -A
 
 import { assert, assertEquals } from "@std/assert";
-import { Runtime } from "@commontools/runner";
-import { Identity, type IdentityCreateConfig } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import type { JSONSchema } from "@commontools/runner";
-import { env } from "@commontools/integration";
+import { Runtime } from "@commonfabric/runner";
+import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { JSONSchema } from "@commonfabric/runner";
+import { env } from "@commonfabric/integration";
 const { API_URL } = env;
 
 const keyConfig: IdentityCreateConfig = {

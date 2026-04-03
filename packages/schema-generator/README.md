@@ -1,4 +1,4 @@
-# @commontools/schema-generator
+# @commonfabric/schema-generator
 
 Short notes on the JSON Schema generator and ref/definitions behavior.
 
@@ -13,7 +13,7 @@ Short notes on the JSON Schema generator and ref/definitions behavior.
   `$ref` is emitted.
 - Anonymous/type‑literal shapes (including aliases that resolve to anonymous
   types) are inlined.
-- `$ref` may appear with Common Tools extensions as siblings (e.g.
+- `$ref` may appear with Common Fabric extensions as siblings (e.g.
   `{ "$ref": "#/definitions/Foo", asStream: true }`).
 
 Rationale: Improves human readability and re‑use of complex shared shapes while

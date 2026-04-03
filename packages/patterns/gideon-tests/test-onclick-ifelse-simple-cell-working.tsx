@@ -47,7 +47,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface State {
   count: Default<number, 0>;
@@ -69,15 +69,15 @@ export default pattern<State>(({ count, showButton }) => {
         <p>Current count: {count}</p>
 
         <div style={{ marginBottom: "1rem" }}>
-          <ct-checkbox $checked={showButton}>Show button</ct-checkbox>
+          <cf-checkbox $checked={showButton}>Show button</cf-checkbox>
         </div>
 
         {/* WORKING: ifElse with plain cell (not derived) */}
         {ifElse(
           showButton,
-          <ct-button onClick={incrementHandler({ count })}>
+          <cf-button onClick={incrementHandler({ count })}>
             Increment (WORKING with ifElse)
-          </ct-button>,
+          </cf-button>,
           <p style={{ color: "gray" }}>Button hidden by ifElse condition</p>,
         )}
 

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive } from "commontools";
+import { derive } from "commonfabric";
 
 declare const value: number;
 

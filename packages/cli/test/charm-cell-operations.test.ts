@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { parsePath } from "@commontools/piece/ops";
+import { parsePath } from "@commonfabric/piece/ops";
 
 describe("parsePath", () => {
   it("should parse simple string paths", () => {

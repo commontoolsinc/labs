@@ -1,6 +1,6 @@
 import { assert } from "@std/assert";
 import { Identity } from "../src/identity.ts";
-import { decode } from "@commontools/utils/encoding";
+import { decode } from "@commonfabric/utils/encoding";
 
 Deno.test("Identity generates mnemonics", async () => {
   const [identity, mnemonic] = await Identity.generateMnemonic();

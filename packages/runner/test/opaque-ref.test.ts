@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { isOpaqueRef } from "../src/builder/types.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Identity } from "@commontools/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
 
 const signer = await Identity.fromPassphrase("test operator");
 

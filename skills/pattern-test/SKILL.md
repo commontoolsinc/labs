@@ -12,7 +12,7 @@ Read that guide first. It is the canonical reference.
 
 Runtime notes:
 
-- Use the `ct` skill, or read `skills/ct/SKILL.md`, when you need CLI command
+- Use the `cf` skill, or read `skills/cf/SKILL.md`, when you need CLI command
   details.
 - The detailed workflow reference remains
   `docs/common/workflows/pattern-testing.md`.

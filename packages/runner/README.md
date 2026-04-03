@@ -27,8 +27,8 @@ testability, isolation, and control over service configuration.
 All services are now accessed through a `Runtime` instance:
 
 ```typescript
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 // Create a runtime instance with configuration
 const runtime = new Runtime({
@@ -120,7 +120,7 @@ This approach replaces the previous distinction between CellLinks and Aliases.
 
 Patterns define computational graphs that process data:
 
-- Created using the Builder package (`@commontools/builder`)
+- Created using the Builder package (`@commonfabric/builder`)
 - Define inputs, outputs, and transformation logic
 - Can be composed into larger patterns
 - Executed by the Runner with automatic dependency tracking
@@ -164,9 +164,9 @@ structures.
 Cells are now created through the Runtime instance rather than global functions:
 
 ```typescript
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Identity } from "@commontools/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
 
 // Set up storage manager
 const signer = await Identity.fromPassphrase("example-passphrase");
@@ -245,10 +245,10 @@ validation, and automatic transformation of data. The `Schema<>` helper from the
 Builder package provides TypeScript type inference.
 
 ```typescript
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import type { JSONSchema } from "@commontools/builder";
-import { Identity } from "@commontools/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { JSONSchema } from "@commonfabric/builder";
+import { Identity } from "@commonfabric/identity";
 
 // Set up storage manager
 const signer = await Identity.fromPassphrase("example-passphrase");
@@ -323,10 +323,10 @@ using the Builder package and executed by the Runner, which manages dependencies
 and updates results automatically.
 
 ```typescript
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { derive, pattern } from "@commontools/builder";
-import { Identity } from "@commontools/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { derive, pattern } from "@commonfabric/builder";
+import { Identity } from "@commonfabric/identity";
 
 // Set up storage manager
 const signer = await Identity.fromPassphrase("example-passphrase");
@@ -400,9 +400,9 @@ The storage system provides persistence for cells and synchronization across
 clients.
 
 ```typescript
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache";
-import { Identity } from "@commontools/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
+import { Identity } from "@commonfabric/identity";
 
 // Create identity for authentication
 const signer = await Identity.fromPassphrase("my-passphrase");
@@ -445,10 +445,10 @@ await runtime.storage.synced();
 You can map and transform data using cells with schemas:
 
 ```typescript
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import type { JSONSchema } from "@commontools/builder";
-import { Identity } from "@commontools/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { JSONSchema } from "@commonfabric/builder";
+import { Identity } from "@commonfabric/identity";
 
 // Set up storage manager
 const signer = await Identity.fromPassphrase("example-passphrase");
@@ -537,9 +537,9 @@ console.log(result);
 Cells can react to changes in deeply nested structures:
 
 ```typescript
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Identity } from "@commontools/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
 
 // Set up storage manager
 const signer = await Identity.fromPassphrase("example-passphrase");
@@ -619,15 +619,15 @@ replaced with Runtime instance methods:
 
 ```typescript
 // OLD (deprecated):
-import { getCell, idle, storage } from "@commontools/runner";
+import { getCell, idle, storage } from "@commonfabric/runner";
 const cell = getCell(space, cause, schema);
 await cell.sync();
 await idle();
 
 // NEW (current):
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { Identity } from "@commontools/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
 
 const signer = await Identity.fromPassphrase("my-passphrase");
 const storageManager = StorageManager.emulate({ as: signer });
@@ -681,8 +681,8 @@ The storage manager opens storage providers for different memory spaces. The
 StorageManager provides convenient factory methods:
 
 ```ts
-import { StorageManager } from "@commontools/runner/storage/cache ";
-import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache ";
+import { Identity } from "@commonfabric/identity";
 
 const signer = await Identity.fromPassphrase("my-passphrase");
 
@@ -696,7 +696,7 @@ const storageManager = StorageManager.open({
 });
 ```
 
-The `@commontools/storage/cache` provides a default implementation of the
+The `@commonfabric/storage/cache` provides a default implementation of the
 `IStorageManager` interface.
 
 - `"volatile://"` - In-memory storage (for testing)

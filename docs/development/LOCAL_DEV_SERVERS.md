@@ -4,7 +4,7 @@
 
 ## Quick Reference
 
-**Use the scripts** (see ct skill for full documentation):
+**Use the scripts** (see the cf skill for full documentation):
 
 ```bash
 ./scripts/start-local-dev.sh          # Start both servers
@@ -32,7 +32,7 @@ EXPERIMENTAL_MODERN_SCHEMA_HASH=true \
 EXPERIMENTAL_MODERN_DATA_MODEL=true \
 ./scripts/restart-local-dev.sh --force --dangerously-clear-all-spaces
 ```
-The same env vars must also be set when running `ct` CLI commands against the
+The same env vars must also be set when running `cf` CLI commands against the
 server. See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 
 **Logs:**
@@ -43,7 +43,7 @@ server. See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 the passphrase `"implicit trust"`. To create a matching key for CLI operations:
 ```bash
 deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
-export CT_IDENTITY=./claude.key
+export CF_IDENTITY=./claude.key
 ```
 
 **First-time browser login:**
@@ -62,7 +62,7 @@ await page.goto("http://localhost:8000/<SPACE>/<PIECE_ID>");
 
 ## Architecture
 
-CommonTools requires **two servers** for local development:
+Common Fabric requires **two servers** for local development:
 
 1. **Backend (Toolshed)** - Port 8000 - API, storage, runtime, proxies shell
 2. **Frontend (Shell)** - Port 5173 - Dev server with hot reload (accessed via 8000 proxy)
@@ -113,7 +113,7 @@ anything is wrong. It supports the same `--port-offset`, `--shell-port`, and
 | Space shows errors | Only one server running | Ensure BOTH are running |
 | Port already in use | Previous server didn't stop | Use `--force` flag |
 | Stale data | Cache issues | Use `--clear-cache` flag (or `--dangerously-clear-all-spaces` for database issues) |
-| `*.ts.net` URLs hang | Not on Tailscale | Connect to CT network via Tailscale |
+| `*.ts.net` URLs hang | Not on Tailscale | Connect to the Tailscale network |
 | OAuth error: `Unexpected token '<'` | Fetching from wrong port | Use port 8000 for API calls ([see below](#oauth-returns-html-instead-of-json)) |
 | UI component changes not appearing | Shell doesn't watch packages/ui | Restart local dev server |
 
@@ -183,7 +183,7 @@ This happens when OAuth or API calls hit port 5173 (frontend) instead of port 80
 
 ### UI Component Changes Not Appearing
 
-When editing `ct-*` components in `packages/ui/`, restart the local dev server to ensure the updated code is running.
+When editing `cf-*` components in `packages/ui/`, restart the local dev server to ensure the updated code is running.
 
 ---
 
@@ -242,7 +242,7 @@ curl -X POST http://localhost:8000/api/integrations/bg \
   -d '{"pieceId":"baedrei...","space":"did:key:z6Mk...","integration":"my-integration"}'
 ```
 
-Or use the `<ct-updater>` component in your piece's UI.
+Or use the `<cf-updater>` component in your piece's UI.
 
 ### Key Details
 

@@ -44,7 +44,7 @@
  *     [NAME]: "My Bill Tracker",
  *     bills: tracker.bills,
  *     [UI]: (
- *       <ct-screen>
+ *       <cf-screen>
  *         {tracker.ui.summaryStatsUI}
  *         {tracker.unpaidBills.map((bill) => (
  *           <div>
@@ -54,7 +54,7 @@
  *             </button>
  *           </div>
  *         ))}
- *       </ct-screen>
+ *       </cf-screen>
  *     ),
  *   };
  * });
@@ -67,7 +67,7 @@ import {
   pattern,
   Stream,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import GmailExtractor from "../gmail-extractor.tsx";
 import type { Auth } from "../gmail-extractor.tsx";
 import ProcessingStatus from "../processing-status.tsx";

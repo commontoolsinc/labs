@@ -1,8 +1,8 @@
 # Mentionables
 
 Mentionables are pieces that a pattern exposes for discovery by other patterns
-and UI components. They power `@`-mention autocomplete in `ct-prompt-input` and
-`[[`-mention autocomplete in `ct-code-editor`.
+and UI components. They power `@`-mention autocomplete in `cf-prompt-input` and
+`[[`-mention autocomplete in `cf-code-editor`.
 
 ## Exporting Mentionables
 
@@ -31,7 +31,7 @@ const create = handler((_, { createdPieces }) => {
 });
 
 return {
-  [UI]: <ct-button onClick={create({ createdPieces })}>Create</ct-button>,
+  [UI]: <cf-button onClick={create({ createdPieces })}>Create</cf-button>,
   mentionable: createdPieces,
 };
 ```
@@ -64,14 +64,14 @@ See [wish](wish.md) for full documentation.
 
 ## Consuming Mentionables in UI Components
 
-### ct-prompt-input (`@`-mentions)
+### cf-prompt-input (`@`-mentions)
 
-Pass the mentionable cell to `ct-prompt-input` via the `$mentionable` attribute:
+Pass the mentionable cell to `cf-prompt-input` via the `$mentionable` attribute:
 
 ```tsx
 const mentionable = wish<MentionablePiece[]>({ query: "#mentionable" }).result;
 
-<ct-prompt-input
+<cf-prompt-input
   $mentionable={mentionable}
   placeholder="Type @ to mention..."
 />
@@ -81,15 +81,15 @@ When the user types `@` and selects a mention, it is inserted as a markdown
 link in the format `[Name](/of:entityId)`. The `/of:` prefix and entity ID
 follow the LLM-friendly link format used throughout the system.
 
-### ct-code-editor (`[[`-mentions)
+### cf-code-editor (`[[`-mentions)
 
-Pass mentionable and mentioned cells to `ct-code-editor`:
+Pass mentionable and mentioned cells to `cf-code-editor`:
 
 ```tsx
 const mentionable = wish<MentionablePiece[]>({ query: "#mentionable" }).result;
 const mentioned = Writable.of<MentionablePiece[]>([]);
 
-<ct-code-editor
+<cf-code-editor
   $value={content}
   $mentionable={mentionable}
   $mentioned={mentioned}
@@ -124,7 +124,7 @@ the runtime to resolve `@link` indirection before delivering values:
 ```tsx
 import { MentionableArraySchema } from "../../core/mentionable.ts";
 
-// In MentionController (used by ct-prompt-input):
+// In MentionController (used by cf-prompt-input):
 this._mentionableTyped = this._mentionable.asSchema<MentionableArray>(
   MentionableArraySchema,
 );
@@ -132,7 +132,7 @@ this._mentionableTyped.subscribe(() => {
   this.host.requestUpdate();
 });
 
-// In ct-code-editor (in willUpdate):
+// In cf-code-editor (in willUpdate):
 this.mentionable = this.mentionable.asSchema(MentionableArraySchema);
 ```
 
@@ -153,7 +153,7 @@ const stableId = resolved.ref().id;  // e.g., "of:bafyabc123"
 **Important:** `CellHandle.id()` strips the `of:` prefix, while
 `CellHandle.ref().id` preserves it. Use `.ref().id` when building
 LLM-friendly links (`/of:...` format). Use `.id()` when you need the bare
-CID (e.g., for wiki-link format in `ct-code-editor`).
+CID (e.g., for wiki-link format in `cf-code-editor`).
 
 ## Link Formats
 
@@ -161,8 +161,8 @@ The system uses two link formats for mentions, depending on context:
 
 | Format | Example | Used by |
 |--------|---------|---------|
-| Markdown link | `[Note](/of:bafyabc123)` | `ct-prompt-input`, LLM dialog, `ct-markdown` |
-| Wiki-link | `[[Note (bafyabc123)]]` | `ct-code-editor`, `note-md.tsx` |
+| Markdown link | `[Note](/of:bafyabc123)` | `cf-prompt-input`, LLM dialog, `cf-markdown` |
+| Wiki-link | `[[Note (bafyabc123)]]` | `cf-code-editor`, `note-md.tsx` |
 
 ### Markdown links (`/of:...`)
 
@@ -170,8 +170,8 @@ These follow the LLM-friendly link format from `link-types.ts`. Path
 segments are encoded per RFC 6901 (JSON Pointer): `~` becomes `~0`, `/`
 becomes `~1`.
 
-`ct-markdown` converts rendered `<a href="/of:...">` elements into
-interactive `<ct-cell-link>` components.
+`cf-markdown` converts rendered `<a href="/of:...">` elements into
+interactive `<cf-cell-link>` components.
 
 ### Wiki-links (`[[Name (id)]]`)
 
@@ -200,7 +200,7 @@ wish("#mentionable")  ──►  $mentionable prop    ──►  @link array
                            │
                     ┌──────┴──────┐
                     ▼             ▼
-             ct-prompt-input  ct-code-editor
+             cf-prompt-input  cf-code-editor
              MentionController   (own impl)
                     │             │
                     ▼             ▼
@@ -212,6 +212,6 @@ wish("#mentionable")  ──►  $mentionable prop    ──►  @link array
              in user message  to [Name](/of:id)
                                   │
                                   ▼
-                              ct-markdown renders
-                              as ct-cell-link
+                              cf-markdown renders
+                              as cf-cell-link
 ```

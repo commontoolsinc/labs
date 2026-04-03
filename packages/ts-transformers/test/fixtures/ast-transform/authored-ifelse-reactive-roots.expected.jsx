@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { ifElse, pattern, Writable } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { ifElse, pattern, Writable } from "commonfabric";
 const identity = <T,>(value: T) => value;
 // FIXTURE: authored-ifelse-reactive-roots
 // Verifies: authored ifElse outside JSX and top-level receiver-method roots lower reactively
@@ -13,7 +13,7 @@ export default pattern((__ct_pattern_input) => {
     const show = __ct_pattern_input.key("show");
     const name = __ct_pattern_input.key("name");
     const cell = __ct_pattern_input.key("cell");
-    const upper = __ctHelpers.derive({
+    const upper = __cfHelpers.derive({
         type: "object",
         properties: {
             name: {
@@ -21,19 +21,19 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["name"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, { name: name }, ({ name }) => identity(name.trim()));
+    } as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => identity(name.trim()));
     return {
         value: ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, show, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.derive({
             type: "object",
             properties: {
                 count: {
@@ -41,18 +41,18 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["count"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count + 1), 0),
+        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count + 1), 0),
         cellValue: ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, show, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.derive({
             type: "object",
             properties: {
                 cell: {
@@ -61,18 +61,18 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["cell"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { cell: cell }, ({ cell }) => cell.get()), 0),
+        } as const satisfies __cfHelpers.JSONSchema, { cell: cell }, ({ cell }) => cell.get()), 0),
         trimmed: ifElse({
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, show, __ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.derive({
             type: "object",
             properties: {
                 name: {
@@ -80,11 +80,11 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["name"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { name: name }, ({ name }) => name.trim()), "fallback"),
+        } as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => name.trim()), "fallback"),
         upper,
-        upperDirect: __ctHelpers.derive({
+        upperDirect: __cfHelpers.derive({
             type: "object",
             properties: {
                 name: {
@@ -92,9 +92,9 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["name"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { name: name }, ({ name }) => name.trim()),
+        } as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => name.trim()),
     };
 }, {
     type: "object",
@@ -114,7 +114,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["count", "show", "name", "cell"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -134,8 +134,8 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["value", "cellValue", "trimmed", "upper", "upperDirect"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

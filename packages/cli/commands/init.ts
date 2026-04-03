@@ -1,8 +1,8 @@
 import { Command } from "@cliffy/command";
-import { Engine } from "@commontools/runner";
+import { Engine } from "@commonfabric/runner";
 import { join } from "@std/path/join";
-import { getCompilerOptions } from "@commontools/js-compiler/typescript";
-import { StaticCacheFS } from "@commontools/static";
+import { getCompilerOptions } from "@commonfabric/js-compiler/typescript";
+import { StaticCacheFS } from "@commonfabric/static";
 import { dirname } from "@std/path/dirname";
 
 export const init = new Command()
@@ -44,8 +44,8 @@ function createTsConfig() {
       // Disable all libraries. Strictly only use
       // types provided by the runtime.
       "noLib": true,
-      "types": ["ct-env"],
-      "typeRoots": ["./.ct-types"],
+      "types": ["cf-env"],
+      "typeRoots": ["./.cf-types"],
 
       "jsx": "react-jsx",
       "target": "ES2023",
@@ -73,11 +73,11 @@ function createTsConfig() {
 // and typed against a typical typescript environment in e.g. VSCode.
 //
 // This is achieved by creating a `node_modules/@types/` directory
-// containing types for the imported stdlib (`commontools`), the
+// containing types for the imported stdlib (`commonfabric`), the
 // implicitly loaded jsx-runtime (`react/jsx-runtime`) and the
-// environment types (`commontoolsenv`) loaded by the `tsconfig.json`.
+// environment types (`cf-env`) loaded by the `tsconfig.json`.
 //
-// Also copies pattern documentation from docs/common to .ct-docs for reference.
+// Also copies pattern documentation from docs/common to .cf-docs for reference.
 async function initWorkspace(cwd: string) {
   const cache = new StaticCacheFS();
   const runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
@@ -86,8 +86,8 @@ async function initWorkspace(cwd: string) {
   const { dom, es2023, jsx } = await Engine.getEnvironmentTypes(cache);
 
   // Concatenate all environment types into a single "lib",
-  // which will be referred to as "ct-env" in the typescript config
-  const ctEnv = Object.values({ dom, es2023 }).reduce((env, types) => {
+  // which will be referred to as "cf-env" in the typescript config
+  const cfEnv = Object.values({ dom, es2023 }).reduce((env, types) => {
     env += `${env}\n${types}`;
     return env;
   }, "");
@@ -100,14 +100,14 @@ async function initWorkspace(cwd: string) {
   );
 
   const types = {
-    "commontools": runtimeModuleTypes.commontools,
+    "commonfabric": runtimeModuleTypes.commonfabric,
     "turndown": runtimeModuleTypes.turndown,
-    "ct-env": ctEnv,
+    "cf-env": cfEnv,
     "react/jsx-runtime": jsxRuntime,
   };
 
   for (const [name, typeDef] of Object.entries(types)) {
-    const path = join(cwd, ".ct-types", name);
+    const path = join(cwd, ".cf-types", name);
     await Deno.mkdir(path, {
       recursive: true,
     });
@@ -118,10 +118,10 @@ async function initWorkspace(cwd: string) {
     JSON.stringify(createTsConfig(), null, 2),
   );
 
-  // Copy pattern documentation files to .ct-docs folder
+  // Copy pattern documentation files to .cf-docs folder
   try {
-    const ctDocsPath = join(cwd, ".ct-docs");
-    await Deno.mkdir(ctDocsPath, { recursive: true });
+    const cfDocsPath = join(cwd, ".cf-docs");
+    await Deno.mkdir(cfDocsPath, { recursive: true });
 
     // In compiled binary, docs are bundled and accessible relative to the binary location
     const currentFilePath = import.meta.url;
@@ -133,7 +133,7 @@ async function initWorkspace(cwd: string) {
       for await (const entry of Deno.readDir(docsCommonPath)) {
         if (entry.isFile) {
           const sourcePath = join(docsCommonPath, entry.name);
-          const targetPath = join(ctDocsPath, entry.name);
+          const targetPath = join(cfDocsPath, entry.name);
           const content = await Deno.readTextFile(sourcePath);
           await Deno.writeTextFile(targetPath, content);
         }

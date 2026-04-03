@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern, UI } from "commontools";
+import { cell, pattern, UI } from "commonfabric";
 
 // FIXTURE: map-array-length-conditional
 // Verifies: length-guard && map pattern is transformed to when() wrapping mapWithPattern()

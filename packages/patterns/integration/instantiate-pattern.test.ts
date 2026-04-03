@@ -1,11 +1,11 @@
-import { env } from "@commontools/integration";
-import { sleep } from "@commontools/utils/sleep";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env } from "@commonfabric/integration";
+import { sleep } from "@commonfabric/utils/sleep";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert } from "@std/assert";
-import { Identity } from "@commontools/identity";
-import { PiecesController } from "@commontools/piece/ops";
+import { Identity } from "@commonfabric/identity";
+import { PiecesController } from "@commonfabric/piece/ops";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -61,13 +61,13 @@ describe("instantiate-pattern integration test", () => {
       });
 
       // Wait for piece to load by waiting for first interactive element
-      await page.waitForSelector("[data-ct-input]", { strategy: "pierce" });
+      await page.waitForSelector("[data-cf-input]", { strategy: "pierce" });
 
       // Store the current URL before any action
       const urlBefore = await page.evaluate(() => globalThis.location.href);
       console.log("URL before action:", urlBefore);
 
-      const input = await page.waitForSelector("[data-ct-input]", {
+      const input = await page.waitForSelector("[data-cf-input]", {
         strategy: "pierce",
       });
 
@@ -76,7 +76,7 @@ describe("instantiate-pattern integration test", () => {
       // Quick wait for input processing
       await sleep(100);
 
-      const button = await page.waitForSelector("[data-ct-button]", {
+      const button = await page.waitForSelector("[data-cf-button]", {
         strategy: "pierce",
       });
 

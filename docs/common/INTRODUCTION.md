@@ -1,4 +1,4 @@
-The Common Tools runtime is a fully integrated, reactive runtime and execution environment for user-created programs built using Typescript + `deno`. Each pattern is a `.tsx` file (that may import from other `.tsx` files) and exports a component comprised of reactive `Cell`s stored in `Space`s (defined by a DID). These cells enable durable communication between patterns. The reactivity is enabled by subscribing to the result of a query, defined by the schemas/type signatures.
+The Common Fabric runtime is a fully integrated, reactive runtime and execution environment for user-created programs built using Typescript + `deno`. Each pattern is a `.tsx` file (that may import from other `.tsx` files) and exports a component comprised of reactive `Cell`s stored in `Space`s (defined by a DID). These cells enable durable communication between patterns. The reactivity is enabled by subscribing to the result of a query, defined by the schemas/type signatures.
 
 ## Mental Model
 
@@ -14,4 +14,4 @@ Each pattern is composed of `Cell`s (passed in as `Inputs`), [lifted functions](
 
 A pattern returns a `Result` `Cell`, including special fields like `[UI]` (renderable html, composed of custom UI components (from `packages/ui`) as well as any number of user-defined key-value pairs. 
 
-Patterns are free to import from other patterns and compose together into reactive graphs. Patterns are lightweight and should be used exploratively to validate claims and understand usage patterns. The `ct` binary (also available via `deno task ct`) is used to compile and typecheck patterns interactively.
+Patterns are free to import from other patterns and compose together into reactive graphs. Patterns are lightweight and should be used exploratively to validate claims and understand usage patterns. The `cf` CLI (typically run via `deno task cf`) is used to compile and typecheck patterns interactively.

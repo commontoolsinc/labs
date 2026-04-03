@@ -3,7 +3,7 @@
 You can access properties directly on computed objects:
 
 ```tsx
-import { computed, UI, pattern } from 'commontools';
+import { computed, UI, pattern } from 'commonfabric';
 
 interface User { name: string; }
 interface Post { title: string; }
@@ -43,7 +43,7 @@ export default pattern<Input>(({ users, posts, config }) => {
 Reactivity is completely automatic in JSX:
 
 ```tsx
-import { UI, pattern } from 'commontools';
+import { UI, pattern } from 'commonfabric';
 
 interface Item { title: string; }
 interface Input {

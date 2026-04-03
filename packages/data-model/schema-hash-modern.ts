@@ -9,7 +9,7 @@
  * `value-hash-modern.ts` and `fabric-value-modern.ts`.
  */
 
-import type { JSONSchema } from "@commontools/api";
+import type { JSONSchema } from "@commonfabric/api";
 import type { FabricHash } from "./fabric-hash.ts";
 import type { FabricValue } from "./interface.ts";
 import { hashOfModern, hashOfModernAsString } from "./value-hash-modern.ts";

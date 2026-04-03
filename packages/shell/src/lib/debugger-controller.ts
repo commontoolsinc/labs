@@ -9,7 +9,7 @@ import type {
   SchedulerDiagnosisResult,
   SchedulerGraphEdge,
   SchedulerGraphSnapshot,
-} from "@commontools/runtime-client";
+} from "@commonfabric/runtime-client";
 
 const STORAGE_KEY = "showDebuggerView";
 const TELEMETRY_ENABLED_KEY = "telemetryEnabled";
@@ -114,15 +114,15 @@ export class DebuggerController implements ReactiveController {
     }
 
     globalThis.addEventListener("storage", this.handleStorageChange);
-    this.host.addEventListener("ct-cell-watch", this.handleCellWatch);
-    this.host.addEventListener("ct-cell-unwatch", this.handleCellUnwatch);
+    this.host.addEventListener("cf-cell-watch", this.handleCellWatch);
+    this.host.addEventListener("cf-cell-unwatch", this.handleCellUnwatch);
     this.host.addEventListener("clear-telemetry", this.handleClearTelemetry);
   }
 
   hostDisconnected() {
     globalThis.removeEventListener("storage", this.handleStorageChange);
-    this.host.removeEventListener("ct-cell-watch", this.handleCellWatch);
-    this.host.removeEventListener("ct-cell-unwatch", this.handleCellUnwatch);
+    this.host.removeEventListener("cf-cell-watch", this.handleCellWatch);
+    this.host.removeEventListener("cf-cell-unwatch", this.handleCellUnwatch);
     this.host.removeEventListener("clear-telemetry", this.handleClearTelemetry);
     // Clean up all watched cell subscriptions to prevent memory leaks
     this.unwatchAll();
@@ -830,7 +830,7 @@ export class DebuggerController implements ReactiveController {
   private handleCellWatch = (e: Event) => {
     const event = e as CustomEvent<{ cell: unknown; label?: string }>;
     const { cell, label } = event.detail;
-    // Cell type from @commontools/runner
+    // Cell type from @commonfabric/runner
     if (cell && typeof (cell as any).sink === "function") {
       this.watchCell(cell as any, label);
     }

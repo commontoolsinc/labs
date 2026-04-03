@@ -8,7 +8,7 @@
  * 2. `hash-wasm` (browser) -- WASM, ~3x faster than pure JS
  * 3. `merkle-reference`'s `sha256` (fallback) -- pure JS via @noble/hashes
  */
-import { isDeno } from "@commontools/utils/env";
+import { isDeno } from "@commonfabric/utils/env";
 import { createSHA256, type IHasher } from "hash-wasm";
 import { sha256 as nobleSha256 } from "merkle-reference";
 import { toUnpaddedBase64url } from "./base64url.ts";

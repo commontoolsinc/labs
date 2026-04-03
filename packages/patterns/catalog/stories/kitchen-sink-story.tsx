@@ -1,36 +1,36 @@
 /// <cts-enable />
-import { NAME, pattern, UI, type VNode } from "commontools";
+import { NAME, pattern, UI, type VNode } from "commonfabric";
 
-import ButtonStory from "./ct-button-story.tsx";
-import CheckboxStory from "./ct-checkbox-story.tsx";
-import CodeEditorStory from "./ct-code-editor-story.tsx";
-import InputStory from "./ct-input-story.tsx";
-import SelectStory from "./ct-select-story.tsx";
-import SwitchStory from "./ct-switch-story.tsx";
-import CardStory from "./ct-card-story.tsx";
-import ModalStory from "./ct-modal-story.tsx";
-import ProgressStory from "./ct-progress-story.tsx";
-import VStackStory from "./ct-vstack-story.tsx";
-import HStackStory from "./ct-hstack-story.tsx";
-import VGroupStory from "./ct-vgroup-story.tsx";
-import HGroupStory from "./ct-hgroup-story.tsx";
-import VScrollStory from "./ct-vscroll-story.tsx";
-import HScrollStory from "./ct-hscroll-story.tsx";
-import TextareaStory from "./ct-textarea-story.tsx";
-import MessageInputStory from "./ct-message-input-story.tsx";
-import ToolbarStory from "./ct-toolbar-story.tsx";
-import HeadingStory from "./ct-heading-story.tsx";
-import LabelStory from "./ct-label-story.tsx";
-import ChipStory from "./ct-chip-story.tsx";
-import BadgeStory from "./ct-badge-story.tsx";
-import AlertStory from "./ct-alert-story.tsx";
-import SeparatorStory from "./ct-separator-story.tsx";
-import MarkdownStory from "./ct-markdown-story.tsx";
-import LoaderStory from "./ct-loader-story.tsx";
-import SkeletonStory from "./ct-skeleton-story.tsx";
-import CollapsibleStory from "./ct-collapsible-story.tsx";
-import TabsStory from "./ct-tabs-story.tsx";
-import ChartStory from "./ct-chart-story.tsx";
+import ButtonStory from "./cf-button-story.tsx";
+import CheckboxStory from "./cf-checkbox-story.tsx";
+import CodeEditorStory from "./cf-code-editor-story.tsx";
+import InputStory from "./cf-input-story.tsx";
+import SelectStory from "./cf-select-story.tsx";
+import SwitchStory from "./cf-switch-story.tsx";
+import CardStory from "./cf-card-story.tsx";
+import ModalStory from "./cf-modal-story.tsx";
+import ProgressStory from "./cf-progress-story.tsx";
+import VStackStory from "./cf-vstack-story.tsx";
+import HStackStory from "./cf-hstack-story.tsx";
+import VGroupStory from "./cf-vgroup-story.tsx";
+import HGroupStory from "./cf-hgroup-story.tsx";
+import VScrollStory from "./cf-vscroll-story.tsx";
+import HScrollStory from "./cf-hscroll-story.tsx";
+import TextareaStory from "./cf-textarea-story.tsx";
+import MessageInputStory from "./cf-message-input-story.tsx";
+import ToolbarStory from "./cf-toolbar-story.tsx";
+import HeadingStory from "./cf-heading-story.tsx";
+import LabelStory from "./cf-label-story.tsx";
+import ChipStory from "./cf-chip-story.tsx";
+import BadgeStory from "./cf-badge-story.tsx";
+import AlertStory from "./cf-alert-story.tsx";
+import SeparatorStory from "./cf-separator-story.tsx";
+import MarkdownStory from "./cf-markdown-story.tsx";
+import LoaderStory from "./cf-loader-story.tsx";
+import SkeletonStory from "./cf-skeleton-story.tsx";
+import CollapsibleStory from "./cf-collapsible-story.tsx";
+import TabsStory from "./cf-tabs-story.tsx";
+import ChartStory from "./cf-chart-story.tsx";
 
 // deno-lint-ignore no-empty-interface
 interface KitchenSinkStoryInput {}

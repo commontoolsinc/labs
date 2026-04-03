@@ -1120,7 +1120,7 @@ import {
   FabricInstance,
   type FabricValue,
   type ReconstructionContext,
-} from '@commontools/data-model';
+} from '@commonfabric/data-model';
 
 type TemperatureUnit = "C" | "F" | "K";
 

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, type Default, NAME, pattern, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commonfabric";
 
 interface LinkPreviewInput {
   url: Default<string, "https://github.com">;
@@ -10,13 +10,13 @@ export const LinkPreview = pattern<LinkPreviewInput, LinkPreviewInput>(
     return {
       [NAME]: computed(() => `Link Preview: ${url}`),
       [UI]: (
-        <ct-vstack style={{ gap: "12px" }}>
-          <ct-input
+        <cf-vstack style={{ gap: "12px" }}>
+          <cf-input
             $value={url}
             placeholder="Enter a URL..."
           />
-          <ct-link-preview url={url} />
-        </ct-vstack>
+          <cf-link-preview url={url} />
+        </cf-vstack>
       ),
       url,
     };

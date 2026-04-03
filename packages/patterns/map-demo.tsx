@@ -8,10 +8,10 @@ import {
   NAME,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 /**
- * Trip Planner Demo - Comprehensive ct-map component demonstration
+ * Trip Planner Demo - Comprehensive cf-map component demonstration
  *
  * Demonstrates:
  * - Basic markers with title/description/icon
@@ -273,42 +273,42 @@ export default pattern<Input, Output>(
     return {
       [NAME]: computed(() => `Trip Planner: ${tripName}`),
       [UI]: (
-        <ct-screen>
-          <ct-vstack slot="header" gap="2">
-            <ct-hstack justify="between" align="center">
-              <ct-heading level={4}>Trip Planner</ct-heading>
-              <ct-hstack gap="2">
-                <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+        <cf-screen>
+          <cf-vstack slot="header" gap="2">
+            <cf-hstack justify="between" align="center">
+              <cf-heading level={4}>Trip Planner</cf-heading>
+              <cf-hstack gap="2">
+                <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                   {stopCount} stops | {areaCount} areas
                 </span>
-              </ct-hstack>
-            </ct-hstack>
-            <ct-input $value={tripName} placeholder="Trip name..." />
-          </ct-vstack>
+              </cf-hstack>
+            </cf-hstack>
+            <cf-input $value={tripName} placeholder="Trip name..." />
+          </cf-vstack>
 
-          <ct-vscroll flex showScrollbar fadeEdges>
-            <ct-vstack gap="3" style="padding: 1rem;">
+          <cf-vscroll flex showScrollbar fadeEdges>
+            <cf-vstack gap="3" style="padding: 1rem;">
               {/* Initialization prompt for empty state */}
               {ifElse(
                 computed(() => !initialized.get() && stops.get().length === 0),
-                <ct-card style="background: var(--ct-color-yellow-50); border: 1px solid var(--ct-color-yellow-300);">
-                  <ct-vstack gap="2" align="center">
-                    <ct-heading level={5}>Welcome to Trip Planner!</ct-heading>
-                    <p style="text-align: center; color: var(--ct-color-gray-600); margin: 0;">
+                <cf-card style="background: var(--cf-color-yellow-50); border: 1px solid var(--cf-color-yellow-300);">
+                  <cf-vstack gap="2" align="center">
+                    <cf-heading level={5}>Welcome to Trip Planner!</cf-heading>
+                    <p style="text-align: center; color: var(--cf-color-gray-600); margin: 0;">
                       Get started with demo data or click on the map to add your
                       first stop.
                     </p>
-                    <ct-button variant="primary" onClick={initializeDemo}>
+                    <cf-button variant="primary" onClick={initializeDemo}>
                       Load Demo Data
-                    </ct-button>
-                  </ct-vstack>
-                </ct-card>,
+                    </cf-button>
+                  </cf-vstack>
+                </cf-card>,
                 null,
               )}
 
               {/* Map container */}
-              <ct-card style="padding: 0; overflow: hidden;">
-                <ct-map
+              <cf-card style="padding: 0; overflow: hidden;">
+                <cf-map
                   $value={mapValue}
                   $center={center}
                   $zoom={zoom}
@@ -316,29 +316,29 @@ export default pattern<Input, Output>(
                   fitToBounds={computed(
                     () => fitBoundsTrigger.get() > 0 && stops.get().length > 0,
                   )}
-                  onct-click={addStopHandler({
+                  oncf-click={addStopHandler({
                     stops,
                     stopCount: stopCount,
                   })}
-                  onct-marker-drag-end={markerDragHandler({ stops })}
-                  onct-marker-click={markerClickHandler({ selectedStopIndex })}
+                  oncf-marker-drag-end={markerDragHandler({ stops })}
+                  oncf-marker-click={markerClickHandler({ selectedStopIndex })}
                 />
-              </ct-card>
+              </cf-card>
 
               {/* Map controls */}
-              <ct-card>
-                <ct-vstack gap="2">
-                  <ct-heading level={5}>Map Controls</ct-heading>
-                  <ct-hstack gap="2" wrap>
-                    <ct-button
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-heading level={5}>Map Controls</cf-heading>
+                  <cf-hstack gap="2" wrap>
+                    <cf-button
                       variant="secondary"
                       onClick={() => {
                         fitBoundsTrigger.set(fitBoundsTrigger.get() + 1);
                       }}
                     >
                       Fit to All Stops
-                    </ct-button>
-                    <ct-button
+                    </cf-button>
+                    <cf-button
                       variant="secondary"
                       onClick={() => {
                         center.set({ lat: 37.6, lng: -122.2 });
@@ -346,10 +346,10 @@ export default pattern<Input, Output>(
                       }}
                     >
                       Reset View
-                    </ct-button>
-                    <ct-checkbox $checked={showRoute}>Show Route</ct-checkbox>
-                  </ct-hstack>
-                  <ct-hstack gap="3">
+                    </cf-button>
+                    <cf-checkbox $checked={showRoute}>Show Route</cf-checkbox>
+                  </cf-hstack>
+                  <cf-hstack gap="3">
                     <span style="font-size: 0.875rem;">
                       Center: {computed(() =>
                         formatCoord(
@@ -364,22 +364,22 @@ export default pattern<Input, Output>(
                     <span style="font-size: 0.875rem;">
                       Zoom: {computed(() => zoom.get().toFixed(1))}
                     </span>
-                  </ct-hstack>
-                </ct-vstack>
-              </ct-card>
+                  </cf-hstack>
+                </cf-vstack>
+              </cf-card>
 
               {/* Stops list */}
-              <ct-card>
-                <ct-vstack gap="2">
-                  <ct-hstack justify="between" align="center">
-                    <ct-heading level={5}>Trip Stops</ct-heading>
-                    <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-hstack justify="between" align="center">
+                    <cf-heading level={5}>Trip Stops</cf-heading>
+                    <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                       Click map to add
                     </span>
-                  </ct-hstack>
+                  </cf-hstack>
 
                   {stops.map((stop, index) => (
-                    <ct-hstack
+                    <cf-hstack
                       gap="2"
                       align="center"
                       style={{
@@ -387,20 +387,20 @@ export default pattern<Input, Output>(
                         borderRadius: "0.5rem",
                         backgroundColor: ifElse(
                           computed(() => selectedStopIndex.get() === index),
-                          "var(--ct-color-blue-100)",
-                          "var(--ct-color-gray-50)",
+                          "var(--cf-color-blue-100)",
+                          "var(--cf-color-gray-50)",
                         ),
                       }}
                     >
                       <span style="font-size: 1.25rem; width: 2rem; text-align: center;">
                         {index + 1}
                       </span>
-                      <ct-vstack gap="0" style="flex: 1;">
-                        <ct-input
+                      <cf-vstack gap="0" style="flex: 1;">
+                        <cf-input
                           $value={stop.title}
                           style="font-weight: 500;"
                         />
-                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                           {computed(
                             () =>
                               `${formatCoord(stop.position.lat)}, ${
@@ -408,8 +408,8 @@ export default pattern<Input, Output>(
                               }`,
                           )}
                         </span>
-                      </ct-vstack>
-                      <ct-button
+                      </cf-vstack>
+                      <cf-button
                         variant="ghost"
                         onClick={() => {
                           center.set(stop.position);
@@ -417,32 +417,32 @@ export default pattern<Input, Output>(
                         }}
                       >
                         Go
-                      </ct-button>
-                      <ct-button
+                      </cf-button>
+                      <cf-button
                         variant="ghost"
                         onClick={removeStopHandler({ stops, index })}
                       >
                         x
-                      </ct-button>
-                    </ct-hstack>
+                      </cf-button>
+                    </cf-hstack>
                   ))}
 
                   {ifElse(
                     computed(() => stops.get().length === 0),
-                    <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
+                    <div style="text-align: center; color: var(--cf-color-gray-500); padding: 1rem;">
                       Click on the map to add your first stop!
                     </div>,
                     null,
                   )}
-                </ct-vstack>
-              </ct-card>
+                </cf-vstack>
+              </cf-card>
 
               {/* Areas of interest */}
-              <ct-card>
-                <ct-vstack gap="2">
-                  <ct-hstack justify="between" align="center">
-                    <ct-heading level={5}>Areas of Interest</ct-heading>
-                    <ct-button
+              <cf-card>
+                <cf-vstack gap="2">
+                  <cf-hstack justify="between" align="center">
+                    <cf-heading level={5}>Areas of Interest</cf-heading>
+                    <cf-button
                       variant="secondary"
                       size="sm"
                       onClick={addAreaHandler({
@@ -451,11 +451,11 @@ export default pattern<Input, Output>(
                       })}
                     >
                       + Add Area
-                    </ct-button>
-                  </ct-hstack>
+                    </cf-button>
+                  </cf-hstack>
 
                   {areasOfInterest.map((area) => (
-                    <ct-hstack gap="2" align="center">
+                    <cf-hstack gap="2" align="center">
                       <div
                         style={{
                           width: "1rem",
@@ -465,16 +465,16 @@ export default pattern<Input, Output>(
                           flexShrink: 0,
                         }}
                       />
-                      <ct-vstack gap="0" style="flex: 1;">
-                        <ct-input
+                      <cf-vstack gap="0" style="flex: 1;">
+                        <cf-input
                           $value={area.title}
                           style="font-weight: 500;"
                         />
-                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                           Radius: {area.radius}m
                         </span>
-                      </ct-vstack>
-                      <ct-button
+                      </cf-vstack>
+                      <cf-button
                         variant="ghost"
                         onClick={() => {
                           center.set(area.center);
@@ -482,8 +482,8 @@ export default pattern<Input, Output>(
                         }}
                       >
                         Go
-                      </ct-button>
-                      <ct-button
+                      </cf-button>
+                      <cf-button
                         variant="ghost"
                         onClick={() => {
                           const current = areasOfInterest.get();
@@ -496,56 +496,56 @@ export default pattern<Input, Output>(
                         }}
                       >
                         x
-                      </ct-button>
-                    </ct-hstack>
+                      </cf-button>
+                    </cf-hstack>
                   ))}
 
                   {ifElse(
                     computed(() => areasOfInterest.get().length === 0),
-                    <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
+                    <div style="text-align: center; color: var(--cf-color-gray-500); padding: 1rem;">
                       No areas defined. Click "Add Area" to highlight a region.
                     </div>,
                     null,
                   )}
-                </ct-vstack>
-              </ct-card>
+                </cf-vstack>
+              </cf-card>
 
               {/* Route summary */}
               {ifElse(
                 computed(() => showRoute.get() && stops.get().length > 1),
-                <ct-card>
-                  <ct-vstack gap="2">
-                    <ct-heading level={5}>Route Overview</ct-heading>
-                    <ct-hstack gap="2" wrap>
+                <cf-card>
+                  <cf-vstack gap="2">
+                    <cf-heading level={5}>Route Overview</cf-heading>
+                    <cf-hstack gap="2" wrap>
                       {stops.map((stop, index) => (
-                        <ct-hstack gap="1" align="center">
+                        <cf-hstack gap="1" align="center">
                           <span style="font-weight: 500;">{stop.title}</span>
                           {ifElse(
                             computed(() =>
                               index < stops.get().length - 1
                             ),
-                            <span style="color: var(--ct-color-gray-400);">
+                            <span style="color: var(--cf-color-gray-400);">
                               {" "}
                               -&gt;{" "}
                             </span>,
                             null,
                           )}
-                        </ct-hstack>
+                        </cf-hstack>
                       ))}
-                    </ct-hstack>
-                    <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+                    </cf-hstack>
+                    <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
                       {stopCount} stops connected by dashed route line
                     </span>
-                  </ct-vstack>
-                </ct-card>,
+                  </cf-vstack>
+                </cf-card>,
                 null,
               )}
 
               {/* Instructions */}
-              <ct-card style="background: var(--ct-color-blue-50);">
-                <ct-vstack gap="1">
-                  <ct-heading level={5}>How to Use</ct-heading>
-                  <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; color: var(--ct-color-gray-600);">
+              <cf-card style="background: var(--cf-color-blue-50);">
+                <cf-vstack gap="1">
+                  <cf-heading level={5}>How to Use</cf-heading>
+                  <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; color: var(--cf-color-gray-600);">
                     <li>Click anywhere on the map to add a new stop</li>
                     <li>Drag markers to reposition stops</li>
                     <li>Use "Fit to All Stops" to zoom to see all markers</li>
@@ -555,13 +555,13 @@ export default pattern<Input, Output>(
                     </li>
                     <li>Edit stop names inline in the list below</li>
                   </ul>
-                </ct-vstack>
-              </ct-card>
-            </ct-vstack>
-          </ct-vscroll>
+                </cf-vstack>
+              </cf-card>
+            </cf-vstack>
+          </cf-vscroll>
 
-          <ct-hstack slot="footer" gap="2" style="padding: 1rem;">
-            <ct-button
+          <cf-hstack slot="footer" gap="2" style="padding: 1rem;">
+            <cf-button
               variant="secondary"
               style="flex: 1;"
               onClick={() => {
@@ -571,8 +571,8 @@ export default pattern<Input, Output>(
               }}
             >
               Clear All
-            </ct-button>
-            <ct-button
+            </cf-button>
+            <cf-button
               variant="primary"
               style="flex: 1;"
               onClick={() => {
@@ -583,9 +583,9 @@ export default pattern<Input, Output>(
               }}
             >
               Reset Demo
-            </ct-button>
-          </ct-hstack>
-        </ct-screen>
+            </cf-button>
+          </cf-hstack>
+        </cf-screen>
       ),
       tripName,
       stops,

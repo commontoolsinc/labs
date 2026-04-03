@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, NAME, Stream, UI, type VNode, Writable } from "commontools";
+import { Default, NAME, Stream, UI, type VNode, Writable } from "commonfabric";
 
 // === Domain Types ===
 

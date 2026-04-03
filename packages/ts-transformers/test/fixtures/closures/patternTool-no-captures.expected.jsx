@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive, pattern, patternTool, type PatternToolResult } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
 type Output = {
     tool: PatternToolResult<Record<string, never>>;
 };
@@ -26,12 +26,12 @@ export default pattern(() => {
                 }
             },
             required: ["query", "content"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "array",
             items: {
                 type: "string"
             }
-        } as const satisfies __ctHelpers.JSONSchema, { query, content }, ({ query, content }) => {
+        } as const satisfies __cfHelpers.JSONSchema, { query, content }, ({ query, content }) => {
             return content.split("\n").filter((c: string) => c.includes(query));
         });
     });
@@ -40,7 +40,7 @@ export default pattern(() => {
     type: "object",
     properties: {},
     additionalProperties: false
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         tool: {
@@ -69,8 +69,8 @@ export default pattern(() => {
             required: ["argumentSchema", "resultSchema"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

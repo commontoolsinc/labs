@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, lift } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, lift } from "commonfabric";
 // FIXTURE: map-cell-receiver-in-lift
 // Verifies: compute-owned map roots on Cell receivers still lower to mapWithPattern
 //   lift(() => items.map((item) => item)) -> lift(() => items.mapWithPattern(...))
@@ -9,13 +9,13 @@ const items = Cell.of<string[]>([], {
     items: {
         type: "string"
     }
-} as const satisfies __ctHelpers.JSONSchema);
-export const fn = lift(false as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema);
+export const fn = lift(false as const satisfies __cfHelpers.JSONSchema, {
     type: "array",
     items: {
         type: "string"
     }
-} as const satisfies __ctHelpers.JSONSchema, () => items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+} as const satisfies __cfHelpers.JSONSchema, () => items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
     const item = __ct_pattern_input.key("element");
     return item;
 }, {
@@ -26,10 +26,10 @@ export const fn = lift(false as const satisfies __ctHelpers.JSONSchema, {
         }
     },
     required: ["element"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __ctHelpers.JSONSchema), {}));
+} as const satisfies __cfHelpers.JSONSchema), {}));
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

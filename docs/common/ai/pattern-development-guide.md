@@ -56,7 +56,7 @@ behavior:
    - add one handler or action
    - render the simplest useful UI
 2. Run it
-   - use `deno task ct check <pattern>.tsx`
+   - use `deno task cf check <pattern>.tsx`
 3. Verify
    - does it render?
    - do the core interactions fire?
@@ -71,9 +71,9 @@ before validating enough.
 
 Use the runtime, not just static reasoning:
 
-- `deno task ct check <pattern>.tsx`
-- `deno task ct check <pattern>.tsx --no-run` for faster type validation
-- `deno task ct test <pattern>.test.tsx` when tests are justified
+- `deno task cf check <pattern>.tsx`
+- `deno task cf check <pattern>.tsx --no-run` for faster type validation
+- `deno task cf test <pattern>.test.tsx` when tests are justified
 
 Primary verification is still runtime behavior. Tests are for logic that is
 awkward, fragile, or expensive to verify by clicking.
@@ -118,8 +118,8 @@ const Note = pattern<NoteInput, NoteOutput>(({ title, content }) => {
   return {
     [UI]: (
       <>
-        <ct-button onClick={toggleMenu}>Menu</ct-button>
-        <ct-button onClick={clearContent}>Clear</ct-button>
+        <cf-button onClick={toggleMenu}>Menu</cf-button>
+        <cf-button onClick={clearContent}>Clear</cf-button>
       </>
     ),
     content,
@@ -143,7 +143,7 @@ const List = pattern<ListInput, ListOutput>(({ items }) => ({
       {items.map((item, index) => (
         <li>
           {item.name}
-          <ct-button onClick={deleteItem({ index, items })}>Delete</ct-button>
+          <cf-button onClick={deleteItem({ index, items })}>Delete</cf-button>
         </li>
       ))}
     </ul>

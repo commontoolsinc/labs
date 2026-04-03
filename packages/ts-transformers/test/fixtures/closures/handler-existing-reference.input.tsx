@@ -1,10 +1,10 @@
 /// <cts-enable />
-import { handler, pattern, UI } from "commontools";
+import { handler, pattern, UI } from "commonfabric";
 
 declare global {
   namespace JSX {
     interface IntrinsicElements {
-      "ct-button": any;
+      "cf-button": any;
     }
   }
 }
@@ -25,9 +25,9 @@ const existing = handler((_event, { state }: { state: State }) => {
 export default pattern<State>((state) => {
   return {
     [UI]: (
-      <ct-button onClick={existing({ state })}>
+      <cf-button onClick={existing({ state })}>
         Existing
-      </ct-button>
+      </cf-button>
     ),
   };
 });

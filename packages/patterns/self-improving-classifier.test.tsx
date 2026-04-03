@@ -12,7 +12,7 @@
  * instead of action() with closures to avoid "reactive reference outside
  * reactive context" errors when accessing proxy objects like subject.submitItem.
  */
-import { Cell, computed, handler, pattern, Stream } from "commontools";
+import { Cell, computed, handler, pattern, Stream } from "commonfabric";
 import SelfImprovingClassifier, {
   type ClassificationRule,
   type LabeledExample,

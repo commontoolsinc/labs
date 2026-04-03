@@ -9,15 +9,15 @@ import {
   isCommand,
 } from "../../shared/mod.ts";
 import { BaseView, createDefaultAppState, SHELL_COMMAND } from "./BaseView.ts";
-import { KeyStore } from "@commontools/identity";
+import { KeyStore } from "@commonfabric/identity";
 import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
-import { type RuntimeClient } from "@commontools/runtime-client";
-import { type DID } from "@commontools/identity";
+import { type RuntimeClient } from "@commonfabric/runtime-client";
+import { type DID } from "@commonfabric/identity";
 import { RuntimeInternals } from "../lib/runtime.ts";
-import { createVDomDebugHelpers } from "@commontools/html/debug";
+import { createVDomDebugHelpers } from "@commonfabric/html/debug";
 import { createDebugUtils } from "../lib/debug-utils.ts";
-import { runtimeContext, spaceContext } from "@commontools/ui";
+import { runtimeContext, spaceContext } from "@commonfabric/ui";
 import { provide } from "@lit/context";
 
 // The root element for the shell application.
@@ -78,8 +78,8 @@ export class XRootView extends BaseView {
           // Clear the runtime and space when no app state
           this.runtime = undefined;
           this.space = undefined;
-          if (globalThis.commontools) {
-            globalThis.commontools.rt = undefined;
+          if (globalThis.commonfabric) {
+            globalThis.commonfabric.rt = undefined;
           }
           return undefined;
         }
@@ -94,8 +94,8 @@ export class XRootView extends BaseView {
           rt.dispose().catch(console.error);
           this.runtime = undefined;
           this.space = undefined;
-          if (globalThis.commontools) {
-            globalThis.commontools.rt = undefined;
+          if (globalThis.commonfabric) {
+            globalThis.commonfabric.rt = undefined;
           }
           return;
         }
@@ -105,13 +105,13 @@ export class XRootView extends BaseView {
         this.space = rt.space() as DID;
 
         // Expose RuntimeClient for console debugging
-        // (e.g. commontools.rt.setLoggerLevel("debug"))
-        if (!globalThis.commontools) {
-          (globalThis as any).commontools = {};
+        // (e.g. commonfabric.rt.setLoggerLevel("debug"))
+        if (!globalThis.commonfabric) {
+          (globalThis as any).commonfabric = {};
         }
-        globalThis.commontools.rt = this.runtime;
-        globalThis.commontools.vdom = createVDomDebugHelpers();
-        globalThis.commontools.detectNonIdempotent = async (
+        globalThis.commonfabric.rt = this.runtime;
+        globalThis.commonfabric.vdom = createVDomDebugHelpers();
+        globalThis.commonfabric.detectNonIdempotent = async (
           durationMs = 5000,
         ) => {
           const result = await rt.runtime().detectNonIdempotent(durationMs);
@@ -126,18 +126,18 @@ export class XRootView extends BaseView {
         };
 
         // Debug utilities for inspecting cell values from the console
-        globalThis.commontools.space = this.space;
+        globalThis.commonfabric.space = this.space;
         const debugUtils = createDebugUtils(
           () => this.space as DID,
           () => this.runtime,
         );
-        globalThis.commontools.readCell = debugUtils.readCell;
-        globalThis.commontools.readArgumentCell = debugUtils.readArgumentCell;
-        globalThis.commontools.subscribeToCell = debugUtils.subscribeToCell;
-        globalThis.commontools.watchWrites = debugUtils.watchWrites;
-        globalThis.commontools.getWriteStackTrace =
+        globalThis.commonfabric.readCell = debugUtils.readCell;
+        globalThis.commonfabric.readArgumentCell = debugUtils.readArgumentCell;
+        globalThis.commonfabric.subscribeToCell = debugUtils.subscribeToCell;
+        globalThis.commonfabric.watchWrites = debugUtils.watchWrites;
+        globalThis.commonfabric.getWriteStackTrace =
           debugUtils.getWriteStackTrace;
-        globalThis.commontools.explainTriggerTrace =
+        globalThis.commonfabric.explainTriggerTrace =
           debugUtils.explainTriggerTrace;
 
         return rt;

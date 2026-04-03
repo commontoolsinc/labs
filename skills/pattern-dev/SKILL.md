@@ -1,6 +1,6 @@
 ---
 name: pattern-dev
-description: Guide for developing CommonTools patterns (TypeScript modules that define reactive data transformations with UI). Use this skill when creating patterns, modifying existing patterns, or working with the pattern framework. Triggers include requests like "build a pattern", "fix this pattern error", "deploy this piece/patch", or questions about handlers and reactive patterns.
+description: Guide for developing Common Fabric patterns (TypeScript modules that define reactive data transformations with UI). Use this skill when creating patterns, modifying existing patterns, or working with the pattern framework. Triggers include requests like "build a pattern", "fix this pattern error", "deploy this piece/patch", or questions about handlers and reactive patterns.
 ---
 
 Start with the shared pattern development guidance in:
@@ -11,7 +11,7 @@ Read that guide first. It is the canonical reference.
 
 Runtime notes:
 
-- Use the `ct` skill, or read `skills/ct/SKILL.md`, when you need CLI command
+- Use the `cf` skill, or read `skills/cf/SKILL.md`, when you need CLI command
   details.
 - If your runtime supports delegation, pass file paths rather than pasted
   summaries.

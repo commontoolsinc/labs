@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, pattern, UI } from "commontools";
+import { Cell, pattern, UI } from "commonfabric";
 
 interface State {
   selectedValue: Cell<string>;
@@ -13,13 +13,13 @@ interface State {
 export default pattern<State>((state) => {
   return {
     [UI]: (
-      <ct-select
+      <cf-select
         $value={state.selectedValue}
         items={[
           { label: "Option A", value: "a" },
           { label: "Option B", value: "b" },
         ]}
-        onct-change={({ detail: { value, items } }) => {
+        oncf-change={({ detail: { value, items } }) => {
           state.selectedValue.set(value);
           state.lastItems.set(items.map(i => i.label).join(", "));
         }}

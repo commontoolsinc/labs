@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, pattern, UI } from "commontools";
+import { derive, pattern, UI } from "commonfabric";
 
 interface ContentPart {
   type: "text" | "image";

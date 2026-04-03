@@ -30,7 +30,7 @@ import {
   UI,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { Output as ProfileOutput } from "../../profile.tsx";
 
 // =============================================================================
@@ -546,13 +546,13 @@ export default pattern<PatternInput, PatternOutput>(() => {
     isConnected,
 
     [UI]: (
-      <ct-screen>
+      <cf-screen>
         <div slot="header">
-          <ct-heading level={3}>Flight Calendar Bridge</ct-heading>
+          <cf-heading level={3}>Flight Calendar Bridge</cf-heading>
         </div>
 
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack padding="6" gap="4">
+        <cf-vscroll flex showScrollbar>
+          <cf-vstack padding="6" gap="4">
             {/* Connection Status */}
             <div
               style={{
@@ -711,7 +711,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
               >
                 Generated Events
               </h3>
-              <ct-vstack gap="4">
+              <cf-vstack gap="4">
                 {eventGroups.map((group) => (
                   <div
                     style={{
@@ -818,7 +818,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                     )}
                   </div>
                 ))}
-              </ct-vstack>
+              </cf-vstack>
             </div>
 
             {/* No flights message */}
@@ -937,9 +937,9 @@ export default pattern<PatternInput, PatternOutput>(() => {
                 </li>
               </ol>
             </div>
-          </ct-vstack>
-        </ct-vscroll>
-      </ct-screen>
+          </cf-vstack>
+        </cf-vscroll>
+      </cf-screen>
     ),
   };
 });

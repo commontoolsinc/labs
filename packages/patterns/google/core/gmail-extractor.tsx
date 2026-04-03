@@ -70,7 +70,7 @@ import {
   JSONSchema,
   pattern,
   Stream,
-} from "commontools";
+} from "commonfabric";
 import GmailImporter, { type Auth, type Email } from "./gmail-importer.tsx";
 import ProcessingStatus from "./processing-status.tsx";
 import {
@@ -597,7 +597,7 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
               color: "#2563eb",
             }}
           >
-            <ct-loader size="sm" />
+            <cf-loader size="sm" />
             <span>{pendingCount} analyzing...</span>
           </div>
           <span style={{ color: "#059669" }}>

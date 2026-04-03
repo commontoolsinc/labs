@@ -27,7 +27,7 @@ if (
     hookSpecificOutput: {
       hookEventName: "PostToolUse",
       additionalContext:
-        `Run it: deno task ct check ${filePath}`,
+        `Run it: deno task cf check ${filePath}`,
     },
   }));
 }

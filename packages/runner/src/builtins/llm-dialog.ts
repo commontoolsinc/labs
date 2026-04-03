@@ -1,10 +1,10 @@
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,
   LLMRequest,
   LLMToolCall,
-} from "@commontools/llm";
+} from "@commonfabric/llm";
 import type {
   BuiltInLLMMessage,
   BuiltInLLMParams,
@@ -12,20 +12,20 @@ import type {
   BuiltInLLMTool,
   BuiltInLLMToolCallPart,
   JSONSchema,
-} from "commontools";
-import type { Schema } from "@commontools/api/schema";
+} from "commonfabric";
+import type { Schema } from "@commonfabric/api/schema";
 import {
   isNontrivialSchema,
   toDeepFrozenSchema,
-} from "@commontools/data-model/schema-utils";
+} from "@commonfabric/data-model/schema-utils";
 import {
   LLMMessageSchema,
   LLMParamsSchema,
   LLMReducedToolSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { getLogger } from "@commontools/utils/logger";
-import { isBoolean, isObject, isRecord } from "@commontools/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
 import { ID, NAME, type Pattern } from "../builder/types.ts";
@@ -48,7 +48,7 @@ import {
 } from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 
-// Avoid importing from @commontools/piece to prevent circular deps in tests
+// Avoid importing from @commonfabric/piece to prevent circular deps in tests
 
 const logger = getLogger("llm-dialog", {
   enabled: false,

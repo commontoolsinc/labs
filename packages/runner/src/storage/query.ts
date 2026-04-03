@@ -1,4 +1,4 @@
-import type { Revision, State } from "@commontools/memory/interface";
+import type { Revision, State } from "@commonfabric/memory/interface";
 
 import {
   type BaseMemoryAddress,

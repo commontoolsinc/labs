@@ -1,10 +1,10 @@
 import ts from "typescript";
-import { CTHelpers } from "../../core/mod.ts";
+import { CFHelpers } from "../../core/mod.ts";
 
 export interface IfElseParams {
   expression: ts.ConditionalExpression;
   factory: ts.NodeFactory;
-  ctHelpers: CTHelpers;
+  cfHelpers: CFHelpers;
   sourceFile: ts.SourceFile;
   overrides?: IfElseOverrides;
 }
@@ -16,7 +16,7 @@ export interface IfElseOverrides {
 }
 
 export function createIfElseCall(params: IfElseParams): ts.CallExpression {
-  const { ctHelpers, overrides, expression } = params;
+  const { cfHelpers, overrides, expression } = params;
 
   let predicate = overrides?.predicate ?? expression.condition;
   let whenTrue = overrides?.whenTrue ?? expression.whenTrue;
@@ -29,7 +29,7 @@ export function createIfElseCall(params: IfElseParams): ts.CallExpression {
     whenFalse = whenFalse.expression;
   }
 
-  return ctHelpers.createHelperCall(
+  return cfHelpers.createHelperCall(
     "ifElse",
     expression,
     undefined,
@@ -41,7 +41,7 @@ export interface WhenParams {
   condition: ts.Expression;
   value: ts.Expression;
   factory: ts.NodeFactory;
-  ctHelpers: CTHelpers;
+  cfHelpers: CFHelpers;
 }
 
 /**
@@ -49,7 +49,7 @@ export interface WhenParams {
  * Equivalent to: ifElse(condition, value, condition)
  */
 export function createWhenCall(params: WhenParams): ts.CallExpression {
-  const { ctHelpers, condition, value } = params;
+  const { cfHelpers, condition, value } = params;
 
   let cond = condition;
   let val = value;
@@ -60,7 +60,7 @@ export function createWhenCall(params: WhenParams): ts.CallExpression {
     val = val.expression;
   }
 
-  return ctHelpers.createHelperCall(
+  return cfHelpers.createHelperCall(
     "when",
     condition,
     undefined,
@@ -73,7 +73,7 @@ export function createWhenCall(params: WhenParams): ts.CallExpression {
  * Equivalent to: ifElse(condition, condition, value)
  */
 export function createUnlessCall(params: WhenParams): ts.CallExpression {
-  const { ctHelpers, condition, value } = params;
+  const { cfHelpers, condition, value } = params;
 
   let cond = condition;
   let val = value;
@@ -84,7 +84,7 @@ export function createUnlessCall(params: WhenParams): ts.CallExpression {
     val = val.expression;
   }
 
-  return ctHelpers.createHelperCall(
+  return cfHelpers.createHelperCall(
     "unless",
     condition,
     undefined,

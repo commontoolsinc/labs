@@ -1,7 +1,7 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type * as Routes from "./memory.routes.ts";
 import { Memory, memory } from "../memory.ts";
-import * as Codec from "@commontools/memory/codec";
+import * as Codec from "@commonfabric/memory/codec";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
 
 export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {

@@ -7,7 +7,7 @@
  * it handles freezing, hashing, and caching. The constructor is public
  * for direct use when both the frozen schema and hash are already in hand.
  */
-import type { JSONSchema } from "@commontools/api";
+import type { JSONSchema } from "@commonfabric/api";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import type { FabricHash } from "./fabric-hash.ts";
 

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 
 type SelectedScopes = {
   gmail: boolean;
@@ -19,16 +19,16 @@ interface Input {
 // Verifies: plain-array callback roots stay plain while dynamic JSX bindings still derive
 //   Object.entries(...).map(fn)                     -> plain .map() remains plain
 //   selectedScopes[key as keyof SelectedScopes]     -> derived binding with selectedScopes and key captures
-// Context: Dynamic property access in a plain array callback used as a ct-checkbox binding
+// Context: Dynamic property access in a plain array callback used as a cf-checkbox binding
 export default pattern<Input>(({ selectedScopes }) => {
   return {
     [UI]: (
       <div>
         {Object.entries(SCOPE_DESCRIPTIONS).map(([key, description]) => (
           <label>
-            <ct-checkbox $checked={selectedScopes[key as keyof SelectedScopes]}>
+            <cf-checkbox $checked={selectedScopes[key as keyof SelectedScopes]}>
               {description}
-            </ct-checkbox>
+            </cf-checkbox>
           </label>
         ))}
       </div>

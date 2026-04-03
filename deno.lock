@@ -1964,7 +1964,7 @@
       },
       "packages/memory": {
         "dependencies": [
-          "jsr:@commontools/leb128@*",
+          "jsr:@commonfabric/leb128@*",
           "jsr:@db/sqlite@0.12",
           "npm:@opentelemetry/api@^1.9.0"
         ]

@@ -1,12 +1,12 @@
-import * as MemoryProvider from "@commontools/memory/provider";
-import * as Consumer from "@commontools/memory/consumer";
+import * as MemoryProvider from "@commonfabric/memory/provider";
+import * as Consumer from "@commonfabric/memory/consumer";
 import {
   type Options,
   Provider,
   StorageManager as BaseStorageManager,
 } from "./cache.ts";
 import * as StorageSubscription from "./subscription.ts";
-import type { MemorySpace } from "@commontools/memory/interface";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { IStorageSubscription } from "./interface.ts";
 export * from "./cache.ts";
 

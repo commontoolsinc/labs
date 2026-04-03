@@ -11,7 +11,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 type Secret<T> = T;
 
@@ -755,12 +755,12 @@ export default pattern<Input, Output>(
     return {
       [NAME]: "Google Docs Comment Orchestrator",
       [UI]: (
-        <ct-screen>
+        <cf-screen>
           {/* Header */}
-          <ct-vstack slot="header" gap={1}>
-            <ct-hstack align="center" justify="between">
-              <ct-heading level={4}>Google Docs Comments</ct-heading>
-              <ct-hstack align="center" gap={1}>
+          <cf-vstack slot="header" gap={1}>
+            <cf-hstack align="center" justify="between">
+              <cf-heading level={4}>Google Docs Comments</cf-heading>
+              <cf-hstack align="center" gap={1}>
                 <span
                   style={{
                     width: "8px",
@@ -772,30 +772,30 @@ export default pattern<Input, Output>(
                 <span style={{ fontSize: "12px", color: "#666" }}>
                   {authInfo.statusText}
                 </span>
-              </ct-hstack>
-            </ct-hstack>
-          </ct-vstack>
+              </cf-hstack>
+            </cf-hstack>
+          </cf-vstack>
 
           {/* Main content */}
-          <ct-vstack gap="1" style="padding: 16px;">
+          <cf-vstack gap="1" style="padding: 16px;">
             {/* Auth UI from utility - handles all states including scope warnings */}
             {authFullUI}
 
             {/* Doc URL input */}
-            <ct-card>
-              <ct-vstack gap={1}>
+            <cf-card>
+              <cf-vstack gap={1}>
                 <label style={{ fontSize: "13px", fontWeight: 500 }}>
                   Google Doc URL
                 </label>
-                <ct-hstack gap={1}>
-                  <ct-input
+                <cf-hstack gap={1}>
+                  <cf-input
                     $value={docUrl}
                     placeholder="https://docs.google.com/document/d/..."
                     style="flex: 1;"
                   />
                   {ifElse(
                     isAuthenticated,
-                    <ct-button
+                    <cf-button
                       variant="primary"
                       type="button"
                       disabled={isFetchingCell}
@@ -810,16 +810,16 @@ export default pattern<Input, Output>(
                     >
                       {ifElse(
                         computed(() => isFetchingCell.get() === true),
-                        <ct-hstack align="center" gap={1}>
-                          <ct-loader />
+                        <cf-hstack align="center" gap={1}>
+                          <cf-loader />
                           <span>Fetching...</span>
-                        </ct-hstack>,
+                        </cf-hstack>,
                         "Fetch Comments",
                       )}
-                    </ct-button>,
+                    </cf-button>,
                     null,
                   )}
-                </ct-hstack>
+                </cf-hstack>
 
                 {/* Error display */}
                 {ifElse(
@@ -828,23 +828,23 @@ export default pattern<Input, Output>(
                     style={{
                       marginTop: "8px",
                       padding: "8px 12px",
-                      backgroundColor: "var(--ct-color-red-50, #fef2f2)",
-                      border: "1px solid var(--ct-color-red-200, #fecaca)",
+                      backgroundColor: "var(--cf-color-red-50, #fef2f2)",
+                      border: "1px solid var(--cf-color-red-200, #fecaca)",
                       borderRadius: "6px",
                       fontSize: "12px",
-                      color: "var(--ct-color-red-700, #b91c1c)",
+                      color: "var(--cf-color-red-700, #b91c1c)",
                     }}
                   >
                     {lastError}
                   </div>,
                   null,
                 )}
-              </ct-vstack>
-            </ct-card>
+              </cf-vstack>
+            </cf-card>
 
             {/* Global Prompt (collapsible) */}
-            <ct-card>
-              <ct-hstack
+            <cf-card>
+              <cf-hstack
                 align="center"
                 justify="between"
                 style="cursor: pointer;"
@@ -867,12 +867,12 @@ export default pattern<Input, Output>(
                 <span style={{ color: "#888" }}>
                   {ifElse(showGlobalPrompt, "\u25BC", "\u25B6")}
                 </span>
-              </ct-hstack>
+              </cf-hstack>
 
               {ifElse(
                 showGlobalPrompt,
                 <div style={{ marginTop: "12px" }}>
-                  <ct-input
+                  <cf-input
                     $value={globalPrompt}
                     placeholder="E.g., Be concise. Use formal language. Always acknowledge valid concerns before disagreeing."
                     style="width: 100%;"
@@ -890,11 +890,11 @@ export default pattern<Input, Output>(
                 </div>,
                 null,
               )}
-            </ct-card>
+            </cf-card>
 
             {/* Comments List */}
-            <ct-card style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
-              <ct-hstack
+            <cf-card style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+              <cf-hstack
                 align="center"
                 justify="between"
                 style="margin-bottom: 12px;"
@@ -902,19 +902,19 @@ export default pattern<Input, Output>(
                 <span style={{ fontWeight: 600 }}>
                   Comments ({openCommentCount})
                 </span>
-              </ct-hstack>
+              </cf-hstack>
 
               {/* Comments list - using pre-computed values, no reactive deps in map */}
-              <ct-vscroll flex showScrollbar fadeEdges>
+              <cf-vscroll flex showScrollbar fadeEdges>
                 {commentsWithState.map((item) => (
                   <div
                     style={{
                       borderRadius: "8px",
-                      border: "1px solid var(--ct-color-border, #e0e0e0)",
+                      border: "1px solid var(--cf-color-border, #e0e0e0)",
                       marginBottom: "8px",
                       overflow: "hidden",
                       backgroundColor: item.state?.status === "skipped"
-                        ? "var(--ct-color-surface-secondary, #f5f5f5)"
+                        ? "var(--cf-color-surface-secondary, #f5f5f5)"
                         : "white",
                       opacity: item.state?.status === "skipped" ? 0.6 : 1,
                     }}
@@ -1007,7 +1007,7 @@ export default pattern<Input, Output>(
                               padding: "2px 6px",
                               borderRadius: "10px",
                               backgroundColor:
-                                "var(--ct-color-surface-secondary, #f0f0f0)",
+                                "var(--cf-color-surface-secondary, #f0f0f0)",
                               color: "#666",
                             }}
                           >
@@ -1025,10 +1025,10 @@ export default pattern<Input, Output>(
                       <div
                         style={{
                           borderTop:
-                            "1px solid var(--ct-color-border, #e0e0e0)",
+                            "1px solid var(--cf-color-border, #e0e0e0)",
                           padding: "16px",
                           backgroundColor:
-                            "var(--ct-color-surface-secondary, #fafafa)",
+                            "var(--cf-color-surface-secondary, #fafafa)",
                         }}
                       >
                         {/* Full quoted text - use ifElse for conditional content */}
@@ -1039,7 +1039,7 @@ export default pattern<Input, Output>(
                               padding: "12px",
                               marginBottom: "12px",
                               borderLeft:
-                                "3px solid var(--ct-color-blue-500, #3b82f6)",
+                                "3px solid var(--cf-color-blue-500, #3b82f6)",
                               backgroundColor: "white",
                               borderRadius: "4px",
                             }}
@@ -1101,7 +1101,7 @@ export default pattern<Input, Output>(
                     )}
                   </div>
                 ))}
-              </ct-vscroll>
+              </cf-vscroll>
 
               {/* AI Response Panel - OUTSIDE map, at pattern body level */}
               {ifElse(
@@ -1109,9 +1109,9 @@ export default pattern<Input, Output>(
                 <div
                   style={{
                     padding: "16px",
-                    backgroundColor: "var(--ct-color-green-50, #f0fdf4)",
+                    backgroundColor: "var(--cf-color-green-50, #f0fdf4)",
                     borderRadius: "8px",
-                    border: "1px solid var(--ct-color-green-200, #bbf7d0)",
+                    border: "1px solid var(--cf-color-green-200, #bbf7d0)",
                     marginTop: "12px",
                   }}
                 >
@@ -1127,12 +1127,12 @@ export default pattern<Input, Output>(
                       style={{
                         fontSize: "14px",
                         fontWeight: 600,
-                        color: "var(--ct-color-green-700, #15803d)",
+                        color: "var(--cf-color-green-700, #15803d)",
                       }}
                     >
                       AI Suggested Response
                     </span>
-                    <ct-button
+                    <cf-button
                       variant="pill"
                       type="button"
                       title="Generate a new response"
@@ -1144,7 +1144,7 @@ export default pattern<Input, Output>(
                       })}
                     >
                       Regenerate
-                    </ct-button>
+                    </cf-button>
                   </div>
 
                   {/* Response content - reads aiResponse directly at pattern body level */}
@@ -1174,7 +1174,7 @@ export default pattern<Input, Output>(
                   <div
                     style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}
                   >
-                    <ct-button
+                    <cf-button
                       variant="primary"
                       type="button"
                       disabled={computed(() => aiResponse.pending ||
@@ -1194,8 +1194,8 @@ export default pattern<Input, Output>(
                       })}
                     >
                       Reply
-                    </ct-button>
-                    <ct-button
+                    </cf-button>
+                    <cf-button
                       variant="secondary"
                       type="button"
                       disabled={computed(() =>
@@ -1216,8 +1216,8 @@ export default pattern<Input, Output>(
                       })}
                     >
                       Reply + Resolve
-                    </ct-button>
-                    <ct-button
+                    </cf-button>
+                    <cf-button
                       variant="ghost"
                       type="button"
                       onClick={skipComment({
@@ -1229,7 +1229,7 @@ export default pattern<Input, Output>(
                       })}
                     >
                       Skip
-                    </ct-button>
+                    </cf-button>
                   </div>
                 </div>,
                 <div
@@ -1244,13 +1244,13 @@ export default pattern<Input, Output>(
                   Select a comment to generate an AI response
                 </div>,
               )}
-            </ct-card>
+            </cf-card>
 
             {/* Trusted Confirmation Component - renders inline when pendingAction is set */}
             {/* TRUST BOUNDARY: executeAction lives in google-docs-comment-confirm.tsx */}
             {ifElse(
               hasAction,
-              <ct-card
+              <cf-card
                 style={{
                   padding: "20px",
                   marginTop: "16px",
@@ -1260,16 +1260,16 @@ export default pattern<Input, Output>(
                 }}
               >
                 {/* Header */}
-                <ct-hstack
+                <cf-hstack
                   align="center"
                   gap={2}
                   style={{ marginBottom: "16px" }}
                 >
                   <span style={{ fontSize: "24px" }}>⚠️</span>
-                  <ct-heading level={4}>
+                  <cf-heading level={4}>
                     Confirm Action on Google Docs
-                  </ct-heading>
-                </ct-hstack>
+                  </cf-heading>
+                </cf-hstack>
 
                 {/* Action type badge */}
                 <div
@@ -1288,7 +1288,7 @@ export default pattern<Input, Output>(
                 </div>
 
                 {/* Context info */}
-                <ct-vstack gap={2} style={{ marginBottom: "16px" }}>
+                <cf-vstack gap={2} style={{ marginBottom: "16px" }}>
                   <div style={{ fontSize: "14px", color: "#666" }}>
                     <strong>Document:</strong> {actionDetails?.docUrlShort}
                   </div>
@@ -1315,7 +1315,7 @@ export default pattern<Input, Output>(
                     <strong>Original comment:</strong>{" "}
                     {actionDetails?.commentContent}
                   </div>
-                </ct-vstack>
+                </cf-vstack>
 
                 {/* Your response */}
                 <div
@@ -1362,16 +1362,16 @@ export default pattern<Input, Output>(
                 )}
 
                 {/* Action buttons */}
-                <ct-hstack gap={2} justify="end">
-                  <ct-button
+                <cf-hstack gap={2} justify="end">
+                  <cf-button
                     variant="secondary"
                     type="button"
                     disabled={isExecutingCell}
                     onClick={cancelAction({ action: pendingActionCell })}
                   >
                     Cancel
-                  </ct-button>
-                  <ct-button
+                  </cf-button>
+                  <cf-button
                     variant="primary"
                     type="button"
                     disabled={isExecutingCell}
@@ -1390,13 +1390,13 @@ export default pattern<Input, Output>(
                       "Posting...",
                       <span>✓ Post {actionDetails?.typeLabel}</span>,
                     )}
-                  </ct-button>
-                </ct-hstack>
-              </ct-card>,
+                  </cf-button>
+                </cf-hstack>
+              </cf-card>,
               null,
             )}
-          </ct-vstack>
-        </ct-screen>
+          </cf-vstack>
+        </cf-screen>
       ),
       docUrl,
       comments,

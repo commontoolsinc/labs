@@ -27,7 +27,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import {
   createSubPiece,
   getDefinition,
@@ -2637,7 +2637,7 @@ export const ExtractorModule = pattern<
                         color: "#6b7280",
                       }}
                     >
-                      <ct-loader size="sm" />
+                      <cf-loader size="sm" />
                       <span>Running OCR on photos...</span>
                     </div>,
                     null,
@@ -2718,7 +2718,7 @@ export const ExtractorModule = pattern<
                 padding: "24px",
               }}
             >
-              <ct-loader size="sm" show-elapsed />
+              <cf-loader size="sm" show-elapsed />
               <span style={{ color: "#92400e" }}>
                 {extractingProgressIcon} {extractingProgressMessage}
               </span>
@@ -3086,7 +3086,7 @@ export const ExtractorModule = pattern<
                         color: "#6b7280",
                       }}
                     >
-                      <ct-loader size="sm" />
+                      <cf-loader size="sm" />
                       <span>Generating cleanup preview...</span>
                     </div>,
                     <div>

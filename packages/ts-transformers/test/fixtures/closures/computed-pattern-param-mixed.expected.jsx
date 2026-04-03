@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, computed, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 // FIXTURE: computed-pattern-param-mixed
 // Verifies: computed() capturing a mix of cells, pattern params, and plain locals
 //   computed(() => (value.get() + config.base + offset) * config.multiplier + threshold.get()) → derive(..., { value, config: { base, multiplier }, offset, threshold }, ...)
@@ -12,12 +12,12 @@ export default pattern((config: {
 }) => {
     const value = Writable.of(10, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const offset = 5; // non-cell local
     const threshold = Writable.of(15, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema); // cell local
-    const result = __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema); // cell local
+    const result = __cfHelpers.derive({
         type: "object",
         properties: {
             value: {
@@ -45,9 +45,9 @@ export default pattern((config: {
             }
         },
         required: ["value", "config", "offset", "threshold"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         value: value,
         config: {
             base: config.key("base"),
@@ -68,10 +68,10 @@ export default pattern((config: {
         }
     },
     required: ["base", "multiplier"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

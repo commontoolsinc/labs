@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, lift } from "commontools";
+import { Cell, lift } from "commonfabric";
 
 // FIXTURE: map-cell-receiver-in-lift
 // Verifies: compute-owned map roots on Cell receivers still lower to mapWithPattern

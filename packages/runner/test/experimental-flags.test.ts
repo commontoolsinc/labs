@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { ExperimentalOptions, RuntimeOptions } from "@commontools/runner";
+import type { ExperimentalOptions, RuntimeOptions } from "@commonfabric/runner";
 
 const VALIDATION_MSG = "ExperimentalOptions: `modernDataModel` requires";
 

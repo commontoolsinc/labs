@@ -1,7 +1,7 @@
 import * as path from "@std/path";
 import { Manifest } from "./manifest.ts";
 import { Summary, TestFileResults } from "./interface.ts";
-import { build } from "@commontools/felt";
+import { build } from "@commonfabric/felt";
 
 export const tsToJs = (path: string): string => path.replace(/\.ts$/, ".js");
 

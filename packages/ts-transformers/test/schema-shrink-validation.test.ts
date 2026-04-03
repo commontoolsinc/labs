@@ -1,19 +1,19 @@
 import { assertEquals, assertGreater, assertStringIncludes } from "@std/assert";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
-import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
 /**
  * Extracts JSON schema literals from transformed output.
  * Schemas appear as either:
- * - `{ type: "object", ... } as const satisfies __ctHelpers.JSONSchema`
- * - `true as const satisfies __ctHelpers.JSONSchema`
- * - `false as const satisfies __ctHelpers.JSONSchema`
+ * - `{ type: "object", ... } as const satisfies __cfHelpers.JSONSchema`
+ * - `true as const satisfies __cfHelpers.JSONSchema`
+ * - `false as const satisfies __cfHelpers.JSONSchema`
  * Returns them in order of appearance.
  */
 function extractSchemas(output: string): string[] {
   const schemas: string[] = [];
-  const marker = "as const satisfies __ctHelpers.JSONSchema";
+  const marker = "as const satisfies __cfHelpers.JSONSchema";
   let searchFrom = 0;
   while (true) {
     const markerIdx = output.indexOf(marker, searchFrom);
@@ -67,7 +67,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "export default pattern((state: unknown) => {",
         "  const x = state.foo;",
@@ -76,7 +76,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -96,7 +96,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "export default pattern((state: { a: string }) => {",
         "  const x = state.a;",
@@ -105,7 +105,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -125,14 +125,14 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const helper = (x: unknown) => (x as any).foo;",
         "",
         "const fn = lift((state: unknown) => helper(state));",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -151,14 +151,14 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const helper = (x: { a: string }) => (x as any).b;",
         "",
         "const fn = lift((state: { a: string }) => helper(state));",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -177,12 +177,12 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift((state: unknown) => console.log(state));",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -201,12 +201,12 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift((state: any) => console.log(state));",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -227,12 +227,12 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift((state: { a: string }) => console.log(state));",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -253,7 +253,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "export default pattern((state: unknown) => {",
         "  console.log(state);",
@@ -261,7 +261,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -280,7 +280,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { handler } from "commontools";',
+        'import { handler } from "commonfabric";',
         "",
         "interface BatchEvent {",
         "  amounts?: unknown;",
@@ -295,7 +295,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -314,7 +314,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "interface State {",
         "  data?: unknown;",
@@ -326,7 +326,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -345,7 +345,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { handler } from "commontools";',
+        'import { handler } from "commonfabric";',
         "",
         "interface BatchEvent {",
         "  amounts?: any;",
@@ -359,7 +359,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -380,7 +380,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { handler } from "commontools";',
+        'import { handler } from "commonfabric";',
         "",
         "interface BatchEvent {",
         "  amounts?: number[];",
@@ -395,7 +395,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -416,7 +416,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { handler } from "commontools";',
+        'import { handler } from "commonfabric";',
         "",
         "type Req = { item: string };",
         "",
@@ -425,7 +425,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -448,7 +448,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "export default pattern((state: { a: string; b: number }) => {",
         "  const x = state.a;",
@@ -457,7 +457,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -480,14 +480,14 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { handler } from "commontools";',
+        'import { handler } from "commonfabric";',
         "",
         "export const h = handler<{ amount?: number } | undefined, {}>(",
         "  (args) => { console.log(args.amount); },",
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -510,14 +510,14 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { handler } from "commontools";',
+        'import { handler } from "commonfabric";',
         "",
         "export const h = handler<{ value?: number } | number | undefined, {}>(",
         "  (args) => { console.log(args.value); },",
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -540,7 +540,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { handler } from "commontools";',
+        'import { handler } from "commonfabric";',
         "",
         "interface Req { item: string }",
         "",
@@ -549,7 +549,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -572,12 +572,12 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift((items: number[]) => items[0]);",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -600,7 +600,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "type Items = Array<{ name: string }>;",
         "const hasItems = lift<Items, boolean>(",
@@ -608,7 +608,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -631,7 +631,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "type Indexed = { [index: number]: string };",
         "const hasItems = lift<Indexed, boolean>(",
@@ -639,7 +639,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -662,7 +662,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       // where the callback param is SomeType | undefined and accesses a property.
       const source = [
         "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "interface ServingsEvent { servings?: number; delta?: number }",
         "",
@@ -673,7 +673,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const shrinkErrors = errors.filter(
@@ -700,7 +700,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const sourceTypeArgs = [
         "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "export const h = handler<{ amount: number }, { total: Cell<number> }>(",
         "  (event, ctx) => { ctx.total.set(event.amount); },",
@@ -708,7 +708,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       ].join("\n");
       const sourceInline = [
         "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "export const h = handler(",
         "  (event: { amount: number }, ctx: { total: Cell<number> }) => {",
@@ -717,10 +717,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -752,7 +752,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       // (type-arg: {type:"number"}, inline: {anyOf:[{type:"number"},{type:"undefined"}]}).
       const sourceTypeArgs = [
         "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "export const h = handler<{ amount?: number } | undefined, { total: Cell<number> }>(",
         "  (event, ctx) => { ctx.total.set(event?.amount ?? 0); },",
@@ -760,7 +760,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       ].join("\n");
       const sourceInline = [
         "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "export const h = handler(",
         "  (event: { amount?: number } | undefined, ctx: { total: Cell<number> }) => {",
@@ -769,10 +769,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -815,7 +815,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const sourceTypeArgs = [
         "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "interface ScaleEvent { servings?: number; delta?: number }",
         "interface ScaleState { desiredServings: Cell<number> }",
@@ -826,7 +826,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       ].join("\n");
       const sourceInline = [
         "/// <cts-enable />",
-        'import { type Cell, handler } from "commontools";',
+        'import { type Cell, handler } from "commonfabric";',
         "",
         "interface ScaleEvent { servings?: number; delta?: number }",
         "interface ScaleState { desiredServings: Cell<number> }",
@@ -838,10 +838,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -882,7 +882,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const sourceTypeArgs = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift<{ count: number }, string>(",
         "  (state) => `count: ${state.count}`,",
@@ -890,17 +890,17 @@ Deno.test("Schema Shrink Validation", async (t) => {
       ].join("\n");
       const sourceInline = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift(",
         "  (state: { count: number }): string => `count: ${state.count}`,",
         ");",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -928,7 +928,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       // Both forms now preserve `| undefined` in the input schema.
       const sourceTypeArgs = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift<{ count: number } | undefined, number>(",
         "  (state) => state?.count ?? 0,",
@@ -936,17 +936,17 @@ Deno.test("Schema Shrink Validation", async (t) => {
       ].join("\n");
       const sourceInline = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "const fn = lift(",
         "  (state: { count: number } | undefined): number => state?.count ?? 0,",
         ");",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -987,7 +987,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const sourceTypeArgs = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "interface Item { name: string; price: number }",
         "",
@@ -997,7 +997,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       ].join("\n");
       const sourceInline = [
         "/// <cts-enable />",
-        'import { lift } from "commontools";',
+        'import { lift } from "commonfabric";',
         "",
         "interface Item { name: string; price: number }",
         "",
@@ -1006,10 +1006,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
         ");",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -1038,7 +1038,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const sourceTypeArgs = [
         "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "export default pattern<{ name: string; count: number }>(({ name, count }) => {",
         "  return { name, count };",
@@ -1046,17 +1046,17 @@ Deno.test("Schema Shrink Validation", async (t) => {
       ].join("\n");
       const sourceInline = [
         "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "export default pattern(({ name, count }: { name: string; count: number }) => {",
         "  return { name, count };",
         "});",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -1093,7 +1093,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const sourceTypeArgs = [
         "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "interface Args { name: string; count: number }",
         "",
@@ -1103,7 +1103,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       ].join("\n");
       const sourceInline = [
         "/// <cts-enable />",
-        'import { pattern } from "commontools";',
+        'import { pattern } from "commonfabric";',
         "",
         "interface Args { name: string; count: number }",
         "",
@@ -1112,10 +1112,10 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "});",
       ].join("\n");
       const rTA = await validateSource(sourceTypeArgs, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const rInline = await validateSource(sourceInline, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       assertEquals(
         getShrinkErrors(rTA.diagnostics).length,
@@ -1154,7 +1154,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { cell, derive, lift } from "commontools";',
+        'import { cell, derive, lift } from "commonfabric";',
         "",
         'const stage = cell<string>("initial");',
         "const attemptCount = cell<number>(0);",
@@ -1180,7 +1180,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       ].join("\n");
 
       const result = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(result.diagnostics);
 
@@ -1207,7 +1207,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { derive, type Writable } from "commontools";',
+        'import { derive, type Writable } from "commonfabric";',
         "const input = {} as Writable<{ foo: string; bar: string }>;",
         "const d = derive(input, (v: Writable<{ foo: string; bar: string }>) => {",
         '  const foo = v.key("foo").get();',
@@ -1217,7 +1217,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       ].join("\n");
 
       const result = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(result.diagnostics);
 
@@ -1239,7 +1239,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
     async () => {
       const source = [
         "/// <cts-enable />",
-        'import { handler, type Writable } from "commontools";',
+        'import { handler, type Writable } from "commonfabric";',
         "const h = handler((event: { id: string }, state: Writable<{ foo: string; bar: string }>) => {",
         '  const foo = state.key("foo").get();',
         "  Object.keys(state.get());",
@@ -1248,7 +1248,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
       ].join("\n");
 
       const result = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(result.diagnostics);
 

@@ -1,13 +1,13 @@
 /**
  * VDOM debug helpers for browser console inspection.
  *
- * Usage: commontools.vdom.dump()   — pretty-print the VDOM tree
- *        commontools.vdom.renders() — list all active renderings
- *        commontools.vdom.stats()   — node/listener counts
+ * Usage: commonfabric.vdom.dump()   — pretty-print the VDOM tree
+ *        commonfabric.vdom.renders() — list all active renderings
+ *        commonfabric.vdom.stats()   — node/listener counts
  */
 
-import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
-import { debugVDOMSchema } from "@commontools/runner/schemas";
+import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
+import { debugVDOMSchema } from "@commonfabric/runner/schemas";
 import { type ActiveRender, getActiveRenders } from "./render.ts";
 
 /**
@@ -140,7 +140,7 @@ function formatTree(node: unknown, indent = 0): string {
 }
 
 /**
- * Create the debug helpers object to register on globalThis.commontools.vdom.
+ * Create the debug helpers object to register on globalThis.commonfabric.vdom.
  */
 export function createVDomDebugHelpers() {
   return {

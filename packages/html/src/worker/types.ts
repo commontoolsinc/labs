@@ -5,8 +5,8 @@
  * where cells are accessed synchronously via cell.get() and cell.sink().
  */
 
-import type { Cancel, Cell, JSONSchema } from "@commontools/runner";
-import type { CellRef, JSONValue } from "@commontools/runtime-client";
+import type { Cancel, Cell, JSONSchema } from "@commonfabric/runner";
+import type { CellRef, JSONValue } from "@commonfabric/runtime-client";
 
 /**
  * A render node in the worker VDOM tree.

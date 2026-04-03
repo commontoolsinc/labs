@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * Regression test: inline arrow function inside explicit computed() in JSX
  *
@@ -7,7 +7,7 @@ import * as __ctHelpers from "commontools";
  * to a handler, and the Cell reference (state.isEditing) must be properly
  * captured in the derive wrapper created for the computed.
  */
-import { Cell, computed, pattern, UI } from "commontools";
+import { Cell, computed, pattern, UI } from "commonfabric";
 interface Card {
     title: string;
     description: string;
@@ -18,34 +18,34 @@ interface State {
 }
 // FIXTURE: inline-action-in-ternary-branch
 // Verifies: inline arrow handler inside explicit computed() in a ternary branch is extracted and captured in derive
-//   computed(() => <ct-button onClick={() => state.isEditing.set(true)} />) → derive({ state: { isEditing: asCell } }, ..., handler(...)(...))
+//   computed(() => <cf-button onClick={() => state.isEditing.set(true)} />) → derive({ state: { isEditing: asCell } }, ..., handler(...)(...))
 // Context: Regression -- inline handler inside computed() must have its Cell ref captured in the derive wrapper
 export default pattern((state) => {
     return {
-        [UI]: (<ct-card>
-        {__ctHelpers.ifElse({
+        [UI]: (<cf-card>
+        {__cfHelpers.ifElse({
             type: "boolean",
             asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, state.key("isEditing"), <div>Editing</div>, <div>
+        } as const satisfies __cfHelpers.JSONSchema, state.key("isEditing"), <div>Editing</div>, <div>
             <span>{state.key("card", "title")}</span>
             {/* Explicit computed() wrapping a button with inline handler */}
             {/* The Cell ref in the handler must be captured in the derive */}
-            {__ctHelpers.derive({
+            {__cfHelpers.derive({
                 type: "object",
                 properties: {
                     state: {
@@ -60,7 +60,7 @@ export default pattern((state) => {
                     }
                 },
                 required: ["state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -80,9 +80,9 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, { state: {
+            } as const satisfies __cfHelpers.JSONSchema, { state: {
                     isEditing: state.key("isEditing")
-                } }, ({ state }) => (<ct-button onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+                } }, ({ state }) => (<cf-button onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
                 type: "object",
                 properties: {
                     state: {
@@ -97,13 +97,13 @@ export default pattern((state) => {
                     }
                 },
                 required: ["state"]
-            } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => state.isEditing.set(true))({
+            } as const satisfies __cfHelpers.JSONSchema, (__ct_handler_event, { state }) => state.isEditing.set(true))({
                 state: {
                     isEditing: state.isEditing
                 }
-            })}>Edit</ct-button>))}
+            })}>Edit</cf-button>))}
           </div>)}
-      </ct-card>),
+      </cf-card>),
         card: state.key("card"),
     };
 }, {
@@ -132,7 +132,7 @@ export default pattern((state) => {
             required: ["title", "description"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -176,8 +176,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

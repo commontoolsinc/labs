@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * Regression test: action() referenced inside explicit computed() in JSX
  *
@@ -6,7 +6,7 @@ import * as __ctHelpers from "commontools";
  * (not encouraged, but should still work). The action is referenced INSIDE
  * the computed expression, so it must be captured in the derive wrapper.
  */
-import { action, Cell, computed, pattern, UI } from "commontools";
+import { action, Cell, computed, pattern, UI } from "commonfabric";
 interface Card {
     title: string;
     description: string;
@@ -23,8 +23,8 @@ export default pattern((__ct_pattern_input) => {
     const card = __ct_pattern_input.key("card");
     const isEditing = Cell.of(false, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const startEditing = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema);
+    const startEditing = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             isEditing: {
@@ -33,36 +33,36 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["isEditing"]
-    } as const satisfies __ctHelpers.JSONSchema, (_, { isEditing }) => {
+    } as const satisfies __cfHelpers.JSONSchema, (_, { isEditing }) => {
         isEditing.set(true);
     })({
         isEditing: isEditing
     });
     return {
-        [UI]: (<ct-card>
-        {__ctHelpers.ifElse({
+        [UI]: (<cf-card>
+        {__cfHelpers.ifElse({
             type: "boolean",
             asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, isEditing, <div>Editing</div>, <div>
+        } as const satisfies __cfHelpers.JSONSchema, isEditing, <div>Editing</div>, <div>
             <span>{card.key("title")}</span>
             {/* Explicit computed() wrapping JSX that references the action */}
             {/* The action must be captured in the derive created for this computed */}
-            {__ctHelpers.derive({
+            {__cfHelpers.derive({
                 type: "object",
                 properties: {
                     card: {
@@ -79,7 +79,7 @@ export default pattern((__ct_pattern_input) => {
                     }
                 },
                 required: ["card", "startEditing"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -99,17 +99,17 @@ export default pattern((__ct_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 card: {
                     description: card.key("description")
                 },
                 startEditing: startEditing
             }, ({ card, startEditing }) => (<div>
                 <span>{card.description}</span>
-                <ct-button onClick={startEditing}>Edit</ct-button>
+                <cf-button onClick={startEditing}>Edit</cf-button>
               </div>))}
           </div>)}
-      </ct-card>),
+      </cf-card>),
         card,
     };
 }, {
@@ -134,7 +134,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["title", "description"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -178,8 +178,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, pattern, action } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, pattern, action } from "commonfabric";
 interface State {
     count: Cell<number>;
 }
@@ -9,7 +9,7 @@ interface State {
 export default pattern((__ct_pattern_input) => {
     const count = __ct_pattern_input.key("count");
     return {
-        inc: __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+        inc: __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
             properties: {
                 count: {
@@ -18,7 +18,7 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["count"]
-        } as const satisfies __ctHelpers.JSONSchema, (_, { count }) => count.set(count.get() + 1))({
+        } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => count.set(count.get() + 1))({
             count: count
         }),
     };
@@ -31,7 +31,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["count"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         inc: {
@@ -39,8 +39,8 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["inc"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

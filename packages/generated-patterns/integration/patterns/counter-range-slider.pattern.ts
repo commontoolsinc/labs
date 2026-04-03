@@ -9,7 +9,7 @@ import {
   pattern,
   str,
   type Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface RangeSliderArgs {
   min: Default<number, 0>;

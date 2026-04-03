@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, computed, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 // FIXTURE: computed-with-closed-over-cell-map
 // Verifies: .map() on a closed-over Cell inside computed() IS transformed to .mapWithPattern()
 //   computed(() => numbers.map(n => n * multiplier.get())) → derive(..., { numbers, multiplier }, ({ numbers, multiplier }) => numbers.mapWithPattern(pattern(fn, ...), { multiplier }))
@@ -12,15 +12,15 @@ export default pattern(() => {
         items: {
             type: "number"
         }
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const multiplier = Writable.of(2, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     // Inside computed, we close over numbers (a Cell)
     // The computed gets transformed to derive({}, () => numbers.map(...))
     // Inside a derive, .map on a closed-over Cell should STILL be transformed to mapWithPattern
     // because Cells need the pattern-based mapping even when unwrapped
-    const doubled = __ctHelpers.derive({
+    const doubled = __cfHelpers.derive({
         type: "object",
         properties: {
             numbers: {
@@ -36,15 +36,15 @@ export default pattern(() => {
             }
         },
         required: ["numbers", "multiplier"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "number"
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         numbers: numbers,
         multiplier: multiplier
-    }, ({ numbers, multiplier }) => numbers.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+    }, ({ numbers, multiplier }) => numbers.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
         const n = __ct_pattern_input.key("element");
         const multiplier = __ct_pattern_input.key("params", "multiplier");
         return n * multiplier.get();
@@ -66,19 +66,19 @@ export default pattern(() => {
             }
         },
         required: ["element", "params"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema), {
+    } as const satisfies __cfHelpers.JSONSchema), {
         multiplier: multiplier
     }));
     return doubled;
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "array",
     items: {
         type: "number"
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

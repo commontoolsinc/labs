@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, NAME, pattern, Stream, UI } from "commontools";
+import { Default, NAME, pattern, Stream, UI } from "commonfabric";
 import { getValue, roll } from "./dice-handlers.ts";
 
 interface PatternState {
@@ -19,18 +19,18 @@ export default pattern<PatternState, PatternOutput>((state) => {
     [NAME]: `Dice Roller`,
     [UI]: (
       <div>
-        <ct-button onClick={roll(state)}>
+        <cf-button onClick={roll(state)}>
           Roll D6
-        </ct-button>
-        <ct-button onClick={roll(state)}>
+        </cf-button>
+        <cf-button onClick={roll(state)}>
           getValue(state), Roll D20
-        </ct-button>
+        </cf-button>
         <span id="dice-result">
           Current value: {state.value}
         </span>
-        <ct-button onClick={getValue(state)}>
+        <cf-button onClick={getValue(state)}>
           Check value
-        </ct-button>
+        </cf-button>
       </div>
     ),
     value: state.value,

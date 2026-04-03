@@ -1,8 +1,8 @@
 import {
   hashObjectFromString,
   hashOf,
-} from "@commontools/data-model/value-hash";
-import type { FabricValue } from "@commontools/data-model/fabric-value";
+} from "@commonfabric/data-model/value-hash";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   CauseString,
   Changes as MemoryChanges,
@@ -24,21 +24,21 @@ import type {
   The,
   UCAN,
   Unit,
-} from "@commontools/memory/interface";
-import { set, setSelector } from "@commontools/memory/selection";
-import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import { assert, unclaimed } from "@commontools/memory/fact";
-import { COMMIT_LOG_TYPE, toRevision } from "@commontools/memory/commit";
-import * as Consumer from "@commontools/memory/consumer";
-import * as Codec from "@commontools/memory/codec";
-import { getLogger } from "@commontools/utils/logger";
-import { isBrowser } from "@commontools/utils/env";
-import { isRecord } from "@commontools/utils/types";
+} from "@commonfabric/memory/interface";
+import { set, setSelector } from "@commonfabric/memory/selection";
+import type { MemorySpaceSession } from "@commonfabric/memory/consumer";
+import { assert, unclaimed } from "@commonfabric/memory/fact";
+import { COMMIT_LOG_TYPE, toRevision } from "@commonfabric/memory/commit";
+import * as Consumer from "@commonfabric/memory/consumer";
+import * as Codec from "@commonfabric/memory/codec";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isBrowser } from "@commonfabric/utils/env";
+import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { deepEqual } from "@commontools/utils/deep-equal";
-import { hashSchema } from "@commontools/data-model/schema-hash";
-import { schemaWithProperties } from "@commontools/data-model/schema-utils";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { hashSchema } from "@commonfabric/data-model/schema-hash";
+import { schemaWithProperties } from "@commonfabric/data-model/schema-utils";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import {
@@ -64,13 +64,13 @@ import type {
 } from "./interface.ts";
 import { type Cell } from "../cell.ts";
 import * as IDB from "./idb.ts";
-export * from "@commontools/memory/interface";
+export * from "@commonfabric/memory/interface";
 import { Channel, RawCommand } from "./inspector.ts";
 import * as Transaction from "./transaction.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";
 import * as Address from "./transaction/address.ts";
-import { ACL_TYPE, ANYONE_USER } from "@commontools/memory/acl";
+import { ACL_TYPE, ANYONE_USER } from "@commonfabric/memory/acl";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {

@@ -5,7 +5,7 @@
  * Simple pattern with two text labels and a swap button between them.
  * Click on either label to rename it via modal.
  */
-import { Default, handler, pattern, UI, Writable } from "commontools";
+import { Default, handler, pattern, UI, Writable } from "commonfabric";
 
 // ============ TYPES ============
 
@@ -146,9 +146,9 @@ export default pattern<Input, Output>(({ leftText, rightText }) => {
           {leftText}
         </div>
 
-        <ct-button onClick={swapTexts({ leftText, rightText })}>
+        <cf-button onClick={swapTexts({ leftText, rightText })}>
           ⇄ Swap
-        </ct-button>
+        </cf-button>
 
         <div
           style={labelStyle}
@@ -163,7 +163,7 @@ export default pattern<Input, Output>(({ leftText, rightText }) => {
         </div>
 
         {/* Edit Modal */}
-        <ct-modal $open={showModal} dismissable size="sm" label="Edit Text">
+        <cf-modal $open={showModal} dismissable size="sm" label="Edit Text">
           <span slot="header">
             Edit {editingSide.get() === "left" ? "Left" : "Right"} Text
           </span>
@@ -179,7 +179,7 @@ export default pattern<Input, Output>(({ leftText, rightText }) => {
             >
               Text
             </label>
-            <ct-input
+            <cf-input
               $value={editValue}
               placeholder="Enter text..."
               style="width: 100%;"
@@ -231,7 +231,7 @@ export default pattern<Input, Output>(({ leftText, rightText }) => {
               Save
             </button>
           </div>
-        </ct-modal>
+        </cf-modal>
       </div>
     ),
   };

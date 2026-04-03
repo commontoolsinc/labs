@@ -14,8 +14,8 @@ success() {
   echo "✓ $1"
 }
 
-if [ -n "${CT_CLI_INTEGRATION_USE_LOCAL:-}" ]; then
-  ct() {
+if [ -n "${CF_CLI_INTEGRATION_USE_LOCAL:-}" ]; then
+  cf() {
     deno task cli "$@"
   }
 fi
@@ -112,7 +112,7 @@ wait_for_piece_value() {
 
   for _ in $(seq 1 "$attempts"); do
     local actual
-    actual=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
+    actual=$(cf piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
     if [ "$actual" = "$expected" ]; then
       return 0
     fi
@@ -120,7 +120,7 @@ wait_for_piece_value() {
   done
 
   local actual
-  actual=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
+  actual=$(cf piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
   error "Timed out waiting for piece path '$path'. Expected: $expected, got: $actual"
 }
 
@@ -129,7 +129,7 @@ read_piece_value_or_default() {
   local fallback="$2"
   local actual
 
-  actual=$(ct piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
+  actual=$(cf piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
   if [ -z "$actual" ]; then
     printf '%s\n' "$fallback"
     return 0
@@ -155,7 +155,7 @@ cleanup() {
   set +e
   local can_remove_mountpoint=true
   if [ -n "${MOUNTPOINT:-}" ] && [ -d "${MOUNTPOINT:-}" ]; then
-    ct fuse unmount "$MOUNTPOINT" >/dev/null 2>&1
+    cf fuse unmount "$MOUNTPOINT" >/dev/null 2>&1
     if mount_is_active "$MOUNTPOINT"; then
       >&2 echo "WARN: leaving mounted filesystem at $MOUNTPOINT because unmount failed"
       can_remove_mountpoint=false
@@ -194,11 +194,11 @@ echo "SPACE=$SPACE"
 echo "IDENTITY=$IDENTITY"
 echo "MOUNTPOINT=$MOUNTPOINT"
 
-ct id new >"$IDENTITY"
+cf id new >"$IDENTITY"
 
-PIECE_ID=$(ct piece new --main-export "$CUSTOM_EXPORT" $SPACE_ARGS "$PATTERN_SRC")
+PIECE_ID=$(cf piece new --main-export "$CUSTOM_EXPORT" $SPACE_ARGS "$PATTERN_SRC")
 echo "Created piece: $PIECE_ID"
-MOUNT_OUTPUT=$(ct fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --background)
+MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --background)
 echo "$MOUNT_OUTPUT"
 
 MOUNT_PID="${MOUNT_OUTPUT#*PID }"
@@ -276,17 +276,17 @@ TOOL_FIRST_LINE=$(head -n 1 "$TOOL_FILE")
 test -x "$HANDLER_FILE" || error "Handler file should be executable."
 test -x "$TOOL_FILE" || error "Tool file should be executable."
 assert_contains "$HANDLER_FIRST_LINE" "#!" "Handler file should start with a shebang."
-assert_contains "$HANDLER_FIRST_LINE" " exec" "Handler shebang should invoke ct exec."
+assert_contains "$HANDLER_FIRST_LINE" " exec" "Handler shebang should invoke cf exec."
 assert_contains "$TOOL_FIRST_LINE" "#!" "Tool file should start with a shebang."
-assert_contains "$TOOL_FIRST_LINE" " exec" "Tool shebang should invoke ct exec."
-success "Callable files are executable and expose ct exec shebangs"
+assert_contains "$TOOL_FIRST_LINE" " exec" "Tool shebang should invoke cf exec."
+success "Callable files are executable and expose cf exec shebangs"
 
 COUNT_BEFORE_HELP=$(read_piece_value_or_default "messageCount" "0")
-HANDLER_HELP=$(ct exec "$HANDLER_FILE" --help)
-TOOL_HELP=$(ct exec "$TOOL_FILE" --help)
-TOOL_HELP_JSON=$(ct exec "$TOOL_FILE" --help --json)
+HANDLER_HELP=$(cf exec "$HANDLER_FILE" --help)
+TOOL_HELP=$(cf exec "$TOOL_FILE" --help)
+TOOL_HELP_JSON=$(cf exec "$TOOL_FILE" --help --json)
 DIRECT_HANDLER_HELP=$("$HANDLER_FILE" --help)
-assert_contains "$HANDLER_HELP" "ct exec" "ct exec help should describe the ct exec call form."
+assert_contains "$HANDLER_HELP" "cf exec" "cf exec help should describe the cf exec call form."
 assert_contains "$HANDLER_HELP" "[invoke] --message <string>" "Handler help should show the optional invoke verb."
 assert_contains "$HANDLER_HELP" "--message <string>" "Handler help should expand schema-derived flags."
 assert_contains "$HANDLER_HELP" "Required." "Handler help should mark required flags."
@@ -299,8 +299,8 @@ assert_contains "$TOOL_HELP" "--help --json" "Tool help should mention machine-r
 assert_contains "$DIRECT_HANDLER_HELP" "[invoke] --message <string>" "Direct help should show the optional invoke verb."
 assert_contains "$DIRECT_HANDLER_HELP" "$HANDLER_FILE" "Direct help should mention the mounted file path."
 assert_contains "$DIRECT_HANDLER_HELP" "--message <string>" "Direct help should show the mounted file call form."
-if [[ "$DIRECT_HANDLER_HELP" == *"ct exec $HANDLER_FILE"* ]]; then
-  error "Direct help should hide the ct exec call form."
+if [[ "$DIRECT_HANDLER_HELP" == *"cf exec $HANDLER_FILE"* ]]; then
+  error "Direct help should hide the cf exec call form."
 fi
 printf '%s\n' "$TOOL_HELP_JSON" | jq -e '.inputSchema.required == ["query"]' >/dev/null ||
   error "Machine-readable help should include the input schema."
@@ -308,7 +308,7 @@ printf '%s\n' "$TOOL_HELP_JSON" | jq -e '.outputSchema.properties.summary.type =
   error "Machine-readable help should include the output schema."
 COUNT_AFTER_HELP=$(read_piece_value_or_default "messageCount" "0")
 if [ "$COUNT_AFTER_HELP" != "$COUNT_BEFORE_HELP" ]; then
-  error "Top-level ct exec --help should not mutate messageCount. Expected: $COUNT_BEFORE_HELP, got: $COUNT_AFTER_HELP"
+  error "Top-level cf exec --help should not mutate messageCount. Expected: $COUNT_BEFORE_HELP, got: $COUNT_AFTER_HELP"
 fi
 success "Top-level and direct --help print agent-oriented callable help without invoking callables"
 
@@ -322,10 +322,10 @@ assert_json_eq \
   "Direct tool execution returned unexpected JSON"
 success "Mounted callables can be executed directly through their shebangs"
 
-printf '{"message":"stdin-handler"}' | ct exec "$HANDLER_FILE" --json
+printf '{"message":"stdin-handler"}' | cf exec "$HANDLER_FILE" --json
 wait_for_piece_value "lastMessage" '"stdin-handler"'
 wait_for_piece_value "messageCount" "2"
-success "ct exec reads handler JSON input from stdin"
+success "cf exec reads handler JSON input from stdin"
 
 DIRECT_TOOL_STDIN=$(printf '{"query":"stdin-tool","help":"stdin-help"}' | "$TOOL_FILE" --json)
 assert_json_eq \
@@ -334,46 +334,46 @@ assert_json_eq \
   "Direct tool execution with stdin JSON returned unexpected JSON"
 success "Mounted tools read JSON input from stdin"
 
-ct exec "$HANDLER_FILE" --message "piece-explicit"
+cf exec "$HANDLER_FILE" --message "piece-explicit"
 wait_for_piece_value "lastMessage" '"piece-explicit"'
 wait_for_piece_value "messageCount" "3"
-success "ct exec invokes mounted handlers with schema-derived flags"
+success "cf exec invokes mounted handlers with schema-derived flags"
 
-ct exec "$HANDLER_FILE" --message "piece-implicit"
+cf exec "$HANDLER_FILE" --message "piece-implicit"
 wait_for_piece_value "lastMessage" '"piece-implicit"'
 wait_for_piece_value "messageCount" "4"
-success "ct exec invokes mounted handlers without an explicit verb"
+success "cf exec invokes mounted handlers without an explicit verb"
 
-TOOL_EXPLICIT=$(ct exec "$TOOL_FILE" --query "explicit" --help "schema-field")
+TOOL_EXPLICIT=$(cf exec "$TOOL_FILE" --query "explicit" --help "schema-field")
 assert_json_eq \
   "$TOOL_EXPLICIT" \
   '{"help":"schema-field","query":"explicit","source":"bound-source","summary":"bound-source:explicit:schema-field"}' \
   "Explicit tool execution returned unexpected JSON"
-success "ct exec runs mounted tools with schema-derived flags"
+success "cf exec runs mounted tools with schema-derived flags"
 
-HELP_FIELD_OUTPUT=$(ct exec "$TOOL_FILE" --help "literal-help" --query "help-field")
+HELP_FIELD_OUTPUT=$(cf exec "$TOOL_FILE" --help "literal-help" --query "help-field")
 assert_json_eq \
   "$HELP_FIELD_OUTPUT" \
   '{"help":"literal-help","query":"help-field","source":"bound-source","summary":"bound-source:help-field:literal-help"}' \
   "Top-level --help with a value should be parsed as the tool schema field"
 success "Top-level --help with a value is parsed as the schema field when present"
 
-TOOL_IMPLICIT=$(ct exec "$TOOL_FILE" --query "implicit" --help "")
+TOOL_IMPLICIT=$(cf exec "$TOOL_FILE" --query "implicit" --help "")
 assert_json_eq \
   "$TOOL_IMPLICIT" \
   '{"help":"","query":"implicit","source":"bound-source","summary":"bound-source:implicit:"}' \
   "Implicit tool execution returned unexpected JSON"
-success "ct exec runs mounted tools without an explicit verb"
+success "cf exec runs mounted tools without an explicit verb"
 
 LEGACY_COUNT_BEFORE_EXEC=$(read_piece_value_or_default "legacyCount" "0")
-ct exec "$LEGACY_HANDLER_FILE"
+cf exec "$LEGACY_HANDLER_FILE"
 wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE_EXEC + 1))"
-ct exec "$LEGACY_HANDLER_FILE" invoke
+cf exec "$LEGACY_HANDLER_FILE" invoke
 wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE_EXEC + 2))"
 success "Empty-object handlers run without an explicit verb, and invoke still works"
 
 COUNT_BEFORE_PIECES_SHARED=$(read_piece_value_or_default "messageCount" "0")
-ct exec "$HANDLER_FILE" --message "shared-message"
+cf exec "$HANDLER_FILE" --message "shared-message"
 wait_for_piece_value "lastMessage" '"shared-message"'
 wait_for_piece_value "messageCount" "$((COUNT_BEFORE_PIECES_SHARED + 1))"
 
@@ -386,13 +386,13 @@ if [ "$ENTITY_DEEP_PROBE" = "1" ]; then
   wait_for_path "$ENTITY_TOOL_FILE"
 
   COUNT_BEFORE_ENTITIES_SHARED=$(read_piece_value_or_default "messageCount" "0")
-  ct exec "$ENTITY_HANDLER_FILE" --message "shared-message"
+  cf exec "$ENTITY_HANDLER_FILE" --message "shared-message"
   wait_for_piece_value "lastMessage" '"shared-message"'
   wait_for_piece_value "messageCount" "$((COUNT_BEFORE_ENTITIES_SHARED + 1))"
   success "Handler execution through pieces/ and entities/ reaches the same backing cell"
 
-  PIECES_TOOL_SHARED=$(ct exec "$TOOL_FILE" --query "shared-tool" --help "entity-compare")
-  ENTITIES_TOOL_SHARED=$(ct exec "$ENTITY_TOOL_FILE" --query "shared-tool" --help "entity-compare")
+  PIECES_TOOL_SHARED=$(cf exec "$TOOL_FILE" --query "shared-tool" --help "entity-compare")
+  ENTITIES_TOOL_SHARED=$(cf exec "$ENTITY_TOOL_FILE" --query "shared-tool" --help "entity-compare")
   assert_json_eq \
     "$PIECES_TOOL_SHARED" \
     "$ENTITIES_TOOL_SHARED" \

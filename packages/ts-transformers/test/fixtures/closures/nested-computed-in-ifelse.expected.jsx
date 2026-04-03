@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 /**
  * Regression test: computed() inside ifElse branch should not double-wrap .get()
  *
@@ -10,7 +10,7 @@ import * as __ctHelpers from "commontools";
  * Bug: secondToggle.get() was returning CellImpl instead of boolean
  * Fix: Added isInsideSafeCallbackWrapper check in rewriteChildExpressions
  */
-import { computed, ifElse, pattern, UI, Writable } from "commontools";
+import { computed, ifElse, pattern, UI, Writable } from "commonfabric";
 // FIXTURE: nested-computed-in-ifelse
 // Verifies: computed() inside ifElse branches transforms to derive() without double-wrapping .get()
 //   computed(() => { secondToggle.get(); ... }) → derive({ secondToggle }, ({ secondToggle }) => { secondToggle.get(); ... })
@@ -21,14 +21,14 @@ import { computed, ifElse, pattern, UI, Writable } from "commontools";
 export default pattern(() => {
     const showOuter = Writable.of(false, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const secondToggle = Writable.of(false, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {/* Case A: Top-level computed - always worked */}
-        <div style={__ctHelpers.derive({
+        <div style={__cfHelpers.derive({
                 type: "object",
                 properties: {
                     secondToggle: {
@@ -37,7 +37,7 @@ export default pattern(() => {
                     }
                 },
                 required: ["secondToggle"]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 type: "object",
                 properties: {
                     background: {
@@ -45,7 +45,7 @@ export default pattern(() => {
                     }
                 },
                 required: ["background"]
-            } as const satisfies __ctHelpers.JSONSchema, { secondToggle: secondToggle }, ({ secondToggle }) => {
+            } as const satisfies __cfHelpers.JSONSchema, { secondToggle: secondToggle }, ({ secondToggle }) => {
                 const val = secondToggle.get();
                 return { background: val ? "green" : "red" };
             })}>Case A</div>
@@ -54,17 +54,17 @@ export default pattern(() => {
         {ifElse({
                 type: "boolean",
                 asCell: true
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{}, {
                         type: "object",
                         properties: {}
                     }]
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{}, {
                         type: "object",
                         properties: {}
                     }]
-            } as const satisfies __ctHelpers.JSONSchema, {} as const satisfies __ctHelpers.JSONSchema, showOuter, <div style={__ctHelpers.derive({
+            } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, showOuter, <div style={__cfHelpers.derive({
                     type: "object",
                     properties: {
                         secondToggle: {
@@ -73,7 +73,7 @@ export default pattern(() => {
                         }
                     },
                     required: ["secondToggle"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "object",
                     properties: {
                         background: {
@@ -81,7 +81,7 @@ export default pattern(() => {
                         }
                     },
                     required: ["background"]
-                } as const satisfies __ctHelpers.JSONSchema, { secondToggle: secondToggle }, ({ secondToggle }) => {
+                } as const satisfies __cfHelpers.JSONSchema, { secondToggle: secondToggle }, ({ secondToggle }) => {
                     // This .get() should NOT be wrapped in extra derive
                     const val = secondToggle.get();
                     return { background: val ? "green" : "red" };
@@ -92,7 +92,7 @@ export default pattern(() => {
     type: "object",
     properties: {},
     additionalProperties: false
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -121,8 +121,8 @@ export default pattern(() => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

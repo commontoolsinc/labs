@@ -1,4 +1,4 @@
-import * as Memory from "@commontools/memory";
+import * as Memory from "@commonfabric/memory";
 import * as Path from "@std/path";
 import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";

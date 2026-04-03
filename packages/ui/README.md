@@ -20,7 +20,7 @@ security constraints.
 ```
 src/
 ├── index.ts          # Main entry (exports both v1 and v2, with v2 as default)
-└── v2/              # New shadcn-inspired components (ct- prefix)
+└── v2/              # New shadcn-inspired components (cf- prefix)
     ├── components/  # 39 modern components
     ├── core/        # Base element class
     ├── styles/      # Design tokens and shared styles
@@ -33,45 +33,45 @@ src/
 
 ```typescript
 // Import v2 components (default)
-import { CTButton, CTCard, CTInput } from "@commontools/ui";
+import { CFButton, CFCard, CFInput } from "@commonfabric/ui";
 
 // Or import specific versions
-import { v2 } from "@commontools/ui";
+import { v2 } from "@commonfabric/ui";
 
 // Auto-register all v2 components
-import { registerAllComponents } from "@commontools/ui/v2";
+import { registerAllComponents } from "@commonfabric/ui/v2";
 registerAllComponents();
 ```
 
 ### Use in HTML
 
 ```html
-<!-- V2 Components (ct- prefix) -->
-<ct-button variant="primary">Click Me</ct-button>
-<ct-input type="email" placeholder="Enter email"></ct-input>
-<ct-card>
+<!-- V2 Components (cf- prefix) -->
+<cf-button variant="primary">Click Me</cf-button>
+<cf-input type="email" placeholder="Enter email"></cf-input>
+<cf-card>
   <h3 slot="header">Card Title</h3>
   <p slot="content">Card content</p>
-</ct-card>
+</cf-card>
 ```
 
 ## 📖 V2 Components (39 total)
 
 ### Core UI Components (23)
 
-- **Forms**: `ct-button`, `ct-input`, `ct-textarea`, `ct-checkbox`, `ct-radio`,
-  `ct-switch`, `ct-toggle`, `ct-slider`
-- **Layout**: `ct-card`, `ct-separator`, `ct-accordion`, `ct-collapsible`,
-  `ct-tabs`, `ct-scroll-area`
-- **Feedback**: `ct-alert`, `ct-badge`, `ct-progress`, `ct-skeleton`, `ct-label`
-- **Data**: `ct-table`, `ct-form`, `ct-input-otp`
-- **Display**: `ct-aspect-ratio`, `ct-resizable-panel-group`
+- **Forms**: `cf-button`, `cf-input`, `cf-textarea`, `cf-checkbox`, `cf-radio`,
+  `cf-switch`, `cf-toggle`, `cf-slider`
+- **Layout**: `cf-card`, `cf-separator`, `cf-accordion`, `cf-collapsible`,
+  `cf-tabs`, `cf-scroll-area`
+- **Feedback**: `cf-alert`, `cf-badge`, `cf-progress`, `cf-skeleton`, `cf-label`
+- **Data**: `cf-table`, `cf-form`, `cf-input-otp`
+- **Display**: `cf-aspect-ratio`, `cf-resizable-panel-group`
 
 ### Layout Components (8)
 
-- **Flexbox**: `ct-hstack`, `ct-vstack`, `ct-hgroup`, `ct-vgroup`
-- **Scrolling**: `ct-hscroll`, `ct-vscroll`
-- **Grid**: `ct-grid`, `ct-table`
+- **Flexbox**: `cf-hstack`, `cf-vstack`, `cf-hgroup`, `cf-vgroup`
+- **Scrolling**: `cf-hscroll`, `cf-vscroll`
+- **Grid**: `cf-grid`, `cf-table`
 
 ## 🔒 Security Constraints
 
@@ -132,7 +132,7 @@ packages/ui/
 │   │   ├── components/      # common-* components
 │   │   └── index.ts
 │   └── v2/                  # Modern components
-│       ├── components/      # ct-* components
+│       ├── components/      # cf-* components
 │       ├── core/            # BaseElement class
 │       ├── styles/          # Shared styles
 │       ├── utils/           # Utilities
@@ -146,55 +146,55 @@ packages/ui/
 ### Form with Validation
 
 ```html
-<ct-form>
-  <ct-vstack gap="4">
-    <ct-vgroup gap="1">
-      <ct-label for="email" required>Email</ct-label>
-      <ct-input id="email" type="email" name="email" required></ct-input>
-    </ct-vgroup>
+<cf-form>
+  <cf-vstack gap="4">
+    <cf-vgroup gap="1">
+      <cf-label for="email" required>Email</cf-label>
+      <cf-input id="email" type="email" name="email" required></cf-input>
+    </cf-vgroup>
 
-    <ct-vgroup gap="1">
-      <ct-label for="message">Message</ct-label>
-      <ct-textarea id="message" name="message" rows="4"></ct-textarea>
-    </ct-vgroup>
+    <cf-vgroup gap="1">
+      <cf-label for="message">Message</cf-label>
+      <cf-textarea id="message" name="message" rows="4"></cf-textarea>
+    </cf-vgroup>
 
-    <ct-hstack gap="3" justify="end">
-      <ct-button variant="outline" type="reset">Cancel</ct-button>
-      <ct-button type="submit">Submit</ct-button>
-    </ct-hstack>
-  </ct-vstack>
-</ct-form>
+    <cf-hstack gap="3" justify="end">
+      <cf-button variant="outline" type="reset">Cancel</cf-button>
+      <cf-button type="submit">Submit</cf-button>
+    </cf-hstack>
+  </cf-vstack>
+</cf-form>
 ```
 
 ### Dashboard Layout
 
 ```html
-<ct-vstack gap="4">
-  <ct-card>
+<cf-vstack gap="4">
+  <cf-card>
     <h2 slot="header">Dashboard</h2>
-    <ct-grid slot="content" columns="3" gap="4">
-      <ct-card>
-        <ct-vstack slot="content" gap="2">
-          <ct-badge variant="secondary">Active</ct-badge>
+    <cf-grid slot="content" columns="3" gap="4">
+      <cf-card>
+        <cf-vstack slot="content" gap="2">
+          <cf-badge variant="secondary">Active</cf-badge>
           <h3>Total Users</h3>
           <p style="font-size: 2rem">1,234</p>
-        </ct-vstack>
-      </ct-card>
+        </cf-vstack>
+      </cf-card>
       <!-- More cards... -->
-    </ct-grid>
-  </ct-card>
-</ct-vstack>
+    </cf-grid>
+  </cf-card>
+</cf-vstack>
 ```
 
 ### Event Handling
 
 ```javascript
-// V2 events (ct- prefix)
-document.querySelector("ct-button").addEventListener("ct-click", (e) => {
+// V2 events (cf- prefix)
+document.querySelector("cf-button").addEventListener("cf-click", (e) => {
   console.log("Button clicked:", e.detail);
 });
 
-document.querySelector("ct-form").addEventListener("ct-submit", (e) => {
+document.querySelector("cf-form").addEventListener("cf-submit", (e) => {
   e.preventDefault();
   console.log("Form data:", e.detail.formData);
 });
@@ -206,17 +206,17 @@ Components support CSS custom properties and parts:
 
 ```css
 /* Custom properties */
-ct-button {
+cf-button {
   --background: #3b82f6;
   --foreground: white;
 }
 
 /* CSS parts */
-ct-input::part(input) {
+cf-input::part(input) {
   font-family: monospace;
 }
 
-ct-card::part(header) {
+cf-card::part(header) {
   background: #f3f4f6;
 }
 ```
@@ -229,7 +229,7 @@ For React/TypeScript projects, add type definitions:
 // types/jsx.d.ts
 declare namespace JSX {
   interface IntrinsicElements {
-    "ct-button": {
+    "cf-button": {
       variant?:
         | "default"
         | "destructive"

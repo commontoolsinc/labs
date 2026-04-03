@@ -1,5 +1,5 @@
 ```tsx
-import { pattern, computed, UI, VNode } from 'commontools';
+import { pattern, computed, UI, VNode } from 'commonfabric';
 
 interface Input {
   items: Array<{ done: boolean, title: string }>

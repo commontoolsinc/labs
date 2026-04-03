@@ -22,10 +22,10 @@ The fastest way to check for non-idempotent actions:
 
 ```javascript
 // Run diagnosis for 5 seconds (default)
-await commontools.detectNonIdempotent()
+await commonfabric.detectNonIdempotent()
 
 // Run for a custom duration
-await commontools.detectNonIdempotent(10000) // 10 seconds
+await commonfabric.detectNonIdempotent(10000) // 10 seconds
 ```
 
 This prints a table of non-idempotent actions and any cycles found, then returns
@@ -57,7 +57,7 @@ programmatically:
 ```javascript
 // Check if the scheduler currently appears to be churning
 // (via RuntimeClient IPC — this reads worker-side state)
-await commontools.rt.request({
+await commonfabric.rt.request({
   type: "runtime:detectNonIdempotent",
   durationMs: 3000
 })
@@ -100,7 +100,7 @@ system from settling.
 
 ```javascript
 // Default: 5-second diagnosis window
-const result = await commontools.detectNonIdempotent()
+const result = await commonfabric.detectNonIdempotent()
 ```
 
 Output looks like:
@@ -119,7 +119,7 @@ Cycles: []
 The returned object has the complete diagnosis:
 
 ```javascript
-const result = await commontools.detectNonIdempotent(3000)
+const result = await commonfabric.detectNonIdempotent(3000)
 
 // Non-idempotent actions
 for (const report of result.nonIdempotent) {
@@ -194,7 +194,7 @@ The results section shows:
 For programmatic access (e.g. from tests or tooling):
 
 ```typescript
-import { RuntimeClient } from "@commontools/runtime-client";
+import { RuntimeClient } from "@commonfabric/runtime-client";
 
 const result = await runtimeClient.detectNonIdempotent(5000);
 if (result.nonIdempotent.length > 0) {
@@ -292,7 +292,7 @@ When debugging a pattern that appears to be churning or causing high CPU:
 
 1. Start local dev servers (`deno task dev-local` from repo root)
 2. Open the browser console
-3. Run `await commontools.detectNonIdempotent(5000)`
+3. Run `await commonfabric.detectNonIdempotent(5000)`
 4. Check `result.nonIdempotent` — the `differingWriteKeys` tell you which cell
    paths are producing different values on re-runs
 5. Check `result.cycles` — if present, two or more actions are triggering each
@@ -305,7 +305,7 @@ When debugging a pattern that appears to be churning or causing high CPU:
 
 ## See Also
 
-- [Console Commands](./console-commands.md) — full `commontools.*` reference
+- [Console Commands](./console-commands.md) — full `commonfabric.*` reference
 - [Reactivity Issues](./reactivity-issues.md) — common reactivity problems
 - [Performance](./performance.md) — handler and computed performance tips
 - [@reactivity](../../common/concepts/reactivity.md) — reactivity system fundamentals

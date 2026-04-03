@@ -23,7 +23,7 @@ import {
   NAME,
   pattern,
   UI,
-} from "commontools";
+} from "commonfabric";
 
 interface Item {
   title: string;
@@ -117,12 +117,12 @@ export default pattern<Input>(({ items, log }) => {
         <h2>Nested Map + ifElse Test</h2>
 
         <div style={{ marginBottom: "20px", display: "flex", gap: "10px" }}>
-          <ct-button onClick={runRepro({ items, log })}>
+          <cf-button onClick={runRepro({ items, log })}>
             Run Test Sequence
-          </ct-button>
-          <ct-button onClick={resetItems({ items, log })}>
+          </cf-button>
+          <cf-button onClick={resetItems({ items, log })}>
             Reset
-          </ct-button>
+          </cf-button>
         </div>
 
         {/* Row 1: Basic List vs Category List */}
@@ -146,9 +146,9 @@ export default pattern<Input>(({ items, log }) => {
             </div>
             {items.map((item, idx) => (
               <div style={{ margin: "4px 0" }}>
-                <ct-checkbox $checked={item.done}>
+                <cf-checkbox $checked={item.done}>
                   [{idx}] {item.title} ({item.category})
-                </ct-checkbox>
+                </cf-checkbox>
               </div>
             ))}
           </div>
@@ -179,9 +179,9 @@ export default pattern<Input>(({ items, log }) => {
                       (item.category || "Uncategorized") === category
                     ),
                     <div style={{ marginLeft: "16px" }}>
-                      <ct-checkbox $checked={item.done}>
+                      <cf-checkbox $checked={item.done}>
                         [{idx}] {item.title}
-                      </ct-checkbox>
+                      </cf-checkbox>
                     </div>,
                     null,
                   )
@@ -214,9 +214,9 @@ export default pattern<Input>(({ items, log }) => {
               ifElse(
                 computed(() => item.done),
                 <div style={{ margin: "4px 0" }}>
-                  <ct-checkbox $checked={item.done}>
+                  <cf-checkbox $checked={item.done}>
                     [{idx}] {item.title} (done)
-                  </ct-checkbox>
+                  </cf-checkbox>
                 </div>,
                 null,
               )
@@ -247,9 +247,9 @@ export default pattern<Input>(({ items, log }) => {
               ifElse(
                 computed(() => item.done),
                 <div style={{ margin: "4px 0" }}>
-                  <ct-checkbox $checked={item.done}>
+                  <cf-checkbox $checked={item.done}>
                     [{idx}] {item.title} (done)
-                  </ct-checkbox>
+                  </cf-checkbox>
                 </div>,
                 <span style={{ display: "none" }} />,
               )

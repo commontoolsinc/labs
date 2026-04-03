@@ -1,6 +1,6 @@
 ## Core Principle: Writable<> is About Write Access, Not Reactivity
 
-**The most important thing to understand:** Everything in CommonTools is reactive by default. The `Writable<>` wrapper in type signatures doesn't enable reactivity—it indicates **write intent**.
+**The most important thing to understand:** Everything in Common Fabric is reactive by default. The `Writable<>` wrapper in type signatures doesn't enable reactivity—it indicates **write intent**.
 
 ### The Rule
 
@@ -8,7 +8,7 @@
 - **Omit `Writable<>`** for read-only access - the framework automatically provides reactive values
 
 ```tsx
-import { Default, Writable, UI, pattern } from 'commontools'
+import { Default, Writable, UI, pattern } from 'commonfabric'
 
 interface Item {}
 
@@ -46,17 +46,17 @@ export default pattern<WritableInput>(({ count, items, title }) => {
         <div>Count: {count}</div>
 
         {/* Can also mutate */}
-        <ct-button onClick={() => count.set(count.get() + 1)}>
+        <cf-button onClick={() => count.set(count.get() + 1)}>
           Increment
-        </ct-button>
+        </cf-button>
 
         {/* Bidirectional binding */}
-        <ct-input $value={title} />
+        <cf-input $value={title} />
 
         {/* Can also mutate */}
-        <ct-button onClick={() => items.push({ title: "New" })}>
+        <cf-button onClick={() => items.push({ title: "New" })}>
           Add Item
-        </ct-button>
+        </cf-button>
       </div>
     ),
   };

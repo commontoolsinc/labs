@@ -1,13 +1,13 @@
-import { JSONSchema } from "@commontools/runner";
+import { JSONSchema } from "@commonfabric/runner";
 import {
   applyDefaults,
   type GenerationOptions,
   hydratePrompt,
   type LLMRequest,
-} from "@commontools/llm";
-import { type BuiltInLLMMessage } from "@commontools/api";
+} from "@commonfabric/llm";
+import { type BuiltInLLMMessage } from "@commonfabric/api";
 import { extractUserCode, staticSystemMd } from "./static.ts";
-import { type StaticCache } from "@commontools/static";
+import { type StaticCache } from "@commonfabric/static";
 
 export const RESPONSE_PREFILL = "```javascript\n";
 

@@ -286,7 +286,7 @@ async function buildCli(config: BuildConfig): Promise<void> {
     args: [
       "compile",
       "--output",
-      config.distPath("ct"),
+      config.distPath("cf"),
       // Run `--no-check` here, as the `--include`'d
       // `es2023.d.ts` file will attempt to be checked
       // as a non-static asset. Checking should be done
@@ -314,6 +314,9 @@ async function buildCli(config: BuildConfig): Promise<void> {
     console.error("Failed to build background charm service binary");
     Deno.exit(1);
   }
+  await Deno.remove(config.distPath("ct")).catch(() => undefined);
+  await Deno.copyFile(config.distPath("cf"), config.distPath("ct"));
+  await Deno.chmod(config.distPath("ct"), 0o755).catch(() => undefined);
   console.log("CLI binary built successfully");
 }
 

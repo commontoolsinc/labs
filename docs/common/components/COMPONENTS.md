@@ -4,63 +4,63 @@
 
 > **Living documentation:** [`packages/patterns/catalog/catalog.tsx`](../../../packages/patterns/catalog/catalog.tsx) is the authoritative, type-checked component catalog. Each component has a story file under [`packages/patterns/catalog/stories/`](../../../packages/patterns/catalog/stories/) showing usage. Refer to those files for the most accurate, up-to-date examples.
 
-CommonTools UI components with bidirectional binding support.
+Common Fabric UI components with bidirectional binding support.
 
 ## Bidirectional Binding
 
 Use `$` prefix for automatic two-way sync. No handler needed for simple updates.
 
 ```tsx
-<ct-checkbox $checked={item.done} />    // Auto-syncs checkbox state
-<ct-input $value={title} />             // Auto-syncs text input
-<ct-select $value={category} items={[...]} />
+<cf-checkbox $checked={item.done} />    // Auto-syncs checkbox state
+<cf-input $value={title} />             // Auto-syncs text input
+<cf-select $value={category} items={[...]} />
 ```
 
-**Native HTML inputs are one-way only.** Always use `ct-*` components for form inputs.
+**Native HTML inputs are one-way only.** Always use the Common Fabric form components for inputs.
 
 For when to use handlers vs binding, see [two-way-binding](../patterns/two-way-binding.md).
 
 ## Property Names: Use CamelCase
 
-Use camelCase for `ct-*` component properties. Kebab-case JSX attributes don't map correctly:
+Use camelCase for Common Fabric component properties. Kebab-case JSX attributes don't map correctly:
 
 ```tsx
 // ❌ Kebab-case won't work
-<ct-autocomplete allow-custom={true} />  // Sets element["allow-custom"], not allowCustom
+<cf-autocomplete allow-custom={true} />  // Sets element["allow-custom"], not allowCustom
 
 // ✅ CamelCase works
-<ct-autocomplete allowCustom={true} />  // Sets element.allowCustom correctly
+<cf-autocomplete allowCustom={true} />  // Sets element.allowCustom correctly
 ```
 
 ---
 
-## ct-button
+## cf-button
 
 ```tsx
 // Simple inline handler
-<ct-button onClick={() => count.set(count.get() + 1)}>Increment</ct-button>
+<cf-button onClick={() => count.set(count.get() + 1)}>Increment</cf-button>
 
 // action() for more complex logic (preferred)
 const increment = action(() => {
   count.set(count.get() + 1);
   lastUpdated.set(Date.now());
 });
-<ct-button onClick={increment}>Increment</ct-button>
+<cf-button onClick={increment}>Increment</cf-button>
 ```
 
 ---
 
-## ct-input
+## cf-input
 
 ```tsx
 // Bidirectional binding (preferred)
-<ct-input $value={title} />
+<cf-input $value={title} />
 
 // With placeholder
-<ct-input $value={searchQuery} placeholder="Search..." />
+<cf-input $value={searchQuery} placeholder="Search..." />
 
 // Manual handler for side effects
-<ct-input value={title} onct-input={(e) => {
+<cf-input value={title} oncf-input={(e) => {
   title.set(e.detail.value);
   console.log("Changed:", e.detail.value);
 }} />
@@ -68,26 +68,26 @@ const increment = action(() => {
 
 ---
 
-## ct-checkbox
+## cf-checkbox
 
 ```tsx
 // Bidirectional binding
-<ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
+<cf-checkbox $checked={item.done}>{item.title}</cf-checkbox>
 
 // In array maps
 {items.map((item) => (
-  <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
+  <cf-checkbox $checked={item.done}>{item.title}</cf-checkbox>
 ))}
 ```
 
 ---
 
-## ct-select
+## cf-select
 
 Uses `items` attribute with `{ label, value }` objects. **Do not use `<option>` elements.**
 
 ```tsx
-<ct-select
+<cf-select
   $value={category}
   items={[
     { label: "Produce", value: "Produce" },
@@ -97,7 +97,7 @@ Uses `items` attribute with `{ label, value }` objects. **Do not use `<option>` 
 />
 
 // Values can be any type
-<ct-select
+<cf-select
   $value={selectedId}
   items={[
     { label: "First", value: 1 },
@@ -106,7 +106,7 @@ Uses `items` attribute with `{ label, value }` objects. **Do not use `<option>` 
 />
 
 // Dynamic items from data
-<ct-select
+<cf-select
   $value={selectedUser}
   items={users.map(u => ({ label: u.name, value: u }))}
 />
@@ -114,14 +114,14 @@ Uses `items` attribute with `{ label, value }` objects. **Do not use `<option>` 
 
 ---
 
-## ct-message-input
+## cf-message-input
 
 Input + button combo for adding items.
 
 ```tsx
-<ct-message-input
+<cf-message-input
   placeholder="New item"
-  onct-send={(e) => {
+  oncf-send={(e) => {
     const text = e.detail?.message?.trim();
     if (text) items.push({ title: text, done: false });
   }}
@@ -130,28 +130,28 @@ Input + button combo for adding items.
 
 ---
 
-## ct-card
+## cf-card
 
 Styled card with built-in padding (1rem). Don't add extra padding to children.
 
 ```tsx
-// ✅ Let ct-card handle padding
-<ct-card>
-  <ct-vstack gap={1}>
+// ✅ Let cf-card handle padding
+<cf-card>
+  <cf-vstack gap={1}>
     <h3>Title</h3>
     <p>Content</p>
-  </ct-vstack>
-</ct-card>
+  </cf-vstack>
+</cf-card>
 
 // ❌ Double padding
-<ct-card>
+<cf-card>
   <div style="padding: 1rem;">Content</div>
-</ct-card>
+</cf-card>
 ```
 
 ---
 
-## ct-render
+## cf-render
 
 Renders pattern instances for composition.
 
@@ -161,7 +161,7 @@ import SubPattern from "./sub-pattern.tsx";
 const subView = SubPattern({ items });
 
 // Three equivalent ways:
-<ct-render $cell={subView} />   // Most explicit
+<cf-render $cell={subView} />   // Most explicit
 {subView}                        // Direct interpolation
 <SubPattern items={items} />     // JSX syntax
 ```
@@ -175,40 +175,22 @@ const listView = ListView({ items });
 const gridView = GridView({ items });
 
 <div style={{ display: "flex", gap: "1rem" }}>
-  <ct-render $cell={listView} />
-  <ct-render $cell={gridView} />
+  <cf-render $cell={listView} />
+  <cf-render $cell={gridView} />
 </div>
 // Both views stay in sync automatically
 ```
 
 See [composition](../patterns/composition.md) for more on pattern composition.
 
----
-
-## ct-outliner
-
-Tree structure editor. See `packages/patterns/page.tsx` for complete example.
-
-```tsx
-type OutlinerNode = {
-  body: Default<string, "">;
-  children: Default<any[], []>;
-  attachments: Default<any[], []>;
-};
-
-<ct-outliner $value={outline} />
-```
-
----
-
-## ct-cell-context
+## cf-cell-context
 
 Debugging tool for inspecting cell values. See [CELL_CONTEXT.md](CELL_CONTEXT.md).
 
 ```tsx
-<ct-cell-context $cell={result} label="Result">
+<cf-cell-context $cell={result} label="Result">
   <div>{result.value}</div>
-</ct-cell-context>
+</cf-cell-context>
 ```
 
 ---
@@ -218,7 +200,7 @@ Debugging tool for inspecting cell values. See [CELL_CONTEXT.md](CELL_CONTEXT.md
 Use `equals()` for identity comparison:
 
 ```tsx
-import { equals, handler, Writable } from 'commontools';
+import { equals, handler, Writable } from 'commonfabric';
 
 const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
   (_, { items, item }) => {
@@ -231,7 +213,7 @@ const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
 
 ---
 
-## ct-screen
+## cf-screen
 
 Full-screen container for app-like layouts. Use instead of `<div style={{ height: "100%" }}>` which doesn't work (parent has no explicit height). The component already sets `display: flex; flex-direction: column;` internally.
 
@@ -242,37 +224,37 @@ Full-screen container for app-like layouts. Use instead of `<div style={{ height
 </div>
 
 // ✅ WORKS - full available width and height
-<ct-screen>
+<cf-screen>
   <header>Title</header>
-  <ct-vscroll style="flex: 1;">
+  <cf-vscroll style="flex: 1;">
     {/* Scrollable content */}
-  </ct-vscroll>
-</ct-screen>
+  </cf-vscroll>
+</cf-screen>
 ```
 
 ---
 
-## ct-image-input
+## cf-image-input
 
 ```tsx
-<ct-image-input
-  onct-change={handleImageUpload}
+<cf-image-input
+  oncf-change={handleImageUpload}
   maxSizeBytes={5000000}
 >
   📷 Add Photo
-</ct-image-input>
+</cf-image-input>
 ```
 
 The component compresses images to fit within `maxSizeBytes`.
 
 ---
 
-## ct-code-editor
+## cf-code-editor
 
 Rich text editor with wiki-link mentions. **Uses `[[` for completions, not `@`.**
 
 ```tsx
-<ct-code-editor
+<cf-code-editor
   $value={inputText}
   $mentionable={mentionable}
   $mentioned={mentioned}
@@ -284,21 +266,21 @@ Rich text editor with wiki-link mentions. **Uses `[[` for completions, not `@`.*
 **To trigger completions:** Type `[[` (double brackets), not `@`.
 
 Mentions are inserted as wiki-links: `[[Name (entityId)]]` where `entityId`
-is the bare CID. For rendering in `ct-markdown`, convert to markdown links
+is the bare CID. For rendering in `cf-markdown`, convert to markdown links
 with `/of:` prefix (see [mentionable](../conventions/mentionable.md)).
 
 ---
 
-## ct-prompt-input
+## cf-prompt-input
 
 Multiline textarea with `@`-mention autocomplete, attachments, and voice input.
 
 ```tsx
-<ct-prompt-input
+<cf-prompt-input
   $mentionable={mentionable}
   placeholder="Type @ to mention..."
   buttonText="Send"
-  onct-send={handleSend}
+  oncf-send={handleSend}
 />
 ```
 
@@ -309,7 +291,7 @@ on cell resolution and link formats.
 
 ---
 
-## ct-map
+## cf-map
 
 Interactive map component using Leaflet with OpenStreetMap tiles. No API key required.
 
@@ -368,11 +350,11 @@ interface MapPolyline {
 
 | Event | Detail | Description |
 |-------|--------|-------------|
-| `ct-click` | `{ lat, lng }` | Map background clicked |
-| `ct-bounds-change` | `{ bounds, center, zoom }` | Viewport changed |
-| `ct-marker-click` | `{ marker, index, lat, lng }` | Marker clicked |
-| `ct-marker-drag-end` | `{ marker, index, position, oldPosition }` | Marker drag completed |
-| `ct-circle-click` | `{ circle, index, lat, lng }` | Circle clicked |
+| `cf-click` | `{ lat, lng }` | Map background clicked |
+| `cf-bounds-change` | `{ bounds, center, zoom }` | Viewport changed |
+| `cf-marker-click` | `{ marker, index, lat, lng }` | Marker clicked |
+| `cf-marker-drag-end` | `{ marker, index, position, oldPosition }` | Marker drag completed |
+| `cf-circle-click` | `{ circle, index, lat, lng }` | Circle clicked |
 
 **Note:** Polylines do not emit click events. For clickable segments, use circles as waypoints.
 
@@ -387,12 +369,12 @@ const mapData = {
     icon: "📍"
   }))
 };
-<ct-map $value={mapData} fitToBounds />
+<cf-map $value={mapData} fitToBounds />
 
 // Interactive: Click to add marker
-<ct-map
+<cf-map
   $value={mapData}
-  onct-click={(e) => {
+  oncf-click={(e) => {
     markers.push({
       position: { lat: e.detail.lat, lng: e.detail.lng },
       title: "New Location",
@@ -402,9 +384,9 @@ const mapData = {
 />
 
 // Draggable markers
-<ct-map
+<cf-map
   $value={mapData}
-  onct-marker-drag-end={(e) => {
+  oncf-marker-drag-end={(e) => {
     markers.key(e.detail.index).key("position").set(e.detail.position);
   }}
 />
@@ -444,19 +426,37 @@ const mapData = {
 
 ---
 
-## ct-chart
+## Style Syntax
 
-SVG charting components. Compose mark elements inside a `ct-chart` container.
+| Element | Syntax | Example |
+|---------|--------|---------|
+| HTML (`div`, `span`) | Object, camelCase | `style={{ backgroundColor: "#fff" }}` |
+| Custom (`cf-*`) | String, kebab-case | `style="background-color: #fff;"` |
+
+```tsx
+// Mixed usage
+<div style={{ display: "flex", gap: "1rem" }}>
+  <cf-vstack style="flex: 1; padding: 1rem;">
+    <span style={{ color: "#333" }}>Label</span>
+  </cf-vstack>
+</div>
+```
+
+---
+
+## cf-chart
+
+SVG charting components. Compose mark elements inside a `cf-chart` container.
 
 ### Elements
 
-- **`ct-chart`** - Container that discovers child marks, computes scales, renders SVG
-- **`ct-line-mark`** - Line series
-- **`ct-area-mark`** - Filled area
-- **`ct-bar-mark`** - Bar/column chart
-- **`ct-dot-mark`** - Scatter/dot plot
+- **`cf-chart`** - Container that discovers child marks, computes scales, renders SVG
+- **`cf-line-mark`** - Line series
+- **`cf-area-mark`** - Filled area
+- **`cf-bar-mark`** - Bar/column chart
+- **`cf-dot-mark`** - Scatter/dot plot
 
-### ct-chart Properties
+### cf-chart Properties
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
@@ -480,56 +480,56 @@ SVG charting components. Compose mark elements inside a `ct-chart` container.
 | `color` | `string` | `"#6366f1"` | Stroke/fill color |
 | `label` | `string` | - | Label for tooltip |
 
-**ct-line-mark** adds: `strokeWidth` (default 2), `curve` (`"linear"`, `"step"`, `"monotone"`, `"natural"`)
+**cf-line-mark** adds: `strokeWidth` (default 2), `curve` (`"linear"`, `"step"`, `"monotone"`, `"natural"`)
 
-**ct-area-mark** adds: `opacity` (default 0.2), `curve`, `y2` (baseline)
+**cf-area-mark** adds: `opacity` (default 0.2), `curve`, `y2` (baseline)
 
-**ct-bar-mark** adds: `opacity` (default 1), `barPadding` (0-1, default 0.2)
+**cf-bar-mark** adds: `opacity` (default 1), `barPadding` (0-1, default 0.2)
 
-**ct-dot-mark** adds: `radius` (default 3)
+**cf-dot-mark** adds: `radius` (default 3)
 
 ### Events
 
 | Event | Detail | Description |
 |-------|--------|-------------|
-| `ct-hover` | `{ x, y, dataX, dataY, nearest }` | Mouse over chart |
-| `ct-click` | `{ x, y, dataX, dataY, nearest }` | Chart clicked |
-| `ct-leave` | `{}` | Mouse left chart |
+| `cf-hover` | `{ x, y, dataX, dataY, nearest }` | Mouse over chart |
+| `cf-click` | `{ x, y, dataX, dataY, nearest }` | Chart clicked |
+| `cf-leave` | `{}` | Mouse left chart |
 
 ### Usage
 
 ```tsx
 // Sparkline (inline, no axes)
-<ct-chart height={24} style="width: 80px;">
-  <ct-line-mark $data={trend} color="green" />
-</ct-chart>
+<cf-chart height={24} style="width: 80px;">
+  <cf-line-mark $data={trend} color="green" />
+</cf-chart>
 
 // Line chart with axes
-<ct-chart height={200} xAxis yAxis>
-  <ct-line-mark $data={prices} x="date" y="price" color="blue" label="AAPL" />
-</ct-chart>
+<cf-chart height={200} xAxis yAxis>
+  <cf-line-mark $data={prices} x="date" y="price" color="blue" label="AAPL" />
+</cf-chart>
 
 // Layered area + line
-<ct-chart height={200} xAxis yAxis>
-  <ct-area-mark $data={prices} x="date" y="price" color="blue" opacity={0.15} />
-  <ct-line-mark $data={prices} x="date" y="price" color="blue" />
-</ct-chart>
+<cf-chart height={200} xAxis yAxis>
+  <cf-area-mark $data={prices} x="date" y="price" color="blue" opacity={0.15} />
+  <cf-line-mark $data={prices} x="date" y="price" color="blue" />
+</cf-chart>
 
 // Bar chart
-<ct-chart height={200} xAxis yAxis>
-  <ct-bar-mark $data={monthly} x="month" y="revenue" color="green" label="Revenue" />
-</ct-chart>
+<cf-chart height={200} xAxis yAxis>
+  <cf-bar-mark $data={monthly} x="month" y="revenue" color="green" label="Revenue" />
+</cf-chart>
 
 // Multi-series
-<ct-chart height={300} xAxis yAxis>
-  <ct-line-mark $data={appl} x="date" y="price" color="blue" label="AAPL" />
-  <ct-line-mark $data={goog} x="date" y="price" color="red" label="GOOG" />
-</ct-chart>
+<cf-chart height={300} xAxis yAxis>
+  <cf-line-mark $data={appl} x="date" y="price" color="blue" label="AAPL" />
+  <cf-line-mark $data={goog} x="date" y="price" color="red" label="GOOG" />
+</cf-chart>
 
 // Simple number array (auto-indexed x)
-<ct-chart height={100}>
-  <ct-line-mark $data={[1, 3, 2, 5, 4, 7, 6]} color="#22c55e" />
-</ct-chart>
+<cf-chart height={100}>
+  <cf-line-mark $data={[1, 3, 2, 5, 4, 7, 6]} color="#22c55e" />
+</cf-chart>
 ```
 
 ### Notes
@@ -553,4 +553,4 @@ SVG elements (`<svg>`, `<path>`, `<circle>`, etc.) are not in the JSX type defin
 </svg>
 ```
 
-**Workarounds:** Use `ct-chart` for data visualization, styled `<div>` elements for simple graphics, or text sparklines (`▁▂▃▄▅▆▇█`).
+**Workarounds:** Use `cf-chart` for data visualization, styled `<div>` elements for simple graphics, or text sparklines (`▁▂▃▄▅▆▇█`).

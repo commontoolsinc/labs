@@ -39,7 +39,7 @@ import {
   pattern,
   UI,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Article {
   title: string;
@@ -190,17 +190,17 @@ const summaries = articles.map((article) => ({
         </div>
 
         <div style={{ margin: "20px 0" }}>
-          <ct-message-input
+          <cf-message-input
             placeholder="Add article: Title | Content (e.g., 'React Tips | Hooks simplify state')"
             appearance="rounded"
-            onct-send={addArticle({ articles })}
+            oncf-send={addArticle({ articles })}
           />
         </div>
 
         <div style={{ marginBottom: "10px" }}>
-          <ct-button onClick={clearArticles({ articles })}>
+          <cf-button onClick={clearArticles({ articles })}>
             Clear Articles
-          </ct-button>
+          </cf-button>
           <span style={{ marginLeft: "10px", color: "#666" }}>
             {derive({ articles }, ({ articles: arr }) =>
               `${arr.length} article(s)`)}
@@ -238,7 +238,7 @@ const summaries = articles.map((article) => ({
                   if (pending) {
                     return (
                       <div style={{ color: "#1976d2" }}>
-                        <ct-loader show-elapsed /> Generating summary...
+                        <cf-loader show-elapsed /> Generating summary...
                       </div>
                     );
                   }

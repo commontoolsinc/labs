@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { computed, pattern, UI } from "commonfabric";
 interface Spot {
     active: boolean;
     spotNumber: string;
@@ -30,11 +30,11 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("people").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("people").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const person = __ct_pattern_input.key("element");
                 const state = __ct_pattern_input.key("params", "state");
                 const personName = person.key("name"), email = person.key("email"), commuteMode = person.key("commuteMode"), priorityRank = person.key("priorityRank"), defaultSpot = person.key("defaultSpot"), spotPreferences = person.key("spotPreferences"), isFirst = person.key("isFirst"), isLast = person.key("isLast");
-                const isEditing = __ctHelpers.derive({
+                const isEditing = __cfHelpers.derive({
                     type: "object",
                     properties: {
                         state: {
@@ -55,15 +55,15 @@ export default pattern((state) => {
                         }
                     },
                     required: ["state", "personName"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     state: {
                         editingPersonName: state.key("editingPersonName")
                     },
                     personName: personName
                 }, ({ state, personName }) => state.editingPersonName === personName);
-                const isRemoveConfirm = __ctHelpers.derive({
+                const isRemoveConfirm = __cfHelpers.derive({
                     type: "object",
                     properties: {
                         state: {
@@ -84,15 +84,15 @@ export default pattern((state) => {
                         }
                     },
                     required: ["state", "personName"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     state: {
                         removePersonConfirmTarget: state.key("removePersonConfirmTarget")
                     },
                     personName: personName
                 }, ({ state, personName }) => state.removePersonConfirmTarget === personName);
-                const activeSpotOpts = __ctHelpers.derive({
+                const activeSpotOpts = __cfHelpers.derive({
                     type: "object",
                     properties: {
                         state: {
@@ -126,7 +126,7 @@ export default pattern((state) => {
                             required: ["active", "spotNumber"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
                         type: "object",
@@ -140,7 +140,7 @@ export default pattern((state) => {
                         },
                         required: ["label", "value"]
                     }
-                } as const satisfies __ctHelpers.JSONSchema, { state: {
+                } as const satisfies __cfHelpers.JSONSchema, { state: {
                         spots: state.key("spots")
                     } }, ({ state }) => state.spots
                     .filter((s) => s.active)
@@ -156,57 +156,57 @@ export default pattern((state) => {
               {defaultSpot ? <span>{defaultSpot}</span> : null}
               {isFirst ? <span>first</span> : null}
               {isLast ? <span>last</span> : null}
-              {__ctHelpers.ifElse({
+              {__cfHelpers.ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{}, {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "null"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{
                             type: "null"
                         }, {}, {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, isEditing, <span>editing</span>, null)}
-              {__ctHelpers.ifElse({
+                } as const satisfies __cfHelpers.JSONSchema, isEditing, <span>editing</span>, null)}
+              {__cfHelpers.ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{}, {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "null"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{
                             type: "null"
                         }, {}, {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, isRemoveConfirm, <span>removing</span>, null)}
-              {__ctHelpers.ifElse({
+                } as const satisfies __cfHelpers.JSONSchema, isRemoveConfirm, <span>removing</span>, null)}
+              {__cfHelpers.ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{}, {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "null"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{
                             type: "null"
                         }, {}, {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         activeSpotOpts: {
@@ -220,9 +220,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["activeSpotOpts"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, { activeSpotOpts: {
+                } as const satisfies __cfHelpers.JSONSchema, { activeSpotOpts: {
                         length: activeSpotOpts.key("length")
                     } }, ({ activeSpotOpts }) => activeSpotOpts.length > 0), <span>spots</span>, null)}
               {spotPreferences.key("length") > 0
@@ -321,7 +321,7 @@ export default pattern((state) => {
                         required: ["name", "email", "commuteMode", "priorityRank", "spotPreferences", "isFirst", "isLast"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
@@ -341,7 +341,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {
+            } as const satisfies __cfHelpers.JSONSchema), {
                 state: {
                     editingPersonName: state.key("editingPersonName"),
                     removePersonConfirmTarget: state.key("removePersonConfirmTarget"),
@@ -431,7 +431,7 @@ export default pattern((state) => {
             required: ["name", "email", "commuteMode", "priorityRank", "spotPreferences", "isFirst", "isLast"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -460,8 +460,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

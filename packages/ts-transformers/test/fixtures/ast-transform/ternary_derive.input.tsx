@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commonfabric";
 
 interface PatternState {
   value: Default<number, 0>;

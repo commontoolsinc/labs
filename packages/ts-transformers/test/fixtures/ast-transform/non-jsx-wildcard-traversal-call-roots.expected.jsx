@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 interface State {
     wishes: [
         {
@@ -15,7 +15,7 @@ interface State {
 // FIXTURE: non-jsx-wildcard-traversal-call-roots
 // Verifies: wildcard traversal calls lower as whole call roots outside JSX
 export default pattern((state) => ({
-    serialized: __ctHelpers.derive({
+    serialized: __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -41,12 +41,12 @@ export default pattern((state) => ({
             }
         },
         required: ["state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             wishes: state.key("wishes")
         } }, ({ state }) => JSON.stringify(state.wishes[1])),
-    keys: __ctHelpers.derive({
+    keys: __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -72,15 +72,15 @@ export default pattern((state) => ({
             }
         },
         required: ["state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             wishes: state.key("wishes")
         } }, ({ state }) => Object.keys(state.wishes[1])),
-    values: __ctHelpers.derive({
+    values: __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -106,15 +106,15 @@ export default pattern((state) => ({
             }
         },
         required: ["state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             wishes: state.key("wishes")
         } }, ({ state }) => Object.values(state.wishes[1])),
-    entries: __ctHelpers.derive({
+    entries: __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -140,7 +140,7 @@ export default pattern((state) => ({
             }
         },
         required: ["state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "array",
@@ -148,7 +148,7 @@ export default pattern((state) => ({
                 type: "string"
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             wishes: state.key("wishes")
         } }, ({ state }) => Object.entries(state.wishes[1])),
 }), {
@@ -171,7 +171,7 @@ export default pattern((state) => ({
         }
     },
     required: ["wishes"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         serialized: {
@@ -200,8 +200,8 @@ export default pattern((state) => ({
         }
     },
     required: ["serialized", "keys", "values", "entries"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

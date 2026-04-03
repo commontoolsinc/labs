@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, computed, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 // FIXTURE: computed-nested
 // Verifies: chained computed() calls where the second captures the result of the first
 //   computed(() => a.get() + b.get()) → derive(..., { a, b }, ({ a, b }) => a.get() + b.get())
@@ -9,11 +9,11 @@ import { Writable, computed, pattern } from "commontools";
 export default pattern(() => {
     const a = Writable.of(10, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const b = Writable.of(20, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const sum = __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema);
+    const sum = __cfHelpers.derive({
         type: "object",
         properties: {
             a: {
@@ -26,13 +26,13 @@ export default pattern(() => {
             }
         },
         required: ["a", "b"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         a: a,
         b: b
     }, ({ a, b }) => a.get() + b.get());
-    const doubled = __ctHelpers.derive({
+    const doubled = __cfHelpers.derive({
         type: "object",
         properties: {
             sum: {
@@ -40,14 +40,14 @@ export default pattern(() => {
             }
         },
         required: ["sum"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, { sum: sum }, ({ sum }) => sum * 2);
+    } as const satisfies __cfHelpers.JSONSchema, { sum: sum }, ({ sum }) => sum * 2);
     return doubled;
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

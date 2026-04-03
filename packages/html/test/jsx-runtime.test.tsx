@@ -1,7 +1,7 @@
 /**
  * Tests for the JSX automatic runtime
  *
- * These tests verify that @commontools/html can be used as a JSX runtime
+ * These tests verify that @commonfabric/html can be used as a JSX runtime
  * compatible with TypeScript's "jsx": "react-jsx" configuration.
  */
 
@@ -9,7 +9,7 @@ import { describe, it } from "@std/testing/bdd";
 import * as assert from "./assert.ts";
 
 // Note: To properly test the automatic JSX runtime, this file should be
-// compiled with jsxImportSource set to "@commontools/html"
+// compiled with jsxImportSource set to "@commonfabric/html"
 // However, for this test to work with the current deno.jsonc configuration,
 // we'll import the functions directly and verify they work correctly.
 
@@ -118,7 +118,7 @@ describe("JSX automatic runtime", () => {
     });
   });
 
-  it("Fragment creates a ct-fragment element", () => {
+  it("Fragment creates a cf-fragment element", () => {
     const fragment = Fragment({
       children: [
         jsx("p", { children: "Paragraph 1" }),
@@ -128,7 +128,7 @@ describe("JSX automatic runtime", () => {
 
     assert.matchObject(fragment, {
       type: "vnode",
-      name: "ct-fragment",
+      name: "cf-fragment",
       children: [
         {
           type: "vnode",

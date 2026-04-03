@@ -1,5 +1,5 @@
-import { hashOf } from "@commontools/data-model/value-hash";
-import { isRecord } from "@commontools/utils/types";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { isRecord } from "@commonfabric/utils/types";
 import { isOpaqueRef } from "./builder/types.ts";
 import {
   getCellOrThrow,

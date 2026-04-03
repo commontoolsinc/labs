@@ -1,8 +1,8 @@
-import * as __ctHelpers from "commontools";
-import { computed, handler, ifElse, pattern, UI, Writable } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { computed, handler, ifElse, pattern, UI, Writable } from "commonfabric";
 const openNoteEditor = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         subPieces: {
@@ -22,10 +22,10 @@ const openNoteEditor = handler({
         }
     },
     required: ["subPieces", "editingNoteIndex", "editingNoteText", "index"]
-} as const satisfies __ctHelpers.JSONSchema, (_event, state) => state);
+} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
 const openSettings = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         settingsModuleIndex: {
@@ -36,10 +36,10 @@ const openSettings = handler({
         }
     },
     required: ["settingsModuleIndex", "index"]
-} as const satisfies __ctHelpers.JSONSchema, (_event, state) => state);
+} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
 const toggleExpanded = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         expandedIndex: {
@@ -50,10 +50,10 @@ const toggleExpanded = handler({
         }
     },
     required: ["expandedIndex", "index"]
-} as const satisfies __ctHelpers.JSONSchema, (_event, state) => state);
+} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
 const trashSubPiece = handler({
     type: "unknown"
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         subPieces: {
@@ -79,7 +79,7 @@ const trashSubPiece = handler({
         }
     },
     required: ["subPieces", "trashedSubPieces", "expandedIndex", "settingsModuleIndex", "index"]
-} as const satisfies __ctHelpers.JSONSchema, (_event, state) => state);
+} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
 interface Item {
     note?: string;
     collapsed?: boolean;
@@ -101,17 +101,17 @@ export default pattern((__ct_pattern_input) => {
     const trashedSubPieces = __ct_pattern_input.key("trashedSubPieces");
     const editingNoteIndex = Writable.of<number | undefined>(undefined, {
         type: ["number", "undefined"]
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const editingNoteText = Writable.of("", {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const expandedIndex = Writable.of<number | undefined>(undefined, {
         type: ["number", "undefined"]
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const settingsModuleIndex = Writable.of<number | undefined>(undefined, {
         type: ["number", "undefined"]
-    } as const satisfies __ctHelpers.JSONSchema);
-    const allEntries = __ctHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema);
+    const allEntries = __cfHelpers.derive({
         type: "object",
         properties: {
             items: {
@@ -142,7 +142,7 @@ export default pattern((__ct_pattern_input) => {
                 required: ["allowMultiple"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "object",
@@ -185,7 +185,7 @@ export default pattern((__ct_pattern_input) => {
                 required: ["allowMultiple"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.map((entry, index) => ({
+    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.map((entry, index) => ({
         entry,
         index,
         isExpanded: index === 0,
@@ -194,7 +194,7 @@ export default pattern((__ct_pattern_input) => {
     })));
     return {
         [UI]: (<div>
-        {allEntries.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {allEntries.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const entry = __ct_pattern_input.key("element", "entry");
                 const index = __ct_pattern_input.key("element", "index");
                 const isExpanded = __ct_pattern_input.key("element", "isExpanded");
@@ -208,18 +208,18 @@ export default pattern((__ct_pattern_input) => {
                 const trashedSubPieces = __ct_pattern_input.key("params", "trashedSubPieces");
                 return ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{}, {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "null"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{
                             type: "null"
                         }, {}]
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         entry: {
@@ -236,30 +236,30 @@ export default pattern((__ct_pattern_input) => {
                         }
                     },
                     required: ["entry"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, { entry: {
+                } as const satisfies __cfHelpers.JSONSchema, { entry: {
                         collapsed: entry.key("collapsed")
                     } }, ({ entry }) => !entry.collapsed), <div>
               {ifElse({
                         type: "boolean"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         anyOf: [{}, {
                                 type: "object",
                                 properties: {}
                             }]
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "null"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         anyOf: [{
                                 type: "null"
                             }, {}]
-                    } as const satisfies __ctHelpers.JSONSchema, allowMultiple, <button type="button" onClick={openNoteEditor({
+                    } as const satisfies __cfHelpers.JSONSchema, allowMultiple, <button type="button" onClick={openNoteEditor({
                             subPieces,
                             editingNoteIndex,
                             editingNoteText,
                             index,
-                        })} style={__ctHelpers.derive({
+                        })} style={__cfHelpers.derive({
                             type: "object",
                             properties: {
                                 entry: {
@@ -272,7 +272,7 @@ export default pattern((__ct_pattern_input) => {
                                 }
                             },
                             required: ["entry"]
-                        } as const satisfies __ctHelpers.JSONSchema, {
+                        } as const satisfies __cfHelpers.JSONSchema, {
                             type: "object",
                             properties: {
                                 fontWeight: {
@@ -280,9 +280,9 @@ export default pattern((__ct_pattern_input) => {
                                 }
                             },
                             required: ["fontWeight"]
-                        } as const satisfies __ctHelpers.JSONSchema, { entry: entry }, ({ entry }) => ({
+                        } as const satisfies __cfHelpers.JSONSchema, { entry: entry }, ({ entry }) => ({
                             fontWeight: entry?.note ? "700" : "400",
-                        }))} title={__ctHelpers.derive({
+                        }))} title={__cfHelpers.derive({
                         type: "object",
                         properties: {
                             entry: {
@@ -295,22 +295,22 @@ export default pattern((__ct_pattern_input) => {
                             }
                         },
                         required: ["entry"]
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, { entry: entry }, ({ entry }) => entry?.note || "Add note...")}>
+                    } as const satisfies __cfHelpers.JSONSchema, { entry: entry }, ({ entry }) => entry?.note || "Add note...")}>
                   note
                 </button>, null)}
-              {__ctHelpers.when({
+              {__cfHelpers.when({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{
                             type: "null"
                         }, {}]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{
                             type: ["boolean", "null"]
                         }, {}]
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         isExpanded: {
@@ -318,50 +318,50 @@ export default pattern((__ct_pattern_input) => {
                         }
                     },
                     required: ["isExpanded"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, { isExpanded: isExpanded }, ({ isExpanded }) => !isExpanded), ifElse({
+                } as const satisfies __cfHelpers.JSONSchema, { isExpanded: isExpanded }, ({ isExpanded }) => !isExpanded), ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{}, {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "null"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{
                             type: "null"
                         }, {}]
-                } as const satisfies __ctHelpers.JSONSchema, true, <button type="button" onClick={openSettings({ settingsModuleIndex, index })}>
+                } as const satisfies __cfHelpers.JSONSchema, true, <button type="button" onClick={openSettings({ settingsModuleIndex, index })}>
                   settings
                 </button>, null))}
-              <button type="button" onClick={toggleExpanded({ expandedIndex, index })} style={{ background: __ctHelpers.ifElse({
+              <button type="button" onClick={toggleExpanded({ expandedIndex, index })} style={{ background: __cfHelpers.ifElse({
                         type: "boolean"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": ["a", "b"]
-                    } as const satisfies __ctHelpers.JSONSchema, isPinned, "a", "b") }}>
+                    } as const satisfies __cfHelpers.JSONSchema, isPinned, "a", "b") }}>
                 expand
               </button>
-              {__ctHelpers.when({
+              {__cfHelpers.when({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{}, {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{
                             type: "boolean"
                         }, {}, {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         isExpanded: {
@@ -369,9 +369,9 @@ export default pattern((__ct_pattern_input) => {
                         }
                     },
                     required: ["isExpanded"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, { isExpanded: isExpanded }, ({ isExpanded }) => !isExpanded), <button type="button" onClick={trashSubPiece({
+                } as const satisfies __cfHelpers.JSONSchema, { isExpanded: isExpanded }, ({ isExpanded }) => !isExpanded), <button type="button" onClick={trashSubPiece({
                         subPieces,
                         trashedSubPieces,
                         expandedIndex,
@@ -461,7 +461,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["allowMultiple"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         type: "null"
                     }, {
@@ -480,7 +480,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema), {
+            } as const satisfies __cfHelpers.JSONSchema), {
                 subPieces: subPieces,
                 editingNoteIndex: editingNoteIndex,
                 editingNoteText: editingNoteText,
@@ -533,7 +533,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["allowMultiple"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -562,8 +562,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -9,7 +9,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import Note from "../../notes/note.tsx";
 import Notebook from "../../notes/notebook.tsx";
 import { type MinimalPiece } from "../../notes/schemas.tsx";
@@ -113,13 +113,13 @@ export default pattern<
     [NAME]: "Nest Bug Repro",
     requestCreate,
     [UI]: (
-      <ct-vstack gap="4" padding="6">
+      <cf-vstack gap="4" padding="6">
         <span style={{ fontSize: "18px", fontWeight: "600" }}>
           Nest Bug Repro {status}
         </span>
 
         {/* Idle: show button */}
-        <ct-button
+        <cf-button
           variant="primary"
           onClick={requestCreate}
           style={{
@@ -129,10 +129,10 @@ export default pattern<
           }}
         >
           Create Nested Notebooks
-        </ct-button>
+        </cf-button>
 
         {/* Creating: indicator */}
-        <ct-hstack
+        <cf-hstack
           gap="2"
           align="center"
           style={{
@@ -144,25 +144,25 @@ export default pattern<
           <span
             style={{
               fontSize: "14px",
-              color: "var(--ct-color-text-secondary, #666)",
+              color: "var(--cf-color-text-secondary, #666)",
             }}
           >
             Creating notebooks...
           </span>
-        </ct-hstack>
+        </cf-hstack>
 
         {/* Done: success */}
-        <ct-card
+        <cf-card
           style={{
             display: computed(() => status.get() === "done" ? "block" : "none"),
           }}
         >
-          <ct-vstack gap="2" padding="4">
+          <cf-vstack gap="2" padding="4">
             <span
               style={{
                 fontSize: "16px",
                 fontWeight: "600",
-                color: "var(--ct-color-success, #16a34a)",
+                color: "var(--cf-color-success, #16a34a)",
               }}
             >
               Done! Created 12 pieces (6 notes + 6 notebooks)
@@ -170,14 +170,14 @@ export default pattern<
             <span
               style={{
                 fontSize: "13px",
-                color: "var(--ct-color-text-secondary, #666)",
+                color: "var(--cf-color-text-secondary, #666)",
               }}
             >
               3 levels of nesting: parent &gt; child &gt; grandchild
             </span>
-          </ct-vstack>
-        </ct-card>
-      </ct-vstack>
+          </cf-vstack>
+        </cf-card>
+      </cf-vstack>
     ),
   };
 });

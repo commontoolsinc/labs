@@ -14,10 +14,10 @@
  */
 
 import { parseArgs } from "@std/cli/parse-args";
-import type { Cell } from "@commontools/runner";
+import type { Cell } from "@commonfabric/runner";
 import { cellConstructorFactory } from "../../runner/src/cell.ts";
 import { loadManager } from "../../cli/lib/piece.ts";
-import { PiecesController } from "@commontools/piece/ops";
+import { PiecesController } from "@commonfabric/piece/ops";
 import { runSyncLoop } from "./daemon.ts";
 import type { Edit, FailedEdit, Todo } from "./types.ts";
 

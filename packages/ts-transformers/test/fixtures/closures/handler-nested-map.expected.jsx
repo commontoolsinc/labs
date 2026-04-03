@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 interface State {
     items: Array<{
         value: number;
@@ -12,7 +12,7 @@ interface State {
 // Context: .map() on a plain array inside a handler remains a normal JS .map(), not a reactive transform
 export default pattern((state) => {
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+        [UI]: (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
             properties: {
                 state: {
@@ -38,7 +38,7 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => {
+        } as const satisfies __cfHelpers.JSONSchema, (__ct_handler_event, { state }) => {
             const scaled = state.items.map((item) => item.value * state.multiplier);
             console.log(scaled);
         })({
@@ -70,7 +70,7 @@ export default pattern((state) => {
         }
     },
     required: ["items", "multiplier"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -99,8 +99,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

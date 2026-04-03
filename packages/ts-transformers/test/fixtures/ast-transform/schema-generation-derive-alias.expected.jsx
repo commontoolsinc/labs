@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { derive as deriveAlias } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { derive as deriveAlias } from "commonfabric";
 type AliasInput = {
     text: string;
 };
@@ -19,7 +19,7 @@ export const textLength = deriveAlias({
         }
     },
     required: ["text"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         length: {
@@ -27,10 +27,10 @@ export const textLength = deriveAlias({
         }
     },
     required: ["length"]
-} as const satisfies __ctHelpers.JSONSchema, state, (value) => ({
+} as const satisfies __cfHelpers.JSONSchema, state, (value) => ({
     length: value.text.length,
 }));
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

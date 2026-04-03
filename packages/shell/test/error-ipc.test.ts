@@ -6,11 +6,11 @@ import {
   NotificationType,
   RuntimeConnection,
   type RuntimeTransport,
-} from "@commontools/runtime-client";
+} from "@commonfabric/runtime-client";
 import type {
   IPCClientMessage,
   IPCRemoteMessage,
-} from "@commontools/runtime-client";
+} from "@commonfabric/runtime-client";
 
 /**
  * Tests that error notifications sent from the worker (via IPC)
@@ -49,7 +49,7 @@ describe("Error IPC propagation", () => {
     const sourceMapppedStack = `Error: something broke
     at myFunction (pattern.ts:10:5)
     at processData (utils.ts:25:12)
-    at <CT_INTERNAL>`;
+    at <CF_INTERNAL>`;
 
     // Simulate the worker sending an ErrorNotification
     transport.simulateMessage({
@@ -83,8 +83,8 @@ describe("Error IPC propagation", () => {
     const goodStack = `Error: user code error
     at validateInput (validator.ts:15:10)
     at processForm (form-handler.ts:42:3)
-    at <CT_INTERNAL>
-    at <CT_INTERNAL>`;
+    at <CF_INTERNAL>
+    at <CF_INTERNAL>`;
 
     transport.simulateMessage({
       type: NotificationType.ErrorReport,

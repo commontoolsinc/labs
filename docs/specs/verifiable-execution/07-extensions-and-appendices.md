@@ -1,4 +1,4 @@
-# CT Protocol: Extensions & Appendices (Sections 13–17)
+# CF Protocol: Extensions & Appendices (Sections 13–17)
 
 See `docs/specs/verifiable-execution/README.md` for navigation.
 
@@ -9,7 +9,7 @@ See `docs/specs/verifiable-execution/README.md` for navigation.
 Many failures of trust occur at the boundary between system and human. Messages
 are spoofed, prompts injected, consent manufactured.
 
-The CT Protocol addresses this by extending verifiability to **interaction
+The CF Protocol addresses this by extending verifiability to **interaction
 itself**: if user actions materially affect system behavior, then those actions
 belong in the provenance chain.
 
@@ -47,7 +47,7 @@ proofs, policy identifiers, and optional enforcement evidence.
 
 ### 14.2 The Critical Constraint
 
-A CT Protocol–backed credential must not invent facts. Every assertion must be
+A CF Protocol–backed credential must not invent facts. Every assertion must be
 reducible to receipts and verification steps that can be replayed.
 
 ### 14.3 Replayable Verification
@@ -101,7 +101,7 @@ _ct.example.com TXT "did=did:key:z6M...SPACE..."
 
 Or:
 ```
-https://example.com/.well-known/ct-space-did
+https://example.com/.well-known/cf-space-did
 ```
 
 ### 16.3 Security Properties
@@ -113,12 +113,12 @@ https://example.com/.well-known/ct-space-did
 
 ## 17. Philosophy: Dissolving Unnecessary Authority
 
-The CT Protocol is not neutral about power. It begins from the observation that
+The CF Protocol is not neutral about power. It begins from the observation that
 many failures of trust are also failures of balance.
 
 ### 17.1 The Shift
 
-Instead of replacing one authority with another, the CT Protocol seeks to
+Instead of replacing one authority with another, the CF Protocol seeks to
 **dissolve unnecessary authority** by making evidence portable and verification
 repeatable.
 
@@ -186,7 +186,7 @@ or Unclaimed (genesis).
 
 ## Appendix C: Mapping to Current Implementation
 
-| CT Protocol Concept   | Current Implementation                           | Package |
+| CF Protocol Concept   | Current Implementation                           | Package |
 | --------------------- | ------------------------------------------------ | ------- |
 | Entity                | `URI` (`${string}:${string}`)                    | memory  |
 | Fact                  | `Assertion \| Retraction`                        | memory  |

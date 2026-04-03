@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { JSONSchemaObj } from "commontools";
+import type { JSONSchemaObj } from "commonfabric";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { resolveSchema } from "../src/schema.ts";
 

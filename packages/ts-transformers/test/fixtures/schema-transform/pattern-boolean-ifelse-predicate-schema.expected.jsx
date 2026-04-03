@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 type State = {
     user: {
         settings: {
@@ -12,15 +12,15 @@ type State = {
 // schema instead of collapsing to `true`.
 export default pattern((state) => ({
     [UI]: (<div>
-      {__ctHelpers.ifElse({
+      {__cfHelpers.ifElse({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["enabled", "disabled"]
-    } as const satisfies __ctHelpers.JSONSchema, state.key("user", "settings", "notifications"), "enabled", "disabled")}
+    } as const satisfies __cfHelpers.JSONSchema, state.key("user", "settings", "notifications"), "enabled", "disabled")}
     </div>),
 }), {
     type: "object",
@@ -42,7 +42,7 @@ export default pattern((state) => ({
         }
     },
     required: ["user"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -71,8 +71,8 @@ export default pattern((state) => ({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

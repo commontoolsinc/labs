@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, pattern, action } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, pattern, action } from "commonfabric";
 interface BaseState {
     a: Cell<string>;
     b: Cell<number>;
@@ -14,7 +14,7 @@ export default pattern((__ct_pattern_input) => {
     const a = __ct_pattern_input.key("a");
     const b = __ct_pattern_input.key("b");
     return {
-        readA: __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+        readA: __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
             properties: {
                 a: {
@@ -22,10 +22,10 @@ export default pattern((__ct_pattern_input) => {
                     asCell: true
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, (_, { a }) => console.log(a))({
+        } as const satisfies __cfHelpers.JSONSchema, (_, { a }) => console.log(a))({
             a: a
         }),
-        readB: __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+        readB: __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
             properties: {
                 b: {
@@ -33,7 +33,7 @@ export default pattern((__ct_pattern_input) => {
                     asCell: true
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, (_, { b }) => console.log(b))({
+        } as const satisfies __cfHelpers.JSONSchema, (_, { b }) => console.log(b))({
             b: b
         }),
     };
@@ -49,7 +49,7 @@ export default pattern((__ct_pattern_input) => {
             asCell: true
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         readA: {
@@ -60,8 +60,8 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["readA", "readB"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

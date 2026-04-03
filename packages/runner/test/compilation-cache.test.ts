@@ -11,7 +11,7 @@ import {
   MemoryCompilationCache,
 } from "../src/compilation-cache/mod.ts";
 import type { CompilationCacheStorage } from "../src/compilation-cache/mod.ts";
-import type { JsScript } from "@commontools/js-compiler";
+import type { JsScript } from "@commonfabric/js-compiler";
 import type { CompileResult } from "../src/harness/types.ts";
 
 const testJsScript: JsScript = {
@@ -225,7 +225,7 @@ let fsTempDir: string | undefined;
 storageTests(
   "FileSystem",
   () => {
-    fsTempDir = Deno.makeTempDirSync({ prefix: "ct-cache-test-" });
+    fsTempDir = Deno.makeTempDirSync({ prefix: "cf-cache-test-" });
     return new FileSystemCompilationCache(fsTempDir);
   },
   async () => {
@@ -244,7 +244,7 @@ describe("FileSystem: path traversal validation", () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = Deno.makeTempDirSync({ prefix: "ct-cache-test-" });
+    tempDir = Deno.makeTempDirSync({ prefix: "cf-cache-test-" });
     storage = new FileSystemCompilationCache(tempDir);
   });
 

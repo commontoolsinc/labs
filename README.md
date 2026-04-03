@@ -1,13 +1,13 @@
-# Common Tools Platform
+# Common Fabric Platform
 
 **Common Labs** - Radioactive experiments. Turn back! You will find no API
 stability here.
 
 ![A loom, by Midjourney](./docs/images/loom.jpg)
 
-## What is Common Tools?
+## What is Common Fabric?
 
-Common Tools is a nascent distributed computing platform that provides both a
+Common Fabric is a nascent distributed computing platform that provides both a
 runtime and storage layer. The design allows instrumentation of all information
 flow in the system, enabling safe & private collaboration at scale.
 
@@ -18,11 +18,11 @@ and program networks. They're written in TypeScript/JSX and run in a secure
 sandbox environment. Patterns can:
 
 - Process and transform data
-- Render interactive UIs using `ct-` prefixed components
+- Render interactive UIs using `cf-` prefixed components
 - React to changes from linked patterns
 - Connect to external APIs
 
-**Pieces** are deployed instances of patterns running in CommonTools spaces.
+**Pieces** are deployed instances of patterns running in Common Fabric spaces.
 Pieces can be linked together to create complex workflows where data flows
 automatically between connected components.
 
@@ -50,16 +50,16 @@ This is a multi-package monorepo with several key components:
 written in Deno2, that provides the distributed runtime and storage.
 
 **Frontend ([Shell](./packages/shell))**: A web client interface written with
-Lit Web Components for interacting with CommonTools spaces.
+Lit Web Components for interacting with Common Fabric spaces.
 
-**CLI (ct)**: Command-line interface for managing pieces, linking patterns, and
-deploying to spaces. Run `deno task ct --help` for command reference.
+**CLI (cf)**: Command-line interface for managing pieces, linking patterns, and
+deploying to spaces. Run `deno task cf --help` for command reference.
 
-**UI Components ([packages/ui](./packages/ui))**: Custom VDOM layer and `ct-`
+**UI Components ([packages/ui](./packages/ui))**: Custom VDOM layer and `cf-`
 prefixed components for pattern UIs.
 
 **Examples & Patterns ([packages/patterns](./packages/patterns))**: Example
-patterns for building with CommonTools.
+patterns for building with Common Fabric.
 
 **Pattern Development**: Patterns can be developed using the repo-local
 `skills/pattern-dev/` skill package. Claude compatibility still exposes this as

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { handler, Cell } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { handler, Cell } from "commonfabric";
 interface CounterEvent {
     increment: number;
 }
@@ -14,7 +14,7 @@ const myHandler = handler({
         }
     },
     required: ["increment"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -23,7 +23,7 @@ const myHandler = handler({
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, (event, state) => {
+} as const satisfies __cfHelpers.JSONSchema, (event, state) => {
     state.value.set(state.value.get() + event.increment);
 });
 // FIXTURE: simple-handler
@@ -32,6 +32,6 @@ const myHandler = handler({
 //   Cell<number> → { type: "number", asCell: true }
 export { myHandler };
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

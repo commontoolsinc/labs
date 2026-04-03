@@ -1,6 +1,6 @@
-import * as __ctHelpers from "commontools";
+import * as __cfHelpers from "commonfabric";
 // deno-lint-ignore-file no-unused-vars
-import { handler, computed } from "commontools";
+import { handler, computed } from "commonfabric";
 // FIXTURE: safe-context-and-jsx
 // Verifies: && and || with JSX inside handler callbacks are transformed to when()/unless()
 //   computed(() => show) && <span> → when(computed(() => show), <span>)
@@ -85,7 +85,7 @@ const MyHandler = handler({
             properties: {}
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         show: {
@@ -93,8 +93,8 @@ const MyHandler = handler({
         }
     },
     required: ["show"]
-} as const satisfies __ctHelpers.JSONSchema, (_event, { show }) => {
-    return <div>{__ctHelpers.derive({
+} as const satisfies __cfHelpers.JSONSchema, (_event, { show }) => {
+    return <div>{__cfHelpers.derive({
         type: "object",
         properties: {
             show: {
@@ -102,9 +102,9 @@ const MyHandler = handler({
             }
         },
         required: ["show"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, { show: show }, ({ show }) => show) && <span>Content</span>}</div>;
+    } as const satisfies __cfHelpers.JSONSchema, { show: show }, ({ show }) => show) && <span>Content</span>}</div>;
 });
 // Test: || with JSX inside handler callback should transform to unless()
 const MyHandler2 = handler({
@@ -185,7 +185,7 @@ const MyHandler2 = handler({
             properties: {}
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -197,8 +197,8 @@ const MyHandler2 = handler({
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, (_event, { value }) => {
-    return <div>{__ctHelpers.derive({
+} as const satisfies __cfHelpers.JSONSchema, (_event, { value }) => {
+    return <div>{__cfHelpers.derive({
         type: "object",
         properties: {
             value: {
@@ -210,15 +210,15 @@ const MyHandler2 = handler({
             }
         },
         required: ["value"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         anyOf: [{
                 type: "string"
             }, {
                 type: "null"
             }]
-    } as const satisfies __ctHelpers.JSONSchema, { value: value }, ({ value }) => value) || <span>Fallback</span>}</div>;
+    } as const satisfies __cfHelpers.JSONSchema, { value: value }, ({ value }) => value) || <span>Fallback</span>}</div>;
 });
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

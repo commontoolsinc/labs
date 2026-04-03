@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/runner",
+  "name": "@commonfabric/runner",
   "tasks": {
     "test": "ENV=test deno test --allow-ffi --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git test/*.test.ts",
     "bench": {

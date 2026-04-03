@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, pattern } from "commontools";
+import { derive, pattern } from "commonfabric";
 
 // FIXTURE: pattern-derive-opaque-ref-map
 // Verifies: .map() on an OpaqueRef inside derive() is NOT transformed to mapWithPattern

@@ -1,12 +1,12 @@
-# `ct exec` + FUSE Callable Files Implementation Plan
+# `cf exec` + FUSE Callable Files Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use @trycycle-executing to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `ct exec` for mounted callable files, expose pattern tools as `.tool`, make callable files readable with a `#!... exec` first line, and drive help/flag parsing from the resolved callable schema.
+**Goal:** Add `cf exec` for mounted callable files, expose pattern tools as `.tool`, make callable files readable with a `#!... exec` first line, and drive help/flag parsing from the resolved callable schema.
 
-**Architecture:** Treat mounted handlers and pattern tools as one FUSE concept: callable files discovered from `childCell.asSchemaFromLinks()`, surfaced as `.handler` or `.tool`, and rendered as readable synthetic files whose first line is a stable `ct` shebang. Persist enough mount metadata for `ct exec` to map an absolute mounted file path back to the owning space, piece, and child cell without talking to the FUSE daemon. Keep execution logic local to the CLI: parse flags from the callable schema, resolve the backing cell, dispatch handlers through existing piece writes, dispatch pattern tools through a minimal runtime-run path, and prove the shipped behavior with a real mounted-filesystem integration script.
+**Architecture:** Treat mounted handlers and pattern tools as one FUSE concept: callable files discovered from `childCell.asSchemaFromLinks()`, surfaced as `.handler` or `.tool`, and rendered as readable synthetic files whose first line is a stable `cf` shebang. Persist enough mount metadata for `cf exec` to map an absolute mounted file path back to the owning space, piece, and child cell without talking to the FUSE daemon. Keep execution logic local to the CLI: parse flags from the callable schema, resolve the backing cell, dispatch handlers through existing piece writes, dispatch pattern tools through a minimal runtime-run path, and prove the shipped behavior with a real mounted-filesystem integration script.
 
-**Tech Stack:** Deno 2, Cliffy, `@commontools/piece`, `@commontools/runner`, FUSE low-level bindings, existing CLI integration shell harnesses.
+**Tech Stack:** Deno 2, Cliffy, `@commonfabric/piece`, `@commonfabric/runner`, FUSE low-level bindings, existing CLI integration shell harnesses.
 
 ---
 
@@ -16,13 +16,13 @@
 
 1. Mounted `*.handler` files remain writable and start being readable.
 2. Mounted pattern-tool values are surfaced as `*.tool` siblings instead of expanded `pattern/extraParams` directories.
-3. Reading either callable file returns text whose first line is `#!<stable-ct-shim> exec`.
-4. `ct exec <mounted-callable-file> [invoke|run] [flags]` works for mounted `*.handler` and `*.tool` paths.
+3. Reading either callable file returns text whose first line is `#!<stable-cf-shim> exec`.
+4. `cf exec <mounted-callable-file> [invoke|run] [flags]` works for mounted `*.handler` and `*.tool` paths.
 5. The verb defaults by callable kind when omitted:
    - handler defaults to `invoke`
    - tool defaults to `run`
-6. `ct exec <file> --help` always prints top-level help for that callable.
-7. After the verb, schema flags own the namespace. If the input schema has a `help` field, `ct exec <file> run --help` is parsed as that field, not intercepted as CLI help.
+6. `cf exec <file> --help` always prints top-level help for that callable.
+7. After the verb, schema flags own the namespace. If the input schema has a `help` field, `cf exec <file> run --help` is parsed as that field, not intercepted as CLI help.
 8. Tool input flags come from the underlying pattern `argumentSchema`, minus injected `result`, minus already-bound `extraParams`.
 9. Tool help shows a best-effort output schema summary, but output-schema heuristics are display-only and must not block execution.
 10. Non-mounted paths, stale mounts, non-callable files, and invalid flag/value combinations fail with clear CLI errors instead of stack traces.
@@ -36,13 +36,13 @@
 ### Important contracts
 
 1. Always call `childCell.asSchemaFromLinks()` before classifying a callable or deriving help.
-2. `ct exec` resolves the mounted file from persisted mount metadata plus the mounted directory’s `meta.json`, not from daemon RPC and not from live piece-name matching.
+2. `cf exec` resolves the mounted file from persisted mount metadata plus the mounted directory’s `meta.json`, not from daemon RPC and not from live piece-name matching.
 3. The mounted display name under `pieces/` is not stable because FUSE de-dupes names (`foo`, `foo-2`, ...). Use mounted `meta.json` to recover the real piece ID.
 4. Mount metadata must exist for both foreground and background mounts. Background-only PID files are insufficient.
-5. Persist the mount identity path as an absolute path so later `ct exec` calls do not depend on caller cwd.
+5. Persist the mount identity path as an absolute path so later `cf exec` calls do not depend on caller cwd.
 6. Use one shared mounted-callable path parser for both:
    - FUSE handler write routing
-   - CLI `ct exec` resolution
+   - CLI `cf exec` resolution
 7. Only top-level callable children under `input/` and `result/` are surfaced as `.handler` / `.tool`.
 8. Handler execution must preserve the current write-to-handler behavior: writing a payload to the same piece property path the FUSE flush path uses, then waiting for runtime idle/sync before exiting the CLI.
 
@@ -51,7 +51,7 @@
 ### Create
 
 - `packages/cli/commands/exec.ts`
-  - New `ct exec` command entrypoint.
+  - New `cf exec` command entrypoint.
 - `packages/cli/lib/exec.ts`
   - Mount lookup, mounted-file resolution, callable-cell lookup, execution dispatch.
 - `packages/cli/lib/exec-schema.ts`
@@ -72,7 +72,7 @@
 ### Modify
 
 - `packages/cli/commands/main.ts`
-  - Register `ct exec`.
+  - Register `cf exec`.
 - `packages/cli/commands/fuse.ts`
   - Always write/remove mount-state files, generate the stable shebang shim, pass the shim path into the daemon, update help text for readable callables and `.tool`.
 - `packages/cli/lib/fuse.ts`
@@ -92,7 +92,7 @@
 - `packages/cli/test/fuse.test.ts`
   - Cover mount-state lookup, absolute identity persistence, stale cleanup, and shim generation.
 - `packages/fuse/README.md`
-  - Document `.tool`, readable callable files, and `ct exec`.
+  - Document `.tool`, readable callable files, and `cf exec`.
 - `docs/specs/fuse-filesystem/2-path-scheme.md`
   - Add `.tool` to the mounted layout.
 - `docs/specs/fuse-filesystem/3-json-mapping.md`
@@ -100,16 +100,16 @@
 - `docs/specs/fuse-filesystem/4-read-write.md`
   - Update callable read/write semantics and modes.
 - `docs/common/workflows/handlers-cli-testing.md`
-  - Document `ct exec` against mounted handlers/tools.
+  - Document `cf exec` against mounted handlers/tools.
 
 ## Architecture Decisions
 
-### 1. Generate a stable `ct` shim for the shebang line, but do not gate on direct shell execution
+### 1. Generate a stable `cf` shim for the shebang line, but do not gate on direct shell execution
 
-The repo does not ship a real `ct` binary path; developers often launch the CLI via `deno task ct`. Rendered callable files still need a deterministic first line:
+The repo does not ship a real `cf` binary path; developers often launch the CLI via `deno task cf`. Rendered callable files still need a deterministic first line:
 
 ```text
-#!/absolute/path/to/generated/ct-shim exec
+#!/absolute/path/to/generated/cf-shim exec
 ```
 
 Implement `ensureExecShim(...)` in `packages/cli/lib/fuse.ts` and pass the shim path to the FUSE daemon. The shim should be repo-rooted and explicit:
@@ -160,7 +160,7 @@ FUSE should only:
 2. synthesize callable nodes and readable shebang text
 3. keep current write-to-handler semantics intact
 
-CLI `ct exec` should:
+CLI `cf exec` should:
 
 1. resolve the mounted file path
 2. load the backing piece and callable child cell
@@ -169,9 +169,9 @@ CLI `ct exec` should:
 
 Do not move execution semantics into FUSE and do not add daemon RPC for lookup.
 
-### 4. Keep tool execution local to `ct exec`; do not refactor runner builtins
+### 4. Keep tool execution local to `cf exec`; do not refactor runner builtins
 
-`ct exec` only needs a narrow pattern-tool execution path:
+`cf exec` only needs a narrow pattern-tool execution path:
 
 ```ts
 const pattern = callableCell.key("pattern").getRaw() as Pattern | undefined;
@@ -197,7 +197,7 @@ For object schemas:
 Always support:
 
 ```bash
-ct exec <file> run --json '{"query":"oat milk","filters":{"fresh":true}}'
+cf exec <file> run --json '{"query":"oat milk","filters":{"fresh":true}}'
 ```
 
 `--json` is mutually exclusive with generated flags.
@@ -218,7 +218,7 @@ Add focused cases covering:
 3. longest-prefix mount lookup resolves a mounted file path to the correct mount
 4. stale mount-state entries are ignored and cleaned up
 5. generated shim content points at `packages/cli/mod.ts`
-6. `ct fuse --help` text describes readable `.handler` files and `.tool`
+6. `cf fuse --help` text describes readable `.handler` files and `.tool`
 
 Run:
 
@@ -251,7 +251,7 @@ export async function ensureExecShim(...)
 
 Keep the mountpoint-hash filename behavior so unmount/status continue to key by absolute mountpoint.
 
-- [ ] **Step 3: Wire `ct fuse mount` to always write mount-state and pass the shim path into the daemon**
+- [ ] **Step 3: Wire `cf fuse mount` to always write mount-state and pass the shim path into the daemon**
 
 For both foreground and background mounts:
 
@@ -278,7 +278,7 @@ Expected: PASS.
 
 ```bash
 git add packages/cli/lib/fuse.ts packages/cli/commands/fuse.ts packages/cli/test/fuse.test.ts
-git commit -m "feat: persist fuse mount state for ct exec"
+git commit -m "feat: persist fuse mount state for cf exec"
 ```
 
 ## Task 2: Generalize FUSE Synthetic Files Into Readable Callables
@@ -402,13 +402,13 @@ git add packages/fuse/callables.ts packages/fuse/callable-path.ts packages/fuse/
 git commit -m "feat: expose fuse handlers and tools as callables"
 ```
 
-## Task 3: Build Dynamic Schema Flags And Help For `ct exec`
+## Task 3: Build Dynamic Schema Flags And Help For `cf exec`
 
 **Files:**
 - Create: `packages/cli/lib/exec-schema.ts`
 - Create: `packages/cli/test/exec.test.ts`
 
-- [ ] **Step 1: Add failing parser/help tests for `ct exec`**
+- [ ] **Step 1: Add failing parser/help tests for `cf exec`**
 
 Cover:
 
@@ -456,8 +456,8 @@ Rules:
 
 Implement:
 
-1. `ct exec <file> --help` => top-level help
-2. `ct exec <file> [invoke|run] --help` => schema field `help` if that field exists
+1. `cf exec <file> --help` => top-level help
+2. `cf exec <file> [invoke|run] --help` => schema field `help` if that field exists
 3. otherwise post-verb `--help` falls back to command help
 
 Do not model `invoke` / `run` as Cliffy subcommands. `packages/cli/commands/exec.ts` must preserve raw tail args so this precedence works.
@@ -477,10 +477,10 @@ Expected: PASS.
 
 ```bash
 git add packages/cli/lib/exec-schema.ts packages/cli/test/exec.test.ts
-git commit -m "feat: add schema-driven parsing for ct exec"
+git commit -m "feat: add schema-driven parsing for cf exec"
 ```
 
-## Task 4: Implement `ct exec` Resolution And Execution
+## Task 4: Implement `cf exec` Resolution And Execution
 
 **Files:**
 - Create: `packages/cli/commands/exec.ts`
@@ -508,7 +508,7 @@ cd packages/cli
 deno test --allow-ffi --allow-read --allow-write --allow-run --allow-env test/exec.test.ts
 ```
 
-Expected: FAIL because `ct exec` does not exist yet.
+Expected: FAIL because `cf exec` does not exist yet.
 
 - [ ] **Step 2: Implement mount-path resolution and callable lookup in `packages/cli/lib/exec.ts`**
 
@@ -547,19 +547,19 @@ Tool:
 4. wait for the first non-`undefined` result value with a timeout
 5. print the completed result as JSON to stdout
 
-Keep this local to `ct exec`; do not refactor `llm-dialog`.
+Keep this local to `cf exec`; do not refactor `llm-dialog`.
 
-- [ ] **Step 4: Wire the command into `ct`**
+- [ ] **Step 4: Wire the command into `cf`**
 
 Add:
 
 ```text
-ct exec <mounted-callable-file> [invoke|run] [flags]
+cf exec <mounted-callable-file> [invoke|run] [flags]
 ```
 
 to `packages/cli/commands/main.ts`, keeping root help terse.
 
-- [ ] **Step 5: Re-run the focused `ct exec` test**
+- [ ] **Step 5: Re-run the focused `cf exec` test**
 
 Run:
 
@@ -574,7 +574,7 @@ Expected: PASS.
 
 ```bash
 git add packages/cli/commands/exec.ts packages/cli/lib/exec.ts packages/cli/commands/main.ts packages/cli/test/exec.test.ts
-git commit -m "feat: add ct exec for mounted callables"
+git commit -m "feat: add cf exec for mounted callables"
 ```
 
 ## Task 5: Prove The Real User Flow And Update Docs
@@ -603,10 +603,10 @@ The script should:
 3. mount FUSE
 4. assert `.handler` and `.tool` entries exist
 5. read each callable file and assert the first line starts with `#!` and contains ` exec`
-6. assert `ct exec <handler-file> --help` and `ct exec <tool-file> --help` show top-level help
-7. assert `ct exec <tool-file> run --help <value>` is parsed as the schema field, not intercepted as CLI help
-8. execute `ct exec` against the handler and tool with explicit verbs
-9. execute `ct exec` without an explicit verb for one handler case and one tool case
+6. assert `cf exec <handler-file> --help` and `cf exec <tool-file> --help` show top-level help
+7. assert `cf exec <tool-file> run --help <value>` is parsed as the schema field, not intercepted as CLI help
+8. execute `cf exec` against the handler and tool with explicit verbs
+9. execute `cf exec` without an explicit verb for one handler case and one tool case
 10. assert the handler changed piece state
 11. assert the tool printed the expected JSON
 12. verify legacy `echo '{}' > file.handler` still works
@@ -616,7 +616,7 @@ Run:
 
 ```bash
 cd packages/cli
-API_URL=http://localhost:8000 CT_CLI_INTEGRATION_USE_LOCAL=1 ./integration/fuse-exec.sh
+API_URL=http://localhost:8000 CF_CLI_INTEGRATION_USE_LOCAL=1 ./integration/fuse-exec.sh
 ```
 
 Expected: FAIL until the end-to-end surface is complete.
@@ -636,9 +636,9 @@ Required doc changes:
 1. FUSE layout now includes `*.tool`
 2. synthesized `.json` siblings render `/tool` sigils
 3. callable files are readable and handlers remain writable
-4. `ct exec` examples are documented
+4. `cf exec` examples are documented
 5. handler-testing docs mention mounted callable execution as a fast local workflow
-6. built-in `ct fuse` help no longer describes handlers as write-only
+6. built-in `cf fuse` help no longer describes handlers as write-only
 
 - [ ] **Step 4: Run the focused automated checks**
 
@@ -660,7 +660,7 @@ Run:
 
 ```bash
 cd packages/cli
-API_URL=http://localhost:8000 CT_CLI_INTEGRATION_USE_LOCAL=1 ./integration/fuse-exec.sh
+API_URL=http://localhost:8000 CF_CLI_INTEGRATION_USE_LOCAL=1 ./integration/fuse-exec.sh
 ```
 
 Expected: all PASS.
@@ -669,14 +669,14 @@ Expected: all PASS.
 
 ```bash
 git add packages/cli/integration/fuse-exec.sh packages/cli/integration/pattern/fuse-exec.tsx packages/fuse/README.md docs/specs/fuse-filesystem/2-path-scheme.md docs/specs/fuse-filesystem/3-json-mapping.md docs/specs/fuse-filesystem/4-read-write.md docs/common/workflows/handlers-cli-testing.md
-git commit -m "docs: document ct exec fuse callables"
+git commit -m "docs: document cf exec fuse callables"
 ```
 
 ## Final Verification
 
-- [ ] `ct exec` works for both mounted `.handler` and mounted `.tool` files.
+- [ ] `cf exec` works for both mounted `.handler` and mounted `.tool` files.
 - [ ] Verb omission defaults to `invoke` for handlers and `run` for tools.
-- [ ] `ct exec` resolves callable files from both mounted `pieces/...` and mounted `entities/...` paths.
+- [ ] `cf exec` resolves callable files from both mounted `pieces/...` and mounted `entities/...` paths.
 - [ ] Reading a mounted callable file returns a first line shaped like `#!... exec`.
 - [ ] Handler write-through (`echo ... > file.handler`) still works.
 - [ ] `.tool` hides `pattern/extraParams` internals from the mounted tree and from synthesized `.json` siblings.

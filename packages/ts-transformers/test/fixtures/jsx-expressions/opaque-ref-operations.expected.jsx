@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // FIXTURE: opaque-ref-operations
 // Verifies: arithmetic on cell-backed OpaqueRefs in JSX is wrapped in derive() with asCell schema
 //   {count}           → {count}  (bare ref, no transform)
@@ -8,14 +8,14 @@ import { cell, pattern, UI } from "commontools";
 export default pattern((_state) => {
     const count = cell(10, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     const price = cell(10, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
         <p>Count: {count}</p>
-        <p>Next: {__ctHelpers.derive({
+        <p>Next: {__cfHelpers.derive({
             type: "object",
             properties: {
                 count: {
@@ -24,10 +24,10 @@ export default pattern((_state) => {
                 }
             },
             required: ["count"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count.get() + 1)}</p>
-        <p>Double: {__ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count.get() + 1)}</p>
+        <p>Double: {__cfHelpers.derive({
             type: "object",
             properties: {
                 count: {
@@ -36,10 +36,10 @@ export default pattern((_state) => {
                 }
             },
             required: ["count"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count.get() * 2)}</p>
-        <p>Total: {__ctHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count.get() * 2)}</p>
+        <p>Total: {__cfHelpers.derive({
             type: "object",
             properties: {
                 price: {
@@ -48,12 +48,12 @@ export default pattern((_state) => {
                 }
             },
             required: ["price"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { price: price }, ({ price }) => price.get() * 1.1)}</p>
+        } as const satisfies __cfHelpers.JSONSchema, { price: price }, ({ price }) => price.get() * 1.1)}</p>
       </div>),
     };
-}, false as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -82,8 +82,8 @@ export default pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

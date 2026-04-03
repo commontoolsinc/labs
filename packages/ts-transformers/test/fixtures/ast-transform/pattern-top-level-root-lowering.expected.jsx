@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 const identity = <T,>(value: T) => value;
 // FIXTURE: pattern-top-level-root-lowering
 // Verifies: top-level non-JSX ordinary helper calls with reactive inputs are
@@ -11,7 +11,7 @@ const identity = <T,>(value: T) => value;
 //   state.label ?? "Pending"      -> derive-wrapped nullish root
 //   state.items?.[0]              -> lowered optional element access
 export default pattern((state) => {
-    const label = __ctHelpers.derive({
+    const label = __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -31,14 +31,14 @@ export default pattern((state) => {
             }
         },
         required: ["state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             user: {
                 name: state.key("user", "name")
             }
         } }, ({ state }) => identity(state.user.name));
-    const maybeLabel = __ctHelpers.derive({
+    const maybeLabel = __cfHelpers.derive({
         type: "object",
         properties: {
             state: {
@@ -57,15 +57,15 @@ export default pattern((state) => {
             }
         },
         required: ["state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: ["string", "undefined"]
-    } as const satisfies __ctHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, { state: {
             maybeUser: state.key("maybeUser")
         } }, ({ state }) => identity(state.maybeUser?.name));
     return {
         label,
         maybeLabel,
-        maxValue: __ctHelpers.derive({
+        maxValue: __cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -82,13 +82,13 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 a: state.key("a"),
                 b: state.key("b")
             } }, ({ state }) => Math.max(state.a, state.b)),
-        parsedValue: __ctHelpers.derive({
+        parsedValue: __cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -102,12 +102,12 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 float: state.key("float")
             } }, ({ state }) => parseInt(state.float)),
-        fallbackLabel: __ctHelpers.derive({
+        fallbackLabel: __cfHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -120,9 +120,9 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, { state: {
                 label: state.key("label")
             } }, ({ state }) => state.label ?? "Pending"),
         firstItem: state.key("items", "0"),
@@ -172,7 +172,7 @@ export default pattern((state) => {
         }
     },
     required: ["user", "a", "b", "float"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         label: {
@@ -195,8 +195,8 @@ export default pattern((state) => {
         }
     },
     required: ["label", "maybeLabel", "maxValue", "parsedValue", "fallbackLabel", "firstItem"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

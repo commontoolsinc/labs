@@ -33,7 +33,7 @@ export const getCompilerOptions = (): CompilerOptions => {
     module: MODULE_KIND,
     // TypeScript warns on the legacy AMD + outFile bundling path. We still
     // rely on it today, so silence the deprecation for the active major.
-    // Note: this first surfaced in CI through the compiled `ct` default-pattern
+    // Note: this first surfaced in CI through the compiled `cf` default-pattern
     // flow and was not fully reproducible in local harness tests.
     ignoreDeprecations: IGNORE_DEPRECATIONS,
 

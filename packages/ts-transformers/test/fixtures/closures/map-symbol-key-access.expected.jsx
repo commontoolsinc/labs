@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { NAME, UI, pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { NAME, UI, pattern } from "commonfabric";
 interface Entry {
     [NAME]: string;
     [UI]: string;
@@ -10,13 +10,13 @@ interface Input {
 // FIXTURE: map-symbol-key-access
 // Verifies: .map() on reactive array is transformed when callback uses symbol key access
 //   .map(fn) → .mapWithPattern(pattern(...), {})
-//   item[NAME] → item.key(__ctHelpers.NAME), item[UI] → item.key(__ctHelpers.UI)
+//   item[NAME] → item.key(__cfHelpers.NAME), item[UI] → item.key(__cfHelpers.UI)
 // Context: Symbol-keyed property access (NAME, UI) is lowered to .key() with helper references
 const _p = pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
-    return items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+    return items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
         const item = __ct_pattern_input.key("element");
-        return ({ n: item.key(__ctHelpers.NAME), u: item.key(__ctHelpers.UI) });
+        return ({ n: item.key(__cfHelpers.NAME), u: item.key(__cfHelpers.UI) });
     }, {
         type: "object",
         properties: {
@@ -39,7 +39,7 @@ const _p = pattern((__ct_pattern_input) => {
                 required: ["$NAME", "$UI"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             n: {
@@ -50,7 +50,7 @@ const _p = pattern((__ct_pattern_input) => {
             }
         },
         required: ["n", "u"]
-    } as const satisfies __ctHelpers.JSONSchema), {});
+    } as const satisfies __cfHelpers.JSONSchema), {});
 }, {
     type: "object",
     properties: {
@@ -76,7 +76,7 @@ const _p = pattern((__ct_pattern_input) => {
             required: ["$NAME", "$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "array",
     items: {
         type: "object",
@@ -90,8 +90,8 @@ const _p = pattern((__ct_pattern_input) => {
         },
         required: ["n", "u"]
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

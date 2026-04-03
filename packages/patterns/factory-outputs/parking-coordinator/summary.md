@@ -159,7 +159,7 @@ documents. Encountered and fixed several issues:
    adminSpotsData) as top-level Computed<> returning plain objects, then iterate
    those in JSX.
 
-Result: 38/38 tests pass, ct check clean.
+Result: 38/38 tests pass, cf check clean.
 
 ### Critic Review (~7.5 minutes)
 
@@ -215,7 +215,7 @@ Orchestrator invoked pattern-maker to fix both issues:
    weekGridData and todayStripData computed filter callbacks:
    `spots.get().filter((s) => s != null && s.active)`.
 
-Post-fix verification: ct check passes (exit 0), 38/38 tests still pass. Fresh
+Post-fix verification: cf check passes (exit 0), 38/38 tests still pass. Fresh
 deployment now shows 3 pre-populated spots in today strip and week grid.
 
 ### Manual Re-Verification

@@ -5,7 +5,7 @@ Use `action()` to handle user events like button clicks, form submissions, and o
 ## Basic Usage
 
 ```tsx
-import { action, pattern, Writable, UI } from 'commontools';
+import { action, pattern, Writable, UI } from 'commonfabric';
 
 export default pattern(() => {
   const count = Writable.of(0);
@@ -23,8 +23,8 @@ export default pattern(() => {
     [UI]: (
       <div>
         <div>Count: {count}</div>
-        <ct-button onClick={decrement}>-</ct-button>
-        <ct-button onClick={increment}>+</ct-button>
+        <cf-button onClick={decrement}>-</cf-button>
+        <cf-button onClick={increment}>+</cf-button>
       </div>
     ),
   };
@@ -45,9 +45,9 @@ const addItem = action((event: { title: string }) => {
 });
 
 // In JSX - pass data when calling
-<ct-button onClick={() => addItem.send({ title: "New Item" })}>
+<cf-button onClick={() => addItem.send({ title: "New Item" })}>
   Add Item
-</ct-button>
+</cf-button>
 ```
 
 ## Multiple Operations in One Action
@@ -88,7 +88,7 @@ See [Reusable Handlers](./handler.md) for the full `handler()` API.
 For very simple one-liners, you can use arrow functions directly in JSX:
 
 ```tsx
-<ct-button onClick={() => count.set(count.get() + 1)}>+</ct-button>
+<cf-button onClick={() => count.set(count.get() + 1)}>+</cf-button>
 ```
 
 However, `action()` is preferred for:

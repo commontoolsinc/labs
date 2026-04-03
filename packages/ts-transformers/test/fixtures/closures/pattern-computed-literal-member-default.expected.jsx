@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 // FIXTURE: pattern-computed-literal-member-default
 // Verifies: literal-member destructuring defaults survive into schema defaults
 //   ({ ["foo"]: foo = "fallback" }) → schema default on "foo"
@@ -18,7 +18,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["foo", "bar"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     anyOf: [{
             $ref: "https://commonfabric.org/schemas/vnode.json"
         }, {
@@ -38,8 +38,8 @@ export default pattern((__ct_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

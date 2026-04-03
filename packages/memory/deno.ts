@@ -3,7 +3,7 @@ import * as Socket from "./socket.ts";
 import * as Path from "@std/path";
 import * as UCAN from "./ucan.ts";
 import * as Receipt from "./receipt.ts";
-import { type DID, Identity, isDID } from "@commontools/identity";
+import { type DID, Identity, isDID } from "@commonfabric/identity";
 
 const serviceDid: DID = (() => {
   // Derived from passphrase "implicit trust"

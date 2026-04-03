@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 // FIXTURE: pattern-with-cells
 // Verifies: pattern input property access is transformed to .key() and arithmetic to derive()
 //   cell.value       → cell.key("value")
@@ -9,7 +9,7 @@ export default pattern((cell) => {
     return {
         [UI]: (<div>
         <p>Current value: {cell.key("value")}</p>
-        <p>Next value: {__ctHelpers.derive({
+        <p>Next value: {__cfHelpers.derive({
             type: "object",
             properties: {
                 cell: {
@@ -23,12 +23,12 @@ export default pattern((cell) => {
                 }
             },
             required: ["cell"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { cell: {
+        } as const satisfies __cfHelpers.JSONSchema, { cell: {
                 value: cell.key("value")
             } }, ({ cell }) => cell.value + 1)}</p>
-        <p>Double: {__ctHelpers.derive({
+        <p>Double: {__cfHelpers.derive({
             type: "object",
             properties: {
                 cell: {
@@ -42,9 +42,9 @@ export default pattern((cell) => {
                 }
             },
             required: ["cell"]
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { cell: {
+        } as const satisfies __cfHelpers.JSONSchema, { cell: {
                 value: cell.key("value")
             } }, ({ cell }) => cell.value * 2)}</p>
       </div>),
@@ -58,7 +58,7 @@ export default pattern((cell) => {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -90,8 +90,8 @@ export default pattern((cell) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

@@ -1,4 +1,4 @@
-import { NAME, UI } from "@commontools/runner/shared";
+import { NAME, UI } from "@commonfabric/runner/shared";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
 import { PageRef, RequestType } from "./protocol/mod.ts";
 import { InitializedRuntimeConnection } from "./client/connection.ts";

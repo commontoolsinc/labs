@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, pattern, UI } from "commontools";
+import * as __cfHelpers from "commonfabric";
+import { Cell, pattern, UI } from "commonfabric";
 interface State {
     counter: Cell<number>;
 }
@@ -8,7 +8,7 @@ interface State {
 //   onClick={() => state.counter.set(...)} → onClick={handler(false, { state: { counter: asCell } }, (_, { state }) => ...)({ state: { counter } })}
 export default pattern((state) => {
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+        [UI]: (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
             properties: {
                 state: {
@@ -23,7 +23,7 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => state.counter.set(state.counter.get() + 1))({
+        } as const satisfies __cfHelpers.JSONSchema, (__ct_handler_event, { state }) => state.counter.set(state.counter.get() + 1))({
             state: {
                 counter: state.key("counter")
             }
@@ -40,7 +40,7 @@ export default pattern((state) => {
         }
     },
     required: ["counter"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -69,8 +69,8 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

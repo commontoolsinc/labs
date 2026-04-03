@@ -1,10 +1,10 @@
 /// <cts-enable />
-import { pattern, UI, handler, Cell } from "commontools";
+import { pattern, UI, handler, Cell } from "commonfabric";
 
 declare global {
   namespace JSX {
     interface IntrinsicElements {
-      "ct-button": any;
+      "cf-button": any;
     }
   }
 }
@@ -34,9 +34,9 @@ export default pattern<State>((state) => {
       <div>
         {/* Map callback references handler - should NOT capture it */}
         {state.items.map((item) => (
-          <ct-button onClick={handleClick({ count: state.count })}>
+          <cf-button onClick={handleClick({ count: state.count })}>
             {item.name}
-          </ct-button>
+          </cf-button>
         ))}
       </div>
     ),

@@ -1,22 +1,22 @@
-import { hashOf } from "@commontools/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   hashSchema,
   hashSchemaItem,
-} from "@commontools/data-model/schema-hash";
-import { MIME } from "@commontools/memory/interface";
-import type { JSONSchemaObj } from "@commontools/api";
+} from "@commonfabric/data-model/schema-hash";
+import { MIME } from "@commonfabric/memory/interface";
+import type { JSONSchemaObj } from "@commonfabric/api";
 import type {
   MemorySpace,
   Result,
   SchemaPathSelector,
   Unit,
-} from "@commontools/memory/interface";
+} from "@commonfabric/memory/interface";
 import {
   type FabricValue,
   isArrayIndexPropertyName,
-} from "@commontools/data-model/fabric-value";
-import { deepEqual } from "@commontools/utils/deep-equal";
-// TODO(@ubik2): Ideally this would import from "@commontools/utils/types",
+} from "@commonfabric/data-model/fabric-value";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+// TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
 // but rollup has issues
 import {
   type Immutable,
@@ -31,7 +31,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import {
   schemaWithProperties,
   toDeepFrozenSchema,
-} from "@commontools/data-model/schema-utils";
+} from "@commonfabric/data-model/schema-utils";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   addressKey,
@@ -2345,12 +2345,24 @@ export class SchemaObjectTraverser<V extends FabricValue>
     schema: JSONSchema,
     valueType: string,
   ): TypeValidity {
-    if (ContextualFlowControl.isTrueSchema(schema)) {
+    let resolved: JSONSchema | undefined = schema;
+    if (isRecord(schema) && "$ref" in schema) {
+      // Handle any top-level $ref in the schema
+      resolved = ContextualFlowControl.resolveSchemaRefs(schema);
+      if (resolved === undefined) {
+        logger.warn(
+          "traverse",
+          () => ["Failed to resolve schema ref", schema],
+        );
+        return TypeValidity.False;
+      }
+    }
+    if (ContextualFlowControl.isTrueSchema(resolved)) {
       return TypeValidity.True;
-    } else if (ContextualFlowControl.isFalseSchema(schema)) {
+    } else if (ContextualFlowControl.isFalseSchema(resolved)) {
       return TypeValidity.False;
     }
-    const schemaObj = schema as JSONSchemaObj;
+    const schemaObj = resolved as JSONSchemaObj;
     // Check the top level type flag
     let typeValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
     if ("type" in schemaObj) {

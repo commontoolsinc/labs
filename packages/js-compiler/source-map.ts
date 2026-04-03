@@ -1,6 +1,6 @@
 import { SourceMap } from "./interface.ts";
 import { MappedPosition, SourceMapConsumer } from "source-map-js";
-import { LRUCache } from "@commontools/utils/cache";
+import { LRUCache } from "@commonfabric/utils/cache";
 
 export type { MappedPosition };
 
@@ -36,7 +36,7 @@ const stackTracePattern =
 const evalFrameNestedPattern =
   /at .+?, <anonymous>:\d+:\d+ \((.+?), <anonymous>:(\d+):(\d+)\)/;
 const evalFramePattern = /at (.+?), <anonymous>:(\d+):(\d+)/;
-const CT_INTERNAL = `    at <CT_INTERNAL>`;
+const CF_INTERNAL = `    at <CF_INTERNAL>`;
 const UNMAPPED = `    at <UNMAPPED>`;
 
 export class SourceMapParser {
@@ -110,7 +110,7 @@ export class SourceMapParser {
     if (!sourceMap) return originalLine;
 
     if (/AMDLoader/.test(fnName) && lineNum === 1) {
-      return CT_INTERNAL;
+      return CF_INTERNAL;
     }
 
     const consumer = this.getConsumer(sourceMap);
@@ -121,7 +121,7 @@ export class SourceMapParser {
 
     if (mapIsEmpty(originalPosition)) {
       if (fnName === "eval" || fnName === "") {
-        return CT_INTERNAL;
+        return CF_INTERNAL;
       }
       return UNMAPPED;
     }

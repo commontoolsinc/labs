@@ -1,4 +1,4 @@
-import type { JsScript } from "@commontools/js-compiler";
+import type { JsScript } from "@commonfabric/js-compiler";
 
 export interface CompilationCacheEntry {
   /** Content-derived id used as the filename prefix during compilation.
