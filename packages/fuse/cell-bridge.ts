@@ -2123,7 +2123,7 @@ export class CellBridge {
    */
   private async subscribePiece(
     piece: PieceController,
-    pieceIno: bigint,
+    _pieceIno: bigint,
     pieceName: string,
     spaceName: string,
   ): Promise<Cancel[]> {
