@@ -1,7 +1,12 @@
 // cell-bridge.test.ts — Integration tests for CellBridge using fake piece objects
 import { assertEquals } from "@std/assert";
 import { FsTree } from "./tree.ts";
-import { CellBridge, type SpaceState } from "./cell-bridge.ts";
+import {
+  CellBridge,
+  type HandlerTarget,
+  type SpaceState,
+  type WritePath,
+} from "./cell-bridge.ts";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -135,6 +140,7 @@ function buildTestSpace(
     piecesIno,
     entitiesIno,
     pieceMap: new Map(),
+    pieceInos: new Map(),
     pieceControllers: new Map(),
     pieceManifest: new Map(),
     pieceSubs: new Map(),
@@ -180,6 +186,11 @@ type SubscribePiece = (
   spaceName: string,
 ) => Promise<Array<() => void>>;
 
+type HydratePieceProp = (
+  pieceIno: bigint,
+  propName: "input" | "result",
+) => Promise<boolean>;
+
 type WriteFsFile = (
   writePath: unknown,
   text: string,
@@ -219,7 +230,7 @@ Deno.test("CellBridge.loadPieceTree creates meta.json with id, name, patternName
   assertEquals(meta.patternName, "note");
 });
 
-Deno.test("CellBridge.loadPieceTree creates input/ dir with leaf files", async () => {
+Deno.test("CellBridge.loadPieceTree creates a stub without eager input hydration", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/ct-exec");
 
@@ -245,23 +256,25 @@ Deno.test("CellBridge.loadPieceTree creates input/ dir with leaf files", async (
     .loadPieceTree(piece, tree.rootIno, "Article", "home");
 
   const inputIno = tree.lookup(pieceIno, "input");
-  assertEquals(inputIno !== undefined, true, "input/ dir should exist");
-
-  const titleContent = getFileContent(tree, inputIno!, "title");
-  assertEquals(titleContent, "hello");
+  assertEquals(inputIno, undefined, "input/ dir should not exist before hydration");
 });
 
-Deno.test("CellBridge.loadPieceTree creates result/ dir with leaf files", async () => {
+Deno.test("CellBridge.hydratePieceProp materializes input and result on demand", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const state = buildTestSpace(bridge, "home", []);
 
   const piece = {
     id: "of:entity-789",
     name: () => "Post",
     getPatternMeta: () => Promise.resolve({ patternName: "post" }),
     input: {
-      getCell: () => Promise.resolve(makeCell({}, undefined)),
-      get: () => Promise.resolve({}),
+      getCell: () =>
+        Promise.resolve(makeCell({ title: "hello" }, {
+          type: "object",
+          properties: { title: { type: "string" } },
+        })),
+      get: () => Promise.resolve({ title: "hello" }),
     },
     result: {
       getCell: () =>
@@ -273,19 +286,31 @@ Deno.test("CellBridge.loadPieceTree creates result/ dir with leaf files", async 
     },
   };
 
+  state.pieceControllers.set("Post", piece as unknown as SpaceState["pieceControllers"] extends Map<string, infer T> ? T : never);
   const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
-    .loadPieceTree(piece, tree.rootIno, "Post", "home");
+    .loadPieceTree(piece, state.piecesIno, "Post", "home");
+  state.pieceMap.set("Post", piece.id);
+  state.pieceInos.set("Post", pieceIno);
 
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "input");
+  const inputIno = tree.lookup(pieceIno, "input");
+  assertEquals(inputIno !== undefined, true, "input/ dir should exist after hydration");
+  assertEquals(getFileContent(tree, inputIno!, "title"), "hello");
+
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
   const resultIno = tree.lookup(pieceIno, "result");
-  assertEquals(resultIno !== undefined, true, "result/ dir should exist");
+  assertEquals(resultIno !== undefined, true, "result/ dir should exist after hydration");
 
   const contentValue = getFileContent(tree, resultIno!, "content");
   assertEquals(contentValue, "world");
 });
 
-Deno.test("CellBridge.loadPieceTree labels void handlers as no-arg callables in .handlers", async () => {
+Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables in .handlers", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const state = buildTestSpace(bridge, "home", []);
 
   const onAddContactCell = makeCell(
     { $stream: true },
@@ -318,8 +343,14 @@ Deno.test("CellBridge.loadPieceTree labels void handlers as no-arg callables in 
     },
   };
 
+  state.pieceControllers.set("Contact Book", piece as unknown as SpaceState["pieceControllers"] extends Map<string, infer T> ? T : never);
   const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
-    .loadPieceTree(piece, tree.rootIno, "Contact Book", "home");
+    .loadPieceTree(piece, state.piecesIno, "Contact Book", "home");
+  state.pieceMap.set("Contact Book", piece.id);
+  state.pieceInos.set("Contact Book", pieceIno);
+
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
 
   const handlers = getFileContent(tree, pieceIno, ".handlers");
   assertEquals(
@@ -503,7 +534,7 @@ Deno.test("CellBridge.updatePiecesJson writes cached manifest data without piece
   ]);
 });
 
-Deno.test("CellBridge result rebuild updates pieces.json summary from cached manifest", async () => {
+Deno.test("CellBridge result hydration updates pieces.json summary from current result data", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/ct-exec");
   const state = buildTestSpace(bridge, "home", []);
@@ -519,7 +550,7 @@ Deno.test("CellBridge result rebuild updates pieces.json summary from cached man
     },
     result: {
       getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
-      get: () => Promise.resolve({ summary: "before" }),
+      get: () => Promise.resolve(resultCell.get()),
     },
   };
 
@@ -534,8 +565,11 @@ Deno.test("CellBridge result rebuild updates pieces.json summary from cached man
   );
   assertEquals(piecesJson[0].summary, "before");
 
+  const pieceIno = tree.lookup(state.piecesIno, "Summary-Piece")!;
   resultCell.set({ summary: "after" });
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
 
   piecesJson = JSON.parse(getFileContent(tree, state.piecesIno, "pieces.json"));
   assertEquals(piecesJson[0].summary, "after");
@@ -990,12 +1024,16 @@ Deno.test("CellBridge.subscribePiece clears stale FS root entries when result sw
   await addPiece(state, piece, "home");
 
   const pieceIno = tree.lookup(state.piecesIno, "FS-Piece")!;
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
   assertEquals(tree.lookup(pieceIno, "index.md") !== undefined, true);
   assertEquals(tree.lookup(pieceIno, "meta") !== undefined, true);
   assertEquals(tree.lookup(pieceIno, "result"), undefined);
 
   resultCell.set({ content: "Now a regular result tree" });
   await new Promise((r) => setTimeout(r, 10));
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
 
   const resultIno = tree.lookup(pieceIno, "result");
   assertEquals(resultIno !== undefined, true, "result/ dir should exist");
@@ -1015,7 +1053,7 @@ Deno.test("CellBridge.subscribePiece clears stale FS root entries when result sw
   );
 });
 
-Deno.test("CellBridge.status tracks coalesced rebuild metrics", async () => {
+Deno.test("CellBridge.status stays idle without eager content rebuild subscriptions", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/ct-exec");
   bridge.init({
@@ -1047,20 +1085,117 @@ Deno.test("CellBridge.status tracks coalesced rebuild metrics", async () => {
   await addPiece(state, piece, "home");
 
   const pieceIno = tree.lookup(state.piecesIno, "Status-Piece")!;
+  assertEquals(tree.lookup(pieceIno, "result"), undefined);
 
   resultCell.set({ content: "Second" });
   resultCell.set({ content: "Final" });
   await new Promise((r) => setTimeout(r, 10));
 
-  const resultIno = tree.lookup(pieceIno, "result")!;
-  assertEquals(getFileContent(tree, resultIno, "content"), "Final");
-
   const status = JSON.parse(getFileContent(tree, tree.rootIno, ".status"));
   assertEquals(status.debug, false);
   assertEquals(status.rebuilds.pending, 0);
-  assertEquals(status.rebuilds.scheduled, 1);
-  assertEquals(status.rebuilds.coalesced, 1);
-  assertEquals(status.rebuilds.completed, 1);
+  assertEquals(status.rebuilds.scheduled, 0);
+  assertEquals(status.rebuilds.coalesced, 0);
+  assertEquals(status.rebuilds.completed, 0);
   assertEquals(status.rebuilds.errors, 0);
-  assertEquals(status.rebuilds.maxPending, 1);
+  assertEquals(status.rebuilds.maxPending, 0);
+  await new Promise((r) => setTimeout(r, 10));
+});
+
+Deno.test("CellBridge.invalidateWritePath clears hydrated piece result cache", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  const piece = {
+    id: "of:invalidate-piece",
+    name: () => "Invalidate Piece",
+    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () =>
+        Promise.resolve(makeCell({ content: "hello" }, {
+          type: "object",
+          properties: { content: { type: "string" } },
+        })),
+      get: () => Promise.resolve({ content: "hello" }),
+    },
+  };
+
+  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace.bind(bridge);
+  await addPiece(state, piece, "home");
+
+  const pieceIno = tree.lookup(state.piecesIno, "Invalidate-Piece")!;
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+  assertEquals(tree.lookup(pieceIno, "result") !== undefined, true);
+
+  bridge.invalidateWritePath({
+    spaceName: "home",
+    pieceName: "Invalidate-Piece",
+    cell: "result",
+    jsonPath: ["content"],
+    isJsonFile: false,
+    piece: piece as unknown as WritePath["piece"],
+  });
+
+  assertEquals(
+    tree.lookup(pieceIno, "result"),
+    undefined,
+    "hydrated result/ dir should be cleared after invalidation",
+  );
+});
+
+Deno.test("CellBridge.invalidateHandlerTarget clears hydrated entity result cache", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  const resultCell = makeCell({ content: "hello" }, {
+    type: "object",
+    properties: { content: { type: "string" } },
+  });
+  const piece = {
+    id: "of:entity-handler-piece",
+    name: () => "Handler Piece",
+    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell),
+      get: () => Promise.resolve({ content: "hello" }),
+    },
+    manager: () => ({
+      runtime: { idle: () => Promise.resolve() },
+      synced: () => Promise.resolve(),
+    }),
+  };
+
+  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace.bind(bridge);
+  await addPiece(state, piece, "home");
+
+  await bridge.resolveEntity(state.entitiesIno, piece.id);
+  const entityIno = tree.lookup(state.entitiesIno, piece.id)!;
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, entityIno, "result");
+  assertEquals(tree.lookup(entityIno, "result") !== undefined, true);
+
+  bridge.invalidateHandlerTarget({
+    piece: piece as unknown as HandlerTarget["piece"],
+    cellProp: "result",
+    cellKey: "content",
+  });
+
+  assertEquals(
+    tree.lookup(entityIno, "result"),
+    undefined,
+    "hydrated entity result/ dir should be cleared after handler invalidation",
+  );
 });
