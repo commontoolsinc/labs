@@ -108,10 +108,15 @@ function markSyntheticReactiveCollectionDeclarationIfNeeded(
   rewritten: ts.VariableDeclaration,
   context: TransformationContext,
 ): void {
+  const rewrittenOriginal = rewritten.initializer
+    ? ts.getOriginalNode(rewritten.initializer)
+    : undefined;
   if (
-    !original.initializer ||
     !rewritten.initializer ||
-    rewritten.initializer === original.initializer ||
+    (
+      rewrittenOriginal === rewritten.initializer &&
+      rewritten.initializer.pos >= 0
+    ) ||
     !isReactiveHelperWrapperCall(
       rewritten.initializer,
       context,
@@ -121,8 +126,8 @@ function markSyntheticReactiveCollectionDeclarationIfNeeded(
   ) {
     return;
   }
-
   context.markSyntheticReactiveCollectionDeclaration(original);
+  context.markSyntheticReactiveCollectionDeclaration(rewritten);
 }
 
 function rewriteLateArrayMethodCallbackCall(
@@ -351,7 +356,27 @@ export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
     return visited;
   };
 
-  return ts.visitNode(root, visit) as T;
+  const rewritten = ts.visitNode(root, visit) as T;
+
+  const lateArrayMethodVisit: ts.Visitor = (node) => {
+    const visited = visitEachChildWithJsx(
+      node,
+      lateArrayMethodVisit,
+      context.tsContext,
+    );
+
+    if (ts.isCallExpression(visited)) {
+      return rewriteLateArrayMethodCallbackCall(
+        visited,
+        context,
+        lateArrayMethodVisit,
+      ) ?? visited;
+    }
+
+    return visited;
+  };
+
+  return ts.visitNode(rewritten, lateArrayMethodVisit) as T;
 }
 
 export function rewritePatternOwnedExpressionSites<T extends ts.Node>(

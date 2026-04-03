@@ -116,7 +116,7 @@ export interface ReactiveCollectionProvenanceOptions {
   readonly allowReactiveArrayCallbackParameters?: boolean;
   readonly sameScope?: ts.FunctionLikeDeclaration;
   readonly typeRegistry?: WeakMap<ts.Node, ts.Type>;
-  readonly syntheticReactiveCollectionRegistry?: WeakSet<ts.Node>;
+  readonly syntheticReactiveCollectionRegistry?: WeakSet<ts.Symbol>;
   readonly logger?: (message: string) => void;
 }
 
@@ -926,7 +926,13 @@ function hasReactiveCollectionProvenanceInternal(
     return false;
   }
 
-  const symbol = checker.getSymbolAtLocation(target);
+  const originalTarget = ts.getOriginalNode(target);
+  const symbol = checker.getSymbolAtLocation(target) ??
+    (
+      originalTarget !== target && ts.isIdentifier(originalTarget)
+        ? checker.getSymbolAtLocation(originalTarget)
+        : undefined
+    );
   if (!symbol || seenSymbols.has(symbol)) {
     return false;
   }
@@ -956,7 +962,7 @@ function hasReactiveCollectionProvenanceInternal(
       continue;
     }
 
-    if (options.syntheticReactiveCollectionRegistry?.has(declaration)) {
+    if (options.syntheticReactiveCollectionRegistry?.has(symbol)) {
       return true;
     }
 

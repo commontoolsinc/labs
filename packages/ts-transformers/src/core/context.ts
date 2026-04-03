@@ -205,7 +205,18 @@ export class TransformationContext {
   }
 
   markSyntheticReactiveCollectionDeclaration(node: ts.Node): void {
-    this.options.syntheticReactiveCollectionRegistry?.add(node);
+    const symbol = ts.isVariableDeclaration(node)
+      ? (ts.isIdentifier(node.name)
+        ? this.checker.getSymbolAtLocation(node.name)
+        : undefined)
+      : ts.isIdentifier(node)
+      ? this.checker.getSymbolAtLocation(node)
+      : undefined;
+    if (!symbol) {
+      return;
+    }
+    this.options.syntheticReactiveCollectionRegistry?.add(symbol);
+    this.invalidateReactiveAnalysisCaches();
   }
 
   getDataFlowAnalyzer(): ReturnType<typeof createDataFlowAnalyzer> {
