@@ -278,11 +278,11 @@ export class Runtime {
 
     // Log any enabled experimental flags.
     const enabledFlags = Object.entries(this.experimental)
-      .filter(([_, v]) => v)
+      .filter(([_, v]) => v !== undefined)
       .map(([k]) => k);
     if (enabledFlags.length > 0) {
       console.log(
-        `Experimental flags enabled: ${enabledFlags.join(", ")}`,
+        `Experimental flag overrides: ${enabledFlags.join(", ")}`,
       );
     }
 

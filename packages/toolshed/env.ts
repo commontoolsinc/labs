@@ -12,6 +12,19 @@ function parseCliArgs(): Record<string, string> {
   return overrides;
 }
 
+/**
+ * Results in `true` (on), `false` (off), or `undefined` (default).
+ */
+function flagValue() {
+  return z.string().default("default").transform((v) => {
+    switch (v) {
+      case "default": return undefined;
+      case "false": return false;
+      default: return true;
+    }
+  });
+}
+
 // NOTE: This is where we define the environment variable types and defaults.
 const EnvSchema = z.object({
   ENV: z.string().default("development"),
@@ -187,18 +200,10 @@ const EnvSchema = z.object({
   // env var to "false" would incorrectly enable the flag. The other boolean
   // env vars in this file have the same latent bug.
   // ===========================================================================
-  EXPERIMENTAL_MODERN_DATA_MODEL: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  EXPERIMENTAL_UNIFIED_JSON_ENCODING: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  EXPERIMENTAL_MODERN_HASH: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  EXPERIMENTAL_MODERN_SCHEMA_HASH: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
+  EXPERIMENTAL_MODERN_DATA_MODEL: flagValue(),
+  EXPERIMENTAL_UNIFIED_JSON_ENCODING: flagValue(),
+  EXPERIMENTAL_MODERN_HASH: flagValue(),
+  EXPERIMENTAL_MODERN_SCHEMA_HASH: flagValue(),
 
   // ===========================================================================
   // Compilation cache flags (see docs/specs/compilation-cache.md)

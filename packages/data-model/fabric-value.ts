@@ -64,7 +64,9 @@ let modernDataModelEnabled = false;
  * memory layer.
  */
 export function setDataModelConfig(enabled?: boolean): void {
-  modernDataModelEnabled = enabled ?? false;
+  if (enabled !== undefined) {
+    modernDataModelEnabled = enabled ?? false;
+  }
 }
 
 /** Returns whether modern data model mode is currently enabled. */

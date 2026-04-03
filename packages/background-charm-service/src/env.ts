@@ -1,5 +1,18 @@
 import { z } from "zod";
 
+/**
+ * Results in `true` (on), `false` (off), or `undefined` (default).
+ */
+function flagValue() {
+  return z.string().default("default").transform((v) => {
+    switch (v) {
+      case "default": return undefined;
+      case "false": return false;
+      default: return true;
+    }
+  });
+}
+
 const envSchema = z.object({
   // Job queue settings
   //MAX_CONCURRENT_JOBS: z.coerce.number().positive().default(5),
@@ -27,18 +40,10 @@ const envSchema = z.object({
   // Boolean(), which treats any non-empty string as truthy -- so setting an
   // env var to "false" would incorrectly enable the flag. The other boolean
   // env vars in this file have the same latent bug.
-  EXPERIMENTAL_MODERN_DATA_MODEL: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  EXPERIMENTAL_UNIFIED_JSON_ENCODING: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  EXPERIMENTAL_MODERN_HASH: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
-  EXPERIMENTAL_MODERN_SCHEMA_HASH: z.string().default("false").transform((
-    v,
-  ) => v === "true"),
+  EXPERIMENTAL_MODERN_DATA_MODEL: flagValue(),
+  EXPERIMENTAL_UNIFIED_JSON_ENCODING: flagValue(),
+  EXPERIMENTAL_MODERN_HASH: flagValue(),
+  EXPERIMENTAL_MODERN_SCHEMA_HASH: flagValue(),
   // Background Charm Service: default is public space "toolshed-system"
   //SERVICE_DID: z.string().default(
   //  "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88",

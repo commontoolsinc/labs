@@ -55,8 +55,10 @@ let modernHashEnabled = false;
  * constructor to propagate `ExperimentalOptions.modernHash` into the
  * memory layer.
  */
-export function setModernHashConfig(enabled: boolean): void {
-  modernHashEnabled = enabled;
+export function setModernHashConfig(enabled?: boolean): void {
+  if (enabled !== undefined) {
+    modernHashEnabled = enabled;
+  }
 }
 
 /**

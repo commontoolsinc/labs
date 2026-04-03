@@ -94,9 +94,11 @@ function configureDispatch(): void {
  * `Runtime` constructor to propagate
  * `ExperimentalOptions.unifiedJsonEncoding` into the memory layer.
  */
-export function setJsonEncodingConfig(enabled: boolean): void {
-  jsonEncodingEnabled = enabled;
-  configureDispatch();
+export function setJsonEncodingConfig(enabled?: boolean): void {
+  if (enabled !== undefined) {
+    jsonEncodingEnabled = enabled;
+    configureDispatch();
+  }
 }
 
 /**

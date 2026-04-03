@@ -43,9 +43,11 @@ let modernSchemaHashEnabled = true;
  * memory layer. Wipes the intern cache since cached hashes are
  * flag-dependent.
  */
-export function setSchemaHashConfig(enabled: boolean): void {
-  modernSchemaHashEnabled = enabled;
-  resetInternCache();
+export function setSchemaHashConfig(enabled?: boolean): void {
+  if (enabled !== undefined) {
+    modernSchemaHashEnabled = enabled;
+    resetInternCache();
+  }
 }
 
 /**
