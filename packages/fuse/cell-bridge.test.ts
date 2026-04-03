@@ -357,16 +357,16 @@ Deno.test("CellBridge.addPieceToSpace assigns -2 suffix on name collision", asyn
   const name1 = await addPiece(state, makeNotePiece("of:id-1"), "home");
   const name2 = await addPiece(state, makeNotePiece("of:id-2"), "home");
 
-  assertEquals(name1, "My Note");
-  assertEquals(name2, "My Note-2");
+  assertEquals(name1, "My-Note");
+  assertEquals(name2, "My-Note-2");
 
   // Both entries should be in pieceMap
-  assertEquals(state.pieceMap.has("My Note"), true);
-  assertEquals(state.pieceMap.has("My Note-2"), true);
+  assertEquals(state.pieceMap.has("My-Note"), true);
+  assertEquals(state.pieceMap.has("My-Note-2"), true);
 
   // Both directories should exist in the tree
-  assertEquals(tree.lookup(state.piecesIno, "My Note") !== undefined, true);
-  assertEquals(tree.lookup(state.piecesIno, "My Note-2") !== undefined, true);
+  assertEquals(tree.lookup(state.piecesIno, "My-Note") !== undefined, true);
+  assertEquals(tree.lookup(state.piecesIno, "My-Note-2") !== undefined, true);
 });
 
 Deno.test("CellBridge.addPieceToSpace assigns -2 and -3 suffixes for three collisions", async () => {
@@ -706,11 +706,11 @@ Deno.test("CellBridge.syncPieceListOnce adds a new piece to the tree", async () 
     .syncPieceListOnce.call(bridge, state, "home");
 
   assertEquals(
-    tree.lookup(state.piecesIno, "Piece Two") !== undefined,
+    tree.lookup(state.piecesIno, "Piece-Two") !== undefined,
     true,
     "Piece Two directory should appear after sync",
   );
-  assertEquals(state.pieceMap.has("Piece Two"), true);
+  assertEquals(state.pieceMap.has("Piece-Two"), true);
 });
 
 Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", async () => {
@@ -740,7 +740,7 @@ Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", 
 
   // Verify it was added
   assertEquals(
-    tree.lookup(state.piecesIno, "Gone Piece") !== undefined,
+    tree.lookup(state.piecesIno, "Gone-Piece") !== undefined,
     true,
     "Piece should exist before sync",
   );
@@ -754,7 +754,7 @@ Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", 
     .syncPieceListOnce.call(bridge, state, "home");
 
   assertEquals(
-    tree.lookup(state.piecesIno, "Gone Piece"),
+    tree.lookup(state.piecesIno, "Gone-Piece"),
     undefined,
     "Piece directory should be gone after sync",
   );
@@ -796,7 +796,7 @@ Deno.test("CellBridge.subscribePiece renames directory when piece name changes",
 
   // Verify initial state
   assertEquals(
-    tree.lookup(state.piecesIno, "Old Name") !== undefined,
+    tree.lookup(state.piecesIno, "Old-Name") !== undefined,
     true,
     "Old Name dir should exist initially",
   );
@@ -806,13 +806,13 @@ Deno.test("CellBridge.subscribePiece renames directory when piece name changes",
     .subscribePiece.call(
       bridge,
       piece,
-      tree.lookup(state.piecesIno, "Old Name")!,
-      "Old Name",
+      tree.lookup(state.piecesIno, "Old-Name")!,
+      "Old-Name",
       "home",
     );
 
   // Store updated subs
-  state.pieceSubs.set("Old Name", subs);
+  state.pieceSubs.set("Old-Name", subs);
 
   // Change the piece name before firing the sink
   pieceName = "New Name";
@@ -824,15 +824,133 @@ Deno.test("CellBridge.subscribePiece renames directory when piece name changes",
   await new Promise((r) => setTimeout(r, 10));
 
   assertEquals(
-    tree.lookup(state.piecesIno, "New Name") !== undefined,
+    tree.lookup(state.piecesIno, "New-Name") !== undefined,
     true,
     "New Name dir should exist after rename",
   );
   assertEquals(
-    tree.lookup(state.piecesIno, "Old Name"),
+    tree.lookup(state.piecesIno, "Old-Name"),
     undefined,
     "Old Name dir should be gone after rename",
   );
+});
+
+Deno.test("CellBridge.addPieceToSpace normalizes projected piece directory names", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  const piece = {
+    id: "of:piece-123",
+    name: () => "  Hello, world! 🚀 / notes  ",
+    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+  };
+
+  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace.bind(bridge);
+  const projectedName = await addPiece(state, piece, "home");
+
+  assertEquals(projectedName, "Hello-world-notes");
+  assertEquals(
+    tree.lookup(state.piecesIno, "Hello-world-notes") !== undefined,
+    true,
+  );
+  assertEquals(
+    JSON.parse(
+      getFileContent(
+        tree,
+        tree.lookup(state.piecesIno, projectedName)!,
+        "meta.json",
+      ),
+    ).name,
+    "  Hello, world! 🚀 / notes  ",
+  );
+});
+
+Deno.test("CellBridge.addPieceToSpace falls back to a normalized piece id for symbol-only names", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  const piece = {
+    id: "of:emoji-piece",
+    name: () => "🔥✨",
+    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+  };
+
+  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace.bind(bridge);
+  const projectedName = await addPiece(state, piece, "home");
+
+  assertEquals(projectedName, "of-emoji-piece");
+  assertEquals(
+    tree.lookup(state.piecesIno, "of-emoji-piece") !== undefined,
+    true,
+  );
+});
+
+Deno.test("CellBridge.subscribePiece renames directories using normalized names", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  let pieceName = "Start Here";
+  const resultCell = new SinkableCell({});
+
+  const piece = {
+    id: "of:abc",
+    name: () => pieceName,
+    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+      get: () => Promise.resolve({}),
+    },
+  };
+
+  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace.bind(bridge);
+  await addPiece(state, piece, "home");
+
+  const subs = await (bridge as unknown as { subscribePiece: SubscribePiece })
+    .subscribePiece.call(
+      bridge,
+      piece,
+      tree.lookup(state.piecesIno, "Start-Here")!,
+      "Start-Here",
+      "home",
+    );
+
+  state.pieceSubs.set("Start-Here", subs);
+
+  pieceName = "Renamed 🚀 Piece";
+  resultCell.set({});
+  await new Promise((r) => setTimeout(r, 10));
+
+  assertEquals(
+    tree.lookup(state.piecesIno, "Renamed-Piece") !== undefined,
+    true,
+  );
+  assertEquals(tree.lookup(state.piecesIno, "Start-Here"), undefined);
 });
 
 Deno.test("CellBridge.subscribePiece clears stale FS root entries when result switches to result/ tree", async () => {
@@ -871,7 +989,7 @@ Deno.test("CellBridge.subscribePiece clears stale FS root entries when result sw
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
-  const pieceIno = tree.lookup(state.piecesIno, "FS Piece")!;
+  const pieceIno = tree.lookup(state.piecesIno, "FS-Piece")!;
   assertEquals(tree.lookup(pieceIno, "index.md") !== undefined, true);
   assertEquals(tree.lookup(pieceIno, "meta") !== undefined, true);
   assertEquals(tree.lookup(pieceIno, "result"), undefined);
@@ -928,7 +1046,7 @@ Deno.test("CellBridge.status tracks coalesced rebuild metrics", async () => {
     .addPieceToSpace.bind(bridge);
   await addPiece(state, piece, "home");
 
-  const pieceIno = tree.lookup(state.piecesIno, "Status Piece")!;
+  const pieceIno = tree.lookup(state.piecesIno, "Status-Piece")!;
 
   resultCell.set({ content: "Second" });
   resultCell.set({ content: "Final" });

@@ -109,6 +109,29 @@ function parseFrontmatter(
   return { frontmatter: fm, body };
 }
 
+function normalizeProjectedPieceName(name: string): string {
+  const normalized = name
+    .normalize("NFKD")
+    .replace(/\p{Mark}+/gu, "")
+    .replace(/\p{Extended_Pictographic}|\p{Emoji_Presentation}/gu, " ")
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-+/g, "-");
+
+  return normalized || "piece";
+}
+
+function resolveProjectedPieceName(
+  rawName: string | undefined,
+  pieceId: string,
+): string {
+  const primary = normalizeProjectedPieceName(rawName?.trim() || "");
+  if (primary !== "piece") return primary;
+
+  const fallback = normalizeProjectedPieceName(pieceId);
+  return fallback || "piece";
+}
+
 type Cancel = () => void;
 
 type ResolveLink = (value: unknown, depth: number) => string | null;
@@ -1217,7 +1240,7 @@ export class CellBridge {
     piece: PieceController,
     spaceName: string,
   ): Promise<string> {
-    let name = piece.name() || piece.id;
+    let name = resolveProjectedPieceName(piece.name(), piece.id);
     if (state.usedNames.has(name)) {
       let suffix = 2;
       while (state.usedNames.has(`${name}-${suffix}`)) suffix++;
@@ -1929,15 +1952,22 @@ export class CellBridge {
             if (currentName === undefined) return;
 
             const newRawName = piece.name() ?? piece.id;
+            const normalizedRawName = resolveProjectedPieceName(
+              piece.name(),
+              piece.id,
+            );
 
             // Skip if the raw name hasn't changed.
-            if (newRawName === currentName) return;
+            if (
+              newRawName === currentName ||
+              normalizedRawName === currentName
+            ) return;
 
             // Collision-resolve the new name. We need to exclude currentName
             // from the used-name check (the piece is vacating it), but we
             // must NOT mutate usedNames until after tree.rename() succeeds —
             // a thrown rename would otherwise leave tracking inconsistent.
-            let newName = newRawName;
+            let newName = normalizedRawName;
             if (state.usedNames.has(newName) && newName !== currentName) {
               let suffix = 2;
               while (
@@ -2218,7 +2248,14 @@ export class CellBridge {
       // Pattern meta not always available
     }
 
-    if (!meta?.program?.files?.length) {
+    // Normalise to a files array: multi-file programs use program.files,
+    // single-file programs use the top-level src string (exposed as main.tsx).
+    let files: { name: string; contents: string }[];
+    if (meta?.program?.files?.length) {
+      files = meta.program.files;
+    } else if (meta?.src) {
+      files = [{ name: "main.tsx", contents: meta.src }];
+    } else {
       // System piece or no source — skip .src/
       return;
     }
@@ -2233,7 +2270,7 @@ export class CellBridge {
 
     // Add each source file at its relative path
     const enc = new TextEncoder();
-    for (const file of meta.program.files) {
+    for (const file of files) {
       const relPath = file.name.startsWith("/")
         ? file.name.slice(1)
         : file.name;
