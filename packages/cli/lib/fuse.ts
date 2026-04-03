@@ -252,12 +252,12 @@ export async function ensureExecShim(
   const script = compiled
     ? `#!/usr/bin/env bash
 export CF_EXEC_SHEBANG=1
-export CF_CLI_NAME=${JSON.stringify(displayCliName)}
+export CF_CLI_NAME=${displayCliName}
 exec "${Deno.execPath()}" "$@"
 `
     : `#!/usr/bin/env bash
 export CF_EXEC_SHEBANG=1
-export CF_CLI_NAME=${JSON.stringify(displayCliName)}
+export CF_CLI_NAME=${displayCliName}
 exec "${Deno.execPath()}" run --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run "${
       cliMod(importMetaUrl)
     }" "$@"

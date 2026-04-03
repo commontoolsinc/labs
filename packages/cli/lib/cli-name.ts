@@ -1,16 +1,33 @@
 import { basename } from "@std/path";
 
+function normalizeCliName(
+  name: string | undefined | null,
+): "cf" | "ct" | undefined {
+  const normalized = name?.trim().toLowerCase();
+  if (normalized === "ct" || normalized === "ct.exe") {
+    return "ct";
+  }
+  if (normalized === "cf" || normalized === "cf.exe") {
+    return "cf";
+  }
+  return undefined;
+}
+
 export function cliName(
   options: { envName?: string | undefined; execPath?: string | undefined } = {},
-): string {
-  const envName = options.envName ?? Deno.env.get("CF_CLI_NAME");
-  if (envName?.trim()) {
-    return envName.trim();
+): "cf" | "ct" {
+  const envName = normalizeCliName(
+    options.envName ?? Deno.env.get("CF_CLI_NAME"),
+  );
+  if (envName) {
+    return envName;
   }
 
-  const execBase = basename(options.execPath ?? Deno.execPath()).toLowerCase();
-  if (execBase === "ct" || execBase === "ct.exe") {
-    return "ct";
+  const execName = normalizeCliName(
+    basename(options.execPath ?? Deno.execPath()),
+  );
+  if (execName) {
+    return execName;
   }
 
   return "cf";

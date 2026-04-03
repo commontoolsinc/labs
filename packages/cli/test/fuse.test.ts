@@ -343,10 +343,28 @@ describe("mount state operations", () => {
     expect(shimPath).not.toBe(join(stateDir, "cf-exec"));
     expect(shim).toContain("#!/usr/bin/env bash");
     expect(shim).toContain("export CF_EXEC_SHEBANG=1");
-    expect(shim).toContain('export CF_CLI_NAME="ct"');
+    expect(shim).toContain("export CF_CLI_NAME=ct");
     expect(shim).toContain('" run --allow-net');
     expect(shim).toContain(join(repoRoot, "packages/cli/mod.ts"));
     expect(shim).toContain('"$@"');
+  });
+
+  it("normalizes invalid CF_CLI_NAME values before writing the exec shim", async () => {
+    const stateDir = join(tmpDir, "state");
+    const repoRoot = join(tmpDir, "repo");
+    const importMetaUrl = toFileUrl(join(repoRoot, "packages/cli/lib/fuse.ts"))
+      .href;
+    let shim = "";
+
+    await withEnv("CF_CLI_NAME", '$(touch "/tmp/pwned")', async () => {
+      const shimPath = await ensureExecShim(stateDir, importMetaUrl);
+      shim = await Deno.readTextFile(shimPath);
+    });
+
+    expect(shim).toContain("export CF_CLI_NAME=cf");
+    expect(shim).not.toContain("touch");
+    expect(shim).not.toContain("$(");
+    expect(shim).not.toContain("`");
   });
 
   it("ensureExecShim falls back to stateDir when repo root is not writable", async () => {

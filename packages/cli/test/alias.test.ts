@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { cliName } from "../lib/cli-name.ts";
 import { checkStderr, ct } from "./utils.ts";
 
 describe("ct compatibility alias", () => {
@@ -28,5 +29,12 @@ describe("ct compatibility alias", () => {
     expect(help).toContain(
       "ct exec /tmp/cf/home/pieces/notes/result/search.tool --query milk",
     );
+  });
+
+  it("ignores unsupported CF_CLI_NAME values", () => {
+    expect(cliName({ envName: " ct " })).toBe("ct");
+    expect(cliName({ envName: "cf.exe" })).toBe("cf");
+    expect(cliName({ envName: "$(touch /tmp/pwned)" })).toBe("cf");
+    expect(cliName({ envName: "`touch /tmp/pwned`" })).toBe("cf");
   });
 });
