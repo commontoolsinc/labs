@@ -189,8 +189,16 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
     if (!cell) {
       // Shouldn't happen: We have a cell link but its link doesn't correspond
       // to a cell.
+
+      // TODO(danfuzz): I think the `TODO(seefeld)` below reflects the old state
+      // of `createJsonSchema()` which was defined to return a
+      // `JSONSchemaObjMutable` (which had to be an `object`) and not a
+      // `JSONSchema` (which includes `boolean`), and not some other problem
+      // with returning `true`. That said, maybe it's more appropriate to
+      // `throw` in this case? Figure out what's what, and take action as
+      // appropriate.
+
       // TODO(seefeld): Should be `true`.
-      // TODO(danfuzz): Or maybe it should `throw`?
       return emptySchemaObject();
     }
 
@@ -223,6 +231,9 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
 
   const basicSchema = schemaForValueType(value);
   if (basicSchema === undefined) {
+    // TODO(danfuzz): I think it's safe to return `true` here. (See longer
+    // related comment above.)
+
     // Unrecognized type. Treat it as "any."
     return finishResult(emptySchemaObject());
   }
@@ -266,6 +277,8 @@ function itemsSchemaFromArray(
   state: AnalyzeTypeState,
 ): JSONSchema {
   if (value.length === 0) {
+    // TODO(danfuzz): I think it's safe to return `true` here. (See longer
+    // related comment above.)
     // TODO(seefeld): should be `true` in this case.
     return {};
   }
