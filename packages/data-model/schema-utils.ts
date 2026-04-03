@@ -10,7 +10,7 @@ import type {
 } from "@commontools/api";
 import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { cloneIfNecessary } from "./fabric-value.ts";
-import { internSchema } from "./schema-hash.ts";
+import { internSchema, isInternedSchema } from "./schema-hash.ts";
 import { type FabricValue } from "./interface.ts";
 
 /**
@@ -60,8 +60,8 @@ export function toDeepFrozenSchema<T extends JSONSchema>(
   schema: T,
   canShare: boolean = false,
 ): T {
-  // Booleans are primitives — already immutable.
-  if (typeof schema === "boolean") {
+  // No need to do any work given an interned schema (including `boolean`s.)
+  if (isInternedSchema(schema)) {
     return schema;
   }
 
@@ -127,10 +127,11 @@ export function cloneSchemaMutable(
 
 /**
  * Return a deep-frozen shallow copy of a schema with the given property
- * overrides applied.
+ * overrides applied. This function provides "intern contagion:" If the given
+ * `schema` is interned, then the result of this function will also be interned.
  *
- * - `undefined` and `true` ("accept everything") are treated as `{}` before
- *   applying overrides.
+ * - `undefined` and `true` ("accept everything") are treated as an interned
+ *   `{}` before applying overrides.
  * - `false` ("reject everything") short-circuits: no overrides can make a
  *   "never" schema accept anything, so `false` is returned as-is.
  */
@@ -139,13 +140,21 @@ export function schemaWithProperties(
   overrides: JSONSchemaObj,
 ): JSONSchema {
   if (schema === false) return false;
-  const base = (schema === undefined || schema === true) ? {} : schema;
-  return toDeepFrozenSchema({ ...base, ...overrides }, true);
+
+  const base = (schema === undefined || schema === true)
+    ? emptySchemaObject()
+    : schema;
+  const result = { ...base, ...overrides };
+
+  return isInternedSchema(base)
+    ? internSchema(result)
+    : toDeepFrozenSchema(result, true);
 }
 
 /**
  * Return a deep-frozen shallow copy of a schema with the named properties
- * removed.
+ * removed. This function provides "intern contagion:" If the given
+ * `schema` is interned, then the result of this function will also be interned.
  *
  * `undefined` is treated as `true` (JSON Schema "accept everything").
  * Boolean schemas are returned as-is (no properties to remove).
@@ -169,11 +178,15 @@ export function schemaWithoutProperties(
     }
   }
 
-  // Note: Still have to deep-freeze in the `!copy` case, though it will be a
-  // no-op if `schema` was already deep-frozen.
-  return copy
-    ? toDeepFrozenSchema(copy as JSONSchemaObj, true)
-    : toDeepFrozenSchema(schema);
+  if (copy) {
+    return isInternedSchema(schema)
+      ? internSchema(copy)
+      : toDeepFrozenSchema(copy as JSONSchemaObj, true);
+  } else {
+    // Note: We still have to deep-freeze in the `!copy` case, though it will be
+    // a no-op if `schema` was already deep-frozen (including interned).
+    return toDeepFrozenSchema(schema);
+  }
 }
 
 /**

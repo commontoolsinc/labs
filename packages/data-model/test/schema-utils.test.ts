@@ -20,7 +20,7 @@ import {
   schemaWithProperties,
   toDeepFrozenSchema,
 } from "../schema-utils.ts";
-import { isInternedSchema } from "../schema-hash.ts";
+import { internSchema, isInternedSchema } from "../schema-hash.ts";
 
 describe("toDeepFrozenSchema", () => {
   describe("boolean schemas", () => {
@@ -216,6 +216,23 @@ describe("toDeepFrozenSchema", () => {
         },
         TypeError,
       );
+    });
+  });
+
+  describe("interned schema handling", () => {
+    it("returns an interned schema as-is", () => {
+      const schema = internSchema({ type: "string" });
+      const result = toDeepFrozenSchema(schema);
+      assertStrictEquals(result, schema);
+    });
+
+    it("returns an interned schema as-is even with canShare=false", () => {
+      const schema = internSchema({
+        type: "object",
+        properties: { x: { type: "number" } },
+      });
+      const result = toDeepFrozenSchema(schema, false);
+      assertStrictEquals(result, schema);
     });
   });
 
@@ -605,6 +622,36 @@ describe("schemaWithProperties", () => {
     const result = schemaWithProperties(false, { type: "string" });
     assertStrictEquals(result, false);
   });
+
+  describe("intern contagion", () => {
+    it("result is interned when base schema is interned", () => {
+      const base = internSchema({ type: "object" });
+      const result = schemaWithProperties(base, {
+        properties: { x: { type: "string" } },
+      });
+      assert(isInternedSchema(result));
+    });
+
+    it("result is not interned when base schema is not interned", () => {
+      const base: JSONSchemaObj = { type: "object" };
+      const result = schemaWithProperties(base, {
+        properties: { x: { type: "string" } },
+      });
+      assert(!isInternedSchema(result));
+      // But it should still be frozen.
+      assert(Object.isFrozen(result));
+    });
+
+    it("result is interned when base is undefined (treated as interned {})", () => {
+      const result = schemaWithProperties(undefined, { type: "string" });
+      assert(isInternedSchema(result));
+    });
+
+    it("result is interned when base is true (treated as interned {})", () => {
+      const result = schemaWithProperties(true, { type: "string" });
+      assert(isInternedSchema(result));
+    });
+  });
 });
 
 describe("schemaWithoutProperties", () => {
@@ -677,6 +724,29 @@ describe("schemaWithoutProperties", () => {
   it("returns boolean false as-is", () => {
     assertStrictEquals(schemaWithoutProperties(false, "asCell"), false);
   });
+
+  describe("intern contagion", () => {
+    it("result is interned when input schema is interned", () => {
+      const schema = internSchema({ type: "object", asCell: true });
+      const result = schemaWithoutProperties(schema, "asCell");
+      assert(isInternedSchema(result));
+    });
+
+    it("result is not interned when input schema is not interned", () => {
+      const schema: JSONSchemaObj = { type: "object", asCell: true };
+      const result = schemaWithoutProperties(schema, "asCell");
+      assert(!isInternedSchema(result));
+      // But it should still be frozen.
+      assert(Object.isFrozen(result));
+    });
+
+    it("no-op on interned schema preserves interned identity", () => {
+      const schema = internSchema({ type: "string" });
+      const result = schemaWithoutProperties(schema, "nonexistent");
+      assertStrictEquals(result, schema);
+      assert(isInternedSchema(result));
+    });
+  });
 });
 
 describe("schemaForValueType", () => {
@@ -689,15 +759,19 @@ describe("schemaForValueType", () => {
         assertEquals(schemaForValueType(example), { type: typeName });
       });
 
+      it("should return a frozen result", () => {
+        assert(isDeepFrozen(schemaForValueType(example)!));
+      });
+
       it("should return an interned result", () => {
+        assert(isInternedSchema(schemaForValueType(example)!));
+      });
+
+      it("should return the same result every time", () => {
         assertStrictEquals(
           schemaForValueType(example),
           schemaForValueType(example),
         );
-      });
-
-      it("should return a frozen result", () => {
-        assert(isDeepFrozen(schemaForValueType(example)));
       });
     });
   }
