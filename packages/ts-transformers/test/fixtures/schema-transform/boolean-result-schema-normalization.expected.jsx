@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: boolean-result-schema-normalization
 // Verifies: boolean result schemas stay normalized as `type: "boolean"` instead
 // of expanding into literal `true` / `false` enums.
@@ -85,5 +96,4 @@ export default pattern((state: {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

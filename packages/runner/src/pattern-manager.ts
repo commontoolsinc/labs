@@ -304,12 +304,6 @@ export class PatternManager {
     return generatedId;
   }
 
-  getPatternId(pattern: Pattern | Module): string | undefined {
-    return this.patternToIdMap.get(
-      this.findOriginalPattern(pattern as Pattern),
-    );
-  }
-
   savePattern(
     { patternId, space }: {
       patternId: string;

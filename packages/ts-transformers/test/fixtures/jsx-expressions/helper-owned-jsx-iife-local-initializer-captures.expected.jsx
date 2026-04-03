@@ -1,4 +1,12 @@
-import * as __cfHelpers from "commonfabric";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 /**
  * TRANSFORM REPRO: helper-owned JSX IIFE must account for local initializer dependencies
  *
@@ -8,6 +16,9 @@ import * as __cfHelpers from "commonfabric";
  * in scope at the synthetic derive call site.
  */
 import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Entry {
     id: string;
     name: string;
@@ -24,6 +35,7 @@ function findChildren(tree: Writable<Entry[]>, path: readonly string[]): readonl
     }
     return current;
 }
+__ctHardenFn(findChildren);
 interface Input {
     entries: Writable<Default<Entry[], [
     ]>>;
@@ -325,5 +337,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

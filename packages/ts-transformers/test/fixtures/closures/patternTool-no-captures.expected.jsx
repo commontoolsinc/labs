@@ -18,14 +18,14 @@ const __ctModuleCallback_1 = __ctHardenFn(({ query, content }: {
     return derive({
         type: "object",
         properties: {
-            content: {
+            query: {
                 type: "string"
             },
-            query: {
+            content: {
                 type: "string"
             }
         },
-        required: ["content", "query"]
+        required: ["query", "content"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {

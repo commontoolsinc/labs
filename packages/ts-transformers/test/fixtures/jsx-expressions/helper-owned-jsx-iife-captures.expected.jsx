@@ -1,4 +1,12 @@
-import * as __cfHelpers from "commonfabric";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 /**
  * TRANSFORM REPRO: helper-owned JSX IIFE decomposes through local aliases
  *
@@ -8,6 +16,9 @@ import * as __cfHelpers from "commonfabric";
  * derives are created.
  */
 import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Entry {
     name: string;
 }
@@ -23,6 +34,7 @@ function visibleEntries(entries: Writable<Default<Entry[], [
     const list = entries.get();
     return list.filter((entry) => prefix.length === 0 || entry.name.startsWith(prefix));
 }
+__ctHardenFn(visibleEntries);
 export default pattern((__ct_pattern_input) => {
     const entries = __ct_pattern_input.key("entries");
     const path = Writable.of<string[]>([], {
@@ -258,5 +270,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

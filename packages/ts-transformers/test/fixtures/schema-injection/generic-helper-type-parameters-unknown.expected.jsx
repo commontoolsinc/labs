@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { Cell, generateObject, wish } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: generic-helper-type-parameters-unknown
 // Verifies: generic definition-site helper wrappers degrade injected schemas to unknown
 //   wish<T>({ query }) → wish<T>({ query }, { type: "unknown" })
@@ -10,6 +21,7 @@ export function buildWishExplicit<T>(path: string) {
         type: "unknown"
     } as const satisfies __cfHelpers.JSONSchema);
 }
+__ctHardenFn(buildWishExplicit);
 export function buildObjectExplicit<T>(prompt: string) {
     return generateObject<T>({
         model: "gpt-4o-mini",
@@ -19,12 +31,13 @@ export function buildObjectExplicit<T>(prompt: string) {
         } as const satisfies __cfHelpers.JSONSchema
     });
 }
+__ctHardenFn(buildObjectExplicit);
 export function buildCellExplicit<T>(value: T) {
     return Cell.of<T>(value, {
         type: "unknown"
     } as const satisfies __cfHelpers.JSONSchema);
 }
+__ctHardenFn(buildCellExplicit);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

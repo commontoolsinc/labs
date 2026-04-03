@@ -1,6 +1,28 @@
-import * as __cfHelpers from "commonfabric";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { pattern } from "commonfabric";
-const identity = <T,>(value: T) => value;
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
+const __ctModuleCallback_1 = __ctHardenFn(({ element: item, params: {} }) => __cfHelpers.derive({
+    type: "object",
+    properties: {
+        item: {
+            type: "string"
+        }
+    },
+    required: ["item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => identity(item.toUpperCase())));
+const identity = __ctHardenFn(<T,>(value: T) => value);
 // FIXTURE: map-local-helper-call-root
 // Verifies: non-JSX pattern-owned map callbacks lift ordinary local helper
 //   calls as whole callback-local derives rather than lowering only the inner
@@ -9,20 +31,7 @@ const identity = <T,>(value: T) => value;
 //   -> mapWithPattern(..., ({ item }) => derive(..., ({ item }) => identity(item.toUpperCase())))
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
-    return items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-        const item = __ct_pattern_input.key("element");
-        return __cfHelpers.derive({
-            type: "object",
-            properties: {
-                item: {
-                    type: "string"
-                }
-            },
-            required: ["item"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => identity(item.toUpperCase()));
-    }, {
+    return items.mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_1, {
         type: "object",
         properties: {
             element: {
@@ -52,5 +61,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

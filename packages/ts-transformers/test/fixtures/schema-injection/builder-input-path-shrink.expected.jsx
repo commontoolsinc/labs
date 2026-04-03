@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { action, derive, handler, lift, pattern, type Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: builder-input-path-shrink
 // Verifies: builder input schemas shrink to observed paths when reads/writes are specific,
 // including explicit type arguments and interprocedural helper calls.
@@ -17,10 +28,10 @@ const liftOptional = lift({
     foo: string | undefined;
     bar: string;
 }>) => input.key("foo").get());
-const deriveInput = {} as Writable<{
+const deriveInput = __cfHelpers.__ct_data({} as Writable<{
     foo: string;
     bar: string;
-}>;
+}>);
 const deriveObserved = derive({
     type: "object",
     properties: {
@@ -92,10 +103,10 @@ const handlerExplicit = handler({
     event.detail.message;
     state.key("foo").get();
 });
-const helper = (value: Writable<{
+const helper = __ctHardenFn((value: Writable<{
     foo: string;
     bar: string;
-}>) => value.key("foo").get();
+}>) => value.key("foo").get());
 const liftInterprocedural = lift({
     type: "object",
     properties: {
@@ -178,7 +189,7 @@ const actionPattern = pattern((input: Writable<{
 } as const satisfies __cfHelpers.JSONSchema, {
     asStream: true
 } as const satisfies __cfHelpers.JSONSchema);
-export default {
+export default __cfHelpers.__ct_data({
     liftOptional,
     deriveObserved,
     deriveExplicit,
@@ -188,8 +199,7 @@ export default {
     liftWriteOnly,
     liftExplicit,
     actionPattern,
-};
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

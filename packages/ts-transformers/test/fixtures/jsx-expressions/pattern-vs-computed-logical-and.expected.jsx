@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { computed, pattern } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: pattern-vs-computed-logical-and
 // Verifies: top-level pattern JSX logical roots lower structurally, but computed-owned logical roots stay authored
 //   <div>{foo && name}</div> in a pattern body → __cfHelpers.when(...)
@@ -111,5 +122,4 @@ export const ComputedLogicalAnd = pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

@@ -25,7 +25,10 @@ Deno.test("Closure Transformer hoists nested derive callbacks that close over mo
         <div>
           {state.values.map((dateStr) => (
             <span>
-              {derive({ dateStr }, ({ dateStr }) => formatDateShort(dateStr))}
+              {derive(
+                { dateStr },
+                ({ dateStr }: { dateStr: string }) => formatDateShort(dateStr),
+              )}
             </span>
           ))}
         </div>
@@ -37,7 +40,7 @@ Deno.test("Closure Transformer hoists nested derive callbacks that close over mo
   const normalized = output.replace(/\s+/g, " ");
 
   const hoistedMatch = normalized.match(
-    /const (\S+) = __ctHardenFn\(\(\{ dateStr \}\) => formatDateShort\(dateStr\)\);/,
+    /const (\S+) = __ctHardenFn\(\(\{ dateStr \}: \{ dateStr: string; \}\) => formatDateShort\(dateStr\)\);/,
   );
 
   assert(hoistedMatch, `expected hoisted helper in output:\n${output}`);

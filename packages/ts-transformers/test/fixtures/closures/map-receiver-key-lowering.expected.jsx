@@ -11,6 +11,26 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
+const __ctModuleCallback_1 = __ctHardenFn(({ element: item, params: {} }) => item.key("subItems").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
+    const subItem = __ct_pattern_input.key("element");
+    return subItem.key("value");
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "string"
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema), {}));
 interface Item {
     subItems: Array<{
         value: string;
@@ -26,38 +46,10 @@ interface Input {
 // Context: No captures; receiver expression item.subItems is lowered to item.key("subItems")
 const _p = pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
-    return items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-        const item = __ct_pattern_input.key("element");
-        return item.key("subItems").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const subItem = __ct_pattern_input.key("element");
-            return subItem.key("value");
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "string"
-                        }
-                    },
-                    required: ["value"]
-                }
-            },
-            required: ["element"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema), {});
-    }, {
+    return items.mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_1, {
         type: "object",
         properties: {
             element: {
-                $ref: "#/$defs/Item"
-            }
-        },
-        required: ["element"],
-        $defs: {
-            Item: {
                 type: "object",
                 properties: {
                     subItems: {
@@ -75,7 +67,8 @@ const _p = pattern((__ct_pattern_input) => {
                 },
                 required: ["subItems"]
             }
-        }
+        },
+        required: ["element"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {

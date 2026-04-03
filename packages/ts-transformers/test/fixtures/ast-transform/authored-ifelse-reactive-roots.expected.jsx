@@ -1,6 +1,17 @@
-import * as __cfHelpers from "commonfabric";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { ifElse, pattern, Writable } from "commonfabric";
-const identity = <T,>(value: T) => value;
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
+const identity = __ctHardenFn(<T,>(value: T) => value);
 // FIXTURE: authored-ifelse-reactive-roots
 // Verifies: authored ifElse outside JSX and top-level receiver-method roots lower reactively
 //   ifElse(show, count + 1, 0)         → compute-wrapped branch
@@ -137,5 +148,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

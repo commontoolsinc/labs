@@ -11,6 +11,7 @@ import { Cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
+const __ctModuleCallback_1 = __ctHardenFn((__ct_handler_event, __ct_handler_params) => console.log("hi"));
 interface State {
     counter: Cell<number>;
 }
@@ -23,7 +24,7 @@ export default pattern((_state) => {
         [UI]: (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
             properties: {}
-        } as const satisfies __cfHelpers.JSONSchema, (__ct_handler_event, __ct_handler_params) => console.log("hi"))({})}>
+        } as const satisfies __cfHelpers.JSONSchema, __ctModuleCallback_1)({})}>
         Log
       </button>),
     };

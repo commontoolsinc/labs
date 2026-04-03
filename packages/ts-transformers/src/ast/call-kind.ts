@@ -43,7 +43,10 @@ import {
 } from "../core/commonfabric-runtime-registry.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
-import { getTypeAtLocationWithFallback } from "./utils.ts";
+import {
+  getTypeAtLocationWithFallback,
+  getVariableInitializer,
+} from "./utils.ts";
 
 const BUILDER_SYMBOL_NAMES = COMMONFABRIC_BUILDER_EXPORT_NAMES;
 
@@ -72,6 +75,8 @@ const CELL_FACTORY_NAMES = new Set(["of"]);
 const CELL_FOR_NAMES = new Set(["for"]);
 const COMMONFABRIC_CALL_NAMES = COMMONFABRIC_CALL_EXPORT_NAMES;
 const WILDCARD_OBJECT_METHOD_NAMES = new Set(["keys", "values", "entries"]);
+const SYNTHETIC_MODULE_CALLBACK_PREFIX = "__ctModuleCallback";
+const FUNCTION_HARDENING_HELPER_PREFIX = "__ctHardenFn";
 
 export type ArrayMethodFamilyName = "map" | "filter" | "flatMap";
 
@@ -248,10 +253,9 @@ export function getPatternBuilderCallbackArgument(
   }
 
   const callbackArg = call.arguments[0];
-  if (callbackArg && isCallbackFunctionExpression(callbackArg)) {
-    return callbackArg;
-  }
-  return undefined;
+  return callbackArg
+    ? resolveCallbackFunctionExpression(callbackArg, checker)
+    : undefined;
 }
 
 export function getPatternToolCallbackArgument(
@@ -270,10 +274,9 @@ export function getPatternToolCallbackArgument(
   }
 
   const callbackArg = call.arguments[0];
-  if (callbackArg && isCallbackFunctionExpression(callbackArg)) {
-    return callbackArg;
-  }
-  return undefined;
+  return callbackArg
+    ? resolveCallbackFunctionExpression(callbackArg, checker)
+    : undefined;
 }
 
 export function getCapabilitySummaryCallbackArgument(
@@ -298,10 +301,9 @@ export function getCapabilitySummaryCallbackArgument(
     callbackArg = call.arguments[0];
   }
 
-  if (callbackArg && isCallbackFunctionExpression(callbackArg)) {
-    return callbackArg;
-  }
-  return undefined;
+  return callbackArg
+    ? resolveCallbackFunctionExpression(callbackArg, checker)
+    : undefined;
 }
 
 export function getDeriveInputAndCallbackArgument(
@@ -316,12 +318,15 @@ export function getDeriveInputAndCallbackArgument(
     return undefined;
   }
 
-  const callback = getCapabilitySummaryCallbackArgument(call, checker);
+  const callbackIndex = call.arguments.length - 1;
+  const callbackArg = call.arguments[callbackIndex];
+  const callback = callbackArg
+    ? resolveCallbackFunctionExpression(callbackArg, checker)
+    : undefined;
   if (!callback) {
     return undefined;
   }
 
-  const callbackIndex = call.arguments.indexOf(callback);
   const inputIndex = callbackIndex === 1 ? 0 : callbackIndex === 3 ? 2 : -1;
   const input = inputIndex >= 0 ? call.arguments[inputIndex] : undefined;
   if (!input) {
@@ -397,6 +402,96 @@ function isCallbackFunctionExpression(
   expression: ts.Expression,
 ): expression is ts.ArrowFunction | ts.FunctionExpression {
   return ts.isArrowFunction(expression) || ts.isFunctionExpression(expression);
+}
+
+function resolveCallbackFunctionExpression(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  seen = new Set<ts.Node>(),
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  const target = stripWrappers(expression);
+  if (seen.has(target)) {
+    return undefined;
+  }
+  seen.add(target);
+
+  if (isCallbackFunctionExpression(target)) {
+    return target;
+  }
+
+  const hardened = unwrapHardenedCallbackExpression(target);
+  if (hardened) {
+    return resolveCallbackFunctionExpression(hardened, checker, seen);
+  }
+
+  if (!ts.isIdentifier(target)) {
+    return undefined;
+  }
+
+  const initializer = getVariableInitializer(target, checker) ??
+    getSyntheticModuleCallbackInitializer(target);
+  return initializer
+    ? resolveCallbackFunctionExpression(initializer, checker, seen)
+    : undefined;
+}
+
+function unwrapHardenedCallbackExpression(
+  expression: ts.Expression,
+): ts.Expression | undefined {
+  if (!ts.isCallExpression(expression) || expression.arguments.length !== 1) {
+    return undefined;
+  }
+
+  const callee = stripWrappers(expression.expression);
+  if (
+    !ts.isIdentifier(callee) ||
+    !callee.text.startsWith(FUNCTION_HARDENING_HELPER_PREFIX)
+  ) {
+    return undefined;
+  }
+
+  return expression.arguments[0];
+}
+
+function getSyntheticModuleCallbackInitializer(
+  identifier: ts.Identifier,
+): ts.Expression | undefined {
+  if (!identifier.text.startsWith(SYNTHETIC_MODULE_CALLBACK_PREFIX)) {
+    return undefined;
+  }
+
+  const sourceFile = findContainingSourceFile(identifier);
+  if (!sourceFile) {
+    return undefined;
+  }
+
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) {
+      continue;
+    }
+
+    for (const declaration of statement.declarationList.declarations) {
+      if (
+        ts.isIdentifier(declaration.name) &&
+        declaration.name.text === identifier.text
+      ) {
+        return declaration.initializer;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function findContainingSourceFile(node: ts.Node): ts.SourceFile | undefined {
+  let current: ts.Node | undefined = node;
+  while (current) {
+    if (ts.isSourceFile(current)) {
+      return current;
+    }
+    current = current.parent ?? ts.getOriginalNode(current).parent;
+  }
+  return undefined;
 }
 
 export function isWildcardTraversalCall(

@@ -11,6 +11,49 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
+const __ctModuleCallback_1 = __ctHardenFn(({ element: item, params: { state, multiplier } }) => (<span>
+            Total: {__cfHelpers.derive({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                },
+                quantity: {
+                    type: "number"
+                }
+            },
+            required: ["price", "quantity"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                discount: {
+                    type: "number"
+                },
+                taxRate: {
+                    type: "number"
+                }
+            },
+            required: ["discount", "taxRate"]
+        }
+    },
+    required: ["item", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, {
+    item: {
+        price: item.price,
+        quantity: item.quantity
+    },
+    state: {
+        discount: state.discount,
+        taxRate: state.taxRate
+    }
+}, ({ item, state }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost)}
+          </span>));
 interface Item {
     price: number;
     quantity: number;
@@ -30,58 +73,20 @@ export default pattern((state) => {
     const multiplier = 2;
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const state = __ct_pattern_input.key("params", "state");
-                const multiplier = __ct_pattern_input.params.multiplier;
-                return (<span>
-            Total: {__cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                },
-                                quantity: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price", "quantity"]
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                discount: {
-                                    type: "number"
-                                },
-                                taxRate: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["discount", "taxRate"]
-                        }
-                    },
-                    required: ["item", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    item: {
-                        price: item.key("price"),
-                        quantity: item.key("quantity")
-                    },
-                    state: {
-                        discount: state.key("discount"),
-                        taxRate: state.key("taxRate")
-                    }
-                }, ({ item, state }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost)}
-          </span>);
-            }, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {
-                        $ref: "#/$defs/Item"
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number"
+                            },
+                            quantity: {
+                                type: "number"
+                            }
+                        },
+                        required: ["price", "quantity"]
                     },
                     params: {
                         type: "object",
@@ -97,29 +102,12 @@ export default pattern((state) => {
                                     }
                                 },
                                 required: ["discount", "taxRate"]
-                            },
-                            multiplier: {
-                                type: "number"
                             }
                         },
-                        required: ["state", "multiplier"]
+                        required: ["state"]
                     }
                 },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number"
-                            },
-                            quantity: {
-                                type: "number"
-                            }
-                        },
-                        required: ["price", "quantity"]
-                    }
-                }
+                required: ["element", "params"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

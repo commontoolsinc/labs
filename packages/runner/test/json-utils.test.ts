@@ -882,8 +882,11 @@ describe("moduleToJSON", () => {
         const implementation =
           (value as { implementation: (...args: unknown[]) => unknown })
             .implementation;
+        const implementationSource =
+          (implementation as { preview?: string }).preview ??
+            implementation.toString();
         if (
-          Function.prototype.toString.call(implementation).includes(
+          implementationSource.includes(
             "formatDateShort(dateStr).shortName",
           )
         ) {

@@ -1,13 +1,24 @@
-import * as __cfHelpers from "commonfabric";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 type SelectedScopes = {
     gmail: boolean;
     calendar: boolean;
 };
-const SCOPE_DESCRIPTIONS = {
+const SCOPE_DESCRIPTIONS = __cfHelpers.__ct_data({
     gmail: "Gmail",
     calendar: "Calendar",
-} as const;
+} as const);
 interface Input {
     selectedScopes: SelectedScopes;
 }
@@ -15,13 +26,13 @@ interface Input {
 // Verifies: plain-array callback roots stay plain while dynamic JSX bindings still derive
 //   Object.entries(...).map(fn)                     -> plain .map() remains plain
 //   selectedScopes[key as keyof SelectedScopes]     -> derived binding with selectedScopes and key captures
-// Context: Dynamic property access in a plain array callback used as a cf-checkbox binding
+// Context: Dynamic property access in a plain array callback used as a ct-checkbox binding
 export default pattern((__ct_pattern_input) => {
     const selectedScopes = __ct_pattern_input.key("selectedScopes");
     return {
         [UI]: (<div>
         {Object.entries(SCOPE_DESCRIPTIONS).map(([key, description]) => (<label>
-            <cf-checkbox $checked={__cfHelpers.derive({
+            <ct-checkbox $checked={__cfHelpers.derive({
                 type: "object",
                 properties: {
                     selectedScopes: {
@@ -53,7 +64,7 @@ export default pattern((__ct_pattern_input) => {
                 key: key
             }, ({ selectedScopes, key }) => selectedScopes[key as keyof SelectedScopes])}>
               {description}
-            </cf-checkbox>
+            </ct-checkbox>
           </label>))}
       </div>),
     };
@@ -111,5 +122,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

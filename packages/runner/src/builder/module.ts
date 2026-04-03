@@ -87,12 +87,16 @@ export function createNodeFactory<T = any, R = any>(
 ): ModuleFactory<T, R> {
   // Attach source location and preview to function implementations for debugging
   if (typeof moduleSpec.implementation === "function") {
-    annotateFunctionDebugMetadata(moduleSpec.implementation);
-    moduleSpec.implementationRef = ensureImplementationRef(
+    const implementation = prepareInspectableImplementation(
       moduleSpec.implementation,
+    );
+    annotateFunctionDebugMetadata(implementation);
+    moduleSpec.implementationRef = ensureImplementationRef(
+      implementation,
       "fn",
     );
-    hardenVerifiedFunction(moduleSpec.implementation);
+    hardenVerifiedFunction(implementation);
+    moduleSpec.implementation = implementation;
   }
 
   const module: Module & toJSON = {
@@ -348,6 +352,7 @@ function handlerInternal<E, T>(
   // Attach source location and preview to handler function for debugging
   let implementationRef: string | undefined;
   if (typeof handler === "function") {
+    handler = prepareInspectableImplementation(handler);
     annotateFunctionDebugMetadata(handler);
     implementationRef = ensureImplementationRef(handler, "handler");
     hardenVerifiedFunction(handler);
@@ -547,6 +552,28 @@ function annotateFunctionDebugMetadata(
   // Store function body preview for hover tooltips
   const fnStr = fn.toString();
   (fn as { preview?: string }).preview = fnStr.slice(0, 200);
+}
+
+function prepareInspectableImplementation<
+  T extends (...args: any[]) => unknown,
+>(
+  implementation: T,
+): T {
+  if (Object.isExtensible(implementation)) {
+    return implementation;
+  }
+
+  const source = implementation.toString();
+  const wrapped = function (this: unknown, ...args: Parameters<T>) {
+    return implementation.apply(this, args);
+  } as (...args: Parameters<T>) => ReturnType<T>;
+
+  Object.defineProperty(wrapped, "toString", {
+    value: () => source,
+    configurable: true,
+  });
+
+  return wrapped as T;
 }
 
 function resolveLocationFromFunctionSource(

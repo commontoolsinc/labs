@@ -1,5 +1,16 @@
-import * as __cfHelpers from "commonfabric";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { lift, pattern, type Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: builder-input-full-shape-continuity
 // Verifies: builder input schemas stay conservative/full-shape when the authored contract
 // does not justify path shrinking.
@@ -78,35 +89,14 @@ const liftPassthrough = lift({
     foo: string;
     bar: string;
 }>) => input);
-const helper = (value: Writable<{
+const helper = __ctHardenFn((value: Writable<{
     foo: string;
     bar: string;
-}>) => value.key("foo");
+}>) => value.key("foo"));
 const patternHelper = pattern((input: Writable<{
     foo: string;
     bar: string;
-}>) => __cfHelpers.derive({
-    type: "object",
-    properties: {
-        input: {
-            type: "object",
-            properties: {
-                foo: {
-                    type: "string"
-                },
-                bar: {
-                    type: "string"
-                }
-            },
-            required: ["foo", "bar"],
-            asCell: true
-        }
-    },
-    required: ["input"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "string",
-    asCell: true
-} as const satisfies __cfHelpers.JSONSchema, { input: input }, ({ input }) => helper(input)), {
+}>) => helper(input), {
     type: "object",
     properties: {
         foo: {
@@ -143,15 +133,14 @@ const wildcardLift = lift({
     Object.keys(input.get());
     return foo;
 });
-export default {
+export default __cfHelpers.__ct_data({
     liftWrapped,
     patternFullShape,
     patternExplicit,
     liftPassthrough,
     patternHelper,
     wildcardLift,
-};
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

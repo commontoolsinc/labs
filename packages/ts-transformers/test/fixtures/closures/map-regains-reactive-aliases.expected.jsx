@@ -1,5 +1,51 @@
-import * as __cfHelpers from "commonfabric";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { Default, computed, lift, pattern, wish } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
+const __ctModuleCallback_1 = __ctHardenFn(() => {
+    const foo = wish<Default<string[], [
+    ]>>({ query: "#items" }, {
+        type: "array",
+        items: {
+            type: "string"
+        },
+        "default": []
+    } as const satisfies __cfHelpers.JSONSchema).result!;
+    return foo.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
+        const item = __ct_pattern_input.key("element");
+        return item + "!";
+    }, {
+        type: "object",
+        properties: {
+            element: {
+                type: "string"
+            }
+        },
+        required: ["element"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema), {});
+});
+const __ctModuleCallback_2 = __ctHardenFn(({ element: item, params: {} }) => __cfHelpers.derive({
+    type: "object",
+    properties: {
+        item: {
+            type: "string"
+        }
+    },
+    required: ["item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase()));
 const passthrough = lift({
     type: "array",
     items: {
@@ -139,30 +185,7 @@ export default pattern((state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, {}, () => {
-        const foo = wish<Default<string[], [
-        ]>>({ query: "#items" }, {
-            type: "array",
-            items: {
-                type: "string"
-            },
-            "default": []
-        } as const satisfies __cfHelpers.JSONSchema).result!;
-        return foo.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
-            return item + "!";
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "string"
-                }
-            },
-            required: ["element"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema), {});
-    });
+    } as const satisfies __cfHelpers.JSONSchema, {}, __ctModuleCallback_1);
     const fromFiltered = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -274,20 +297,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema), {});
-        return filtered.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
-            return __cfHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "string"
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase());
-        }, {
+        return filtered.mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_2, {
             type: "object",
             properties: {
                 element: {
@@ -355,5 +365,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

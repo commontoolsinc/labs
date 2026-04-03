@@ -110,12 +110,14 @@ function getBuilderCallbackIndices(
   }
 
   switch (builderName) {
-    case "derive":
-      return call.arguments.length >= 4
-        ? [3]
-        : call.arguments.length >= 2
+    case "derive": {
+      const deriveCallback = call.arguments[1];
+      return call.arguments.length >= 4 ? [3] : call.arguments.length >= 2 &&
+          isFunctionLikeExpression(deriveCallback) &&
+          hasSelfDescribingFunctionTypes(deriveCallback)
         ? [1]
         : [];
+    }
     case "handler":
     case "lift":
     case "pattern":
@@ -124,6 +126,16 @@ function getBuilderCallbackIndices(
     default:
       return [];
   }
+}
+
+function hasSelfDescribingFunctionTypes(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+): boolean {
+  if (callback.parameters.length === 0) {
+    return true;
+  }
+
+  return callback.parameters.every((parameter) => parameter.type !== undefined);
 }
 
 function callbackCanBeHoisted(

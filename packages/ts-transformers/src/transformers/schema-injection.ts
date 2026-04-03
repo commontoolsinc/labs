@@ -6,7 +6,6 @@ import {
   classifyArrayMethodCall,
   detectCallKind,
   ensureTypeNodeRegistered,
-  getDeriveInputAndCallbackArgument,
   getTypeAtLocationWithFallback,
   getTypeFromTypeNodeWithFallback,
   getVariableInitializer,
@@ -23,7 +22,6 @@ import {
   widenLiteralType,
 } from "../ast/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
-import { uniquePaths } from "../utils/path-serialization.ts";
 import {
   type CapabilityParamSummary,
   type CapabilitySummaryRegistry,
@@ -1156,7 +1154,11 @@ function inferDeriveResultTypeFromInitializer(
     return undefined;
   }
 
-  const deriveArgs = getDeriveInputAndCallbackArgument(initializer, checker);
+  const deriveArgs = resolveDeriveInputAndCallbackArgument(
+    initializer,
+    checker,
+    sourceFile,
+  );
   if (!deriveArgs) {
     return undefined;
   }
@@ -1472,6 +1474,37 @@ function findFunctionArgument(
     }
   }
   return undefined;
+}
+
+function resolveDeriveInputAndCallbackArgument(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+): {
+  input: ts.Expression;
+  callback: ts.ArrowFunction | ts.FunctionExpression;
+} | undefined {
+  const callKind = detectCallKind(call, checker);
+  if (callKind?.kind !== "derive") {
+    return undefined;
+  }
+
+  const callbackIndex = call.arguments.length - 1;
+  const callbackExpression = call.arguments[callbackIndex];
+  const callback = callbackExpression
+    ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
+    : undefined;
+  if (!callback) {
+    return undefined;
+  }
+
+  const inputIndex = callbackIndex === 1 ? 0 : callbackIndex === 3 ? 2 : -1;
+  const input = inputIndex >= 0 ? call.arguments[inputIndex] : undefined;
+  if (!input) {
+    return undefined;
+  }
+
+  return { input, callback };
 }
 
 function resolveFunctionLikeExpression(
@@ -2108,7 +2141,11 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
 
       if (callKind?.kind === "derive") {
         const factory = transformation.factory;
-        const deriveArgs = getDeriveInputAndCallbackArgument(node, checker);
+        const deriveArgs = resolveDeriveInputAndCallbackArgument(
+          node,
+          checker,
+          sourceFile,
+        );
 
         if (node.typeArguments && node.typeArguments.length >= 2) {
           const [argumentType, resultType] = node.typeArguments;

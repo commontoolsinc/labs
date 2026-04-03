@@ -1,6 +1,39 @@
-import * as __cfHelpers from "commonfabric";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { pattern, UI } from "commonfabric";
-const identity = <T,>(value: T) => value;
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
+const __ctModuleCallback_1 = __ctHardenFn(({ element: item, params: {} }) => <span>{__cfHelpers.derive({
+    type: "object",
+    properties: {
+        item: {
+            type: "string"
+        }
+    },
+    required: ["item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase())}</span>);
+const __ctModuleCallback_2 = __ctHardenFn(({ element: item, params: {} }) => <span>{__cfHelpers.derive({
+    type: "object",
+    properties: {
+        item: {
+            type: "string"
+        }
+    },
+    required: ["item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => identity(item.toUpperCase()))}</span>);
+const identity = __ctHardenFn(<T,>(value: T) => value);
 // FIXTURE: map-receiver-method-roots
 // Verifies: receiver-method roots inside pattern-owned map callbacks lower reactively
 //   item.toUpperCase()            → callback-local derive
@@ -9,20 +42,7 @@ export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
     return ({
         [UI]: (<div>
-      {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
-            return <span>{__cfHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "string"
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase())}</span>;
-        }, {
+      {items.mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_1, {
             type: "object",
             properties: {
                 element: {
@@ -51,20 +71,7 @@ export default pattern((__ct_pattern_input) => {
                 }
             }
         } as const satisfies __cfHelpers.JSONSchema), {})}
-      {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
-            return <span>{__cfHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "string"
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => identity(item.toUpperCase()))}</span>;
-        }, {
+      {items.mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_2, {
             type: "object",
             properties: {
                 element: {
@@ -138,5 +145,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);

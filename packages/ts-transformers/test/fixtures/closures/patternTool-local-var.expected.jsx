@@ -49,7 +49,7 @@ const __ctModuleCallback_1 = __ctHardenFn(({ language, content }: {
                         type: "boolean"
                     },
                     result: {
-                        type: ["string", "undefined"]
+                        type: "string"
                     }
                 },
                 required: ["pending"]

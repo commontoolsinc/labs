@@ -1,15 +1,26 @@
-import * as __cfHelpers from "commonfabric";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { Cell, lift } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 // FIXTURE: map-cell-receiver-in-lift
 // Verifies: compute-owned map roots on Cell receivers still lower to mapWithPattern
 //   lift(() => items.map((item) => item)) -> lift(() => items.mapWithPattern(...))
 // Context: No JSX here; the map rewrite happens inside a builder-owned compute context
-const items = Cell.of<string[]>([], {
+const items = __cfHelpers.__ct_data(Cell.of<string[]>([], {
     type: "array",
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema));
 export const fn = lift(false as const satisfies __cfHelpers.JSONSchema, {
     type: "array",
     items: {
@@ -31,5 +42,4 @@ export const fn = lift(false as const satisfies __cfHelpers.JSONSchema, {
 } as const satisfies __cfHelpers.JSONSchema), {}));
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __cfHelpers.h.fragment;
+__ctHardenFn(h);
