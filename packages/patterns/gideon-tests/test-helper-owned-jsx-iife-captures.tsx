@@ -14,7 +14,7 @@
  *   `path`, leaving `entries` and `pushPath` outside the generated param
  *   bundle even though they are still used in the closure body
  */
-import { action, Default, pattern, UI, VNode, Writable } from "commontools";
+import { action, Default, pattern, UI, VNode, Writable } from "commonfabric";
 
 interface Entry {
   name: string;

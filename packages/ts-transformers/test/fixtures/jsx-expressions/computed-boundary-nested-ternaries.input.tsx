@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, ifElse, pattern } from "commontools";
+import { computed, ifElse, pattern } from "commonfabric";
 
 // FIXTURE: computed-boundary-nested-ternaries
 // Verifies: outer branch lowering does not structurally lower nested ternaries inside computed callbacks

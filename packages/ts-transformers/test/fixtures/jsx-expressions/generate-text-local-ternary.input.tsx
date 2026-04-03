@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { generateText, pattern, UI } from "commontools";
+import { generateText, pattern, UI } from "commonfabric";
 
 // FIXTURE: generate-text-local-ternary
 // Verifies: local reactive builder results still trigger JSX ternary lowering

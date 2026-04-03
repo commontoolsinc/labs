@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 const double = (x: number) => x * 2;
 // FIXTURE: pattern-local-helper-call-roots
 // Verifies: top-level ordinary local helper calls with reactive inputs are

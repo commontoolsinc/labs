@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, pattern } from "commontools";
+import { cell, pattern } from "commonfabric";
 
 // FIXTURE: cell-pattern-input-structure-recovery
 // Verifies: `cell(state.values)` preserves array/item structure when the source

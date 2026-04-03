@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Writable, computed, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Writable, computed, pattern, UI } from "commonfabric";
 interface Habit {
     name: string;
 }

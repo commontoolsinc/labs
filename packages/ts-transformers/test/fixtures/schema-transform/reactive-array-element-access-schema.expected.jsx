@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, pattern, UI } from "commonfabric";
 // FIXTURE: reactive-array-element-access-schema
 // Verifies: reactive array element access preserves `string | undefined` in the
 // emitted result schema.

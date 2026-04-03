@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, OpaqueCell, Stream } from "commontools";
+import { Cell, OpaqueCell, Stream } from "commonfabric";
 
 // FIXTURE: cell-static-factories
 // Verifies: static cell factories inject schemas from explicit, inferred, and contextual types

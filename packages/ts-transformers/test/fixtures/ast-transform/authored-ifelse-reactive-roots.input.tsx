@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { ifElse, pattern, Writable } from "commontools";
+import { ifElse, pattern, Writable } from "commonfabric";
 
 const identity = <T,>(value: T) => value;
 

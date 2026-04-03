@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, pattern } from "commontools";
+import { computed, pattern } from "commonfabric";
 
 // FIXTURE: pattern-vs-computed-logical-and
 // Verifies: top-level pattern JSX logical roots lower structurally, but computed-owned logical roots stay authored

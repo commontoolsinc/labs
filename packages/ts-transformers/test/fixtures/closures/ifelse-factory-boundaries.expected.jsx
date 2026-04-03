@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { handler, ifElse, lift, pattern, UI, Writable } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { handler, ifElse, lift, pattern, UI, Writable } from "commonfabric";
 const moduleHasSettings = lift({
     type: "object",
     properties: {

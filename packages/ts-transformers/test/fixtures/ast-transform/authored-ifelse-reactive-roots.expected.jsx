@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { ifElse, pattern, Writable } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { ifElse, pattern, Writable } from "commonfabric";
 const identity = <T,>(value: T) => value;
 // FIXTURE: authored-ifelse-reactive-roots
 // Verifies: authored ifElse outside JSX and top-level receiver-method roots lower reactively

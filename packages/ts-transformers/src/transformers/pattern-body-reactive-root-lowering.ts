@@ -9,7 +9,7 @@ import { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import {
   cloneKeyExpression,
-  isCommonToolsKeyExpression,
+  isCommonFabricKeyExpression,
 } from "../utils/reactive-keys.ts";
 import {
   collectDestructureBindings,
@@ -53,7 +53,7 @@ function isSelfPathSegment(
   context: TransformationContext,
 ): boolean {
   return typeof segment !== "string" &&
-    isCommonToolsKeyExpression(segment, context, "SELF");
+    isCommonFabricKeyExpression(segment, context, "SELF");
 }
 
 function registerReplacementType(

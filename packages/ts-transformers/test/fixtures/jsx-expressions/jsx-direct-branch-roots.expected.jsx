@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 // FIXTURE: jsx-direct-branch-roots
 // Verifies: direct JSX branch roots lower structurally without leaving raw
 //   child expressions in place.

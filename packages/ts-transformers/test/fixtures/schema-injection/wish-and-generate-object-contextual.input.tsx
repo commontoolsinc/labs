@@ -3,7 +3,7 @@ import {
   generateObject,
   type WishState,
   wish,
-} from "commontools";
+} from "commonfabric";
 
 const existingLabelSchema = {
   type: "object",

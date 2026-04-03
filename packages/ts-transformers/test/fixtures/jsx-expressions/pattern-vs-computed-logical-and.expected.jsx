@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, pattern } from "commonfabric";
 // FIXTURE: pattern-vs-computed-logical-and
 // Verifies: top-level pattern JSX logical roots lower structurally, but computed-owned logical roots stay authored
 //   <div>{foo && name}</div> in a pattern body → __ctHelpers.when(...)

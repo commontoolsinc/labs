@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 // FIXTURE: jsx-filter-length-roots
 // Verifies: structural filter-length wrappers use the shared post-closure path
 //   instead of rewriting the filter callback itself to filterWithPattern().

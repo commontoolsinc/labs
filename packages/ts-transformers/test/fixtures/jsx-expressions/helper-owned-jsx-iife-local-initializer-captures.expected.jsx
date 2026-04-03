@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * TRANSFORM REPRO: helper-owned JSX IIFE must account for local initializer dependencies
  *
@@ -7,7 +7,7 @@ import * as __ctHelpers from "commontools";
  * themselves (`tree`, `p`, `unsorted`, `items`) is wrong because they are not
  * in scope at the synthetic derive call site.
  */
-import { action, Default, pattern, UI, VNode, Writable, } from "commontools";
+import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
 interface Entry {
     id: string;
     name: string;

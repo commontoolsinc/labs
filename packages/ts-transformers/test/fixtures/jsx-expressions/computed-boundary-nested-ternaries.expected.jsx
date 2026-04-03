@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, ifElse, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, ifElse, pattern } from "commonfabric";
 // FIXTURE: computed-boundary-nested-ternaries
 // Verifies: outer branch lowering does not structurally lower nested ternaries inside computed callbacks
 //   show ? computed(() => bar ? "B" : "C") : "D" → outer branch lowers, inner ternary stays authored

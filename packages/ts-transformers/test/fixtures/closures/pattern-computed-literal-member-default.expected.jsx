@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 // FIXTURE: pattern-computed-literal-member-default
 // Verifies: literal-member destructuring defaults survive into schema defaults
 //   ({ ["foo"]: foo = "fallback" }) → schema default on "foo"

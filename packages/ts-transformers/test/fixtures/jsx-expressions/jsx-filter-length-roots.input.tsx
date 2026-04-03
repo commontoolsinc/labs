@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, UI } from "commontools";
+import { pattern, UI } from "commonfabric";
 
 // FIXTURE: jsx-filter-length-roots
 // Verifies: structural filter-length wrappers use the shared post-closure path

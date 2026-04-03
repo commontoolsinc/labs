@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 const identity = <T,>(value: T) => value;
 // FIXTURE: map-local-helper-call-root
 // Verifies: non-JSX pattern-owned map callbacks lift ordinary local helper

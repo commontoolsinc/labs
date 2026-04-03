@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern } from "commontools";
+import { pattern } from "commonfabric";
 
 const identity = <T,>(value: T) => value;
 

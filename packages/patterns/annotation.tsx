@@ -24,7 +24,7 @@ import {
   type VNode,
   wish,
   Writable,
-} from "commontools";
+} from "commonfabric";
 import type { MentionablePiece } from "./system/backlinks-index.tsx";
 
 // ===== Types =====
@@ -218,9 +218,9 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
     return {
       [NAME]: annotationName,
       [UI]: (
-        <ct-vstack gap="3" style={{ padding: "12px" }}>
+        <cf-vstack gap="3" style={{ padding: "12px" }}>
           {/* ── Header row: kind + status + resolve button ── */}
-          <ct-hstack gap="2" style={{ alignItems: "center", flexWrap: "wrap" }}>
+          <cf-hstack gap="2" style={{ alignItems: "center", flexWrap: "wrap" }}>
             {/* Kind selector */}
             <select
               style={{
@@ -285,19 +285,19 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
               >
                 {statusValue}
               </span>,
-              <ct-button
+              <cf-button
                 onClick={markResolved({
                   status: status,
                 })}
                 style={{ fontSize: "12px" }}
               >
                 Mark resolved
-              </ct-button>,
+              </cf-button>,
             )}
-          </ct-hstack>
+          </cf-hstack>
 
           {/* ── Content textarea ── */}
-          <ct-textarea
+          <cf-textarea
             $value={content}
             placeholder="Annotation content..."
             rows={4}
@@ -305,7 +305,7 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
           />
 
           {/* ── Target piece section ── */}
-          <ct-vstack gap="2">
+          <cf-vstack gap="2">
             <span
               style={{
                 fontSize: "12px",
@@ -320,27 +320,27 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
             {ifElse(
               hasTarget,
               /* Target is set — show link + clear button */
-              <ct-hstack gap="2" style={{ alignItems: "center" }}>
-                <ct-cell-link $cell={targetPieceValue} />
-                <ct-button
+              <cf-hstack gap="2" style={{ alignItems: "center" }}>
+                <cf-cell-link $cell={targetPieceValue} />
+                <cf-button
                   onClick={clearTarget({
                     targetPiece: targetPiece,
                   })}
                   style={{ fontSize: "12px" }}
                 >
                   Remove
-                </ct-button>
-              </ct-hstack>,
+                </cf-button>
+              </cf-hstack>,
               /* No target — show search picker */
-              <ct-vstack gap="2">
-                <ct-hstack gap="2">
-                  <ct-input
+              <cf-vstack gap="2">
+                <cf-hstack gap="2">
+                  <cf-input
                     $value={targetSearch}
                     placeholder="Search for a piece to annotate..."
                     style={{ flex: "1", fontSize: "13px" }}
                   />
-                </ct-hstack>
-                <ct-vstack
+                </cf-hstack>
+                <cf-vstack
                   gap="1"
                   style={{
                     maxHeight: "160px",
@@ -375,13 +375,13 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
                         </button>
                       ),
                   )}
-                </ct-vstack>
-              </ct-vstack>,
+                </cf-vstack>
+              </cf-vstack>,
             )}
-          </ct-vstack>
+          </cf-vstack>
 
           {/* ── Blocked by section ── */}
-          <ct-vstack gap="2">
+          <cf-vstack gap="2">
             <span
               style={{
                 fontSize: "12px",
@@ -394,11 +394,11 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
             </span>
 
             {/* Current blockers */}
-            <ct-vstack gap="1">
+            <cf-vstack gap="1">
               {blockedByList.map((blocker: AnnotationPiece, index: number) => (
-                <ct-hstack key={index} gap="2" style={{ alignItems: "center" }}>
-                  <ct-cell-link $cell={blocker} />
-                  <ct-button
+                <cf-hstack key={index} gap="2" style={{ alignItems: "center" }}>
+                  <cf-cell-link $cell={blocker} />
+                  <cf-button
                     onClick={removeBlocker({
                       index,
                       blockedBy: blockedBy,
@@ -406,29 +406,29 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
                     style={{ fontSize: "11px" }}
                   >
                     Remove
-                  </ct-button>
-                </ct-hstack>
+                  </cf-button>
+                </cf-hstack>
               ))}
-            </ct-vstack>
+            </cf-vstack>
 
             {/* Add blocker toggle */}
-            <ct-button
+            <cf-button
               onClick={toggleBlockerPicker({ showBlockerPicker })}
               style={{ fontSize: "12px", alignSelf: "flex-start" }}
             >
               + Add blocker
-            </ct-button>
+            </cf-button>
 
             {/* Blocker search picker */}
             {ifElse(
               showBlockerPicker,
-              <ct-vstack gap="2">
-                <ct-input
+              <cf-vstack gap="2">
+                <cf-input
                   $value={blockerSearch}
                   placeholder="Search annotations..."
                   style={{ fontSize: "13px" }}
                 />
-                <ct-vstack
+                <cf-vstack
                   gap="1"
                   style={{
                     maxHeight: "160px",
@@ -465,12 +465,12 @@ export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
                         </button>
                       ),
                   )}
-                </ct-vstack>
-              </ct-vstack>,
+                </cf-vstack>
+              </cf-vstack>,
               <span />,
             )}
-          </ct-vstack>
-        </ct-vstack>
+          </cf-vstack>
+        </cf-vstack>
       ),
       mentioned,
       content,

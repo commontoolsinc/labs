@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 // FIXTURE: pattern-object-binary-add
 // Verifies: top-level non-JSX arithmetic in an object property is lowered after
 //   closure normalization into a direct derive wrapper rather than left as raw

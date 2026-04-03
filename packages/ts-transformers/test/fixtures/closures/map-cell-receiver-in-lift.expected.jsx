@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, lift } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, lift } from "commonfabric";
 // FIXTURE: map-cell-receiver-in-lift
 // Verifies: compute-owned map roots on Cell receivers still lower to mapWithPattern
 //   lift(() => items.map((item) => item)) -> lift(() => items.mapWithPattern(...))

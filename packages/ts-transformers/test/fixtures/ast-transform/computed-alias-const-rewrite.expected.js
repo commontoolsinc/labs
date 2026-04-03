@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed } from "commonfabric";
 // FIXTURE: computed-alias-const-rewrite
 // Verifies: stable const aliases to `computed()` still lower to `derive()`.
 const alias = computed;

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 // FIXTURE: filter-flatmap-plain-captures
 // Verifies: plain lexical captures in reactive filter/flatMap chains become
 // params values, not reactive key(...) lookups

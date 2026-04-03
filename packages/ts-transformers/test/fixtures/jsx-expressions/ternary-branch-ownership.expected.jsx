@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, pattern, UI, Writable } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, pattern, UI, Writable } from "commonfabric";
 interface TagEvent {
     label: string;
 }

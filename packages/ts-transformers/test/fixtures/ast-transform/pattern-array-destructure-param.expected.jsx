@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 // FIXTURE: pattern-array-destructure-param
 // Verifies: top-level array destructuring in pattern params lowers to index-based key access
 //   ([first]) => <div>{first}</div> → const first = __ct_pattern_input.key("0")

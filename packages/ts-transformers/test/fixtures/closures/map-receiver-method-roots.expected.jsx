@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 const identity = <T,>(value: T) => value;
 // FIXTURE: map-receiver-method-roots
 // Verifies: receiver-method roots inside pattern-owned map callbacks lower reactively

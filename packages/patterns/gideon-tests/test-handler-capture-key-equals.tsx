@@ -1,5 +1,12 @@
 /// <cts-enable />
-import { Cell, Default, handler, pattern, Stream, Writable } from "commontools";
+import {
+  Cell,
+  Default,
+  handler,
+  pattern,
+  Stream,
+  Writable,
+} from "commonfabric";
 
 export interface InboxItem {
   id: string;

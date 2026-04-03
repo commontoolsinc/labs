@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { cell, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { cell, pattern } from "commonfabric";
 // FIXTURE: cell-pattern-input-structure-recovery
 // Verifies: `cell(state.values)` preserves array/item structure when the source
 // comes from a typed pattern input.

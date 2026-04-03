@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed, generateObject, pattern } from "commontools";
+import { computed, generateObject, pattern } from "commonfabric";
 
 // FIXTURE: pattern-opaque-destructure-temporary-root-names
 // Verifies: destructured opaque temporaries preserve generated root suffixes

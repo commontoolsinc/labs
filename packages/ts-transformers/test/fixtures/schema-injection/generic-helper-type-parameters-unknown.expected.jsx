@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, generateObject, wish } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, generateObject, wish } from "commonfabric";
 // FIXTURE: generic-helper-type-parameters-unknown
 // Verifies: generic definition-site helper wrappers degrade injected schemas to unknown
 //   wish<T>({ query }) → wish<T>({ query }, { type: "unknown" })

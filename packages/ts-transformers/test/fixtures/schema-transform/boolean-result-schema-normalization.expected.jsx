@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern, UI } from "commonfabric";
 // FIXTURE: boolean-result-schema-normalization
 // Verifies: boolean result schemas stay normalized as `type: "boolean"` instead
 // of expanding into literal `true` / `false` enums.

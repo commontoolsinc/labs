@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { ifElse, pattern, UI, Writable } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { ifElse, pattern, UI, Writable } from "commonfabric";
 interface Item {
     name: string;
 }

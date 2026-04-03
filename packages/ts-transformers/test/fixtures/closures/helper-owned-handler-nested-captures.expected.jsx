@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commontools";
+import * as __ctHelpers from "commonfabric";
 /**
  * TRANSFORM REPRO: helper-owned handler with nested callback captures
  *
@@ -13,7 +13,7 @@ import * as __ctHelpers from "commontools";
  * - generated handler state only includes `timer`, while the handler body
  *   still uses the other captures inside the nested `setTimeout(...)` callback
  */
-import { action, Default, pattern, Stream, Writable } from "commontools";
+import { action, Default, pattern, Stream, Writable } from "commonfabric";
 function flushLater(fileId: Writable<Default<string, "">>, content: Writable<Default<string, "">>, savedContent: Writable<Default<string, "">>, onSaveFile: Stream<{
     fileId: string;
     content: string;

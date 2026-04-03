@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 const identity = <T,>(value: T) => value;
 // FIXTURE: pattern-top-level-root-lowering
 // Verifies: top-level non-JSX ordinary helper calls with reactive inputs are

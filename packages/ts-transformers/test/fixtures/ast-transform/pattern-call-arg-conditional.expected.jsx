@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 const identity = <T,>(value: T) => value;
 // FIXTURE: pattern-call-arg-conditional
 // Verifies: top-level ordinary helper calls with reactive arguments are lifted

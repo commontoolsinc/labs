@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { generateText, pattern, UI } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { generateText, pattern, UI } from "commonfabric";
 // FIXTURE: generate-text-local-ternary
 // Verifies: local reactive builder results still trigger JSX ternary lowering
 //   text.pending ? "Loading" : text.result -> __ctHelpers.ifElse(...)

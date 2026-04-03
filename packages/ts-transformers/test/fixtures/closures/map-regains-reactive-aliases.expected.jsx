@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Default, computed, lift, pattern, wish } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Default, computed, lift, pattern, wish } from "commonfabric";
 const passthrough = lift({
     type: "array",
     items: {

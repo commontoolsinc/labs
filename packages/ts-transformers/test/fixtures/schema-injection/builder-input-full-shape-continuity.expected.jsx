@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { lift, pattern, type Writable } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { lift, pattern, type Writable } from "commonfabric";
 // FIXTURE: builder-input-full-shape-continuity
 // Verifies: builder input schemas stay conservative/full-shape when the authored contract
 // does not justify path shrinking.

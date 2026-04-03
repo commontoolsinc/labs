@@ -1337,7 +1337,7 @@ function resolveBuilderSymbolKind(
   seen: Set<ts.Symbol>,
   options: { followFactoryResults: boolean },
 ): Extract<CallKind, { kind: "builder" }> | undefined {
-  const importedBuilderName = getImportedCommon FabricNamedExport(
+  const importedBuilderName = getImportedCommonFabricNamedExport(
     symbol,
     BUILDER_SYMBOL_NAMES,
   );
@@ -1354,7 +1354,7 @@ function resolveBuilderSymbolKind(
   if (BUILDER_SYMBOL_NAMES.has(name) && isCommonFabricSymbol(resolved)) {
     return { kind: "builder", symbol: resolved, builderName: name };
   }
-  if (BUILDER_SYMBOL_NAMES.has(name) && isImportedFromCommon Fabric(resolved)) {
+  if (BUILDER_SYMBOL_NAMES.has(name) && isImportedFromCommonFabric(resolved)) {
     return { kind: "builder", symbol: resolved, builderName: name };
   }
   if (BUILDER_SYMBOL_NAMES.has(name) && isAmbientSymbol(resolved)) {
@@ -1411,7 +1411,7 @@ function canUseBuilderSignatureFallback(symbol: ts.Symbol): boolean {
   );
 }
 
-function isImportedFromCommon Fabric(symbol: ts.Symbol): boolean {
+function isImportedFromCommonFabric(symbol: ts.Symbol): boolean {
   return (symbol.declarations ?? []).some((declaration) => {
     let current: ts.Node | undefined = declaration;
     while (current) {
@@ -1426,7 +1426,7 @@ function isImportedFromCommon Fabric(symbol: ts.Symbol): boolean {
   });
 }
 
-function getImportedCommon FabricNamedExport(
+function getImportedCommonFabricNamedExport(
   symbol: ts.Symbol,
   allowedNames: ReadonlySet<string>,
 ): string | undefined {
@@ -1470,7 +1470,7 @@ function resolveSymbolKind(
   checker: ts.TypeChecker,
   seen: Set<ts.Symbol>,
 ): CallKind | undefined {
-  const importedName = getImportedCommon FabricNamedExport(
+  const importedName = getImportedCommonFabricNamedExport(
     symbol,
     COMMONFABRIC_CALL_NAMES,
   );
@@ -1522,7 +1522,7 @@ function resolveSymbolKind(
     namedCallKind &&
     (
       isCommonFabricSymbol(resolved) ||
-      isImportedFromCommon Fabric(resolved) ||
+      isImportedFromCommonFabric(resolved) ||
       isAmbientSymbol(resolved)
     )
   ) {

@@ -22,7 +22,7 @@ async function getEmptyArrayErrorCount(
   expression: string,
 ): Promise<number> {
   const source = `
-    import { ${imports}, pattern } from "commontools";
+    import { ${imports}, pattern } from "commonfabric";
     export default pattern(() => {
       const value = ${expression};
       return <div>{value}</div>;
@@ -30,7 +30,7 @@ async function getEmptyArrayErrorCount(
   `;
 
   const { diagnostics } = await validateSource(source, {
-    types: COMMONTOOLS_TYPES,
+    types: COMMONFABRIC_TYPES,
   });
 
   return getEmptyArrayErrors(diagnostics).length;
@@ -288,12 +288,12 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
     "errors on top-level optional call in pattern body",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern((input) => input?.foo());
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -310,7 +310,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
     "errors on statement-position optional call in pattern body",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern((input) => {
         input?.foo();
@@ -318,7 +318,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -388,12 +388,12 @@ Deno.test(
       "errors on rest destructuring in pattern params",
       async () => {
         const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       const p = pattern(({ foo, ...rest }) => <div>{foo}</div>);
     `;
         const { diagnostics } = await validateSource(source, {
-          types: COMMONTOOLS_TYPES,
+          types: COMMONFABRIC_TYPES,
         });
         const errors = getErrors(diagnostics);
         const computationErrors = errors.filter((error) =>
@@ -412,12 +412,12 @@ Deno.test(
       "allows array destructuring in pattern params",
       async () => {
         const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       const p = pattern(([first]) => <div>{first}</div>);
     `;
         const { diagnostics } = await validateSource(source, {
-          types: COMMONTOOLS_TYPES,
+          types: COMMONFABRIC_TYPES,
         });
         const errors = getErrors(diagnostics);
         const computationErrors = errors.filter((error) =>
@@ -432,7 +432,7 @@ Deno.test(
       "errors on Object.keys/values/entries over pattern input",
       async () => {
         const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       const p = pattern((input) => {
         Object.keys(input);
@@ -442,7 +442,7 @@ Deno.test(
       });
     `;
         const { diagnostics } = await validateSource(source, {
-          types: COMMONTOOLS_TYPES,
+          types: COMMONFABRIC_TYPES,
         });
         const errors = getErrors(diagnostics);
         const computationErrors = errors.filter((error) =>
@@ -457,12 +457,12 @@ Deno.test(
       "errors on dynamic key access over pattern input",
       async () => {
         const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       const p = pattern((input, key: string) => input[key]);
     `;
         const { diagnostics } = await validateSource(source, {
-          types: COMMONTOOLS_TYPES,
+          types: COMMONFABRIC_TYPES,
         });
         const errors = getErrors(diagnostics);
         const computationErrors = errors.filter((error) =>
@@ -475,14 +475,14 @@ Deno.test(
 
     await t.step("allows known symbol key access", async () => {
       const source = `/// <cts-enable />
-      import { NAME, UI, pattern } from "commontools";
+      import { NAME, UI, pattern } from "commonfabric";
 
       const p = pattern(({ items }) =>
         items.map((item) => ({ n: item[NAME], u: item[UI] }))
       );
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const computationErrors = errors.filter((error) =>
@@ -494,12 +494,12 @@ Deno.test(
 
     await t.step("allows SELF destructuring key", async () => {
       const source = `/// <cts-enable />
-      import { SELF, pattern } from "commontools";
+      import { SELF, pattern } from "commonfabric";
 
       const p = pattern(({ [SELF]: self, value }) => self);
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const computationErrors = errors.filter((error) =>
@@ -511,7 +511,7 @@ Deno.test(
 
     await t.step("errors on for..in over pattern input", async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       const p = pattern((input) => {
         for (const key in input) {
@@ -521,7 +521,7 @@ Deno.test(
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const computationErrors = errors.filter((error) =>
@@ -535,12 +535,12 @@ Deno.test(
       "allows JSON.stringify over pattern input in return position",
       async () => {
         const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       const p = pattern((input) => JSON.stringify(input));
     `;
         const { diagnostics } = await validateSource(source, {
-          types: COMMONTOOLS_TYPES,
+          types: COMMONFABRIC_TYPES,
         });
         const errors = getErrors(diagnostics);
         const computationErrors = errors.filter((error) =>
@@ -558,7 +558,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
     "errors on let declaration in top-level pattern body",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ count: number }>(({ count }) => {
         let display = count;
@@ -566,7 +566,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -578,7 +578,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
     "errors on loop in top-level pattern body",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern(() => {
         const values: number[] = [];
@@ -589,7 +589,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -601,7 +601,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
     "errors on early return in top-level pattern body",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ flag: boolean }>(({ flag }) => {
         if (flag) {
@@ -611,7 +611,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -623,7 +623,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
     "errors on let declaration in pattern-owned map callback",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ items: string[] }>(({ items }) => {
         return items.map((item) => {
@@ -633,7 +633,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -645,7 +645,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
     "errors on loop in pattern-owned map callback",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ items: string[] }>(({ items }) => {
         return items.map((item) => {
@@ -658,7 +658,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -670,7 +670,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
     "allows early return inside computed callback",
     async () => {
       const source = `/// <cts-enable />
-      import { computed, pattern } from "commontools";
+      import { computed, pattern } from "commonfabric";
 
       export default pattern<{ flag: boolean }>(({ flag }) => {
         return computed(() => {
@@ -682,7 +682,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -697,7 +697,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
     "errors on reassignment in top-level pattern body",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       let lastSeen = "";
 
@@ -707,7 +707,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -719,7 +719,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
     "allows let and loops inside computed map callback",
     async () => {
       const source = `/// <cts-enable />
-      import { computed, pattern } from "commontools";
+      import { computed, pattern } from "commonfabric";
 
       export default pattern<{ items: string[] }>(({ items }) => {
         return computed(() =>
@@ -734,7 +734,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -749,7 +749,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
     "allows let inside plain array callback in pattern body",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern(() => {
         const items = ["a", "b"];
@@ -760,7 +760,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -775,7 +775,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
     "allows reassignment inside computed callback",
     async () => {
       const source = `/// <cts-enable />
-      import { computed, pattern } from "commontools";
+      import { computed, pattern } from "commonfabric";
 
       export default pattern<{ count: number }>(({ count }) => {
         const next = computed(() => {
@@ -787,7 +787,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -802,7 +802,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
     "errors on var declaration in top-level pattern body",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ count: number }>(({ count }) => {
         var display = count;
@@ -810,7 +810,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -822,7 +822,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
     "errors on block-scoped early return inside pattern-owned nested map callback",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern, UI } from "commontools";
+      import { pattern, UI } from "commonfabric";
 
       interface State {
         sections: { tasks: { label: string }[]; tags: { name: string }[] }[];
@@ -849,7 +849,7 @@ Deno.test("Pattern Context Validation - Statement Boundaries", async (t) => {
       }));
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -865,7 +865,7 @@ Deno.test(
       "allows top-level call-argument ternary in pattern body",
       async () => {
         const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       const identity = <T,>(value: T) => value;
 
@@ -875,7 +875,7 @@ Deno.test(
       });
     `;
         const { diagnostics } = await validateSource(source, {
-          types: COMMONTOOLS_TYPES,
+          types: COMMONFABRIC_TYPES,
         });
         const errors = getErrors(diagnostics);
         assertEquals(errors.length, 0);
@@ -886,14 +886,14 @@ Deno.test(
       "allows top-level object-property logical-or in pattern body",
       async () => {
         const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ label?: string }>((state) => ({
         label: state.label || "Pending",
       }));
     `;
         const { diagnostics } = await validateSource(source, {
-          types: COMMONTOOLS_TYPES,
+          types: COMMONFABRIC_TYPES,
         });
         const errors = getErrors(diagnostics);
         assertEquals(errors.length, 0);
@@ -904,7 +904,7 @@ Deno.test(
       "allows top-level call-argument property access in pattern body",
       async () => {
         const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       const identity = <T,>(value: T) => value;
 
@@ -914,7 +914,7 @@ Deno.test(
       });
     `;
         const { diagnostics } = await validateSource(source, {
-          types: COMMONTOOLS_TYPES,
+          types: COMMONFABRIC_TYPES,
         });
         const errors = getErrors(diagnostics);
         assertEquals(errors.length, 0);
@@ -925,14 +925,14 @@ Deno.test(
       "allows top-level object-property arithmetic in pattern body",
       async () => {
         const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ count: number }>((state) => ({
         next: state.count + 1,
       }));
     `;
         const { diagnostics } = await validateSource(source, {
-          types: COMMONTOOLS_TYPES,
+          types: COMMONFABRIC_TYPES,
         });
         const errors = getErrors(diagnostics);
         assertEquals(errors.length, 0);
@@ -943,14 +943,14 @@ Deno.test(
       "allows top-level object-property nullish coalescing in pattern body",
       async () => {
         const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ label?: string | null }>((state) => ({
         label: state.label ?? "Pending",
       }));
     `;
         const { diagnostics } = await validateSource(source, {
-          types: COMMONTOOLS_TYPES,
+          types: COMMONFABRIC_TYPES,
         });
         const errors = getErrors(diagnostics);
         assertEquals(errors.length, 0);
@@ -961,14 +961,14 @@ Deno.test(
       "allows top-level return-expression optional property access in pattern body",
       async () => {
         const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ user?: { name: string } }>((state) =>
         state.user?.name
       );
     `;
         const { diagnostics } = await validateSource(source, {
-          types: COMMONTOOLS_TYPES,
+          types: COMMONFABRIC_TYPES,
         });
         const errors = getErrors(diagnostics);
         assertEquals(errors.length, 0);
@@ -979,7 +979,7 @@ Deno.test(
       "allows top-level call-argument optional property access in pattern body",
       async () => {
         const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       const identity = <T,>(value: T) => value;
 
@@ -989,7 +989,7 @@ Deno.test(
       });
     `;
         const { diagnostics } = await validateSource(source, {
-          types: COMMONTOOLS_TYPES,
+          types: COMMONFABRIC_TYPES,
         });
         const errors = getErrors(diagnostics);
         assertEquals(errors.length, 0);
@@ -1000,14 +1000,14 @@ Deno.test(
       "allows top-level object-property optional element access in pattern body",
       async () => {
         const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ items?: string[] }>((state) => ({
         first: state.items?.[0],
       }));
     `;
         const { diagnostics } = await validateSource(source, {
-          types: COMMONTOOLS_TYPES,
+          types: COMMONFABRIC_TYPES,
         });
         const errors = getErrors(diagnostics);
         assertEquals(errors.length, 0);
@@ -1021,14 +1021,14 @@ Deno.test("Pattern Context Validation - Destructuring Defaults", async (t) => {
     "errors on non-static default initializer destructuring",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       const fallback = "fallback";
 
       export default pattern(({ foo = fallback }) => <div>{foo}</div>);
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const computationErrors = errors.filter((error) =>
@@ -1047,7 +1047,7 @@ Deno.test("Pattern Context Validation - Destructuring Defaults", async (t) => {
     "errors on opaque local default destructuring",
     async () => {
       const source = `/// <cts-enable />
-      import { computed, generateObject, pattern } from "commontools";
+      import { computed, generateObject, pattern } from "commonfabric";
 
       export default pattern<{ messages: string[] }>(({ messages }) => {
         const preview = computed(() => messages[0] ?? "");
@@ -1065,7 +1065,7 @@ Deno.test("Pattern Context Validation - Destructuring Defaults", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       const computationErrors = errors.filter((error) =>
@@ -1086,14 +1086,14 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
     "allows top-level object-property receiver method call in pattern body",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ name: string }>((state) => ({
         upper: state.name.toUpperCase(),
       }));
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(errors.length, 0);
@@ -1104,7 +1104,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
     "allows top-level call-argument receiver method call in pattern body",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       const identity = <T,>(value: T) => value;
 
@@ -1114,7 +1114,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(errors.length, 0);
@@ -1123,14 +1123,14 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
 
   await t.step("allows receiver method call inside JSX", async () => {
     const source = `/// <cts-enable />
-      import { pattern, h } from "commontools";
+      import { pattern, h } from "commonfabric";
 
       export default pattern<{ name: string }>((state) => {
         return <div>{state.name.toUpperCase()}</div>;
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(errors.length, 0);
@@ -1138,7 +1138,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
 
   await t.step("allows receiver method call inside computed()", async () => {
     const source = `/// <cts-enable />
-      import { computed, pattern } from "commontools";
+      import { computed, pattern } from "commonfabric";
 
       export default pattern<{ name: string }>((state) => {
         const upper = computed(() => state.name.toUpperCase());
@@ -1146,7 +1146,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(errors.length, 0);
@@ -1156,14 +1156,14 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
     "allows receiver method call inside authored ifElse branch",
     async () => {
       const source = `/// <cts-enable />
-      import { ifElse, pattern } from "commontools";
+      import { ifElse, pattern } from "commonfabric";
 
       export default pattern<{ name: string; show: boolean }>((state) => ({
         value: ifElse(state.show, state.name.trim(), "fallback"),
       }));
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(errors.length, 0);
@@ -1174,14 +1174,14 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
     "allows direct receiver-method root inside pattern-owned array-method callbacks",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ items: string[] }>(({ items }) => {
         return items.map((item) => item.toUpperCase());
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(errors.length, 0);
@@ -1192,7 +1192,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
     "allows call-argument receiver-method root inside pattern-owned array-method callbacks",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       const identity = <T,>(value: T) => value;
 
@@ -1201,7 +1201,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(errors.length, 0);
@@ -1212,7 +1212,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
     "allows receiver-method roots through aliased reactive array-method chains",
     async () => {
       const source = `/// <cts-enable />
-      import { computed, pattern } from "commontools";
+      import { computed, pattern } from "commonfabric";
 
       export default pattern<{ items: string[] }>((state) => {
         const inner = computed(() => state.items);
@@ -1225,7 +1225,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(errors.length, 0);
@@ -1236,7 +1236,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
     "errors on opaque array receiver-method calls nested inside array-callback expressions",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern, UI } from "commontools";
+      import { pattern, UI } from "commonfabric";
 
       interface Person {
         name: string;
@@ -1257,7 +1257,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
       }));
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -1269,7 +1269,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
     "allows the same opaque array receiver-method call when wrapped in computed()",
     async () => {
       const source = `/// <cts-enable />
-      import { computed, pattern, UI } from "commontools";
+      import { computed, pattern, UI } from "commonfabric";
 
       interface Person {
         spotPreferences: string[];
@@ -1283,7 +1283,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
       }));
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(errors.length, 0);
@@ -1294,14 +1294,14 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
     "still errors on optional receiver-call root inside pattern-owned array-method callbacks",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ items: Array<string | undefined> }>(({ items }) => {
         return items.map((item) => item?.toUpperCase());
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -1829,7 +1829,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 
   await t.step("allows value-returning array callback inside JSX", async () => {
     const source = `/// <cts-enable />
-      import { pattern, h } from "commontools";
+      import { pattern, h } from "commonfabric";
 
       interface Item { id: number; name: string; }
 
@@ -1838,7 +1838,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertEquals(
@@ -1850,14 +1850,14 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 
   await t.step("errors on foreign callback container inside JSX", async () => {
     const source = `/// <cts-enable />
-      import { pattern, h } from "commontools";
+      import { pattern, h } from "commonfabric";
 
       export default pattern<{ list: string[] }>(({ list }) => {
         return <div>{[0, 1].forEach(() => list.map((item) => item))}</div>;
       });
     `;
     const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
     assertGreater(errors.length, 0, "Expected at least one error");
@@ -1895,7 +1895,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
     "allows arithmetic computation inside authored ifElse branches",
     async () => {
       const source = `/// <cts-enable />
-      import { ifElse, pattern } from "commontools";
+      import { ifElse, pattern } from "commonfabric";
 
       export default pattern<{ count: number; show: boolean }>(({ count, show }) => {
         return {
@@ -1904,7 +1904,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2261,14 +2261,14 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
     "errors on top-level .get() on Writable path in pattern body",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern, Writable } from "commontools";
+      import { pattern, Writable } from "commonfabric";
 
       export default pattern((input: Writable<{ count: number; label: string }>) =>
         input.key("count").get()
       );
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -2303,7 +2303,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
     "allows .get() on Writable inside authored ifElse branch",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern, ifElse, Writable } from "commontools";
+      import { pattern, ifElse, Writable } from "commonfabric";
 
       export default pattern<{ count: Writable<number>; show: boolean }>((
         { count, show },
@@ -2312,7 +2312,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertEquals(
@@ -2327,7 +2327,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
     "still errors on opaque .get() inside authored ifElse branch",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern, ifElse } from "commontools";
+      import { pattern, ifElse } from "commonfabric";
 
       export default pattern<{ items: string[]; show: boolean }>((
         { items, show },
@@ -2336,7 +2336,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -2349,7 +2349,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
     "errors on statement-position .get() in pattern body",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       export default pattern<{ items: string[] }>(({ items }) => {
         items.get();
@@ -2357,7 +2357,7 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -2538,7 +2538,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
     "allows .map() after ?? [] fallback with cast-wrapped reactive left side",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern, UI } from "commontools";
+      import { pattern, UI } from "commonfabric";
 
       interface Item {
         id: string;
@@ -2549,7 +2549,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
       }));
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
         diagnostic.type === "pattern-context:map-on-fallback"
@@ -2564,7 +2564,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
     "allows .map() after ?? [] fallback with satisfies-wrapped reactive left side",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern, UI } from "commontools";
+      import { pattern, UI } from "commonfabric";
 
       interface Item {
         id: string;
@@ -2575,7 +2575,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
       }));
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
         diagnostic.type === "pattern-context:map-on-fallback"
@@ -2644,7 +2644,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
     "allows .filter() after ?? [] fallback with reactive left side",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern, UI } from "commontools";
+      import { pattern, UI } from "commonfabric";
 
       interface Item { name: string; }
 
@@ -2659,7 +2659,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const fallbackErrors = getErrors(diagnostics).filter((error) =>
         error.type === "pattern-context:map-on-fallback"
@@ -2673,7 +2673,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
     "allows .flatMap() after ?? [] fallback with reactive left side",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern, UI } from "commontools";
+      import { pattern, UI } from "commonfabric";
 
       interface Item { name: string; }
 
@@ -2688,7 +2688,7 @@ Deno.test("Pattern Context Validation - Fallback Array Methods", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const fallbackErrors = getErrors(diagnostics).filter((error) =>
         error.type === "pattern-context:map-on-fallback"
@@ -2805,7 +2805,7 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
     "errors when pattern return type infers as unknown",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       declare function fetchUnknown(): unknown;
 
@@ -2814,7 +2814,7 @@ Deno.test("Pattern Result Schema Inference", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
@@ -3008,7 +3008,7 @@ Deno.test("Standalone Function Validation", async (t) => {
     "does not treat shadowed local patternTool helpers as safe wrappers in pattern context",
     async () => {
       const source = `/// <cts-enable />
-      import { pattern } from "commontools";
+      import { pattern } from "commonfabric";
 
       const patternTool = <T,>(fn: T) => fn;
 
@@ -3018,7 +3018,7 @@ Deno.test("Standalone Function Validation", async (t) => {
       });
     `;
       const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
+        types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
       assertHasErrorType(errors, "pattern-context:function-creation");

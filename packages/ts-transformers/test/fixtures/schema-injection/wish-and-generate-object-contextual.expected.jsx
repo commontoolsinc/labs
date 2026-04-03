@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { generateObject, type WishState, wish, } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { generateObject, type WishState, wish, } from "commonfabric";
 const existingLabelSchema = {
     type: "object",
     properties: {

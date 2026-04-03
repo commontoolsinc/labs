@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Default, handler, NAME, pattern, UI, wish, Writable, } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Default, handler, NAME, pattern, UI, wish, Writable, } from "commonfabric";
 type Item = {
     name: string;
     value: number;

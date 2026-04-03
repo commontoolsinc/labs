@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { computed } from "commontools";
+import { computed } from "commonfabric";
 
 // FIXTURE: computed-reassigned-alias-no-rewrite
 // Verifies: mutable aliases to `computed()` are not treated as stable builder aliases.

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, generateObject, pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, generateObject, pattern } from "commonfabric";
 // FIXTURE: pattern-opaque-destructure-temporary-root-names
 // Verifies: destructured opaque temporaries preserve generated root suffixes
 //   const { result } = generateObject(...) uses the synthesized __ct_destructure_* binding consistently

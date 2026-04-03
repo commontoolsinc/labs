@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed, handler, ifElse, pattern, UI, Writable } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed, handler, ifElse, pattern, UI, Writable } from "commonfabric";
 const openNoteEditor = handler({
     type: "unknown"
 } as const satisfies __ctHelpers.JSONSchema, {

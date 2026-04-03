@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, generateObject, wish } from "commontools";
+import { Cell, generateObject, wish } from "commonfabric";
 
 // FIXTURE: generic-helper-type-parameters-unknown
 // Verifies: generic definition-site helper wrappers degrade injected schemas to unknown

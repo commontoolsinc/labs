@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { handler, lift } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { handler, lift } from "commonfabric";
 // FIXTURE: generic-builder-type-parameters-unknown
 // Verifies: generic definition-site builder wrappers degrade builder schemas to unknown
 //   lift<T, U>(fn) → lift({ type: "unknown" }, { type: "unknown" }, fn)

@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { pattern } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { pattern } from "commonfabric";
 declare function fetchAny(): any;
 // FIXTURE: pattern-any-result-structural-recovery
 // Verifies: inferred pattern results can still emit concrete object schemas when

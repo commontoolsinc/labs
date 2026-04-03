@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { computed } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { computed } from "commonfabric";
 // FIXTURE: computed-reassigned-alias-no-rewrite
 // Verifies: mutable aliases to `computed()` are not treated as stable builder aliases.
 let alias = computed;

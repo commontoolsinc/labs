@@ -1,5 +1,5 @@
-import * as __ctHelpers from "commontools";
-import { Cell, OpaqueCell, Stream } from "commontools";
+import * as __ctHelpers from "commonfabric";
+import { Cell, OpaqueCell, Stream } from "commonfabric";
 // FIXTURE: cell-static-factories
 // Verifies: static cell factories inject schemas from explicit, inferred, and contextual types
 //   Cell.of<string>("hello") → Cell.of<string>("hello", { type: "string" })
