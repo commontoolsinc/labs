@@ -23,9 +23,7 @@ export const COMMIT_SHA: string | undefined = $COMMIT_SHA;
  * Results in `true` (on), `false` (off), or `undefined` (default).
  */
 function flagValue(flag: string | undefined): boolean | undefined {
-  return (typeof flag === "string")
-    ? (flag === "true")
-    : undefined;
+  return (typeof flag === "string") ? (flag === "true") : undefined;
 }
 
 /** Build-time experimental flags, injected via felt.config.ts defines. */

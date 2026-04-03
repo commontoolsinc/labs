@@ -18,9 +18,12 @@ function parseCliArgs(): Record<string, string> {
 function flagValue() {
   return z.string().default("default").transform((v) => {
     switch (v) {
-      case "default": return undefined;
-      case "false": return false;
-      default: return true;
+      case "default":
+        return undefined;
+      case "false":
+        return false;
+      default:
+        return true;
     }
   });
 }
