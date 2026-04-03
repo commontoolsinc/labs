@@ -1,3 +1,5 @@
+/// <reference path="../src/jsx.d.ts" />
+
 import { describe, it } from "@std/testing/bdd";
 import * as assert from "./assert.ts";
 
