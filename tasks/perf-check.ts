@@ -334,9 +334,9 @@ async function main() {
   console.log("---END COPY-PASTE---");
 
   console.log(
-    `\nThresholds: median + ${STDDEV_FACTOR}σ, +${
+    `\nThresholds: median + ${STDDEV_FACTOR}σ or +${
       MIN_REGRESSION_PCT * 100
-    }%, or +${MIN_ABSOLUTE_DELTA}s (whichever is highest).`,
+    }% (whichever is higher); non-bench metrics also require at least +${MIN_ABSOLUTE_DELTA}s.`,
   );
 
   Deno.exit(1);

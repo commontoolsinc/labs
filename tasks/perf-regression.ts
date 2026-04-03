@@ -665,9 +665,9 @@ async function main() {
     runs[runs.length - 1]?.created_at.slice(0, 10) ?? "?"
   } to ${
     runs[0]?.created_at.slice(0, 10) ?? "?"
-  }. Thresholds: median + ${STDDEV_FACTOR}σ, +${
+  }. Thresholds: median + ${STDDEV_FACTOR}σ or +${
     MIN_REGRESSION_PCT * 100
-  }%, or +${MIN_ABSOLUTE_DELTA}s (whichever is highest). Requires ${RECENT_THRESHOLD}/${RECENT_WINDOW} recent runs to exceed threshold.`;
+  }% (whichever is higher); non-bench metrics also require at least +${MIN_ABSOLUTE_DELTA}s. Requires ${RECENT_THRESHOLD}/${RECENT_WINDOW} recent runs to exceed threshold.`;
 
   await reportRegressions(regressions, baselineInfo, prInfoBySha, timelines);
 }
