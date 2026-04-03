@@ -44,10 +44,10 @@ import {
   JOB_TO_LABEL,
   mapConcurrent,
   MAX_RUNS_TO_FETCH,
-  MEDIAN_MULTIPLIER,
   type MetricTimeline,
   MIN_BASELINE_DAYS,
   MIN_BASELINE_RUNS,
+  MIN_REGRESSION_PCT,
   MIN_SAMPLES,
   normalizeName,
   parseBaselineOverrides,
@@ -202,9 +202,9 @@ function buildIssueBody(
     lines.push(
       `**Baseline samples** (n=${baselineSamples.length}, median=${
         fmt(r.baseline.median)
-      }, stddev=${fmt(r.baseline.stddev)}, threshold=${
-        fmt(r.baseline.threshold)
-      })\n`,
+      }, variance=${fmt(r.baseline.variance)}, stddev=${
+        fmt(r.baseline.stddev)
+      }, threshold=${fmt(r.baseline.threshold)})\n`,
     );
     lines.push("| # | Value | Commit | PR | Date |");
     lines.push("|---|-------|--------|-----|------|");
@@ -663,7 +663,9 @@ async function main() {
     runs[runs.length - 1]?.created_at.slice(0, 10) ?? "?"
   } to ${
     runs[0]?.created_at.slice(0, 10) ?? "?"
-  }. Thresholds: median + ${STDDEV_FACTOR}σ or ${MEDIAN_MULTIPLIER}x median (whichever is lower). Requires ${RECENT_THRESHOLD}/${RECENT_WINDOW} recent runs to exceed threshold.`;
+  }. Thresholds: median + ${STDDEV_FACTOR}σ or +${
+    MIN_REGRESSION_PCT * 100
+  }% (whichever is higher). Requires ${RECENT_THRESHOLD}/${RECENT_WINDOW} recent runs to exceed threshold.`;
 
   await reportRegressions(regressions, baselineInfo, prInfoBySha, timelines);
 }

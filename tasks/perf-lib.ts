@@ -26,8 +26,8 @@ export const RECENT_THRESHOLD = 2;
 /** Standard deviations above the median to flag a regression. */
 export const STDDEV_FACTOR = 3;
 
-/** Multiplier on the median as an alternative threshold. */
-export const MEDIAN_MULTIPLIER = 2;
+/** Minimum percentage increase over median to flag a regression. */
+export const MIN_REGRESSION_PCT = 0.10;
 
 /** Baseline window: at least this many runs. */
 export const MIN_BASELINE_RUNS = 20;
@@ -94,6 +94,7 @@ export interface MetricTimeline {
 export interface Baseline {
   median: number;
   stddev: number;
+  variance: number;
   count: number;
   threshold: number;
 }
@@ -721,12 +722,12 @@ export function computeBaseline(samples: number[]): Baseline | null {
     samples.length;
   const stddev = Math.sqrt(variance);
 
-  const threshold = Math.min(
+  const threshold = Math.max(
     median + STDDEV_FACTOR * stddev,
-    median * MEDIAN_MULTIPLIER,
+    median * (1 + MIN_REGRESSION_PCT),
   );
 
-  return { median, stddev, count: samples.length, threshold };
+  return { median, stddev, variance, count: samples.length, threshold };
 }
 
 // ---------------------------------------------------------------------------

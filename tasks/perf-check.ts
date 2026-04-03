@@ -32,8 +32,8 @@ import {
   formatOverrideSuggestion,
   githubGet,
   mapConcurrent,
-  MEDIAN_MULTIPLIER,
   type MetricTimeline,
+  MIN_REGRESSION_PCT,
   MIN_SAMPLES,
   parseBaselineOverrides,
   type PRInfo,
@@ -328,7 +328,9 @@ async function main() {
   console.log("---END COPY-PASTE---");
 
   console.log(
-    `\nThresholds: median + ${STDDEV_FACTOR}σ or ${MEDIAN_MULTIPLIER}x median (whichever is lower).`,
+    `\nThresholds: median + ${STDDEV_FACTOR}σ or +${
+      MIN_REGRESSION_PCT * 100
+    }% (whichever is higher).`,
   );
 
   Deno.exit(1);
