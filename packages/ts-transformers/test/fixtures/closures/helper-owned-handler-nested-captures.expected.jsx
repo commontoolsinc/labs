@@ -1,4 +1,4 @@
-import * as __ctHelpers from "commonfabric";
+import * as __cfHelpers from "commonfabric";
 /**
  * TRANSFORM REPRO: helper-owned handler with nested callback captures
  *
@@ -48,8 +48,8 @@ export default pattern((__ct_pattern_input) => {
             }, {
                 type: "null"
             }]
-    } as const satisfies __ctHelpers.JSONSchema);
-    const trigger = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema);
+    const trigger = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             timer: {
@@ -90,7 +90,7 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["timer", "fileId", "content", "savedContent", "onSaveFile"]
-    } as const satisfies __ctHelpers.JSONSchema, (_, { timer, fileId, content, savedContent, onSaveFile }) => {
+    } as const satisfies __cfHelpers.JSONSchema, (_, { timer, fileId, content, savedContent, onSaveFile }) => {
         const prev = timer.get();
         if (prev !== null)
             clearTimeout(prev);
@@ -138,7 +138,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["fileId", "content", "savedContent", "onSaveFile"]
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         trigger: {
@@ -146,8 +146,8 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["trigger"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+h.fragment = __cfHelpers.h.fragment;

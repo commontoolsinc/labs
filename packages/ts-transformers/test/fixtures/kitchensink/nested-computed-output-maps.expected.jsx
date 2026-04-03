@@ -444,15 +444,15 @@ export default pattern((state) => {
                 const outerIndex = __ct_pattern_input.params.outerIndex;
                 const state = __ct_pattern_input.key("params", "state");
                 return (<aside>
-              {__ctHelpers.ifElse({
+              {__cfHelpers.ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         reboundIndex: {
@@ -463,12 +463,12 @@ export default pattern((state) => {
                         }
                     },
                     required: ["reboundIndex", "outerIndex"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     reboundIndex: reboundIndex,
                     outerIndex: outerIndex
-                }, ({ reboundIndex, outerIndex }) => reboundIndex === outerIndex), __ctHelpers.derive({
+                }, ({ reboundIndex, outerIndex }) => reboundIndex === outerIndex), __cfHelpers.derive({
                     type: "object",
                     properties: {
                         state: {
@@ -491,9 +491,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["state", "comment"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     state: {
                         lane: state.key("lane")
                     },
@@ -588,15 +588,15 @@ export default pattern((state) => {
                 const outerIndex = __ct_pattern_input.params.outerIndex;
                 const state = __ct_pattern_input.key("params", "state");
                 return (<small>
-              {__ctHelpers.ifElse({
+              {__cfHelpers.ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         edgeIndex: {
@@ -607,12 +607,12 @@ export default pattern((state) => {
                         }
                     },
                     required: ["edgeIndex", "outerIndex"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     edgeIndex: edgeIndex,
                     outerIndex: outerIndex
-                }, ({ edgeIndex, outerIndex }) => edgeIndex === outerIndex), __ctHelpers.derive({
+                }, ({ edgeIndex, outerIndex }) => edgeIndex === outerIndex), __cfHelpers.derive({
                     type: "object",
                     properties: {
                         state: {
@@ -629,9 +629,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["state", "edge"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     state: {
                         lane: state.key("lane")
                     },

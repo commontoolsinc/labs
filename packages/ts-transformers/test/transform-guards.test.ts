@@ -160,7 +160,7 @@ export default pattern<Input>(({ habits, logs, todayDate }) => {
       "return logList.some((log) => log.habitName === habit.name &&",
     );
     assert(
-      !output.includes("return logList.some((log) => __ctHelpers.when("),
+      !output.includes("return logList.some((log) => __cfHelpers.when("),
       "aliased plain array some() callback should stay plain inside computed()/derive()",
     );
   },
@@ -202,10 +202,10 @@ export default pattern<State>((state) => ({
       types: COMMONFABRIC_TYPES,
     });
 
-    assertEquals(output.match(/__ctHelpers\.derive\(/g)?.length ?? 0, 2);
+    assertEquals(output.match(/__cfHelpers\.derive\(/g)?.length ?? 0, 2);
     assertStringIncludes(output, "item.price * (1 - state.discount)");
     assert(
-      !output.includes("item.price * (__ctHelpers.derive("),
+      !output.includes("item.price * (__cfHelpers.derive("),
       "expected ternary branch derive to absorb inner arithmetic instead of nesting a second derive",
     );
   },
@@ -279,7 +279,7 @@ export default pattern<State>((state) => {
 
     assertStringIncludes(output, "lookup.get(");
     assert(
-      !/__ctHelpers\.(?:computed|derive)\([\s\S]{0,160}lookup\.get\(/.test(
+      !/__cfHelpers\.(?:computed|derive)\([\s\S]{0,160}lookup\.get\(/.test(
         output,
       ),
       "expected non-cell helper-owned get() calls to remain plain method calls",
@@ -338,13 +338,13 @@ export default pattern<{ left: Default<number, 0>; right: Default<number, 0> }>(
     assertStringIncludes(output, 'increment: rightChild.key("increment")');
     assert(
       !output.includes(
-        '__ctHelpers.computed((): any => leftChild.key("value"))',
+        '__cfHelpers.computed((): any => leftChild.key("value"))',
       ),
       "expected child value cell reference to stay structural inside helper-owned arguments",
     );
     assert(
       !output.includes(
-        '__ctHelpers.computed((): any => rightChild.key("increment"))',
+        '__cfHelpers.computed((): any => rightChild.key("increment"))',
       ),
       "expected child stream reference to stay structural inside helper-owned arguments",
     );
@@ -395,7 +395,7 @@ export default pattern<{ child: Default<number, 0> }>(({ child }) => {
       'childIncrement: asIncrementStream(childState.key("increment"))',
     );
     assert(
-      !/__ctHelpers\.(?:computed|derive)\([\s\S]{0,240}asIncrementStream\(childState\.key\("increment"\)\)/
+      !/__cfHelpers\.(?:computed|derive)\([\s\S]{0,240}asIncrementStream\(childState\.key\("increment"\)\)/
         .test(
           output,
         ),

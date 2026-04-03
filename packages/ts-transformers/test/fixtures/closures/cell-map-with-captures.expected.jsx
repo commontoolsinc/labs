@@ -18,7 +18,7 @@ export default pattern((state) => {
         items: {
             type: "number"
         }
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {typedValues.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {

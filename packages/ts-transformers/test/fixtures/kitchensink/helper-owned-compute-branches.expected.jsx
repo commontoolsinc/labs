@@ -274,15 +274,15 @@ export default pattern((state) => {
                 const memberIndex = __ct_pattern_input.key("index");
                 const project = __ct_pattern_input.params.project;
                 return (<small>
-              {__ctHelpers.ifElse({
+              {__cfHelpers.ifElse({
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         memberIndex: {
@@ -290,9 +290,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["memberIndex"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __ctHelpers.JSONSchema, { memberIndex: memberIndex }, ({ memberIndex }) => memberIndex === 0), __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, { memberIndex: memberIndex }, ({ memberIndex }) => memberIndex === 0), __cfHelpers.derive({
                     type: "object",
                     properties: {
                         project: {
@@ -309,9 +309,9 @@ export default pattern((state) => {
                         }
                     },
                     required: ["project", "member"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     project: {
                         name: project.name
                     },

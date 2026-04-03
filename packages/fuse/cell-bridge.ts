@@ -25,7 +25,10 @@ import {
 } from "./tree-builder.ts";
 import type { JSONSchema } from "@commonfabric/api";
 import type { PieceManager } from "@commonfabric/piece";
-import type { PieceController, PiecesController } from "@commonfabric/piece/ops";
+import type {
+  PieceController,
+  PiecesController,
+} from "@commonfabric/piece/ops";
 
 /** Strip asStream/asCell markers from a schema for display as input schema. */
 function getInputSchema(
