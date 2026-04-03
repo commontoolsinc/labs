@@ -52,6 +52,9 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "jsxImportSource": "@commonfabric/html",
+    "types": [
+      "./packages/html/src/jsx.d.ts"
+    ],
     "lib": [
       "deno.ns",
       "dom",
