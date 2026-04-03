@@ -93,6 +93,28 @@ const p = pattern<State>((state) => ({
 );
 
 Deno.test(
+  "Transform guards: numeric element-access receiver keys use canonical numeric values",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+interface Item { name: string }
+interface Group { items: Item[] }
+const p = pattern((input: { groups: Group[] }) =>
+  input.groups[1e2].items.map((item) => item.name)
+);
+`;
+
+    const output = await transformSource(source);
+
+    assertStringIncludes(
+      output,
+      'input.key("groups", "100", "items").mapWithPattern(',
+    );
+    assert(!output.includes('"1e2"'));
+  },
+);
+
+Deno.test(
   "Transform guards: unsupported reactive array find() does not lower to findWithPattern",
   async () => {
     const source = `/// <cts-enable />
