@@ -165,8 +165,6 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return TagsStory({});
         case "grid":
           return GridStory({});
-        case "vignette-fitness":
-          return VignetteFitnessStory({});
         case "vignette-recipe":
           return VignetteRecipeStory({});
         case "vignette-finance":
