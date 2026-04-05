@@ -10,11 +10,11 @@ import {
   type ObjectStorageManager,
   SchemaObjectTraverser,
   type SchemaPathSelector,
-} from "@commontools/runner/traverse";
+} from "@commonfabric/runner/traverse";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
 import { ContextualFlowControl } from "../../runner/src/cfc.ts";
-import { type Immutable, isObject } from "@commontools/utils/types";
+import { type Immutable, isObject } from "@commonfabric/utils/types";
 import type { FabricValue, MemorySpace, URI } from "../interface.ts";
 import {
   type EntitySnapshot,

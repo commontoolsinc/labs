@@ -1,9 +1,9 @@
 import { assert, assertEquals } from "@std/assert";
-import { Identity } from "@commontools/identity";
-import type { MIME, URI } from "@commontools/memory/interface";
-import { type EntityDocument, getMemoryV2Flags } from "@commontools/memory/v2";
-import * as MemoryV2Client from "@commontools/memory/v2/client";
-import * as MemoryV2Server from "@commontools/memory/v2/server";
+import { Identity } from "@commonfabric/identity";
+import type { MIME, URI } from "@commonfabric/memory/interface";
+import { type EntityDocument, getMemoryV2Flags } from "@commonfabric/memory/v2";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager as CutoverStorageManager } from "../src/storage/cache.deno.ts";
 import type {
   IStorageProviderWithReplica,

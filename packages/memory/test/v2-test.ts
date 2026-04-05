@@ -2,19 +2,19 @@ import { assert, assertEquals, assertFalse } from "@std/assert";
 import {
   resetDataModelConfig,
   setDataModelConfig,
-} from "@commontools/data-model/fabric-value";
+} from "@commonfabric/data-model/fabric-value";
 import {
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
-} from "@commontools/data-model/json-encoding";
+} from "@commonfabric/data-model/json-encoding";
 import {
   resetSchemaHashConfig,
   setSchemaHashConfig,
-} from "@commontools/data-model/schema-hash";
+} from "@commonfabric/data-model/schema-hash";
 import {
   resetModernHashConfig,
   setModernHashConfig,
-} from "@commontools/data-model/value-hash";
+} from "@commonfabric/data-model/value-hash";
 import {
   decodeMemoryV2Boundary,
   DEFAULT_BRANCH,

@@ -2,9 +2,9 @@
 
 import { assertEquals } from "@std/assert";
 import app from "../../toolshed/app.ts";
-import { Identity } from "@commontools/identity";
-import { type JSONSchema, Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { type JSONSchema, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 const waitFor = async (
   predicate: () => boolean,

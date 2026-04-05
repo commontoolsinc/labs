@@ -3,12 +3,12 @@ import { toFileUrl } from "@std/path";
 import {
   resetDataModelConfig,
   setDataModelConfig,
-} from "@commontools/data-model/fabric-value";
-import { setJsonEncodingConfig } from "@commontools/data-model/json-encoding";
+} from "@commonfabric/data-model/fabric-value";
+import { setJsonEncodingConfig } from "@commonfabric/data-model/json-encoding";
 import {
   resetModernHashConfig,
   setModernHashConfig,
-} from "@commontools/data-model/value-hash";
+} from "@commonfabric/data-model/value-hash";
 import {
   applyCommit,
   close,

@@ -1,5 +1,5 @@
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { type JSONSchema } from "../src/builder/types.ts";

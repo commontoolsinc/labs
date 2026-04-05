@@ -1,7 +1,7 @@
 import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import type {
   IExtendedStorageTransaction,

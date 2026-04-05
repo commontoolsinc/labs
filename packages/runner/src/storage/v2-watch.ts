@@ -1,6 +1,6 @@
-import { hashSchema, internSchema } from "@commontools/data-model/schema-hash";
-import { toDeepFrozenSchema } from "@commontools/data-model/schema-utils";
-import type { MIME } from "@commontools/memory/interface";
+import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import type { MIME } from "@commonfabric/memory/interface";
 import { stableHash } from "../traverse.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { SelectorTracker } from "./cache.ts";

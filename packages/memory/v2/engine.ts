@@ -1,6 +1,6 @@
 import { Database } from "@db/sqlite";
 import { fromDigest } from "merkle-reference";
-import { sha256 } from "@commontools/data-model/sha256-impl";
+import { sha256 } from "@commonfabric/data-model/sha256-impl";
 import type { FabricValue } from "../interface.ts";
 import { applyPatch } from "./patch.ts";
 import { parentPath, parsePointer, pathsOverlap } from "./path.ts";

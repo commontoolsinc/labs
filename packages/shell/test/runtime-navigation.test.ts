@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { DID } from "@commontools/identity";
+import type { DID } from "@commonfabric/identity";
 import { EventEmitter } from "../../runtime-client/client/emitter.ts";
 
 type MockRuntimeClientEvents = {
@@ -90,7 +90,7 @@ describe("RuntimeInternals navigation", () => {
     const onNavigate = (event: Event) => {
       navigation = (event as CustomEvent<typeof navigation>).detail;
     };
-    globalThis.addEventListener("ct-navigate", onNavigate);
+    globalThis.addEventListener("cf-navigate", onNavigate);
 
     try {
       client.emit("navigaterequest", {
@@ -110,7 +110,7 @@ describe("RuntimeInternals navigation", () => {
         pieceId: "piece-123",
       });
     } finally {
-      globalThis.removeEventListener("ct-navigate", onNavigate);
+      globalThis.removeEventListener("cf-navigate", onNavigate);
       env.$API_URL = originalEnv.$API_URL;
       env.$ENVIRONMENT = originalEnv.$ENVIRONMENT;
       env.$COMMIT_SHA = originalEnv.$COMMIT_SHA;
@@ -184,7 +184,7 @@ describe("RuntimeInternals navigation", () => {
     const onNavigate = (event: Event) => {
       navigation = (event as CustomEvent<typeof navigation>).detail;
     };
-    globalThis.addEventListener("ct-navigate", onNavigate);
+    globalThis.addEventListener("cf-navigate", onNavigate);
 
     try {
       client.emit("navigaterequest", {
@@ -204,7 +204,7 @@ describe("RuntimeInternals navigation", () => {
         pieceId: "piece-456",
       });
     } finally {
-      globalThis.removeEventListener("ct-navigate", onNavigate);
+      globalThis.removeEventListener("cf-navigate", onNavigate);
       env.$API_URL = originalEnv.$API_URL;
       env.$ENVIRONMENT = originalEnv.$ENVIRONMENT;
       env.$COMMIT_SHA = originalEnv.$COMMIT_SHA;

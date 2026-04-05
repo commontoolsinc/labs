@@ -3,7 +3,7 @@ import type {
   MIME,
   SchemaPathSelector,
   URI,
-} from "@commontools/memory/interface";
+} from "@commonfabric/memory/interface";
 import { watchIdForEntry } from "../src/storage/v2.ts";
 
 Deno.test("memory v2 watch ids include branch in the stable key", () => {

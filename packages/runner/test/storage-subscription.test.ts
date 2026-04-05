@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  StorageManager,
+  StorageManagerEmulator,
+} from "@commonfabric/runner/storage/cache.deno";
 import type {
   IExtendedStorageTransaction,
   IStorageSubscription,
@@ -50,7 +53,7 @@ class Subscription implements IStorageSubscription {
 
 describe("Storage Subscription", () => {
   let runtime: Runtime;
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: StorageManagerEmulator;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {

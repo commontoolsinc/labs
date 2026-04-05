@@ -48,14 +48,30 @@ function extractInjectedCallableExports(sourceText: string): string[] {
     }
   }
 
+  const objectBindings = new Map<string, ts.ObjectLiteralExpression>();
+  ts.forEachChild(sourceFile, function collectBindings(node) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+      const initializer = node.initializer;
+      if (initializer && ts.isObjectLiteralExpression(initializer)) {
+        objectBindings.set(node.name.text, initializer);
+      }
+    }
+    ts.forEachChild(node, collectBindings);
+  });
+
   let commonfabricObject: ts.ObjectLiteralExpression | undefined;
   ts.forEachChild(sourceFile, function visit(node) {
     if (
       ts.isPropertyAssignment(node) &&
       getPropertyNameText(node.name) === "commonfabric" &&
-      ts.isObjectLiteralExpression(node.initializer)
+      (
+        ts.isObjectLiteralExpression(node.initializer) ||
+        ts.isIdentifier(node.initializer)
+      )
     ) {
-      commonfabricObject = node.initializer;
+      commonfabricObject = ts.isObjectLiteralExpression(node.initializer)
+        ? node.initializer
+        : objectBindings.get(node.initializer.text);
       return;
     }
     ts.forEachChild(node, visit);

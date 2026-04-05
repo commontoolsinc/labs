@@ -1,5 +1,5 @@
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("bench subscription refresh");

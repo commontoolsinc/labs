@@ -1,6 +1,6 @@
-import type { MemorySpace } from "@commontools/memory/interface";
-import * as MemoryV2Client from "@commontools/memory/v2/client";
-import * as MemoryV2Server from "@commontools/memory/v2/server";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { type Options, type SessionFactory, StorageManager } from "./v2.ts";
 
 class EmulatedSessionFactory implements SessionFactory {

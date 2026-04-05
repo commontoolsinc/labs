@@ -1,15 +1,12 @@
 import type { HashObject } from "@commonfabric/data-model/value-hash";
 import type { JSONValue } from "@commonfabric/api";
-import type {
-  FabricDatum,
-  FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { SchemaPathSelector } from "@commonfabric/api";
 export type { SchemaPathSelector };
 
 // Backward-compat aliases for branches that still import the older storage
 // naming from the memory package surface.
-export type StorableDatum = FabricDatum;
+export type StorableDatum = FabricValue;
 export type StorableValue = FabricValue;
 export type { FabricValue };
 

@@ -16,7 +16,7 @@ import { type Program } from "@commonfabric/js-compiler/interface";
 import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
 export type { JSONSchema, JSONValue, Program };
 
-import type { MemoryVersion } from "@commontools/memory/interface";
+import type { MemoryVersion } from "@commonfabric/memory/interface";
 
 export type MessageId = number;
 

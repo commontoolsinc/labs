@@ -1,6 +1,6 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
-import { encodeMemoryV2Boundary } from "@commontools/memory/v2";
-import * as MemoryV2Server from "@commontools/memory/v2/server";
+import { encodeMemoryV2Boundary } from "@commonfabric/memory/v2";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import type * as Routes from "./memory.routes.ts";
 import { Memory, memory, memoryV2Server } from "../memory.ts";
 import * as Codec from "@commonfabric/memory/codec";

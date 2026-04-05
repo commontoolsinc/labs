@@ -1,14 +1,14 @@
-import { deepFreeze } from "@commontools/data-model/deep-freeze";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   getDataModelConfig,
   isArrayIndexPropertyName,
-} from "@commontools/data-model/fabric-value";
-import { unclaimed } from "@commontools/memory/fact";
-import type { PatchOp } from "@commontools/memory/v2";
+} from "@commonfabric/data-model/fabric-value";
+import { unclaimed } from "@commonfabric/memory/fact";
+import type { PatchOp } from "@commonfabric/memory/v2";
 import { encodePointer, pathsOverlap } from "../../../memory/v2/path.ts";
-import type { FabricValue } from "@commontools/memory/interface";
-import { deepEqual } from "@commontools/utils/deep-equal";
-import { isRecord } from "@commontools/utils/types";
+import type { FabricValue } from "@commonfabric/memory/interface";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isRecord } from "@commonfabric/utils/types";
 import type {
   Activity,
   ChangeGroup,

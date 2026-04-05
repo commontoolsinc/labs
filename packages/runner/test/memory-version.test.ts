@@ -1,10 +1,10 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import {
   StorageManager,
   StorageManagerEmulator,
-} from "@commontools/runner/storage/cache.deno";
+} from "@commonfabric/runner/storage/cache.deno";
 import { StorageManager as RemoteStorageManager } from "../src/storage/cache.ts";
 import * as V2Storage from "../src/storage/v2.ts";
 import * as V2Emulate from "../src/storage/v2-emulate.ts";

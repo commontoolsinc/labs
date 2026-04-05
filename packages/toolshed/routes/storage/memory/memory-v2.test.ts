@@ -5,11 +5,11 @@ import {
   encodeMemoryV2Boundary,
   getMemoryV2Flags,
   MEMORY_V2_PROTOCOL,
-} from "@commontools/memory/v2";
-import { hashOf } from "@commontools/data-model/value-hash";
-import { createSession, Identity } from "@commontools/identity";
-import { type JSONSchema, Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+} from "@commonfabric/memory/v2";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { createSession, Identity } from "@commonfabric/identity";
+import { type JSONSchema, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 const HELLO = {
   type: "hello",

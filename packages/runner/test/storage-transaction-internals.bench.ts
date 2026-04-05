@@ -1,9 +1,9 @@
 import {
   resetDataModelConfig,
   setDataModelConfig,
-} from "@commontools/data-model/fabric-value";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+} from "@commonfabric/data-model/fabric-value";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { IAttestation } from "../src/storage/interface.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import { V2StorageTransaction } from "../src/storage/v2-transaction.ts";

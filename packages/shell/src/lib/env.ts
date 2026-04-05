@@ -1,4 +1,4 @@
-import type { MemoryVersion } from "@commontools/memory/interface";
+import type { MemoryVersion } from "@commonfabric/memory/interface";
 
 declare global {
   var $ENVIRONMENT: string | undefined;

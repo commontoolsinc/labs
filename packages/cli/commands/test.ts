@@ -1,5 +1,5 @@
 import { Command } from "@cliffy/command";
-import type { MemoryVersion } from "@commontools/memory/interface";
+import type { MemoryVersion } from "@commonfabric/memory/interface";
 import { resolve } from "@std/path";
 import { expandGlob } from "@std/fs";
 import { cliText } from "../lib/cli-name.ts";

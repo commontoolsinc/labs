@@ -74,6 +74,7 @@ const toSchema: ToSchemaFunction = (_options?) => {
  */
 export const createBuilder = (): {
   commonfabric: BuilderFunctionsAndConstants;
+  commontools: BuilderFunctionsAndConstants;
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 } => {
   // Associate runtime programs with patterns after compilation and initial eval
@@ -88,84 +89,88 @@ export const createBuilder = (): {
     }
   };
 
+  const builder: BuilderFunctionsAndConstants = {
+    // Pattern creation
+    pattern,
+    patternTool,
+
+    // Module creation
+    lift,
+    handler,
+    action,
+    derive,
+    computed,
+
+    // Built-in modules
+    str,
+    ifElse,
+    when,
+    unless,
+    llm,
+    llmDialog,
+    generateObject,
+    generateText,
+    fetchData,
+    fetchProgram,
+    streamData,
+    compileAndRun,
+    navigateTo,
+    wish,
+
+    // Cell creation
+    cell: cellConstructorFactory<AsCell>("cell").of,
+    equals: cellConstructorFactory<AsCell>("cell").equals,
+
+    // Cell constructors with static methods
+    Cell: cellConstructorFactory<AsCell>("cell"),
+    Writable: cellConstructorFactory<AsCell>("cell"), // Alias for Cell with clearer semantics
+    OpaqueCell: cellConstructorFactory<AsOpaqueCell>("opaque"),
+    Stream: cellConstructorFactory<AsStream>("stream"),
+    ComparableCell: cellConstructorFactory<AsComparableCell>("comparable"),
+    ReadonlyCell: cellConstructorFactory<AsReadonlyCell>("readonly"),
+    WriteonlyCell: cellConstructorFactory<AsWriteonlyCell>("writeonly"),
+
+    // Utility
+    byRef,
+
+    // Environment
+    getPatternEnvironment,
+
+    // Entity utilities
+    getEntityId,
+
+    // Constants
+    ID,
+    ID_FIELD,
+    SELF,
+    TYPE,
+    NAME,
+    UI,
+    FS,
+
+    // Schema utilities
+    schema,
+    toSchema,
+    AuthSchema,
+    WebhookConfigSchema,
+
+    // Render utils
+    h,
+
+    // Fabric value classes -- runtime values backing the type declarations
+    // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`
+    // checks in patterns.
+    FabricInstance,
+    FabricPrimitive,
+    FabricEpochNsec,
+    FabricEpochDays,
+    FabricHash,
+  };
+
   return {
-    commonfabric: {
-      // Pattern creation
-      pattern,
-      patternTool,
-
-      // Module creation
-      lift,
-      handler,
-      action,
-      derive,
-      computed,
-
-      // Built-in modules
-      str,
-      ifElse,
-      when,
-      unless,
-      llm,
-      llmDialog,
-      generateObject,
-      generateText,
-      fetchData,
-      fetchProgram,
-      streamData,
-      compileAndRun,
-      navigateTo,
-      wish,
-
-      // Cell creation
-      cell: cellConstructorFactory<AsCell>("cell").of,
-      equals: cellConstructorFactory<AsCell>("cell").equals,
-
-      // Cell constructors with static methods
-      Cell: cellConstructorFactory<AsCell>("cell"),
-      Writable: cellConstructorFactory<AsCell>("cell"), // Alias for Cell with clearer semantics
-      OpaqueCell: cellConstructorFactory<AsOpaqueCell>("opaque"),
-      Stream: cellConstructorFactory<AsStream>("stream"),
-      ComparableCell: cellConstructorFactory<AsComparableCell>("comparable"),
-      ReadonlyCell: cellConstructorFactory<AsReadonlyCell>("readonly"),
-      WriteonlyCell: cellConstructorFactory<AsWriteonlyCell>("writeonly"),
-
-      // Utility
-      byRef,
-
-      // Environment
-      getPatternEnvironment,
-
-      // Entity utilities
-      getEntityId,
-
-      // Constants
-      ID,
-      ID_FIELD,
-      SELF,
-      TYPE,
-      NAME,
-      UI,
-      FS,
-
-      // Schema utilities
-      schema,
-      toSchema,
-      AuthSchema,
-      WebhookConfigSchema,
-
-      // Render utils
-      h,
-
-      // Fabric value classes -- runtime values backing the type declarations
-      // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`
-      // checks in patterns.
-      FabricInstance,
-      FabricPrimitive,
-      FabricEpochNsec,
-      FabricEpochDays,
-      FabricHash,
-    },
+    commonfabric: builder,
+    // Backward-compat alias for older tests and compiled patterns.
+    commontools: builder,
     exportsCallback,
   };
 };

@@ -1,6 +1,6 @@
-import { createSession, Identity } from "@commontools/identity";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { createSession, Identity } from "@commonfabric/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import type { Cell } from "../../runner/src/builder/types.ts";
 import { pieceId, PieceManager } from "../src/manager.ts";

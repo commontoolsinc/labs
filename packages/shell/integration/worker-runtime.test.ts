@@ -1,5 +1,5 @@
-import { env, waitFor } from "@commontools/integration";
-import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { env, waitFor } from "@commonfabric/integration";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 
 const { FRONTEND_URL } = env;

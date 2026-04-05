@@ -1,14 +1,14 @@
 import { assertEquals } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
-import { Identity } from "@commontools/identity";
-import type { URI } from "@commontools/memory/interface";
-import * as MemoryV2Client from "@commontools/memory/v2/client";
+import { Identity } from "@commonfabric/identity";
+import type { URI } from "@commonfabric/memory/interface";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
   type EntityDocument,
   getMemoryV2Flags,
   type SessionSync,
   type SessionSyncUpsert,
-} from "@commontools/memory/v2";
+} from "@commonfabric/memory/v2";
 import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 import {
   SingleSessionFactory,

@@ -1,9 +1,9 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { Identity } from "@commontools/identity";
-import * as MemoryV2Server from "@commontools/memory/v2/server";
-import type { AppliedCommit } from "@commontools/memory/v2/engine";
-import type { MemorySpace, URI } from "@commontools/memory/interface";
+import { Identity } from "@commonfabric/identity";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { type Options as V2StorageOptions } from "../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { TestStorageManager } from "./memory-v2-test-utils.ts";

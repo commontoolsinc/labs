@@ -21,7 +21,7 @@ import {
   manySmallObjectsA,
   medianComplexityA,
 } from "./bench-fixtures.ts";
-import type { FabricValue } from "@commontools/memory/interface";
+import type { FabricValue } from "@commonfabric/memory/interface";
 
 const signer = await Identity.fromPassphrase("bench server sim");
 const space = signer.did();

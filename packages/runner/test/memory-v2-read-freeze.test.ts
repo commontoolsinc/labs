@@ -1,7 +1,7 @@
 import {
   resetDataModelConfig,
   setDataModelConfig,
-} from "@commontools/data-model/fabric-value";
+} from "@commonfabric/data-model/fabric-value";
 import {
   assert,
   assertEquals,
@@ -9,7 +9,7 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-read-freeze");

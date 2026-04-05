@@ -1,7 +1,7 @@
 export type {
   HashObject,
   HashObject as ContentId,
-} from "@commontools/data-model/value-hash";
+} from "@commonfabric/data-model/value-hash";
 
 export {
   hashObjectFromJson as contentIdFromJSON,
@@ -10,4 +10,4 @@ export {
   isHashObject as isContentId,
   resetModernHashConfig as resetCanonicalHashConfig,
   setModernHashConfig as setCanonicalHashConfig,
-} from "@commontools/data-model/value-hash";
+} from "@commonfabric/data-model/value-hash";

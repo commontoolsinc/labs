@@ -1,17 +1,17 @@
 import {
   cloneIfNecessary,
   getDataModelConfig,
-} from "@commontools/data-model/fabric-value";
+} from "@commonfabric/data-model/fabric-value";
 import {
   getJsonEncodingConfig,
   jsonFromValue,
   valueFromJson,
-} from "@commontools/data-model/json-encoding";
-import { getSchemaHashConfig } from "@commontools/data-model/schema-hash";
-import { getModernHashConfig } from "@commontools/data-model/value-hash";
+} from "@commonfabric/data-model/json-encoding";
+import { getSchemaHashConfig } from "@commonfabric/data-model/schema-hash";
+import { getModernHashConfig } from "@commonfabric/data-model/value-hash";
 import type { FabricValue, SchemaPathSelector } from "./interface.ts";
-import type { ReconstructionContext } from "@commontools/data-model/interface";
-import { isObject, isRecord } from "@commontools/utils/types";
+import type { ReconstructionContext } from "@commonfabric/data-model/interface";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 
 export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
 export const MEMORY_V2_CONTENT_TYPE = "merkle-reference/json" as const;

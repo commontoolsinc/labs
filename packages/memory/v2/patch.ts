@@ -1,5 +1,5 @@
 import type { FabricValue } from "../interface.ts";
-import { isInstance, isObject } from "@commontools/utils/types";
+import { isInstance, isObject } from "@commonfabric/utils/types";
 import type { PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
 

@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commontools/identity";
-import * as MemoryV2Client from "@commontools/memory/v2/client";
-import type { Server as MemoryV2Server } from "@commontools/memory/v2/server";
+import { Identity } from "@commonfabric/identity";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import type { Server as MemoryV2Server } from "@commonfabric/memory/v2/server";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { Action } from "../src/scheduler.ts";
-import type { URI } from "@commontools/memory/interface";
+import type { URI } from "@commonfabric/memory/interface";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-pull-reactivity");

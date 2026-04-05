@@ -1,6 +1,6 @@
-import { Identity } from "@commontools/identity";
-import { refer } from "@commontools/memory/reference";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+import { refer } from "@commonfabric/memory/reference";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("bench source topology refresh");

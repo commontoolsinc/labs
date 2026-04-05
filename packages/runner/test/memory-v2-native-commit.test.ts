@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
 import { fromFileUrl } from "@std/path/from-file-url";
-import { FileSystemProgramResolver } from "@commontools/js-compiler";
-import { Identity } from "@commontools/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {

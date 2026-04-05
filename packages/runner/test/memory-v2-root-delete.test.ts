@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";

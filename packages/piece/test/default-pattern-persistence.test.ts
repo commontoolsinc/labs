@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSession, Identity } from "@commontools/identity";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { createSession, Identity } from "@commonfabric/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { RuntimeProgram } from "../../runner/src/harness/types.ts";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import type { Cell } from "../../runner/src/builder/types.ts";

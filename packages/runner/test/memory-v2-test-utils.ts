@@ -1,5 +1,5 @@
-import type { MemorySpace } from "@commontools/memory/interface";
-import * as MemoryV2Client from "@commontools/memory/v2/client";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type {
   IStorageNotification,
   StorageNotification,

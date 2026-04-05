@@ -1,4 +1,4 @@
-import { hashSchema, internSchema } from "@commontools/data-model/schema-hash";
+import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   type EntitySnapshot,
   type GraphQuery,

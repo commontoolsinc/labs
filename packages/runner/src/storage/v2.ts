@@ -1,4 +1,4 @@
-import { cloneIfNecessary } from "@commontools/data-model/fabric-value";
+import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -9,20 +9,20 @@ import {
   type Signer,
   type TransactionError,
   type URI,
-} from "@commontools/memory/interface";
-import { assert, unclaimed } from "@commontools/memory/fact";
-import * as MemoryV2Client from "@commontools/memory/v2/client";
+} from "@commonfabric/memory/interface";
+import { assert, unclaimed } from "@commonfabric/memory/fact";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
   type DocumentPath,
   type EntityDocument,
   type PatchOp,
   type SessionSync,
   toDocumentPath,
-} from "@commontools/memory/v2";
+} from "@commonfabric/memory/v2";
 import { parentPath, parsePointer } from "../../../memory/v2/path.ts";
-import type { AppliedCommit } from "@commontools/memory/v2/engine";
-import { getLogger } from "@commontools/utils/logger";
-import { isObject, isRecord } from "@commontools/utils/types";
+import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";

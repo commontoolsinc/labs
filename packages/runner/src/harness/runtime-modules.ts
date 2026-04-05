@@ -3,6 +3,7 @@ import { StaticCache } from "@commonfabric/static";
 import turndown from "turndown";
 
 export type RuntimeModuleIdentifier =
+  | "commontools"
   | "commonfabric"
   | "commonfabric/schema"
   | "turndown"
@@ -10,6 +11,7 @@ export type RuntimeModuleIdentifier =
   | "@commonfabric/builder"
   | "@commonfabric/runner";
 export const RuntimeModuleIdentifiers: RuntimeModuleIdentifier[] = [
+  "commontools",
   "commonfabric",
   "commonfabric/schema",
   "turndown",
@@ -39,6 +41,7 @@ export const getTypes = (() => {
     const builderTypes = await cache.getText("types/commonfabric.d.ts");
     const schemaTypes = await cache.getText("types/commonfabric-schema.d.ts");
     depTypes = {
+      "commontools": builderTypes,
       "commonfabric": builderTypes,
       "commonfabric/schema": schemaTypes,
       "turndown": await cache.getText(
@@ -56,6 +59,7 @@ export function getExports() {
   const { commonfabric, exportsCallback } = createBuilder();
   return {
     runtimeExports: {
+      "commontools": commonfabric,
       "commonfabric": commonfabric,
       // commonfabric/schema only exports types, no runtime values needed
       "commonfabric/schema": {},

@@ -7,36 +7,36 @@ import {
 import {
   resetDataModelConfig,
   setDataModelConfig,
-} from "@commontools/data-model/fabric-value";
+} from "@commonfabric/data-model/fabric-value";
 import {
   jsonFromValue,
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
   valueFromJson,
-} from "@commontools/data-model/json-encoding";
-import { FabricEpochNsec } from "@commontools/data-model/fabric-epoch";
-import { Identity } from "@commontools/identity";
-import type { FabricValue, MIME, URI } from "@commontools/memory/interface";
+} from "@commonfabric/data-model/json-encoding";
+import { FabricEpochNsec } from "@commonfabric/data-model/fabric-epoch";
+import { Identity } from "@commonfabric/identity";
+import type { FabricValue, MIME, URI } from "@commonfabric/memory/interface";
 import {
   type EntityDocument,
   getMemoryV2Flags,
   type PatchOp,
-} from "@commontools/memory/v2";
-import type { ReconstructionContext } from "@commontools/data-model/interface";
+} from "@commonfabric/memory/v2";
+import type { ReconstructionContext } from "@commonfabric/data-model/interface";
 import type {
   ClientCommit,
   ConfirmedRead,
   Operation,
   PendingRead,
-} from "@commontools/memory/v2";
+} from "@commonfabric/memory/v2";
 import {
   parentPath,
   parsePointer,
   pathsOverlap,
 } from "../../memory/v2/path.ts";
 import { applyPatch } from "../../memory/v2/patch.ts";
-import * as MemoryV2Client from "@commontools/memory/v2/client";
-import type { AppliedCommit } from "@commontools/memory/v2/engine";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import type {
   IStorageProviderWithReplica,
   StorageNotification,
