@@ -1,13 +1,13 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
-import { SHADOWED_FACTORY_BINDINGS } from "@commontools/utils/sandbox-contract";
+import { SHADOWED_FACTORY_BINDINGS } from "@commonfabric/utils/sandbox-contract";
 
 export class ModuleScopeShadowingTransformer extends Transformer {
   override transform(context: TransformationContext): ts.SourceFile {
     const { factory, sourceFile } = context;
     const statements = [...sourceFile.statements];
     const insertAt = findFactoryGuardInsertionIndex(statements);
-    const guards = SHADOWED_FACTORY_BINDINGS.map((name) =>
+    const guards = SHADOWED_FACTORY_BINDINGS.map((name: string) =>
       factory.createVariableStatement(
         undefined,
         factory.createVariableDeclarationList(

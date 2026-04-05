@@ -2,7 +2,7 @@ import ts from "typescript";
 import {
   isTrustedBuilder,
   isTrustedDataHelper,
-} from "@commontools/utils/sandbox-contract";
+} from "@commonfabric/utils/sandbox-contract";
 import {
   CT_DATA_HELPER_IDENTIFIER,
   TransformationContext,

@@ -4,7 +4,6 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { getLogger } from "@commonfabric/utils/logger";
-import { patternBreakpoint } from "./pattern-breakpoint.ts";
 import { isRecord, type Mutable } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
 import {

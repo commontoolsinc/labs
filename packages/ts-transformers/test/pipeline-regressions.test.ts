@@ -301,7 +301,7 @@ export default pattern(() => {
 `;
 
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
 
     assertStringIncludes(output, "const child = Child({ value });");
@@ -343,7 +343,7 @@ export default pattern(() => {
 `;
 
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
 
     assertStringIncludes(output, "const authManager = createAuthManager({");
@@ -362,7 +362,7 @@ Deno.test(
   "Pipeline regression: derive callbacks that rely on contextual typing still receive injected schemas",
   async () => {
     const source = `/// <cts-enable />
-import { derive, pattern } from "commontools";
+import { derive, pattern } from "commonfabric";
 
 const summarize = (values: string[]) => values.length;
 
@@ -373,7 +373,7 @@ export default pattern<{ values: string[] }>(({ values }) => {
 `;
 
     const output = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
+      types: COMMONFABRIC_TYPES,
     });
     const normalized = output.replace(/\s+/g, " ");
 

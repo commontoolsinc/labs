@@ -757,8 +757,8 @@ ${FACTORY_SHADOW_GUARDS}
         {
           name: "/main.ts",
           contents: [
-            'import { handler, pattern, schema } from "commontools";',
-            'import "commontools/schema";',
+            'import { handler, pattern, schema } from "commonfabric";',
+            'import "commonfabric/schema";',
             "const model = schema({",
             '  type: "object",',
             "  properties: {",
@@ -1125,10 +1125,10 @@ describe("Engine in SES mode", () => {
 
     const { jsScript, id } = await engine.compile(program);
     expect(jsScript.js).toMatch(
-      /exports\.TEMPLATE_REGISTRY = commontools_\d+\.__ctHelpers\.__ct_data\(\{/,
+      /exports\.TEMPLATE_REGISTRY = (?:commonfabric|commontools)_\d+\.__ctHelpers\.__ct_data\(\{/,
     );
     expect(jsScript.js).toMatch(
-      /exports\.INTERNAL_MODULE_TYPES = commontools_\d+\.__ctHelpers\.__ct_data\(new Set\(\["type-picker"\]\)\);/,
+      /exports\.INTERNAL_MODULE_TYPES = (?:commonfabric|commontools)_\d+\.__ctHelpers\.__ct_data\(new Set\(\["type-picker"\]\)\);/,
     );
 
     const { main } = await engine.evaluate(id, jsScript, program.files);

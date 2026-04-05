@@ -59,7 +59,7 @@ export default pattern((__ct_pattern_input) => {
     return {
         [UI]: (<div>
         <span>{title} {label}: {counter}</span>
-        <ct-button onClick={reset}>Reset</ct-button>
+        <cf-button onClick={reset}>Reset</cf-button>
       </div>),
         counter,
         label,

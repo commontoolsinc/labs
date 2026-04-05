@@ -8,7 +8,7 @@ function __ctHardenFn(fn: Function) {
 }
 import { __ctHelpers as __cfHelpers } from "commonfabric";
 import { Cell, Default, handler, NAME, pattern, toSchema, UI, } from "commonfabric";
-import "commontools/schema";
+import "commonfabric/schema";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
@@ -201,7 +201,7 @@ export default pattern((__ct_pattern_input) => {
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
         </ul>
-        <ct-message-input name="Send" placeholder="Type a message..." appearance="rounded" onct-send={addItem({ items })}/>
+        <cf-message-input name="Send" placeholder="Type a message..." appearance="rounded" oncf-send={addItem({ items })}/>
       </div>),
         title,
         items,

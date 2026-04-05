@@ -3,7 +3,7 @@ import {
   MappedPosition,
   SourceMap,
   SourceMapParser,
-} from "@commontools/js-compiler";
+} from "@commonfabric/js-compiler";
 
 export interface JsValue {
   invoke(...args: unknown[]): JsValue;

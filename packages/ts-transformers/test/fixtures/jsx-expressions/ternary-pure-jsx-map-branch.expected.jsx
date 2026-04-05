@@ -59,9 +59,9 @@ export default pattern((__ct_pattern_input) => {
             {recentEvents.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const event = __ct_pattern_input.key("element");
                 const idx = __ct_pattern_input.key("index");
-                return (<ct-hstack key={idx} gap="2">
+                return (<cf-hstack key={idx} gap="2">
                 <span>{event.key("label")}</span>
-              </ct-hstack>);
+              </cf-hstack>);
             }, {
                 type: "object",
                 properties: {

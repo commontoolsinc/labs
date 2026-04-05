@@ -9,6 +9,7 @@ import {
 } from "@commonfabric/llm/client";
 import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";

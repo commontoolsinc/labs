@@ -64,9 +64,12 @@ export default pattern((_state) => {
                         },
                         verified: {
                             type: "boolean"
+                        },
+                        name: {
+                            type: "string"
                         }
                     },
-                    required: ["active", "verified"],
+                    required: ["active", "verified", "name"],
                     asCell: true
                 }
             },
@@ -79,11 +82,17 @@ export default pattern((_state) => {
                 user: {
                     type: "object",
                     properties: {
+                        active: {
+                            type: "boolean"
+                        },
+                        verified: {
+                            type: "boolean"
+                        },
                         name: {
                             type: "string"
                         }
                     },
-                    required: ["name"],
+                    required: ["active", "verified", "name"],
                     asCell: true
                 }
             },

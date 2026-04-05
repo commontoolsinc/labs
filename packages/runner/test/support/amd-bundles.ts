@@ -1,4 +1,4 @@
-import { createFactoryShadowGuardSource } from "@commontools/utils/sandbox-contract";
+import { createFactoryShadowGuardSource } from "@commonfabric/utils/sandbox-contract";
 import { getAMDLoader } from "../../../js-compiler/typescript/bundler/amd-loader.ts";
 
 const LOADER_SOURCE = getAMDLoader.toString();

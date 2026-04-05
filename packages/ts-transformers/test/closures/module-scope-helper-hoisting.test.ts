@@ -1,22 +1,22 @@
 import { assert, assertMatch, assertNotMatch } from "@std/assert";
-import { StaticCacheFS } from "@commontools/static";
+import { StaticCacheFS } from "@commonfabric/static";
 import { transformSource } from "../utils.ts";
 
 const staticCache = new StaticCacheFS();
-const commontools = await staticCache.getText("types/commontools.d.ts");
-const commontoolsSchema = await staticCache.getText(
-  "types/commontools-schema.d.ts",
+const commonfabric = await staticCache.getText("types/commonfabric.d.ts");
+const commonfabricSchema = await staticCache.getText(
+  "types/commonfabric-schema.d.ts",
 );
 const options = {
   types: {
-    "commontools.d.ts": commontools,
-    "commontools-schema.d.ts": commontoolsSchema,
+    "commonfabric.d.ts": commonfabric,
+    "commonfabric-schema.d.ts": commonfabricSchema,
   },
 };
 
 Deno.test("Closure Transformer hoists nested derive callbacks that close over module-scoped helpers", async () => {
   const source = `/// <cts-enable />
-    import { derive, pattern, UI } from "commontools";
+    import { derive, pattern, UI } from "commonfabric";
 
     const formatDateShort = (dateStr: string) => dateStr.toUpperCase();
 
@@ -56,7 +56,7 @@ Deno.test("Closure Transformer hoists nested derive callbacks that close over mo
 
 Deno.test("Closure Transformer does not hoist nested handler callbacks that also capture factory parameters", async () => {
   const source = `/// <cts-enable />
-    import { handler } from "commontools";
+    import { handler } from "commonfabric";
 
     const normalize = (value: string) => value.trim();
 

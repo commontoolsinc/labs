@@ -105,8 +105,8 @@ export default pattern((__ct_pattern_input) => {
     return {
         [NAME]: "Action SELF Test",
         [UI]: (<div>
-          <ct-button onClick={showSelf}>Show Self</ct-button>
-          <ct-button onClick={incrementWithSelf}>Increment with Self</ct-button>
+          <cf-button onClick={showSelf}>Show Self</cf-button>
+          <cf-button onClick={incrementWithSelf}>Increment with Self</cf-button>
         </div>),
         title,
         count,

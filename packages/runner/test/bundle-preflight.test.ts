@@ -111,7 +111,7 @@ describe("preflightCompiledBundle()", () => {
     );
   });
 
-  it("rejects standalone __setModuleDefault helper initializers", () => {
+  it("accepts standalone __setModuleDefault helper initializers", () => {
     const bundle = bundleWithCanonicalLoader(`
   var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function (o, v) {
     Object.defineProperty(o, "default", { enumerable: true, value: v });
@@ -125,9 +125,7 @@ describe("preflightCompiledBundle()", () => {
   return require("main");
 `);
 
-    expect(() => preflightCompiledBundle(bundle)).toThrow(
-      "unsupported top-level executable code",
-    );
+    expect(() => preflightCompiledBundle(bundle)).not.toThrow();
   });
 
   it("accepts regex literals inside compiled module factories", () => {

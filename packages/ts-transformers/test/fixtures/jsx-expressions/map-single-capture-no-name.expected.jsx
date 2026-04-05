@@ -56,7 +56,16 @@ export default pattern((_state: any) => {
                 people: {
                     type: "array",
                     items: {
-                        type: "unknown"
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "string"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
                     },
                     asCell: true
                 }

@@ -48,7 +48,7 @@ export type { AuthInfo, AuthState, TokenExpiryWarning };
 
 export interface AuthManagerInput {
   requiredScopes?: Default<string[], []>;
-  accountType?: Default<string, "default">;
+  accountType?: Default<"default" | "personal" | "work", "default">;
   debugMode?: Default<boolean, false>;
 }
 

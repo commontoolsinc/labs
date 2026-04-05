@@ -21,10 +21,10 @@ interface State {
 // Context: Destructured event params retain structure; event schema reflects the destructured shape
 export default pattern((state) => {
     return {
-        [UI]: (<ct-select $value={state.key("selectedValue")} items={[
+        [UI]: (<cf-select $value={state.key("selectedValue")} items={[
                 { label: "Option A", value: "a" },
                 { label: "Option B", value: "b" },
-            ]} onct-change={__cfHelpers.handler({
+            ]} oncf-change={__cfHelpers.handler({
             type: "object",
             properties: {
                 detail: {

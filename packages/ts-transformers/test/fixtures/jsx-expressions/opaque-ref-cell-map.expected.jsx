@@ -190,7 +190,7 @@ export default pattern(() => {
                 const charm = __ct_pattern_input.key("element");
                 const index = __ct_pattern_input.key("index");
                 return (<li>
-                <ct-button onClick={goToCharm({ charm })}>
+                <cf-button onClick={goToCharm({ charm })}>
                   Go to Charm {__cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -202,7 +202,7 @@ export default pattern(() => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
                 } as const satisfies __cfHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}
-                </ct-button>
+                </cf-button>
                 <span>Charm {__cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -255,9 +255,9 @@ export default pattern(() => {
             } as const satisfies __cfHelpers.JSONSchema), {})}
           </ul>)}
 
-        <ct-button onClick={createSimplePattern({ cellRef })}>
+        <cf-button onClick={createSimplePattern({ cellRef })}>
           Create New Charm
-        </ct-button>
+        </cf-button>
       </div>),
         cellRef,
     };

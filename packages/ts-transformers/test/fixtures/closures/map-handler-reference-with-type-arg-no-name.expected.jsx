@@ -14,7 +14,7 @@ const __ctAmdHooks = undefined;
 declare global {
     namespace JSX {
         interface IntrinsicElements {
-            "ct-button": any;
+            "cf-button": any;
         }
     }
 }
@@ -52,9 +52,9 @@ export default pattern((state) => {
         {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const state = __ct_pattern_input.key("params", "state");
-                return (<ct-button onClick={handleClick({ count: state.key("count") })}>
+                return (<cf-button onClick={handleClick({ count: state.key("count") })}>
             {item.key("name")}
-          </ct-button>);
+          </cf-button>);
             }, {
                 type: "object",
                 properties: {

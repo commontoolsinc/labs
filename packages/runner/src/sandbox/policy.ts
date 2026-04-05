@@ -3,7 +3,7 @@ import {
   isTrustedDataHelper,
   TRUSTED_BUILDERS,
   TRUSTED_DATA_HELPERS,
-} from "@commontools/utils/sandbox-contract";
+} from "@commonfabric/utils/sandbox-contract";
 
 export {
   isTrustedBuilder,

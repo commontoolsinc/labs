@@ -1,5 +1,5 @@
 import { getAMDLoader } from "../../../js-compiler/typescript/bundler/amd-loader.ts";
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   CompiledJsParseError,
   parseCompiledBundleSource,
@@ -13,6 +13,7 @@ const ALLOWED_TSLIB_HELPERS = new Set([
   "__createBinding",
   "__exportStar",
   "__importDefault",
+  "__setModuleDefault",
 ]);
 
 const IDENT = String.raw`([A-Za-z_$][\w$]*)`;
@@ -30,6 +31,10 @@ const CANONICAL_EXPORT_STAR_PATTERNS = [
       .raw`^var__exportStar=function\(${IDENT},${IDENT}\)\{for\(var${IDENT}in\1\)if\(\3!==("default"|'default')&&!Object\.prototype\.hasOwnProperty\.call\(\2,\3\)\)__createBinding\(\2,\1,\3\);\};?$`,
   ),
 ];
+const CANONICAL_SET_MODULE_DEFAULT_PATTERN = new RegExp(
+  String
+    .raw`^var__setModuleDefault=\(this&&this\.__setModuleDefault\)\|\|\(Object\.create\?\(function\(${IDENT},${IDENT}\)\{Object\.defineProperty\(\1,"default",\{enumerable:true,value:\2\}\);\}\):function\(\1,\2\)\{\1\["default"\]=\2;\}\);?$`,
+);
 
 const CANONICAL_LOADER_BINDINGS = [
   normalizeExact(
@@ -197,6 +202,8 @@ function isAllowedTsLibHelperDeclaration(normalized: string): boolean {
       return CANONICAL_EXPORT_STAR_PATTERNS.some((pattern) =>
         pattern.test(normalized)
       );
+    case "__setModuleDefault":
+      return CANONICAL_SET_MODULE_DEFAULT_PATTERN.test(normalized);
     default:
       return false;
   }

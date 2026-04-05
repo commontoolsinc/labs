@@ -20,7 +20,7 @@ import {
   readIdentifierEnd,
   startsWithStatementWord,
 } from "./compiled-js-identifiers.ts";
-import { getLogger } from "@commontools/utils/logger";
+import { getLogger } from "@commonfabric/utils/logger";
 import { ModuleVerificationError } from "./module-verification-error.ts";
 import {
   isAllowedCompiledDependencySpecifier,
@@ -36,7 +36,7 @@ import {
   createFactoryShadowGuardSource,
   createFunctionHardeningHelperSource,
   RESERVED_FACTORY_BINDINGS,
-} from "@commontools/utils/sandbox-contract";
+} from "@commonfabric/utils/sandbox-contract";
 
 type BindingKind = "builder" | "data" | "function" | "import" | "unknown";
 
@@ -56,7 +56,7 @@ const CANONICAL_HARDENING_HELPER = stripJsTrivia(
 
 const RESERVED_FACTORY_BINDING_SET = new Set<string>(RESERVED_FACTORY_BINDINGS);
 const CANONICAL_FACTORY_GUARD_STATEMENTS = createFactoryShadowGuardSource().map(
-  (statement) => stripJsTrivia(statement),
+  (statement: string) => stripJsTrivia(statement),
 );
 
 interface ParsedNormalizedCallReference {

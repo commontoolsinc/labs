@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { FUNCTION_HARDENING_HELPER_NAME } from "@commontools/utils/sandbox-contract";
+import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 

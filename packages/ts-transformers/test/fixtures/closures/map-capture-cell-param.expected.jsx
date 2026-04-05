@@ -64,9 +64,9 @@ export default pattern((__ct_pattern_input) => {
                 const index = __ct_pattern_input.key("index");
                 const items = __ct_pattern_input.key("params", "items");
                 return (<li key={index}>
-              <ct-button onClick={removeItem({ items, index })}>
+              <cf-button onClick={removeItem({ items, index })}>
                 Remove
-              </ct-button>
+              </cf-button>
             </li>);
             }, {
                 type: "object",

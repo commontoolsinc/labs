@@ -32,13 +32,15 @@ export function transformInjectHelperModule(
       name: source.name,
       contents: source.name.endsWith(".d.ts")
         ? source.contents
-        : propagateHelpers
-        ? sourceUsesCfDirective(source.contents)
-          ? transformCfDirective(source.contents)
-          : injectCfHelpers(source.contents)
-        : sourceNeedsTopLevelSnapshotHelpers(source.contents)
-        ? injectCtDataHelper(source.contents)
-        : transformCfDirective(source.contents),
+        : normalizeMixedModuleImports(
+          propagateHelpers
+            ? sourceUsesCfDirective(source.contents)
+              ? transformCfDirective(source.contents)
+              : injectCfHelpers(source.contents)
+            : sourceNeedsTopLevelSnapshotHelpers(source.contents)
+            ? injectCtDataHelper(source.contents)
+            : transformCfDirective(source.contents),
+        ),
     })),
     mainExport: program.mainExport,
   };
@@ -138,4 +140,106 @@ function unwrapExpression(expression: ts.Expression): ts.Expression {
     }
     return current;
   }
+}
+
+function normalizeMixedModuleImports(source: string): string {
+  const sourceFile = ts.createSourceFile(
+    "source.tsx",
+    source,
+    ts.ScriptTarget.ES2023,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let changed = false;
+  const statements = sourceFile.statements.flatMap((statement) => {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !statement.importClause ||
+      !statement.importClause.namedBindings ||
+      !ts.isNamedImports(statement.importClause.namedBindings)
+    ) {
+      return [statement];
+    }
+
+    const { importClause } = statement;
+    const namedBindings = importClause.namedBindings;
+    if (!namedBindings || !ts.isNamedImports(namedBindings)) {
+      return [statement];
+    }
+
+    if (importClause.name) {
+      changed = true;
+      return [
+        ts.factory.createImportDeclaration(
+          statement.modifiers,
+          ts.factory.createImportClause(
+            importClause.isTypeOnly,
+            importClause.name,
+            undefined,
+          ),
+          statement.moduleSpecifier,
+          statement.attributes,
+        ),
+        ts.factory.createImportDeclaration(
+          statement.modifiers,
+          ts.factory.createImportClause(
+            importClause.isTypeOnly,
+            undefined,
+            namedBindings,
+          ),
+          statement.moduleSpecifier,
+          statement.attributes,
+        ),
+      ];
+    }
+
+    const defaultSpecifier = namedBindings.elements.find((
+      element,
+    ) => element.propertyName?.text === "default");
+    if (!defaultSpecifier) {
+      return [statement];
+    }
+
+    changed = true;
+    const remainingElements = namedBindings.elements.filter((
+      element,
+    ) => element !== defaultSpecifier);
+    const rewrittenStatements = [
+      ts.factory.createImportDeclaration(
+        statement.modifiers,
+        ts.factory.createImportClause(
+          importClause.isTypeOnly || defaultSpecifier.isTypeOnly,
+          defaultSpecifier.name,
+          undefined,
+        ),
+        statement.moduleSpecifier,
+        statement.attributes,
+      ),
+    ];
+
+    if (remainingElements.length > 0) {
+      rewrittenStatements.push(
+        ts.factory.createImportDeclaration(
+          statement.modifiers,
+          ts.factory.createImportClause(
+            importClause.isTypeOnly,
+            undefined,
+            ts.factory.createNamedImports(remainingElements),
+          ),
+          statement.moduleSpecifier,
+          statement.attributes,
+        ),
+      );
+    }
+
+    return rewrittenStatements;
+  });
+
+  if (!changed) {
+    return source;
+  }
+
+  return ts.createPrinter({
+    newLine: ts.NewLineKind.LineFeed,
+  }).printFile(ts.factory.updateSourceFile(sourceFile, statements));
 }

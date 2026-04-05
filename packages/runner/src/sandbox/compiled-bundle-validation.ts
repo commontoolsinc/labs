@@ -1,6 +1,6 @@
-import type { JsScript } from "@commontools/js-compiler";
-import { hashOf } from "@commontools/data-model/value-hash";
-import { getLogger } from "@commontools/utils/logger";
+import type { JsScript } from "@commonfabric/js-compiler";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   BundlePreflightError,
   preflightParsedCompiledBundle,

@@ -1,4 +1,4 @@
-import { FrozenMap, FrozenSet } from "@commontools/data-model/frozen-builtins";
+import { FrozenMap, FrozenSet } from "@commonfabric/data-model/frozen-builtins";
 
 // Resolve `entries`/`values` from the prototype chain so own-property shadows
 // on Map/Set instances cannot interfere, while still working correctly for

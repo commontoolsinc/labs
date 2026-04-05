@@ -46,6 +46,9 @@ else
  cf_impl() {
    command cf "$@"
  }
+ ct() {
+   deno task ct "$@"
+ }
 fi
 
 ct() {

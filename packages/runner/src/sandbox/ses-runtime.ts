@@ -3,8 +3,8 @@ import {
   MappedPosition,
   SourceMap,
   SourceMapParser,
-} from "@commontools/js-compiler";
-import { getLogger } from "@commontools/utils/logger";
+} from "@commonfabric/js-compiler";
+import { getLogger } from "@commonfabric/utils/logger";
 import "ses";
 import { createCallbackCompartmentGlobals } from "./compartment-globals.ts";
 import { hardenVerifiedFunction } from "./function-hardening.ts";

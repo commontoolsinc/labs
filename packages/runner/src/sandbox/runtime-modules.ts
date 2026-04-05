@@ -1,5 +1,5 @@
 import { createBuilder } from "../builder/factory.ts";
-import { StaticCache } from "@commontools/static";
+import { StaticCache } from "@commonfabric/static";
 import turndown from "turndown";
 import type { RuntimeModuleIdentifier } from "./runtime-module-policy.ts";
 import { freezeSandboxValue } from "./hardening.ts";
@@ -17,9 +17,11 @@ export const getRuntimeModuleTypes = (() => {
     if (depTypes) {
       return depTypes;
     }
-    const builderTypes = await cache.getText("types/commontools.d.ts");
-    const schemaTypes = await cache.getText("types/commontools-schema.d.ts");
+    const builderTypes = await cache.getText("types/commonfabric.d.ts");
+    const schemaTypes = await cache.getText("types/commonfabric-schema.d.ts");
     depTypes = {
+      "commonfabric": builderTypes,
+      "commonfabric/schema": schemaTypes,
       "commontools": builderTypes,
       "commontools/schema": schemaTypes,
       "turndown": await cache.getText("types/turndown.d.ts"),
@@ -32,8 +34,11 @@ export const getRuntimeModuleTypes = (() => {
 })();
 
 export function getRuntimeModuleExports() {
-  const { commontools, exportsCallback } = createBuilder();
+  const { commonfabric, commontools, exportsCallback } = createBuilder();
   const runtimeExports = freezeSandboxValue({
+    "commonfabric": commonfabric,
+    // commonfabric/schema only exports types, no runtime values needed
+    "commonfabric/schema": {},
     "commontools": commontools,
     // commontools/schema only exports types, no runtime values needed
     "commontools/schema": {},

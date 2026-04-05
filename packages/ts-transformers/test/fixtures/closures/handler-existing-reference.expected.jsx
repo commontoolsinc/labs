@@ -14,7 +14,7 @@ const __ctAmdHooks = undefined;
 declare global {
     namespace JSX {
         interface IntrinsicElements {
-            "ct-button": any;
+            "cf-button": any;
         }
     }
 }
@@ -52,9 +52,9 @@ const existing = handler(false as const satisfies __cfHelpers.JSONSchema, {
 // Context: handler() declared outside the pattern; the transform adds schemas but does not re-extract
 export default pattern((state) => {
     return {
-        [UI]: (<ct-button onClick={existing({ state })}>
+        [UI]: (<cf-button onClick={existing({ state })}>
         Existing
-      </ct-button>),
+      </cf-button>),
     };
 }, {
     type: "object",

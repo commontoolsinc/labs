@@ -15,7 +15,11 @@
  * const emails = await client.searchEmails("from:amazon.com", 20);
  * ```
  */
-import { getPatternEnvironment, nonPrivateRandom, Writable } from "commonfabric";
+import {
+  getPatternEnvironment,
+  nonPrivateRandom,
+  Writable,
+} from "commonfabric";
 
 // Re-export the Auth type for convenience
 export type { Auth } from "../gmail-importer.tsx";

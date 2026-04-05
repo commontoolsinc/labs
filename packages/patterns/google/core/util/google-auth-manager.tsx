@@ -27,7 +27,8 @@
  */
 
 import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
-import { __ct_data, type Opaque } from "commontools";
+import type { Opaque } from "commonfabric";
+import { __ct_data } from "commontools";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import GoogleAuth from "../google-auth.tsx";
 
@@ -37,10 +38,11 @@ export type {
   AuthState,
   TokenExpiryWarning,
 } from "../../../auth/auth-types.ts";
-export type {
+import type {
   AuthManagerInput as GoogleAuthManagerInput,
   AuthManagerOutput as GoogleAuthManagerOutput,
 } from "../../../auth/create-auth-manager.tsx";
+export type { GoogleAuthManagerInput, GoogleAuthManagerOutput };
 export type { Auth } from "../google-auth.tsx";
 
 /** Scope mapping for Google APIs - friendly names to URLs */
@@ -103,10 +105,8 @@ const GoogleAuthManagerDescriptor: AuthManagerDescriptor = __ct_data({
 });
 
 export function GoogleAuthManager(
-  input: Opaque<
-    import("../../../auth/create-auth-manager.tsx").AuthManagerInput
-  >,
-) {
+  input: Opaque<GoogleAuthManagerInput>,
+): GoogleAuthManagerOutput {
   return createAuthManager(
     GoogleAuthManagerDescriptor,
     GoogleAuth,

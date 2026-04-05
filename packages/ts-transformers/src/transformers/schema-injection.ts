@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
-import { FUNCTION_HARDENING_HELPER_NAME } from "@commontools/utils/sandbox-contract";
+import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
 
 import {
   classifyArrayMethodCall,

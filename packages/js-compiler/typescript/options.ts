@@ -75,7 +75,7 @@ export const getCompilerOptions = (): CompilerOptions => {
 
     jsx: JsxEmit.React,
     jsxFactory: "h",
-    jsxFragmentFactory: "__ctHelpers.h.fragment",
+    jsxFragmentFactory: "__cfHelpers.h.fragment",
     target: TARGET,
     // `lib` should autoapply, but we need to manage default libraries since
     // we are running outside of node. Ensure this lib matches `target`.

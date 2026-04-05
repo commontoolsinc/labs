@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FrozenMap, FrozenSet } from "@commontools/data-model/frozen-builtins";
+import { FrozenMap, FrozenSet } from "@commonfabric/data-model/frozen-builtins";
 import {
   assertPlainData,
   freezeVerifiedPlainData,

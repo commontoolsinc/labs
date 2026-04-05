@@ -1,9 +1,9 @@
 import { assertEquals } from "@std/assert";
-import { Identity } from "@commontools/identity";
+import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import { Runtime } from "../../src/runtime.ts";
 import type { RuntimeProgram } from "../../src/harness/types.ts";
-import type { JsScript } from "@commontools/js-compiler";
+import type { JsScript } from "@commonfabric/js-compiler";
 import type { Pattern } from "../../src/builder/types.ts";
 import { getRuntimeModuleExports } from "../../src/sandbox/mod.ts";
 import { LegacyEvalRuntime } from "./legacy-eval-runtime.ts";

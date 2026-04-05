@@ -1,4 +1,6 @@
 export type RuntimeModuleIdentifier =
+  | "commonfabric"
+  | "commonfabric/schema"
   | "commontools"
   | "commontools/schema"
   | "turndown"
@@ -7,6 +9,8 @@ export type RuntimeModuleIdentifier =
   | "@commontools/runner";
 
 export const RuntimeModuleIdentifiers = [
+  "commonfabric",
+  "commonfabric/schema",
   "commontools",
   "commontools/schema",
   "turndown",

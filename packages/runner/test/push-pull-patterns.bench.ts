@@ -14,6 +14,7 @@ import {
   type TimingStats,
 } from "@commonfabric/utils/logger";
 import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
