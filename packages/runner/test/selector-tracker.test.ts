@@ -196,5 +196,47 @@ describe("SelectorTracker", () => {
         type: "object",
       });
     });
+
+    it("does not reuse cached output for mutable schemas edited in place", () => {
+      const mutable = {
+        type: "object",
+        properties: {
+          child: {
+            type: "string",
+            asCell: true,
+          },
+        },
+      } as {
+        type: "object";
+        properties: Record<string, JSONSchema>;
+      };
+
+      const first = SelectorTracker.getStandardSchema(mutable as JSONSchema);
+      mutable.properties = {
+        count: {
+          type: "number",
+        },
+      };
+
+      const second = SelectorTracker.getStandardSchema(mutable as JSONSchema);
+
+      expect(first).toEqual({
+        properties: {
+          child: {
+            type: "string",
+          },
+        },
+        type: "object",
+      });
+      expect(second).toEqual({
+        properties: {
+          count: {
+            type: "number",
+          },
+        },
+        type: "object",
+      });
+      expect(second).not.toBe(first);
+    });
   });
 });

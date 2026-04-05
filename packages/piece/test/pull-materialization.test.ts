@@ -68,6 +68,20 @@ function tenfoldPattern(): Pattern {
   };
 }
 
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs: number = 1_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error(`Timed out waiting ${timeoutMs}ms`);
+}
+
 describe("piece pull materialization", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -182,9 +196,7 @@ describe("piece pull materialization", () => {
 
     try {
       const pending = manager.setupPersistent(pattern, { input: 5 });
-      for (let i = 0; i < 20 && !releaseSetup; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+      await waitFor(() => releaseSetup !== undefined);
       expect(setupResolved).toBe(false);
       if (!releaseSetup) {
         throw new Error("Expected runtime.setup to be called");

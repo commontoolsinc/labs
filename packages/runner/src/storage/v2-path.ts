@@ -1,10 +1,10 @@
 import {
   cloneIfNecessary,
   isArrayIndexPropertyName,
-} from "@commontools/data-model/fabric-value";
-import type { EntityDocument } from "@commontools/memory/v2";
-import type { FabricValue } from "@commontools/memory/interface";
-import { isRecord } from "@commontools/utils/types";
+} from "@commonfabric/data-model/fabric-value";
+import type { EntityDocument } from "@commonfabric/memory/v2";
+import type { FabricValue } from "@commonfabric/memory/interface";
+import { isRecord } from "@commonfabric/utils/types";
 
 export type ReadPathOptions = {
   allowArrayLength?: boolean;
@@ -15,6 +15,11 @@ export const isArrayIndexSegment = (segment: string): boolean =>
 
 export const createPathContainer = (nextSegment: string): FabricValue =>
   isArrayIndexSegment(nextSegment) ? [] : {};
+
+const hasOwnPathSegment = (
+  value: Record<string, unknown> | unknown[],
+  segment: string | number,
+): boolean => Object.hasOwn(value, segment);
 
 export const hasValueAtPath = (
   root: FabricValue | undefined,
@@ -32,16 +37,20 @@ export const hasValueAtPath = (
         return false;
       }
       const index = Number(segment);
-      if (!(index in current)) {
+      if (!hasOwnPathSegment(current, index)) {
         return false;
       }
       current = current[index];
       continue;
     }
-    if (!isRecord(current) || !(segment in current)) {
+    if (!isRecord(current)) {
       return false;
     }
-    current = current[segment];
+    const record = current as Record<string, unknown>;
+    if (!hasOwnPathSegment(record, segment)) {
+      return false;
+    }
+    current = record[segment];
   }
   return true;
 };
@@ -61,13 +70,21 @@ export const readValueAtPath = (
       if (!isArrayIndexSegment(segment)) {
         return undefined;
       }
-      current = current[Number(segment)];
+      const index = Number(segment);
+      if (!hasOwnPathSegment(current, index)) {
+        return undefined;
+      }
+      current = current[index];
       continue;
     }
     if (!isRecord(current)) {
       return undefined;
     }
-    current = current[segment];
+    const record = current as Record<string, unknown>;
+    if (!hasOwnPathSegment(record, segment)) {
+      return undefined;
+    }
+    current = record[segment];
   }
   return current as FabricValue | undefined;
 };

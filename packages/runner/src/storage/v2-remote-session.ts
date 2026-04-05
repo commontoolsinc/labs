@@ -1,7 +1,7 @@
-import { hashOf } from "@commontools/data-model/value-hash";
-import { type MemorySpace, type Signer } from "@commontools/memory/interface";
-import * as MemoryV2Client from "@commontools/memory/v2/client";
-import { MEMORY_V2_PROTOCOL } from "@commontools/memory/v2";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { type MemorySpace, type Signer } from "@commonfabric/memory/interface";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import { MEMORY_V2_PROTOCOL } from "@commonfabric/memory/v2";
 
 export interface SessionFactory {
   create(space: MemorySpace, signer?: Signer): Promise<{
@@ -9,6 +9,16 @@ export interface SessionFactory {
     session: MemoryV2Client.SpaceSession;
   }>;
 }
+
+export const toWebSocketAddress = (address: URL): URL => {
+  const next = new URL(address);
+  if (next.protocol === "https:") {
+    next.protocol = "wss:";
+  } else if (next.protocol === "http:") {
+    next.protocol = "ws:";
+  }
+  return next;
+};
 
 class WebSocketTransport implements MemoryV2Client.Transport {
   #receiver: (payload: string) => void = () => {};
@@ -52,8 +62,7 @@ class WebSocketTransport implements MemoryV2Client.Transport {
     if (this.#opening) {
       return await this.#opening;
     }
-    const address = new URL(this.address);
-    address.protocol = address.protocol === "https:" ? "wss:" : "ws:";
+    const address = toWebSocketAddress(this.address);
     this.#opening = new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(address);
       socket.addEventListener("open", () => {
@@ -124,7 +133,7 @@ export class RemoteSessionFactory implements SessionFactory {
     const session = await client.mount(
       space,
       {},
-      (targetSpace, descriptor) =>
+      (targetSpace: string, descriptor: MemoryV2Client.MountOptions) =>
         this.#createSessionOpenAuth(
           signer,
           targetSpace as MemorySpace,

@@ -35,11 +35,9 @@ import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
-import {
-  schemaWithProperties,
-  toDeepFrozenSchema,
-} from "@commonfabric/data-model/schema-utils";
+import { schemaWithProperties } from "@commonfabric/data-model/schema-utils";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import {
@@ -358,6 +356,8 @@ class PullQueue {
   }
 }
 
+// Only cache against already-deep-frozen inputs. Mutable schemas can be edited
+// in place, and keying the cache by their identity would return stale results.
 const standardizedSchemaCache = new WeakMap<object, JSONSchema>();
 
 const selectorRefFor = (selector: SchemaPathSelector): string =>
@@ -608,9 +608,12 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     if (typeof schema === "boolean") {
       return schema;
     }
-    const cached = standardizedSchemaCache.get(schema);
-    if (cached !== undefined) {
-      return cached;
+    const cacheable = isDeepFrozen(schema);
+    if (cacheable) {
+      const cached = standardizedSchemaCache.get(schema);
+      if (cached !== undefined) {
+        return cached;
+      }
     }
     const traverse = (
       value: Readonly<any>,
@@ -632,10 +635,10 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         }
       } else return value;
     };
-    const standardized = internSchema(
-      toDeepFrozenSchema(traverse(schema) as JSONSchema, true),
-    );
-    standardizedSchemaCache.set(schema, standardized);
+    const standardized = internSchema(traverse(schema) as JSONSchema);
+    if (cacheable) {
+      standardizedSchemaCache.set(schema, standardized);
+    }
     return standardized;
   }
 }
