@@ -56,7 +56,7 @@ step, and we'll ratchet targets down as we improve.
 - 14 micro-benchmark files across runner, memory, utils
 - CI benchmarks on every push to main (64-core runner), JSON artifacts with
   90-day retention
-- Regression detector every 4 hours (median + 2σ, auto-creates GitHub issues)
+- Regression detector every 4 hours (median + 3σ or +15%, auto-creates GitHub issues)
 - Recent wins: compilation cache (~100-500ms saved), schema freeze caching,
   LLM queue batching, scheduler debouncing, refer() caching (~2x)
 
