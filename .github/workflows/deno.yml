@@ -241,6 +241,7 @@ jobs:
           TOOLSHED_URL: http://localhost:${{ matrix.toolshed_port }}
         run: |
           chmod +x ./common-binaries/cf
+          chmod +x ./common-binaries/ct
           chmod +x ./common-binaries/toolshed
           # Set tools to path
           # Integration script needs `cf`
