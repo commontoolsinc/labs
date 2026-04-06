@@ -748,7 +748,6 @@ function resolveBase(
   parsed: ParsedWishTarget,
   ctx: WishContext,
 ): BaseResolution[] {
-): BaseResolution[] {
   // Try space targets first (most common)
   const spaceResult = resolveSpaceTarget(parsed, ctx);
   if (spaceResult) return spaceResult;
