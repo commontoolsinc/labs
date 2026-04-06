@@ -14,7 +14,7 @@ const CELL_LIKE_WRAPPER_NAMES = new Set([
   "ReadonlyCell",
   "WriteonlyCell",
 ]);
-const OPAQUE_WRAPPER_NAMES = new Set(["OpaqueRef", "OpaqueCell"]);
+const OPAQUE_WRAPPER_NAMES = new Set(["OpaqueCell"]);
 
 function getEntityNameText(name: ts.EntityName): string {
   return ts.isIdentifier(name) ? name.text : name.right.text;
@@ -717,10 +717,10 @@ export function isDefaultTypeRef(
  * Returns the wrapper kind if detected.
  *
  * This handles:
- * - Direct wrapper types: Default<T, V>, Cell<T>, Stream<T>, OpaqueRef<T>
+ * - Direct wrapper types: Default<T, V>, Cell<T>, Stream<T>, OpaqueCell<T>
  * - Aliases to wrappers: type MyDefault<T> = Default<T, T>
  *
- * Note: This only checks via typeNode. For structural detection of Cell/Stream/OpaqueRef
+ * Note: This only checks via typeNode. For structural detection of Cell/Stream/opaque wrappers
  * based on type identity, see CommonFabricFormatter.getWrapperTypeInfo().
  */
 export function detectWrapperViaNode(

@@ -79,6 +79,23 @@ describe("Schema: Capability wrapper types", () => {
   });
 
   it("Array<Writable<unknown>> produces { type: 'array', items: { type: 'unknown', asCell: ['cell'] } }", async () => {
+  it("OpaqueRef<T> erases to T without wrapper metadata", async () => {
+    const code = `
+      interface X {
+        value: OpaqueRef<{ foo: string }>;
+      }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "X");
+    const gen = createSchemaTransformerV2();
+    const result = asObjectSchema(gen.generateSchema(type, checker));
+    const value = result.properties?.value as Record<string, any>;
+
+    expect(value.properties?.foo?.type).toBe("string");
+    expect(value).not.toHaveProperty("asCell");
+    expect(value).not.toHaveProperty("asOpaque");
+  });
+
+  it("Array<Writable<unknown>> produces { type: 'array', items: { type: 'unknown', asCell: ['cell'] } }", async () => {
     const code = `
       interface X {
         items: Array<Writable<unknown>>;
