@@ -6,7 +6,7 @@
  * battleship patterns.
  */
 
-import { nonPrivateRandom } from "commontools";
+import { nonPrivateRandom } from "commonfabric";
 import type { Coordinate, Ship, ShipType, SquareState } from "./types.tsx";
 import { BOARD_SIZE, PLAYER_COLORS, SHIP_SIZES } from "./constants.tsx";
 

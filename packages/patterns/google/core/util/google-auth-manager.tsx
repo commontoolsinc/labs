@@ -26,9 +26,8 @@
  * For fallback, a "Refresh Session" button is shown in the expired UI.
  */
 
+import { __ct_data, type Opaque } from "commonfabric";
 import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
-import type { Opaque } from "commonfabric";
-import { __ct_data } from "commontools";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import GoogleAuth from "../google-auth.tsx";
 
@@ -45,18 +44,21 @@ import type {
 export type { GoogleAuthManagerInput, GoogleAuthManagerOutput };
 export type { Auth } from "../google-auth.tsx";
 
+const GOOGLE_SCOPE_MAP_VALUES = {
+  gmail: "https://www.googleapis.com/auth/gmail.readonly",
+  gmailSend: "https://www.googleapis.com/auth/gmail.send",
+  gmailModify: "https://www.googleapis.com/auth/gmail.modify",
+  calendar: "https://www.googleapis.com/auth/calendar.readonly",
+  calendarWrite: "https://www.googleapis.com/auth/calendar.events",
+  drive: "https://www.googleapis.com/auth/drive",
+  docs: "https://www.googleapis.com/auth/documents.readonly",
+  contacts: "https://www.googleapis.com/auth/contacts.readonly",
+} as const;
+export type ScopeKey = keyof typeof GOOGLE_SCOPE_MAP_VALUES;
+
 /** Scope mapping for Google APIs - friendly names to URLs */
-const GOOGLE_SCOPE_MAP = __ct_data(
-  {
-    gmail: "https://www.googleapis.com/auth/gmail.readonly",
-    gmailSend: "https://www.googleapis.com/auth/gmail.send",
-    gmailModify: "https://www.googleapis.com/auth/gmail.modify",
-    calendar: "https://www.googleapis.com/auth/calendar.readonly",
-    calendarWrite: "https://www.googleapis.com/auth/calendar.events",
-    drive: "https://www.googleapis.com/auth/drive",
-    docs: "https://www.googleapis.com/auth/documents.readonly",
-    contacts: "https://www.googleapis.com/auth/contacts.readonly",
-  } as const,
+const GOOGLE_SCOPE_MAP: Record<ScopeKey, string> = __ct_data(
+  GOOGLE_SCOPE_MAP_VALUES,
 );
 export const SCOPE_MAP = GOOGLE_SCOPE_MAP;
 
@@ -74,8 +76,6 @@ const GOOGLE_SCOPE_DESCRIPTIONS = __ct_data(
   } as const,
 );
 export const SCOPE_DESCRIPTIONS = GOOGLE_SCOPE_DESCRIPTIONS;
-
-export type ScopeKey = keyof typeof GOOGLE_SCOPE_MAP;
 
 /** Account type for multi-account support */
 export type AccountType = "default" | "personal" | "work";
