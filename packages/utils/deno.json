@@ -5,6 +5,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./base64url": "./src/base64url.ts",
     "./cache": "./src/cache.ts",
     "./defer": "./src/defer.ts",
     "./encoding": "./src/encoding.ts",
