@@ -566,6 +566,7 @@ function assignParameterBindingAlias(
   aliases: Map<string, SourceRef>,
   aliasShapes: Map<string, AliasShape>,
   markWildcard: (name: string) => void,
+  checker?: ts.TypeChecker,
 ): void {
   if (ts.isIdentifier(name)) {
     if (!source) {
@@ -611,7 +612,7 @@ function assignParameterBindingAlias(
         key = element.name.text;
       }
     } else {
-      key = getStaticPropertyKeyText(element.propertyName);
+      key = getStaticPropertyKeyText(element.propertyName, checker);
       if (!key && isSourceRefBinding(source)) {
         markWildcard(source.root);
       }
@@ -630,6 +631,7 @@ function assignParameterBindingAlias(
       aliases,
       aliasShapes,
       markWildcard,
+      checker,
     );
   }
 }
@@ -787,6 +789,7 @@ export function analyzeFunctionCapabilities(
         aliases,
         aliasShapes,
         markWildcard,
+        checker,
       );
     }
 
@@ -856,7 +859,12 @@ export function analyzeFunctionCapabilities(
         ts.isBinaryExpression(current) &&
         FALLBACK_OPERATORS.has(current.operatorToken.kind)
       ) {
-        return resolveBinding(current.left);
+        const left = resolveBinding(current.left);
+        const right = resolveBinding(current.right);
+        if (left && right) {
+          return aliasBindingEquals(left, right) ? left : undefined;
+        }
+        return left ?? right;
       }
 
       const info = extractAccessPath(current, checker);
@@ -1162,6 +1170,7 @@ export function analyzeFunctionCapabilities(
         aliases,
         aliasShapes,
         markWildcard,
+        checker,
       );
     };
 

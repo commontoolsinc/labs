@@ -609,6 +609,27 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability analysis follows right-hand ?? fallback aliases through for...of item reads",
+  () => {
+    const fn = parseFirstCallback(
+      `const cached = undefined;
+      const fn = (input) => {
+        const items = cached ?? input.notes;
+        for (const item of items) {
+          item.title;
+        }
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("notes"));
+    assert(input.readPaths.includes("notes.0.title"));
+  },
+);
+
+Deno.test(
   "Capability analysis binds plain array callback items back to source element paths",
   () => {
     const { program, sourceFile } = createProgramWithSource(
@@ -1013,6 +1034,31 @@ Deno.test(
       ) => self?.id ?? value;
       `,
     );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "__param0");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("$SELF.id"));
+    assert(input.readPaths.includes("value"));
+  },
+);
+
+Deno.test(
+  "Capability analysis tracks aliased fixed-symbol destructuring without wildcard",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": `
+      import { SELF as CF_SELF } from "commonfabric";
+
+      const fn = (
+        { [CF_SELF]: self, value }: { [CF_SELF]?: { id: string }; value: string },
+      ) => self?.id ?? value;
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
     const summary = analyzeFunctionCapabilities(
       findArrowByVariableName(sourceFile, "fn"),
       { checker: program.getTypeChecker() },

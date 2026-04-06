@@ -1503,6 +1503,42 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "lift shrinks item fields through right-hand ?? fallback aliases",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "type Note = { title: string; body: string };",
+        "const cached = undefined as Note[] | undefined;",
+        "const liftTitles = lift((input: { notes: Note[] }) => {",
+        "  const items = cached ?? input.notes;",
+        "  for (const item of items) {",
+        "    return item.title;",
+        "  }",
+        '  return "";',
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "notes");
+      assertStringIncludes(inputSchema, "title");
+      assertEquals(inputSchema.includes("body"), false);
+    },
+  );
+
+  await t.step(
     "lift preserves array item properties named key",
     async () => {
       const source = [
@@ -1674,6 +1710,39 @@ Deno.test("Schema Shrink Validation", async (t) => {
       const inputSchema = extractSchemas(result.output)[0] ?? "";
       assertStringIncludes(inputSchema, "$NAME");
       assertStringIncludes(inputSchema, "$UI");
+      assertEquals(inputSchema.includes("metadata"), false);
+      assertEquals(inputSchema.includes("author"), false);
+    },
+  );
+
+  await t.step(
+    "derive shrinks aliased fixed-symbol destructuring without pulling unrelated fields",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive, NAME as CF_NAME } from "commonfabric";',
+        "type Piece = {",
+        "  [CF_NAME]?: string;",
+        "  metadata: { author: string; tags: string[] };",
+        "};",
+        "const piece = {} as Piece;",
+        'const label = derive({ piece }, ({ piece: { [CF_NAME]: name } }) => name ?? "");',
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "$NAME");
       assertEquals(inputSchema.includes("metadata"), false);
       assertEquals(inputSchema.includes("author"), false);
     },
