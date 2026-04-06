@@ -547,6 +547,67 @@ export function rewriteArrayMethodCallbackExpressionSites(
     );
   };
 
+  const wrapArrayMethodCallbackLocalExpression = (
+    expression: ts.Expression,
+    options: {
+      allowDirectExpressionWrap?: boolean;
+    } = {},
+  ): ts.Expression | undefined => {
+    const analysis = analyze(expression);
+    if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
+      const relevantDataFlows = context.getRelevantDataFlowsFromAnalysis(
+        analysis,
+      );
+      if (relevantDataFlows.length === 0) {
+        return undefined;
+      }
+
+      return createReactiveWrapperForExpression(
+        expression,
+        relevantDataFlows,
+        context,
+        {
+          allowDirectExpressionWrap: options.allowDirectExpressionWrap,
+          preferDeriveWrapper: true,
+        },
+      );
+    }
+
+    return undefined;
+  };
+
+  const rewriteArrayMethodCallbackExpressionStatement = (
+    expression: ts.Expression,
+  ): ts.Expression | undefined => {
+    if (isDirectArrayMethodRootExpression(expression)) {
+      return undefined;
+    }
+
+    return wrapArrayMethodCallbackLocalExpression(expression);
+  };
+
+  const rewriteSkippedArrayMethodCallbackInitializer = (
+    expression: ts.Expression,
+  ): ts.Expression | undefined => {
+    if (isControlFlowRewriteExpression(expression)) {
+      return undefined;
+    }
+
+    const handling = classifyExpressionSiteHandling(
+      expression,
+      "variable-initializer",
+      context,
+      analyze,
+    );
+    if (handling.kind !== "skip" || handling.reason !== "not-lowerable") {
+      return undefined;
+    }
+
+    return wrapArrayMethodCallbackLocalExpression(expression, {
+      allowDirectExpressionWrap: true,
+    });
+  };
+
   const visit: ts.Visitor = (node) => {
     if (
       node !== body &&
@@ -591,6 +652,32 @@ export function rewriteArrayMethodCallbackExpressionSites(
       }
 
       return visitEachChildWithJsx(node, visit, context.tsContext);
+    }
+
+    if (ts.isExpressionStatement(node)) {
+      const rewritten = rewriteArrayMethodCallbackExpressionStatement(
+        node.expression,
+      );
+      if (rewritten) {
+        return context.factory.updateExpressionStatement(node, rewritten);
+      }
+
+      return visitEachChildWithJsx(node, visit, context.tsContext);
+    }
+
+    if (ts.isVariableDeclaration(node) && node.initializer) {
+      const rewritten = rewriteSkippedArrayMethodCallbackInitializer(
+        node.initializer,
+      );
+      if (rewritten) {
+        return context.factory.updateVariableDeclaration(
+          node,
+          node.name,
+          node.exclamationToken,
+          node.type,
+          rewritten,
+        );
+      }
     }
 
     if (ts.isExpression(node)) {

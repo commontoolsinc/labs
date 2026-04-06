@@ -16,12 +16,24 @@ const __ctModuleCallback_1 = __ctHardenFn(({ element: item, params: { settings }
     properties: {
         item: {
             type: "number"
+        },
+        settings: {
+            type: "object",
+            properties: {
+                multiplier: {
+                    type: "number"
+                }
+            },
+            required: ["multiplier"]
         }
     },
-    required: ["item"]
+    required: ["item", "settings"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item * settings.multiplier)}</span>));
+} as const satisfies __cfHelpers.JSONSchema, {
+    item: item,
+    settings: settings
+}, ({ item, settings }) => item * settings.multiplier)}</span>));
 interface State {
     items: number[];
     settings: {
@@ -41,9 +53,24 @@ export default pattern((state) => {
                 properties: {
                     element: {
                         type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            settings: {
+                                type: "object",
+                                properties: {
+                                    multiplier: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["multiplier"]
+                            }
+                        },
+                        required: ["settings"]
                     }
                 },
-                required: ["element"]
+                required: ["element", "params"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

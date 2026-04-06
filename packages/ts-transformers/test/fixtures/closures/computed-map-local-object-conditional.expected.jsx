@@ -74,7 +74,31 @@ export default pattern((state) => {
         [UI]: (<div>
         {rows.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const row = __ct_pattern_input.key("element");
-                const view = { status: __cfHelpers.ifElse({
+                const view = __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        row: {
+                            type: "object",
+                            properties: {
+                                done: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["done"]
+                        }
+                    },
+                    required: ["row"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "object",
+                    properties: {
+                        status: {
+                            type: "string"
+                        }
+                    },
+                    required: ["status"]
+                } as const satisfies __cfHelpers.JSONSchema, { row: {
+                        done: row.key("done")
+                    } }, ({ row }) => ({ status: __cfHelpers.ifElse({
                         type: "boolean"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
@@ -82,8 +106,8 @@ export default pattern((state) => {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": ["Done", "Pending"]
-                    } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending") };
-                return <span>{view.status}</span>;
+                    } as const satisfies __cfHelpers.JSONSchema, row.done, "Done", "Pending") }));
+                return <span>{view.key("status")}</span>;
             }, {
                 type: "object",
                 properties: {

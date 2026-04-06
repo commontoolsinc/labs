@@ -185,14 +185,6 @@ export function createDataFlowAnalyzer(
     const target = unwrapStructuralDataFlowExpression(initializer);
 
     if (
-      ts.isIdentifier(target) ||
-      ts.isPropertyAccessExpression(target) ||
-      ts.isElementAccessExpression(target)
-    ) {
-      return false;
-    }
-
-    if (
       ts.isObjectLiteralExpression(target) ||
       ts.isArrayLiteralExpression(target) ||
       isFunctionLikeExpression(target)

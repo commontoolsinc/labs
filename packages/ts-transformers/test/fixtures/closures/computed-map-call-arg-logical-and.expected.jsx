@@ -75,13 +75,31 @@ export default pattern((state) => {
         [UI]: (<div>
         {rows.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const row = __ct_pattern_input.key("element");
-                const label = identity(__cfHelpers.when({
+                const label = __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        row: {
+                            type: "object",
+                            properties: {
+                                done: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["done"]
+                        }
+                    },
+                    required: ["row"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "unknown"
+                } as const satisfies __cfHelpers.JSONSchema, { row: {
+                        done: row.key("done")
+                    } }, ({ row }) => identity(__cfHelpers.when({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     "enum": [false, "Done"]
-                } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done"));
+                } as const satisfies __cfHelpers.JSONSchema, row.done, "Done")));
                 return <span>{label}</span>;
             }, {
                 type: "object",
