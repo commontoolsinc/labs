@@ -248,3 +248,36 @@ Deno.test("applyShrinkAndWrap turns identity-only cell leaves into OpaqueCell<un
   assertEquals(printed.includes("name"), false);
   assertEquals(printed.includes("nested"), false);
 });
+
+Deno.test("applyShrinkAndWrap shrinks direct array parameters to used item fields", () => {
+  const { sourceFile, checker } = createProgram(`
+    type AssetRecord = {
+      id: string;
+      stage: string;
+      owner: string;
+      unused: { nested: string };
+    };
+    type Input = AssetRecord[];
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      readPaths: [["id"], ["stage"], ["owner"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  assertStringIncludes(printed, "id: string;");
+  assertStringIncludes(printed, "stage: string;");
+  assertStringIncludes(printed, "owner: string;");
+  assertEquals(printed.includes("unused"), false);
+  assertEquals(printed.includes("nested"), false);
+});

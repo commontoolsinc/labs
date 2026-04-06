@@ -570,19 +570,23 @@ Deno.test("Capability analysis marks for...in over tracked source as wildcard", 
   assertEquals(input.wildcard, true);
 });
 
-Deno.test("Capability analysis marks for...of over tracked source as wildcard", () => {
-  const fn = parseFirstCallback(
-    `const fn = (input) => {
+Deno.test(
+  "Capability analysis keeps bare for...of element uses path-specific",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
       for (const item of input) {
         console.log(item);
       }
     };`,
-  );
-  const summary = analyzeFunctionCapabilities(fn);
-  const input = getPaths(summary, "input");
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
 
-  assertEquals(input.wildcard, true);
-});
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("0"));
+  },
+);
 
 Deno.test(
   "Capability analysis keeps ?? fallback aliases path-specific through for...of item reads",
@@ -600,7 +604,242 @@ Deno.test(
 
     assertEquals(input.wildcard, false);
     assert(input.readPaths.includes("items"));
-    assert(input.readPaths.includes("items.notes.length"));
+    assert(input.readPaths.includes("items.0.notes.length"));
+  },
+);
+
+Deno.test(
+  "Capability analysis binds plain array callback items back to source element paths",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        map<U>(mapper: (value: T) => U): Array<U>;
+      }
+
+      type Route = { id: string; label: string; capacity: number; unused: string };
+
+      const fn = (input: { routes: Route[] }) =>
+        input.routes.map((route) => ({
+          route: route.id,
+          label: route.label,
+          capacity: route.capacity,
+        }));
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("routes"));
+    assert(input.readPaths.includes("routes.0.id"));
+    assert(input.readPaths.includes("routes.0.label"));
+    assert(input.readPaths.includes("routes.0.capacity"));
+    assertEquals(input.readPaths.includes("routes.0.unused"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis follows tracked values through local Map set/get",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        forEach(callback: (value: T) => void): void;
+      }
+
+      type Component = { id: string; name: string; props: string[]; unused: string };
+
+      const fn = (input: { components: Component[]; ids: string[] }) => {
+        const componentMap = new Map<string, Component>();
+        input.components.forEach((component) => componentMap.set(component.id, component));
+        return input.ids.map((id) => componentMap.get(id)?.name ?? id);
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("components"));
+    assert(input.readPaths.includes("components.0.id"));
+    assert(input.readPaths.includes("components.0.name"));
+    assert(input.readPaths.includes("ids"));
+    assert(input.readPaths.includes("ids.0"));
+    assertEquals(input.readPaths.includes("components.0.unused"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis follows tracked values stored in local arrays through sort callbacks",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        push(...items: T[]): number;
+        sort(compareFn?: (a: T, b: T) => number): T[];
+      }
+
+      type Candidate = { id: string; age: number; site: string; unused: string };
+      type Result = { candidate: Candidate; eligible: boolean };
+
+      const fn = (input: { candidates: Candidate[] }) => {
+        const results: Result[] = [];
+        for (const candidate of input.candidates) {
+          results.push({ candidate, eligible: candidate.age >= 18 });
+        }
+        results.sort((left, right) =>
+          left.candidate.id.localeCompare(right.candidate.id)
+        );
+        return results.length;
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("candidates"));
+    assert(input.readPaths.includes("candidates.0.age"));
+    assert(input.readPaths.includes("candidates.0.id"));
+    assertEquals(input.readPaths.includes("candidates.0.unused"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps element bindings through filter-to-map chains",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        filter(predicate: (value: T) => boolean): Array<T>;
+        map<U>(mapper: (value: T) => U): Array<U>;
+      }
+
+      type ScreeningResult = {
+        candidate: { id: string; site: string; unused: string };
+        eligible: boolean;
+      };
+
+      const fn = (input: { report: ScreeningResult[] }) =>
+        input.report
+          .filter((entry) => entry.eligible)
+          .map((entry) => entry.candidate.id);
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("report"));
+    assert(input.readPaths.includes("report.0.eligible"));
+    assert(input.readPaths.includes("report.0.candidate.id"));
+    assertEquals(input.readPaths.includes("report.0.candidate.unused"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis tracks properties read from find() result aliases",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        find(predicate: (value: T) => boolean): T | undefined;
+      }
+
+      type IncidentStep = {
+        id: string;
+        title: string;
+        owner: string;
+        status: "pending" | "in_progress";
+        expectedMinutes: number;
+        elapsedMinutes: number;
+      };
+
+      const fn = (input: { list: IncidentStep[]; active: string | null }) => {
+        const target = input.list.find((step) => step.id === input.active);
+        return target ? target.title : "idle";
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("list"));
+    assert(input.readPaths.includes("list.0.id"));
+    assert(input.readPaths.includes("list.0.title"));
+    assert(input.readPaths.includes("active"));
+  },
+);
+
+Deno.test(
+  "Capability analysis tracks chained || fallback reads on both branches",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      const fn = (state: { name: string; firstItem: string | undefined }) =>
+        state.name || state.firstItem || "default";
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const state = getPaths(summary, "state");
+
+    assertEquals(state.wildcard, false);
+    assert(state.readPaths.includes("name"));
+    assert(state.readPaths.includes("firstItem"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps array item properties named key",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        filter(predicate: (value: T) => boolean): Array<T>;
+        map<U>(mapper: (value: T) => U): Array<U>;
+      }
+
+      type ColumnSummary = {
+        key: "backlog" | "inProgress" | "review" | "done";
+        overloaded: boolean;
+        title: string;
+      };
+
+      const fn = (summaries: ColumnSummary[]) =>
+        summaries
+          .filter((summary) => summary.overloaded)
+          .map((summary) => summary.key);
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const summaries = getPaths(summary, "summaries");
+
+    assertEquals(summaries.wildcard, false);
+    assert(summaries.readPaths.includes("0.overloaded"));
+    assert(summaries.readPaths.includes("0.key"));
   },
 );
 
@@ -801,7 +1040,46 @@ Deno.test(
 
     assertEquals(input.wildcard, false);
     assert(input.readPaths.includes("items"));
-    assert(input.readPaths.includes("items.name"));
+    assert(input.readPaths.includes("items.0.name"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps direct array parameters path-specific in for...of loops",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface AssetRecord {
+        id: string;
+        stage: string;
+        owner: string;
+        unused: { nested: string };
+      }
+
+      const fn = (entries: AssetRecord[]) => {
+        const buckets: { id: string; stage: string; owner: string }[] = [];
+        for (const entry of entries) {
+          buckets.push({
+            id: entry.id,
+            stage: entry.stage,
+            owner: entry.owner,
+          });
+        }
+        return buckets;
+      };
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "entries");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("0.id"));
+    assert(input.readPaths.includes("0.stage"));
+    assert(input.readPaths.includes("0.owner"));
+    assertEquals(input.readPaths.includes("0.unused"), false);
   },
 );
 

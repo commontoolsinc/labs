@@ -227,6 +227,17 @@ function isNumericPathSegment(segment: string): boolean {
   return /^\d+$/.test(segment);
 }
 
+function isArrayRootOnlyPath(
+  path: readonly string[],
+): boolean {
+  if (path.length !== 1) {
+    return false;
+  }
+
+  const [head] = path;
+  return !!head && NON_ITEM_PROPS.has(head);
+}
+
 function getArrayItemPaths(
   paths: readonly (readonly string[])[],
 ): readonly (readonly string[])[] {
@@ -235,7 +246,7 @@ function getArrayItemPaths(
     if (path.length === 0) continue;
     const [head, ...tail] = path;
     if (!head) continue;
-    if (NON_ITEM_PROPS.has(head) && tail.length === 0) {
+    if (isArrayRootOnlyPath(path)) {
       continue;
     }
     itemPaths.push(isNumericPathSegment(head) ? tail : path);
@@ -355,11 +366,7 @@ function buildShrunkTypeNodeFromType(
   // fetching full item schemas unnecessarily.
   if (isArrayShapeType(type, checker)) {
     const itemPaths = getArrayItemPaths(normalized);
-    const allNonItem = normalized.every(
-      (path) =>
-        path.length === 1 && path[0] !== undefined &&
-        NON_ITEM_PROPS.has(path[0]),
-    );
+    const allNonItem = normalized.every((path) => isArrayRootOnlyPath(path));
     if (allNonItem && isHomogeneousArrayType(type, checker)) {
       // No item access — emit unknown[] to avoid fetching item schemas.
       return factory.createArrayTypeNode(
@@ -537,7 +544,6 @@ function buildShrunkTypeNodeFromTypeNode(
   if (normalized.length === 0) {
     return undefined;
   }
-  const itemPaths = getArrayItemPaths(normalized);
   const hasDirectAccess = normalized.some((path) => path.length === 0);
 
   if (hasDirectAccess) {
@@ -571,7 +577,7 @@ function buildShrunkTypeNodeFromTypeNode(
         }
       }
     }
-    if (itemPaths.length === 0) {
+    if (!normalized.some((path) => path.length > 0)) {
       return node;
     }
   }
@@ -605,11 +611,8 @@ function buildShrunkTypeNodeFromTypeNode(
       isArray = !!tc.isArrayType?.(resolvedType);
     }
     if (isArray) {
-      const allNonItem = normalized.every(
-        (path) =>
-          path.length === 1 && path[0] !== undefined &&
-          NON_ITEM_PROPS.has(path[0]),
-      );
+      const itemPaths = getArrayItemPaths(normalized);
+      const allNonItem = normalized.every((path) => isArrayRootOnlyPath(path));
       if (allNonItem) {
         const arrayNode = factory.createArrayTypeNode(
           factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
@@ -998,6 +1001,81 @@ function typeHasProperty(
   return false;
 }
 
+function getArrayElementTypeNode(
+  node: ts.TypeNode | undefined,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode | undefined {
+  if (!node) return undefined;
+
+  const current = ts.isParenthesizedTypeNode(node) ? node.type : node;
+
+  if (ts.isUnionTypeNode(current)) {
+    for (const member of current.types) {
+      if (isNullishTypeNode(member)) continue;
+      const elementNode = getArrayElementTypeNode(
+        member,
+        checker,
+        sourceFile,
+        typeRegistry,
+      );
+      if (elementNode) {
+        return elementNode;
+      }
+    }
+    return undefined;
+  }
+
+  if (ts.isArrayTypeNode(current)) {
+    return current.elementType;
+  }
+
+  if (
+    ts.isTypeOperatorNode(current) &&
+    current.operator === ts.SyntaxKind.ReadonlyKeyword &&
+    ts.isArrayTypeNode(current.type)
+  ) {
+    return current.type.elementType;
+  }
+
+  if (
+    ts.isTypeReferenceNode(current) &&
+    ts.isIdentifier(current.typeName) &&
+    current.typeArguments?.[0] &&
+    (current.typeName.text === "Array" ||
+      current.typeName.text === "ReadonlyArray")
+  ) {
+    return current.typeArguments[0];
+  }
+
+  const resolvedType = getTypeFromTypeNodeWithFallback(
+    current,
+    checker,
+    typeRegistry,
+  );
+  if (!isArrayShapeType(resolvedType, checker)) {
+    return undefined;
+  }
+
+  const elementType = getArrayElementType(resolvedType, checker);
+  if (!elementType) {
+    return undefined;
+  }
+
+  const typeToNodeFlags = ts.NodeBuilderFlags.NoTruncation |
+    ts.NodeBuilderFlags.UseStructuralFallback;
+  const elementNode = checker.typeToTypeNode(
+    elementType,
+    sourceFile,
+    typeToNodeFlags,
+  );
+  if (elementNode) {
+    ensureTypeNodeRegistered(elementNode, checker, typeRegistry);
+  }
+  return elementNode;
+}
+
 /**
  * After shrinking, validates that the requested property paths were actually
  * materialised. Reports a diagnostic when the base type is too narrow or
@@ -1044,14 +1122,66 @@ export function validateShrinkCoverage(
   // These are internal implementation details, not user-authored types.
   if (paramSummary.name.startsWith("__")) return;
 
-  // Collect requested top-level property names, filtering out the reactive
-  // proxy accessor method "key" which is injected by the pattern-callback
-  // transformer and is not a user-authored property.
+  const nonNullableBaseType = baseType
+    ? checker.getNonNullableType(baseType)
+    : undefined;
+
+  if (nonNullableBaseType && isArrayShapeType(nonNullableBaseType, checker)) {
+    const arrayRootPaths = uniquePaths(
+      paths.filter((path) => isArrayRootOnlyPath(path)),
+    );
+    const arrayItemPaths = getArrayItemPaths(paths);
+
+    if (arrayItemPaths.length > 0) {
+      const elementType = getArrayElementType(nonNullableBaseType, checker);
+      const elementTypeNode = getArrayElementTypeNode(
+        baseTypeNode,
+        checker,
+        context.sourceFile,
+        context.options.typeRegistry,
+      ) ?? ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+      const shrunkElementNode = getArrayElementTypeNode(
+        shrunk,
+        checker,
+        context.sourceFile,
+        context.options.typeRegistry,
+      );
+
+      validateShrinkCoverage(
+        paramSummary,
+        elementTypeNode,
+        elementType,
+        arrayItemPaths,
+        shrunkElementNode,
+        context,
+        fnNode,
+        checker,
+      );
+    }
+
+    if (arrayRootPaths.length === 0) {
+      return;
+    }
+
+    paths = arrayRootPaths;
+  }
+
+  // Collect requested top-level property names. Synthetic callback lowering can
+  // introduce helper reads like `.key("foo")`; ignore those when the base type
+  // does not actually define a `key` property.
   const requestedHeads = new Set<string>();
   for (const p of paths) {
-    if (p.length > 0 && p[0] !== undefined && p[0] !== "key") {
-      requestedHeads.add(p[0]);
+    const head = p[0];
+    if (!head) {
+      continue;
     }
+    if (
+      head === "key" &&
+      !typeHasProperty(head, shrunk, baseTypeNode, baseType, checker)
+    ) {
+      continue;
+    }
+    requestedHeads.add(head);
   }
   if (requestedHeads.size === 0) return;
 
@@ -1101,15 +1231,15 @@ export function validateShrinkCoverage(
   // This catches interfaces like `{ amounts?: unknown }` where the property
   // exists but its type is `unknown`, meaning the runtime schema will contain
   // `{ type: "unknown" }` and the runtime will return opaque undefined.
-  if (baseType) {
-    const nonNullable = checker.getNonNullableType(baseType);
+  if (nonNullableBaseType) {
     const unknownProps: string[] = [];
     for (const head of requestedHeads) {
-      const prop = nonNullable.getProperty(head) ??
-        (nonNullable.isUnion()
-          ? nonNullable.types.find((t) => t.getProperty(head))?.getProperty(
-            head,
-          )
+      const prop = nonNullableBaseType.getProperty(head) ??
+        (nonNullableBaseType.isUnion()
+          ? nonNullableBaseType.types.find((t) => t.getProperty(head))
+            ?.getProperty(
+              head,
+            )
           : undefined);
       if (!prop) continue;
       const propType = checker.getTypeOfSymbol(prop);
@@ -1838,6 +1968,7 @@ export function applyShrinkAndWrap(
     !paramSummary.wildcard &&
     retainedPaths.length > 0
   ) {
+    const hasDirectAccess = retainedPaths.some((path) => path.length === 0);
     const preferTypeDriven = !!baseType && isSyntheticTypeNode(baseTypeNode);
     if (preferTypeDriven) {
       // Synthetic inferred nodes can lose property precision in node-only mode.
@@ -1919,7 +2050,8 @@ export function applyShrinkAndWrap(
 
         if (
           nodeDriven === baseTypeNode &&
-          typeDriven !== baseTypeNode
+          typeDriven !== baseTypeNode &&
+          !hasDirectAccess
         ) {
           shrunk = typeDriven;
         } else if (typeDrivenCoverage > nodeDrivenCoverage) {

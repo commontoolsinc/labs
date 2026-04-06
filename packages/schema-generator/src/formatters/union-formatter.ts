@@ -28,6 +28,13 @@ export class UnionFormatter implements TypeFormatter {
   ): JSONSchemaMutable {
     const union = type as ts.UnionType;
     const members = union.types ?? [];
+    const unionNode = context.typeNode &&
+        ts.isParenthesizedTypeNode(context.typeNode)
+      ? context.typeNode.type
+      : context.typeNode;
+    const memberNodes = unionNode && ts.isUnionTypeNode(unionNode)
+      ? unionNode.types
+      : undefined;
 
     if (members.length === 0) {
       throw new Error("UnionFormatter received empty union type");
@@ -41,13 +48,18 @@ export class UnionFormatter implements TypeFormatter {
 
     const generate = (
       t: ts.Type,
+      memberIndex: number,
       typeNode?: ts.TypeNode,
     ): JSONSchemaMutable => {
       const native = getNativeTypeSchema(t, context.typeChecker);
       if (native !== undefined) {
         return cloneSchemaDefinition(native);
       }
-      return this.schemaGenerator.formatChildType(t, context, typeNode);
+      return this.schemaGenerator.formatChildType(
+        t,
+        context,
+        typeNode ?? memberNodes?.[memberIndex],
+      );
     };
 
     // Case: exactly one non-null member + null => anyOf (nullable type).
@@ -57,7 +69,7 @@ export class UnionFormatter implements TypeFormatter {
     // Note: if undefined is also present (T | null | undefined), nonNull.length > 1,
     // so we fall through to the anyOf path which emits { type: "undefined" } explicitly.
     if (hasNull && nonNull.length === 1) {
-      const item = generate(nonNull[0]!);
+      const item = generate(nonNull[0]!, members.indexOf(nonNull[0]!));
       return { anyOf: [item, { type: "null" }] };
     }
 
@@ -107,7 +119,7 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     // Fallback: anyOf of member schemas (excluding null/undefined handled above)
-    let unionOptions = members.map((m) => generate(m));
+    let unionOptions = members.map((m, index) => generate(m, index));
     // When widenLiterals is true, try to merge structurally identical schemas
     // that only differ in literal enum values
     if (context.widenLiterals && unionOptions.length > 1) {

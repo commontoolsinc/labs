@@ -140,6 +140,24 @@ function getExplicitPropertyTypeNode(
   return undefined;
 }
 
+function isExplicitPropertyShapeTypeNode(
+  typeNode: ts.TypeNode | undefined,
+): boolean {
+  if (!typeNode) return false;
+
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    return isExplicitPropertyShapeTypeNode(typeNode.type);
+  }
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    return typeNode.types.some((member) =>
+      isExplicitPropertyShapeTypeNode(member)
+    );
+  }
+
+  return ts.isTypeLiteralNode(typeNode);
+}
+
 function shouldSkipInternalProperty(
   propName: string,
   propDecl: ts.Declaration | undefined,
@@ -200,6 +218,9 @@ export class ObjectFormatter implements TypeFormatter {
 
     const properties: Record<string, JSONSchemaMutable> = {};
     const required: string[] = [];
+    const shouldRespectExplicitPropertyShape = isExplicitPropertyShapeTypeNode(
+      context.typeNode,
+    );
 
     const props = checker.getPropertiesOfType(type);
     for (const prop of props) {
@@ -228,6 +249,13 @@ export class ObjectFormatter implements TypeFormatter {
       }
 
       if (shouldSkipInternalProperty(propName, propDecl, context)) {
+        continue;
+      }
+
+      if (
+        shouldRespectExplicitPropertyShape &&
+        !typeNodeExplicitlyDeclaresProperty(context.typeNode, propName)
+      ) {
         continue;
       }
 
