@@ -1788,9 +1788,68 @@ export function isPrimitive(val: unknown): val is Primitive {
   return val === null || (type !== "object" && type !== "function");
 }
 
+type TraverseFailure = Readonly<{
+  name: "TraverseFailure";
+  code: string;
+  message: string;
+}>;
+
+function createTraverseFailure(
+  code: string,
+  message: string,
+): TraverseFailure {
+  return Object.freeze({
+    name: "TraverseFailure" as const,
+    code,
+    message,
+  });
+}
+
+const TRAVERSE_FAILURES = {
+  pathMismatch: createTraverseFailure("PATH_MISMATCH", "Path mismatch"),
+  undefinedLink: createTraverseFailure(
+    "UNDEFINED_LINK",
+    "Encountered link to undefined value",
+  ),
+  schemaRefResolution: createTraverseFailure(
+    "SCHEMA_REF_RESOLUTION",
+    "Failed to resolve schema ref",
+  ),
+  noMatchingAnyOf: createTraverseFailure(
+    "NO_MATCHING_ANY_OF",
+    "No matching anyOf",
+  ),
+  noMatchingOneOf: createTraverseFailure(
+    "NO_MATCHING_ONE_OF",
+    "No matching oneOf",
+  ),
+  multipleMatchingOneOf: createTraverseFailure(
+    "MULTIPLE_MATCHING_ONE_OF",
+    "Multiple matching oneOf",
+  ),
+  falseAllOf: createTraverseFailure(
+    "FALSE_ALL_OF",
+    "Encountered false in allOf",
+  ),
+  falseSchema: createTraverseFailure("FALSE_SCHEMA", "Schema is false"),
+  invalidType: createTraverseFailure("INVALID_TYPE", "Invalid type"),
+  invalidArray: createTraverseFailure("INVALID_ARRAY", "Invalid array"),
+  invalidObject: createTraverseFailure("INVALID_OBJECT", "Invalid object"),
+  unexpectedDocValue: createTraverseFailure(
+    "UNEXPECTED_DOC_VALUE",
+    "Unexpected type for doc value",
+  ),
+} as const;
+
+function fail<T>(
+  error: TraverseFailure,
+): TraverseResult<T> {
+  return { error };
+}
+
 type TraverseResult<T> = { ok: T; error?: never } | {
   ok?: never;
-  error: Error;
+  error: TraverseFailure;
 };
 
 /** Opaque memo cache shared across SchemaObjectTraverser instances within a query */
@@ -1990,7 +2049,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     ) {
       // There's a mismatch in the initial part, so this will not match
       logger.debug("traverse", () => ["path mismatch", docPath, selector.path]);
-      return { error: new Error("Path mismatch") };
+      return fail(TRAVERSE_FAILURES.pathMismatch);
     } else { // valuePath length < selector.path.length
       const [nextDoc, nextSelector] = this.getDocAtPath(
         doc,
@@ -2015,11 +2074,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
           // In the future, getAtPath could be altered to convey whether we
           // found a valid undefined node, and we can handle this better, but
           // right now there's no way for that to happen.
-          return { error: new Error("Encountered link to undefined value") };
+          return fail(TRAVERSE_FAILURES.undefinedLink);
         } else {
           return this.isValidType(nextSelector.schema, "undefined")
             ? { ok: this.traversePrimitive(nextDoc, nextSelector.schema) }
-            : { error: new Error("Encountered link to undefined value") };
+            : fail(TRAVERSE_FAILURES.undefinedLink);
         }
       }
       if (!deepEqual(nextDoc.address.path, nextSelector!.path)) {
@@ -2101,7 +2160,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           "traverse",
           () => ["Failed to resolve schema ref", schema],
         );
-        return { error: new Error("Failed to resolve schema ref") };
+        return fail(TRAVERSE_FAILURES.schemaRefResolution);
       }
     }
     if (isRecord(resolved)) {
@@ -2162,7 +2221,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
             this.getDebugValue(doc),
           ],
         );
-        return { error: new Error("No matching anyOf") };
+        return fail(TRAVERSE_FAILURES.noMatchingAnyOf);
       } else if (resolved.oneOf) {
         const { oneOf, ...restSchema } = resolved;
         // Consider items without asCell or asStream first, since if we aren't
@@ -2204,7 +2263,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
               this.getDebugValue(doc),
             ],
           );
-          return { error: new Error("No matching oneOf") };
+          return fail(TRAVERSE_FAILURES.noMatchingOneOf);
         }
         logger.info(
           "traverse",
@@ -2215,7 +2274,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
             this.getDebugValue(doc),
           ],
         );
-        return { error: new Error("Multiple matching oneOf") };
+        return fail(TRAVERSE_FAILURES.multipleMatchingOneOf);
       } else if (resolved.allOf) {
         const matches: Immutable<FabricValue>[] = [];
         const { allOf, ...restSchema } = resolved;
@@ -2225,7 +2284,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
               "traverse",
               () => ["Encountered false in allOf", resolved],
             );
-            return { error: new Error("Encountered false in allOf") };
+            return fail(TRAVERSE_FAILURES.falseAllOf);
           }
           const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
           // TODO(@ubik2): do i need to merge the link schema?
@@ -2289,7 +2348,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       !SchemaObjectTraverser.asCellOrStream(resolved)
     ) {
       // This value rejects all objects - just return
-      return { error: new Error("Schema is false") };
+      return fail(TRAVERSE_FAILURES.falseSchema);
     } else if (!isRecord(resolved)) {
       logger.warn(
         "traverse",
@@ -2306,27 +2365,27 @@ export class SchemaObjectTraverser<V extends FabricValue>
         ? { ok: defaultValue }
         : this.isValidType(schemaObj, "undefined")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
-        : { error: new Error("Invalid type") };
+        : fail(TRAVERSE_FAILURES.invalidType);
     } else if (doc.value === null) {
       return this.isValidType(schemaObj, "null")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
-        : { error: new Error("Invalid type") };
+        : fail(TRAVERSE_FAILURES.invalidType);
     } else if (isString(doc.value)) {
       return this.isValidType(schemaObj, "string")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
-        : { error: new Error("Invalid type") };
+        : fail(TRAVERSE_FAILURES.invalidType);
     } else if (isFiniteNumber(doc.value)) {
       return this.isValidType(schemaObj, "number")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
-        : { error: new Error("Invalid type") };
+        : fail(TRAVERSE_FAILURES.invalidType);
     } else if (isBoolean(doc.value)) {
       return this.isValidType(schemaObj, "boolean")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
-        : { error: new Error("Invalid type") };
+        : fail(TRAVERSE_FAILURES.invalidType);
     } else if (Array.isArray(doc.value)) {
       const valid = this.isValidType(schemaObj, "array");
       if (valid === TypeValidity.False) {
-        return { error: new Error("Invalid type") };
+        return fail(TRAVERSE_FAILURES.invalidType);
       }
 
       const newValue: Immutable<FabricValue>[] = [];
@@ -2346,7 +2405,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       }
       const entries = this.traverseArrayWithSchema(doc, schemaObj, newLink);
       if (!Array.isArray(entries)) {
-        return { error: new Error("Invalid array") };
+        return fail(TRAVERSE_FAILURES.invalidArray);
       }
       entries.forEach((item, i) => {
         newValue[i] = item;
@@ -2362,7 +2421,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       } else {
         const valid = this.isValidType(schemaObj, "object");
         if (valid === TypeValidity.False) {
-          return { error: new Error("Invalid type") };
+          return fail(TRAVERSE_FAILURES.invalidType);
         }
         const newValue: Record<string, Immutable<FabricValue>> = {};
         // Our link is based on the last link in the chain and not the first.
@@ -2378,7 +2437,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         }
         const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
         if (entries === undefined || entries === null) {
-          return { error: new Error("Invalid object") };
+          return fail(TRAVERSE_FAILURES.invalidObject);
         }
         for (const [k, v] of Object.entries(entries)) {
           newValue[k] = v;
@@ -2393,7 +2452,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         };
       }
     }
-    return { error: new Error("Unexpected type for doc value") };
+    return fail(TRAVERSE_FAILURES.unexpectedDocValue);
   }
 
   /**
@@ -2930,11 +2989,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // If we don't have a schema, we don't allow undefined
         // If we have a schema with asCell, we can't create a cell for this,
         // since we can't follow all the write-redirect links.
-        return { error: new Error("Encountered link to undefined value") };
+        return fail(TRAVERSE_FAILURES.undefinedLink);
       } else {
         return this.isValidType(redirSelector.schema, "undefined")
           ? { ok: this.traversePrimitive(redirDoc, redirSelector.schema) }
-          : { error: new Error("Encountered link to undefined value") };
+          : fail(TRAVERSE_FAILURES.undefinedLink);
       }
     }
     // For the runtime, where we don't traverse cells, we just want
