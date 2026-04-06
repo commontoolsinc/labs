@@ -2674,6 +2674,39 @@ describe("interval #now wish", () => {
     expect(nowValue! % 1000).toBe(0);
   });
 
+  it("#now one-shot remains stable across reruns", async () => {
+    const triggerCell = runtime.getCell<number>(space, "one-shot trigger", undefined, tx);
+    triggerCell.set(0);
+
+    const wishPattern = pattern(() => {
+      triggerCell.get();
+      return { nowValue: wish({ query: "#now" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "stable one-shot result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    const first = result.key("nowValue").get()?.result;
+    expect(typeof first).toBe("number");
+
+    await new Promise((r) => setTimeout(r, 1100));
+    triggerCell.withTx(tx).set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    const second = result.key("nowValue").get()?.result;
+    expect(second).toBe(first);
+  });
+
   it("#now/5000 returns a cell with coarsened timestamp", async () => {
     const wishPattern = pattern(() => {
       return { nowValue: wish({ query: "#now/5000" }) };

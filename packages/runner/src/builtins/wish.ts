@@ -549,6 +549,7 @@ function handleIntervalNow(
   const intervalMs = Math.max(requested, MIN_INTERVAL_MS);
 
   state.generation++;
+  const generation = state.generation;
 
   // If the interval changed, force cell recreation.
   if (state.cell && state.intervalMs !== intervalMs) {
@@ -573,11 +574,12 @@ function handleIntervalNow(
     | { startTime: number; interval: number; lastTriggered: number }
     | null
     | undefined;
+  const intervalCell = state.cell;
   const currentCoarsened = coarsenTimestamp(Date.now(), intervalMs);
 
   if (existing == null || existing.lastTriggered == null) {
     // Cell is empty — first instance ever. Initialize with metadata.
-    state.cell.withTx(ctx.tx).send({
+    intervalCell.withTx(ctx.tx).send({
       startTime: currentCoarsened,
       interval: intervalMs,
       lastTriggered: currentCoarsened,
@@ -585,13 +587,14 @@ function handleIntervalNow(
   } else if (existing.lastTriggered !== currentCoarsened) {
     // Stale (e.g. after reload) — issue immediate update, fire and forget
     void ctx.runtime.editWithRetry((editTx) => {
-      const current = state.cell!.withTx(editTx).get() as
+      if (generation !== state.generation || intervalCell !== state.cell) return;
+      const current = intervalCell.withTx(editTx).get() as
         | { startTime: number; interval: number; lastTriggered: number }
         | null
         | undefined;
       const coarsened = coarsenTimestamp(Date.now(), intervalMs);
       if (!current || current.lastTriggered !== coarsened) {
-        state.cell!.withTx(editTx).send({
+        intervalCell.withTx(editTx).send({
           ...(current ?? { startTime: coarsened, interval: intervalMs }),
           lastTriggered: coarsened,
         });
@@ -997,8 +1000,6 @@ export function wish(
           const parsed = parseWishTarget(query);
           parsed.path = [...parsed.path, ...(path ?? [])];
           const ctx: WishContext = { runtime, tx, parentCell, scope, nowCell };
-          // Persist #now cell across re-runs to avoid non-idempotent loops
-          if (ctx.nowCell) nowCell = ctx.nowCell;
 
           // Interval #now is not a resolution — it's a timer subscription.
           // Handle it before entering the resolution pipeline.
@@ -1015,6 +1016,9 @@ export function wish(
           }
 
           const baseResolutions = resolveBase(parsed, ctx);
+          // Persist one-shot #now cell across re-runs to avoid non-idempotent
+          // loops from recreating an immutable timestamp cell.
+          if (ctx.nowCell) nowCell = ctx.nowCell;
 
           if (baseResolutions.length === 0) {
             // No matches yet — data may still be loading. Send a pending
