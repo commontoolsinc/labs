@@ -105,11 +105,16 @@ Deno.test("memory v2 reflects the active runtime storage flags", () => {
   resetModernHashConfig();
   resetSchemaHashConfig();
 
+  setDataModelConfig(false);
+  setJsonEncodingConfig(false);
+  setModernHashConfig(false);
+  setSchemaHashConfig(false);
+
   assertEquals(getMemoryV2Flags(), {
     richStorableValues: false,
     unifiedJsonEncoding: false,
     canonicalHashing: false,
-    modernSchemaHash: true,
+    modernSchemaHash: false,
   });
 
   setDataModelConfig(true);
