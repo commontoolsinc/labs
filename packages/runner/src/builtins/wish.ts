@@ -587,7 +587,9 @@ function handleIntervalNow(
   } else if (existing.lastTriggered !== currentCoarsened) {
     // Stale (e.g. after reload) — issue immediate update, fire and forget
     void ctx.runtime.editWithRetry((editTx) => {
-      if (generation !== state.generation || intervalCell !== state.cell) return;
+      if (generation !== state.generation || intervalCell !== state.cell) {
+        return;
+      }
       const current = intervalCell.withTx(editTx).get() as
         | { startTime: number; interval: number; lastTriggered: number }
         | null

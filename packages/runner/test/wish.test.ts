@@ -2675,7 +2675,12 @@ describe("interval #now wish", () => {
   });
 
   it("#now one-shot remains stable across reruns", async () => {
-    const triggerCell = runtime.getCell<number>(space, "one-shot trigger", undefined, tx);
+    const triggerCell = runtime.getCell<number>(
+      space,
+      "one-shot trigger",
+      undefined,
+      tx,
+    );
     triggerCell.set(0);
 
     const wishPattern = pattern(() => {
