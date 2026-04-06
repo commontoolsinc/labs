@@ -1,6 +1,7 @@
 import ts from "typescript";
 import {
   classifyArrayCallbackContainerCall,
+  isCellLikeType,
   isWildcardTraversalCall,
 } from "../ast/mod.ts";
 import type {
@@ -28,8 +29,13 @@ export interface CapabilityAnalysisOptions {
 interface MutableCapabilityState {
   readonly reads: Set<string>;
   readonly writes: Set<string>;
+  readonly rawIdentityPaths: Set<string>;
+  readonly rawIdentityCellPaths: Set<string>;
   passthrough: boolean;
   wildcard: boolean;
+  hasIdentityUse: boolean;
+  hasNonIdentityUse: boolean;
+  hasNonIdentityRootUse: boolean;
 }
 
 interface AccessPathInfo {
@@ -371,6 +377,48 @@ function isCallOrNewArgumentUsage(
   return false;
 }
 
+function isKnownIdentityEqualsCallee(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): boolean {
+  const current = unwrapExpression(expr);
+
+  if (ts.isIdentifier(current)) {
+    if (current.text === "equals") {
+      return true;
+    }
+    if (!checker) {
+      return false;
+    }
+    const symbol = checker.getSymbolAtLocation(current);
+    const aliasName = symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0
+      ? checker.getAliasedSymbol(symbol).getName()
+      : undefined;
+    return aliasName === "equals" || symbol?.getName() === "equals";
+  }
+
+  if (ts.isPropertyAccessExpression(current)) {
+    return current.name.text === "equals";
+  }
+
+  if (
+    ts.isElementAccessExpression(current) &&
+    current.argumentExpression &&
+    isLiteralElement(current.argumentExpression)
+  ) {
+    return getLiteralElementText(current.argumentExpression) === "equals";
+  }
+
+  return false;
+}
+
+function isKnownIdentityEqualsCall(
+  call: ts.CallExpression,
+  checker?: ts.TypeChecker,
+): boolean {
+  return isKnownIdentityEqualsCallee(call.expression, checker);
+}
+
 function clearBindingAliases(
   name: ts.BindingName,
   aliases: Map<string, SourceRef>,
@@ -499,28 +547,78 @@ export function analyzeFunctionCapabilities(
         state = {
           reads: new Set<string>(),
           writes: new Set<string>(),
+          rawIdentityPaths: new Set<string>(),
+          rawIdentityCellPaths: new Set<string>(),
           passthrough: false,
           wildcard: false,
+          hasIdentityUse: false,
+          hasNonIdentityUse: false,
+          hasNonIdentityRootUse: false,
         };
         states.set(name, state);
       }
       return state;
     };
 
-    const trackRead = (name: string, path: readonly string[]): void => {
-      ensureState(name).reads.add(encodePath(path));
+    const trackRead = (
+      name: string,
+      path: readonly string[],
+      options?: { identityOnly?: boolean },
+    ): void => {
+      const state = ensureState(name);
+      state.reads.add(encodePath(path));
+      if (options?.identityOnly) {
+        state.hasIdentityUse = true;
+      } else {
+        state.hasNonIdentityUse = true;
+      }
     };
 
     const trackWrite = (name: string, path: readonly string[]): void => {
-      ensureState(name).writes.add(encodePath(path));
+      const state = ensureState(name);
+      state.writes.add(encodePath(path));
+      state.hasNonIdentityUse = true;
     };
 
     const markWildcard = (name: string): void => {
-      ensureState(name).wildcard = true;
+      const state = ensureState(name);
+      state.wildcard = true;
+      state.hasNonIdentityUse = true;
     };
 
-    const markPassthrough = (name: string): void => {
-      ensureState(name).passthrough = true;
+    const markPassthrough = (
+      name: string,
+      options?: { identityOnly?: boolean },
+    ): void => {
+      const state = ensureState(name);
+      state.passthrough = true;
+      if (options?.identityOnly) {
+        state.hasIdentityUse = true;
+      } else {
+        state.hasNonIdentityUse = true;
+        state.hasNonIdentityRootUse = true;
+      }
+    };
+
+    const recordIdentityPath = (
+      name: string,
+      path: readonly string[],
+      options?: { cellLike?: boolean },
+    ): void => {
+      const state = ensureState(name);
+      const encoded = encodePath(path);
+      state.rawIdentityPaths.add(encoded);
+      if (options?.cellLike) {
+        state.rawIdentityCellPaths.add(encoded);
+      }
+      state.hasIdentityUse = true;
+    };
+
+    const isCellLikeExpression = (expr: ts.Expression): boolean => {
+      if (!checker) {
+        return false;
+      }
+      return isCellLikeType(checker.getTypeAtLocation(expr), checker);
     };
 
     for (let index = 0; index < fn.parameters.length; index++) {
@@ -664,12 +762,15 @@ export function analyzeFunctionCapabilities(
       return undefined;
     };
 
-    const trackReadRef = (ref: SourceRef): void => {
+    const trackReadRef = (
+      ref: SourceRef,
+      options?: { identityOnly?: boolean },
+    ): void => {
       if (ref.dynamic) {
         markWildcard(ref.root);
         return;
       }
-      trackRead(ref.root, ref.path);
+      trackRead(ref.root, ref.path, options);
     };
 
     const trackWriteRef = (ref: SourceRef): void => {
@@ -839,6 +940,21 @@ export function analyzeFunctionCapabilities(
         return;
       }
       marker(ref.root, ref.path);
+    };
+
+    const markIdentityUseRef = (
+      ref: SourceRef,
+      expr?: ts.Expression,
+    ): void => {
+      const cellLike = expr ? isCellLikeExpression(expr) : false;
+      if (ref.dynamic) {
+        markWildcard(ref.root);
+      } else if (ref.path.length === 0) {
+        recordIdentityPath(ref.root, [], { cellLike });
+        markPassthrough(ref.root, { identityOnly: true });
+      } else {
+        recordIdentityPath(ref.root, ref.path, { cellLike });
+      }
     };
 
     const resolveInterproceduralSummary = (
@@ -1029,14 +1145,39 @@ export function analyzeFunctionCapabilities(
                 )
               )
             ) {
+              const identityOnlyArgumentUse = !!(
+                parent &&
+                ts.isCallExpression(parent) &&
+                parent.arguments.includes(usage) &&
+                isKnownIdentityEqualsCall(parent, checker)
+              );
               if (
                 isCallOrNewArgumentUsage(usage) ||
                 isPassThroughIdentifierUsage(node)
               ) {
                 if (source.path.length === 0 && !source.dynamic) {
-                  markPassthrough(source.root);
+                  if (identityOnlyArgumentUse) {
+                    recordIdentityPath(source.root, [], {
+                      cellLike: isCellLikeExpression(usage),
+                    });
+                  }
+                  markPassthrough(
+                    source.root,
+                    identityOnlyArgumentUse
+                      ? { identityOnly: true }
+                      : undefined,
+                  );
+                } else if (identityOnlyArgumentUse && !source.dynamic) {
+                  recordIdentityPath(source.root, source.path, {
+                    cellLike: isCellLikeExpression(usage),
+                  });
                 } else {
-                  trackReadRef(source);
+                  trackReadRef(
+                    source,
+                    identityOnlyArgumentUse
+                      ? { identityOnly: true }
+                      : undefined,
+                  );
                 }
               } else {
                 trackReadRef(source);
@@ -1097,6 +1238,7 @@ export function analyzeFunctionCapabilities(
       }
 
       if (ts.isCallExpression(node)) {
+        const identityEqualsCall = isKnownIdentityEqualsCall(node, checker);
         const interproceduralHandledArgs = new Set<number>();
         const calleeSummary = resolveInterproceduralSummary(node);
         if (calleeSummary) {
@@ -1125,8 +1267,34 @@ export function analyzeFunctionCapabilities(
               trackWrite(source.root, [...source.path, ...writePath]);
             }
 
+            for (const identityPath of paramSummary.identityPaths ?? []) {
+              if (source.dynamic) {
+                markWildcard(source.root);
+              } else {
+                recordIdentityPath(
+                  source.root,
+                  [...source.path, ...identityPath],
+                  {
+                    cellLike: (paramSummary.identityCellPaths ?? []).some(
+                      (path) =>
+                        path.length === identityPath.length &&
+                        path.every((segment, index) =>
+                          segment === identityPath[index]
+                        ),
+                    ),
+                  },
+                );
+              }
+            }
+
             if (paramSummary.passthrough && source.path.length === 0) {
-              markPassthrough(source.root);
+              if (paramSummary.identityOnly) {
+                recordIdentityPath(source.root, []);
+              }
+              markPassthrough(
+                source.root,
+                paramSummary.identityOnly ? { identityOnly: true } : undefined,
+              );
             }
           }
         }
@@ -1151,6 +1319,8 @@ export function analyzeFunctionCapabilities(
               if (argPath.dynamic) {
                 markWildcard(receiver.root);
               }
+            } else if (identityEqualsCall) {
+              markIdentityUseRef(receiver, node.expression.expression);
             } else if (WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
             } else if (READER_METHODS.has(methodName)) {
@@ -1169,18 +1339,28 @@ export function analyzeFunctionCapabilities(
 
         // Passing a tracked root object into an opaque helper can conceal
         // indirect traversal/mutation; conservatively disable shrinking.
-        for (let index = 0; index < node.arguments.length; index++) {
-          if (interproceduralHandledArgs.has(index)) {
-            continue;
+        if (!identityEqualsCall) {
+          for (let index = 0; index < node.arguments.length; index++) {
+            if (interproceduralHandledArgs.has(index)) {
+              continue;
+            }
+            const argument = node.arguments[index];
+            if (!argument) continue;
+            const unwrappedArgument = unwrapExpression(argument);
+            if (!ts.isIdentifier(unwrappedArgument)) continue;
+            const source = resolveSourceRef(unwrappedArgument);
+            if (!source) continue;
+            if (source.dynamic || source.path.length > 0) continue;
+            markWildcard(source.root);
           }
-          const argument = node.arguments[index];
-          if (!argument) continue;
-          const unwrappedArgument = unwrapExpression(argument);
-          if (!ts.isIdentifier(unwrappedArgument)) continue;
-          const source = resolveSourceRef(unwrappedArgument);
-          if (!source) continue;
-          if (source.dynamic || source.path.length > 0) continue;
-          markWildcard(source.root);
+        }
+        if (identityEqualsCall) {
+          for (const argument of node.arguments) {
+            const source = resolveSourceRef(argument);
+            if (source) {
+              markIdentityUseRef(source, argument);
+            }
+          }
         }
 
         // Full-shape operations.
@@ -1291,13 +1471,43 @@ export function analyzeFunctionCapabilities(
         : `${PARAMETER_SUMMARY_PREFIX}${index}`;
       const state = states.get(summaryName);
       if (!state) continue;
+      const readPaths = Array.from(state.reads).map(decodePath);
+      const writePaths = Array.from(state.writes).map(decodePath);
+      const identityPaths = Array.from(state.rawIdentityPaths)
+        .map(decodePath)
+        .filter((identityPath) => {
+          if (state.wildcard) {
+            return false;
+          }
+          if (identityPath.length === 0 && state.hasNonIdentityRootUse) {
+            return false;
+          }
+          const overlapsNonIdentity = [...readPaths, ...writePaths].some((
+            path,
+          ) =>
+            path.length >= identityPath.length &&
+            identityPath.every((segment, index) => path[index] === segment)
+          );
+          return !overlapsNonIdentity;
+        });
+      const keptIdentityPaths = new Set(identityPaths.map(encodePath));
+      const identityCellPaths = Array.from(state.rawIdentityCellPaths)
+        .filter((path) => keptIdentityPaths.has(path))
+        .map(decodePath);
       params.push({
         name: summaryName,
         capability: toCapability(state),
-        readPaths: Array.from(state.reads).map(decodePath),
-        writePaths: Array.from(state.writes).map(decodePath),
+        readPaths,
+        writePaths,
         passthrough: state.passthrough,
         wildcard: state.wildcard,
+        identityOnly: identityPaths.some((path) => path.length === 0) &&
+          !state.hasNonIdentityUse &&
+          state.reads.size === 0 &&
+          state.writes.size === 0 &&
+          !state.wildcard,
+        identityPaths,
+        identityCellPaths,
       });
     }
 

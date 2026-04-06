@@ -78,6 +78,7 @@ function createParamSummary(
     writePaths: [],
     passthrough: false,
     wildcard: false,
+    identityOnly: false,
     ...summary,
   };
 }
@@ -163,4 +164,87 @@ Deno.test("applyShrinkAndWrap defaults-only fallback expands repeated child leav
   assertStringIncludes(printed, "right: {\n            a: string;");
   assertStringIncludes(printed, "\n            b: string;");
   assertEquals(printed.includes("right: Shared"), false);
+});
+
+Deno.test("applyShrinkAndWrap turns identity-only wrapped inputs into OpaqueCell<unknown>", () => {
+  const { sourceFile, checker } = createProgram(`
+    type Item = { name: string; nested: { value: number } };
+  `);
+  const alias = findTypeAlias(sourceFile, "Item");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      identityOnly: true,
+      passthrough: true,
+    }),
+    alias.type,
+    baseType,
+    true,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  assertEquals(
+    printTypeNode(result, sourceFile),
+    "__cfHelpers.OpaqueCell<unknown>",
+  );
+});
+
+Deno.test("applyShrinkAndWrap turns identity-only unwrapped inputs into unknown", () => {
+  const { sourceFile, checker } = createProgram(`
+    type Item = { name: string; nested: { value: number } };
+  `);
+  const alias = findTypeAlias(sourceFile, "Item");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      identityOnly: true,
+      passthrough: true,
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  assertEquals(printTypeNode(result, sourceFile), "unknown");
+});
+
+Deno.test("applyShrinkAndWrap turns identity-only cell leaves into OpaqueCell<unknown>", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare namespace __cfHelpers {
+      export type Writable<T> = { readonly value?: T };
+      export type OpaqueCell<T> = { readonly opaque?: T };
+    }
+    type Input = {
+      left: __cfHelpers.Writable<{ name: string; nested: { value: number } }>;
+      right: __cfHelpers.Writable<{ name: string; nested: { value: number } }>;
+    };
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      identityPaths: [["left"], ["right"]],
+      identityCellPaths: [["left"], ["right"]],
+    }),
+    ts.factory.createTypeReferenceNode("Input"),
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  assertStringIncludes(printed, "left: __cfHelpers.OpaqueCell<unknown>");
+  assertStringIncludes(printed, "right: __cfHelpers.OpaqueCell<unknown>");
+  assertEquals(printed.includes("name"), false);
+  assertEquals(printed.includes("nested"), false);
 });

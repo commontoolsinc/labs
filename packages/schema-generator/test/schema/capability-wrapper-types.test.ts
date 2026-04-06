@@ -31,7 +31,7 @@ describe("Schema: Capability wrapper types", () => {
     expect(op).toBeDefined();
     expect(op.properties?.baz?.type).toBe("boolean");
     expect(op.asCell).toEqual(["opaque"]);
-    expect(op.asOpaque).toBeUndefined();
+    expect(op).not.toHaveProperty("asOpaque");
   });
 
   it("resolves alias chains for capability wrappers", async () => {
@@ -62,7 +62,7 @@ describe("Schema: Capability wrapper types", () => {
 
     expect(op.properties?.enabled?.type).toBe("boolean");
     expect(op.asCell).toEqual(["opaque"]);
-    expect(op.asOpaque).toBeUndefined();
+    expect(op).not.toHaveProperty("asOpaque");
   });
 
   it("Writable<unknown> produces { type: 'unknown', asCell: ['cell'] }", async () => {

@@ -103,6 +103,43 @@ function typeNodeExplicitlyDeclaresProperty(
   );
 }
 
+function getExplicitPropertyTypeNode(
+  typeNode: ts.TypeNode | undefined,
+  propName: string,
+): ts.TypeNode | undefined {
+  if (!typeNode) return undefined;
+
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    return getExplicitPropertyTypeNode(typeNode.type, propName);
+  }
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    for (const member of typeNode.types) {
+      const nested = getExplicitPropertyTypeNode(member, propName);
+      if (nested) {
+        return nested;
+      }
+    }
+    return undefined;
+  }
+
+  if (!ts.isTypeLiteralNode(typeNode)) {
+    return undefined;
+  }
+
+  for (const member of typeNode.members) {
+    if (
+      (ts.isPropertySignature(member) || ts.isPropertyDeclaration(member)) &&
+      !!member.name &&
+      getPropertyNameText(member.name) === propName
+    ) {
+      return member.type;
+    }
+  }
+
+  return undefined;
+}
+
 function shouldSkipInternalProperty(
   propName: string,
   propDecl: ts.Declaration | undefined,
@@ -168,7 +205,10 @@ export class ObjectFormatter implements TypeFormatter {
     for (const prop of props) {
       const propName = prop.getName();
 
-      let propTypeNode: ts.TypeNode | undefined;
+      let propTypeNode = getExplicitPropertyTypeNode(
+        context.typeNode,
+        propName,
+      );
       const propDecl = prop.valueDeclaration ??
         (prop.declarations?.[0] as ts.Declaration | undefined);
 
@@ -181,7 +221,9 @@ export class ObjectFormatter implements TypeFormatter {
         if (
           ts.isPropertySignature(propDecl) || ts.isPropertyDeclaration(propDecl)
         ) {
-          if (propDecl.type) propTypeNode = propDecl.type as ts.TypeNode;
+          if (!propTypeNode && propDecl.type) {
+            propTypeNode = propDecl.type as ts.TypeNode;
+          }
         }
       }
 

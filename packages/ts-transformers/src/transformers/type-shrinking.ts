@@ -13,7 +13,9 @@ import {
   ensureTypeNodeRegistered,
   getTypeFromTypeNodeWithFallback,
   isAnyOrUnknownType,
+  isCellLikeType,
   typeToSchemaTypeNode,
+  unwrapCellLikeType,
 } from "../ast/mod.ts";
 
 // ---------------------------------------------------------------------------
@@ -1182,6 +1184,318 @@ export function wrapTypeNodeWithCapability(
   );
 }
 
+function createIdentityOnlyReplacementTypeNode(
+  node: ts.TypeNode,
+  semanticType: ts.Type | undefined,
+  forceOpaque: boolean,
+  checker: ts.TypeChecker,
+  factory: ts.NodeFactory,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode {
+  const unknownNode = factory.createKeywordTypeNode(
+    ts.SyntaxKind.UnknownKeyword,
+  );
+  const resolvedType = semanticType ??
+    getTypeFromTypeNodeWithFallback(
+      node,
+      checker,
+      typeRegistry,
+    );
+  if (
+    forceOpaque ||
+    isCellLikeTypeNode(node) ||
+    isCellLikeType(resolvedType, checker)
+  ) {
+    const wrappedNode = wrapTypeNodeWithCapability(
+      unknownNode,
+      "opaque",
+      factory,
+    );
+    const wrappedType = resolveIdentitySemanticType(
+      wrappedNode,
+      checker,
+      typeRegistry,
+    );
+    if (wrappedType && typeRegistry) {
+      typeRegistry.set(wrappedNode, wrappedType);
+    }
+    return wrappedNode;
+  }
+  return unknownNode;
+}
+
+function getIdentityChildSemanticType(
+  type: ts.Type | undefined,
+  head: string,
+  location: ts.Node,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  if (!type) {
+    return undefined;
+  }
+
+  const nonNullable = checker.getNonNullableType(type);
+  const prop = findPropertySymbol(nonNullable, head, checker);
+  if (prop) {
+    const declaration = prop.valueDeclaration ?? prop.declarations?.[0] ??
+      location;
+    return checker.getTypeOfSymbolAtLocation(prop, declaration);
+  }
+
+  const numericIndex = Number.isFinite(Number(head));
+  return checker.getIndexTypeOfType(
+    nonNullable,
+    numericIndex ? ts.IndexKind.Number : ts.IndexKind.String,
+  ) ?? checker.getIndexTypeOfType(nonNullable, ts.IndexKind.String);
+}
+
+function resolveIdentitySemanticType(
+  node: ts.TypeNode,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.Type | undefined {
+  try {
+    return getTypeFromTypeNodeWithFallback(node, checker, typeRegistry);
+  } catch (_error: unknown) {
+    return undefined;
+  }
+}
+
+function applyIdentityOnlyPathsToTypeNode(
+  node: ts.TypeNode,
+  paths: readonly (readonly string[])[],
+  cellLikePaths: readonly (readonly string[])[],
+  factory: ts.NodeFactory,
+  checker: ts.TypeChecker,
+  semanticType?: ts.Type,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode {
+  const normalized = uniquePaths(paths);
+  const normalizedCellLikePaths = uniquePaths(cellLikePaths);
+  if (normalized.length === 0) {
+    return node;
+  }
+  const resolvedSemanticType = semanticType ??
+    resolveIdentitySemanticType(node, checker, typeRegistry);
+  if (normalized.some((path) => path.length === 0)) {
+    return createIdentityOnlyReplacementTypeNode(
+      node,
+      resolvedSemanticType,
+      normalizedCellLikePaths.some((path) => path.length === 0),
+      checker,
+      factory,
+      typeRegistry,
+    );
+  }
+
+  if (ts.isParenthesizedTypeNode(node)) {
+    const updated = applyIdentityOnlyPathsToTypeNode(
+      node.type,
+      normalized,
+      normalizedCellLikePaths,
+      factory,
+      checker,
+      resolvedSemanticType,
+      typeRegistry,
+    );
+    return updated === node.type
+      ? node
+      : factory.updateParenthesizedType(node, updated);
+  }
+
+  const itemPaths = getArrayItemPaths(normalized);
+  const itemCellLikePaths = getArrayItemPaths(normalizedCellLikePaths);
+  if (itemPaths.length > 0) {
+    const itemSemanticType = resolvedSemanticType
+      ? getArrayElementType(
+        checker.getNonNullableType(resolvedSemanticType),
+        checker,
+      )
+      : undefined;
+    if (ts.isArrayTypeNode(node)) {
+      const updated = applyIdentityOnlyPathsToTypeNode(
+        node.elementType,
+        itemPaths,
+        itemCellLikePaths,
+        factory,
+        checker,
+        itemSemanticType,
+        typeRegistry,
+      );
+      if (updated === node.elementType) {
+        return node;
+      }
+      const arrayNode = factory.updateArrayTypeNode(node, updated);
+      ensureTypeNodeRegistered(arrayNode, checker, typeRegistry);
+      return arrayNode;
+    }
+
+    if (
+      ts.isTypeOperatorNode(node) &&
+      node.operator === ts.SyntaxKind.ReadonlyKeyword &&
+      ts.isArrayTypeNode(node.type)
+    ) {
+      const updated = applyIdentityOnlyPathsToTypeNode(
+        node.type.elementType,
+        itemPaths,
+        itemCellLikePaths,
+        factory,
+        checker,
+        itemSemanticType,
+        typeRegistry,
+      );
+      if (updated === node.type.elementType) {
+        return node;
+      }
+      const readonlyArray = factory.updateArrayTypeNode(node.type, updated);
+      const readonlyNode = factory.updateTypeOperatorNode(
+        node,
+        readonlyArray,
+      );
+      ensureTypeNodeRegistered(readonlyNode, checker, typeRegistry);
+      return readonlyNode;
+    }
+
+    if (
+      ts.isTypeReferenceNode(node) &&
+      ts.isIdentifier(node.typeName) &&
+      node.typeArguments?.[0] &&
+      (node.typeName.text === "Array" || node.typeName.text === "ReadonlyArray")
+    ) {
+      const [inner] = node.typeArguments;
+      const updated = applyIdentityOnlyPathsToTypeNode(
+        inner,
+        itemPaths,
+        itemCellLikePaths,
+        factory,
+        checker,
+        itemSemanticType,
+        typeRegistry,
+      );
+      if (updated === inner) {
+        return node;
+      }
+      const arrayRef = factory.updateTypeReferenceNode(
+        node,
+        node.typeName,
+        factory.createNodeArray([updated]),
+      );
+      ensureTypeNodeRegistered(arrayRef, checker, typeRegistry);
+      return arrayRef;
+    }
+  }
+
+  if (ts.isTypeLiteralNode(node)) {
+    const grouped = groupPathsByHead(normalized);
+    const cellLikeGrouped = groupPathsByHead(normalizedCellLikePaths);
+    let changed = false;
+    const members = node.members.map((member) => {
+      if (!ts.isPropertySignature(member) || !member.type || !member.name) {
+        return member;
+      }
+      const propertyName = getRequestedPropertyNameText(member.name);
+      if (!propertyName) {
+        return member;
+      }
+      const childPaths = grouped.get(propertyName);
+      if (!childPaths) {
+        return member;
+      }
+      const updated = applyIdentityOnlyPathsToTypeNode(
+        member.type,
+        childPaths,
+        cellLikeGrouped.get(propertyName) ?? [],
+        factory,
+        checker,
+        getIdentityChildSemanticType(
+          resolvedSemanticType,
+          propertyName,
+          member,
+          checker,
+        ),
+        typeRegistry,
+      );
+      if (updated === member.type) {
+        return member;
+      }
+      changed = true;
+      return factory.updatePropertySignature(
+        member,
+        member.modifiers,
+        member.name,
+        member.questionToken ??
+          (typeNodeIncludesUndefined(updated)
+            ? factory.createToken(ts.SyntaxKind.QuestionToken)
+            : undefined),
+        updated,
+      );
+    });
+
+    if (!changed) {
+      return node;
+    }
+    return createRegisteredTypeLiteral(
+      members,
+      { factory, checker, typeRegistry },
+    );
+  }
+
+  if (
+    ts.isTypeReferenceNode(node) &&
+    isCellLikeTypeNode(node) &&
+    node.typeArguments?.[0]
+  ) {
+    const [inner, ...rest] = node.typeArguments;
+    const updated = applyIdentityOnlyPathsToTypeNode(
+      inner,
+      normalized,
+      normalizedCellLikePaths,
+      factory,
+      checker,
+      unwrapCellLikeType(resolvedSemanticType, checker) ?? resolvedSemanticType,
+      typeRegistry,
+    );
+    if (updated === inner) {
+      return node;
+    }
+    const cellNode = factory.updateTypeReferenceNode(
+      node,
+      node.typeName,
+      factory.createNodeArray([updated, ...rest]),
+    );
+    ensureTypeNodeRegistered(cellNode, checker, typeRegistry);
+    return cellNode;
+  }
+
+  if (ts.isUnionTypeNode(node)) {
+    let changed = false;
+    const members = node.types.map((member) => {
+      const updated = applyIdentityOnlyPathsToTypeNode(
+        member,
+        normalized,
+        normalizedCellLikePaths,
+        factory,
+        checker,
+        resolvedSemanticType,
+        typeRegistry,
+      );
+      if (updated !== member) {
+        changed = true;
+      }
+      return updated;
+    });
+
+    if (!changed) {
+      return node;
+    }
+    const unionNode = factory.createUnionTypeNode(members);
+    ensureTypeNodeRegistered(unionNode, checker, typeRegistry);
+    return unionNode;
+  }
+
+  return node;
+}
+
 function wrapTypeNodeWithDefault(
   node: ts.TypeNode,
   defaultType: ts.TypeNode,
@@ -1470,6 +1784,12 @@ export function applyShrinkAndWrap(
     ...paramSummary.readPaths,
     ...paramSummary.writePaths,
   ]);
+  const identityPaths = uniquePaths(paramSummary.identityPaths ?? []);
+  const identityCellPaths = uniquePaths(paramSummary.identityCellPaths ?? []);
+  const retainedPaths = uniquePaths([...paths, ...identityPaths]);
+  const identityOnlyUnknown = !!paramSummary.identityOnly &&
+    !paramSummary.wildcard &&
+    paths.length === 0;
 
   if (mode === "defaults_only") {
     if (context && fnNode) {
@@ -1477,7 +1797,7 @@ export function applyShrinkAndWrap(
         paramSummary,
         baseTypeNode,
         baseType,
-        paths,
+        retainedPaths,
         undefined,
         context,
         fnNode,
@@ -1485,21 +1805,23 @@ export function applyShrinkAndWrap(
       );
     }
 
-    const next = applyCapabilityDefaultsToTypeNode(
-      baseTypeNode,
-      paramSummary.defaults,
-      baseType,
-      buildDefaultsOnlyFallbackPaths(
-        baseType,
+    const next = identityOnlyUnknown
+      ? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword)
+      : applyCapabilityDefaultsToTypeNode(
+        baseTypeNode,
         paramSummary.defaults,
+        baseType,
+        buildDefaultsOnlyFallbackPaths(
+          baseType,
+          paramSummary.defaults,
+          checker,
+          sourceFile,
+        ),
+        false,
         checker,
         sourceFile,
-      ),
-      false,
-      checker,
-      sourceFile,
-      factory,
-    );
+        factory,
+      );
 
     if (!shouldWrap) {
       return next;
@@ -1507,15 +1829,21 @@ export function applyShrinkAndWrap(
     return wrapTypeNodeWithCapability(next, wrapCapability, factory);
   }
 
-  let next = baseTypeNode;
+  let next = identityOnlyUnknown
+    ? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword)
+    : baseTypeNode;
   let shrunk: ts.TypeNode | undefined;
-  if (!paramSummary.wildcard && paths.length > 0) {
+  if (
+    !identityOnlyUnknown &&
+    !paramSummary.wildcard &&
+    retainedPaths.length > 0
+  ) {
     const preferTypeDriven = !!baseType && isSyntheticTypeNode(baseTypeNode);
     if (preferTypeDriven) {
       // Synthetic inferred nodes can lose property precision in node-only mode.
       const typeDriven = buildShrunkTypeNodeFromType(
         baseType!,
-        paths,
+        retainedPaths,
         checker,
         sourceFile,
         factory,
@@ -1523,13 +1851,13 @@ export function applyShrinkAndWrap(
       );
       const nodeDriven = buildShrunkTypeNodeFromTypeNode(
         baseTypeNode,
-        paths,
+        retainedPaths,
         factory,
         checker,
       );
       shrunk = typeDriven ?? nodeDriven;
       if (typeDriven && nodeDriven) {
-        const requestedHeads = getTopLevelRequestedHeads(paths);
+        const requestedHeads = getTopLevelRequestedHeads(retainedPaths);
         const typeDrivenCoverage = countRepresentedRequestedHeads(
           typeDriven,
           requestedHeads,
@@ -1563,14 +1891,14 @@ export function applyShrinkAndWrap(
       // wrappers. Compute both and choose the more informative shrink.
       const nodeDriven = buildShrunkTypeNodeFromTypeNode(
         baseTypeNode,
-        paths,
+        retainedPaths,
         factory,
         checker,
       );
       const typeDriven = baseType
         ? buildShrunkTypeNodeFromType(
           baseType,
-          paths,
+          retainedPaths,
           checker,
           sourceFile,
           factory,
@@ -1579,7 +1907,7 @@ export function applyShrinkAndWrap(
         : undefined;
       shrunk = nodeDriven ?? typeDriven;
       if (nodeDriven && typeDriven) {
-        const requestedHeads = getTopLevelRequestedHeads(paths);
+        const requestedHeads = getTopLevelRequestedHeads(retainedPaths);
         const typeDrivenCoverage = countRepresentedRequestedHeads(
           typeDriven,
           requestedHeads,
@@ -1608,12 +1936,24 @@ export function applyShrinkAndWrap(
       next = shrunk;
     }
   }
+  if (!identityOnlyUnknown && identityPaths.length > 0) {
+    next = applyIdentityOnlyPathsToTypeNode(
+      next,
+      identityPaths,
+      identityCellPaths,
+      factory,
+      checker,
+      baseType,
+      context?.options.typeRegistry,
+    );
+    shrunk = next;
+  }
   if (context && fnNode) {
     validateShrinkCoverage(
       paramSummary,
       baseTypeNode,
       baseType,
-      paths,
+      retainedPaths,
       shrunk,
       context,
       fnNode,
@@ -1625,7 +1965,7 @@ export function applyShrinkAndWrap(
     next,
     paramSummary.defaults,
     baseType,
-    paths,
+    retainedPaths,
     paramSummary.wildcard,
     checker,
     sourceFile,

@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
 import { analyzeFunctionCapabilities } from "../../src/policy/mod.ts";
+import { COMMONFABRIC_TYPES } from "../commonfabric-test-types.ts";
 
 function parseFirstCallback(
   source: string,
@@ -75,6 +76,21 @@ function createProgramWithFiles(
           name.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
         )
         : undefined,
+    resolveModuleNames: (moduleNames) =>
+      moduleNames.map((name) => {
+        const directMatch = Object.keys(files).find((fileName) =>
+          fileName === `/${name}.d.ts` ||
+          fileName.endsWith(`/${name}.d.ts`)
+        );
+        if (!directMatch) {
+          return undefined;
+        }
+        return {
+          resolvedFileName: directMatch,
+          extension: ts.Extension.Dts,
+          isExternalLibraryImport: false,
+        };
+      }),
   };
 
   const program = ts.createProgram([entryFileName], options, host);
@@ -121,6 +137,9 @@ function getPaths(
   writePaths: string[];
   wildcard: boolean;
   passthrough: boolean;
+  identityOnly: boolean;
+  identityPaths: string[];
+  identityCellPaths: string[];
 } {
   const param = summary.params.find((entry) => entry.name === name);
   if (!param) {
@@ -132,6 +151,11 @@ function getPaths(
     writePaths: param.writePaths.map((path) => path.join(".")),
     wildcard: param.wildcard,
     passthrough: param.passthrough,
+    identityOnly: !!param.identityOnly,
+    identityPaths: (param.identityPaths ?? []).map((path) => path.join(".")),
+    identityCellPaths: (param.identityCellPaths ?? []).map((path) =>
+      path.join(".")
+    ),
   };
 }
 
@@ -455,6 +479,7 @@ Deno.test("Capability analysis classifies pure passthrough as opaque", () => {
   assertEquals(input.readPaths.length, 0);
   assertEquals(input.writePaths.length, 0);
   assertEquals(input.passthrough, true);
+  assertEquals(input.identityOnly, false);
 });
 
 Deno.test("Capability analysis marks root call arguments as wildcard", () => {
@@ -576,6 +601,133 @@ Deno.test(
     assertEquals(input.wildcard, false);
     assert(input.readPaths.includes("items"));
     assert(input.readPaths.includes("items.notes.length"));
+  },
+);
+
+Deno.test(
+  "Capability analysis treats equals() arguments as identity-only",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input, other) => {
+        return equals(input, other);
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+    const other = getPaths(summary, "other");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.passthrough, true);
+    assertEquals(input.wildcard, false);
+    assertEquals(input.identityOnly, true);
+    assertEquals(input.readPaths.length, 0);
+
+    assertEquals(other.capability, "opaque");
+    assertEquals(other.passthrough, true);
+    assertEquals(other.wildcard, false);
+    assertEquals(other.identityOnly, true);
+    assertEquals(other.readPaths.length, 0);
+  },
+);
+
+Deno.test(
+  "Capability analysis treats .equals() receiver and argument as identity-only",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input, other) => {
+        return input.equals(other);
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+    const other = getPaths(summary, "other");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.passthrough, true);
+    assertEquals(input.wildcard, false);
+    assertEquals(input.identityOnly, true);
+    assertEquals(input.readPaths.length, 0);
+
+    assertEquals(other.capability, "opaque");
+    assertEquals(other.passthrough, true);
+    assertEquals(other.wildcard, false);
+    assertEquals(other.identityOnly, true);
+    assertEquals(other.readPaths.length, 0);
+  },
+);
+
+Deno.test(
+  "Capability analysis marks destructured cell equals paths as identity-cell paths",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const CELL_BRAND: unique symbol;
+
+      type Writable<T> = {
+        readonly [CELL_BRAND]: "cell";
+        equals(other: Writable<T>): boolean;
+      };
+
+      const fn = ({ left, right }: {
+        left: Writable<{ name: string }>;
+        right: Writable<{ name: string }>;
+      }) => left.equals(right);
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "__param0");
+
+    assertEquals(input.identityOnly, false);
+    assert(input.identityPaths.includes("left"));
+    assert(input.identityPaths.includes("right"));
+    assert(input.identityCellPaths.includes("left"));
+    assert(input.identityCellPaths.includes("right"));
+  },
+);
+
+Deno.test(
+  "Capability analysis marks inferred derive cell equals paths as identity-cell paths",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": `
+        import { derive, type Writable } from "commonfabric";
+
+        type Piece = Writable<{ name: string }>;
+        const left = {} as Piece;
+        const right = {} as Piece;
+        const same = derive({ left, right }, ({ left, right }) =>
+          left.equals(right)
+        );
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const callback = (() => {
+      let found: ts.ArrowFunction | undefined;
+      const visit = (node: ts.Node): void => {
+        if (found) return;
+        if (ts.isArrowFunction(node) && node.parameters.length === 1) {
+          found = node;
+          return;
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sourceFile);
+      if (!found) {
+        throw new Error("Expected derive callback.");
+      }
+      return found;
+    })();
+    const summary = analyzeFunctionCapabilities(callback, { checker });
+    const input = getPaths(summary, "__param0");
+
+    assert(input.identityPaths.includes("left"));
+    assert(input.identityPaths.includes("right"));
+    assert(input.identityCellPaths.includes("left"));
+    assert(input.identityCellPaths.includes("right"));
   },
 );
 

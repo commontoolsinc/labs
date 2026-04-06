@@ -217,6 +217,32 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "no error when unknown parameter is passed to equals in lift",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { equals, lift } from "commonfabric";',
+        "",
+        "const fn = lift((state: unknown) => equals(state, state));",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no schema:unknown-type-access for equals(identity) but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
     "no error when concrete type is passed to opaque function in lift",
     async () => {
       const source = [
@@ -1240,6 +1266,38 @@ Deno.test("Schema Shrink Validation", async (t) => {
       assertStringIncludes(inputSchema, "$UI");
       assertEquals(inputSchema.includes("metadata"), false);
       assertEquals(inputSchema.includes("author"), false);
+    },
+  );
+
+  await t.step(
+    "derive shrinks equals-only cell inputs to opaque unknown cells",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive, type Writable } from "commonfabric";',
+        "type Piece = Writable<{ name: string; extra: { nested: string } }>;",
+        "const left = {} as Piece;",
+        "const right = {} as Piece;",
+        "const same = derive({ left, right }, ({ left, right }) => left.equals(right));",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "asOpaque: true");
+      assertEquals(inputSchema.includes("name"), false);
+      assertEquals(inputSchema.includes("extra"), false);
+      assertEquals(inputSchema.includes("nested"), false);
     },
   );
 
