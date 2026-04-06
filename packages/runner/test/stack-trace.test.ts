@@ -156,8 +156,32 @@ describe("Stack trace source mapping", () => {
     expect(lines[1]).toBe("    at riskyOperation (main.tsx:3:10)");
   });
 
-  it("sanitizes relative and absolute runner internal stack frames", () => {
+  it("preserves relative and absolute runner internal stack frames by default", () => {
     const runtime = new SESRuntime({ lockdown: true });
+    const stack = [
+      "Error: boom",
+      "    at eval (main.tsx:6:12)",
+      "  at packages/runner/src/sandbox/ses-runtime.ts:100:15",
+      "    at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:45:22)",
+      "    at /home/runner/work/labs/labs/packages/runner/src/harness/engine.ts:244:45",
+      "  at callback (ext:deno_web/02_timers.js:42:7)",
+    ].join("\n");
+
+    expect(runtime.parseStack(stack).split("\n")).toEqual([
+      "Error: boom",
+      "    at eval (main.tsx:6:12)",
+      "  at packages/runner/src/sandbox/ses-runtime.ts:100:15",
+      "    at SESInternals.exec (packages/runner/src/sandbox/ses-runtime.ts:45:22)",
+      "    at /home/runner/work/labs/labs/packages/runner/src/harness/engine.ts:244:45",
+      "  at callback (ext:deno_web/02_timers.js:42:7)",
+    ]);
+  });
+
+  it("can sanitize relative and absolute runner internal stack frames", () => {
+    const runtime = new SESRuntime({
+      lockdown: true,
+      hideInternalStackFrames: true,
+    });
     const stack = [
       "Error: boom",
       "    at eval (main.tsx:6:12)",

@@ -1,4 +1,4 @@
-import { env, type Page, waitFor } from "@commonfabric/integration";
+import { env, waitFor } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -8,13 +8,6 @@ import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
-
-function pierce(page: Page, selector: string, timeout?: number) {
-  return page.waitForSelector(selector, {
-    strategy: "pierce",
-    ...(timeout != null ? { timeout } : {}),
-  });
-}
 
 describe("shell piece tests", () => {
   const shell = new ShellIntegration();

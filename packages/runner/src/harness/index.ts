@@ -1,4 +1,5 @@
 export { Engine, EngineProgramResolver } from "./engine.ts";
+export type { EngineOptions } from "./engine.ts";
 export type {
   Harness,
   HarnessedFunction,

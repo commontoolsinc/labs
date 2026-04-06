@@ -179,6 +179,8 @@ export interface RuntimeOptions {
   /** Optional compilation cache for persistent caching of compiled JS.
    *  If absent, no persistent caching is performed (same as before). */
   cachedCompiler?: CachedCompiler;
+  /** Replace runner-owned frames with `<CT_INTERNAL>` in surfaced stacks. */
+  hideInternalStackFrames?: boolean;
 }
 
 /**
@@ -347,7 +349,9 @@ export class Runtime {
     this.cachedCompiler = options.cachedCompiler;
 
     // Create harness first (no dependencies on other services)
-    this.harness = new Engine(this);
+    this.harness = new Engine(this, {
+      hideInternalStackFrames: options.hideInternalStackFrames,
+    });
 
     this.storageManager = options.storageManager;
     this.userIdentityDID = options.storageManager.as.did() as DID;

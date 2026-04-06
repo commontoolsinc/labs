@@ -14,6 +14,7 @@ const logger = getLogger("ses-runtime");
 export interface SESRuntimeOptions {
   globals?: Record<string, unknown>;
   lockdown?: boolean;
+  hideInternalStackFrames?: boolean;
 }
 
 interface SESCompartmentLike {
@@ -30,6 +31,8 @@ export interface JsValue {
 
 class SESInternals {
   private sourceMaps = new SourceMapParser();
+
+  constructor(private options: SESRuntimeOptions = {}) {}
 
   exec<T>(callback: () => T): T {
     try {
@@ -58,7 +61,10 @@ class SESInternals {
   }
 
   parseStack(stack: string): string {
-    return sanitizeInternalFrames(this.sourceMaps.parse(stack));
+    const mappedStack = this.sourceMaps.parse(stack);
+    return this.options.hideInternalStackFrames
+      ? sanitizeInternalFrames(mappedStack)
+      : mappedStack;
   }
 
   clear(): void {
@@ -115,11 +121,13 @@ class SESJsValue implements JsValue {
 
 export class SESIsolate {
   private globals: Record<string, unknown>;
+  private internals: SESInternals;
 
   constructor(
     private options: SESRuntimeOptions = {},
-    private internals = new SESInternals(),
+    internals?: SESInternals,
   ) {
+    this.internals = internals ?? new SESInternals(options);
     this.globals = { ...(options.globals ?? {}) };
     ensureSESInitialized(!!options.lockdown);
   }
@@ -177,12 +185,13 @@ export class SESIsolate {
 }
 
 export class SESRuntime extends EventTarget {
-  private internals = new SESInternals();
+  private internals: SESInternals;
   private isolates = new Map<string, SESIsolate>();
   private callbackEvaluator: SESCallbackEvaluator;
 
   constructor(private options: SESRuntimeOptions = {}) {
     super();
+    this.internals = new SESInternals(options);
     this.callbackEvaluator = new SESCallbackEvaluator(options);
   }
 

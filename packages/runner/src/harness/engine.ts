@@ -99,6 +99,10 @@ interface Internals {
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 }
 
+export interface EngineOptions {
+  hideInternalStackFrames?: boolean;
+}
+
 export class Engine extends EventTarget implements Harness {
   private internals: Internals | undefined;
   private ctRuntime: Runtime;
@@ -109,7 +113,10 @@ export class Engine extends EventTarget implements Harness {
   private readonly executableRegistry = new ExecutableRegistry();
   private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
 
-  constructor(ctRuntime: Runtime) {
+  constructor(
+    ctRuntime: Runtime,
+    private readonly options: EngineOptions = {},
+  ) {
     super();
     this.ctRuntime = ctRuntime;
   }
@@ -413,6 +420,7 @@ export class Engine extends EventTarget implements Harness {
         globals: createModuleCompartmentGlobals({
           console: this.consoleShim,
         }),
+        hideInternalStackFrames: this.options.hideInternalStackFrames,
         lockdown: false,
       });
     }
