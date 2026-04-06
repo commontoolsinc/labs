@@ -25,6 +25,16 @@ describe("Pattern Runner - Regressions", () => {
   let ifElse: ReturnType<typeof createBuilder>["commonfabric"]["ifElse"];
   let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
 
+  const bindBuilder = () => {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    ({
+      derive,
+      pattern,
+      ifElse,
+      handler,
+    } = commonfabric);
+  };
+
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
@@ -33,14 +43,7 @@ describe("Pattern Runner - Regressions", () => {
     });
 
     tx = runtime.edit();
-
-    const { commonfabric } = createTrustedBuilder(runtime);
-    ({
-      derive,
-      pattern,
-      ifElse,
-      handler,
-    } = commonfabric);
+    bindBuilder();
   });
 
   afterEach(async () => {
@@ -137,6 +140,7 @@ describe("Pattern Runner - Regressions", () => {
       memoryVersion: "v2",
     });
     tx = runtime.edit();
+    bindBuilder();
 
     const notePattern = pattern<{ title: string }>(({ title }) => ({
       title,
@@ -220,6 +224,7 @@ describe("Pattern Runner - Regressions", () => {
       memoryVersion: "v2",
     });
     tx = runtime.edit();
+    bindBuilder();
 
     const echoPattern = pattern<{ title: string }>(({ title }) => ({ title }));
     const resultCell = runtime.getCell<{ title: string }>(
@@ -266,6 +271,7 @@ describe("Pattern Runner - Regressions", () => {
       memoryVersion: "v2",
     });
     tx = runtime.edit();
+    bindBuilder();
 
     const initialRecipe = Object.assign(() => {}, {
       toJSON() {

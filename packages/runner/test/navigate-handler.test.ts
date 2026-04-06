@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -22,7 +22,7 @@ Deno.test("handler can update local state and still navigate", async () => {
   const tx: IExtendedStorageTransaction = runtime.edit();
 
   try {
-    const { commontools } = createBuilder();
+    const { commontools } = createTrustedBuilder(runtime);
     const {
       NAME,
       Writable,
@@ -103,7 +103,7 @@ Deno.test(
     const tx: IExtendedStorageTransaction = runtime.edit();
 
     try {
-      const { commontools } = createBuilder();
+      const { commontools } = createTrustedBuilder(runtime);
       const {
         NAME,
         Writable,
