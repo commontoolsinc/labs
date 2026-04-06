@@ -1233,7 +1233,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   );
 
   await t.step(
-    "errors on opaque array receiver-method calls nested inside array-callback expressions",
+    "allows opaque array receiver-method calls nested inside array-callback expressions when the enclosing expression is lowerable",
     async () => {
       const source = `/// <cts-enable />
       import { pattern, UI } from "commonfabric";
@@ -1260,8 +1260,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertHasErrorType(errors, "pattern-context:computation");
+      assertEquals(errors.length, 0);
     },
   );
 
