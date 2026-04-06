@@ -21,8 +21,8 @@
  * ```
  */
 
+import { __ct_data, type Opaque } from "commonfabric";
 import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
-import { __ct_data, type Opaque } from "commontools";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import AirtableAuth from "../airtable-auth.tsx";
 
