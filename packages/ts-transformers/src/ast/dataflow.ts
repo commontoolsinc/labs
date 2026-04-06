@@ -193,12 +193,27 @@ export function createDataFlowAnalyzer(
       return { kind: "property", text: element.propertyName.text };
     }
 
+    const propertyNameText = getStaticPropertyNameText(element.propertyName);
+    if (propertyNameText !== undefined) {
+      return { kind: "property", text: propertyNameText };
+    }
+
+    return undefined;
+  };
+
+  const getStaticPropertyNameText = (
+    name: ts.PropertyName,
+  ): string | undefined => {
+    if (ts.isIdentifier(name)) {
+      return name.text;
+    }
+
     if (
-      ts.isStringLiteral(element.propertyName) ||
-      ts.isNumericLiteral(element.propertyName) ||
-      ts.isNoSubstitutionTemplateLiteral(element.propertyName)
+      ts.isStringLiteral(name) ||
+      ts.isNumericLiteral(name) ||
+      ts.isNoSubstitutionTemplateLiteral(name)
     ) {
-      return { kind: "property", text: element.propertyName.text };
+      return name.text;
     }
 
     return undefined;
@@ -340,6 +355,55 @@ export function createDataFlowAnalyzer(
       ts.isArrayLiteralExpression(target)
     ) {
       return target;
+    }
+
+    return undefined;
+  };
+
+  const getStaticObjectLiteralPropertyInitializer = (
+    objectLiteral: ts.ObjectLiteralExpression,
+    propertyName: string,
+  ): ts.Expression | undefined => {
+    for (let index = objectLiteral.properties.length - 1; index >= 0; index--) {
+      const property = objectLiteral.properties[index];
+
+      if (
+        ts.isSpreadAssignment(property) ||
+        (ts.isPropertyAssignment(property) && ts.isComputedPropertyName(property.name)) ||
+        (ts.isMethodDeclaration(property) && ts.isComputedPropertyName(property.name)) ||
+        (ts.isGetAccessorDeclaration(property) &&
+          ts.isComputedPropertyName(property.name)) ||
+        (ts.isSetAccessorDeclaration(property) &&
+          ts.isComputedPropertyName(property.name))
+      ) {
+        return undefined;
+      }
+
+      if (ts.isPropertyAssignment(property)) {
+        const staticName = getStaticPropertyNameText(property.name);
+        if (staticName === propertyName) {
+          return property.initializer;
+        }
+        continue;
+      }
+
+      if (ts.isShorthandPropertyAssignment(property)) {
+        if (property.name.text === propertyName) {
+          return property.name;
+        }
+        continue;
+      }
+
+      if (
+        ts.isMethodDeclaration(property) ||
+        ts.isGetAccessorDeclaration(property) ||
+        ts.isSetAccessorDeclaration(property)
+      ) {
+        const staticName = getStaticPropertyNameText(property.name);
+        if (staticName === propertyName) {
+          return undefined;
+        }
+      }
     }
 
     return undefined;
@@ -674,24 +738,30 @@ export function createDataFlowAnalyzer(
           targetSymbol,
         );
         if (aggregateInitializer && ts.isObjectLiteralExpression(aggregateInitializer)) {
-          const aggregateAnalysis = analyzeExpression(
+          const propertyInitializer = getStaticObjectLiteralPropertyInitializer(
             aggregateInitializer,
-            scope,
-            context,
+            expression.name.text,
           );
-          if (
-            aggregateAnalysis.containsOpaqueRef ||
-            aggregateAnalysis.requiresRewrite ||
-            aggregateAnalysis.dataFlows.length > 0
-          ) {
-            const parentId =
-              context.expressionToNodeId.get(expression.expression) ?? null;
-            recordDataFlow(expression, scope, parentId, true);
-            return {
-              containsOpaqueRef: true,
-              requiresRewrite: false,
-              dataFlows: [expression],
-            };
+          if (propertyInitializer) {
+            const propertyAnalysis = analyzeExpression(
+              propertyInitializer,
+              scope,
+              context,
+            );
+            if (
+              propertyAnalysis.containsOpaqueRef ||
+              propertyAnalysis.requiresRewrite ||
+              propertyAnalysis.dataFlows.length > 0
+            ) {
+              const parentId =
+                context.expressionToNodeId.get(expression.expression) ?? null;
+              recordDataFlow(expression, scope, parentId, true);
+              return {
+                containsOpaqueRef: true,
+                requiresRewrite: false,
+                dataFlows: [expression],
+              };
+            }
           }
         }
       }
