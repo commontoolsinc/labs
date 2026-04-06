@@ -309,7 +309,7 @@ export class Scheduler {
   // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
   private isEffectAction = new WeakMap<Action, boolean>();
   private dirty = new Set<Action>();
-  private pullMode = false;
+  private pullMode = true;
 
   // Debugger breakpoints: action IDs that should trigger `debugger` before execution
   private breakpoints = new Set<string>();
@@ -560,6 +560,9 @@ export class Scheduler {
   enableIdempotencyCheck(): void {
     this.idempotencyCheckMode = true;
     this.idempotencyViolations = [];
+    if (this.pullMode) {
+      this.queueExecution();
+    }
   }
 
   disableIdempotencyCheck(): void {
@@ -698,7 +701,10 @@ export class Scheduler {
     } else {
       this.computations.add(action);
       this.effects.delete(action);
-      if (options.queueExecution && !this.pullMode) {
+      if (
+        options.queueExecution &&
+        (!this.pullMode || this.idempotencyCheckMode)
+      ) {
         this.queueExecution();
       }
     }

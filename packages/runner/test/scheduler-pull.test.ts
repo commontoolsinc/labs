@@ -2522,7 +2522,7 @@ describe("inline idempotency check mode", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    // No pull mode — matches production test-runner behavior
+    // Inline idempotency mode should work regardless of the scheduler default.
     tx = runtime.edit();
   });
 
