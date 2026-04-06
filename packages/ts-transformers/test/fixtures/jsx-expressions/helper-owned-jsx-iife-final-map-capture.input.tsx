@@ -12,7 +12,7 @@ import {
   UI,
   VNode,
   Writable,
-} from "commontools";
+} from "commonfabric";
 
 interface Entry {
   name: string;

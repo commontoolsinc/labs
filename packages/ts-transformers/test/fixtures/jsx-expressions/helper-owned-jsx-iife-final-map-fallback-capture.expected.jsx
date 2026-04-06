@@ -1,9 +1,20 @@
-import * as __ctHelpers from "commontools";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 /**
  * TRANSFORM REPRO: helper-owned JSX IIFE final map callback captures reactive state
  * after the local receiver has been rewritten through a synthetic fallback wrapper.
  */
-import { pattern, UI, VNode } from "commontools";
+import { pattern, UI, VNode } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Entry {
     name: string;
 }
@@ -15,7 +26,7 @@ interface Input {
 interface Output {
     [UI]: VNode;
 }
-const visibleEntries = (entries: Entry[], prefix: string) => entries.filter((entry) => entry.name.startsWith(prefix));
+const visibleEntries = __ctHardenFn((entries: Entry[], prefix: string) => entries.filter((entry) => entry.name.startsWith(prefix)));
 export default pattern((__ct_pattern_input) => {
     const entries = __ct_pattern_input.key("entries");
     const prefix = __ct_pattern_input.key("prefix");
@@ -23,7 +34,7 @@ export default pattern((__ct_pattern_input) => {
     return ({
         [UI]: (<div>
       {(() => {
-                const visible = __ctHelpers.unless({
+                const visible = __cfHelpers.unless({
                     type: "array",
                     items: {
                         $ref: "#/$defs/Entry"
@@ -39,10 +50,10 @@ export default pattern((__ct_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: false
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/Entry"
@@ -58,7 +69,7 @@ export default pattern((__ct_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         entries: {
@@ -83,7 +94,7 @@ export default pattern((__ct_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/Entry"
@@ -99,11 +110,11 @@ export default pattern((__ct_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     entries: entries,
                     prefix: prefix
                 }, ({ entries, prefix }) => visibleEntries(entries, prefix)), []);
-                return visible.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                return visible.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                     const entry = __ct_pattern_input.key("element");
                     const labelPrefix = __ct_pattern_input.key("params", "labelPrefix");
                     return (<button type="button">
@@ -137,7 +148,7 @@ export default pattern((__ct_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{
                             $ref: "https://commonfabric.org/schemas/vnode.json"
                         }, {
@@ -157,7 +168,7 @@ export default pattern((__ct_pattern_input) => {
                             required: ["$UI"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema), {
+                } as const satisfies __cfHelpers.JSONSchema), {
                     labelPrefix: labelPrefix
                 });
             })()}
@@ -191,7 +202,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["name"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -199,8 +210,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["$UI"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__ctHardenFn(h);

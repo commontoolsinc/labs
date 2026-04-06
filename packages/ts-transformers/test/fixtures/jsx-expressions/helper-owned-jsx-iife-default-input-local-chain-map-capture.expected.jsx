@@ -1,4 +1,12 @@
-import * as __ctHelpers from "commontools";
+function __ctHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __ctHelpers as __cfHelpers } from "commonfabric";
 /**
  * TRANSFORM REPRO: helper-owned JSX IIFE with defaulted array input, local
  * initializer chain, and final map callback captures.
@@ -6,7 +14,10 @@ import * as __ctHelpers from "commontools";
  * The final callback array method should lower to mapWithPattern, but the
  * IIFE itself should stay decomposed rather than being blanket-wrapped.
  */
-import { action, Default, pattern, UI, VNode, Writable, } from "commontools";
+import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __ctAmdHooks = undefined;
 interface Entry {
     id: string;
     name: string;
@@ -24,6 +35,7 @@ function findChildren(tree: readonly Entry[], path: readonly string[]): readonly
     }
     return current;
 }
+__ctHardenFn(findChildren);
 interface Input {
     entries: Default<Entry[], [
     ]>;
@@ -38,8 +50,8 @@ export default pattern((__ct_pattern_input) => {
         items: {
             type: "string"
         }
-    } as const satisfies __ctHelpers.JSONSchema);
-    const handleNavigateInto = __ctHelpers.handler({
+    } as const satisfies __cfHelpers.JSONSchema);
+    const handleNavigateInto = __cfHelpers.handler({
         type: "object",
         properties: {
             name: {
@@ -47,7 +59,7 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["name"]
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
             path: {
@@ -59,12 +71,12 @@ export default pattern((__ct_pattern_input) => {
             }
         },
         required: ["path"]
-    } as const satisfies __ctHelpers.JSONSchema, ({ name }, { path }) => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ name }, { path }) => {
         path.push(name);
     })({
         path: path
     });
-    const handleOpenFile = __ctHelpers.handler({
+    const handleOpenFile = __cfHelpers.handler({
         type: "object",
         properties: {
             item: {
@@ -98,16 +110,16 @@ export default pattern((__ct_pattern_input) => {
                 required: ["id", "name", "type"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {}
-    } as const satisfies __ctHelpers.JSONSchema, ({ item }, __ct_action_params) => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ item }, __ct_action_params) => {
         void item;
     })({});
     return {
         [UI]: (<div>
         {(() => {
-                const tree = (__ctHelpers.unless({
+                const tree = (__cfHelpers.unless({
                     $ref: "#/$defs/AnonymousType_1",
                     $defs: {
                         AnonymousType_1: {
@@ -138,10 +150,10 @@ export default pattern((__ct_pattern_input) => {
                             required: ["id", "name", "type"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: false
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     $ref: "#/$defs/AnonymousType_1",
                     $defs: {
                         AnonymousType_1: {
@@ -172,21 +184,21 @@ export default pattern((__ct_pattern_input) => {
                             required: ["id", "name", "type"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, entries, [])) as Entry[];
-                const p = (__ctHelpers.unless({
+                } as const satisfies __cfHelpers.JSONSchema, entries, [])) as Entry[];
+                const p = (__cfHelpers.unless({
                     type: "array",
                     items: {
                         type: "string"
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: false
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
                         type: "string"
                     }
-                } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                     type: "object",
                     properties: {
                         path: {
@@ -198,14 +210,14 @@ export default pattern((__ct_pattern_input) => {
                         }
                     },
                     required: ["path"]
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
                         type: "string"
                     }
-                } as const satisfies __ctHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), [])) as string[];
+                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), [])) as string[];
                 const unsorted = findChildren(tree, p) as Entry[];
-                const items = __ctHelpers.derive({
+                const items = __cfHelpers.derive({
                     type: "object",
                     properties: {
                         unsorted: {
@@ -242,7 +254,7 @@ export default pattern((__ct_pattern_input) => {
                             required: ["id", "name", "type"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     $ref: "#/$defs/AnonymousType_1",
                     $defs: {
                         AnonymousType_1: {
@@ -273,26 +285,26 @@ export default pattern((__ct_pattern_input) => {
                             required: ["id", "name", "type"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, { unsorted: unsorted }, ({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => {
+                } as const satisfies __cfHelpers.JSONSchema, { unsorted: unsorted }, ({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => {
                     if (a.type === b.type)
                         return 0;
                     return a.type === "file" ? -1 : 1;
                 }));
-                return items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                return items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                     const item = __ct_pattern_input.key("element");
                     const handleNavigateInto = __ct_pattern_input.key("params", "handleNavigateInto");
                     const handleOpenFile = __ct_pattern_input.key("params", "handleOpenFile");
                     const isFolder = item.key("type") === "folder";
-                    const isOpenable = __ctHelpers.when({
+                    const isOpenable = __cfHelpers.when({
                         type: "boolean"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "boolean"
-                    } as const satisfies __ctHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, {
                         type: "boolean"
-                    } as const satisfies __ctHelpers.JSONSchema, !isFolder &&
+                    } as const satisfies __cfHelpers.JSONSchema, !isFolder &&
                         !!item.key("contentType"), item.key("contentType") !== "binary");
                     return (<button type="button" onClick={isFolder
-                            ? __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+                            ? __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
                                 type: "object",
                                 properties: {
                                     handleNavigateInto: {
@@ -316,7 +328,7 @@ export default pattern((__ct_pattern_input) => {
                                     }
                                 },
                                 required: ["handleNavigateInto", "item"]
-                            } as const satisfies __ctHelpers.JSONSchema, (_, { handleNavigateInto, item }) => handleNavigateInto.send({
+                            } as const satisfies __cfHelpers.JSONSchema, (_, { handleNavigateInto, item }) => handleNavigateInto.send({
                                 name: item.name,
                             }))({
                                 handleNavigateInto: handleNavigateInto,
@@ -324,7 +336,7 @@ export default pattern((__ct_pattern_input) => {
                                     name: item.key("name")
                                 }
                             }) : isOpenable
-                            ? __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+                            ? __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
                                 type: "object",
                                 properties: {
                                     handleOpenFile: {
@@ -371,7 +383,7 @@ export default pattern((__ct_pattern_input) => {
                                         }
                                     }
                                 }
-                            } as const satisfies __ctHelpers.JSONSchema, (_, { handleOpenFile, item }) => handleOpenFile.send({ item }))({
+                            } as const satisfies __cfHelpers.JSONSchema, (_, { handleOpenFile, item }) => handleOpenFile.send({ item }))({
                                 handleOpenFile: handleOpenFile,
                                 item: item
                             }) : undefined}>
@@ -440,7 +452,7 @@ export default pattern((__ct_pattern_input) => {
                             }
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{
                             $ref: "https://commonfabric.org/schemas/vnode.json"
                         }, {
@@ -460,7 +472,7 @@ export default pattern((__ct_pattern_input) => {
                             required: ["$UI"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema), {
+                } as const satisfies __cfHelpers.JSONSchema), {
                     handleNavigateInto: handleNavigateInto,
                     handleOpenFile: handleOpenFile
                 });
@@ -505,7 +517,7 @@ export default pattern((__ct_pattern_input) => {
             required: ["id", "name", "type"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -513,8 +525,7 @@ export default pattern((__ct_pattern_input) => {
         }
     },
     required: ["$UI"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__ctHardenFn(h);

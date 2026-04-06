@@ -96,7 +96,7 @@ Deno.test(
   "Transform guards: numeric element-access receiver keys use canonical numeric values",
   async () => {
     const source = `/// <cts-enable />
-import { pattern } from "commontools";
+import { pattern } from "commonfabric";
 interface Item { name: string }
 interface Group { items: Item[] }
 const p = pattern((input: { groups: Group[] }) =>
