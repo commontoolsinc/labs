@@ -11,7 +11,7 @@
 import { isDeno } from "@commonfabric/utils/env";
 import { createSHA256, type IHasher } from "hash-wasm";
 import { sha256 as nobleSha256 } from "merkle-reference";
-import { toUnpaddedBase64url } from "./base64url.ts";
+import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 
 /**
  * Incremental SHA-256 hasher. Feed data via `update()`, finalize with
