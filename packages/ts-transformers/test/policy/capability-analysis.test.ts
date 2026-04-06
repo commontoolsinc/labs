@@ -559,20 +559,99 @@ Deno.test("Capability analysis marks for...of over tracked source as wildcard", 
   assertEquals(input.wildcard, true);
 });
 
-Deno.test("Capability analysis marks for...of over tracked sub-path as wildcard", () => {
-  const fn = parseFirstCallback(
-    `const fn = (input) => {
+Deno.test(
+  "Capability analysis keeps ?? fallback aliases path-specific through for...of item reads",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        const items = input.items ?? [];
+        for (const item of items) {
+          item.notes?.length;
+        }
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("items"));
+    assert(input.readPaths.includes("items.notes.length"));
+  },
+);
+
+Deno.test(
+  "Capability analysis tracks known fixed-symbol element access without wildcard",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const NAME: unique symbol;
+      declare const UI: unique symbol;
+      declare const SELF: unique symbol;
+
+      const fn = (input: {
+        [NAME]?: string;
+        [UI]?: { node: string };
+        [SELF]?: { id: string };
+        extra: number;
+      }) => [input[NAME], input[UI], input[SELF]];
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("$NAME"));
+    assert(input.readPaths.includes("$UI"));
+    assert(input.readPaths.includes("$SELF"));
+    assertEquals(input.readPaths.includes("extra"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis tracks known fixed-symbol destructuring without wildcard",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      declare const SELF: unique symbol;
+
+      const fn = (
+        { [SELF]: self, value }: { [SELF]?: { id: string }; value: string },
+      ) => self?.id ?? value;
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "__param0");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("$SELF.id"));
+    assert(input.readPaths.includes("value"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps for...of over tracked sub-path path-specific",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
       for (const item of input.items) {
-        console.log(item);
+        item.name;
       }
     };`,
-  );
-  const summary = analyzeFunctionCapabilities(fn);
-  const input = getPaths(summary, "input");
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
 
-  assertEquals(input.wildcard, true);
-  assert(input.readPaths.includes("items"));
-});
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("items"));
+    assert(input.readPaths.includes("items.name"));
+  },
+);
 
 Deno.test(
   "Capability analysis handles deeply nested mutual recursion without hanging",

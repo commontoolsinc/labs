@@ -49,6 +49,11 @@ const PARAMETER_SUMMARY_PREFIX = "__param";
 
 const WRITER_METHODS = new Set(["set", "update"]);
 const READER_METHODS = new Set(["get"]);
+const FALLBACK_OPERATORS = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.QuestionQuestionToken,
+  ts.SyntaxKind.BarBarToken,
+]);
+const KNOWN_FIXED_SYMBOL_KEYS = new Set(["NAME", "UI", "SELF", "FS"]);
 const ASSIGNMENT_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.EqualsToken,
   ts.SyntaxKind.PlusEqualsToken,
@@ -109,6 +114,7 @@ function getLiteralElementText(
 
 function extractLiteralPathArguments(
   args: readonly ts.Expression[],
+  checker?: ts.TypeChecker,
 ): { path: readonly string[]; dynamic: boolean } {
   const path: string[] = [];
   for (const arg of args) {
@@ -120,12 +126,91 @@ function extractLiteralPathArguments(
       path.push(arg.text);
       continue;
     }
+    const knownKey = getKnownComputedKeyPathSegment(arg, checker);
+    if (knownKey) {
+      path.push(knownKey);
+      continue;
+    }
     return { path, dynamic: true };
   }
   return { path, dynamic: false };
 }
 
-function extractAccessPath(expr: ts.Expression): AccessPathInfo | undefined {
+function getKnownFixedSymbolKeyName(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): string | undefined {
+  if (
+    ts.isPropertyAccessExpression(expr) &&
+    ts.isIdentifier(expr.expression) &&
+    expr.expression.text === "__cfHelpers" &&
+    KNOWN_FIXED_SYMBOL_KEYS.has(expr.name.text)
+  ) {
+    return expr.name.text;
+  }
+
+  if (!ts.isIdentifier(expr)) {
+    return undefined;
+  }
+
+  if (KNOWN_FIXED_SYMBOL_KEYS.has(expr.text)) {
+    return expr.text;
+  }
+
+  if (!checker) {
+    return undefined;
+  }
+
+  const symbol = checker.getSymbolAtLocation(expr);
+  const aliasName = symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0
+    ? checker.getAliasedSymbol(symbol).getName()
+    : undefined;
+  if (aliasName && KNOWN_FIXED_SYMBOL_KEYS.has(aliasName)) {
+    return aliasName;
+  }
+
+  const symbolName = symbol?.getName();
+  if (symbolName && KNOWN_FIXED_SYMBOL_KEYS.has(symbolName)) {
+    return symbolName;
+  }
+
+  return undefined;
+}
+
+function getKnownComputedKeyPathSegment(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): string | undefined {
+  const keyName = getKnownFixedSymbolKeyName(expr, checker);
+  return keyName ? `$${keyName}` : undefined;
+}
+
+function getStaticPropertyKeyText(
+  name: ts.PropertyName,
+  checker?: ts.TypeChecker,
+): string | undefined {
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
+    return name.text;
+  }
+
+  if (ts.isNumericLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) {
+    return name.text;
+  }
+
+  if (ts.isComputedPropertyName(name)) {
+    return getKnownComputedKeyPathSegment(name.expression, checker) ??
+      (isLiteralElement(name.expression)
+        ? getLiteralElementText(name.expression)
+        : undefined);
+  }
+
+  return undefined;
+}
+
+function extractAccessPath(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): AccessPathInfo | undefined {
   const path: string[] = [];
   let dynamic = false;
   let optional = false;
@@ -144,7 +229,13 @@ function extractAccessPath(expr: ts.Expression): AccessPathInfo | undefined {
       if (isLiteralElement(current.argumentExpression)) {
         path.unshift(getLiteralElementText(current.argumentExpression));
       } else {
-        dynamic = true;
+        const knownKey = current.argumentExpression &&
+          getKnownComputedKeyPathSegment(current.argumentExpression, checker);
+        if (knownKey) {
+          path.unshift(knownKey);
+        } else {
+          dynamic = true;
+        }
       }
       current = unwrapExpression(current.expression);
       continue;
@@ -334,14 +425,11 @@ function assignParameterBindingAlias(
       if (ts.isIdentifier(element.name)) {
         key = element.name.text;
       }
-    } else if (ts.isIdentifier(element.propertyName)) {
-      key = element.propertyName.text;
-    } else if (ts.isStringLiteral(element.propertyName)) {
-      key = element.propertyName.text;
-    } else if (ts.isNumericLiteral(element.propertyName)) {
-      key = element.propertyName.text;
     } else {
-      markWildcard(source.root);
+      key = getStaticPropertyKeyText(element.propertyName);
+      if (!key) {
+        markWildcard(source.root);
+      }
     }
 
     if (!key) {
@@ -484,7 +572,7 @@ export function analyzeFunctionCapabilities(
     const resolveFromAccess = (
       expression: ts.Expression,
     ): SourceRef | undefined => {
-      const info = extractAccessPath(expression);
+      const info = extractAccessPath(expression, checker);
       if (!info) return undefined;
       const alias = aliases.get(info.root);
       if (!alias) return undefined;
@@ -499,6 +587,13 @@ export function analyzeFunctionCapabilities(
       expression: ts.Expression,
     ): SourceRef | undefined => {
       const current = unwrapExpression(expression);
+      if (
+        ts.isBinaryExpression(current) &&
+        FALLBACK_OPERATORS.has(current.operatorToken.kind)
+      ) {
+        return resolveSourceRef(current.left);
+      }
+
       const byAccess = resolveFromAccess(current);
       if (byAccess) return byAccess;
 
@@ -551,7 +646,10 @@ export function analyzeFunctionCapabilities(
           return receiverRef;
         }
         if (methodName === "key") {
-          const argPath = extractLiteralPathArguments(current.arguments);
+          const argPath = extractLiteralPathArguments(
+            current.arguments,
+            checker,
+          );
           if (argPath.dynamic) {
             return { ...receiverRef, dynamic: true };
           }
@@ -620,14 +718,11 @@ export function analyzeFunctionCapabilities(
           if (ts.isIdentifier(element.name)) {
             key = element.name.text;
           }
-        } else if (ts.isIdentifier(element.propertyName)) {
-          key = element.propertyName.text;
-        } else if (ts.isStringLiteral(element.propertyName)) {
-          key = element.propertyName.text;
-        } else if (ts.isNumericLiteral(element.propertyName)) {
-          key = element.propertyName.text;
         } else {
-          markWildcard(source.root);
+          key = getStaticPropertyKeyText(element.propertyName, checker);
+          if (!key) {
+            markWildcard(source.root);
+          }
         }
 
         if (!key) {
@@ -694,14 +789,8 @@ export function analyzeFunctionCapabilities(
             continue;
           }
 
-          let key: string | undefined;
-          if (ts.isIdentifier(property.name)) {
-            key = property.name.text;
-          } else if (ts.isStringLiteral(property.name)) {
-            key = property.name.text;
-          } else if (ts.isNumericLiteral(property.name)) {
-            key = property.name.text;
-          } else {
+          const key = getStaticPropertyKeyText(property.name, checker);
+          if (!key) {
             markWildcard(source.root);
           }
 
@@ -833,6 +922,26 @@ export function analyzeFunctionCapabilities(
         if (includeNestedCallbacks) {
           visitScopedFunctionBody(node);
         }
+        return;
+      }
+
+      if (
+        ts.isBinaryExpression(node) &&
+        FALLBACK_OPERATORS.has(node.operatorToken.kind)
+      ) {
+        const leftRef = resolveSourceRef(node.left);
+        if (leftRef) {
+          if (leftRef.dynamic) {
+            markWildcard(leftRef.root);
+          } else if (leftRef.path.length === 0) {
+            markPassthrough(leftRef.root);
+          } else {
+            trackReadRef(leftRef);
+          }
+        } else {
+          visit(node.left);
+        }
+        visit(node.right);
         return;
       }
 
@@ -1035,7 +1144,10 @@ export function analyzeFunctionCapabilities(
           if (receiver) {
             const methodName = node.expression.name.text;
             if (methodName === "key") {
-              const argPath = extractLiteralPathArguments(node.arguments);
+              const argPath = extractLiteralPathArguments(
+                node.arguments,
+                checker,
+              );
               if (argPath.dynamic) {
                 markWildcard(receiver.root);
               }
@@ -1111,8 +1223,52 @@ export function analyzeFunctionCapabilities(
         }
       }
 
-      if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
+      if (ts.isForInStatement(node)) {
         markWildcardFromExpression(node.expression);
+        ts.forEachChild(node, visit);
+        return;
+      }
+
+      if (ts.isForOfStatement(node)) {
+        const iterableRef = resolveSourceRef(node.expression);
+        if (iterableRef) {
+          if (iterableRef.dynamic) {
+            markWildcard(iterableRef.root);
+          } else if (iterableRef.path.length === 0) {
+            markPassthrough(iterableRef.root);
+          } else {
+            trackReadRef(iterableRef);
+          }
+        } else {
+          visit(node.expression);
+        }
+
+        const savedAliases = new Map(aliases);
+        const savedSpecificPaths = new Set(aliasesWithSpecificPaths);
+        try {
+          if (iterableRef) {
+            if (ts.isVariableDeclarationList(node.initializer)) {
+              for (const declaration of node.initializer.declarations) {
+                assignBindingAlias(declaration.name, iterableRef);
+              }
+            } else if (ts.isExpression(node.initializer)) {
+              assignExpressionPatternAlias(node.initializer, iterableRef);
+            }
+          } else {
+            visit(node.initializer);
+          }
+          visit(node.statement);
+        } finally {
+          aliases.clear();
+          for (const [name, source] of savedAliases) {
+            aliases.set(name, source);
+          }
+          aliasesWithSpecificPaths.clear();
+          for (const name of savedSpecificPaths) {
+            aliasesWithSpecificPaths.add(name);
+          }
+        }
+        return;
       }
 
       ts.forEachChild(node, visit);

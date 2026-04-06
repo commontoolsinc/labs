@@ -1165,6 +1165,85 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "derive shrinks array items through ?? fallback aliases and for...of loops",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive } from "commonfabric";',
+        "type Note = { title: string; body: string };",
+        "type NotebookPiece = {",
+        "  notes?: Note[];",
+        "  metadata: { author: string; tags: string[] };",
+        "};",
+        "const pieces = {} as NotebookPiece[];",
+        "const total = derive({ pieces }, ({ pieces }) => {",
+        "  const items = pieces ?? [];",
+        "  let count = 0;",
+        "  for (const piece of items) {",
+        "    count += piece.notes?.length ?? 0;",
+        "  }",
+        "  return count;",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "notes");
+      assertEquals(inputSchema.includes("metadata"), false);
+      assertEquals(inputSchema.includes("author"), false);
+      assertEquals(inputSchema.includes("body"), false);
+    },
+  );
+
+  await t.step(
+    "derive shrinks known fixed-symbol access without pulling unrelated fields",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive, NAME, UI } from "commonfabric";',
+        "type Piece = {",
+        "  [NAME]?: string;",
+        "  [UI]?: string;",
+        "  metadata: { author: string; tags: string[] };",
+        "};",
+        "const piece = {} as Piece;",
+        "const label = derive({ piece }, ({ piece }) => {",
+        '  return `${piece[NAME] ?? ""}:${piece[UI] ?? ""}`;',
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "$NAME");
+      assertStringIncludes(inputSchema, "$UI");
+      assertEquals(inputSchema.includes("metadata"), false);
+      assertEquals(inputSchema.includes("author"), false);
+    },
+  );
+
+  await t.step(
     "derive wildcard usage keeps conservative full-shape input schema",
     async () => {
       const source = [

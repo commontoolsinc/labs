@@ -37,6 +37,7 @@ const NON_ITEM_PROPS = new Set([
   "key",
   "update",
 ]);
+const KNOWN_FIXED_SYMBOL_KEYS = new Set(["NAME", "UI", "SELF", "FS"]);
 
 // ---------------------------------------------------------------------------
 // Utility helpers
@@ -80,7 +81,7 @@ function getTopLevelRepresentedHeads(node: ts.TypeNode): Set<string> {
   const heads = new Set<string>();
   for (const member of current.members) {
     if (!ts.isPropertySignature(member) || !member.name) continue;
-    const name = getPropertyNameText(member.name);
+    const name = getRequestedPropertyNameText(member.name);
     if (name) heads.add(name);
   }
   return heads;
@@ -156,12 +157,42 @@ function isSyntheticTypeNode(node: ts.TypeNode): boolean {
   return node.pos < 0 || node.end < 0;
 }
 
+function getKnownComputedKeyHead(expr: ts.Expression): string | undefined {
+  if (ts.isIdentifier(expr) && KNOWN_FIXED_SYMBOL_KEYS.has(expr.text)) {
+    return `$${expr.text}`;
+  }
+  if (
+    ts.isPropertyAccessExpression(expr) &&
+    ts.isIdentifier(expr.expression) &&
+    expr.expression.text === "__cfHelpers" &&
+    KNOWN_FIXED_SYMBOL_KEYS.has(expr.name.text)
+  ) {
+    return `$${expr.name.text}`;
+  }
+  return undefined;
+}
+
+function getRequestedPropertyNameText(
+  name: ts.PropertyName,
+): string | undefined {
+  return getPropertyNameText(name) ??
+    (ts.isComputedPropertyName(name)
+      ? getKnownComputedKeyHead(name.expression)
+      : undefined);
+}
+
 function isArrayShapeType(type: ts.Type, checker: ts.TypeChecker): boolean {
   const typeChecker = checker as ts.TypeChecker & {
     isArrayType?: (type: ts.Type) => boolean;
     isTupleType?: (type: ts.Type) => boolean;
   };
-  return !!(typeChecker.isArrayType?.(type) || typeChecker.isTupleType?.(type));
+  const symbolName = type.getSymbol()?.getName();
+  return !!(
+    typeChecker.isArrayType?.(type) ||
+    typeChecker.isTupleType?.(type) ||
+    symbolName === "Array" ||
+    symbolName === "ReadonlyArray"
+  );
 }
 
 function isHomogeneousArrayType(
@@ -178,7 +209,8 @@ function isHomogeneousArrayType(
   if (typeChecker.isArrayType?.(type)) {
     return true;
   }
-  return type.getSymbol()?.getName() === "ReadonlyArray";
+  const symbolName = type.getSymbol()?.getName();
+  return symbolName === "Array" || symbolName === "ReadonlyArray";
 }
 
 function isNumericIndexableType(
@@ -187,6 +219,87 @@ function isNumericIndexableType(
 ): boolean {
   return isArrayShapeType(type, checker) ||
     !!checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+}
+
+function isNumericPathSegment(segment: string): boolean {
+  return /^\d+$/.test(segment);
+}
+
+function getArrayItemPaths(
+  paths: readonly (readonly string[])[],
+): readonly (readonly string[])[] {
+  const itemPaths: (readonly string[])[] = [];
+  for (const path of paths) {
+    if (path.length === 0) continue;
+    const [head, ...tail] = path;
+    if (!head) continue;
+    if (NON_ITEM_PROPS.has(head) && tail.length === 0) {
+      continue;
+    }
+    itemPaths.push(isNumericPathSegment(head) ? tail : path);
+  }
+  return uniquePaths(itemPaths);
+}
+
+function getArrayElementType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  const numericIndex = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+  if (numericIndex) {
+    return numericIndex;
+  }
+
+  if ((type.flags & ts.TypeFlags.Object) !== 0) {
+    const objectType = type as ts.ObjectType;
+    if ((objectType.objectFlags & ts.ObjectFlags.Reference) !== 0) {
+      const ref = objectType as ts.TypeReference;
+      const typeArgs = checker.getTypeArguments(ref);
+      if (typeArgs[0]) {
+        return typeArgs[0];
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function getSymbolPropertyHead(symbol: ts.Symbol): string | undefined {
+  for (const declaration of symbol.declarations ?? []) {
+    if (
+      (ts.isPropertySignature(declaration) ||
+        ts.isPropertyDeclaration(declaration)) &&
+      declaration.name
+    ) {
+      const head = getRequestedPropertyNameText(declaration.name);
+      if (head) return head;
+    }
+  }
+  return undefined;
+}
+
+function findPropertySymbol(
+  type: ts.Type,
+  head: string,
+  checker: ts.TypeChecker,
+): ts.Symbol | undefined {
+  const direct = type.getProperty(head);
+  if (direct) return direct;
+
+  for (const prop of checker.getPropertiesOfType(type)) {
+    if (getSymbolPropertyHead(prop) === head) {
+      return prop;
+    }
+  }
+
+  if (type.isUnion()) {
+    for (const member of type.types) {
+      const prop = findPropertySymbol(member, head, checker);
+      if (prop) return prop;
+    }
+  }
+
+  return undefined;
 }
 
 export function isCellLikeTypeNode(node: ts.TypeNode): boolean {
@@ -239,6 +352,7 @@ function buildShrunkTypeNodeFromType(
   // (no item-level access), shrink the item type to `unknown` to avoid
   // fetching full item schemas unnecessarily.
   if (isArrayShapeType(type, checker)) {
+    const itemPaths = getArrayItemPaths(normalized);
     const allNonItem = normalized.every(
       (path) =>
         path.length === 1 && path[0] !== undefined &&
@@ -249,6 +363,24 @@ function buildShrunkTypeNodeFromType(
       return factory.createArrayTypeNode(
         factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
       );
+    }
+    if (itemPaths.length > 0 && isHomogeneousArrayType(type, checker)) {
+      const elementType = getArrayElementType(type, checker);
+      if (elementType) {
+        const elementNode = buildShrunkTypeNodeFromType(
+          elementType,
+          itemPaths,
+          checker,
+          sourceFile,
+          factory,
+          typeRegistry,
+        ) ??
+          checker.typeToTypeNode(elementType, sourceFile, typeToNodeFlags) ??
+          factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+        const arrayNode = factory.createArrayTypeNode(elementNode);
+        ensureTypeNodeRegistered(arrayNode, checker, typeRegistry);
+        return arrayNode;
+      }
     }
     const node = checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
       factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
@@ -318,7 +450,7 @@ function buildShrunkTypeNodeFromType(
     let propType: ts.Type | undefined;
     let isOptional = false;
 
-    const prop = type.getProperty(head);
+    const prop = findPropertySymbol(type, head, checker);
     if (prop) {
       const declaration = prop.valueDeclaration ?? prop.declarations?.[0] ??
         sourceFile;
@@ -403,8 +535,10 @@ function buildShrunkTypeNodeFromTypeNode(
   if (normalized.length === 0) {
     return undefined;
   }
+  const itemPaths = getArrayItemPaths(normalized);
+  const hasDirectAccess = normalized.some((path) => path.length === 0);
 
-  if (normalized.some((path) => path.length === 0)) {
+  if (hasDirectAccess) {
     // For Cell-like types, an empty path typically comes from `.get()` being
     // tracked as a full read.  If there are also longer paths (e.g. from
     // `.get().length`), try shrinking the inner type using those paths.
@@ -435,7 +569,9 @@ function buildShrunkTypeNodeFromTypeNode(
         }
       }
     }
-    return node;
+    if (itemPaths.length === 0) {
+      return node;
+    }
   }
 
   // Shrink array types: when only array-intrinsic properties (e.g. `length`)
@@ -481,7 +617,77 @@ function buildShrunkTypeNodeFromTypeNode(
         }
         return arrayNode;
       }
-      // Item access or other paths — keep full array type.
+      if (itemPaths.length > 0) {
+        if (ts.isArrayTypeNode(node)) {
+          const shrunkElement = buildShrunkTypeNodeFromTypeNode(
+            node.elementType,
+            itemPaths,
+            factory,
+            checker,
+            typeRegistry,
+          ) ?? node.elementType;
+          return factory.updateArrayTypeNode(node, shrunkElement);
+        }
+
+        if (
+          ts.isTypeOperatorNode(node) &&
+          node.operator === ts.SyntaxKind.ReadonlyKeyword &&
+          ts.isArrayTypeNode(node.type)
+        ) {
+          const shrunkElement = buildShrunkTypeNodeFromTypeNode(
+            node.type.elementType,
+            itemPaths,
+            factory,
+            checker,
+            typeRegistry,
+          ) ?? node.type.elementType;
+          return factory.updateTypeOperatorNode(
+            node,
+            factory.updateArrayTypeNode(node.type, shrunkElement),
+          );
+        }
+
+        if (
+          ts.isTypeReferenceNode(node) &&
+          ts.isIdentifier(node.typeName) &&
+          node.typeArguments?.[0] &&
+          (node.typeName.text === "Array" ||
+            node.typeName.text === "ReadonlyArray")
+        ) {
+          const [inner] = node.typeArguments;
+          const shrunkInner = buildShrunkTypeNodeFromTypeNode(
+            inner,
+            itemPaths,
+            factory,
+            checker,
+            typeRegistry,
+          ) ?? inner;
+          return factory.updateTypeReferenceNode(
+            node,
+            node.typeName,
+            factory.createNodeArray([shrunkInner]),
+          );
+        }
+
+        if (checker && ts.isTypeReferenceNode(node)) {
+          const resolvedType = getTypeFromTypeNodeWithFallback(
+            node,
+            checker,
+            typeRegistry,
+          );
+          if (isArrayShapeType(resolvedType, checker)) {
+            return buildShrunkTypeNodeFromType(
+              resolvedType,
+              normalized,
+              checker,
+              node.getSourceFile(),
+              factory,
+              typeRegistry,
+            );
+          }
+        }
+      }
+      // Item access or other paths we could not materialize — keep full array type.
       return node;
     }
   }
@@ -660,7 +866,7 @@ function shrinkTypeLiteralMembers(
       continue;
     }
 
-    const propertyName = getPropertyNameText(member.name);
+    const propertyName = getRequestedPropertyNameText(member.name);
     if (!propertyName) continue;
     const childPaths = grouped.get(propertyName);
     if (!childPaths) continue;
@@ -709,7 +915,7 @@ function typeNodeHasHead(
     return node.members.some(
       (m) =>
         ts.isPropertySignature(m) && m.name &&
-        getPropertyNameText(m.name) === head,
+        getRequestedPropertyNameText(m.name) === head,
     );
   }
 
@@ -726,7 +932,7 @@ function typeNodeHasHead(
       return members.some(
         (m) =>
           ts.isPropertySignature(m) && m.name &&
-          getPropertyNameText(m.name) === head,
+          getRequestedPropertyNameText(m.name) === head,
       );
     }
   }
@@ -741,7 +947,7 @@ function typeHasHead(
   checker: ts.TypeChecker,
 ): boolean {
   // Direct property lookup (works for simple object types)
-  if (type.getProperty(head)) return true;
+  if (findPropertySymbol(type, head, checker)) return true;
 
   // For unions, check each non-primitive constituent individually
   // (getProperty on a union uses intersection semantics)
@@ -1340,14 +1546,6 @@ export function applyShrinkAndWrap(
           // drop the whole property while trying to descend into `T`.
           shrunk = nodeDriven;
         } else if (
-          containsAnyOrUnknownTypeNode(typeDriven) &&
-          !containsAnyOrUnknownTypeNode(nodeDriven)
-        ) {
-          // Prefer node-driven shrinking when type-driven rebuilding widens
-          // nested members to `any`/`unknown` (e.g. array items or optional
-          // fields).
-          shrunk = nodeDriven;
-        } else if (
           nodeDriven !== baseTypeNode &&
           containsAnyOrUnknownTypeNode(nodeDriven) &&
           !containsAnyOrUnknownTypeNode(typeDriven)
@@ -1360,22 +1558,50 @@ export function applyShrinkAndWrap(
         }
       }
     } else {
-      // Source-authored nodes preserve exact unions/aliases; keep them first.
-      shrunk = buildShrunkTypeNodeFromTypeNode(
+      // Source-authored nodes preserve exact unions/aliases, but type-driven
+      // shrinking can still produce a better result for arrays and inferred
+      // wrappers. Compute both and choose the more informative shrink.
+      const nodeDriven = buildShrunkTypeNodeFromTypeNode(
         baseTypeNode,
         paths,
         factory,
         checker,
       );
-      if (!shrunk && baseType) {
-        shrunk = buildShrunkTypeNodeFromType(
+      const typeDriven = baseType
+        ? buildShrunkTypeNodeFromType(
           baseType,
           paths,
           checker,
           sourceFile,
           factory,
           context?.options.typeRegistry,
+        )
+        : undefined;
+      shrunk = nodeDriven ?? typeDriven;
+      if (nodeDriven && typeDriven) {
+        const requestedHeads = getTopLevelRequestedHeads(paths);
+        const typeDrivenCoverage = countRepresentedRequestedHeads(
+          typeDriven,
+          requestedHeads,
         );
+        const nodeDrivenCoverage = countRepresentedRequestedHeads(
+          nodeDriven,
+          requestedHeads,
+        );
+
+        if (
+          nodeDriven === baseTypeNode &&
+          typeDriven !== baseTypeNode
+        ) {
+          shrunk = typeDriven;
+        } else if (typeDrivenCoverage > nodeDrivenCoverage) {
+          shrunk = typeDriven;
+        } else if (
+          containsAnyOrUnknownTypeNode(nodeDriven) &&
+          !containsAnyOrUnknownTypeNode(typeDriven)
+        ) {
+          shrunk = typeDriven;
+        }
       }
     }
     if (shrunk) {
