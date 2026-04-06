@@ -74,43 +74,14 @@ export default pattern((state) => {
         [UI]: (<div>
         {rows.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const row = __ct_pattern_input.key("element");
-                const view = __cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        row: {
-                            type: "object",
-                            properties: {
-                                done: {
-                                    type: "boolean"
-                                }
-                            },
-                            required: ["done"]
-                        }
-                    },
-                    required: ["row"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "object",
-                    properties: {
-                        status: {
-                            anyOf: [{
-                                    type: "string"
-                                }, {
-                                    type: "boolean",
-                                    "enum": [true]
-                                }]
-                        }
-                    },
-                    required: ["status"]
-                } as const satisfies __cfHelpers.JSONSchema, { row: {
-                        done: row.key("done")
-                    } }, ({ row }) => ({ status: __cfHelpers.unless({
+                const view = { status: __cfHelpers.unless({
                         type: "boolean"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": [true, "Pending"]
-                    } as const satisfies __cfHelpers.JSONSchema, row.done, "Pending") }));
-                return <span>{view.key("status")}</span>;
+                    } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Pending") };
+                return <span>{view.status}</span>;
             }, {
                 type: "object",
                 properties: {

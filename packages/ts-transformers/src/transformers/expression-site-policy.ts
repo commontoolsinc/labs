@@ -1277,6 +1277,59 @@ export function findLowerableExpressionSite(
   return deferredArrayMethodReceiverSite;
 }
 
+const STRUCTURAL_NESTED_CONTAINER_KINDS = new Set<ExpressionContainerKind>([
+  "call-argument",
+  "object-property",
+  "array-element",
+]);
+
+export function findPreferredNestedLowerableExpressionSite(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): LowerableExpressionSite | undefined {
+  let nestedSite: LowerableExpressionSite | undefined;
+
+  const visit = (node: ts.Node): void => {
+    if (nestedSite) {
+      return;
+    }
+
+    if (node !== expression && ts.isFunctionLike(node)) {
+      return;
+    }
+
+    if (node !== expression && ts.isExpression(node)) {
+      const containerKind = getExpressionContainerKind(node);
+      if (
+        containerKind &&
+        STRUCTURAL_NESTED_CONTAINER_KINDS.has(containerKind) &&
+        context.getReactiveContext(node).kind === "pattern"
+      ) {
+        const decision = classifyExpressionSiteHandling(
+          node,
+          containerKind,
+          context,
+          analyze,
+        );
+        if (decision.kind !== "skip" && decision.lowerable) {
+          nestedSite = {
+            expression: node,
+            containerKind,
+          };
+          return;
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(expression);
+
+  return nestedSite;
+}
+
 export function classifyRestrictedReactiveComputation(
   expression: ts.Expression,
   context: TransformationContext,

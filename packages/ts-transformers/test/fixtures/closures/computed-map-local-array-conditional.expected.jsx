@@ -17,11 +17,11 @@ interface Item {
 interface State {
     items: Item[];
 }
-// FIXTURE: computed-map-local-object-conditional
-// Verifies: nested ternary inside a callback-local object initializer within a
-//   computed-array .map() callback is lowered to ifElse().
-//   const view = { status: row.done ? "Done" : "Pending" }
-//   → const view = { status: ifElse(row.done, "Done", "Pending") }
+// FIXTURE: computed-map-local-array-conditional
+// Verifies: nested ternary inside a callback-local array initializer within a
+//   computed-array .map() callback is lowered at the array element site.
+//   const view = [row.done ? "Done" : "Pending"]
+//   → const view = [ifElse(row.done, "Done", "Pending")]
 export default pattern((state) => {
     const rows = __cfHelpers.derive({
         type: "object",
@@ -74,7 +74,7 @@ export default pattern((state) => {
         [UI]: (<div>
         {rows.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
                 const row = __ct_pattern_input.key("element");
-                const view = { status: __cfHelpers.ifElse({
+                const view = [__cfHelpers.ifElse({
                         type: "boolean"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
@@ -82,8 +82,21 @@ export default pattern((state) => {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": ["Done", "Pending"]
-                    } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending") };
-                return <span>{view.status}</span>;
+                    } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending")];
+                return <span>{__cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        view: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            }
+                        }
+                    },
+                    required: ["view"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: ["string", "undefined"]
+                } as const satisfies __cfHelpers.JSONSchema, { view: view }, ({ view }) => view[0])}</span>;
             }, {
                 type: "object",
                 properties: {

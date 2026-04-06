@@ -11,6 +11,7 @@ import {
   classifyExpressionSiteHandling,
   containsLogicalBinaryOperator,
   findLowerableExpressionSite,
+  findPreferredNestedLowerableExpressionSite,
   getExpressionContainerKind,
   isControlFlowRewriteExpression,
   isDirectArrayMethodRootExpression,
@@ -600,6 +601,12 @@ export function rewriteArrayMethodCallbackExpressionSites(
       analyze,
     );
     if (handling.kind !== "skip" || handling.reason !== "not-lowerable") {
+      return undefined;
+    }
+
+    if (
+      findPreferredNestedLowerableExpressionSite(expression, context, analyze)
+    ) {
       return undefined;
     }
 
