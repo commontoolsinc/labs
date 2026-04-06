@@ -1,5 +1,8 @@
 import { FabricPrimitive } from "./interface.ts";
-import { fromBase64url, toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+import {
+  fromBase64url,
+  toUnpaddedBase64url,
+} from "@commonfabric/utils/base64url";
 
 /**
  * A content-addressed identifier: a hash digest paired with an algorithm tag.

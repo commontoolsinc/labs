@@ -22,7 +22,10 @@ export type JsonWireValue =
 import { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
 import { FabricBytes } from "./fabric-bytes.ts";
 import { TAGS } from "./fabric-type-tags.ts";
-import { fromBase64url, toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+import {
+  fromBase64url,
+  toUnpaddedBase64url,
+} from "@commonfabric/utils/base64url";
 import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,

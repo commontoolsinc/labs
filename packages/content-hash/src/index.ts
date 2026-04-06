@@ -12,15 +12,9 @@ import { isDeno } from "@commonfabric/utils/env";
 import { createSHA256, type IHasher } from "hash-wasm";
 import { sha256 as nobleSha256 } from "merkle-reference";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
-import type {
-  IncrementalHasher,
-  Sha256Fn,
-} from "./interface.ts";
+import type { IncrementalHasher, Sha256Fn } from "./interface.ts";
 
-export type {
-  IncrementalHasher,
-  Sha256Fn,
-} from "./interface.ts";
+export type { IncrementalHasher, Sha256Fn } from "./interface.ts";
 
 let sha256Fn: Sha256Fn = nobleSha256;
 let createHasher: () => IncrementalHasher;

@@ -4,7 +4,10 @@ import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
 } from "../bigint-encoding.ts";
-import { fromBase64url, toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+import {
+  fromBase64url,
+  toUnpaddedBase64url,
+} from "@commonfabric/utils/base64url";
 
 // ============================================================================
 // bigintToMinimalTwosComplement
