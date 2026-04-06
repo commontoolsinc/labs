@@ -21,8 +21,8 @@ Only do this AFTER all logic is verified and tests pass.
   styling examples
 
 Treat `docs/common/patterns/style.md` as the canonical entry point for this
-topic, but remember that it is still a roadmap plus interim guidance rather
-than the finished detailed style guide.
+topic, but remember that it is still a roadmap plus interim guidance rather than
+the finished detailed style guide.
 
 ## Visual Priorities
 
