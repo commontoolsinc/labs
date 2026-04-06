@@ -369,8 +369,10 @@ export function createDataFlowAnalyzer(
 
       if (
         ts.isSpreadAssignment(property) ||
-        (ts.isPropertyAssignment(property) && ts.isComputedPropertyName(property.name)) ||
-        (ts.isMethodDeclaration(property) && ts.isComputedPropertyName(property.name)) ||
+        (ts.isPropertyAssignment(property) &&
+          ts.isComputedPropertyName(property.name)) ||
+        (ts.isMethodDeclaration(property) &&
+          ts.isComputedPropertyName(property.name)) ||
         (ts.isGetAccessorDeclaration(property) &&
           ts.isComputedPropertyName(property.name)) ||
         (ts.isSetAccessorDeclaration(property) &&
@@ -737,7 +739,10 @@ export function createDataFlowAnalyzer(
         const aggregateInitializer = getStableConstAggregateInitializer(
           targetSymbol,
         );
-        if (aggregateInitializer && ts.isObjectLiteralExpression(aggregateInitializer)) {
+        if (
+          aggregateInitializer &&
+          ts.isObjectLiteralExpression(aggregateInitializer)
+        ) {
           const propertyInitializer = getStaticObjectLiteralPropertyInitializer(
             aggregateInitializer,
             expression.name.text,
