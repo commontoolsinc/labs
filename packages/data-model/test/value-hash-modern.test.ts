@@ -4,7 +4,7 @@ import {
   hashOfModern as modernHashRaw,
   hashOfModernAsString,
 } from "../value-hash-modern.ts";
-import { createHasher } from "../sha256-impl.ts";
+import { createHasher } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { FabricHash } from "../fabric-hash.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";

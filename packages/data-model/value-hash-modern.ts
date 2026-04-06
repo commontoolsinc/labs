@@ -9,7 +9,7 @@
  *
  * Gated behind `ExperimentalOptions.modernHash`.
  */
-import { createHasher, type IncrementalHasher } from "./sha256-impl.ts";
+import { createHasher, type IncrementalHasher } from "@commonfabric/content-hash";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "./fabric-hash.ts";
 import { FabricBytes } from "./fabric-bytes.ts";
