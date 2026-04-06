@@ -44,7 +44,7 @@ else
  }
 
  cf_impl() {
-   command ct "$@"
+   command cf "$@"
  }
 fi
 
