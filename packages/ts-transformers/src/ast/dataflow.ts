@@ -548,6 +548,51 @@ export function createDataFlowAnalyzer(
         ts.isNoSubstitutionTemplateLiteral(argumentExpression));
   };
 
+  const isStructuralOpaqueTargetExpression = (
+    expression: ts.Expression,
+    seenSymbols = new Set<ts.Symbol>(),
+  ): boolean => {
+    const target = unwrapStructuralDataFlowExpression(expression);
+
+    if (ts.isCallExpression(target)) {
+      return classifyOpaquePathTerminalCall(target) === "key";
+    }
+
+    if (ts.isPropertyAccessExpression(target)) {
+      return isStructuralOpaqueTargetExpression(target.expression, seenSymbols);
+    }
+
+    if (ts.isElementAccessExpression(target)) {
+      return isStaticElementAccess(target) &&
+        isStructuralOpaqueTargetExpression(target.expression, seenSymbols);
+    }
+
+    if (!ts.isIdentifier(target)) {
+      return false;
+    }
+
+    const symbol = tryGetSymbol(target);
+    if (
+      symbol &&
+      (isReactiveValueSymbol(symbol, checker) ||
+        symbolDeclaresCommonFabricDefault(symbol, checker))
+    ) {
+      return true;
+    }
+
+    if (!symbol || seenSymbols.has(symbol)) {
+      return false;
+    }
+
+    seenSymbols.add(symbol);
+    const initializer = getStableConstAliasInitializer(symbol);
+    if (!initializer) {
+      return false;
+    }
+
+    return isStructuralOpaqueTargetExpression(initializer, seenSymbols);
+  };
+
   const analyzeExpression = (
     expression: ts.Expression,
     scope: DataFlowScope,
@@ -837,6 +882,20 @@ export function createDataFlowAnalyzer(
 
         // This is a direct property access on an OpaqueRef (like state.charms.length)
         // It should be its own explicit dependency
+        recordDataFlow(expression, scope, parentId, true);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
+          dataFlows: [expression],
+        };
+      }
+
+      if (isStructuralOpaqueTargetExpression(expression.expression)) {
+        if (originatesFromIgnored(expression.expression)) {
+          return emptyAnalysis();
+        }
+        const parentId =
+          context.expressionToNodeId.get(expression.expression) ?? null;
         recordDataFlow(expression, scope, parentId, true);
         return {
           containsOpaqueRef: true,

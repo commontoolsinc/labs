@@ -35,20 +35,7 @@ export default pattern((state) => ({
                     const tag = __ct_pattern_input.key("element");
                     const tasks = __ct_pattern_input.key("params", "tasks");
                     return (<span>
-                {tag.key("name")}:{__cfHelpers.derive({
-                        type: "object",
-                        properties: {
-                            tasks: {
-                                type: "array",
-                                items: {
-                                    type: "unknown"
-                                }
-                            }
-                        },
-                        required: ["tasks"]
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "number"
-                    } as const satisfies __cfHelpers.JSONSchema, { tasks: tasks }, ({ tasks }) => tasks.length)}
+                {tag.key("name")}:{tasks.key("length")}
               </span>);
                 }, {
                     type: "object",

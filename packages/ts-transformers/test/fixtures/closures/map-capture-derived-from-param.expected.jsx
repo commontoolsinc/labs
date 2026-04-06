@@ -32,7 +32,9 @@ const __ctModuleCallback_1 = __ctHardenFn(({ element: item, params: { settings }
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, {
     item: item,
-    settings: settings
+    settings: {
+        multiplier: settings.multiplier
+    }
 }, ({ item, settings }) => item * settings.multiplier)}</span>));
 interface State {
     items: number[];
