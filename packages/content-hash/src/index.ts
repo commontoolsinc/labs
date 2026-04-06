@@ -12,21 +12,15 @@ import { isDeno } from "@commonfabric/utils/env";
 import { createSHA256, type IHasher } from "hash-wasm";
 import { sha256 as nobleSha256 } from "merkle-reference";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+import type {
+  IncrementalHasher,
+  Sha256Fn,
+} from "./interface.ts";
 
-/**
- * Incremental SHA-256 hasher. Feed data via `update()`, finalize with
- * `digest()`. A hasher must not be reused after `digest()` is called.
- */
-export interface IncrementalHasher {
-  update(data: Uint8Array): void;
-  digest(): Uint8Array;
-  digest(encoding: "base64url"): string;
-}
-
-/**
- * All-at-once SHA-256: `(payload) => digest`.
- */
-export type Sha256Fn = (payload: Uint8Array) => Uint8Array;
+export type {
+  IncrementalHasher,
+  Sha256Fn,
+} from "./interface.ts";
 
 let sha256Fn: Sha256Fn = nobleSha256;
 let createHasher: () => IncrementalHasher;
