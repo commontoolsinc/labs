@@ -1,13 +1,70 @@
 import { type FabricValue } from "@commonfabric/data-model/fabric-value";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { isRecord, type Mutable } from "@commonfabric/utils/types";
-import { isOpaqueRef, type JSONSchema } from "./builder/types.ts";
+import {
+  isModule,
+  isOpaqueRef,
+  type JSONSchema,
+  type Module,
+  type Pattern,
+} from "./builder/types.ts";
 import { isCellLink } from "./link-utils.ts";
 import { LINK_V1_TAG, type SigilLink } from "./sigil-types.ts";
+
+export function setRunnableName<T extends object & { src?: string }>(
+  target: T,
+  name: string,
+  options: { setSrc?: boolean } = {},
+): void {
+  Object.defineProperty(target, "name", {
+    value: name,
+    configurable: true,
+  });
+
+  if (options.setSrc) {
+    target.src = name;
+  }
+}
+
+export function sanitizeDebugLabel(label?: string): string | undefined {
+  if (!label) return undefined;
+  return label.replace(/^async\s+/, "").trim() || undefined;
+}
 
 export function getSpellLink(patternId: string): SigilLink {
   const id = hashOf({ causal: { patternId, type: "pattern" } }).toJSON()["/"];
   return { "/": { [LINK_V1_TAG]: { id: `of:${id}` } } };
+}
+
+export function describePatternOrModule(
+  patternOrModule: Pattern | Module | undefined,
+): string {
+  if (!patternOrModule) return "undefined";
+  if (isModule(patternOrModule)) {
+    if (
+      patternOrModule.type === "ref" &&
+      typeof patternOrModule.implementation === "string"
+    ) {
+      return `module:ref:${patternOrModule.implementation}`;
+    }
+
+    if (typeof patternOrModule.implementation === "function") {
+      const impl = patternOrModule.implementation as {
+        debugName?: string;
+        src?: string;
+        name?: string;
+      };
+      const name = sanitizeDebugLabel(impl.debugName) ??
+        sanitizeDebugLabel(impl.src) ??
+        sanitizeDebugLabel(impl.name) ??
+        "anonymous";
+      return `module:${patternOrModule.type}:${name}`;
+    }
+
+    return `module:${patternOrModule.type}`;
+  }
+
+  return `pattern:nodes=${patternOrModule.nodes.length}`;
 }
 
 /**

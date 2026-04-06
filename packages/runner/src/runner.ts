@@ -63,9 +63,12 @@ import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
 import {
   cellAwareDeepCopy,
+  describePatternOrModule,
   extractDefaultValues,
   getSpellLink,
   mergeObjects,
+  sanitizeDebugLabel,
+  setRunnableName,
   validateAndCheckOpaqueRefs,
 } from "./runner-utils.ts";
 import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
@@ -126,21 +129,6 @@ type JavaScriptNodeContext = BoundNodeIO & {
   name: string | undefined;
   verifiedLoadId: string | undefined;
 };
-
-function setRunnableName<T extends object & { src?: string }>(
-  target: T,
-  name: string,
-  options: { setSrc?: boolean } = {},
-): void {
-  Object.defineProperty(target, "name", {
-    value: name,
-    configurable: true,
-  });
-
-  if (options.setSrc) {
-    target.src = name;
-  }
-}
 
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
@@ -2329,44 +2317,8 @@ export class Runner {
   }
 }
 
-function sanitizeDebugLabel(label?: string): string | undefined {
-  if (!label) return undefined;
-  return label.replace(/^async\s+/, "").trim() || undefined;
-}
-
 function getTxDebugActionId(
   tx?: IExtendedStorageTransaction,
 ): string | undefined {
   return tx ? (tx.tx as { debugActionId?: string }).debugActionId : undefined;
-}
-
-function describePatternOrModule(
-  patternOrModule: Pattern | Module | undefined,
-): string {
-  if (!patternOrModule) return "undefined";
-  if (isModule(patternOrModule)) {
-    if (
-      patternOrModule.type === "ref" &&
-      typeof patternOrModule.implementation === "string"
-    ) {
-      return `module:ref:${patternOrModule.implementation}`;
-    }
-
-    if (typeof patternOrModule.implementation === "function") {
-      const impl = patternOrModule.implementation as {
-        debugName?: string;
-        src?: string;
-        name?: string;
-      };
-      const name = sanitizeDebugLabel(impl.debugName) ??
-        sanitizeDebugLabel(impl.src) ??
-        sanitizeDebugLabel(impl.name) ??
-        "anonymous";
-      return `module:${patternOrModule.type}:${name}`;
-    }
-
-    return `module:${patternOrModule.type}`;
-  }
-
-  return `pattern:nodes=${patternOrModule.nodes.length}`;
 }
