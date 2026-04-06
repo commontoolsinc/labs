@@ -26,6 +26,8 @@ Check that these are not inside the pattern body:
 | `handler()` defined inside pattern | Move to module scope, or use `action()` instead |
 | `lift()` immediately invoked (`lift(...)(args)`) | Use `computed()` or define lift at module scope |
 | helper functions defined inside pattern | Move to module scope |
+| top-level `let`, `var`, or class | Convert to `const` plain data, or move stateful logic into actions, handlers, or helpers |
+| `setTimeout()` or `setInterval()` in authored pattern code | Use a reactive/runtime primitive instead; authored timers are not available yet |
 
 Allowed inside patterns:
 
@@ -44,6 +46,8 @@ Allowed inside patterns:
 | `.get()` on computed or lift result | Access directly; only `Writable` uses `.get()` |
 | `items.filter(...)` inline in JSX | Wrap in `computed()` outside JSX |
 | `items.sort(...)` inline in JSX | Wrap in `computed()` outside JSX |
+| `Date.now()` or `Math.random()` in authored pattern code | Use `safeDateNow()` or `nonPrivateRandom()` |
+| `safeDateNow()` or `nonPrivateRandom()` inside `computed()` or `derive()` without clear intent | Move the snapshot into `action()`, `handler()`, or one-time initialization |
 | nested computed with outer-scope reactive vars | Pre-compute with lift or an outer computed |
 | `lift()` closing over reactive deps | Pass dependencies as explicit parameters |
 | cells from composed patterns in `ifElse` | Wrap in a local `computed()` bridge |

@@ -25,6 +25,8 @@ testability.
 
 ## Read First
 
+- `docs/common/ai/pattern-development-guide.md` - especially the SES authoring
+  limits and escape-hatch guidance
 - `docs/common/patterns/` - especially `meta/` for generalizable idioms
 - `docs/common/concepts/action.md` - action() for local state
 - `docs/common/concepts/handler.md` - handler() for reusable logic
@@ -42,6 +44,9 @@ const submit = action(() => {
   inputValue.set("");
 });
 ```
+
+Use `safeDateNow()` and `nonPrivateRandom()` instead of ambient `Date.now()` and
+`Math.random()` when a pattern needs explicit time or randomness.
 
 **handler()** - Reused with different bindings:
 

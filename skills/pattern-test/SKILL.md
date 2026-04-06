@@ -10,6 +10,9 @@ Start with the shared testing guidance in:
 
 Read that guide first. It is the canonical reference.
 
+For patterns that stamp timestamps or IDs, prefer deterministic assertions over
+recomputing time/random values inside the test itself.
+
 Runtime notes:
 
 - Use the `cf` skill, or read `skills/cf/SKILL.md`, when you need CLI command

@@ -43,10 +43,13 @@ Use camelCase for Common Fabric component properties. Kebab-case JSX attributes 
 // action() for more complex logic (preferred)
 const increment = action(() => {
   count.set(count.get() + 1);
-  lastUpdated.set(Date.now());
+  lastUpdated.set(safeDateNow());
 });
 <cf-button onClick={increment}>Increment</cf-button>
 ```
+
+Use `safeDateNow()` rather than `Date.now()` when authored pattern code needs a
+timestamp snapshot.
 
 ---
 

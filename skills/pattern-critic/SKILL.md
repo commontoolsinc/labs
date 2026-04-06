@@ -9,6 +9,10 @@ Start with the shared critique guidance in:
 
 Read that guide first. It is the canonical reference.
 
+Be explicit about SES and determinism issues: direct `Date.now()` or
+`Math.random()`, authored timers, and non-idempotent `computed()` use of
+`safeDateNow()` or `nonPrivateRandom()` should all be flagged.
+
 Then use the detailed references already maintained in the repo for:
 
 - `docs/development/debugging/README.md`
