@@ -4,6 +4,6 @@ import { sha256 } from "@commonfabric/content-hash";
 
 describe("sha256()", () => {
   it("tests nothing for now (TODO)", () => {
-    expect(true).toBe(true);
+    expect(sha256).not.toBe(null);
   });
 });
