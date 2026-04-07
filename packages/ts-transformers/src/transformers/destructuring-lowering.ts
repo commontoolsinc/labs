@@ -254,13 +254,16 @@ export function collectDestructureBindings(
     } else if (ts.isNumericLiteral(element.propertyName)) {
       key = element.propertyName.text;
     } else if (ts.isComputedPropertyName(element.propertyName)) {
-      const staticKey = getPropertyNameText(element.propertyName);
-      if (staticKey !== undefined) {
-        key = staticKey;
+      const computedKey = element.propertyName.expression;
+      if (isCommonFabricKeyExpression(computedKey, context, "SELF")) {
+        directKeyExpression = context.cfHelpers.getHelperExpr("SELF");
       } else {
-        const computedKey = element.propertyName.expression;
-        if (isCommonFabricKeyExpression(computedKey, context, "SELF")) {
-          directKeyExpression = context.cfHelpers.getHelperExpr("SELF");
+        const staticKey = getPropertyNameText(
+          element.propertyName,
+          context.checker,
+        );
+        if (staticKey !== undefined) {
+          key = staticKey;
         } else {
           key = getKnownComputedKeyExpression(computedKey, context) ??
             computedKey;
