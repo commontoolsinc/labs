@@ -495,6 +495,12 @@ export class CellBridge {
       propIno = this.tree.addDir(pieceIno, propName);
     }
     this.piecePropRoots.set(propIno, { pieceIno, propName });
+    // Also ensure a stub JSON file so lookups for result.json / input.json
+    // can reply immediately from tree while hydration runs in the background.
+    const jsonName = `${propName}.json`;
+    if (this.tree.lookup(pieceIno, jsonName) === undefined) {
+      this.tree.addFile(pieceIno, jsonName, "{}", "object");
+    }
     return propIno;
   }
 

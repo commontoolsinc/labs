@@ -296,7 +296,8 @@ Deno.test("CellBridge.prepareLookup hydrates result.json on direct lookup", asyn
   const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
     .loadPieceTree(piece, tree.rootIno, "Lookup JSON", "home");
 
-  assertEquals(tree.lookup(pieceIno, "result.json"), undefined);
+  // result.json exists as a stub placeholder before hydration
+  assertEquals(tree.lookup(pieceIno, "result.json") !== undefined, true);
 
   const prepared = await (bridge as unknown as {
     prepareLookup: (parentIno: bigint, name: string) => Promise<boolean>;
@@ -1359,7 +1360,7 @@ Deno.test("CellBridge.invalidateWritePath does not spawn concurrent hydrations f
         activeGets++;
         maxConcurrentGets = Math.max(maxConcurrentGets, activeGets);
         try {
-          if (getCalls === 1) {
+          if (getCalls === 2) {
             await firstGetGate;
           }
           return { content: "fresh" };
