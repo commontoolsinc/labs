@@ -1444,6 +1444,13 @@ export class CellBridge {
     this.updateIndexJson(state);
     this.updatePiecesJson(state);
 
+    // Eagerly start hydration for all pieces in the background so that data
+    // is ready by the time FUSE lookups hit piece prop paths.
+    for (const [_name, pieceIno] of state.pieceInos) {
+      this.hydratePieceProp(pieceIno, "input").catch(() => {});
+      this.hydratePieceProp(pieceIno, "result").catch(() => {});
+    }
+
     // Subscribe to piece list changes so new/removed pieces update the tree
     const piecesCell = await manager.getPieces();
     const piecesListCancel = piecesCell.sink(() => {
