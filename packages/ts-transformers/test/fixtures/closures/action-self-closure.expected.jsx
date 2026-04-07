@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -26,9 +26,9 @@ interface TestOutput {
 //   action(() => console.log(self.title)) → handler(eventSchema, { self: { title } }, (_, { self }) => ...)({ self: { title: self.key("title") } })
 //   action(() => { self; count.set(...) }) → handler(eventSchema, { self: TestOutput, count: asCell }, ...)({ self, count })
 // Context: SELF reference requires Default<> inputs so output schema is always satisfied
-export default pattern((__ct_pattern_input) => {
-    const title = __ct_pattern_input.key("title");
-    const self = __ct_pattern_input[__cfHelpers.SELF];
+export default pattern((__cf_pattern_input) => {
+    const title = __cf_pattern_input.key("title");
+    const self = __cf_pattern_input[__cfHelpers.SELF];
     const count = Writable.of(0, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema);
@@ -140,4 +140,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

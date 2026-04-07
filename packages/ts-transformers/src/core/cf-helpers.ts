@@ -3,8 +3,8 @@ import { TransformationContext } from "./mod.ts";
 
 export const CF_HELPERS_IDENTIFIER = "__cfHelpers";
 export const CT_HELPERS_IDENTIFIER = "__ctHelpers";
-export const CT_DATA_HELPER_IDENTIFIER = "__ctDataHelper";
-const CT_DATA_HELPER_KEEP_IDENTIFIER = "__ctDataHelperKeep";
+export const CT_DATA_HELPER_IDENTIFIER = "__cfDataHelper";
+const CT_DATA_HELPER_KEEP_IDENTIFIER = "__cfDataHelperKeep";
 
 const CF_HELPERS_SPECIFIER = "commonfabric";
 
@@ -130,7 +130,7 @@ export class CFHelpers {
 
   getDataHelperExpr(originalNode?: ts.Node): ts.Identifier {
     if (!this.sourceHasDataHelper()) {
-      throw new Error("Source file does not contain __ctDataHelper.");
+      throw new Error("Source file does not contain __cfDataHelper.");
     }
 
     if (!originalNode) {

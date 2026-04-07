@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -27,8 +27,8 @@ interface Assignment {
 //   aisleNames.map(...)            → aisleNames.mapWithPattern(pattern(...), {captures})
 //   groupedByAisle[aisleName].map  → derive({groupedByAisle, aisleName}, ...).mapWithPattern(...)
 // Context: CT-1036 -- nested map with derived object indexed by derived key, two levels deep
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
     // Create assignments with aisle data
     const itemsWithAisles = derive({
         type: "object",
@@ -226,9 +226,9 @@ export default pattern((__ct_pattern_input) => {
     // - Map over the result
     return {
         [UI]: (<div>
-          {aisleNames.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const aisleName = __ct_pattern_input.key("element");
-                const groupedByAisle = __ct_pattern_input.key("params", "groupedByAisle");
+          {aisleNames.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const aisleName = __cf_pattern_input.key("element");
+                const groupedByAisle = __cf_pattern_input.key("params", "groupedByAisle");
                 return (<div>
               <h3>{aisleName}</h3>
               {__cfHelpers.derive({
@@ -315,8 +315,8 @@ export default pattern((__ct_pattern_input) => {
                     } as const satisfies __cfHelpers.JSONSchema, {
                         groupedByAisle: groupedByAisle,
                         aisleName: aisleName
-                    }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName])!.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                        const assignment = __ct_pattern_input.key("element");
+                    }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName])!.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                        const assignment = __cf_pattern_input.key("element");
                         return (<div>
                   <span>{assignment.key("item", "name")}</span>
                   <cf-checkbox $checked={assignment.key("item", "done")}/>
@@ -512,4 +512,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

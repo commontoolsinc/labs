@@ -40,7 +40,7 @@ Deno.test("Closure Transformer hoists nested derive callbacks that close over mo
   const normalized = output.replace(/\s+/g, " ");
 
   const hoistedMatch = normalized.match(
-    /const (\S+) = __ctHardenFn\(\(\{ dateStr \}: \{ dateStr: string; \}\) => formatDateShort\(dateStr\)\);/,
+    /const (\S+) = __cfHardenFn\(\(\{ dateStr \}: \{ dateStr: string; \}\) => formatDateShort\(dateStr\)\);/,
   );
 
   assert(hoistedMatch, `expected hoisted helper in output:\n${output}`);
@@ -74,7 +74,7 @@ Deno.test("Closure Transformer does not hoist nested handler callbacks that also
 
   assertNotMatch(
     normalized,
-    /const \S+ = __ctHardenFn\(\(event: \{ status\?: string \} \| undefined\) =>/,
+    /const \S+ = __cfHardenFn\(\(event: \{ status\?: string \} \| undefined\) =>/,
   );
   assertMatch(
     normalized,

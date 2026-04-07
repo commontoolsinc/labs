@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -186,9 +186,9 @@ export default pattern(() => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, { cellRef: cellRef }, ({ cellRef }) => !cellRef?.length), <div>No charms created yet</div>, <ul>
-            {cellRef.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const charm = __ct_pattern_input.key("element");
-                const index = __ct_pattern_input.key("index");
+            {cellRef.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const charm = __cf_pattern_input.key("element");
+                const index = __cf_pattern_input.key("index");
                 return (<li>
                 <cf-button onClick={goToCharm({ charm })}>
                   Go to Charm {__cfHelpers.derive({
@@ -273,4 +273,4 @@ export default pattern(() => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

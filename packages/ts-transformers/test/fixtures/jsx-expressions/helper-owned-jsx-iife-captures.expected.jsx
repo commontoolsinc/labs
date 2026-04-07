@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -34,9 +34,9 @@ function visibleEntries(entries: Writable<Default<Entry[], [
     const list = entries.get();
     return list.filter((entry) => prefix.length === 0 || entry.name.startsWith(prefix));
 }
-__ctHardenFn(visibleEntries);
-export default pattern((__ct_pattern_input) => {
-    const entries = __ct_pattern_input.key("entries");
+__cfHardenFn(visibleEntries);
+export default pattern((__cf_pattern_input) => {
+    const entries = __cf_pattern_input.key("entries");
     const path = Writable.of<string[]>([], {
         type: "array",
         items: {
@@ -200,9 +200,9 @@ export default pattern((__ct_pattern_input) => {
                     entries: entries,
                     p: p
                 }, ({ entries, p }) => visibleEntries(entries, p[0] || ""));
-                return visible.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                    const entry = __ct_pattern_input.key("element");
-                    const pushPath = __ct_pattern_input.key("params", "pushPath");
+                return visible.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                    const entry = __cf_pattern_input.key("element");
+                    const pushPath = __cf_pattern_input.key("params", "pushPath");
                     return (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
                         type: "object",
                         properties: {
@@ -331,4 +331,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

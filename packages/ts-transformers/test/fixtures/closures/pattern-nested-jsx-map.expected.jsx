@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -43,8 +43,8 @@ interface PatternInput {
 // Context: Inner map on item.tags captures `item.selectedIndex` from the outer
 //   mapWithPattern, so it must be passed as a param. Ternaries become ifElse at
 //   both the outer and inner levels.
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
     const hasItems = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -109,15 +109,15 @@ export default pattern((__ct_pattern_input) => {
                     type: "array",
                     items: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, hasItems, items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
+        } as const satisfies __cfHelpers.JSONSchema, hasItems, items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
             return (<div>
               <strong>{item.key("label")}</strong>
               <ul>
-                {item.key("tags").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                    const tag = __ct_pattern_input.key("element");
-                    const i = __ct_pattern_input.key("index");
-                    const item = __ct_pattern_input.key("params", "item");
+                {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                    const tag = __cf_pattern_input.key("element");
+                    const i = __cf_pattern_input.key("index");
+                    const item = __cf_pattern_input.key("params", "item");
                     return (<li>
                     {__cfHelpers.ifElse({
                         type: "boolean"
@@ -351,4 +351,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

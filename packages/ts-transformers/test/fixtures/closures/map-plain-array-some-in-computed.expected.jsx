@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -29,15 +29,15 @@ interface Input {
 //   habits.map(fn) -> habits.mapWithPattern(...)
 //   computed(() => logs.get().some(fn)) -> derive(...) whose inner some(fn) stays plain JS
 // Context: The outer callback is pattern-owned, but the inner some() callback runs on the unwrapped logs array inside computed()
-export default pattern((__ct_pattern_input) => {
-    const habits = __ct_pattern_input.key("habits");
-    const logs = __ct_pattern_input.key("logs");
-    const todayDate = __ct_pattern_input.key("todayDate");
+export default pattern((__cf_pattern_input) => {
+    const habits = __cf_pattern_input.key("habits");
+    const logs = __cf_pattern_input.key("logs");
+    const todayDate = __cf_pattern_input.key("todayDate");
     return {
-        [UI]: <div>{habits.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const habit = __ct_pattern_input.key("element");
-                const logs = __ct_pattern_input.key("params", "logs");
-                const todayDate = __ct_pattern_input.key("params", "todayDate");
+        [UI]: <div>{habits.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const habit = __cf_pattern_input.key("element");
+                const logs = __cf_pattern_input.key("params", "logs");
+                const todayDate = __cf_pattern_input.key("params", "todayDate");
                 const doneToday = __cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -253,4 +253,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

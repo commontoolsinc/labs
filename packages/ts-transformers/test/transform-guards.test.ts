@@ -57,7 +57,7 @@ const p = pattern((input: { list: Array<{ name: string; age: number }> }) => <di
     assertStringIncludes(output, ".mapWithPattern(");
     assertStringIncludes(
       output,
-      'const name = __ct_pattern_input.key("element", "name");',
+      'const name = __cf_pattern_input.key("element", "name");',
     );
   },
 );

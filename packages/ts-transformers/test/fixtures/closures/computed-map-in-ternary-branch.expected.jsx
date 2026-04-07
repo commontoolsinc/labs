@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -27,8 +27,8 @@ interface PatternInput {
 // Context: The outer `people.map(...)` is over a pattern input cell, while the
 //   inner `adminData.map(...)` is over compute-owned data but still lowered in
 //   pattern context when rendered from the ternary branch.
-export default pattern((__ct_pattern_input) => {
-    const people = __ct_pattern_input.key("people");
+export default pattern((__cf_pattern_input) => {
+    const people = __cf_pattern_input.key("people");
     const showAdmin = Writable.of(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema);
@@ -109,8 +109,8 @@ export default pattern((__ct_pattern_input) => {
     } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length);
     return {
         [UI]: (<div>
-        {people.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const person = __ct_pattern_input.key("element");
+        {people.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const person = __cf_pattern_input.key("element");
                 return (<span>{person.key("name")}</span>);
             }, {
                 type: "object",
@@ -185,8 +185,8 @@ export default pattern((__ct_pattern_input) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count + " people")}</span>
               <ul>
-                {adminData.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const entry = __ct_pattern_input.key("element");
+                {adminData.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const entry = __cf_pattern_input.key("element");
                 return (<li>
                     {__cfHelpers.ifElse({
                     type: "boolean"
@@ -302,4 +302,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

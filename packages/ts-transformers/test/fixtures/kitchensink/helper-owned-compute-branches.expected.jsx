@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -280,10 +280,10 @@ export default pattern((state) => {
                         : ""}
             </span>))}
           {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside derive */}
-          {fallbackMembers.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const member = __ct_pattern_input.key("element");
-                const memberIndex = __ct_pattern_input.key("index");
-                const project = __ct_pattern_input.params.project;
+          {fallbackMembers.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const member = __cf_pattern_input.key("element");
+                const memberIndex = __cf_pattern_input.key("index");
+                const project = __cf_pattern_input.params.project;
                 return (<small>
               {__cfHelpers.ifElse({
                     type: "boolean"
@@ -484,4 +484,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

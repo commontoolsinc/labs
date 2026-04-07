@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -20,9 +20,9 @@ interface State {
 //   unless(value, defaultValue) → unless(conditionSchema, fallbackSchema, resultSchema, value, defaultValue)
 //   pattern<State>(fn)          → pattern(fn, inputSchema, outputSchema)
 // Context: unless(cond, fallback) returns cond if truthy, else fallback; schemas reflect the union type
-export default pattern((__ct_pattern_input) => {
-    const value = __ct_pattern_input.key("value");
-    const defaultValue = __ct_pattern_input.key("defaultValue");
+export default pattern((__cf_pattern_input) => {
+    const value = __cf_pattern_input.key("value");
+    const defaultValue = __cf_pattern_input.key("defaultValue");
     // unless(condition, fallback) - returns condition if truthy, else fallback
     const result = unless({
         anyOf: [{
@@ -93,4 +93,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

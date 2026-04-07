@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,7 +11,7 @@ import { ifElse, pattern, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const identity = __ctHardenFn(<T,>(value: T) => value);
+const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: authored-ifelse-reactive-roots
 // Verifies: authored ifElse outside JSX and top-level receiver-method roots lower reactively
 //   ifElse(show, count + 1, 0)         → compute-wrapped branch
@@ -19,11 +19,11 @@ const identity = __ctHardenFn(<T,>(value: T) => value);
 //   ifElse(show, name.trim(), "x")     → reactive receiver-method branch
 //   name.trim()                        → top-level receiver-method root lowered via derive
 //   identity(name.trim())             → derive-wrapped local-helper root
-export default pattern((__ct_pattern_input) => {
-    const count = __ct_pattern_input.key("count");
-    const show = __ct_pattern_input.key("show");
-    const name = __ct_pattern_input.key("name");
-    const cell = __ct_pattern_input.key("cell");
+export default pattern((__cf_pattern_input) => {
+    const count = __cf_pattern_input.key("count");
+    const show = __cf_pattern_input.key("show");
+    const name = __cf_pattern_input.key("name");
+    const cell = __cf_pattern_input.key("cell");
     const upper = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -148,4 +148,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

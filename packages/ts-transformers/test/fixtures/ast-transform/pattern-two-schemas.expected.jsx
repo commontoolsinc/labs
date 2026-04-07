@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -22,10 +22,10 @@ interface Result {
 // FIXTURE: pattern-two-schemas
 // Verifies: pattern with both input and output schemas already present preserves them
 //   pattern<Input, Result>(fn, inputSchema, outputSchema) → pattern(fn, inputSchema, outputSchema) (schemas kept)
-//   ({ count }) destructuring                              → __ct_pattern_input.key("count")
+//   ({ count }) destructuring                              → __cf_pattern_input.key("count")
 // Context: Schemas are user-provided, not generated; type args are stripped but schemas remain
-export default pattern((__ct_pattern_input) => {
-    const count = __ct_pattern_input.key("count");
+export default pattern((__cf_pattern_input) => {
+    const count = __cf_pattern_input.key("count");
     return {
         doubled: __cfHelpers.derive({
             type: "object",
@@ -58,4 +58,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

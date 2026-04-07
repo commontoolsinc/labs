@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -14,9 +14,9 @@ const __ctAmdHooks = undefined;
 const key = "foo" as const;
 // FIXTURE: pattern-computed-binding-key-destructure
 // Verifies: computed binding-name destructuring is lowered structurally
-//   ({ [key]: foo }) → const foo = __ct_pattern_input.key(key)
-export default pattern((__ct_pattern_input) => {
-    const foo = __ct_pattern_input.key(key);
+//   ({ [key]: foo }) → const foo = __cf_pattern_input.key(key)
+export default pattern((__cf_pattern_input) => {
+    const foo = __cf_pattern_input.key(key);
     return <div>{foo}</div>;
 }, {
     type: "object",
@@ -49,4 +49,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

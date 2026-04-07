@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -55,14 +55,14 @@ const removeItem = handler({
 //   .map(fn) → .mapWithPattern(pattern(...), { items: items })
 //   items capture → params.items (no asOpaque when schema is inferred from annotation)
 // Context: Same as map-capture-cell-param but uses inline type annotation instead of generic
-export default pattern((__ct_pattern_input: InputSchema) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input: InputSchema) => {
+    const items = __cf_pattern_input.key("items");
     return {
         [UI]: (<ul>
-          {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const _ = __ct_pattern_input.key("element");
-                const index = __ct_pattern_input.key("index");
-                const items = __ct_pattern_input.key("params", "items");
+          {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const _ = __cf_pattern_input.key("element");
+                const index = __cf_pattern_input.key("index");
+                const items = __cf_pattern_input.key("params", "items");
                 return (<li key={index}>
               <cf-button onClick={removeItem({ items, index })}>
                 Remove
@@ -184,4 +184,4 @@ export default pattern((__ct_pattern_input: InputSchema) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

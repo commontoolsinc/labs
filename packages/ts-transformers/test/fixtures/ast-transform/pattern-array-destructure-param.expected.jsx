@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -13,9 +13,9 @@ const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
 // FIXTURE: pattern-array-destructure-param
 // Verifies: top-level array destructuring in pattern params lowers to index-based key access
-//   ([first]) => <div>{first}</div> → const first = __ct_pattern_input.key("0")
-export default pattern((__ct_pattern_input) => {
-    const first = __ct_pattern_input.key("0");
+//   ([first]) => <div>{first}</div> → const first = __cf_pattern_input.key("0")
+export default pattern((__cf_pattern_input) => {
+    const first = __cf_pattern_input.key("0");
     return <div>{first}</div>;
 }, {
     type: "array",
@@ -45,4 +45,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

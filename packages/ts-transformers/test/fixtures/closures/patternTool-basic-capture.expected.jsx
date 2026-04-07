@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,7 +11,7 @@ import { cell, derive, pattern, patternTool, type PatternToolResult } from "comm
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const __ctModuleCallback_1 = __ctHardenFn(({ query, content }: {
+const __cfModuleCallback_1 = __cfHardenFn(({ query, content }: {
     query: string;
     content: string;
 }) => {
@@ -59,7 +59,7 @@ type Output = {
 // Context: Module-scoped `content` cell is referenced inside the patternTool
 //   callback. The transformer threads it through the existing extraParams object.
 export default pattern(() => {
-    const grepTool = patternTool(__ctModuleCallback_1, { content });
+    const grepTool = patternTool(__cfModuleCallback_1, { content });
     return { grepTool };
 }, {
     type: "object",
@@ -101,4 +101,4 @@ export default pattern(() => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

@@ -76,8 +76,8 @@ export function transformHandlerJsxAttribute(
     stateTypeNode,
     context,
     {
-      eventParamName: "__ct_handler_event",
-      paramsParamName: "__ct_handler_params",
+      eventParamName: "__cf_handler_event",
+      paramsParamName: "__cf_handler_params",
     },
   );
 

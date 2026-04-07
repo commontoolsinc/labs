@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -29,9 +29,9 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Ternary with captures in map callback */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const state = __ct_pattern_input.key("params", "state");
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const state = __cf_pattern_input.key("params", "state");
                 return (<div>
             Price: ${__cfHelpers.ifElse({
                     type: "boolean"
@@ -238,4 +238,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

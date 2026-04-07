@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -78,8 +78,8 @@ const increment = handler(false as const satisfies __cfHelpers.JSONSchema, {
 //   handler() → injects event/context schemas with asCell annotations
 //   pattern<Args>() → generates input schema, output schema (with asOpaque/asStream)
 // Context: deeply nested optional types (OptionalBranch inside OptionalNested inside NestedOptionalState)
-export default pattern((__ct_pattern_input) => {
-    const state = __ct_pattern_input.key("state");
+export default pattern((__cf_pattern_input) => {
+    const state = __cf_pattern_input.key("state");
     return {
         state,
         increment: increment({ state }),
@@ -166,4 +166,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

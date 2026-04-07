@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -15,10 +15,10 @@ const __ctAmdHooks = undefined;
 // The `token` from pattern destructuring must be captured as an explicit
 // input to the derived derive() call, so the callback receives the
 // resolved value—not the OpaqueRef proxy.
-export default pattern((__ct_pattern_input: {
+export default pattern((__cf_pattern_input: {
     token: string;
 }) => {
-    const token = __ct_pattern_input.key("token");
+    const token = __cf_pattern_input.key("token");
     const url = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -90,4 +90,4 @@ export default pattern((__ct_pattern_input: {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

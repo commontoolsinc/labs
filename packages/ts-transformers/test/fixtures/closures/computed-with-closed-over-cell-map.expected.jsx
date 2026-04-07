@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -55,9 +55,9 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema, {
         numbers: numbers,
         multiplier: multiplier
-    }, ({ numbers, multiplier }) => numbers.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-        const n = __ct_pattern_input.key("element");
-        const multiplier = __ct_pattern_input.key("params", "multiplier");
+    }, ({ numbers, multiplier }) => numbers.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        const n = __cf_pattern_input.key("element");
+        const multiplier = __cf_pattern_input.key("params", "multiplier");
         return n * multiplier.get();
     }, {
         type: "object",
@@ -91,4 +91,4 @@ export default pattern(() => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

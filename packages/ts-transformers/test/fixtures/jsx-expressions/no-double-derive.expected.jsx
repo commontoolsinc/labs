@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -28,9 +28,9 @@ interface State {
 //   derive(items.length, (n) => n + 1) → derive(schema, schema, items.length, (n) => n + 1)
 //   derive(cellRef, (ref) => ref.name) → derive(schema, schema, cellRef, (ref) => ref.name)
 // Context: Negative test -- prevents the transformer from wrapping already-derived expressions
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
-    const cellRef = __ct_pattern_input.key("cellRef");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
+    const cellRef = __cf_pattern_input.key("cellRef");
     return {
         [UI]: (<div>
         {/* User-written derive with simple parameter transformation - should NOT be double-wrapped */}
@@ -53,9 +53,9 @@ export default pattern((__ct_pattern_input) => {
         } as const satisfies __cfHelpers.JSONSchema, cellRef, (ref) => ref.name || "Unknown")}</span>
 
         {/* Nested in map with user-written derive - derives should NOT be double-wrapped */}
-        {items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const item = __ct_pattern_input.key("element");
-                const index = __ct_pattern_input.key("index");
+        {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const index = __cf_pattern_input.key("index");
                 return (<li key={item.key("id")}>
             {/* These user-written derives should remain as-is, not wrapped in another derive */}
             Item {derive({
@@ -184,4 +184,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

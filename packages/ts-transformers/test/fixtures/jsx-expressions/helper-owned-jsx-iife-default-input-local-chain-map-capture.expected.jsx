@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -35,7 +35,7 @@ function findChildren(tree: readonly Entry[], path: readonly string[]): readonly
     }
     return current;
 }
-__ctHardenFn(findChildren);
+__cfHardenFn(findChildren);
 interface Input {
     entries: Default<Entry[], [
     ]>;
@@ -43,8 +43,8 @@ interface Input {
 interface Output {
     [UI]: VNode;
 }
-export default pattern((__ct_pattern_input) => {
-    const entries = __ct_pattern_input.key("entries");
+export default pattern((__cf_pattern_input) => {
+    const entries = __cf_pattern_input.key("entries");
     const path = Writable.of<string[]>([], {
         type: "array",
         items: {
@@ -113,7 +113,7 @@ export default pattern((__ct_pattern_input) => {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {}
-    } as const satisfies __cfHelpers.JSONSchema, ({ item }, __ct_action_params) => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ item }, __cf_action_params) => {
         void item;
     })({});
     return {
@@ -290,10 +290,10 @@ export default pattern((__ct_pattern_input) => {
                         return 0;
                     return a.type === "file" ? -1 : 1;
                 }));
-                return items.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                    const item = __ct_pattern_input.key("element");
-                    const handleNavigateInto = __ct_pattern_input.key("params", "handleNavigateInto");
-                    const handleOpenFile = __ct_pattern_input.key("params", "handleOpenFile");
+                return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                    const item = __cf_pattern_input.key("element");
+                    const handleNavigateInto = __cf_pattern_input.key("params", "handleNavigateInto");
+                    const handleOpenFile = __cf_pattern_input.key("params", "handleOpenFile");
                     const isFolder = item.key("type") === "folder";
                     const isOpenable = __cfHelpers.when({
                         type: "boolean"
@@ -528,4 +528,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

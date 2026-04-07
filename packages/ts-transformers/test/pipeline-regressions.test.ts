@@ -40,7 +40,7 @@ const p = pattern<{ items: string[] }>((state) => ({
     assertEquals(computationDiagnostics.length, 0);
     assertStringIncludes(
       output,
-      "const fontSize = __ct_pattern_input.params.style[key];",
+      "const fontSize = __cf_pattern_input.params.style[key];",
     );
   },
 );
@@ -249,15 +249,15 @@ Deno.test(
 
     assertStringIncludes(
       mapWindow,
-      'const selectedExampleId = __ct_pattern_input.key("params", "selectedExampleId");',
+      'const selectedExampleId = __cf_pattern_input.key("params", "selectedExampleId");',
     );
     assertStringIncludes(
       mapWindow,
-      'const currentItem = __ct_pattern_input.key("params", "currentItem");',
+      'const currentItem = __cf_pattern_input.key("params", "currentItem");',
     );
     assertStringIncludes(
       mapWindow,
-      'const examples = __ct_pattern_input.key("params", "examples");',
+      'const examples = __cf_pattern_input.key("params", "examples");',
     );
   },
 );
@@ -379,7 +379,7 @@ export default pattern<{ values: string[] }>(({ values }) => {
 
     assertMatch(
       normalized,
-      /const result = derive\([\s\S]*, values, (?:__ctModuleCallback_\d+|\(entries\) => summarize\(entries\.get\(\)\))\);/,
+      /const result = derive\([\s\S]*, values, (?:__cfModuleCallback_\d+|\(entries\) => summarize\(entries\.get\(\)\))\);/,
     );
   },
 );

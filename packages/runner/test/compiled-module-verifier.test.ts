@@ -186,7 +186,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
 ((runtimeDeps = {}) => {
   define("main", ["require", "exports"], function (require, exports) {
     "use strict";
-    function __ctHardenFn(fn) {
+    function __cfHardenFn(fn) {
       Object.freeze(fn);
       const prototype = fn.prototype;
       if (prototype && typeof prototype === "object") {
@@ -194,7 +194,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
       }
       return fn;
     }
-    const step = __ctHardenFn(() => 42);
+    const step = __cfHardenFn(() => 42);
     exports.default = step;
   });
 });

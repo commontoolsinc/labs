@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -23,17 +23,17 @@ interface State {
 }
 // FIXTURE: map-destructured-opaque-local-capture
 // Verifies: destructured opaque locals captured by nested map callbacks stay reactive
-//   const { tasks } = section → const tasks = __ct_pattern_input.key("params", "tasks")
+//   const { tasks } = section → const tasks = __cf_pattern_input.key("params", "tasks")
 //   nested tag callback reads tasks.length through key("length"), not plain params values
 export default pattern((state) => ({
     [UI]: (<div>
-      {state.key("sections").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const section = __ct_pattern_input.key("element");
+      {state.key("sections").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const section = __cf_pattern_input.key("element");
             const tasks = section.key("tasks");
             return (<div>
-            {section.key("tags").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                    const tag = __ct_pattern_input.key("element");
-                    const tasks = __ct_pattern_input.key("params", "tasks");
+            {section.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                    const tag = __cf_pattern_input.key("element");
+                    const tasks = __cf_pattern_input.key("params", "tasks");
                     return (<span>
                 {tag.key("name")}:{tasks.key("length")}
               </span>);
@@ -219,4 +219,4 @@ export default pattern((state) => ({
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

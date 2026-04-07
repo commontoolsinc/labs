@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,7 +11,7 @@ import { derive, pattern, patternTool, type PatternToolResult } from "commonfabr
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const __ctModuleCallback_1 = __ctHardenFn(({ query, content }: {
+const __cfModuleCallback_1 = __cfHardenFn(({ query, content }: {
     query: string;
     content: string;
 }) => {
@@ -46,7 +46,7 @@ type Output = {
 //   parameters (query, content) and no module-scoped reactive variables, the
 //   transformer should not inject any extraParams.
 export default pattern(() => {
-    const tool = patternTool(__ctModuleCallback_1);
+    const tool = patternTool(__cfModuleCallback_1);
     return { tool };
 }, {
     type: "object",
@@ -84,4 +84,4 @@ export default pattern(() => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,7 +11,7 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const identity = __ctHardenFn((x: string) => x);
+const identity = __cfHardenFn((x: string) => x);
 interface Item {
     done: boolean;
 }
@@ -73,8 +73,8 @@ export default pattern((state) => {
         } }, ({ state }) => state.items);
     return {
         [UI]: (<div>
-        {rows.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const row = __ct_pattern_input.key("element");
+        {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const row = __cf_pattern_input.key("element");
                 const label = identity(__cfHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
@@ -181,4 +181,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

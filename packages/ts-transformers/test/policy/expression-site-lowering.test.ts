@@ -294,8 +294,8 @@ Deno.test(
     const { sourceFile, checker, context } = createProgramAndContext(`
       declare function identity<T>(value: T): T;
 
-      const callback = (__ct_pattern_input: any) => {
-        const row = __ct_pattern_input.key("element");
+      const callback = (__cf_pattern_input: any) => {
+        const row = __cf_pattern_input.key("element");
         const label = identity(row.done ? "Done" : "Pending");
         return label;
       };

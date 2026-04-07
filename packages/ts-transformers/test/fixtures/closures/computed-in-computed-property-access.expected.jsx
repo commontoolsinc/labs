@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,7 +11,7 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const __ctModuleCallback_1 = __ctHardenFn(() => {
+const __cfModuleCallback_1 = __cfHardenFn(() => {
     const foo = __cfHelpers.derive({
         type: "object",
         properties: {}
@@ -39,11 +39,11 @@ export default pattern(() => {
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {}, __ctModuleCallback_1);
+    } as const satisfies __cfHelpers.JSONSchema, {}, __cfModuleCallback_1);
     return outer;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

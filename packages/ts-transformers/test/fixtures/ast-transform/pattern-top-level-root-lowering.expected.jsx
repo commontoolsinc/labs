@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,7 +11,7 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const identity = __ctHardenFn(<T,>(value: T) => value);
+const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: pattern-top-level-root-lowering
 // Verifies: top-level non-JSX ordinary helper calls with reactive inputs are
 //   lifted as whole calls instead of lowering only inner argument expressions.
@@ -209,4 +209,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -17,8 +17,8 @@ declare function fetchAny(): any;
 // `any` only appears in nested properties.
 //   pattern<Input>(fn) → pattern(fn, inputSchema, objectResultSchema)
 // Context: the top-level result stays structural, but `title` degrades to `true`.
-export default pattern((__ct_pattern_input) => {
-    const prompt = __ct_pattern_input.key("prompt");
+export default pattern((__cf_pattern_input) => {
+    const prompt = __cf_pattern_input.key("prompt");
     return { title: fetchAny().title, prompt };
 }, {
     type: "object",
@@ -40,4 +40,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

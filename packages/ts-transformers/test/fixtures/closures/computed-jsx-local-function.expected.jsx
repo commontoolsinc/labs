@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -15,8 +15,8 @@ const __ctAmdHooks = undefined;
 // Verifies: computed() with a locally-defined function inside the callback is closure-extracted
 //   computed(() => { const format = ...; return <span>{format(count)}</span> }) → derive(captureSchema, resultSchema, { count }, ({ count }) => { ... })
 //   The pattern param `count` is captured with asOpaque: true in the schema.
-export default pattern((__ct_pattern_input) => {
-    const count = __ct_pattern_input.key("count");
+export default pattern((__cf_pattern_input) => {
+    const count = __cf_pattern_input.key("count");
     return {
         [UI]: (<div>
         {__cfHelpers.derive({
@@ -93,4 +93,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

@@ -75,8 +75,8 @@ const CELL_FACTORY_NAMES = new Set(["of"]);
 const CELL_FOR_NAMES = new Set(["for"]);
 const COMMONFABRIC_CALL_NAMES = COMMONFABRIC_CALL_EXPORT_NAMES;
 const WILDCARD_OBJECT_METHOD_NAMES = new Set(["keys", "values", "entries"]);
-const SYNTHETIC_MODULE_CALLBACK_PREFIX = "__ctModuleCallback";
-const FUNCTION_HARDENING_HELPER_PREFIX = "__ctHardenFn";
+const SYNTHETIC_MODULE_CALLBACK_PREFIX = "__cfModuleCallback";
+const FUNCTION_HARDENING_HELPER_PREFIX = "__cfHardenFn";
 
 export type ArrayMethodFamilyName = "map" | "filter" | "flatMap";
 

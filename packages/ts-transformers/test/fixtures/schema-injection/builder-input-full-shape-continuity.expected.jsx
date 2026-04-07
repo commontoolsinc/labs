@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -89,7 +89,7 @@ const liftPassthrough = lift({
     foo: string;
     bar: string;
 }>) => input);
-const helper = __ctHardenFn((value: Writable<{
+const helper = __cfHardenFn((value: Writable<{
     foo: string;
     bar: string;
 }>) => value.key("foo"));
@@ -143,4 +143,4 @@ export default __cfHelpers.__ct_data({
 });
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

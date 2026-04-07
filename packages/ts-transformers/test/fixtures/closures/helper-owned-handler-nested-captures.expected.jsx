@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -36,7 +36,7 @@ function flushLater(fileId: Writable<Default<string, "">>, content: Writable<Def
         return;
     onSaveFile.send({ fileId: targetFileId, content: nextContent });
 }
-__ctHardenFn(flushLater);
+__cfHardenFn(flushLater);
 interface Input {
     fileId: Writable<Default<string, "">>;
     content: Writable<Default<string, "">>;
@@ -49,11 +49,11 @@ interface Input {
 interface Output {
     trigger: Stream<void>;
 }
-export default pattern((__ct_pattern_input) => {
-    const fileId = __ct_pattern_input.key("fileId");
-    const content = __ct_pattern_input.key("content");
-    const savedContent = __ct_pattern_input.key("savedContent");
-    const onSaveFile = __ct_pattern_input.key("onSaveFile");
+export default pattern((__cf_pattern_input) => {
+    const fileId = __cf_pattern_input.key("fileId");
+    const content = __cf_pattern_input.key("content");
+    const savedContent = __cf_pattern_input.key("savedContent");
+    const onSaveFile = __cf_pattern_input.key("onSaveFile");
     const timer = Writable.of<ReturnType<typeof setTimeout> | null>(null, {
         anyOf: [{
                 type: "number"
@@ -161,4 +161,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

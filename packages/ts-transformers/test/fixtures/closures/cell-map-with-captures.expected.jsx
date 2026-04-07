@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,7 +11,7 @@ import { Cell, cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const __ctModuleCallback_1 = __ctHardenFn(({ element: value, params: { state } }) => (<span>{__cfHelpers.derive({
+const __cfModuleCallback_1 = __cfHardenFn(({ element: value, params: { state } }) => (<span>{__cfHelpers.derive({
     type: "object",
     properties: {
         value: {
@@ -57,7 +57,7 @@ export default pattern((state) => {
     } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
-        {typedValues.mapWithPattern(__cfHelpers.pattern(__ctModuleCallback_1, {
+        {typedValues.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {
@@ -153,4 +153,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

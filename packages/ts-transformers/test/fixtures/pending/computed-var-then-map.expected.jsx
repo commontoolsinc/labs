@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -67,12 +67,12 @@ interface Input {
 // Verifies: KNOWN BUG — .map() after || [] fallback via computed variable is NOT transformed
 //   computed(() => msg.reactions || []).map(fn) — the .map() should become mapWithPattern but doesn't
 // Context: Pending fix. The derive result loses OpaqueRef type info, so map-strategy skips it.
-export default pattern((__ct_pattern_input) => {
-    const messages = __ct_pattern_input.key("messages");
+export default pattern((__cf_pattern_input) => {
+    const messages = __cf_pattern_input.key("messages");
     return {
         [UI]: (<div>
-        {messages.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                const msg = __ct_pattern_input.key("element");
+        {messages.mapWithPattern(__ctHelpers.pattern(__cf_pattern_input => {
+                const msg = __cf_pattern_input.key("element");
                 // Method 1: computed variable with fallback - FAILS
                 const messageReactions = __ctHelpers.derive({
                     type: "object",
@@ -149,9 +149,9 @@ export default pattern((__ct_pattern_input) => {
                 {/* BUG: This .map() is NOT transformed to mapWithPattern.
                         The derive result doesn't pass the OpaqueRef type check.
                         Accessing msg.id causes runtime error. */}
-                {messageReactions.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                        const reaction = __ct_pattern_input.key("element");
-                        const msg = __ct_pattern_input.key("params", "msg");
+                {messageReactions.mapWithPattern(__ctHelpers.pattern(__cf_pattern_input => {
+                        const reaction = __cf_pattern_input.key("element");
+                        const msg = __cf_pattern_input.key("params", "msg");
                         return (<button type="button" data-msg-id={msg.key("id")}>
                     {reaction.key("emoji")} ({reaction.key("userNames", "length")})
                   </button>);
@@ -381,4 +381,4 @@ export default pattern((__ct_pattern_input) => {
  */
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

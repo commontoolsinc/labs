@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -101,8 +101,8 @@ export default pattern(() => {
                 length: allCharms.length
             } }, ({ allCharms }) => allCharms.length)}</span>
         <ul>
-          {allCharms.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const charm = __ct_pattern_input.key("element");
+          {allCharms.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const charm = __cf_pattern_input.key("element");
                 return (<li>{charm.key("name")}</li>);
             }, {
                 type: "object",
@@ -185,4 +185,4 @@ export default pattern(() => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

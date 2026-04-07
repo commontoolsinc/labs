@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,7 +11,7 @@ import { handler, lift } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const __ctModuleCallback_1 = __ctHardenFn((_value) => {
+const __cfModuleCallback_1 = __cfHardenFn((_value) => {
     throw new Error("not executed");
 });
 // FIXTURE: generic-builder-type-parameters-unknown
@@ -23,9 +23,9 @@ export function buildLift<T, U>() {
         type: "unknown"
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "unknown"
-    } as const satisfies __cfHelpers.JSONSchema, __ctModuleCallback_1);
+    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1);
 }
-__ctHardenFn(buildLift);
+__cfHardenFn(buildLift);
 export function buildHandler<E, S>() {
     return handler({
         type: "unknown"
@@ -36,7 +36,7 @@ export function buildHandler<E, S>() {
         void state;
     });
 }
-__ctHardenFn(buildHandler);
+__cfHardenFn(buildHandler);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

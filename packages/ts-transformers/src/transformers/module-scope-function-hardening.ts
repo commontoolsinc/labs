@@ -100,7 +100,7 @@ function transformFunctionDeclaration(
   }
 
   state.useHelper();
-  const defaultName = factory.createUniqueName("__ctDefaultFn");
+  const defaultName = factory.createUniqueName("__cfDefaultFn");
   const fnExpr = factory.createFunctionExpression(
     retainRuntimeFunctionModifiers(statement.modifiers),
     statement.asteriskToken,

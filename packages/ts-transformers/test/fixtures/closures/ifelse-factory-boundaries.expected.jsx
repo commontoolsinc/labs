@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -61,16 +61,16 @@ interface Message {
 // Verifies: authored ifElse keeps captured property access inside factory boundaries
 //   moduleHasSettings({ piece: entry.piece }) → piece capture stays structural inside lift() call
 //   selectMessage({ selectedId, msgId: msg.id }) → msg.id stays structural inside handler call branch
-export default pattern((__ct_pattern_input) => {
-    const entries = __ct_pattern_input.key("entries");
-    const messages = __ct_pattern_input.key("messages");
+export default pattern((__cf_pattern_input) => {
+    const entries = __cf_pattern_input.key("entries");
+    const messages = __cf_pattern_input.key("messages");
     const selectedId = Writable.of("", {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema);
     return {
         [UI]: (<div>
-          {entries.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const entry = __ct_pattern_input.key("element");
+          {entries.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const entry = __cf_pattern_input.key("element");
                 return ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
@@ -129,9 +129,9 @@ export default pattern((__ct_pattern_input) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-          {messages.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const msg = __ct_pattern_input.key("element");
-                const selectedId = __ct_pattern_input.key("params", "selectedId");
+          {messages.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const msg = __cf_pattern_input.key("element");
+                const selectedId = __cf_pattern_input.key("params", "selectedId");
                 return ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
@@ -296,4 +296,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

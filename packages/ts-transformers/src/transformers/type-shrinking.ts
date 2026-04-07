@@ -832,7 +832,7 @@ export function validateShrinkCoverage(
   }
 
   // Skip validation for synthetic parameters injected by the transformer
-  // pipeline (e.g. ClosureTransformer's __ct_ parameters or __param indices).
+  // pipeline (e.g. ClosureTransformer's __cf_ parameters or __param indices).
   // These are internal implementation details, not user-authored types.
   if (paramSummary.name.startsWith("__")) return;
 

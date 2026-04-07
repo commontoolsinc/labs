@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -11,7 +11,7 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __ctAmdHooks = undefined;
-const __ctModuleCallback_1 = __ctHardenFn(({ element: item, params: { suffix } }) => __cfHelpers.derive({
+const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: { suffix } }) => __cfHelpers.derive({
     type: "object",
     properties: {
         item: {
@@ -33,16 +33,16 @@ const __ctModuleCallback_1 = __ctHardenFn(({ element: item, params: { suffix } }
 // FIXTURE: filter-flatmap-plain-captures
 // Verifies: plain lexical captures in reactive filter/flatMap chains become
 // params values, not reactive key(...) lookups
-//   suffix/prefix literals -> __ct_pattern_input.params.{suffix,prefix}
+//   suffix/prefix literals -> __cf_pattern_input.params.{suffix,prefix}
 //   items.filter(fn).flatMap(fn) -> filterWithPattern(...).flatMapWithPattern(...)
 // Context: the captures are plain strings, so the lowered callbacks should not
 // route them through key() ownership paths.
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
     const suffix = "!";
     const prefix = "#";
     return {
-        labels: items.filterWithPattern(__cfHelpers.pattern(__ctModuleCallback_1, {
+        labels: items.filterWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
             type: "object",
             properties: {
                 element: {
@@ -60,9 +60,9 @@ export default pattern((__ct_pattern_input) => {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema), {
             suffix: suffix
-        }).flatMapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-            const item = __ct_pattern_input.key("element");
-            const prefix = __ct_pattern_input.params.prefix;
+        }).flatMapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
+            const prefix = __cf_pattern_input.params.prefix;
             return __cfHelpers.ifElse({
                 type: "number"
             } as const satisfies __cfHelpers.JSONSchema, {
@@ -178,4 +178,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

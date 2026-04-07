@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -28,9 +28,9 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with array destructured parameter */}
-        {state.key("pizzas").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const date = __ct_pattern_input.key("element", "0");
-                const pizza = __ct_pattern_input.key("element", "1");
+        {state.key("pizzas").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const date = __cf_pattern_input.key("element", "0");
+                const pizza = __cf_pattern_input.key("element", "1");
                 return (<div>
             {date}: {pizza}
           </div>);
@@ -73,10 +73,10 @@ export default pattern((state) => {
             } as const satisfies __cfHelpers.JSONSchema), {})}
 
         {/* Map with array destructured parameter and capture */}
-        {state.key("pizzas").mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                const date = __ct_pattern_input.key("element", "0");
-                const pizza = __ct_pattern_input.key("element", "1");
-                const state = __ct_pattern_input.key("params", "state");
+        {state.key("pizzas").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const date = __cf_pattern_input.key("element", "0");
+                const pizza = __cf_pattern_input.key("element", "1");
+                const state = __cf_pattern_input.key("params", "state");
                 return (<div>
             {date}: {pizza} (scale: {state.key("scale")})
           </div>);
@@ -192,4 +192,4 @@ export default pattern((state) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

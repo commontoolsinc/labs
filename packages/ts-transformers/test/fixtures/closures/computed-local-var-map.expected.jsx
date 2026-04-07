@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -28,8 +28,8 @@ interface Item {
 // Context: Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
 //   so `localVar` is a plain array. The .map() must remain untransformed.
 //   This is a negative test for reactive .map() detection on local aliases.
-export default pattern((__ct_pattern_input) => {
-    const items = __ct_pattern_input.key("items");
+export default pattern((__cf_pattern_input) => {
+    const items = __cf_pattern_input.key("items");
     const filtered = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -191,4 +191,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

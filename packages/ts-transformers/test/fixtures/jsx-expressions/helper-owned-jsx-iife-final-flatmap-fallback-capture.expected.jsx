@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -26,11 +26,11 @@ interface Input {
 interface Output {
     [UI]: VNode;
 }
-const visibleEntries = __ctHardenFn((entries: Entry[], prefix: string) => entries.filter((entry) => entry.name.startsWith(prefix)));
-export default pattern((__ct_pattern_input) => {
-    const entries = __ct_pattern_input.key("entries");
-    const prefix = __ct_pattern_input.key("prefix");
-    const labelPrefix = __ct_pattern_input.key("labelPrefix");
+const visibleEntries = __cfHardenFn((entries: Entry[], prefix: string) => entries.filter((entry) => entry.name.startsWith(prefix)));
+export default pattern((__cf_pattern_input) => {
+    const entries = __cf_pattern_input.key("entries");
+    const prefix = __cf_pattern_input.key("prefix");
+    const labelPrefix = __cf_pattern_input.key("labelPrefix");
     return ({
         [UI]: (<div>
       {(() => {
@@ -114,9 +114,9 @@ export default pattern((__ct_pattern_input) => {
                     entries: entries,
                     prefix: prefix
                 }, ({ entries, prefix }) => visibleEntries(entries, prefix)), []);
-                const labels = visible.flatMapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                    const entry = __ct_pattern_input.key("element");
-                    const labelPrefix = __ct_pattern_input.key("params", "labelPrefix");
+                const labels = visible.flatMapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                    const entry = __cf_pattern_input.key("element");
+                    const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
                     return __cfHelpers.ifElse({
                         type: "boolean"
                     } as const satisfies __cfHelpers.JSONSchema, {
@@ -179,8 +179,8 @@ export default pattern((__ct_pattern_input) => {
                 } as const satisfies __cfHelpers.JSONSchema), {
                     labelPrefix: labelPrefix
                 });
-                return labels.mapWithPattern(__cfHelpers.pattern(__ct_pattern_input => {
-                    const label = __ct_pattern_input.key("element");
+                return labels.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                    const label = __cf_pattern_input.key("element");
                     return <button type="button">{label}</button>;
                 }, {
                     type: "object",
@@ -253,4 +253,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);

@@ -1,4 +1,4 @@
-function __ctHardenFn(fn: Function) {
+function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
     if (prototype && typeof prototype === "object") {
@@ -21,9 +21,9 @@ type PartState = Partial<BaseState>;
 // Verifies: Partial<BaseState> produces optional (anyOf undefined|type) capture schemas in handlers
 //   action(() => console.log(a)) → handler(false, { a: { anyOf: [undefined, string] } }, ...)({ a })
 // Context: Partial<> makes properties optional; capture schemas reflect this with anyOf union
-export default pattern((__ct_pattern_input) => {
-    const a = __ct_pattern_input.key("a");
-    const b = __ct_pattern_input.key("b");
+export default pattern((__cf_pattern_input) => {
+    const a = __cf_pattern_input.key("a");
+    const b = __cf_pattern_input.key("b");
     return {
         readA: __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
             type: "object",
@@ -74,4 +74,4 @@ export default pattern((__ct_pattern_input) => {
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
-__ctHardenFn(h);
+__cfHardenFn(h);
