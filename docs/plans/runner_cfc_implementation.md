@@ -100,14 +100,23 @@ attempt. It is derived from transaction inspection APIs and excludes
 verifier-internal reads. Scheduler-only metadata and CFC metadata must remain
 separate concerns.
 
-### Canonical Write Set
+### Potential and Final Write Sets
 
 The ideal high-precision model records ordered attempted writes before
 last-write-wins compaction.
 
-Phase 1 does not require that precision. It uses a deterministic final-per-path
-write set sourced from v2 transaction internals and may pessimistically treat
-all consumed reads as influencing all final writes. If later rules need
+Phase 1 does not require that precision. It uses two deterministic transaction
+views:
+
+- `potentialWrites`: the maybe-write target set, sourced from tx
+  `markReadAsPotentialWrite` reads performed while deciding whether a diff
+  results in a write
+- `writes`: the actual changed/final write set sourced from v2 transaction
+  internals
+
+Boundary checking uses `potentialWrites ∪ writes` as the target set for
+relevance and conservative target-side policy checks. Persisted output labels
+and metadata updates are derived from `writes` only. If later rules need
 per-write provenance or exact attempt order, we can add dedicated write-attempt
 logging as a follow-on precision optimization.
 
@@ -118,7 +127,7 @@ handler has produced its reads and writes but before commit succeeds.
 
 Prepare:
 
-- gathers consumed reads and canonical writes
+- gathers consumed reads, canonical `potentialWrites`, and canonical `writes`
 - evaluates schema and policy obligations
 - computes output labels and metadata
 - records a digest of exactly what was checked
@@ -128,7 +137,8 @@ Prepare:
 The prepared digest is a stable hash of:
 
 - canonical consumed reads
-- canonical writes
+- canonical `potentialWrites`
+- canonical `writes`
 - implementation identity
 - trust snapshot identity
 
@@ -355,19 +365,21 @@ Primary files:
 Tasks:
 
 - [ ] Build a canonical extractor over the v2 inspection APIs
-- [ ] Produce a deterministic final-per-path write set for phase 1
-- [ ] Preserve write no-op information when cheaply available
+- [ ] Surface tx `potentialWrites` as the phase-1 maybe-write target set
+- [ ] Produce a deterministic final-per-path `writes` set for phase 1
+- [ ] Preserve no-op attempted-target coverage through `potentialWrites`
 - [ ] Keep scheduler metadata and verifier metadata distinct
 - [ ] Exclude only `internalVerifierRead` from the consumed-read set
 - [ ] Make the phase-1 prepare engine free to pessimistically treat all consumed
-      reads as influencing all final writes
+      reads as influencing all target paths in `potentialWrites ∪ writes`
 - [ ] Defer exact ordered write-attempt logging to a follow-up precision slice if
       later rules need it
 
 Acceptance:
 
 - [ ] Canonical path handling strips the `value` wrapper consistently
-- [ ] Phase-1 canonical write extraction is deterministic across runs
+- [ ] Phase-1 canonical `potentialWrites` extraction is deterministic across runs
+- [ ] Phase-1 canonical `writes` extraction is deterministic across runs
 - [ ] Internal verifier reads remain visible for diagnostics but not policy
 - [ ] Final-per-path view is deterministic
 
@@ -387,6 +399,8 @@ Tasks:
       consumed read
 - [ ] Mark write-only transactions relevant when the target path carries CFC
       obligations even if no read happened first
+- [ ] Treat attempted no-op writes as relevant when they appear in
+      `potentialWrites` for a path carrying CFC obligations
 - [ ] Ensure dependency-discovery transactions do not trigger prepare
 - [ ] Audit helper reads that should be tagged `internalVerifierRead`
 
@@ -396,6 +410,8 @@ Acceptance:
 - [ ] Reading unlabeled plain data does not mark it relevant
 - [ ] Writing to a path with stored or schema-derived CFC metadata marks it
       relevant
+- [ ] Attempting a no-op write to a path with stored or schema-derived CFC
+      metadata still marks it relevant
 - [ ] Dependency-collection transactions remain unaffected
 
 ### 5. Metadata Persistence
@@ -453,13 +469,16 @@ Tasks:
       `requiredIntegrity`, and `maxConfidentiality`
 - [ ] Implement `writeAuthorizedBy`, `exactCopyOf`, `projection`, and
       collection-derived transition checks where they can be evaluated from
-      consumed reads plus final writes; otherwise fail closed or remain
-      conservative
+      consumed reads plus `potentialWrites`/`writes`; otherwise fail closed or
+      remain conservative
 - [ ] Compute output label maps and the coarse summary classification
+      from `writes`
 - [ ] Persist only concrete evidence in stored labels; derived trust closure
       remains runtime-only
-- [ ] In phase 1, allow a conservative all-consumed-reads-to-all-final-writes
-      influence model
+- [ ] In phase 1, allow a conservative all-consumed-reads-to-all-targets
+      influence model over `potentialWrites ∪ writes`
+- [ ] Use `potentialWrites ∪ writes` for target-side enforcement and use
+      `writes` only for persisted output metadata
 - [ ] Reject on missing schema, missing metadata needed for a check, or any
       unsupported trust-sensitive claim
 
@@ -674,7 +693,8 @@ Land the work in mergeable vertical slices:
 
 1. [ ] Types, canonical path helpers, and digest helpers
 2. [ ] Transaction CFC state and rollout modes with observe-mode prepare
-3. [ ] V2 consumed-read and compact final-write extraction APIs
+3. [ ] V2 consumed-read, `potentialWrites`, and compact final-write extraction
+       APIs
 4. [ ] Relevance detection and merged-schema envelope implementation
 5. [ ] Embedded v2 CFC metadata persistence and non-exposure
 6. [ ] Baseline prepare engine for classification and integrity checks
