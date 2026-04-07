@@ -496,6 +496,35 @@ export default pattern((_) => {
       assertEquals(value.$UI.name, "h1");
     });
 
+    it("renders UI from a page fetched back through getPage()", async () => {
+      const session = await createSession({ identity, spaceName });
+      await using rt = await createRuntimeClient(session);
+
+      const created = await rt.createPage(TEST_PROGRAM, {
+        run: true,
+      });
+      const fetched = await rt.getPage(created.id(), true);
+      assertExists(fetched, "Fetched page should exist");
+
+      const cell = fetched.cell();
+      await cell.sync();
+      const value = cell.get() as { $UI?: VNode; $NAME?: string };
+      assertExists(value?.$UI, "Fetched page cell should retain $UI");
+
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, cell as any, renderOptions);
+      const expected = "<h1>home<strong>hello</strong></h1>";
+      await waitFor(() => Promise.resolve(root.innerHTML === expected));
+      assertEquals(root.innerHTML, expected);
+
+      cancel();
+    });
+
     it("renders page UI using html render function with CellHandle", async () => {
       const session = await createSession({ identity, spaceName });
       await using rt = await createRuntimeClient(session);

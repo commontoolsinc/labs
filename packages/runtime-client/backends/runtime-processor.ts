@@ -28,7 +28,6 @@ import {
 } from "@commontools/runner/compilation-cache";
 import {
   NameSchema,
-  nameSchema,
   rendererVDOMSchema,
 } from "@commontools/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
@@ -603,7 +602,6 @@ export class RuntimeProcessor {
     let cell = this.runtime.getCellFromEntityId(this.space, {
       "/": request.pageId,
     });
-    cell = cell.asSchema(nameSchema);
 
     if (request.runIt) {
       this.runtime.start(cell).catch(console.error);
