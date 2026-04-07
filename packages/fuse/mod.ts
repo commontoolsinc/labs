@@ -246,27 +246,36 @@ export async function main(argv: string[] = Deno.args) {
 
       // If at root and bridge is available, try async space connection.
       // Reply from tree synchronously if space is already connected.
-      // Otherwise return ENOENT and connect in background — the FUSE worker
-      // thread blocks until this callback returns, so we must never await.
       if (parent === tree.rootIno && bridge && !name.startsWith(".")) {
         if (replyLookupFromTree(req, parent, name)) {
           return;
         }
-        bridge.connectSpace(name).catch(() => {});
-        fuse.symbols.fuse_reply_err(req, ENOENT);
+        bridge.connectSpace(name).then(() => {
+          if (!replyLookupFromTree(req, parent, name)) {
+            fuse.symbols.fuse_reply_err(req, ENOENT);
+          }
+        }).catch(() => {
+          fuse.symbols.fuse_reply_err(req, ENOENT);
+        });
         return;
       }
 
       if (bridge && bridge.shouldPrepareLookup(parent, name)) {
-        // Reply from tree if possible. If the entry isn't in the tree yet,
-        // return ENOENT immediately and kick off hydration in the background.
-        // The FUSE worker thread blocks until this callback returns, so we
-        // must never await here — the next lookup will find hydrated data.
+        // Fast path: if entry is already in the tree (stubs, meta.json,
+        // previously hydrated data), reply immediately and trigger
+        // hydration in the background for not-yet-populated entries.
         if (replyLookupFromTree(req, parent, name)) {
+          bridge.prepareLookup(parent, name).catch(() => {});
           return;
         }
-        bridge.prepareLookup(parent, name).catch(() => {});
-        fuse.symbols.fuse_reply_err(req, ENOENT);
+        // Slow path: entry not in tree, must hydrate before replying.
+        bridge.prepareLookup(parent, name).then(() => {
+          if (!replyLookupFromTree(req, parent, name)) {
+            fuse.symbols.fuse_reply_err(req, ENOENT);
+          }
+        }).catch(() => {
+          fuse.symbols.fuse_reply_err(req, ENOENT);
+        });
         return;
       }
 
@@ -601,10 +610,12 @@ export async function main(argv: string[] = Deno.args) {
       };
 
       if (bridge?.shouldPrepareDirectory(inode)) {
-        // Kick off hydration in background — the FUSE worker thread blocks
-        // until this callback returns, so reply synchronously with whatever
-        // is currently in the tree (stubs). Next readdir sees hydrated data.
-        bridge.prepareDirectory(inode).catch(() => {});
+        bridge.prepareDirectory(inode).then(() => {
+          sendDirectoryReply();
+        }).catch(() => {
+          fuse.symbols.fuse_reply_err(req, ENOENT);
+        });
+        return;
       }
 
       sendDirectoryReply();
