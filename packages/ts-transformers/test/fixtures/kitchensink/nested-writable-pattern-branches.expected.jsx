@@ -413,7 +413,16 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 element: {
-                                    $ref: "#/$defs/Task"
+                                    type: "object",
+                                    properties: {
+                                        tags: {
+                                            type: "array",
+                                            items: {
+                                                type: "string"
+                                            }
+                                        }
+                                    },
+                                    required: ["tags"]
                                 },
                                 index: {
                                     type: "number"
@@ -457,33 +466,7 @@ export default pattern((state) => {
                                     required: ["selectedTaskId", "hoveredSectionId", "section", "sectionIndex", "state"]
                                 }
                             },
-                            required: ["element", "params"],
-                            $defs: {
-                                Task: {
-                                    type: "object",
-                                    properties: {
-                                        id: {
-                                            type: "string"
-                                        },
-                                        label: {
-                                            type: "string"
-                                        },
-                                        done: {
-                                            type: "boolean"
-                                        },
-                                        tags: {
-                                            type: "array",
-                                            items: {
-                                                type: "string"
-                                            }
-                                        },
-                                        note: {
-                                            type: "string"
-                                        }
-                                    },
-                                    required: ["id", "label", "done", "tags"]
-                                }
-                            }
+                            required: ["element", "params"]
                         } as const satisfies __cfHelpers.JSONSchema, {
                             anyOf: [{
                                     $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -576,7 +559,16 @@ export default pattern((state) => {
                 type: "object",
                 properties: {
                     element: {
-                        $ref: "#/$defs/Section"
+                        type: "object",
+                        properties: {
+                            tasks: {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/Task"
+                                }
+                            }
+                        },
+                        required: ["tasks"]
                     },
                     index: {
                         type: "number"
@@ -610,30 +602,6 @@ export default pattern((state) => {
                 },
                 required: ["element", "params"],
                 $defs: {
-                    Section: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "string"
-                            },
-                            title: {
-                                type: "string"
-                            },
-                            expanded: {
-                                type: "boolean"
-                            },
-                            accent: {
-                                type: "string"
-                            },
-                            tasks: {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/Task"
-                                }
-                            }
-                        },
-                        required: ["id", "title", "expanded", "tasks"]
-                    },
                     Task: {
                         type: "object",
                         properties: {

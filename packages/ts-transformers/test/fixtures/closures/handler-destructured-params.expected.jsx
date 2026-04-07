@@ -38,9 +38,10 @@ export default pattern((state) => {
                                 properties: {
                                     label: {
                                         type: "string"
-                                    }
+                                    },
+                                    value: true
                                 },
-                                required: ["label"]
+                                required: ["label", "value"]
                             }
                         }
                     },

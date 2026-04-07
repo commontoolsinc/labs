@@ -843,6 +843,40 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability analysis conservatively widens chained unknown array methods",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        filter(predicate: (value: T) => boolean): T[];
+        slice(start?: number): T[];
+        find(predicate: (value: T) => boolean): T | undefined;
+      }
+
+      type ParkingPerson = {
+        name: string;
+        priorityRank: number;
+        defaultSpot: string;
+        active: boolean;
+      };
+
+      const fn = (input: { people: ParkingPerson[] }) =>
+        input.people.filter((person) => person.active).slice(0).find((person) => person.name === "Alice")?.priorityRank === 1;
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("people"));
+    assert(input.readPaths.includes("people.0.active"));
+  },
+);
+
+Deno.test(
   "Capability analysis tracks chained || fallback reads on both branches",
   () => {
     const { program, sourceFile } = createProgramWithSource(

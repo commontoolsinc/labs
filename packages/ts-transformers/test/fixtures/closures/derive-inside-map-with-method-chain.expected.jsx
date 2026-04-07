@@ -46,16 +46,24 @@ export default pattern((state) => {
               {derive({
                         type: "array",
                         items: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
+                            $ref: "#/$defs/SubItem"
+                        },
+                        $defs: {
+                            SubItem: {
+                                type: "object",
+                                properties: {
+                                    id: {
+                                        type: "number"
+                                    },
+                                    name: {
+                                        type: "string"
+                                    },
+                                    active: {
+                                        type: "boolean"
+                                    }
                                 },
-                                active: {
-                                    type: "boolean"
-                                }
-                            },
-                            required: ["name", "active"]
+                                required: ["id", "name", "active"]
+                            }
                         }
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"

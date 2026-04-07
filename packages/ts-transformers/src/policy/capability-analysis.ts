@@ -29,6 +29,7 @@ export interface CapabilityAnalysisOptions {
 
 interface MutableCapabilityState {
   readonly reads: Set<string>;
+  readonly fullShapeReads: Set<string>;
   readonly writes: Set<string>;
   readonly rawIdentityPaths: Set<string>;
   readonly rawIdentityCellPaths: Set<string>;
@@ -92,6 +93,19 @@ const READER_METHODS = new Set(["get"]);
 const FALLBACK_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.QuestionQuestionToken,
   ts.SyntaxKind.BarBarToken,
+]);
+const PRECISE_CHAIN_METHODS = new Set([
+  "map",
+  "mapWithPattern",
+  "filter",
+  "filterWithPattern",
+  "flatMap",
+  "flatMapWithPattern",
+  "sort",
+  "toSorted",
+  "find",
+  "findLast",
+  "at",
 ]);
 const ASSIGNMENT_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.EqualsToken,
@@ -638,6 +652,7 @@ export function analyzeFunctionCapabilities(
       if (!state) {
         state = {
           reads: new Set<string>(),
+          fullShapeReads: new Set<string>(),
           writes: new Set<string>(),
           rawIdentityPaths: new Set<string>(),
           rawIdentityCellPaths: new Set<string>(),
@@ -669,6 +684,15 @@ export function analyzeFunctionCapabilities(
     const trackWrite = (name: string, path: readonly string[]): void => {
       const state = ensureState(name);
       state.writes.add(encodePath(path));
+      state.hasNonIdentityUse = true;
+    };
+
+    const trackFullShapeRead = (
+      name: string,
+      path: readonly string[],
+    ): void => {
+      const state = ensureState(name);
+      state.fullShapeReads.add(encodePath(path));
       state.hasNonIdentityUse = true;
     };
 
@@ -914,6 +938,27 @@ export function analyzeFunctionCapabilities(
       return binding && isSourceRefBinding(binding) ? binding : undefined;
     };
 
+    const resolveConservativeCallReceiverRef = (
+      call: ts.CallExpression,
+    ): SourceRef | undefined => {
+      const target = unwrapExpression(call.expression);
+      if (
+        !ts.isPropertyAccessExpression(target) &&
+        !ts.isElementAccessExpression(target)
+      ) {
+        return undefined;
+      }
+
+      const direct = resolveSourceRef(target.expression);
+      if (direct) {
+        return direct;
+      }
+
+      return ts.isCallExpression(target.expression)
+        ? resolveConservativeCallReceiverRef(target.expression)
+        : undefined;
+    };
+
     const buildAliasBindingFromExpression = (
       expression: ts.Expression,
     ): AliasBinding | undefined => {
@@ -1112,6 +1157,14 @@ export function analyzeFunctionCapabilities(
         return;
       }
       trackWrite(ref.root, ref.path);
+    };
+
+    const trackFullShapeReadRef = (ref: SourceRef): void => {
+      if (ref.dynamic) {
+        markWildcard(ref.root);
+        return;
+      }
+      trackFullShapeRead(ref.root, ref.path);
     };
 
     const assignBindingAlias = (
@@ -1668,11 +1721,24 @@ export function analyzeFunctionCapabilities(
           }
         }
 
-        if (ts.isPropertyAccessExpression(node.expression)) {
-          const receiver = resolveSourceRef(node.expression.expression);
+        if (
+          ts.isPropertyAccessExpression(node.expression) ||
+          ts.isElementAccessExpression(node.expression)
+        ) {
+          const directReceiver = resolveSourceRef(node.expression.expression);
+          const receiver = directReceiver ??
+            resolveConservativeCallReceiverRef(node);
           if (receiver) {
-            const methodName = node.expression.name.text;
-            if (methodName === "key") {
+            const methodName = getCallMethodName(node.expression);
+            const shouldTrackFullShape = !directReceiver &&
+              (!methodName || !PRECISE_CHAIN_METHODS.has(methodName));
+            if (!methodName) {
+              if (shouldTrackFullShape) {
+                trackFullShapeReadRef(receiver);
+              } else {
+                trackReadRef(receiver);
+              }
+            } else if (methodName === "key") {
               const argPath = extractLiteralPathArguments(
                 node.arguments,
                 checker,
@@ -1693,7 +1759,11 @@ export function analyzeFunctionCapabilities(
               }
             } else {
               // Unknown method call over a tracked source reads at least the receiver path.
-              trackReadRef(receiver);
+              if (shouldTrackFullShape) {
+                trackFullShapeReadRef(receiver);
+              } else if (directReceiver) {
+                trackReadRef(receiver);
+              }
             }
           }
         }
@@ -1845,6 +1915,7 @@ export function analyzeFunctionCapabilities(
       const state = states.get(summaryName);
       if (!state) continue;
       const readPaths = Array.from(state.reads).map(decodePath);
+      const fullShapePaths = Array.from(state.fullShapeReads).map(decodePath);
       const writePaths = Array.from(state.writes).map(decodePath);
       const identityPaths = Array.from(state.rawIdentityPaths)
         .map(decodePath)
@@ -1871,6 +1942,7 @@ export function analyzeFunctionCapabilities(
         name: summaryName,
         capability: toCapability(state),
         readPaths,
+        fullShapePaths,
         writePaths,
         passthrough: state.passthrough,
         wildcard: state.wildcard,

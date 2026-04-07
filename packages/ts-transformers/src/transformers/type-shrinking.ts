@@ -354,12 +354,20 @@ function buildShrunkTypeNodeFromType(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  fullShapePaths: readonly (readonly string[])[] = [],
 ): ts.TypeNode | undefined {
   const typeToNodeFlags = ts.NodeBuilderFlags.NoTruncation |
     ts.NodeBuilderFlags.UseStructuralFallback;
   const normalized = uniquePaths(paths);
+  const normalizedFullShapePaths = uniquePaths(fullShapePaths);
   if (normalized.length === 0) {
     return undefined;
+  }
+  if (normalizedFullShapePaths.some((path) => path.length === 0)) {
+    const node = checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
+      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+    typeRegistry?.set(node, type);
+    return node;
   }
 
   // Keep array-like roots as arrays. Narrowing `T[]` to `{ length: number }`
@@ -369,6 +377,7 @@ function buildShrunkTypeNodeFromType(
   // fetching full item schemas unnecessarily.
   if (isArrayShapeType(type, checker)) {
     const itemPaths = getArrayItemPaths(normalized);
+    const fullShapeItemPaths = getArrayItemPaths(normalizedFullShapePaths);
     const allNonItem = normalized.every((path) => isArrayRootOnlyPath(path));
     if (allNonItem && isHomogeneousArrayType(type, checker)) {
       // No item access — emit unknown[] to avoid fetching item schemas.
@@ -386,6 +395,7 @@ function buildShrunkTypeNodeFromType(
           sourceFile,
           factory,
           typeRegistry,
+          fullShapeItemPaths,
         ) ??
           checker.typeToTypeNode(elementType, sourceFile, typeToNodeFlags) ??
           factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
@@ -423,6 +433,7 @@ function buildShrunkTypeNodeFromType(
         sourceFile,
         factory,
         typeRegistry,
+        normalizedFullShapePaths,
       );
       if (!shrunkInner) return undefined;
       // Collect the nullish members to re-append
@@ -456,6 +467,7 @@ function buildShrunkTypeNodeFromType(
   }
 
   const grouped = groupPathsByHead(normalized);
+  const fullShapeGrouped = groupPathsByHead(normalizedFullShapePaths);
   const properties: ts.TypeElement[] = [];
 
   for (const [head, childPaths] of grouped) {
@@ -483,6 +495,7 @@ function buildShrunkTypeNodeFromType(
     }
 
     const hasDirectAccess = childPaths.some((path) => path.length === 0);
+    const fullShapeChildPaths = fullShapeGrouped.get(head) ?? [];
 
     if (!propType) {
       continue;
@@ -526,6 +539,7 @@ function buildShrunkTypeNodeFromType(
       sourceFile,
       factory,
       typeRegistry,
+      fullShapeChildPaths,
     );
     if (!shrunkChild && !hasDirectAccess) {
       // We failed to materialize a deeper path; let caller fall back to
@@ -568,10 +582,15 @@ function buildShrunkTypeNodeFromTypeNode(
   factory: ts.NodeFactory,
   checker?: ts.TypeChecker,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  fullShapePaths: readonly (readonly string[])[] = [],
 ): ts.TypeNode | undefined {
   const normalized = uniquePaths(paths);
+  const normalizedFullShapePaths = uniquePaths(fullShapePaths);
   if (normalized.length === 0) {
     return undefined;
+  }
+  if (normalizedFullShapePaths.some((path) => path.length === 0)) {
+    return node;
   }
   const hasDirectAccess = normalized.some((path) => path.length === 0);
 
@@ -595,6 +614,7 @@ function buildShrunkTypeNodeFromTypeNode(
             factory,
             checker,
             typeRegistry,
+            normalizedFullShapePaths,
           );
           if (shrunkInner && shrunkInner !== inner) {
             return factory.updateTypeReferenceNode(
@@ -641,6 +661,7 @@ function buildShrunkTypeNodeFromTypeNode(
     }
     if (isArray) {
       const itemPaths = getArrayItemPaths(normalized);
+      const fullShapeItemPaths = getArrayItemPaths(normalizedFullShapePaths);
       const allNonItem = normalized.every((path) => isArrayRootOnlyPath(path));
       if (allNonItem) {
         const arrayNode = factory.createArrayTypeNode(
@@ -659,6 +680,7 @@ function buildShrunkTypeNodeFromTypeNode(
             factory,
             checker,
             typeRegistry,
+            fullShapeItemPaths,
           ) ?? node.elementType;
           return factory.updateArrayTypeNode(node, shrunkElement);
         }
@@ -674,6 +696,7 @@ function buildShrunkTypeNodeFromTypeNode(
             factory,
             checker,
             typeRegistry,
+            fullShapeItemPaths,
           ) ?? node.type.elementType;
           return factory.updateTypeOperatorNode(
             node,
@@ -695,6 +718,7 @@ function buildShrunkTypeNodeFromTypeNode(
             factory,
             checker,
             typeRegistry,
+            fullShapeItemPaths,
           ) ?? inner;
           return factory.updateTypeReferenceNode(
             node,
@@ -717,6 +741,7 @@ function buildShrunkTypeNodeFromTypeNode(
               node.getSourceFile(),
               factory,
               typeRegistry,
+              normalizedFullShapePaths,
             );
           }
         }
@@ -734,6 +759,7 @@ function buildShrunkTypeNodeFromTypeNode(
       factory,
       checker,
       typeRegistry,
+      normalizedFullShapePaths,
     );
   }
 
@@ -751,6 +777,7 @@ function buildShrunkTypeNodeFromTypeNode(
       factory,
       checker,
       typeRegistry,
+      normalizedFullShapePaths,
     ) ?? inner;
     return factory.updateTypeReferenceNode(
       node,
@@ -772,6 +799,7 @@ function buildShrunkTypeNodeFromTypeNode(
         factory,
         checker,
         typeRegistry,
+        normalizedFullShapePaths,
       );
       if (!shrunk) return undefined;
       // If the shrunk type is identical to the original declaration (same
@@ -802,6 +830,7 @@ function buildShrunkTypeNodeFromTypeNode(
         factory,
         checker,
         typeRegistry,
+        normalizedFullShapePaths,
       );
       if (s && s !== member) {
         changed = true;
@@ -891,8 +920,10 @@ function shrinkTypeLiteralMembers(
   factory: ts.NodeFactory,
   checker?: ts.TypeChecker,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  fullShapePaths: readonly (readonly string[])[] = [],
 ): ts.TypeNode | undefined {
   const grouped = groupPathsByHead(normalizedPaths);
+  const fullShapeGrouped = groupPathsByHead(fullShapePaths);
   const result: ts.TypeElement[] = [];
 
   for (const member of members) {
@@ -911,6 +942,7 @@ function shrinkTypeLiteralMembers(
       factory,
       checker,
       typeRegistry,
+      fullShapeGrouped.get(propertyName) ?? [],
     ) ?? member.type;
 
     result.push(
@@ -1943,6 +1975,7 @@ export function applyShrinkAndWrap(
     ...paramSummary.readPaths,
     ...paramSummary.writePaths,
   ]);
+  const fullShapePaths = uniquePaths(paramSummary.fullShapePaths ?? []);
   const identityPaths = uniquePaths(paramSummary.identityPaths ?? []);
   const identityCellPaths = uniquePaths(paramSummary.identityCellPaths ?? []);
   const retainedPaths = uniquePaths([...paths, ...identityPaths]);
@@ -2008,12 +2041,15 @@ export function applyShrinkAndWrap(
         sourceFile,
         factory,
         context?.options.typeRegistry,
+        fullShapePaths,
       );
       const nodeDriven = buildShrunkTypeNodeFromTypeNode(
         baseTypeNode,
         retainedPaths,
         factory,
         checker,
+        context?.options.typeRegistry,
+        fullShapePaths,
       );
       shrunk = typeDriven ?? nodeDriven;
       if (typeDriven && nodeDriven) {
@@ -2056,6 +2092,8 @@ export function applyShrinkAndWrap(
         retainedPaths,
         factory,
         checker,
+        context?.options.typeRegistry,
+        fullShapePaths,
       );
       const typeDriven = baseType
         ? buildShrunkTypeNodeFromType(
@@ -2065,6 +2103,7 @@ export function applyShrinkAndWrap(
           sourceFile,
           factory,
           context?.options.typeRegistry,
+          fullShapePaths,
         )
         : undefined;
       shrunk = nodeDriven ?? typeDriven;

@@ -195,6 +195,41 @@ Deno.test("applyShrinkAndWrap does not treat numeric index signatures as arrays"
   assertEquals(printTypeNode(result, sourceFile), "unknown");
 });
 
+Deno.test("applyShrinkAndWrap preserves full array item shapes for direct array reads", () => {
+  const { sourceFile, checker } = createProgram(`
+    type Input = {
+      people: {
+        active: boolean;
+        name: string;
+        priorityRank: number;
+      }[];
+      other: string;
+    };
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      readPaths: [["people"], ["people", "0", "active"]],
+      fullShapePaths: [["people"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  assertStringIncludes(printed, "people");
+  assertStringIncludes(printed, "active");
+  assertStringIncludes(printed, "name");
+  assertStringIncludes(printed, "priorityRank");
+  assertEquals(printed.includes("other"), false);
+});
+
 Deno.test("applyShrinkAndWrap defaults-only fallback expands repeated child leaves independently", () => {
   const { sourceFile, checker } = createProgram(`
     type Shared = { a: string; b: string };
