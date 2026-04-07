@@ -1,20 +1,20 @@
 # CFC Runner Implementation Plan
 
-This document is the current plan for adding commit-boundary Contextual Flow
-Control (CFC) enforcement to `packages/runner`.
+This document is the implementation plan for adding commit-boundary Contextual
+Flow Control (CFC) enforcement to `packages/runner`.
 
 It is intentionally self-contained. It describes:
 
 - the target behavior
-- the current baseline in this checkout
+- the normative specification context
 - the data model we will implement
 - the workstreams, files, and acceptance criteria
 - the rollout sequence
 
 ## Goal
 
-Move from today's schema-guided IFC propagation and coarse label facts to a
-runner that enforces CFC at commit time.
+Move from schema-guided IFC propagation and coarse summary labels to a runner
+that enforces CFC at commit time.
 
 At the end of this work:
 
@@ -23,45 +23,25 @@ At the end of this work:
 - external side effects will be gated on successful commit
 - trust-sensitive relaxations will be explicit, deterministic, and fail closed
 
-Phase 1 targets the memory-v2 transaction path first. Legacy v1 compatibility
-can remain on the existing coarse-label behavior until the v2 boundary model is
+Phase 1 targets the memory-v2 transaction path first. Legacy compatibility may
+remain outside the v2 embedded-metadata model until the boundary model is
 stable.
 
-## Current Baseline
+## Specification Context
 
-The current tree already has useful foundations:
+This plan is constrained by the surrounding specs rather than by any specific
+current implementation shape:
 
-- `packages/runner/src/cfc.ts` resolves schema refs, walks `ifc` annotations,
-  and computes coarse classification joins
-- `packages/runner/src/schema.ts`, `packages/runner/src/traverse.ts`, and
-  `packages/runner/src/cell.ts` already carry schema context through reads,
-  links, projections, and materialization
 - `docs/specs/json_schema.md` defines `ifc` as a schema extension
-- `docs/specs/verifiable-execution/06-cfc-and-trust.md` defines today's coarse
-  `Labels.classification` and the future path-granular label-map direction
-- `docs/specs/ts-transformer/cfc_authoring_contract.md` already reserves richer
-  `ifc` keys such as `integrity`, `addIntegrity`, `requiredIntegrity`,
-  `maxConfidentiality`, `writeAuthorizedBy`, `projection`, and collection rules
-- `packages/runner/src/storage/interface.ts` exposes coarse `StorageValue.labels`
-  with `classification?: string[]`
-- `packages/runner/src/storage/cache.ts` already persists
-  `application/label+json` facts in the v1 path and uses schema-derived
-  classification to shape remote queries
-- `packages/runner/src/storage/transaction/journal.ts` already records ordered
-  read and write activity with metadata
-- `packages/runner/src/storage/reactivity-log.ts` already distinguishes
-  scheduler-only reads via metadata markers such as `ignoreReadForScheduling`
-- `packages/runner/src/storage/extended-storage-transaction.ts` already has a
-  wrapper transaction seam and commit callbacks
-- `packages/runner/src/storage/v2-transaction.ts` already tracks richer internal
-  write state (`writeDetails`, `patchDetails`, native commit operations) that we
-  can expose as dedicated v2 CFC extraction APIs instead of reconstructing
-  everything from legacy journal activity
-- `packages/runner/src/cell.ts`, `packages/runner/src/scheduler.ts`, and
-  `packages/runner/src/builtins/fetch-data.ts` already expose places where
-  side effects and post-commit hooks can be centralized
+- `docs/specs/verifiable-execution/06-cfc-and-trust.md` defines the coarse
+  summary-label model and the direction toward canonical path-granular label
+  maps
+- `docs/specs/ts-transformer/cfc_authoring_contract.md` defines the authoring
+  surface for richer `ifc` keys such as `integrity`, `addIntegrity`,
+  `requiredIntegrity`, `maxConfidentiality`, `writeAuthorizedBy`, `projection`,
+  and collection rules
 
-What is missing is the actual boundary substrate:
+This plan adds the boundary substrate that those specs require:
 
 - there is no transaction-level CFC state
 - there is no prepare-before-commit step
@@ -174,8 +154,8 @@ snapshot, not on ambient mutable state.
 ## Storage Model
 
 For memory-v2, the runner needs an authoritative CFC metadata record embedded in
-the single entity document. Legacy v1 coarse label facts remain as compatibility
-behavior until parity work lands.
+the single entity document. Legacy compatibility may remain outside this v2
+storage model until parity work lands.
 
 ### Embedded Metadata
 
@@ -213,9 +193,8 @@ Storage rules:
   `schemaHash` in the same document as `value` and `source`
 - ordinary `application/json` reads and materialized values must strip the
   reserved `cfc` sibling
-- v1 may continue using `application/label+json` as legacy compatibility
-  behavior, but phase 1 does not block on reproducing that MIME-based shape in
-  v2
+- any compatibility bridge from legacy coarse labels into the embedded v2 model
+  is follow-up work and does not block phase 1
 
 ### Path Canonicalization
 
@@ -312,7 +291,8 @@ Tasks:
       `CfcEnforcementMode`, and `CfcMetadata`
 - [ ] Define a dedicated metadata marker for `internalVerifierRead`
 - [ ] Define a dedicated side-effect outbox entry type for post-commit effects
-- [ ] Define the system metadata MIME/type used for the CFC side record
+- [ ] Define the reserved embedded `cfc` document shape and system-ownership
+      rules for that metadata
 - [ ] Define a canonical code-identity shape that separates policy-facing code
       identity from per-load runtime ids
 
@@ -434,8 +414,8 @@ Tasks:
 - [ ] Ensure normal user-doc reads do not expose the reserved `cfc` sibling
 - [ ] Make storage helpers able to read current CFC metadata efficiently during
       prepare
-- [ ] Keep v1 `application/label+json` compatibility as follow-up work; do not
-      block phase 1 on v1 parity
+- [ ] Keep any legacy coarse-label compatibility bridge as follow-up work; do
+      not block phase 1 on parity outside the embedded v2 model
 
 Acceptance:
 
@@ -471,6 +451,9 @@ Tasks:
       collection-derived transition checks where they can be evaluated from
       consumed reads plus `potentialWrites`/`writes`; otherwise fail closed or
       remain conservative
+- [ ] Until stable implementation identities and trust snapshots land, treat
+      trust-sensitive claims such as `writeAuthorizedBy` as non-enforceable:
+      allow diagnostics in `observe`, but hard-reject them in enforcing modes
 - [ ] Compute output label maps and the coarse summary classification
       from `writes`
 - [ ] Persist only concrete evidence in stored labels; derived trust closure
@@ -682,6 +665,9 @@ Every phase should land with tests before the next phase starts.
       labels
 - [ ] Treat step 8 below as the first safe enablement point for state-only
       transactions
+- [ ] Before step 9 below, enforcing modes cover only the non-trust-sensitive
+      rule subset; claims that depend on stable code identity or trust snapshots
+      must remain observe-only or fail closed
 - [ ] Do not enable enforcing modes for runtimes with external sinks until
       outbox and retry tests are green
 - [ ] Do not enable direct CAS enforcement until parallel-path non-bypass tests
@@ -699,17 +685,19 @@ Land the work in mergeable vertical slices:
 5. [ ] Embedded v2 CFC metadata persistence and non-exposure
 6. [ ] Baseline prepare engine for classification and integrity checks
 7. [ ] Scheduler integration and success-only outbox
-8. [ ] Enforcing commit gate for state-only transactions once extraction/prepare
-       slices are green
-9. [ ] Stable implementation identity and trust snapshotting
+8. [ ] Enforcing commit gate for state-only transactions for the
+       non-trust-sensitive rule subset once extraction/prepare slices are green
+9. [ ] Stable implementation identity and trust snapshotting, then enable
+       trust-sensitive rule enforcement
 10. [ ] Structural flow-precision claims for core built-ins
 11. [ ] Fetch and other external sink enforcement
 12. [ ] UI provenance and trusted-event path
 13. [ ] Direct CAS and parallel-path hardening
 
-Step 8 is the first safe enablement point for transactions that do not issue
-external effects. Step 11 is the first safe enablement point for runtimes with
-external sinks.
+Step 8 is the first safe enablement point for non-trust-sensitive,
+state-only transactions that do not issue external effects. Step 9 is the first
+safe enablement point for trust-sensitive rule enforcement. Step 11 is the
+first safe enablement point for runtimes with external sinks.
 
 ## Done Means
 
@@ -717,8 +705,8 @@ This plan is complete when all of the following are true:
 
 - CFC-relevant transactions are prepared and verified before commit
 - authoritative CFC metadata is persisted for later reads and writes
-- current coarse label behavior still works for existing query and redaction
-  flows, whether sourced from legacy v1 facts or embedded v2 summaries
+- coarse summary classification behavior still works for existing query and
+  redaction flows through the embedded v2 summary model
 - external side effects are commit-gated and retry-safe
 - stable policy-facing code identities and runtime verified-load provenance refer
   to the same admitted implementations for the supported identity classes
