@@ -844,7 +844,10 @@ export function analyzeFunctionCapabilities(
         ts.isPropertyAccessExpression(current) ||
         ts.isElementAccessExpression(current)
       ) {
-        const innerBinding = resolveBinding(current.expression);
+        const innerBinding = resolveBinding(current.expression) ??
+          (ts.isCallExpression(current.expression)
+            ? buildAliasBindingFromExpression(current.expression)
+            : undefined);
         if (innerBinding) {
           if (ts.isCallExpression(current.expression)) {
             resolvedGetCalls.add(current.expression);

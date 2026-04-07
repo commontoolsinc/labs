@@ -810,6 +810,39 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability analysis tracks direct properties read from find() results",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        find(predicate: (value: T) => boolean): T | undefined;
+      }
+
+      type ParkingPerson = {
+        name: string;
+        priorityRank: number;
+        defaultSpot: string;
+      };
+
+      const fn = (input: { people: ParkingPerson[] }) =>
+        input.people.find((person) => person.name === "Alice")?.priorityRank === 1;
+      `,
+    );
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("people"));
+    assert(input.readPaths.includes("people.0.name"));
+    assert(input.readPaths.includes("people.0.priorityRank"));
+    assertEquals(input.readPaths.includes("people.0.defaultSpot"), false);
+  },
+);
+
+Deno.test(
   "Capability analysis tracks chained || fallback reads on both branches",
   () => {
     const { program, sourceFile } = createProgramWithSource(

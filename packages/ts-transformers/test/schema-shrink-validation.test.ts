@@ -1503,6 +1503,42 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "lift preserves direct properties read from find() results",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "type ParkingPerson = {",
+        "  name: string;",
+        "  priorityRank: number;",
+        "  defaultSpot: string;",
+        "};",
+        "const liftPriority = lift((input: { people: ParkingPerson[] }) =>",
+        '  input.people.find((person) => person.name === "Alice")?.priorityRank === 1',
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "people");
+      assertStringIncludes(inputSchema, "name");
+      assertStringIncludes(inputSchema, "priorityRank");
+      assertEquals(inputSchema.includes("defaultSpot"), false);
+    },
+  );
+
+  await t.step(
     "lift shrinks item fields through right-hand ?? fallback aliases",
     async () => {
       const source = [
