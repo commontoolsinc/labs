@@ -1,5 +1,5 @@
 import { isDeno } from "@commonfabric/utils/env";
-import ports from "@commontools/ports" with { type: "json" };
+import ports from "@commonfabric/ports" with { type: "json" };
 
 // Environment configuration provided to patterns. Could
 // eventually be e.g. `import.meta` exposed to patterns.

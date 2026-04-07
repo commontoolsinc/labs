@@ -1,5 +1,5 @@
 import { exists } from "@std/fs";
-import ports from "@commontools/ports" with { type: "json" };
+import ports from "@commonfabric/ports" with { type: "json" };
 import * as path from "@std/path";
 import { createRouter } from "@/lib/create-app.ts";
 import { cors } from "@hono/hono/cors";

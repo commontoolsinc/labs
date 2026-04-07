@@ -1,6 +1,6 @@
 import { Command } from "@cliffy/command";
 import { basename, resolve } from "@std/path";
-import ports from "@commontools/ports" with { type: "json" };
+import ports from "@commonfabric/ports" with { type: "json" };
 import {
   buildDenoArgs,
   defaultStateDir,
