@@ -832,7 +832,7 @@ Deno.test("CellBridge.sendToHandlerTarget survives callable inode rebuilds", asy
   const entitiesIno = tree.addDir(spaceIno, "entities");
   const pieceIno = tree.addDir(piecesIno, "notes");
   const pieceResultIno = tree.addDir(pieceIno, "result", "object");
-  const script = buildCallableScript("/tmp/ct-exec");
+  const script = buildCallableScript("/tmp/cf-exec");
 
   const handlerIno = tree.addCallable(
     pieceResultIno,

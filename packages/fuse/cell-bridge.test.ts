@@ -202,7 +202,7 @@ type WriteFsFile = (
 
 Deno.test("CellBridge.loadPieceTree creates meta.json with id, name, patternName", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
 
   const piece = {
     id: "of:entity-123",
@@ -232,7 +232,7 @@ Deno.test("CellBridge.loadPieceTree creates meta.json with id, name, patternName
 
 Deno.test("CellBridge.loadPieceTree creates stable input/result stubs without eager hydration", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
 
   const piece = {
     id: "of:entity-456",
@@ -273,7 +273,7 @@ Deno.test("CellBridge.loadPieceTree creates stable input/result stubs without ea
 
 Deno.test("CellBridge.prepareLookup hydrates result.json on direct lookup", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
 
   const piece = {
     id: "of:entity-result-json",
@@ -313,7 +313,7 @@ Deno.test("CellBridge.prepareLookup hydrates result.json on direct lookup", asyn
 
 Deno.test("CellBridge.hydratePieceProp materializes input and result on demand", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
 
   const piece = {
@@ -373,7 +373,7 @@ Deno.test("CellBridge.hydratePieceProp materializes input and result on demand",
 
 Deno.test("CellBridge.hydratePieceProp returns early when a prop is already hydrated", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
   let resultGets = 0;
   let resultCellGets = 0;
@@ -420,7 +420,7 @@ Deno.test("CellBridge.hydratePieceProp returns early when a prop is already hydr
 
 Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables in .handlers", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
 
   const onAddContactCell = makeCell(
@@ -480,7 +480,7 @@ Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables 
 
 Deno.test("CellBridge.addPieceToSpace assigns -2 suffix on name collision", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
 
   const makeNotePiece = (id: string) => ({
@@ -517,7 +517,7 @@ Deno.test("CellBridge.addPieceToSpace assigns -2 suffix on name collision", asyn
 
 Deno.test("CellBridge.addPieceToSpace assigns -2 and -3 suffixes for three collisions", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
 
   const makeStandupPiece = (id: string) => ({
@@ -556,7 +556,7 @@ Deno.test("CellBridge.addPieceToSpace assigns -2 and -3 suffixes for three colli
 
 Deno.test("CellBridge.updateIndexJson writes .index.json mapping names to entity IDs", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
 
   const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
@@ -611,7 +611,7 @@ Deno.test("CellBridge.updateIndexJson writes .index.json mapping names to entity
 
 Deno.test("CellBridge.updatePiecesJson writes cached manifest data without piece reads", () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
 
   state.pieceMap.set("Alpha", "of:alpha");
@@ -651,7 +651,7 @@ Deno.test("CellBridge.updatePiecesJson writes cached manifest data without piece
 
 Deno.test("CellBridge result hydration updates pieces.json summary from current result data", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
   const resultCell = new SinkableCell({ summary: "before" });
 
@@ -694,7 +694,7 @@ Deno.test("CellBridge result hydration updates pieces.json summary from current 
 
 Deno.test("CellBridge.writeFsFile writes markdown frontmatter and body to FS paths", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const writes: Array<{ path: (string | number)[]; value: unknown }> = [];
 
   const ok = await (bridge as unknown as { writeFsFile: WriteFsFile })
@@ -725,7 +725,7 @@ Deno.test("CellBridge.writeFsFile writes markdown frontmatter and body to FS pat
 
 Deno.test("CellBridge.writeFsFile removes deleted markdown frontmatter keys and preserves scalar types", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const writes: Array<{ path: (string | number)[]; value: unknown }> = [];
 
   const ok = await (bridge as unknown as { writeFsFile: WriteFsFile })
@@ -768,7 +768,7 @@ Deno.test("CellBridge.writeFsFile removes deleted markdown frontmatter keys and 
 
 Deno.test("CellBridge.writeFsFile removes deleted keys from application/json projections", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const writes: Array<{ path: (string | number)[]; value: unknown }> = [];
 
   const ok = await (bridge as unknown as { writeFsFile: WriteFsFile })
@@ -815,7 +815,7 @@ Deno.test("CellBridge.writeFsFile removes deleted keys from application/json pro
 
 Deno.test("CellBridge.syncPieceListOnce adds a new piece to the tree", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
 
   const existingPiece = {
     id: "of:p1",
@@ -866,7 +866,7 @@ Deno.test("CellBridge.syncPieceListOnce adds a new piece to the tree", async () 
 
 Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
 
   const piece = {
     id: "of:gone",
@@ -921,7 +921,7 @@ Deno.test({
   sanitizeOps: false,
   fn: async () => {
     const tree = new FsTree();
-    const bridge = new CellBridge(tree, "/tmp/ct-exec");
+    const bridge = new CellBridge(tree, "/tmp/cf-exec");
     const state = buildTestSpace(bridge, "home", []);
 
     // Mutable name — we'll change it before firing the sink
@@ -1002,7 +1002,7 @@ Deno.test({
 
 Deno.test("CellBridge.addPieceToSpace normalizes projected piece directory names", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
 
   const piece = {
@@ -1042,7 +1042,7 @@ Deno.test("CellBridge.addPieceToSpace normalizes projected piece directory names
 
 Deno.test("CellBridge.addPieceToSpace falls back to a normalized piece id for symbol-only names", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
 
   const piece = {
@@ -1075,7 +1075,7 @@ Deno.test({
   sanitizeOps: false,
   fn: async () => {
     const tree = new FsTree();
-    const bridge = new CellBridge(tree, "/tmp/ct-exec");
+    const bridge = new CellBridge(tree, "/tmp/cf-exec");
     const state = buildTestSpace(bridge, "home", []);
 
     let pieceName = "Start Here";
@@ -1134,7 +1134,7 @@ Deno.test({
 
 Deno.test("CellBridge.subscribePiece clears stale FS root entries when result switches to result/ tree", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
 
   const inputCell = new SinkableCell({});
@@ -1215,7 +1215,7 @@ Deno.test({
   sanitizeOps: false,
   fn: async () => {
     const tree = new FsTree();
-    const bridge = new CellBridge(tree, "/tmp/ct-exec");
+    const bridge = new CellBridge(tree, "/tmp/cf-exec");
     bridge.init({
       apiUrl: "http://localhost:8000",
       identity: "/tmp/test-identity.pem",
@@ -1270,7 +1270,7 @@ Deno.test({
 
 Deno.test("CellBridge.invalidateWritePath clears hydrated piece result cache", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
 
   const piece = {
@@ -1320,7 +1320,7 @@ Deno.test("CellBridge.invalidateWritePath clears hydrated piece result cache", a
 
 Deno.test("CellBridge.invalidateHandlerTarget clears hydrated entity result cache", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
 
   const resultCell = makeCell({ content: "hello" }, {
@@ -1372,7 +1372,7 @@ Deno.test("CellBridge.invalidateHandlerTarget clears hydrated entity result cach
 
 Deno.test("CellBridge.invalidateWritePath does not spawn concurrent hydrations for the same prop", async () => {
   const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
 
   let resolveFirstGet: (() => void) | undefined;

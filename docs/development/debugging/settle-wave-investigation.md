@@ -591,8 +591,8 @@ The rest of this section is an example run that motivated the guide above.
 - local Toolshed origin: `http://localhost:8000`
 - space: `perf-space-mmwj1lw4`
 - trace artifacts:
-  - `/tmp/ct-perf-traces/reload-after-register.json`
-  - `/tmp/ct-perf-traces/create-note.json`
+  - `/tmp/cf-perf-traces/reload-after-register.json`
+  - `/tmp/cf-perf-traces/create-note.json`
 
 ### Trace Headlines
 
@@ -1046,7 +1046,7 @@ The grouped action ids line up with a few broad reactive surfaces:
   - instantiates `BacklinksIndex`, `SummaryIndex`, and two `PieceGrid`
     instances from that shared state
 - `packages/patterns/system/piece-grid.tsx`
-  - maps the full piece list to a grid of `ct-render` previews, so one added
+  - maps the full piece list to a grid of `cf-render` previews, so one added
     piece can revisit the whole grid surface
 - `packages/patterns/system/backlinks-index.tsx`
   - `computeIndex` resets backlinks on every piece and repopulates them by

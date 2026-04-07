@@ -183,8 +183,8 @@ export const fuse = new Command()
     }
 
     if (options.background) {
-      // Derive log file path: /tmp/ct-fuse-<mountname>.log
-      const logFile = `/tmp/ct-fuse-${basename(absMountpoint)}.log`;
+      // Derive log file path: /tmp/cf-fuse-<mountname>.log
+      const logFile = `/tmp/cf-fuse-${basename(absMountpoint)}.log`;
 
       // Pass --log-file so the daemon redirects its own output (including
       // the ring-buffer crash dump) to disk rather than /dev/null.

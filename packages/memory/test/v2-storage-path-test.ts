@@ -2,7 +2,7 @@ import { assertEquals, assertThrows } from "@std/assert";
 import { resolveSpaceStoreUrl } from "../memory.ts";
 
 Deno.test("resolveSpaceStoreUrl keeps v1 directory mode unchanged", () => {
-  const root = new URL("file:///tmp/ct-memory/");
+  const root = new URL("file:///tmp/cf-memory/");
   const subject = "did:key:z6Mkk-test";
 
   assertEquals(
@@ -12,7 +12,7 @@ Deno.test("resolveSpaceStoreUrl keeps v1 directory mode unchanged", () => {
 });
 
 Deno.test("resolveSpaceStoreUrl uses a dedicated engine subdirectory in directory mode", () => {
-  const root = new URL("file:///tmp/ct-memory/");
+  const root = new URL("file:///tmp/cf-memory/");
   const subject = "did:key:z6Mkk-test";
 
   assertEquals(
@@ -22,17 +22,17 @@ Deno.test("resolveSpaceStoreUrl uses a dedicated engine subdirectory in director
 });
 
 Deno.test("resolveSpaceStoreUrl uses a sibling engine directory in single-file mode", () => {
-  const file = new URL("file:///tmp/ct-memory/space.sqlite");
+  const file = new URL("file:///tmp/cf-memory/space.sqlite");
   const subject = "did:key:z6Mkk-test";
 
   assertEquals(
     resolveSpaceStoreUrl(file, subject, "v2").href,
-    new URL(`file:///tmp/ct-memory/space.engine-v3/${subject}.sqlite`).href,
+    new URL(`file:///tmp/cf-memory/space.engine-v3/${subject}.sqlite`).href,
   );
 });
 
 Deno.test("resolveSpaceStoreUrl rejects traversal-like subjects", () => {
-  const root = new URL("file:///tmp/ct-memory/");
+  const root = new URL("file:///tmp/cf-memory/");
 
   assertThrows(
     () => resolveSpaceStoreUrl(root, "../../evil" as any, "v2"),
