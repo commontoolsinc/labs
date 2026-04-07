@@ -211,6 +211,14 @@ type SchemaInner<
     ? WrapCells extends true
       ? Cell<SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>>
     : SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>
+  : T extends { asCell: ["cell"] }
+    ? WrapCells extends true
+      ? Cell<SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>>
+    : SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>
+  : T extends { asCell: ["stream"] }
+    ? WrapCells extends true
+      ? Cell<SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>>
+    : SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>
   : T extends { asStream: true }
     ? WrapCells extends true
       ? Stream<SchemaInner<Omit<T, "asStream">, Root, Depth, WrapCells>>

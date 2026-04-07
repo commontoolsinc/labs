@@ -840,9 +840,10 @@ describe("link-utils", () => {
 
       const result = sanitizeSchemaForLinks(schema, { keepStreams: true });
 
-      expect((result as any).asCell).toBeUndefined();
-      // asStream should be kept
-      expect((result as any).asStream).toBe(true);
+      // Expect the new version of asStream (where it's an entry in asCell)
+      expect((result as any).asCell).toEqual(["stream"]);
+      // asStream should be gone
+      expect((result as any).asStream).toBeUndefined();
     });
 
     it("should handle shared references (diamond pattern) correctly", () => {
@@ -945,14 +946,14 @@ describe("link-utils", () => {
     it("should handle cycles through allOf", () => {
       const schema: any = {
         type: "object",
-        asStream: true,
+        asCell: ["stream"],
         allOf: [{ type: "object" }, null],
       };
       schema.allOf[1] = { properties: { nested: schema } };
 
       const result = sanitizeSchemaForLinks(schema);
 
-      expect((result as any).asStream).toBeUndefined();
+      expect((result as any).asCell).toBeUndefined();
       expect((result as any).allOf[1].properties.nested.$ref).toBeDefined();
       expect(() => JSON.stringify(result)).not.toThrow();
     });
@@ -984,16 +985,16 @@ describe("link-utils", () => {
     it("should handle keepAsOpaque option", () => {
       const schema: any = {
         type: "object",
-        asOpaque: true,
+        asCell: ["opaque"],
       };
 
-      // By default, asOpaque should be removed
+      // By default, asCell should be removed
       const resultDefault = sanitizeSchemaForLinks(schema);
-      expect((resultDefault as any).asOpaque).toBeUndefined();
+      expect((resultDefault as any).asCell).toBeUndefined();
 
-      // With keepAsOpaque: true, it should be preserved
-      const resultKept = sanitizeSchemaForLinks(schema, { keepAsOpaque: true });
-      expect((resultKept as any).asOpaque).toBe(true);
+      // With keepAsCell: true, it should be preserved
+      const resultKept = sanitizeSchemaForLinks(schema, { keepAsCell: true });
+      expect((resultKept as any).asCell).toEqual(["opaque"]);
     });
   });
 

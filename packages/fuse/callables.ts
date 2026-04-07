@@ -1,4 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
+import { ContextualFlowControl } from "../runner/src/cfc.ts";
 
 const encoder = new TextEncoder();
 
@@ -28,7 +29,9 @@ function isPatternSchemaValue(value: unknown): boolean {
 
 function isPatternSchemaSchema(schema: JSONSchema | undefined): boolean {
   if (!isSchemaRecord(schema)) return false;
-  if (schema.asCell === true) return true;
+  if (ContextualFlowControl.isAsCell(schema)) {
+    return true;
+  }
 
   const properties = schema.properties;
   if (

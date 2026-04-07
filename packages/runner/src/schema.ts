@@ -55,9 +55,12 @@ const logger = getLogger("validateAndTransform", {
  *      based on the first non-alias value. This is because writes will follow
  *      aliases as well.
  *
- *  Calling `effect` on returned cells within a higher-level `effect` works as
- *  expected. Be sure to track the cancels, though. (Tracking cancels isn't
- *  necessary when using the schedueler directly)
+ * `asCell` can also be an array, so it can indicate a `Cell<Cell<T>>` or
+ * capture other options like opaque or stream types.
+ *
+ * Calling `effect` on returned cells within a higher-level `effect` works as
+ * expected. Be sure to track the cancels, though. (Tracking cancels isn't
+ * necessary when using the schedueler directly)
  */
 
 export function resolveSchema(
@@ -115,19 +118,23 @@ export function processDefaultValue(
   if (!schema) return defaultValue;
 
   let resolvedSchema = resolveSchema(schema);
-  let asCell = false;
-  let asStream = false;
-  if (isRecord(resolvedSchema)) {
-    asCell = resolvedSchema.asCell === true;
-    asStream = resolvedSchema.asStream === true;
-    if (
-      resolvedSchema.asCell !== undefined ||
-      resolvedSchema.asStream !== undefined
-    ) {
-      const { asCell: _asCell, asStream: _asStream, ...restSchema } =
-        resolvedSchema;
-      resolvedSchema = restSchema;
-    }
+  if (!isRecord(resolvedSchema)) {
+    // For primitive types, return as is
+    return annotateWithBackToCellSymbols(
+      defaultValue,
+      runtime,
+      link,
+      tx,
+      synced,
+    );
+  }
+
+  const asCell = ContextualFlowControl.isAsCell(resolvedSchema);
+  const asStream = ContextualFlowControl.isAsStream(resolvedSchema);
+  if (asCell || asStream) {
+    const { asCell: _asCell, asStream: _asStream, ...restSchema } =
+      resolvedSchema;
+    resolvedSchema = restSchema;
   }
 
   // If schema indicates this should be a cell
@@ -136,10 +143,7 @@ export function processDefaultValue(
     // doc, to emulate the behavior of .get() returning a different underlying
     // document when the value is changed. A classic example is
     // `currentlySelected` with a default of `null`.
-    if (
-      defaultValue === undefined && isRecord(resolvedSchema) &&
-      resolvedSchema.default !== undefined
-    ) {
+    if (defaultValue === undefined && resolvedSchema.default !== undefined) {
       return runtime.getImmutableCell(
         link.space,
         resolvedSchema.default,
@@ -175,8 +179,8 @@ export function processDefaultValue(
 
   // Handle object type defaults
   if (
-    isRecord(resolvedSchema) && resolvedSchema?.type === "object" &&
-    isRecord(defaultValue) && !Array.isArray(defaultValue)
+    resolvedSchema?.type === "object" && isRecord(defaultValue) &&
+    !Array.isArray(defaultValue)
   ) {
     const result: Record<string, any> = {};
     const processedKeys = new Set<string>();
@@ -199,7 +203,7 @@ export function processDefaultValue(
           );
           processedKeys.add(key);
         } else if (isRecord(propSchema)) {
-          if (propSchema.asCell) {
+          if (ContextualFlowControl.isAsCell(propSchema)) {
             // asCell are always created, it's their value that can be `undefined`
             result[key] = processDefaultValue(
               runtime,
@@ -262,8 +266,8 @@ export function processDefaultValue(
 
   // Handle array type defaults
   if (
-    isRecord(resolvedSchema) && resolvedSchema.type === "array" &&
-    Array.isArray(defaultValue) && resolvedSchema.items
+    resolvedSchema.type === "array" && Array.isArray(defaultValue) &&
+    resolvedSchema.items
   ) {
     // TODO(@ubik2): Need to handle prefixItems
     // Handle boolean items values
@@ -556,8 +560,13 @@ class TransformObjectCreator
     if (link.schema === undefined || link.schema === true) {
       return createQueryResultProxy(this.runtime, this.tx, link);
     } else if (isRecord(link.schema)) {
-      const { asCell, asStream, ...restSchema } = link.schema;
-      if (asCell || asStream) {
+      const { asCell: _c, asStream: _s, ...restSchema } = link.schema;
+      const cellKind = ContextualFlowControl.isAsCell(link.schema)
+        ? "cell"
+        : ContextualFlowControl.isAsStream(link.schema)
+        ? "stream"
+        : undefined;
+      if (cellKind !== undefined) {
         // TODO(@ubik2): deal with anyOf/oneOf with asCell/asStream
         // TODO(@ubik2): Figure out if we should purge asCell/asStream from restSchema children
         return createCell(
@@ -565,6 +574,7 @@ class TransformObjectCreator
           { ...link, schema: restSchema },
           getTransactionForChildCells(this.tx),
           this.synced,
+          cellKind,
         ) as AnyCellWrapping<FabricValue>;
       }
       // If it's not a cell/stream, but the schema is true-ish, use a

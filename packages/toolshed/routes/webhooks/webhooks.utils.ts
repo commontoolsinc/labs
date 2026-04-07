@@ -209,15 +209,16 @@ export async function removeFromServiceIndex(
 }
 
 // Send incoming webhook payload to the target inbox stream.
-// The cell must be schema'd with asStream so .send() dispatches through the
-// stream/handler system rather than being treated as a regular cell set.
+// The cell must be schema with `asCell: ["stream"]` so .send() dispatches
+// through the stream/handler system rather than being treated as a regular
+// cell set.
 export async function sendToStream(
   cellLink: string,
   payload: unknown,
 ): Promise<void> {
   const parsedCellLink = JSON.parse(cellLink);
   const cell = runtime.getCellFromLink(parsedCellLink);
-  const streamCell = cell.asSchema({ asStream: true });
+  const streamCell = cell.asSchema({ asCell: ["stream"] });
   await streamCell.sync();
   await runtime.storageManager.synced();
 

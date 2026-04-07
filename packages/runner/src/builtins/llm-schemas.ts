@@ -53,7 +53,7 @@ export const LLMToolSchema = toDeepFrozenSchema(
       inputSchema: { type: "object" },
       handler: {
         // Deliberately no schema, so it gets populated from the handler
-        asStream: true,
+        asCell: ["stream"],
       },
       pattern: {
         type: "object",

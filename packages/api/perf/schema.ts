@@ -76,7 +76,7 @@ type ComplexSchema = {
           readonly items: { readonly type: "string" };
         };
       };
-      readonly asStream: true;
+      readonly asCell: ["stream"];
     };
     readonly item: {
       readonly type: "object";

@@ -7,6 +7,8 @@
  */
 
 import type { JSONSchema } from "commonfabric";
+import { ContextualFlowControl } from "./cfc.ts";
+import { AsCellType } from "@commonfabric/api";
 
 export interface SchemaFormatOptions {
   /** Definitions map for resolving $ref references */
@@ -97,7 +99,7 @@ export function schemaToTypeString(
   const s = schema as Record<string, unknown>;
 
   // Handle $ref - resolve from definitions
-  if (s.$ref && typeof s.$ref === "string") {
+  if (schema.$ref && typeof schema.$ref === "string") {
     const refPath = s.$ref as string;
     const match = refPath.match(/^#\/\$defs\/(.+)$/);
     if (match) {
@@ -118,35 +120,31 @@ export function schemaToTypeString(
 
   // At max depth, return simplified representation
   if (depth >= maxDepth) {
-    if (s.asStream) return "(...) => void";
-    if (s.asCell) return "Cell<...>";
-    if (s.type === "object") return "{...}";
-    if (s.type === "array") return "[...]";
-    return String(s.type || "unknown");
+    if (ContextualFlowControl.isAsStream(schema)) return "(...) => void";
+    if (ContextualFlowControl.isAsCell(schema)) return "Cell<...>";
+    if (schema.type === "object") return "{...}";
+    if (schema.type === "array") return "[...]";
+    return String(schema.type || "unknown");
   }
 
   // Handle wrapper types first
-  if (s.asStream) {
-    // Stream handler: ({ props }) => void
-    const innerType = schemaToTypeString(
-      { ...s, asStream: undefined } as JSONSchema,
-      nextOpts,
-    );
-    return `(${innerType}) => void`;
-  }
-
-  if (s.asCell) {
-    // Cell wrapper: Cell<T>
-    const innerType = schemaToTypeString(
-      { ...s, asCell: undefined } as JSONSchema,
-      nextOpts,
-    );
-    return `Cell<${innerType}>`;
-  }
-
-  if (s.asOpaque) {
-    // Opaque wrapper - just note it's opaque
-    return "Opaque";
+  const { asCell, asStream, ...restSchema } = schema;
+  // Normalize asCell/asStream into a single asCellValue array for easier handling
+  const asCellValue: AsCellType[] | undefined = asCell
+    ? (asCell === true ? ["cell"] : asCell)
+    : asStream
+    ? ["stream"]
+    : [];
+  if (asCellValue.length > 0) {
+    // The last entry in the asCellValue is the innermost
+    let innerType = schemaToTypeString(restSchema, nextOpts);
+    for (let i = 0; i < asCellValue.length; i++) {
+      innerType = getWrappedTypeString(
+        asCellValue.slice(0, asCellValue.length - i),
+        innerType,
+      );
+    }
+    return innerType;
   }
 
   // Handle PatternToolResult - objects with { pattern, extraParams } structure
@@ -233,4 +231,26 @@ export function schemaToTypeString(
 
   // Fallback
   return type ? String(type) : "unknown";
+}
+
+function getWrappedTypeString(
+  asCell: AsCellType[],
+  innerType: string,
+): string {
+  if (ContextualFlowControl.asCellValueMatches(asCell, "cell")) {
+    innerType = `Cell<${innerType}`;
+  } else if (ContextualFlowControl.asCellValueMatches(asCell, "readonly")) {
+    innerType = `ReadonlyCell<${innerType}`;
+  } else if (ContextualFlowControl.asCellValueMatches(asCell, "writeonly")) {
+    innerType = `WriteonlyCell<${innerType}`;
+  } else if (ContextualFlowControl.asCellValueMatches(asCell, "comparable")) {
+    innerType = `ComparableCell<${innerType}`;
+  } else if (ContextualFlowControl.asCellValueMatches(asCell, "stream")) {
+    innerType = `(${innerType}) => void`;
+  } else if (ContextualFlowControl.asCellValueMatches(asCell, "opaque")) {
+    innerType = "Opaque";
+  } else {
+    innerType = "UnknownWrapper";
+  }
+  return innerType;
 }

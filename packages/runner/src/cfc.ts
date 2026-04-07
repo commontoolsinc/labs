@@ -1,4 +1,4 @@
-import { JSONSchemaObj } from "@commonfabric/api";
+import { AsCellType, JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
@@ -832,13 +832,37 @@ export class ContextualFlowControl {
   // We don't need to check ID and ID_FIELD, since they won't be included
   // in Object.keys return values.
   static isInternalSchemaKey(key: string): boolean {
-    return key === "ifc" || key === "asCell" || key === "asStream" ||
-      key === "asOpaque";
+    return key === "ifc" || key === "asCell" || key === "asStream";
   }
 
   static isFalseSchema(schema: JSONSchema): boolean {
     return schema === false ||
       (isRecord(schema) && "not" in schema &&
         this.isTrueSchema(schema["not"]!));
+  }
+
+  static asCellValueMatches(
+    asCellValue: AsCellType[],
+    asCellType: string,
+  ): boolean {
+    return (asCellValue.length > 0) && (asCellValue.at(-1) === asCellType);
+  }
+
+  static isAsCell(schema: JSONSchema | boolean): boolean {
+    if (typeof schema === "boolean") return false;
+    if (schema.asCell === true) {
+      return true;
+    }
+    return Array.isArray(schema.asCell) &&
+      ContextualFlowControl.asCellValueMatches(schema.asCell, "cell");
+  }
+
+  static isAsStream(schema: JSONSchema | boolean): boolean {
+    if (typeof schema === "boolean") return false;
+    if (schema.asStream === true) {
+      return true;
+    }
+    return Array.isArray(schema.asCell) &&
+      ContextualFlowControl.asCellValueMatches(schema.asCell, "stream");
   }
 }

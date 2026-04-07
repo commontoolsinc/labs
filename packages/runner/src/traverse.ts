@@ -1452,10 +1452,7 @@ function _mergeSchemaFlagsUncached(
     // the value in the schema
     const { asCell, asStream } = flagSchema;
     if (asCell || asStream) {
-      const props = {
-        ...(asCell && { asCell: true }),
-        ...(asStream && { asStream: true }),
-      };
+      const props = { asCell: asCell ?? ["stream"] };
       return schemaWithProperties(schema, props);
     }
   }
@@ -3014,7 +3011,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
       return false;
     }
     if (
-      schema.asCell || schema.asStream ||
+      ContextualFlowControl.isAsCell(schema) ||
+      ContextualFlowControl.isAsStream(schema) ||
       (Array.isArray(schema.anyOf) &&
         schema.anyOf.every((option) =>
           SchemaObjectTraverser.asCellOrStream(option)
@@ -3104,7 +3102,7 @@ export function canBranchMatch(
   if (typeof branch === "boolean") return branch;
 
   // Never reject asCell/asStream branches
-  if (branch.asCell || branch.asStream) return true;
+  if (SchemaObjectTraverser.asCellOrStream(branch)) return true;
 
   // If the value is an object that could be a link/pointer, bail out entirely.
   // Links are dereferenced during traversal, so the current shape of the value
@@ -3290,8 +3288,8 @@ function _mergeAnyOfBranchSchemasUncached(
     ...(requiredSet.size > 0 && { required: [...requiredSet] }),
     ...(!anyAllowsAdditional && { additionalProperties: false }),
     ...(mergedDefs && { $defs: mergedDefs }),
-    ...(outerSchema.asCell && { asCell: true }),
-    ...(outerSchema.asStream && { asStream: true }),
+    ...((outerSchema.asCell || outerSchema.asStream) &&
+      { asCell: outerSchema.asCell ?? ["stream"] }),
   } as JSONSchemaObj;
 }
 

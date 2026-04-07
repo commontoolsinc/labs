@@ -37,7 +37,6 @@ export function createCellRef(cell: Cell<unknown>, schema?: unknown): CellRef {
     cell.getAsLink({
       includeSchema: true,
       keepAsCell: true,
-      keepStreams: true,
     }),
   );
   // Check before casting to a NormalizedFullLink

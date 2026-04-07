@@ -53,7 +53,7 @@ export const rendererVDOMSchema = toDeepFrozenSchema(
                 type: "array",
                 items: { type: "null" }, // stop query from descending
               }, {
-                asStream: true,
+                asCell: ["stream"],
                 type: "unknown",
               }],
             },
@@ -204,7 +204,7 @@ export const vnodeSchema = toDeepFrozenSchema(
           }, {
             asCell: true,
           }, {
-            asStream: true,
+            asCell: ["stream"],
           }, {
             type: "null",
           }, {

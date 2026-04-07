@@ -387,7 +387,7 @@ async function tryResolvePieceHandler(
   const streamRoot = pieceCell.asSchema({
     type: "object",
     properties: {
-      [callableName]: { asStream: true },
+      [callableName]: { asCell: ["stream"] },
     },
     required: [callableName],
   });

@@ -13,9 +13,9 @@ export const homeSchema = {
     learned: learnedSectionSchema,
     spaces: spacesListSchema,
     defaultAppUrl: { type: "string", default: "" },
-    addFavorite: { ...favoriteEntrySchema, asStream: true },
-    removeFavorite: { ...favoriteEntrySchema, asStream: true },
-    addJournalEntry: { ...journalEntrySchema, asStream: true },
+    addFavorite: { ...favoriteEntrySchema, asCell: ["stream"] },
+    removeFavorite: { ...favoriteEntrySchema, asCell: ["stream"] },
+    addJournalEntry: { ...journalEntrySchema, asCell: ["stream"] },
   },
 } as const satisfies JSONSchema;
 

@@ -214,7 +214,7 @@ export class PieceManager {
     const cell = defaultPattern.asSchema({
       type: "object",
       properties: {
-        addPiece: { asStream: true },
+        addPiece: { asCell: ["stream"] },
       },
     });
 

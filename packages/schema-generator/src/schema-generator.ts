@@ -726,7 +726,6 @@ export class SchemaGenerator implements ISchemaGenerator {
       if (filtered.length === 1) return filtered[0]!;
       return { anyOf: filtered as JSONSchemaObjMutable[] };
     }
-
     // Synthetic TypeReferenceNodes may fail to bind in checker APIs directly.
     // Resolve by name from source scope as a fallback (e.g., CharmEntry in
     // Cell<CharmEntry[]>).
@@ -760,6 +759,8 @@ export class SchemaGenerator implements ISchemaGenerator {
       case ts.SyntaxKind.UnknownKeyword:
         return { type: "unknown" };
       case ts.SyntaxKind.VoidKeyword:
+        // matches anything, but we will not access the cell
+        return { asCell: ["opaque"] };
       case ts.SyntaxKind.AnyKeyword:
         // Accept any value
         return true;

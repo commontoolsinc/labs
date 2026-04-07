@@ -339,7 +339,6 @@ export class Runner {
         ? resultCell.asSchema(pattern.resultSchema).getAsLink({
           base: processCell,
           includeSchema: true,
-          keepStreams: true,
           keepAsCell: true,
         })
         : resultCell.getAsLink({
