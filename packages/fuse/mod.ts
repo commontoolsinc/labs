@@ -258,6 +258,12 @@ export async function main(argv: string[] = Deno.args) {
       }
 
       if (bridge && bridge.shouldPrepareLookup(parent, name)) {
+        // If the entry already exists in the tree (e.g. as a stub dir),
+        // reply immediately and hydrate in the background for readdir.
+        if (replyLookupFromTree(req, parent, name)) {
+          bridge.prepareLookup(parent, name).catch(() => {});
+          return;
+        }
         bridge.prepareLookup(parent, name).then(() => {
           if (!replyLookupFromTree(req, parent, name)) {
             fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -553,7 +559,10 @@ export async function main(argv: string[] = Deno.args) {
             ino: childIno,
             mode: nodeMode(
               childNode,
-              Boolean(bridge?.resolveWritePath(childIno)),
+              Boolean(
+                bridge?.resolveWritePath(childIno) ||
+                  bridge?.resolveSourceWritePath(childIno),
+              ),
             ),
           });
         }

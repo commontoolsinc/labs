@@ -73,7 +73,7 @@ wait_for_path() {
 
   while true; do
     # Initial lazy hydration of FUSE paths may need a network round-trip.
-    if path_exists "$path" 3; then
+    if path_exists "$path" 1; then
       return 0
     fi
     if [ $(( $(date +%s) - started_at )) -ge "$timeout_seconds" ]; then
@@ -95,12 +95,12 @@ resolve_entity_dir() {
   local bare_entity_dir="$entities_dir/$bare_id"
 
   while true; do
-    if path_exists "$canonical_entity_dir" 3; then
+    if path_exists "$canonical_entity_dir" 1; then
       printf '%s\n' "$canonical_entity_dir"
       return 0
     fi
 
-    if path_exists "$bare_entity_dir" 3; then
+    if path_exists "$bare_entity_dir" 1; then
       printf '%s\n' "$bare_entity_dir"
       return 0
     fi
@@ -208,6 +208,8 @@ cf id new >"$IDENTITY"
 
 PIECE_ID=$(cf piece new --main-export "$CUSTOM_EXPORT" $SPACE_ARGS "$PATTERN_SRC")
 echo "Created piece: $PIECE_ID"
+cf piece step $SPACE_ARGS --piece "$PIECE_ID"
+echo "Stepped piece: $PIECE_ID"
 MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --background)
 echo "$MOUNT_OUTPUT"
 

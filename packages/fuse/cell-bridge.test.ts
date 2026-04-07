@@ -1359,7 +1359,7 @@ Deno.test("CellBridge.invalidateWritePath does not spawn concurrent hydrations f
         activeGets++;
         maxConcurrentGets = Math.max(maxConcurrentGets, activeGets);
         try {
-          if (getCalls === 2) {
+          if (getCalls === 1) {
             await firstGetGate;
           }
           return { content: "fresh" };
