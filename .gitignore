@@ -16,6 +16,7 @@ dist/
 .agents/settings.local.json
 # Current and legacy local CLI state
 .cf/
+.ct/
 claude-research.key
 *.key
 .passphrase
