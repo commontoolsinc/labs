@@ -512,6 +512,11 @@ export class CellBridge {
         if (propIno !== undefined) this.piecePropRoots.delete(propIno);
       }
     }
+    for (const propName of ["input", "result"] as const) {
+      const key = `${pieceIno}-${propName}`;
+      this.pendingHydrations.delete(key);
+      this.hydrationEpochs.delete(key);
+    }
     this.hydratedPieceProps.delete(pieceIno);
     this.pieceRoots.delete(pieceIno);
   }
@@ -542,20 +547,6 @@ export class CellBridge {
       this.piecePropRoots.delete(propIno);
     }
     this.hydratedPieceProps.get(pieceIno)?.delete(propName);
-  }
-
-  private findPieceControllerById(
-    state: SpaceState,
-    pieceId: string,
-  ): PieceController | undefined {
-    const bareId = pieceId.startsWith("of:") ? pieceId.slice(3) : pieceId;
-    for (const piece of state.pieceControllers.values()) {
-      const candidate = piece.id.startsWith("of:")
-        ? piece.id.slice(3)
-        : piece.id;
-      if (candidate === bareId) return piece;
-    }
-    return undefined;
   }
 
   private getPieceInfo(
@@ -1077,9 +1068,12 @@ export class CellBridge {
     this.debugLog(`[${spaceName}] Updated ${pieceName}/${propName}`);
   }
 
+  private static readonly MAX_HYDRATION_RETRIES = 3;
+
   private hydratePieceProp(
     pieceIno: bigint,
     propName: "input" | "result",
+    retries = 0,
   ): Promise<boolean> {
     const info = this.getPieceInfo(pieceIno);
     if (!info) return Promise.resolve(false);
@@ -1092,41 +1086,49 @@ export class CellBridge {
     if (existing) return existing;
     const startedEpoch = this.hydrationEpochs.get(key) ?? 0;
 
-    const pending: { promise?: Promise<boolean> } = {};
-    const promise: Promise<boolean> = (async (): Promise<boolean> => {
-      try {
-        const cell = await info.piece[propName].getCell();
-        const newValue = await info.piece[propName].get();
-        await this.rebuildPieceProp({
-          cell,
-          newValue,
-          pieceId: info.piece.id,
-          pieceIno,
-          pieceName: info.rootName,
-          propName,
-          resolveLink: this.makeLinkResolver(info.spaceName),
-          spaceName: info.spaceName,
-        });
-        const currentEpoch = this.hydrationEpochs.get(key) ?? 0;
-        const stillHydrated =
-          this.hydratedPieceProps.get(pieceIno)?.has(propName) ?? false;
-        if (currentEpoch !== startedEpoch || !stillHydrated) {
-          if (this.pendingHydrations.get(key) === pending.promise) {
-            this.pendingHydrations.delete(key);
-          }
-          return await this.hydratePieceProp(pieceIno, propName);
-        }
-        return true;
-      } finally {
-        if (this.pendingHydrations.get(key) === pending.promise) {
-          this.pendingHydrations.delete(key);
-        }
+    const cleanup = () => {
+      if (this.pendingHydrations.get(key) === handle.promise) {
+        this.pendingHydrations.delete(key);
       }
-    })();
-    pending.promise = promise;
+    };
+    const handle: { promise: Promise<boolean> } = {
+      promise: (async (): Promise<boolean> => {
+        try {
+          const cell = await info.piece[propName].getCell();
+          const newValue = await info.piece[propName].get();
+          await this.rebuildPieceProp({
+            cell,
+            newValue,
+            pieceId: info.piece.id,
+            pieceIno,
+            pieceName: info.rootName,
+            propName,
+            resolveLink: this.makeLinkResolver(info.spaceName),
+            spaceName: info.spaceName,
+          });
+          const currentEpoch = this.hydrationEpochs.get(key) ?? 0;
+          const stillHydrated =
+            this.hydratedPieceProps.get(pieceIno)?.has(propName) ?? false;
+          if (currentEpoch !== startedEpoch || !stillHydrated) {
+            cleanup();
+            if (retries >= CellBridge.MAX_HYDRATION_RETRIES) {
+              return false;
+            }
+            return await this.hydratePieceProp(
+              pieceIno,
+              propName,
+              retries + 1,
+            );
+          }
+          return true;
+        } finally {
+          cleanup();
+        }
+      })(),
+    };
 
-    this.pendingHydrations.set(key, promise);
-    return promise;
+    this.pendingHydrations.set(key, handle.promise);
+    return handle.promise;
   }
 
   private invalidateRootPropCache(
@@ -1143,12 +1145,11 @@ export class CellBridge {
     if (propIno !== undefined) {
       this.tree.clear(propIno);
     }
-    this.ensurePiecePropStub(rootIno, propName);
-
     const jsonIno = this.tree.lookup(rootIno, `${propName}.json`);
     if (jsonIno !== undefined) {
       this.tree.clear(jsonIno);
     }
+    this.ensurePiecePropStub(rootIno, propName);
 
     if (propName === "result") {
       const fsEntries = this.fsProjectionEntries.get(rootIno);
@@ -2175,7 +2176,8 @@ export class CellBridge {
   }
 
   /**
-   * Subscribe only to projected name changes for a piece.
+   * Subscribe to cell changes for hydration-cache invalidation and
+   * projected name changes for a piece.
    */
   private async subscribePiece(
     piece: PieceController,

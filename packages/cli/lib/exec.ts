@@ -190,8 +190,12 @@ export async function executeMountedCallableFile(
   // Auto-step: trigger reactive recomputation after handler execution.
   // Skip if --help was shown — no mutation occurred.
   if (!result.helpText && typeof resolved.piece?.getCell === "function") {
-    await resolved.piece.getCell().pull();
-    await resolved.manager.synced();
+    try {
+      await resolved.piece.getCell().pull();
+      await resolved.manager.synced();
+    } catch {
+      // Auto-step is best-effort; the handler already executed successfully.
+    }
   }
 
   return result;
