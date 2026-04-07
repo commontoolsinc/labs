@@ -20,8 +20,9 @@ At the end of this work:
 
 - schema `ifc` annotations will be enforced before a commit succeeds
 - CFC-relevant writes will persist authoritative path-granular metadata and
-  deep-frozen canonical schema hashes backed by content-addressed schema
-  storage for later checks
+  deep-frozen canonical schema hashes backed by canonical schema documents
+  stored at `cid:<hash>` as a phase-1 stand-in for fuller content-addressed v2
+  storage
 - commit-time enforcement will apply uniformly at the transaction boundary,
   regardless of whether the transaction came from the scheduler,
   `runtime.editWithRetry()`, or another runtime-owned caller
@@ -46,8 +47,10 @@ current implementation shape:
   and collection rules
 - `docs/specs/memory-v2/README.md` and
   `docs/specs/memory-v2/03-commit-model.md` define the seq-addressed JSON write
-  path and the content-addressed adjunct storage surfaces we should reuse for
-  schema persistence and code identity
+  path and the adjunct/system-entity surfaces we should reuse for schema
+  persistence and code identity; phase 1 persists canonical schemas as regular
+  v2 entities addressed by `cid:<hash>` so the boundary model does not depend
+  on new blob APIs landing first
 
 This plan adds the boundary substrate that those specs require:
 
@@ -113,7 +116,10 @@ Phase-1 invariant: direct `tx.write*()` usage remains internal-only runner API.
 No-op attempted-target coverage depends on higher-level diff paths performing
 `markReadAsPotentialWrite` reads before deciding whether to write. That
 assumption should be documented explicitly on the transaction write APIs and
-covered by guardrail tests.
+covered by guardrail tests. This is not just theoretical: current v2 writes
+short-circuit same-value writes before recording write activity, so no-op
+attempted-target coverage must come from `markReadAsPotentialWrite` or a future
+explicit attempted-write API.
 
 ### Write-Policy Input
 
@@ -169,13 +175,21 @@ Every trust-sensitive check uses an explicit implementation identity:
 reuses the verified-load registry for execution provenance, while policy
 references resolve against a separate stable code identity derived from one of:
 
-- verified compiled code: admitted `codeCID` plus canonical binding locator
-  within that admitted code bundle
+- verified compiled code: a richer verified bundle identity plus canonical
+  binding path within that bundle, and when needed source loc/col and/or a pure
+  code hash
 - built-ins: canonical runtime-owned registry ids
 
-Phase 1 does not require stable policy identities for direct-eval or
-unsafe-host/test helpers. Those paths are treated as untrusted for
-trust-sensitive relaxations unless a later explicit stable-id path is added.
+Phase 1 treats bare memory-v2 `codeCID` as at most one component or hint for
+that identity, not the identity itself. Trust-sensitive enforcement for
+verified compiled user code is therefore blocked on extending memory-v2
+commit/transport/storage surfaces to carry or rebind the richer
+bundle/path/location/hash identity deterministically.
+
+Phase 1 does not require stable policy identities for direct-eval,
+unsafe-host/test helpers, or any other unsupported identity class. Those paths
+are treated as untrusted for trust-sensitive relaxations unless a later
+explicit stable-id path is added.
 
 ### Trust Snapshot
 
@@ -219,13 +233,24 @@ type EntityDocumentWithCfc = {
 };
 ```
 
+### Document Surface Rules
+
+Memory-v2 keeps a full entity-document boundary. Low-level `tx.read()` and
+`tx.write()` operate on the whole entity document, including reserved metadata
+siblings such as `source` and `cfc`.
+
+Only the logical `value` surface is exposed to untrusted or user-authored code.
+`Cell.get()`, `Cell.sync()`, query materialization, and similar
+validate/transform paths read under `value`, not the full document. Reserved
+siblings remain system metadata, not user JSON content.
+
 Storage rules:
 
 - in memory-v2, the reserved `cfc` sibling is authoritative for boundary checks
   once present
 - the v2 `cfc` sibling stores the authoritative label map and `schemaHash` in
   the same document as `value` and `source`
-- ordinary `application/json` reads and materialized values must strip the
+- untrusted value-surface reads and materialized values must not expose the
   reserved `cfc` sibling
 - no `application/label+json` bridge or coarse-summary compatibility path is
   carried forward
@@ -248,12 +273,15 @@ Use the existing frozen-schema pipeline for canonical schema identity:
 merged schema envelope for the entity, not the hash of any one effective
 selector schema seen during prepare.
 
-The corresponding deep-frozen canonical schema object is also persisted in
-memory-v2 content-addressed storage keyed by that hash.
+The corresponding deep-frozen canonical schema object is also persisted as a
+regular memory-v2 entity whose id is `cid:<hash>`. The canonical schema payload
+lives under that entity document's `value`; any sibling fields are reserved for
+system metadata. This is a phase-1 stand-in for a future dedicated
+content-addressed v2 surface.
 
-Prepare loads the prior envelope by `schemaHash`, merges candidate schema input
-into it, and persists a replacement canonical schema object only when the
-merged envelope changes.
+Prepare loads the prior envelope by reading `cid:<schemaHash>` and then its
+`value`, merges candidate schema input into it, and persists a replacement
+canonical schema document only when the merged envelope changes.
 
 ### Merged Schema Envelope
 
@@ -275,25 +303,29 @@ Phase-1 merge rules:
 - a merge may add a required field only when the merged schema also provides a
   default that preserves validity/materialization for existing documents
 - every merged result is canonicalized with `toDeepFrozenSchema()` and
-  `internSchema(..., true)` before persistence to content-addressed storage
+  `internSchema(..., true)` before persistence to its `cid:<hash>` schema
+  document
 
 Phase-1 behavior:
 
 - each write that carries schema context, typically from `Cell.*` operations,
   contributes a candidate schema update for its target entity
 - if the target entity has no stored `schemaHash`, prepare persists the
-  candidate canonical schema envelope and stores the resulting `schemaHash`
+  candidate canonical schema envelope as `cid:<hash>` and stores the resulting
+  `schemaHash`
 - if the target entity already has a stored `schemaHash`, prepare loads that
-  canonical schema by hash and attempts a monotonic merge of the candidate
-  schema into it
+  canonical schema document from `cid:<schemaHash>` and attempts a monotonic
+  merge of the candidate schema into it
 - if merge fails because the candidate would weaken IFC obligations or
   invalidate previously valid data, prepare rejects and the transaction aborts,
   unless an explicit migration or recovery path is active
 - if the canonical merged envelope produces the same `schemaHash`, prepare
   treats the schema update as a no-op
 - if the canonical merged envelope produces a new `schemaHash`, prepare
-  persists the replacement hash and associated metadata
-- if a stored `schemaHash` is missing or unreadable, prepare rejects and the
+  persists or reuses the replacement `cid:<hash>` schema document and
+  replacement hash
+- if a stored `schemaHash` is missing or unreadable, or the corresponding
+  `cid:<hash>` schema document is absent/unreadable, prepare rejects and the
   transaction aborts unless an explicit recovery path is active
 
 This keeps schema identity stable while making schema evolution a per-write
@@ -351,7 +383,8 @@ Tasks:
 - [ ] Define the reserved embedded `cfc` document shape and system-ownership
       rules for that metadata
 - [ ] Define a canonical code-identity shape that separates policy-facing code
-      identity from per-load runtime ids and can align with memory-v2 `codeCID`
+      identity from per-load runtime ids and can encode bundle/path/location/hash
+      provenance without relying on bare memory-v2 `codeCID`
 
 Acceptance:
 
@@ -410,10 +443,14 @@ Tasks:
 - [ ] Surface tx `potentialWrites` as the phase-1 maybe-write target set
 - [ ] Produce a deterministic final-per-path `writes` set for phase 1
 - [ ] Preserve no-op attempted-target coverage through `potentialWrites`
-- [ ] Add JSDoc on internal `tx.write*` APIs explaining that phase-1 no-op
-      attempted-target coverage relies on higher-level diff paths using
-      `markReadAsPotentialWrite`; blind same-value direct writes are not
+- [ ] Add JSDoc and guardrails on internal `tx.write*` APIs explaining that
+      phase-1 no-op attempted-target coverage relies on higher-level diff paths
+      using `markReadAsPotentialWrite`; blind same-value direct writes are not
       surfaced through `potentialWrites`
+- [ ] Audit existing internal direct `tx.write*` / `writeValueOrThrow()` call
+      sites and either ensure they establish `potentialWrites` coverage before
+      same-value short-circuiting or explicitly keep them out of phase-1 CFC
+      scope
 - [ ] Add explicit APIs to record canonical `WritePolicyInput` entries at
       mutation time; do not rely on generic tx read/write inspection alone for
       schema hashes or structural provenance claims
@@ -434,6 +471,8 @@ Acceptance:
 - [ ] Canonical `WritePolicyInput` capture is deterministic across runs
 - [ ] Internal verifier reads remain visible for diagnostics but not policy
 - [ ] Final-per-path view is deterministic
+- [ ] Same-value direct writes are either covered by `potentialWrites` or
+      explicitly out of phase-1 scope
 
 ### 4. Relevance Detection
 
@@ -481,13 +520,14 @@ Tasks:
 
 - [ ] Persist CFC metadata as a system-owned reserved sibling to `value` and
       `source` in the v2 entity document
-- [ ] Persist canonical merged schema envelopes in memory-v2 content-addressed
-      storage and store `schemaHash` in embedded metadata
+- [ ] Persist canonical merged schema envelopes as system-owned v2 schema
+      documents at `cid:<hash>` and store `schemaHash` in embedded metadata
 - [ ] Store the authoritative path-granular label map and `schemaHash` in that
       embedded metadata
-- [ ] Ensure normal user-doc reads do not expose the reserved `cfc` sibling
+- [ ] Ensure untrusted value-surface reads and materialized values do not
+      expose the reserved `cfc` sibling
 - [ ] Make storage helpers able to read current CFC metadata and load
-      canonical schemas by `schemaHash` efficiently during prepare
+      canonical schemas from `cid:<schemaHash>` efficiently during prepare
 - [ ] Do not carry forward `application/label+json` or query-redaction
       compatibility behavior
 
@@ -497,9 +537,10 @@ Acceptance:
       `schemaHash`
       in the v2 document
 - [ ] Loading the stored canonical schema by `schemaHash` after a fresh runtime
-      restart reproduces the canonical merged schema envelope
-- [ ] Existing reads of `application/json` do not surface the reserved `cfc`
-      sibling
+      restart reads `cid:<schemaHash>` and reproduces the canonical merged
+      schema envelope
+- [ ] Existing untrusted value-surface reads and materialized values do not
+      surface the reserved `cfc` sibling
 - [ ] Missing or unreadable `schemaHash` rejects later writes unless recovery
       is on
 
@@ -526,7 +567,7 @@ Tasks:
 - [ ] Ensure structural merge does not invalidate previously valid data; adding
       a required field requires a default
 - [ ] Resolve input labels from stored CFC metadata and persisted
-      `schemaHash`-backed envelopes; no coarse-label fallback
+      `cid:<hash>`-backed schema documents; no coarse-label fallback
 - [ ] Implement `classification`, `integrity`, `addIntegrity`,
       `requiredIntegrity`, and `maxConfidentiality`
 - [ ] Implement `writeAuthorizedBy`, `exactCopyOf`, `projection`, and
@@ -544,9 +585,10 @@ Tasks:
 - [ ] Use `potentialWrites ∪ writes` for target-side enforcement and use
       `writes` only for persisted output metadata
 - [ ] If a target entity has no stored `schemaHash`, seed it from the first
-      canonical `SchemaAndHash`; if merge yields the existing `schemaHash`,
-      treat it as a no-op; if merge yields a new `schemaHash`, replace the
-      stored hash; if merge fails, reject and abort the transaction
+      canonical `SchemaAndHash` and persist or reuse `cid:<hash>`; if merge
+      yields the existing `schemaHash`, treat it as a no-op; if merge yields a
+      new `schemaHash`, replace the stored hash; if merge fails, reject and
+      abort the transaction
 - [ ] Reject on missing schema, missing write-policy inputs, unreadable schema
       hashes, or any unsupported trust-sensitive claim
 
@@ -605,23 +647,33 @@ Primary files:
 - `packages/runner/src/builder/module.ts`
 - `packages/runner/src/builder/json-utils.ts`
 - `packages/runner/src/harness/executable-registry.ts`
+- `packages/runner/src/storage/interface.ts`
+- `packages/memory/v2.ts`
 - new files under `packages/runner/src/cfc/`
 
 Tasks:
 
 - [ ] Define a stable policy-facing code identity separate from runtime
-      `implementationRef` and per-load `verifiedLoadId`, and align verified
-      compiled-code identity with admitted memory-v2 `codeCID` plus canonical
-      binding location
+      `implementationRef` and per-load `verifiedLoadId`, capable of describing
+      verified bundle identity, canonical binding path, optional loc/col,
+      and/or pure code hash
 - [ ] Keep `implementationRef` as the runtime lookup key and `verifiedLoadId` as
       the runtime admission scope; resolve policy identities through the
-      verified registry, built-in registry, and `codeCID` when available
+      verified registry and built-in registry, treating bare memory-v2
+      `codeCID` as only one possible component or hint rather than a complete
+      identity
 - [ ] Define canonical ids for built-ins
+- [ ] Mark verified compiled-code policy identity as blocked on extending
+      memory-v2 commit/transport/storage surfaces beyond bare `codeCID` so the
+      richer bundle/path/location/hash identity can be carried or rebound
+      deterministically
 - [ ] In phase 1, treat direct-eval and unsafe-host/test helpers as untrusted
       for trust-sensitive relaxations unless a later explicit stable-id path is
       added
 - [ ] Thread the resulting implementation identity through action and handler
-      execution
+      execution where possible; built-ins can land earlier, while verified
+      compiled user code remains observe-only/fail-closed until the v2
+      extension lands
 - [ ] Define a trust-snapshot provider interface that is deterministic and easy
       to test
 - [ ] Bind prepare success to the acting principal, trust snapshot identity,
@@ -630,8 +682,9 @@ Tasks:
 
 Acceptance:
 
-- [ ] Built-ins and verified compiled code with admitted `codeCID` produce
-      stable policy-facing implementation identities
+- [ ] Built-ins produce stable policy-facing implementation identities
+- [ ] Verified compiled user-code policy identities remain blocked until v2
+      carries the richer bundle/path/location/hash identity surface
 - [ ] Unsupported identity classes fail closed for trust-sensitive checks
 - [ ] Changing the trust snapshot between prepare and commit invalidates prepare
 - [ ] Unknown implementation identity is treated as untrusted
@@ -665,13 +718,16 @@ Primary files:
 - `packages/runner/src/builtins/fetch-data.ts`
 - `packages/runner/src/builtins/fetch-program.ts`
 - `packages/runner/src/builtins/stream-data.ts`
+- `packages/runner/src/builtins/llm.ts`
+- `packages/runner/src/builtins/llm-dialog.ts`
 - new files under `packages/runner/src/cfc/`
 
 Tasks:
 
 - [ ] Introduce a stable, immutable request snapshot for external sink calls
-- [ ] Include `streamData` alongside `fetchData` and `fetchProgram` in the
-      initial sink inventory and rollout gate
+- [ ] Include `streamData`, `llm`, `llmDialog`, `generateText`, and
+      `generateObject` alongside `fetchData` and `fetchProgram` in the initial
+      sink inventory and rollout gate
 - [ ] Move network side effects behind the transaction outbox
 - [ ] Verify sink-specific policy from the prepared request snapshot and
       committed CFC state before issuing the request
@@ -681,7 +737,8 @@ Tasks:
 Acceptance:
 
 - [ ] Failed prepare or failed commit never issues a network call from
-      `fetchData`, `fetchProgram`, or `streamData`
+      `fetchData`, `fetchProgram`, `streamData`, `llm`, `llmDialog`,
+      `generateText`, or `generateObject`
 - [ ] Retried attempts reuse the winning committed effect and do not double-send
 - [ ] Request release rules are evaluated from the prepared request snapshot and
       committed CFC metadata, not ad hoc runtime state
@@ -712,7 +769,10 @@ Acceptance:
 
 ### 12. Content-Addressed Side-Path Hardening
 
-This stays behind the core causal-path rollout.
+This stays behind the core causal-path rollout. Phase 1 schema persistence uses
+regular `cid:<hash>` schema entities, not a dedicated blob/adjunct write
+surface. This slice remains blocked until memory-v2 gains first-class
+content-addressed adjunct read/write APIs.
 
 Primary files:
 
@@ -722,11 +782,13 @@ Primary files:
 
 Tasks:
 
-- [ ] Apply the same boundary model to content-addressed adjunct writes that
-      affect CFC outcomes, starting with persisted schema blobs and future
-      blob-backed side paths
+- [ ] Apply the same boundary model to future content-addressed adjunct writes
+      that affect CFC outcomes once v2 exposes them, starting with any
+      blob-backed schema/object side paths that replace the temporary
+      `cid:<hash>` schema-entity convention
 - [ ] Enforce exact binding between embedded hashes such as `schemaHash` and
-      the content-addressed objects that prepare actually checked
+      either the temporary `cid:<hash>` schema entity or any future
+      content-addressed object that prepare actually checked
 - [ ] Normalize miss behavior across absent blob/ref, unreadable binding, and
       policy mismatch
 - [ ] Prove that seq-addressed entity updates and content-addressed side paths
@@ -783,7 +845,8 @@ Every phase should land with tests before the next phase starts.
 - [ ] Do not enable enforcing modes for runtimes with external sinks until
       outbox and retry tests are green
 - [ ] Do not enable content-addressed side-path enforcement until non-bypass
-      tests are green
+      tests are green; the temporary `cid:<hash>` schema-entity path can land
+      earlier
 
 ## Recommended Landing Order
 
@@ -795,23 +858,26 @@ Land the work in mergeable vertical slices:
 3. [ ] V2 consumed-read, `potentialWrites`, compact final-write extraction, and
        write-policy input capture APIs
 4. [ ] Relevance detection and merged-schema envelope implementation
-5. [ ] Embedded v2 CFC metadata persistence, content-addressed schema
+5. [ ] Embedded v2 CFC metadata persistence, `cid:<hash>` schema-document
        persistence, and non-exposure
 6. [ ] Baseline prepare engine for classification and integrity checks
 7. [ ] Transaction integration and success-only outbox
 8. [ ] Enforcing commit gate for state-only transactions for the
        non-trust-sensitive rule subset once extraction/prepare slices are green
-9. [ ] Stable implementation identity and trust snapshotting, then enable
-       trust-sensitive rule enforcement
+9. [ ] Stable built-in implementation identity and trust snapshotting; richer
+       verified-code identity and trust-sensitive rule enforcement remain
+       blocked on extending v2 code-identity surfaces
 10. [ ] Structural flow-precision claims for core built-ins
-11. [ ] Fetch, `streamData`, and other external sink enforcement
+11. [ ] Fetch, `streamData`, `llm`, and other external sink enforcement
 12. [ ] UI provenance and trusted-event path
 13. [ ] Content-addressed side-path hardening
 
 Step 8 is the first safe enablement point for non-trust-sensitive,
 state-only transactions that do not issue external effects. Step 9 is the first
-safe enablement point for trust-sensitive rule enforcement. Step 11 is the
-first safe enablement point for runtimes with external sinks.
+safe enablement point for identity classes that already have stable policy ids,
+such as built-ins; verified compiled user-code trust-sensitive enforcement
+remains blocked until the richer v2 code-identity extension lands. Step 11 is
+the first safe enablement point for runtimes with external sinks.
 
 ## Done Means
 
@@ -820,13 +886,13 @@ This plan is complete when all of the following are true:
 - CFC-relevant transactions are prepared and verified before commit at the
   transaction boundary
 - authoritative path-granular CFC metadata and canonical schema hashes are
-  persisted for later reads and writes
+  persisted for later reads and writes, with phase-1 schema payloads stored as
+  `cid:<hash>` schema documents
 - no `application/label+json` or coarse-label bridge is required for the v2
   enforcement path
 - external side effects are commit-gated and retry-safe
-- stable policy-facing code identities align supported verified compiled code
-  with admitted `codeCID` and runtime provenance for the supported identity
-  classes
+- stable policy-facing code identities align supported identity classes with
+  bundle/path/location/hash provenance rather than relying on bare `codeCID`
 - trust-sensitive relaxations are deterministic and fail closed
 - tests cover warm-runtime and fresh-runtime behavior
 - the feature can be enabled incrementally with clear observability
