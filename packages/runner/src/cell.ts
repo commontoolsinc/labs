@@ -1072,7 +1072,7 @@ export class CellImpl<T extends FabricValue>
     if (!schema) {
       const sourceCell = this.getSourceCell<{ resultRef: Cell<unknown> }>({
         type: "object",
-        properties: { resultRef: { asCell: true } },
+        properties: { resultRef: { asCell: ["cell"] } },
       });
       const sourceCellSchema = sourceCell?.key("resultRef").get()?.schema;
       if (sourceCellSchema !== undefined) {

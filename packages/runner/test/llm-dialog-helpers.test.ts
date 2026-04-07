@@ -296,17 +296,6 @@ Deno.test("simplifySchemaForContext preserves asCell marker with nested properti
   assertEquals(result.properties?.user?.required, ["name", "age"]);
 });
 
-Deno.test("simplifySchemaForContext preserves asOpaque marker", () => {
-  const schema: any = {
-    type: "object",
-    properties: {
-      state: { asOpaque: true, type: "object" },
-    },
-  };
-  const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.state?.asOpaque, true);
-});
-
 Deno.test("simplifySchemaForContext preserves small enums", () => {
   const schema: any = {
     type: "object",
@@ -616,6 +605,7 @@ Deno.test("prepareSchemaForLLM strips internal markers and resolves $ref", () =>
       data: { $ref: "#/$defs/Item", asCell: true },
       otherData: { $ref: "#/$defs/Item", asCell: ["cell"] },
       stream: { type: "number", asCell: ["stream"] },
+      otherStream: { type: "number", asStream: true }, // legacy asStream marker
       hidden: { type: "object", asCell: ["opaque"] },
     },
   };
@@ -624,6 +614,7 @@ Deno.test("prepareSchemaForLLM strips internal markers and resolves $ref", () =>
   assertEquals(result.properties?.data?.asCell, undefined);
   assertEquals(result.properties?.otherData?.asCell, undefined);
   assertEquals(result.properties?.stream?.asCell, undefined);
+  assertEquals(result.properties?.otherStream?.asStream, undefined);
   assertEquals(result.properties?.hidden?.asCell, undefined);
   // $ref should be resolved
   assertEquals(result.properties?.data?.type, "string");

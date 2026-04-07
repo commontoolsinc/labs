@@ -22,14 +22,15 @@ describe("Schema: Capability wrapper types", () => {
 
     expect(ro).toBeDefined();
     expect(ro.properties?.foo?.type).toBe("string");
-    expect(ro.asCell).toBe(true);
+    expect(ro.asCell).toEqual(["readonly"]);
 
     expect(wo).toBeDefined();
     expect(wo.properties?.bar?.type).toBe("number");
-    expect(wo.asCell).toBe(true);
+    expect(wo.asCell).toEqual(["writeonly"]);
 
     expect(op).toBeDefined();
     expect(op.properties?.baz?.type).toBe("boolean");
+    expect(op.asCell).toEqual(["opaque"]);
     expect(op.asOpaque).toBeUndefined();
   });
 

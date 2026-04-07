@@ -4069,8 +4069,8 @@ function getPieceMetadataFromFrame(frame?: Frame): {
     type: "object",
     properties: {
       [TYPE]: { type: "string" },
-      spell: { type: "object", asCell: true },
-      resultRef: { type: "object", asCell: true },
+      spell: { type: "object", asCell: ["cell"] },
+      resultRef: { type: "object", asCell: ["cell"] },
     },
   });
   result.patternId = source.get()?.[TYPE];

@@ -102,7 +102,7 @@ storage:
 
 - Schemas are based on JSON Schema with extensions for reactivity and references
 - Each Cell has an associated schema that validates its data
-- Schemas can define nested cells with `asCell: true`
+- Schemas can define nested cells with `asCell: ["cell"]`
 - Schema validation happens automatically when setting values
 
 ### Sigil-based Links
@@ -275,7 +275,7 @@ const userSchema = {
         notifications: { type: "boolean" },
       },
       // Make settings a nested cell that can be observed independently
-      asCell: true,
+      asCell: ["cell"],
       default: { theme: "light", notifications: true },
     },
     tags: {
@@ -566,7 +566,7 @@ const rootCell = runtime.getCell(
           label: { type: "string" },
         },
         // Make nested object a cell so it can be observed independently
-        asCell: true,
+        asCell: ["cell"],
       },
     },
     default: {
@@ -585,7 +585,7 @@ rootCell.sink((value) => {
   console.log("Root changed:", value); // Called immediately with initial value
 
   // Also subscribe to changes in the nested property
-  // (this is a cell because we used asCell: true in the schema)
+  // (this is a cell because we used asCell: ["cell"] in the schema)
   // This inner sink is also called immediately with the current nested value
   const cancel = value.current.sink((nestedValue) => {
     console.log("Nested value:", nestedValue); // Called immediately, then on changes

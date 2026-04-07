@@ -47,7 +47,7 @@ export function navigateTo(
     const inputsWithLog = inputsCell.asSchema({
       type: "object",
       properties: {},
-      asCell: true,
+      asCell: ["cell"],
     })
       .withTx(tx);
     const target = inputsWithLog.get();

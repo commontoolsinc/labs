@@ -46,7 +46,7 @@ export const journalEntrySchema = {
     },
     // Live cell reference (may update over time)
     // we use type unknown to validate, but avoid including children
-    subject: { type: "unknown", asCell: true },
+    subject: { type: "unknown", asCell: ["cell"] },
     // Frozen snapshot at entry time
     snapshot: journalSnapshotSchema,
     // LLM-generated narrative prose

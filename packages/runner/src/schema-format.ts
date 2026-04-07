@@ -41,17 +41,17 @@ export interface SchemaFormatOptions {
  * // → "{ name?: string }"
  *
  * @example
- * // Stream handlers (asStream: true)
+ * // Stream handlers (asCell: ["stream"])
  * schemaToTypeString({
- *   asStream: true,
+ *   asCell: ["stream"],
  *   properties: { value: { type: "string" } }
  * })
  * // → "({ value?: string }) => void"
  *
  * @example
- * // Cell wrappers (asCell: true)
+ * // Cell wrappers (asCell: ["cell"])
  * schemaToTypeString({
- *   asCell: true,
+ *   asCell: ["cell"],
  *   properties: { count: { type: "number" } }
  * })
  * // → "Cell<{ count?: number }>"
@@ -130,7 +130,7 @@ export function schemaToTypeString(
   // Handle wrapper types first
   const { asCell, asStream, ...restSchema } = schema;
   // Normalize asCell/asStream into a single asCellValue array for easier handling
-  const asCellValue: AsCellType[] | undefined = asCell
+  const asCellValue: readonly AsCellType[] = asCell
     ? (asCell === true ? ["cell"] : asCell)
     : asStream
     ? ["stream"]
@@ -238,13 +238,13 @@ function getWrappedTypeString(
   innerType: string,
 ): string {
   if (ContextualFlowControl.asCellValueMatches(asCell, "cell")) {
-    innerType = `Cell<${innerType}`;
+    innerType = `Cell<${innerType}>`;
   } else if (ContextualFlowControl.asCellValueMatches(asCell, "readonly")) {
-    innerType = `ReadonlyCell<${innerType}`;
+    innerType = `ReadonlyCell<${innerType}>`;
   } else if (ContextualFlowControl.asCellValueMatches(asCell, "writeonly")) {
-    innerType = `WriteonlyCell<${innerType}`;
+    innerType = `WriteonlyCell<${innerType}>`;
   } else if (ContextualFlowControl.asCellValueMatches(asCell, "comparable")) {
-    innerType = `ComparableCell<${innerType}`;
+    innerType = `ComparableCell<${innerType}>`;
   } else if (ContextualFlowControl.asCellValueMatches(asCell, "stream")) {
     innerType = `(${innerType}) => void`;
   } else if (ContextualFlowControl.asCellValueMatches(asCell, "opaque")) {

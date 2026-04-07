@@ -196,6 +196,35 @@ describe("Schema-to-TS Type Conversion", () => {
     expectType<ExpectedCell, CellSchema>();
   });
 
+  it('should handle asCell: ["cell"] attribute', () => {
+    type CellSchema = Schema<{
+      type: "object";
+      properties: {
+        value: { type: "number" };
+      };
+      asCell: ["cell"];
+    }>;
+
+    type ExpectedCell = Cell<{ value?: number }>;
+
+    expectType<ExpectedCell, CellSchema>();
+  });
+
+  it('should handle readonly asCell: ["cell"] from const schemas', () => {
+    const schema = {
+      type: "object",
+      properties: {
+        value: { type: "number" },
+      },
+      asCell: ["cell"],
+    } as const;
+
+    type CellSchema = Schema<typeof schema>;
+    type ExpectedCell = Cell<{ value?: number }>;
+
+    expectType<ExpectedCell, CellSchema>();
+  });
+
   it("should handle nested asCell attributes", () => {
     type NestedCellSchema = Schema<{
       type: "object";

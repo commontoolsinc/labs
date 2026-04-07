@@ -38,7 +38,7 @@ const WISH_ARGUMENT_SCHEMA = toDeepFrozenSchema({
     query: { type: "string" },
     path: { type: "array", items: { type: "string" } },
     schema: { type: "object" },
-    context: { type: "object", additionalProperties: { asCell: true } },
+    context: { type: "object", additionalProperties: { asCell: ["cell"] } },
     scope: { type: "array", items: { type: "string" } },
   },
 });

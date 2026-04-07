@@ -7,6 +7,7 @@ import {
 } from "../typescript/cell-brand.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import type {
+  JSONSchema,
   JSONSchemaMutable,
   JSONSchemaObjMutable,
 } from "@commonfabric/api";
@@ -241,13 +242,9 @@ export class CommonFabricFormatter implements TypeFormatter {
       const hint = context.schemaHints.get(context.typeNode);
       if (hint?.items === false) {
         isArrayPropertyOnlyAccess = true;
-        const itemsOverride: Record<string, unknown> = {
-          type: "object",
-          properties: {},
-        };
-        if (wrapperKind === "Cell") {
-          itemsOverride.asCell = true;
-        }
+        const itemsOverride: JSONSchema = (wrapperKind === "Cell")
+          ? { type: "object", properties: {}, asCell: ["cell"] }
+          : { type: "object", properties: {} };
         // OpaqueRef needs no items override — it's just T
         childContext = { ...context, arrayItemsOverride: itemsOverride };
       }
@@ -371,10 +368,9 @@ export class CommonFabricFormatter implements TypeFormatter {
       if (hint?.items === false) {
         isArrayPropertyOnlyAccess = true;
         // Build items override with object stub and the appropriate wrapper semantic
-        const itemsOverride: JSONSchemaObjMutable = { type: "unknown" };
-        if (wrapperKind === "Cell") {
-          itemsOverride.asCell = true;
-        }
+        const itemsOverride: JSONSchema = (wrapperKind === "Cell")
+          ? { type: "unknown", asCell: ["cell"] }
+          : { type: "unknown" };
         // OpaqueRef needs no items override — it's just T
         childContext = { ...context, arrayItemsOverride: itemsOverride };
       }

@@ -1358,7 +1358,7 @@ export type JSONSchemaObj = {
   readonly [ID_FIELD]?: unknown;
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
   // A value of `true` is treated the same as `["cell"]`
-  readonly asCell?: boolean | AsCellType[];
+  readonly asCell?: boolean | readonly AsCellType[];
   // streams are what handler returns. if you pass that to another handler/lift and declare it as asSteam, you can call .send on it
   /** @deprecated Use `asCell: ["stream"]` for streams  */
   readonly asStream?: boolean;

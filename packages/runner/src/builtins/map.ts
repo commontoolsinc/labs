@@ -5,8 +5,8 @@ const MAP_INPUT_SCHEMA = toDeepFrozenSchema({
   type: "object",
   properties: {
     // type: "unknown" is ignored by the asCell code path (no type validation)
-    list: { type: "array", items: { asCell: true, type: "unknown" } },
-    op: { asCell: true },
+    list: { type: "array", items: { asCell: ["cell"], type: "unknown" } },
+    op: { asCell: ["cell"] },
   },
   required: ["op"],
 });
@@ -29,8 +29,8 @@ import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
  * The goal is to keep the output array current without recomputing too much.
  *
  * Elements are tracked by the normalized link address of their cell (via
- * `getAsNormalizedFullLink()`). The `asSchema` traverse with `asCell: true`
- * already resolves cell links to target entities, so:
+ * `getAsNormalizedFullLink()`). The `asSchema` traverse with
+ * `asCell: ["cell"]` already resolves cell links to target entities, so:
  *
  * - Cell links: `list[i]` resolves to a cell pointing at the target entity.
  *   Its normalized link is stable across position changes, enabling reuse.

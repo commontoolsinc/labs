@@ -136,7 +136,7 @@ export async function getBGCharms(
     type: "array",
     items: {
       ...BGCharmEntrySchema,
-      asCell: true,
+      asCell: ["cell"],
     },
     default: [],
   } as const satisfies JSONSchema;

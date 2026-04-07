@@ -1423,7 +1423,7 @@ describe("Schema - Link Resolution", () => {
 
       const cellAContents = cellA.asSchema({
         "type": "object",
-        "properties": { "system": { "type": "string", "asOpaque": true } },
+        "properties": { "system": { "type": "string" } },
         "required": ["system"],
       }).get();
       expect(cellAContents).toEqual({ system: "You are a polite..." });
