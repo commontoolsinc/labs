@@ -13,19 +13,24 @@ It is intentionally self-contained. It describes:
 
 ## Goal
 
-Move from schema-guided IFC propagation and coarse summary labels to a runner
-that enforces CFC at commit time.
+Move from schema-guided IFC propagation to a runner/storage boundary that
+enforces CFC at commit time.
 
 At the end of this work:
 
 - schema `ifc` annotations will be enforced before a commit succeeds
-- CFC-relevant writes will persist authoritative metadata for later checks
+- CFC-relevant writes will persist authoritative path-granular metadata and
+  deep-frozen canonical schema hashes backed by content-addressed schema
+  storage for later checks
+- commit-time enforcement will apply uniformly at the transaction boundary,
+  regardless of whether the transaction came from the scheduler,
+  `runtime.editWithRetry()`, or another runtime-owned caller
 - external side effects will be gated on successful commit
 - trust-sensitive relaxations will be explicit, deterministic, and fail closed
 
-Phase 1 targets the memory-v2 transaction path first. Legacy compatibility may
-remain outside the v2 embedded-metadata model until the boundary model is
-stable.
+Phase 1 targets the memory-v2 transaction path only. No
+`application/label+json` bridge or coarse-label compatibility path is carried
+forward.
 
 ## Specification Context
 
@@ -33,19 +38,23 @@ This plan is constrained by the surrounding specs rather than by any specific
 current implementation shape:
 
 - `docs/specs/json_schema.md` defines `ifc` as a schema extension
-- `docs/specs/verifiable-execution/06-cfc-and-trust.md` defines the coarse
-  summary-label model and the direction toward canonical path-granular label
-  maps
+- `docs/specs/verifiable-execution/06-cfc-and-trust.md` defines the
+  path-granular label-map direction and trust terminology
 - `docs/specs/ts-transformer/cfc_authoring_contract.md` defines the authoring
   surface for richer `ifc` keys such as `integrity`, `addIntegrity`,
   `requiredIntegrity`, `maxConfidentiality`, `writeAuthorizedBy`, `projection`,
   and collection rules
+- `docs/specs/memory-v2/README.md` and
+  `docs/specs/memory-v2/03-commit-model.md` define the seq-addressed JSON write
+  path and the content-addressed adjunct storage surfaces we should reuse for
+  schema persistence and code identity
 
 This plan adds the boundary substrate that those specs require:
 
 - there is no transaction-level CFC state
 - there is no prepare-before-commit step
-- there is no canonical digest of consumed reads and attempted writes
+- there is no canonical digest of consumed reads, attempted writes, and
+  write-time policy inputs
 - there is no authoritative persisted CFC metadata record per entity
 - there is no trust snapshot threaded through boundary evaluation
 - side effects are not uniformly gated on successful commit
@@ -69,9 +78,9 @@ support these keys in phases:
 
 ### CFC-Relevant Transaction
 
-A transaction is CFC-relevant when at least one consumed read or attempted
-write touches data whose effective schema or stored CFC metadata carries IFC
-constraints.
+A transaction is CFC-relevant when at least one consumed read, attempted write,
+or write-time policy input touches data whose effective schema or stored CFC
+metadata carries IFC constraints.
 
 ### Consumed Read
 
@@ -95,15 +104,31 @@ views:
   internals
 
 Boundary checking uses `potentialWrites ∪ writes` as the target set for
-relevance and conservative target-side policy checks. Persisted output labels
-and metadata updates are derived from `writes` only. If later rules need
-per-write provenance or exact attempt order, we can add dedicated write-attempt
-logging as a follow-on precision optimization.
+relevance and conservative target-side policy checks. Persisted output label-map
+updates and metadata updates are derived from `writes` only. If later rules
+need per-write provenance or exact attempt order, we can add dedicated
+write-attempt logging as a follow-on precision optimization.
 
-Phase-1 invariant: direct `tx.write*()` usage is internal-only. No-op attempted
-target coverage depends on higher-level diff paths performing
+Phase-1 invariant: direct `tx.write*()` usage remains internal-only runner API.
+No-op attempted-target coverage depends on higher-level diff paths performing
 `markReadAsPotentialWrite` reads before deciding whether to write. That
-assumption should be documented explicitly on the transaction write APIs.
+assumption should be documented explicitly on the transaction write APIs and
+covered by guardrail tests.
+
+### Write-Policy Input
+
+A write-policy input is boundary-relevant write-time data that cannot be
+reconstructed from generic tx read/write inspection alone.
+
+Examples:
+
+- the candidate `SchemaAndHash` or canonical schema payload for a target write
+- provenance claims needed for `projection`, `exactCopyOf`, or collection rules
+- trusted-event provenance
+- immutable sink request snapshots
+
+These inputs must be recorded explicitly in tx CFC state at mutation time,
+canonicalized deterministically, and hashed into prepare.
 
 ### Prepare
 
@@ -112,9 +137,10 @@ handler has produced its reads and writes but before commit succeeds.
 
 Prepare:
 
-- gathers consumed reads, canonical `potentialWrites`, and canonical `writes`
+- gathers consumed reads, canonical `potentialWrites`, canonical `writes`, and
+  canonical write-policy inputs
 - evaluates schema and policy obligations
-- computes output labels and metadata
+- computes output label maps and metadata
 - records a digest of exactly what was checked
 
 ### Prepared Digest
@@ -124,6 +150,7 @@ The prepared digest is a stable hash of:
 - canonical consumed reads
 - canonical `potentialWrites`
 - canonical `writes`
+- canonical write-policy inputs
 - implementation identity
 - trust snapshot identity
 
@@ -142,8 +169,8 @@ Every trust-sensitive check uses an explicit implementation identity:
 reuses the verified-load registry for execution provenance, while policy
 references resolve against a separate stable code identity derived from one of:
 
-- verified compiled code: bundle identity + canonical binding locator within the
-  verified bundle
+- verified compiled code: admitted `codeCID` plus canonical binding locator
+  within that admitted code bundle
 - built-ins: canonical runtime-owned registry ids
 
 Phase 1 does not require stable policy identities for direct-eval or
@@ -159,8 +186,7 @@ snapshot, not on ambient mutable state.
 ## Storage Model
 
 For memory-v2, the runner needs an authoritative CFC metadata record embedded in
-the single entity document. Legacy compatibility may remain outside this v2
-storage model until parity work lands.
+the single entity document. Phase 1 is memory-v2-only.
 
 ### Embedded Metadata
 
@@ -168,18 +194,21 @@ Introduce a system-owned reserved sibling to `value` and `source` for each
 entity:
 
 ```ts
+type IFCLabel = {
+  classification?: unknown[];
+  confidentiality?: unknown[];
+  integrity?: unknown[];
+};
+
 type CfcMetadata = {
   version: 1;
   schemaHash: string;
   labelMap: {
+    version: 1;
     entries: Array<{
       path: string[];
-      confidentiality?: unknown[];
-      integrity?: unknown[];
+      label: IFCLabel;
     }>;
-  };
-  summary: {
-    classification?: string[];
   };
 };
 
@@ -194,12 +223,12 @@ Storage rules:
 
 - in memory-v2, the reserved `cfc` sibling is authoritative for boundary checks
   once present
-- the v2 `cfc` sibling stores the authoritative label map, summary labels, and
-  `schemaHash` in the same document as `value` and `source`
+- the v2 `cfc` sibling stores the authoritative label map and `schemaHash` in
+  the same document as `value` and `source`
 - ordinary `application/json` reads and materialized values must strip the
   reserved `cfc` sibling
-- any compatibility bridge from legacy coarse labels into the embedded v2 model
-  is follow-up work and does not block phase 1
+- no `application/label+json` bridge or coarse-summary compatibility path is
+  carried forward
 
 ### Path Canonicalization
 
@@ -209,12 +238,22 @@ The canonical logical path format is `string[]` with the wrapper segment
 When we need deterministic hashing or ordering, encode that canonical path as a
 JSON Pointer string derived from the segment array.
 
-### Schema Hash
+### Schema Hash and Frozen Schema
 
-Use the existing schema hashing infrastructure for canonical schema identity.
+Use the existing frozen-schema pipeline for canonical schema identity:
+`toDeepFrozenSchema()` for canonical deep-frozen form and
+`internSchema(..., true)` for `SchemaAndHash`.
 
-`schemaHash` is the hash of the canonical merged schema envelope for the entity,
-not the hash of any one effective selector schema seen during prepare.
+`schemaHash` is the persisted `SchemaAndHash.hashString` for the canonical
+merged schema envelope for the entity, not the hash of any one effective
+selector schema seen during prepare.
+
+The corresponding deep-frozen canonical schema object is also persisted in
+memory-v2 content-addressed storage keyed by that hash.
+
+Prepare loads the prior envelope by `schemaHash`, merges candidate schema input
+into it, and persists a replacement canonical schema object only when the
+merged envelope changes.
 
 ### Merged Schema Envelope
 
@@ -235,25 +274,27 @@ Phase-1 merge rules:
   valid
 - a merge may add a required field only when the merged schema also provides a
   default that preserves validity/materialization for existing documents
-- every merged result is canonicalized with the frozen/interned schema helpers
-  before hashing
+- every merged result is canonicalized with `toDeepFrozenSchema()` and
+  `internSchema(..., true)` before persistence to content-addressed storage
 
 Phase-1 behavior:
 
 - each write that carries schema context, typically from `Cell.*` operations,
   contributes a candidate schema update for its target entity
-- if the target entity has no stored schema envelope yet, prepare seeds it from
-  the candidate schema
-- if the target entity already has a stored schema envelope, prepare attempts a
-  monotonic merge of the candidate schema into that envelope
+- if the target entity has no stored `schemaHash`, prepare persists the
+  candidate canonical schema envelope and stores the resulting `schemaHash`
+- if the target entity already has a stored `schemaHash`, prepare loads that
+  canonical schema by hash and attempts a monotonic merge of the candidate
+  schema into it
 - if merge fails because the candidate would weaken IFC obligations or
   invalidate previously valid data, prepare rejects and the transaction aborts,
-  unless an explicit migration path is active
-- every merged envelope is canonicalized before hashing
-- if the canonical merged envelope hashes to the existing `schemaHash`, prepare
+  unless an explicit migration or recovery path is active
+- if the canonical merged envelope produces the same `schemaHash`, prepare
   treats the schema update as a no-op
-- if the canonical merged envelope produces a new hash, prepare persists the
-  replacement `schemaHash` and associated metadata
+- if the canonical merged envelope produces a new `schemaHash`, prepare
+  persists the replacement hash and associated metadata
+- if a stored `schemaHash` is missing or unreadable, prepare rejects and the
+  transaction aborts unless an explicit recovery path is active
 
 This keeps schema identity stable while making schema evolution a per-write
 entity update, rather than depending on whichever narrowed selector schema
@@ -267,7 +308,8 @@ This plan does not attempt to do all of the following in the first landing:
 - general policy distribution or discovery protocols
 - broad UI authoring ergonomics beyond the provenance hooks needed for trusted
   events
-- a generalized direct-CAS security model before the core causal path is stable
+- a generalized content-addressed side-path security model before the core
+  causal path is stable
 - a wholesale rewrite of scheduler or runtime architecture
 
 ## Invariants
@@ -275,15 +317,16 @@ This plan does not attempt to do all of the following in the first landing:
 These must hold once enforcement is enabled:
 
 - no CFC-relevant commit succeeds without a same-attempt prepare
-- any read or write that changes the prepared digest invalidates prepare
+- any read, write, or write-policy input that changes the prepared digest
+  invalidates prepare
 - verifier-internal reads never become consumed reads
 - explicit IFC claims fail closed on missing schema, missing metadata, unknown
   trust state, or unsupported trust-sensitive claims
+- the commit gate lives at the transaction boundary, not only in scheduler code
 - external side effects happen only after successful commit
 - retries always run in a fresh transaction and recompute prepare
 - persisted CFC metadata is system-controlled, not user-editable JSON content
-- `Labels.classification` remains a coarse summary, not the authoritative
-  policy model
+- no `application/label+json` compatibility path participates in enforcement
 - unlabeled paths remain permissive in phase 1; changing that default is a
   separate rollout step, not an implicit side effect of the first enforcement
   launch
@@ -301,19 +344,20 @@ Primary files:
 Tasks:
 
 - [ ] Define `CfcTxState`, `ConsumedRead`, `AttemptedWrite`,
-      `PreparedDigestInput`, `ImplementationIdentity`, `TrustSnapshot`,
-      `CfcEnforcementMode`, and `CfcMetadata`
+      `WritePolicyInput`, `PreparedDigestInput`, `ImplementationIdentity`,
+      `TrustSnapshot`, `CfcEnforcementMode`, and `CfcMetadata`
 - [ ] Define a dedicated metadata marker for `internalVerifierRead`
 - [ ] Define a dedicated side-effect outbox entry type for post-commit effects
 - [ ] Define the reserved embedded `cfc` document shape and system-ownership
       rules for that metadata
 - [ ] Define a canonical code-identity shape that separates policy-facing code
-      identity from per-load runtime ids
+      identity from per-load runtime ids and can align with memory-v2 `codeCID`
 
 Acceptance:
 
 - [ ] New types compile without changing behavior
-- [ ] Serialization tests cover `CfcMetadata` and digest input canonicalization
+- [ ] Serialization tests cover `CfcMetadata`, `WritePolicyInput`, and digest
+      input canonicalization
 
 ### 2. Transaction State and Commit Gate
 
@@ -326,11 +370,14 @@ Primary files:
 
 Tasks:
 
-- [ ] Add CFC state to the extended transaction wrapper:
-      relevance, preparation status, prepared digest, trust snapshot, outbox,
-      and enforcement mode
+- [ ] Add CFC state to the extended transaction wrapper and/or underlying
+      transaction implementation: relevance, preparation status, prepared
+      digest, write-policy inputs, trust snapshot, outbox, and enforcement mode
 - [ ] Add helpers to mark a transaction relevant, prepared, invalidated, and to
       enqueue post-commit side effects
+- [ ] Make the commit gate live in the transaction commit path so
+      scheduler-driven flows, `runtime.editWithRetry()`, and other
+      runtime-owned commit callers use the same enforcement boundary
 - [ ] Support rollout modes:
       `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`
 - [ ] In `observe`, compute prepare state and diagnostics without blocking
@@ -343,10 +390,11 @@ Acceptance:
 - [ ] Observe mode records prepare state without blocking commit
 - [ ] Relevant transaction without prepare fails commit in enforcing modes
 - [ ] Prepared transaction with unchanged activity commits successfully
-- [ ] Post-prepare read or write invalidates prepare
+- [ ] Post-prepare read, write, or write-policy input invalidates prepare
 - [ ] Abort clears outbox state
+- [ ] Scheduler-owned and direct runtime-owned commit callers hit the same gate
 
-### 3. Canonical Activity Extraction
+### 3. Canonical Activity and Policy-Input Capture
 
 Primary files:
 
@@ -366,18 +414,24 @@ Tasks:
       attempted-target coverage relies on higher-level diff paths using
       `markReadAsPotentialWrite`; blind same-value direct writes are not
       surfaced through `potentialWrites`
+- [ ] Add explicit APIs to record canonical `WritePolicyInput` entries at
+      mutation time; do not rely on generic tx read/write inspection alone for
+      schema hashes or structural provenance claims
 - [ ] Keep scheduler metadata and verifier metadata distinct
 - [ ] Exclude only `internalVerifierRead` from the consumed-read set
-- [ ] Make the phase-1 prepare engine free to pessimistically treat all consumed
-      reads as influencing all target paths in `potentialWrites ∪ writes`
-- [ ] Defer exact ordered write-attempt logging to a follow-up precision slice if
-      later rules need it
+- [ ] Make the phase-1 prepare engine free to pessimistically treat all
+      consumed reads as influencing all target paths in
+      `potentialWrites ∪ writes`
+- [ ] Defer exact ordered write-attempt logging to a follow-up precision slice
+      if later rules need it
 
 Acceptance:
 
 - [ ] Canonical path handling strips the `value` wrapper consistently
-- [ ] Phase-1 canonical `potentialWrites` extraction is deterministic across runs
+- [ ] Phase-1 canonical `potentialWrites` extraction is deterministic across
+      runs
 - [ ] Phase-1 canonical `writes` extraction is deterministic across runs
+- [ ] Canonical `WritePolicyInput` capture is deterministic across runs
 - [ ] Internal verifier reads remain visible for diagnostics but not policy
 - [ ] Final-per-path view is deterministic
 
@@ -399,7 +453,8 @@ Tasks:
       obligations even if no read happened first
 - [ ] Treat attempted no-op writes as relevant when they appear in
       `potentialWrites` for a path carrying CFC obligations
-- [ ] Ensure dependency-discovery transactions do not trigger prepare
+- [ ] Ensure dependency-discovery transactions and other non-committing
+      inspection transactions do not trigger prepare
 - [ ] Audit helper reads that should be tagged `internalVerifierRead`
 
 Acceptance:
@@ -412,36 +467,41 @@ Acceptance:
       metadata still marks it relevant
 - [ ] Dependency-collection transactions remain unaffected
 
-### 5. Metadata Persistence
+### 5. Metadata and Schema Persistence
 
 Primary files:
 
 - `packages/runner/src/storage/v2.ts`
 - `packages/runner/src/storage/v2-document.ts`
 - `packages/memory/v2.ts`
+- `packages/memory/v2/engine.ts`
 - `packages/runner/src/storage/interface.ts`
-- legacy follow-up: `packages/runner/src/storage/cache.ts`,
-  `packages/memory/space.ts`, `packages/memory/provider.ts`
 
 Tasks:
 
 - [ ] Persist CFC metadata as a system-owned reserved sibling to `value` and
       `source` in the v2 entity document
-- [ ] Store the authoritative label map, summary labels, and `schemaHash` in
-      that embedded metadata
+- [ ] Persist canonical merged schema envelopes in memory-v2 content-addressed
+      storage and store `schemaHash` in embedded metadata
+- [ ] Store the authoritative path-granular label map and `schemaHash` in that
+      embedded metadata
 - [ ] Ensure normal user-doc reads do not expose the reserved `cfc` sibling
-- [ ] Make storage helpers able to read current CFC metadata efficiently during
-      prepare
-- [ ] Keep any legacy coarse-label compatibility bridge as follow-up work; do
-      not block phase 1 on parity outside the embedded v2 model
+- [ ] Make storage helpers able to read current CFC metadata and load
+      canonical schemas by `schemaHash` efficiently during prepare
+- [ ] Do not carry forward `application/label+json` or query-redaction
+      compatibility behavior
 
 Acceptance:
 
-- [ ] A successful prepared write persists embedded CFC metadata in the v2
-      document
+- [ ] A successful prepared write persists embedded CFC metadata and
+      `schemaHash`
+      in the v2 document
+- [ ] Loading the stored canonical schema by `schemaHash` after a fresh runtime
+      restart reproduces the canonical merged schema envelope
 - [ ] Existing reads of `application/json` do not surface the reserved `cfc`
       sibling
-- [ ] Stored envelope incompatibility rejects later writes unless migration is on
+- [ ] Missing or unreadable `schemaHash` rejects later writes unless recovery
+      is on
 
 ### 6. Prepare Engine
 
@@ -455,74 +515,84 @@ Tasks:
 
 - [ ] Build `prepareBoundaryCommit(tx, options)` as a pure, deterministic
       evaluator
-- [ ] Thread schema-bearing write context, typically from `Cell.*` mutations,
-      into prepare so each target entity attempts a schema-envelope merge for
-      that write
+- [ ] Thread explicit write-policy inputs recorded at mutation time into
+      prepare, including candidate `SchemaAndHash` values and structural
+      provenance claims
+      when available
 - [ ] Implement a canonical merged-schema envelope operator for the supported
       subset
 - [ ] Ensure IFC keys never weaken under merge and never appear only inside a
       divergent `anyOf`/`oneOf`/`allOf` branch
 - [ ] Ensure structural merge does not invalidate previously valid data; adding
       a required field requires a default
-- [ ] Resolve input labels from stored CFC metadata first, then fall back to
-      coarse labels and schema-derived compatibility behavior
+- [ ] Resolve input labels from stored CFC metadata and persisted
+      `schemaHash`-backed envelopes; no coarse-label fallback
 - [ ] Implement `classification`, `integrity`, `addIntegrity`,
       `requiredIntegrity`, and `maxConfidentiality`
 - [ ] Implement `writeAuthorizedBy`, `exactCopyOf`, `projection`, and
       collection-derived transition checks where they can be evaluated from
-      consumed reads plus `potentialWrites`/`writes`; otherwise fail closed or
-      remain conservative
+      consumed reads plus `potentialWrites`/`writes` plus explicit write-policy
+      inputs; otherwise fail closed or remain conservative
 - [ ] Until stable implementation identities and trust snapshots land, treat
       trust-sensitive claims such as `writeAuthorizedBy` as non-enforceable:
       allow diagnostics in `observe`, but hard-reject them in enforcing modes
-- [ ] Compute output label maps and the coarse summary classification
-      from `writes`
-- [ ] Persist only concrete evidence in stored labels; derived trust closure
+- [ ] Compute output label maps from `writes`
+- [ ] Persist only concrete evidence in stored metadata; derived trust closure
       remains runtime-only
 - [ ] In phase 1, allow a conservative all-consumed-reads-to-all-targets
       influence model over `potentialWrites ∪ writes`
 - [ ] Use `potentialWrites ∪ writes` for target-side enforcement and use
       `writes` only for persisted output metadata
-- [ ] If a target entity has no stored schema envelope, seed it from the first
-      canonical merged schema; if merge yields the existing canonical hash,
-      treat it as a no-op; if merge yields a new canonical hash, replace the
-      stored `schemaHash`; if merge fails, reject and abort the transaction
-- [ ] Reject on missing schema, missing metadata needed for a check, or any
-      unsupported trust-sensitive claim
+- [ ] If a target entity has no stored `schemaHash`, seed it from the first
+      canonical `SchemaAndHash`; if merge yields the existing `schemaHash`,
+      treat it as a no-op; if merge yields a new `schemaHash`, replace the
+      stored hash; if merge fails, reject and abort the transaction
+- [ ] Reject on missing schema, missing write-policy inputs, unreadable schema
+      hashes, or any unsupported trust-sensitive claim
 
 Acceptance:
 
 - [ ] Required-integrity failures reject before commit
 - [ ] Transition failures reject before commit
-- [ ] Successful prepare writes stable merged-envelope `schemaHash` and label
-      map metadata
+- [ ] Successful prepare writes stable `schemaHash` and label-map metadata
 - [ ] Unsupported or malformed trust-sensitive claims fail closed
 
-### 7. Scheduler, Retry, and Side-Effect Gating
+### 7. Transaction Integration, Retry, and Side-Effect Gating
 
 Primary files:
 
 - `packages/runner/src/scheduler.ts`
 - `packages/runner/src/cell.ts`
 - `packages/runner/src/runner.ts`
+- `packages/runner/src/runtime.ts`
 - `packages/runner/src/storage/extended-storage-transaction.ts`
 
 Tasks:
 
-- [ ] Insert prepare between action/handler execution and commit
+- [ ] Make prepare invocation explicit for all runtime-owned writable
+      transaction paths; scheduler integration is one path, but the commit gate
+      remains in the transaction commit path
+- [ ] Insert prepare between action/handler execution and commit in
+      scheduler-managed flows
+- [ ] Integrate generic `runtime.editWithRetry()` and other direct commit
+      callers with the same prepare-or-observe path
 - [ ] Replace effectful use of generic commit callbacks with a success-only
       outbox
-- [ ] Migrate stream sends, queued events, and other runner-managed side effects
-      to the outbox
+- [ ] Migrate stream sends, queued events, and other runner-managed side
+      effects to the outbox
 - [ ] Add JSDoc on internal commit-callback / `onCommit` hooks explaining that
       they are internal-only, may run after failed commits, and must not
       perform external side effects; effectful work must use the outbox
 - [ ] Keep retries fresh: new tx, new prepare, new trust snapshot
-- [ ] Audit `onCommit` call sites and move effectful ones to the outbox
+- [ ] Audit `onCommit` and direct commit call sites and move effectful ones to
+      the outbox
 
 Acceptance:
 
 - [ ] Failed commit does not emit side effects
+- [ ] Relevant transactions committed via the scheduler,
+      `runtime.editWithRetry()`, or other runtime-owned direct callers are
+      uniformly gated
 - [ ] Retried handler emits side effects once, after the winning commit
 - [ ] Non-effectful commit callbacks used for diagnostics still work
 - [ ] Internal callback docs make the non-effectful restriction explicit
@@ -540,12 +610,12 @@ Primary files:
 Tasks:
 
 - [ ] Define a stable policy-facing code identity separate from runtime
-      `implementationRef` and per-load `verifiedLoadId`
+      `implementationRef` and per-load `verifiedLoadId`, and align verified
+      compiled-code identity with admitted memory-v2 `codeCID` plus canonical
+      binding location
 - [ ] Keep `implementationRef` as the runtime lookup key and `verifiedLoadId` as
       the runtime admission scope; resolve policy identities through the
-      verified registry and built-in registry
-- [ ] Derive verified compiled-code identity from verified bundle identity plus
-      canonical binding location within the bundle
+      verified registry, built-in registry, and `codeCID` when available
 - [ ] Define canonical ids for built-ins
 - [ ] In phase 1, treat direct-eval and unsafe-host/test helpers as untrusted
       for trust-sensitive relaxations unless a later explicit stable-id path is
@@ -554,13 +624,14 @@ Tasks:
       execution
 - [ ] Define a trust-snapshot provider interface that is deterministic and easy
       to test
-- [ ] Bind prepare success to the acting principal plus trust snapshot identity
+- [ ] Bind prepare success to the acting principal, trust snapshot identity,
+      and resolved policy-facing implementation identity
 - [ ] Gate trust-sensitive flow relaxations on that snapshot
 
 Acceptance:
 
-- [ ] Built-ins and verified compiled code produce stable policy-facing
-      implementation identities
+- [ ] Built-ins and verified compiled code with admitted `codeCID` produce
+      stable policy-facing implementation identities
 - [ ] Unsupported identity classes fail closed for trust-sensitive checks
 - [ ] Changing the trust snapshot between prepare and commit invalidates prepare
 - [ ] Unknown implementation identity is treated as untrusted
@@ -602,8 +673,8 @@ Tasks:
 - [ ] Include `streamData` alongside `fetchData` and `fetchProgram` in the
       initial sink inventory and rollout gate
 - [ ] Move network side effects behind the transaction outbox
-- [ ] Verify sink-specific policy from prepared request labels before issuing the
-      request
+- [ ] Verify sink-specific policy from the prepared request snapshot and
+      committed CFC state before issuing the request
 - [ ] Add idempotency keys so retries do not reissue the same committed effect
 - [ ] Keep request authorization and request execution as separate steps
 
@@ -612,8 +683,8 @@ Acceptance:
 - [ ] Failed prepare or failed commit never issues a network call from
       `fetchData`, `fetchProgram`, or `streamData`
 - [ ] Retried attempts reuse the winning committed effect and do not double-send
-- [ ] Request release rules are evaluated from persisted labels, not ad hoc
-      runtime state
+- [ ] Request release rules are evaluated from the prepared request snapshot and
+      committed CFC metadata, not ad hoc runtime state
 
 ### 11. UI Provenance and Trusted Events
 
@@ -639,7 +710,7 @@ Acceptance:
 - [ ] Boundary evaluation can consume event provenance without ambient globals
 - [ ] Untrusted UI-origin claims fail closed
 
-### 12. Direct CAS and Parallel-Path Hardening
+### 12. Content-Addressed Side-Path Hardening
 
 This stays behind the core causal-path rollout.
 
@@ -651,36 +722,43 @@ Primary files:
 
 Tasks:
 
-- [ ] Apply the same boundary model to direct CAS writes
-- [ ] Enforce exact label binding on CAS reads
-- [ ] Normalize miss behavior across absent hash, unreadable binding, and label
-      mismatch
-- [ ] Prove that causal-path and CAS-path authorization cannot bypass one
-      another
+- [ ] Apply the same boundary model to content-addressed adjunct writes that
+      affect CFC outcomes, starting with persisted schema blobs and future
+      blob-backed side paths
+- [ ] Enforce exact binding between embedded hashes such as `schemaHash` and
+      the content-addressed objects that prepare actually checked
+- [ ] Normalize miss behavior across absent blob/ref, unreadable binding, and
+      policy mismatch
+- [ ] Prove that seq-addressed entity updates and content-addressed side paths
+      cannot bypass one another
 
 Acceptance:
 
-- [ ] CAS writes cannot bypass policy enforcement
-- [ ] CAS reads do not leak miss reasons
-- [ ] Public causal reads never expose CAS-only metadata
+- [ ] Content-addressed side-path writes cannot bypass policy enforcement
+- [ ] Side-path reads do not leak miss reasons
+- [ ] Public causal reads never expose system-owned side-path metadata except
+      explicit embedded hashes
 
 ## Test Strategy
 
 The test matrix should be built in the same order as the implementation:
 
-- [ ] unit tests for types, path canonicalization, and digest stability
+- [ ] unit tests for types, path canonicalization, write-policy input
+      canonicalization, and digest stability
 - [ ] unit tests for merged-schema monotonicity, branch-external IFC placement,
       and required-field/default compatibility
 - [ ] transaction tests for prepare gating and invalidation
 - [ ] rollout-mode tests for `disabled`, `observe`, and enforcing modes
 - [ ] traversal tests for relevance detection
 - [ ] prepare-engine tests for input requirements and output transitions
-- [ ] storage tests for embedded-metadata persistence and non-exposure
-- [ ] scheduler tests for retry and outbox behavior
+- [ ] storage tests for embedded-metadata persistence, `schemaHash`
+      dereferencing, and non-exposure
+- [ ] scheduler and runtime-owned direct-commit tests for retry and outbox
+      behavior
 - [ ] sink tests for commit-gated network execution and idempotency
 - [ ] UI tests for provenance-backed trusted event delivery
-- [ ] fresh-runtime restart tests for persisted metadata, trust snapshots, and
-      sink results
+- [ ] fresh-runtime restart tests for persisted metadata, schema hashes, trust
+      snapshots, and sink results
 
 Every phase should land with tests before the next phase starts.
 
@@ -694,8 +772,9 @@ Every phase should land with tests before the next phase starts.
 - [ ] Emit counters for:
       `cfcRelevantTx`, `cfcPreparedTx`, `cfcPrepareRejects`,
       `cfcDigestInvalidations`, `cfcOutboxFlushes`, and sink dedup hits
-- [ ] Keep sensitive values out of logs; log only rule ids, paths, and summary
-      labels
+- [ ] Keep sensitive values out of logs; log only rule ids, paths, schema
+      hashes,
+      and effect ids
 - [ ] Treat step 8 below as the first safe enablement point for state-only
       transactions
 - [ ] Before step 9 below, enforcing modes cover only the non-trust-sensitive
@@ -703,21 +782,23 @@ Every phase should land with tests before the next phase starts.
       must remain observe-only or fail closed
 - [ ] Do not enable enforcing modes for runtimes with external sinks until
       outbox and retry tests are green
-- [ ] Do not enable direct CAS enforcement until parallel-path non-bypass tests
-      are green
+- [ ] Do not enable content-addressed side-path enforcement until non-bypass
+      tests are green
 
 ## Recommended Landing Order
 
 Land the work in mergeable vertical slices:
 
-1. [ ] Types, canonical path helpers, and digest helpers
+1. [ ] Types, canonical path helpers, write-policy input helpers, and digest
+       helpers
 2. [ ] Transaction CFC state and rollout modes with observe-mode prepare
-3. [ ] V2 consumed-read, `potentialWrites`, and compact final-write extraction
-       APIs
+3. [ ] V2 consumed-read, `potentialWrites`, compact final-write extraction, and
+       write-policy input capture APIs
 4. [ ] Relevance detection and merged-schema envelope implementation
-5. [ ] Embedded v2 CFC metadata persistence and non-exposure
+5. [ ] Embedded v2 CFC metadata persistence, content-addressed schema
+       persistence, and non-exposure
 6. [ ] Baseline prepare engine for classification and integrity checks
-7. [ ] Scheduler integration and success-only outbox
+7. [ ] Transaction integration and success-only outbox
 8. [ ] Enforcing commit gate for state-only transactions for the
        non-trust-sensitive rule subset once extraction/prepare slices are green
 9. [ ] Stable implementation identity and trust snapshotting, then enable
@@ -725,7 +806,7 @@ Land the work in mergeable vertical slices:
 10. [ ] Structural flow-precision claims for core built-ins
 11. [ ] Fetch, `streamData`, and other external sink enforcement
 12. [ ] UI provenance and trusted-event path
-13. [ ] Direct CAS and parallel-path hardening
+13. [ ] Content-addressed side-path hardening
 
 Step 8 is the first safe enablement point for non-trust-sensitive,
 state-only transactions that do not issue external effects. Step 9 is the first
@@ -736,13 +817,16 @@ first safe enablement point for runtimes with external sinks.
 
 This plan is complete when all of the following are true:
 
-- CFC-relevant transactions are prepared and verified before commit
-- authoritative CFC metadata is persisted for later reads and writes
-- coarse summary classification behavior still works for existing query and
-  redaction flows through the embedded v2 summary model
+- CFC-relevant transactions are prepared and verified before commit at the
+  transaction boundary
+- authoritative path-granular CFC metadata and canonical schema hashes are
+  persisted for later reads and writes
+- no `application/label+json` or coarse-label bridge is required for the v2
+  enforcement path
 - external side effects are commit-gated and retry-safe
-- stable policy-facing code identities and runtime verified-load provenance refer
-  to the same admitted implementations for the supported identity classes
+- stable policy-facing code identities align supported verified compiled code
+  with admitted `codeCID` and runtime provenance for the supported identity
+  classes
 - trust-sensitive relaxations are deterministic and fail closed
 - tests cover warm-runtime and fresh-runtime behavior
 - the feature can be enabled incrementally with clear observability
