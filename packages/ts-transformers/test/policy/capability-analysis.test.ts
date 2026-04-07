@@ -134,6 +134,7 @@ function getPaths(
 ): {
   capability: string;
   readPaths: string[];
+  fullShapePaths: string[];
   writePaths: string[];
   wildcard: boolean;
   passthrough: boolean;
@@ -148,6 +149,7 @@ function getPaths(
   return {
     capability: param.capability,
     readPaths: param.readPaths.map((path) => path.join(".")),
+    fullShapePaths: (param.fullShapePaths ?? []).map((path) => path.join(".")),
     writePaths: param.writePaths.map((path) => path.join(".")),
     wildcard: param.wildcard,
     passthrough: param.passthrough,
@@ -1055,6 +1057,39 @@ Deno.test(
     assert(input.identityPaths.includes("right"));
     assert(input.identityCellPaths.includes("left"));
     assert(input.identityCellPaths.includes("right"));
+  },
+);
+
+Deno.test(
+  "Capability analysis drops identity-only paths that overlap full-shape reads",
+  () => {
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": `
+        import { equals } from "commonfabric";
+
+        type ParkingPerson = {
+          active: boolean;
+          name: string;
+          priorityRank: number;
+          defaultSpot: string;
+        };
+
+        const fn = (input: { people: ParkingPerson[] }) =>
+          equals(
+            input.people,
+            input.people.filter((person) => person.active).slice(0),
+          );
+      `,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "fn"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assert(input.fullShapePaths.includes("people"));
+    assertEquals(input.identityPaths.includes("people"), false);
   },
 );
 

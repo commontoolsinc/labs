@@ -1578,6 +1578,47 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "lift preserves full receiver shape when identity use overlaps an unknown chain",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { equals, lift } from "commonfabric";',
+        "type ParkingPerson = {",
+        "  active: boolean;",
+        "  name: string;",
+        "  priorityRank: number;",
+        "  defaultSpot: string;",
+        "};",
+        "const samePeople = lift((input: { people: ParkingPerson[] }) =>",
+        "  equals(",
+        "    input.people,",
+        "    input.people.filter((person) => person.active).slice(0),",
+        "  )",
+        ");",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "people");
+      assertStringIncludes(inputSchema, "active");
+      assertStringIncludes(inputSchema, "name");
+      assertStringIncludes(inputSchema, "priorityRank");
+      assertStringIncludes(inputSchema, "defaultSpot");
+    },
+  );
+
+  await t.step(
     "lift shrinks item fields through right-hand ?? fallback aliases",
     async () => {
       const source = [
@@ -1694,6 +1735,34 @@ Deno.test("Schema Shrink Validation", async (t) => {
         'import { derive, type Writable } from "commonfabric";',
         "const value = {} as Writable<number>;",
         "const doubled = derive(value, (v) => v.get() * 2);",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, "asCell: true");
+      assertEquals(inputSchema.includes("asOpaque: true"), false);
+    },
+  );
+
+  await t.step(
+    "derive preserves cell wrappers when expression-bodied callback is a direct .get() call",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive, type Writable } from "commonfabric";',
+        "const value = {} as Writable<number>;",
+        "const copy = derive(value, (v) => v.get());",
       ].join("\n");
 
       const result = await validateSource(source, {

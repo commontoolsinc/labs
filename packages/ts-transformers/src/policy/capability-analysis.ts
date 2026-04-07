@@ -1926,9 +1926,11 @@ export function analyzeFunctionCapabilities(
           if (identityPath.length === 0 && state.hasNonIdentityRootUse) {
             return false;
           }
-          const overlapsNonIdentity = [...readPaths, ...writePaths].some((
-            path,
-          ) =>
+          const overlapsNonIdentity = [
+            ...readPaths,
+            ...fullShapePaths,
+            ...writePaths,
+          ].some((path) =>
             path.length >= identityPath.length &&
             identityPath.every((segment, index) => path[index] === segment)
           );

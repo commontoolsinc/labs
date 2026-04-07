@@ -157,7 +157,7 @@ function parameterUsesCellLikeMethods(
   };
 
   if (fn.body) {
-    ts.forEachChild(fn.body, visit);
+    visit(fn.body);
   }
 
   return usesCellLikeMethods;
