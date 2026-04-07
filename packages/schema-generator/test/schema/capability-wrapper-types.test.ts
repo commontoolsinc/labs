@@ -78,7 +78,6 @@ describe("Schema: Capability wrapper types", () => {
     expect(value).toEqual({ type: "unknown", asCell: ["cell"] });
   });
 
-  it("Array<Writable<unknown>> produces { type: 'array', items: { type: 'unknown', asCell: ['cell'] } }", async () => {
   it("OpaqueRef<T> erases to T without wrapper metadata", async () => {
     const code = `
       interface X {

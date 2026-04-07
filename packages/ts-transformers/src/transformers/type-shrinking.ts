@@ -3,6 +3,7 @@ import { getPropertyNameText } from "@commonfabric/schema-generator/property-nam
 import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import { uniquePaths } from "../utils/path-serialization.ts";
+import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import {
   type CapabilityParamDefault,
   type CapabilityParamSummary,
@@ -39,7 +40,6 @@ const NON_ITEM_PROPS = new Set([
   "key",
   "update",
 ]);
-const KNOWN_FIXED_SYMBOL_KEYS = new Set(["NAME", "UI", "SELF", "FS"]);
 
 // ---------------------------------------------------------------------------
 // Utility helpers
@@ -74,7 +74,10 @@ function getTopLevelRequestedHeads(
   return heads;
 }
 
-function getTopLevelRepresentedHeads(node: ts.TypeNode): Set<string> {
+function getTopLevelRepresentedHeads(
+  node: ts.TypeNode,
+  checker?: ts.TypeChecker,
+): Set<string> {
   const current = ts.isParenthesizedTypeNode(node) ? node.type : node;
   if (!ts.isTypeLiteralNode(current)) {
     return new Set<string>();
@@ -83,7 +86,7 @@ function getTopLevelRepresentedHeads(node: ts.TypeNode): Set<string> {
   const heads = new Set<string>();
   for (const member of current.members) {
     if (!ts.isPropertySignature(member) || !member.name) continue;
-    const name = getRequestedPropertyNameText(member.name);
+    const name = getRequestedPropertyNameText(member.name, checker);
     if (name) heads.add(name);
   }
   return heads;
@@ -92,8 +95,9 @@ function getTopLevelRepresentedHeads(node: ts.TypeNode): Set<string> {
 function countRepresentedRequestedHeads(
   node: ts.TypeNode,
   requestedHeads: ReadonlySet<string>,
+  checker?: ts.TypeChecker,
 ): number {
-  const represented = getTopLevelRepresentedHeads(node);
+  const represented = getTopLevelRepresentedHeads(node, checker);
   let count = 0;
   for (const head of requestedHeads) {
     if (represented.has(head)) count++;
@@ -110,6 +114,16 @@ function typeIncludesUndefined(type: ts.Type): boolean {
     return union.types.some((member) => typeIncludesUndefined(member));
   }
   return false;
+}
+
+function isPrimitiveScalarLikeType(type: ts.Type): boolean {
+  return !!(type.flags & (
+    ts.TypeFlags.StringLike |
+    ts.TypeFlags.NumberLike |
+    ts.TypeFlags.BooleanLike |
+    ts.TypeFlags.BigIntLike |
+    ts.TypeFlags.ESSymbolLike
+  ));
 }
 
 function getSymbolTypeAtSource(
@@ -159,27 +173,13 @@ function isSyntheticTypeNode(node: ts.TypeNode): boolean {
   return node.pos < 0 || node.end < 0;
 }
 
-function getKnownComputedKeyHead(expr: ts.Expression): string | undefined {
-  if (ts.isIdentifier(expr) && KNOWN_FIXED_SYMBOL_KEYS.has(expr.text)) {
-    return `$${expr.text}`;
-  }
-  if (
-    ts.isPropertyAccessExpression(expr) &&
-    ts.isIdentifier(expr.expression) &&
-    expr.expression.text === "__cfHelpers" &&
-    KNOWN_FIXED_SYMBOL_KEYS.has(expr.name.text)
-  ) {
-    return `$${expr.name.text}`;
-  }
-  return undefined;
-}
-
 function getRequestedPropertyNameText(
   name: ts.PropertyName,
+  checker?: ts.TypeChecker,
 ): string | undefined {
   return getPropertyNameText(name) ??
     (ts.isComputedPropertyName(name)
-      ? getKnownComputedKeyHead(name.expression)
+      ? getKnownComputedKeyPathSegment(name.expression, checker)
       : undefined);
 }
 
@@ -277,14 +277,17 @@ function getArrayElementType(
   return undefined;
 }
 
-function getSymbolPropertyHead(symbol: ts.Symbol): string | undefined {
+function getSymbolPropertyHead(
+  symbol: ts.Symbol,
+  checker?: ts.TypeChecker,
+): string | undefined {
   for (const declaration of symbol.declarations ?? []) {
     if (
       (ts.isPropertySignature(declaration) ||
         ts.isPropertyDeclaration(declaration)) &&
       declaration.name
     ) {
-      const head = getRequestedPropertyNameText(declaration.name);
+      const head = getRequestedPropertyNameText(declaration.name, checker);
       if (head) return head;
     }
   }
@@ -300,7 +303,7 @@ function findPropertySymbol(
   if (direct) return direct;
 
   for (const prop of checker.getPropertiesOfType(type)) {
-    if (getSymbolPropertyHead(prop) === head) {
+    if (getSymbolPropertyHead(prop, checker) === head) {
       return prop;
     }
   }
@@ -482,6 +485,32 @@ function buildShrunkTypeNodeFromType(
     const hasDirectAccess = childPaths.some((path) => path.length === 0);
 
     if (!propType) {
+      continue;
+    }
+
+    // Nested primitive leaves still need their original runtime shape. For
+    // object properties like `input.text.length`, shrinking `text` to
+    // `{ length: number }` changes a string leaf into an object and breaks the
+    // authored callback contract. Keep the primitive property type intact here;
+    // root-level primitive projections (e.g. `summary.length`) are still
+    // handled by the recursive shrink above.
+    if (!hasDirectAccess && isPrimitiveScalarLikeType(propType)) {
+      const propTypeNode = checker.typeToTypeNode(
+        propType,
+        sourceFile,
+        typeToNodeFlags,
+      ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+      typeRegistry?.set(propTypeNode, propType);
+      properties.push(
+        factory.createPropertySignature(
+          undefined,
+          createPropertyName(head, factory),
+          isOptional
+            ? factory.createToken(ts.SyntaxKind.QuestionToken)
+            : undefined,
+          propTypeNode,
+        ),
+      );
       continue;
     }
 
@@ -871,7 +900,7 @@ function shrinkTypeLiteralMembers(
       continue;
     }
 
-    const propertyName = getRequestedPropertyNameText(member.name);
+    const propertyName = getRequestedPropertyNameText(member.name, checker);
     if (!propertyName) continue;
     const childPaths = grouped.get(propertyName);
     if (!childPaths) continue;
@@ -920,7 +949,7 @@ function typeNodeHasHead(
     return node.members.some(
       (m) =>
         ts.isPropertySignature(m) && m.name &&
-        getRequestedPropertyNameText(m.name) === head,
+        getRequestedPropertyNameText(m.name, checker) === head,
     );
   }
 
@@ -937,7 +966,7 @@ function typeNodeHasHead(
       return members.some(
         (m) =>
           ts.isPropertySignature(m) && m.name &&
-          getRequestedPropertyNameText(m.name) === head,
+          getRequestedPropertyNameText(m.name, checker) === head,
       );
     }
   }
@@ -1523,7 +1552,7 @@ function applyIdentityOnlyPathsToTypeNode(
       if (!ts.isPropertySignature(member) || !member.type || !member.name) {
         return member;
       }
-      const propertyName = getRequestedPropertyNameText(member.name);
+      const propertyName = getRequestedPropertyNameText(member.name, checker);
       if (!propertyName) {
         return member;
       }
@@ -1992,10 +2021,12 @@ export function applyShrinkAndWrap(
         const typeDrivenCoverage = countRepresentedRequestedHeads(
           typeDriven,
           requestedHeads,
+          checker,
         );
         const nodeDrivenCoverage = countRepresentedRequestedHeads(
           nodeDriven,
           requestedHeads,
+          checker,
         );
 
         if (nodeDrivenCoverage > typeDrivenCoverage) {
@@ -2042,10 +2073,12 @@ export function applyShrinkAndWrap(
         const typeDrivenCoverage = countRepresentedRequestedHeads(
           typeDriven,
           requestedHeads,
+          checker,
         );
         const nodeDrivenCoverage = countRepresentedRequestedHeads(
           nodeDriven,
           requestedHeads,
+          checker,
         );
 
         if (

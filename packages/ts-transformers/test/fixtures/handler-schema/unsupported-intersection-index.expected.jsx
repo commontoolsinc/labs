@@ -22,19 +22,26 @@ type Indexed = {
     [k: string]: unknown;
 };
 const removeItem = handler({
-    type: "unknown"
+    type: "object",
+    properties: {
+        key: {
+            type: "string"
+        }
+    },
+    required: ["key"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     additionalProperties: true,
     $comment: "Unsupported intersection pattern: index signature on constituent"
-} as const satisfies __cfHelpers.JSONSchema, (_, { items }) => {
-    // noop
-    items.get();
+} as const satisfies __cfHelpers.JSONSchema, (event, state) => {
+    state.items.get();
+    state[event.key];
 });
 // FIXTURE: unsupported-intersection-index
-// Verifies: intersection with index-signature type falls back to additionalProperties with $comment warning
-//   handler<unknown, ListState & Indexed>() → context: { additionalProperties: true, $comment: "Unsupported intersection..." }
-// Context: negative test -- index signatures cannot be safely merged, so transformer emits a fallback schema
+// Verifies: dynamic key access keeps index-signature intersections open-ended
+//   handler<{key:string}, ListState & Indexed>() → context: { additionalProperties: true, $comment: "Unsupported intersection..." }
+// Context: negative test -- without the dynamic key read, shrinking can safely
+//   keep only `items`. This fixture forces the truly open-ended fallback path.
 export { removeItem };
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

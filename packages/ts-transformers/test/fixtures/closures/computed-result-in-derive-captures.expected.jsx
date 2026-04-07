@@ -41,14 +41,11 @@ export default pattern((state) => {
                         items: {
                             type: "object",
                             properties: {
-                                name: {
-                                    type: "string"
-                                },
                                 done: {
                                     type: "boolean"
                                 }
                             },
-                            required: ["name", "done"]
+                            required: ["done"]
                         }
                     }
                 },

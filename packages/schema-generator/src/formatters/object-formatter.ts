@@ -79,16 +79,17 @@ function getWrapperSchemaFromCallable(
 function typeNodeExplicitlyDeclaresProperty(
   typeNode: ts.TypeNode | undefined,
   propName: string,
+  checker?: ts.TypeChecker,
 ): boolean {
   if (!typeNode) return false;
 
   if (ts.isParenthesizedTypeNode(typeNode)) {
-    return typeNodeExplicitlyDeclaresProperty(typeNode.type, propName);
+    return typeNodeExplicitlyDeclaresProperty(typeNode.type, propName, checker);
   }
 
   if (ts.isUnionTypeNode(typeNode)) {
     return typeNode.types.some((member) =>
-      typeNodeExplicitlyDeclaresProperty(member, propName)
+      typeNodeExplicitlyDeclaresProperty(member, propName, checker)
     );
   }
 
@@ -99,23 +100,24 @@ function typeNodeExplicitlyDeclaresProperty(
   return typeNode.members.some((member) =>
     (ts.isPropertySignature(member) || ts.isPropertyDeclaration(member)) &&
     !!member.name &&
-    getPropertyNameText(member.name) === propName
+    getPropertyNameText(member.name, checker) === propName
   );
 }
 
 function getExplicitPropertyTypeNode(
   typeNode: ts.TypeNode | undefined,
   propName: string,
+  checker?: ts.TypeChecker,
 ): ts.TypeNode | undefined {
   if (!typeNode) return undefined;
 
   if (ts.isParenthesizedTypeNode(typeNode)) {
-    return getExplicitPropertyTypeNode(typeNode.type, propName);
+    return getExplicitPropertyTypeNode(typeNode.type, propName, checker);
   }
 
   if (ts.isUnionTypeNode(typeNode)) {
     for (const member of typeNode.types) {
-      const nested = getExplicitPropertyTypeNode(member, propName);
+      const nested = getExplicitPropertyTypeNode(member, propName, checker);
       if (nested) {
         return nested;
       }
@@ -131,7 +133,7 @@ function getExplicitPropertyTypeNode(
     if (
       (ts.isPropertySignature(member) || ts.isPropertyDeclaration(member)) &&
       !!member.name &&
-      getPropertyNameText(member.name) === propName
+      getPropertyNameText(member.name, checker) === propName
     ) {
       return member.type;
     }
@@ -179,7 +181,11 @@ function shouldSkipInternalProperty(
     return false;
   }
 
-  return !typeNodeExplicitlyDeclaresProperty(context.typeNode, propName);
+  return !typeNodeExplicitlyDeclaresProperty(
+    context.typeNode,
+    propName,
+    context.typeChecker,
+  );
 }
 
 /**
@@ -229,6 +235,7 @@ export class ObjectFormatter implements TypeFormatter {
       let propTypeNode = getExplicitPropertyTypeNode(
         context.typeNode,
         propName,
+        checker,
       );
       const propDecl = prop.valueDeclaration ??
         (prop.declarations?.[0] as ts.Declaration | undefined);
@@ -254,7 +261,7 @@ export class ObjectFormatter implements TypeFormatter {
 
       if (
         shouldRespectExplicitPropertyShape &&
-        !typeNodeExplicitlyDeclaresProperty(context.typeNode, propName)
+        !typeNodeExplicitlyDeclaresProperty(context.typeNode, propName, checker)
       ) {
         continue;
       }

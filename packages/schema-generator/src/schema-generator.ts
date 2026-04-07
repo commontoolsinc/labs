@@ -652,7 +652,7 @@ export class SchemaGenerator implements ISchemaGenerator {
 
       for (const member of typeNode.members) {
         if (ts.isPropertySignature(member) && member.name && member.type) {
-          const propName = getPropertyNameText(member.name);
+          const propName = getPropertyNameText(member.name, checker);
           if (!propName) {
             continue;
           }

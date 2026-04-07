@@ -36,25 +36,17 @@ export default pattern((__cf_pattern_input) => {
             items: {
                 type: "array",
                 items: {
-                    $ref: "#/$defs/Item"
+                    type: "object",
+                    properties: {
+                        price: {
+                            type: "number"
+                        }
+                    },
+                    required: ["price"]
                 }
             }
         },
-        required: ["items"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    price: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "price"]
-            }
-        }
+        required: ["items"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -83,25 +75,17 @@ export default pattern((__cf_pattern_input) => {
                     filtered: {
                         type: "array",
                         items: {
-                            $ref: "#/$defs/Item"
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"]
                         }
                     }
                 },
-                required: ["filtered"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["name", "price"]
-                    }
-                }
+                required: ["filtered"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "array",
                 items: {

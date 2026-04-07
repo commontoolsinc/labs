@@ -6,7 +6,45 @@ import {
   type TransformationContext,
 } from "../core/mod.ts";
 
-type CommonFabricKeyName = "NAME" | "UI" | "SELF" | "FS";
+const COMMON_FABRIC_KEY_NAMES = ["NAME", "UI", "SELF", "FS"] as const;
+const COMMON_FABRIC_KEY_NAME_SET = new Set<CommonFabricKeyName>(
+  COMMON_FABRIC_KEY_NAMES,
+);
+
+export type CommonFabricKeyName = typeof COMMON_FABRIC_KEY_NAMES[number];
+
+export function getCommonFabricKeyName(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): CommonFabricKeyName | undefined {
+  if (
+    ts.isPropertyAccessExpression(expr) &&
+    ts.isIdentifier(expr.expression) &&
+    expr.expression.text === CF_HELPERS_IDENTIFIER &&
+    COMMON_FABRIC_KEY_NAME_SET.has(expr.name.text as CommonFabricKeyName)
+  ) {
+    return expr.name.text as CommonFabricKeyName;
+  }
+
+  if (!ts.isIdentifier(expr)) {
+    return undefined;
+  }
+
+  if (checker) {
+    const symbol = checker.getSymbolAtLocation(expr);
+    for (const name of COMMON_FABRIC_KEY_NAMES) {
+      if (resolvesToCommonFabricSymbol(symbol, checker, name)) {
+        return name;
+      }
+    }
+  }
+
+  if (COMMON_FABRIC_KEY_NAME_SET.has(expr.text as CommonFabricKeyName)) {
+    return expr.text as CommonFabricKeyName;
+  }
+
+  return undefined;
+}
 
 export function cloneKeyExpression(
   expr: ts.Expression,
@@ -32,14 +70,8 @@ export function isCommonFabricKeyIdentifier(
   context: TransformationContext,
   targetName: CommonFabricKeyName,
 ): expr is ts.Identifier {
-  if (!ts.isIdentifier(expr)) return false;
-  const symbol = context.checker.getSymbolAtLocation(expr);
-  if (resolvesToCommonFabricSymbol(symbol, context.checker, targetName)) {
-    return true;
-  }
-  // Fall back to name matching for synthetic/transformed contexts where symbol
-  // resolution may not find the Common Fabric origin (e.g. virtual test setups).
-  return expr.text === targetName;
+  return ts.isIdentifier(expr) &&
+    getCommonFabricKeyName(expr, context.checker) === targetName;
 }
 
 /**
@@ -66,21 +98,24 @@ export function isCommonFabricKeyExpression(
   context: TransformationContext,
   targetName: CommonFabricKeyName,
 ): boolean {
-  return isCommonFabricKeyIdentifier(expr, context, targetName) ||
-    isCtHelpersKeyAccess(expr, targetName);
+  return getCommonFabricKeyName(expr, context.checker) === targetName;
+}
+
+export function getKnownComputedKeyPathSegment(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+): string | undefined {
+  const keyName = getCommonFabricKeyName(expr, checker);
+  return keyName ? `$${keyName}` : undefined;
 }
 
 export function getKnownComputedKeyExpression(
   expr: ts.Expression,
   context: TransformationContext,
 ): ts.Expression | undefined {
-  for (const name of ["NAME", "UI", "SELF", "FS"] as const) {
-    if (
-      isCommonFabricKeyIdentifier(expr, context, name) ||
-      isCtHelpersKeyAccess(expr, name)
-    ) {
-      return context.cfHelpers.getHelperExpr(name);
-    }
+  const keyName = getCommonFabricKeyName(expr, context.checker);
+  if (keyName) {
+    return context.cfHelpers.getHelperExpr(keyName);
   }
   return undefined;
 }

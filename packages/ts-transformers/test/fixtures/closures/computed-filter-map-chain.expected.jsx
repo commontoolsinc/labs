@@ -30,28 +30,23 @@ export default pattern((state) => {
                     preferences: {
                         type: "array",
                         items: {
-                            $ref: "#/$defs/Preference"
+                            type: "object",
+                            properties: {
+                                ingredient: {
+                                    type: "string"
+                                },
+                                preference: {
+                                    "enum": ["liked", "disliked"]
+                                }
+                            },
+                            required: ["ingredient", "preference"]
                         }
                     }
                 },
                 required: ["preferences"]
             }
         },
-        required: ["state"],
-        $defs: {
-            Preference: {
-                type: "object",
-                properties: {
-                    ingredient: {
-                        type: "string"
-                    },
-                    preference: {
-                        "enum": ["liked", "disliked"]
-                    }
-                },
-                required: ["ingredient", "preference"]
-            }
-        }
+        required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {

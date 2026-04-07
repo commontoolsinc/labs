@@ -42,6 +42,68 @@ function createProgram(source: string): {
   return { sourceFile, checker: program.getTypeChecker() };
 }
 
+function createProgramWithFiles(
+  files: Record<string, string>,
+  entryFileName = "/test.ts",
+): {
+  sourceFile: ts.SourceFile;
+  checker: ts.TypeChecker;
+} {
+  const compilerOptions: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2020,
+    module: ts.ModuleKind.ESNext,
+    strict: true,
+    noLib: true,
+    skipLibCheck: true,
+  };
+
+  const host: ts.CompilerHost = {
+    fileExists: (name) => files[name] !== undefined,
+    readFile: (name) => files[name],
+    directoryExists: () => true,
+    getDirectories: () => [],
+    getCanonicalFileName: (name) => name,
+    getCurrentDirectory: () => "/",
+    getNewLine: () => "\n",
+    getDefaultLibFileName: () => "lib.d.ts",
+    useCaseSensitiveFileNames: () => true,
+    writeFile: () => {},
+    getSourceFile: (name, languageVersion) =>
+      files[name] !== undefined
+        ? ts.createSourceFile(
+          name,
+          files[name]!,
+          languageVersion,
+          true,
+          name.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+        )
+        : undefined,
+    resolveModuleNames: (moduleNames) =>
+      moduleNames.map((name) => {
+        const directMatch = Object.keys(files).find((fileName) =>
+          fileName === `/${name}.d.ts` ||
+          fileName.endsWith(`/${name}.d.ts`)
+        );
+        if (!directMatch) {
+          return undefined;
+        }
+        return {
+          resolvedFileName: directMatch,
+          extension: ts.Extension.Dts,
+          isExternalLibraryImport: false,
+        };
+      }),
+  };
+
+  const program = ts.createProgram([entryFileName], compilerOptions, host);
+  const sourceFile = program.getSourceFile(entryFileName);
+  if (!sourceFile) {
+    throw new Error("Expected source file in program.");
+  }
+
+  return { sourceFile, checker: program.getTypeChecker() };
+}
+
 function findTypeAlias(
   sourceFile: ts.SourceFile,
   aliasName: string,
@@ -166,6 +228,31 @@ Deno.test("applyShrinkAndWrap defaults-only fallback expands repeated child leav
   assertEquals(printed.includes("right: Shared"), false);
 });
 
+Deno.test("applyShrinkAndWrap preserves nested primitive leaves for property-only access", () => {
+  const { sourceFile, checker } = createProgram(`
+    type Input = { text: string };
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+  const baseTypeNode = ts.factory.createTypeReferenceNode("Input");
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      readPaths: [["text", "length"]],
+    }),
+    baseTypeNode,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  assertStringIncludes(printed, "text: string;");
+  assertEquals(printed.includes("length: number"), false);
+});
+
 Deno.test("applyShrinkAndWrap turns identity-only wrapped inputs into OpaqueCell<unknown>", () => {
   const { sourceFile, checker } = createProgram(`
     type Item = { name: string; nested: { value: number } };
@@ -280,4 +367,39 @@ Deno.test("applyShrinkAndWrap shrinks direct array parameters to used item field
   assertStringIncludes(printed, "owner: string;");
   assertEquals(printed.includes("unused"), false);
   assertEquals(printed.includes("nested"), false);
+});
+
+Deno.test("applyShrinkAndWrap preserves aliased fixed-symbol keys in node-driven shrinking", () => {
+  const { sourceFile, checker } = createProgramWithFiles({
+    "/test.ts": `
+      import { SELF as CF_SELF } from "commonfabric";
+
+      type Input = {
+        [CF_SELF]?: { id: string; title: string };
+        value: string;
+      };
+    `,
+    "/commonfabric.d.ts": `
+      export declare const SELF: unique symbol;
+    `,
+  });
+  const alias = findTypeAlias(sourceFile, "Input");
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      readPaths: [["$SELF", "id"]],
+    }),
+    alias.type,
+    undefined,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  assertStringIncludes(printed, "[CF_SELF]?: {");
+  assertStringIncludes(printed, "id: string;");
+  assertEquals(printed.includes("title"), false);
+  assertEquals(printed.includes("value"), false);
 });

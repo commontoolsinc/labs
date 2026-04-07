@@ -29,28 +29,23 @@ export default pattern((state) => {
             prefs: {
                 type: "array",
                 items: {
-                    $ref: "#/$defs/Preference"
+                    type: "object",
+                    properties: {
+                        ingredient: {
+                            type: "string"
+                        },
+                        preference: {
+                            "enum": ["liked", "disliked"]
+                        }
+                    },
+                    required: ["ingredient", "preference"]
                 }
             },
             food: {
                 type: "string"
             }
         },
-        required: ["prefs", "food"],
-        $defs: {
-            Preference: {
-                type: "object",
-                properties: {
-                    ingredient: {
-                        type: "string"
-                    },
-                    preference: {
-                        "enum": ["liked", "disliked"]
-                    }
-                },
-                required: ["ingredient", "preference"]
-            }
-        }
+        required: ["prefs", "food"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, { food: state.key("foodDescription"), prefs: state.key("preferences") }, ({ food, prefs }) => {

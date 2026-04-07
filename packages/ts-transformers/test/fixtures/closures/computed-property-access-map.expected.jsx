@@ -37,25 +37,17 @@ export default pattern((__cf_pattern_input) => {
             items: {
                 type: "array",
                 items: {
-                    $ref: "#/$defs/Item"
+                    type: "object",
+                    properties: {
+                        done: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["done"]
                 }
             }
         },
-        required: ["items"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
+        required: ["items"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
@@ -99,28 +91,20 @@ export default pattern((__cf_pattern_input) => {
                             tasks: {
                                 type: "array",
                                 items: {
-                                    $ref: "#/$defs/Item"
+                                    type: "object",
+                                    properties: {
+                                        name: {
+                                            type: "string"
+                                        }
+                                    },
+                                    required: ["name"]
                                 }
                             }
                         },
                         required: ["tasks"]
                     }
                 },
-                required: ["result"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            done: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["name", "done"]
-                    }
-                }
+                required: ["result"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "array",
                 items: {

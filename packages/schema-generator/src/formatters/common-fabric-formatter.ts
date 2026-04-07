@@ -728,7 +728,10 @@ export class CommonFabricFormatter implements TypeFormatter {
       const obj: Record<string, unknown> = {};
       for (const member of typeNode.members) {
         if (ts.isPropertySignature(member) && member.name && member.type) {
-          const propName = getPropertyNameText(member.name);
+          const propName = getPropertyNameText(
+            member.name,
+            context.typeChecker,
+          );
           if (!propName) {
             continue;
           }

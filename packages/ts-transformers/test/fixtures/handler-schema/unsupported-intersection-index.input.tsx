@@ -10,15 +10,16 @@ interface ListState {
 // Index signature will prevent safe merge
 type Indexed = { [k: string]: unknown };
 
-const removeItem = handler<unknown, ListState & Indexed>(
-  (_, { items }) => {
-    // noop
-    items.get();
+const removeItem = handler<{ key: string }, ListState & Indexed>(
+  (event, state) => {
+    state.items.get();
+    state[event.key];
   },
 );
 
 // FIXTURE: unsupported-intersection-index
-// Verifies: intersection with index-signature type falls back to additionalProperties with $comment warning
-//   handler<unknown, ListState & Indexed>() → context: { additionalProperties: true, $comment: "Unsupported intersection..." }
-// Context: negative test -- index signatures cannot be safely merged, so transformer emits a fallback schema
+// Verifies: dynamic key access keeps index-signature intersections open-ended
+//   handler<{key:string}, ListState & Indexed>() → context: { additionalProperties: true, $comment: "Unsupported intersection..." }
+// Context: negative test -- without the dynamic key read, shrinking can safely
+//   keep only `items`. This fixture forces the truly open-ended fallback path.
 export { removeItem };

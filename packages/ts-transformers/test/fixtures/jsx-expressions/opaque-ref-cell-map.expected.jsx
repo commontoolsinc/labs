@@ -264,12 +264,40 @@ export default pattern(() => {
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
+        $NAME: {
+            type: "string",
+            "enum": ["Charms Launcher"]
+        },
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        },
         cellRef: {
             type: "array",
             items: true
         }
     },
-    required: ["cellRef"]
+    required: ["$NAME", "$UI", "cellRef"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

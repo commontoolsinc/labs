@@ -305,20 +305,20 @@ export default pattern((state) => {
                 state: {
                     type: "object",
                     properties: {
-                        end: {
-                            type: "number"
-                        },
                         items: {
                             type: "array",
                             items: {
                                 type: "number"
                             }
                         },
+                        end: {
+                            type: "number"
+                        },
                         start: {
                             type: "number"
                         }
                     },
-                    required: ["end", "items", "start"]
+                    required: ["items", "end", "start"]
                 }
             },
             required: ["state"]
@@ -626,9 +626,6 @@ export default pattern((state) => {
                             items: {
                                 type: "object",
                                 properties: {
-                                    name: {
-                                        type: "string"
-                                    },
                                     age: {
                                         type: "number"
                                     },
@@ -636,7 +633,7 @@ export default pattern((state) => {
                                         type: "boolean"
                                     }
                                 },
-                                required: ["name", "age", "active"]
+                                required: ["age", "active"]
                             }
                         },
                         minAge: {
@@ -769,17 +766,11 @@ export default pattern((state) => {
                             items: {
                                 type: "object",
                                 properties: {
-                                    name: {
-                                        type: "string"
-                                    },
                                     age: {
                                         type: "number"
-                                    },
-                                    active: {
-                                        type: "boolean"
                                     }
                                 },
-                                required: ["name", "age", "active"]
+                                required: ["age"]
                             }
                         },
                         minAge: {
@@ -816,17 +807,11 @@ export default pattern((state) => {
                             items: {
                                 type: "object",
                                 properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    age: {
-                                        type: "number"
-                                    },
                                     active: {
                                         type: "boolean"
                                     }
                                 },
-                                required: ["name", "age", "active"]
+                                required: ["active"]
                             }
                         }
                     },

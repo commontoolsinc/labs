@@ -184,6 +184,33 @@ type CalculatorRequest = {
         },
       ]);
     });
+
+    it("preserves computed Common Fabric UI keys in synthetic type literals", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+declare const UI: unique symbol;
+type VNode = {
+  type: "vnode";
+};
+type Output = { [UI]: VNode };
+`;
+      const { checker, typeNode } = await getTypeFromCode(code, "Output");
+      if (!typeNode) {
+        throw new Error("Expected Output type node.");
+      }
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        typeNode,
+        checker,
+      ) as Record<string, unknown>;
+
+      expect(schema.type).toBe("object");
+      expect(schema.properties).toEqual({
+        $UI: {
+          $ref: "https://commonfabric.org/schemas/vnode.json",
+        },
+      });
+      expect(schema.required).toEqual(["$UI"]);
+    });
   });
 
   describe("anonymous recursion", () => {

@@ -9,6 +9,7 @@ import type {
   FunctionCapabilitySummary,
   ReactiveCapability,
 } from "../core/mod.ts";
+import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 
@@ -92,7 +93,6 @@ const FALLBACK_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.QuestionQuestionToken,
   ts.SyntaxKind.BarBarToken,
 ]);
-const KNOWN_FIXED_SYMBOL_KEYS = new Set(["NAME", "UI", "SELF", "FS"]);
 const ASSIGNMENT_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.EqualsToken,
   ts.SyntaxKind.PlusEqualsToken,
@@ -173,55 +173,6 @@ function extractLiteralPathArguments(
     return { path, dynamic: true };
   }
   return { path, dynamic: false };
-}
-
-function getKnownFixedSymbolKeyName(
-  expr: ts.Expression,
-  checker?: ts.TypeChecker,
-): string | undefined {
-  if (
-    ts.isPropertyAccessExpression(expr) &&
-    ts.isIdentifier(expr.expression) &&
-    expr.expression.text === "__cfHelpers" &&
-    KNOWN_FIXED_SYMBOL_KEYS.has(expr.name.text)
-  ) {
-    return expr.name.text;
-  }
-
-  if (!ts.isIdentifier(expr)) {
-    return undefined;
-  }
-
-  if (KNOWN_FIXED_SYMBOL_KEYS.has(expr.text)) {
-    return expr.text;
-  }
-
-  if (!checker) {
-    return undefined;
-  }
-
-  const symbol = checker.getSymbolAtLocation(expr);
-  const aliasName = symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0
-    ? checker.getAliasedSymbol(symbol).getName()
-    : undefined;
-  if (aliasName && KNOWN_FIXED_SYMBOL_KEYS.has(aliasName)) {
-    return aliasName;
-  }
-
-  const symbolName = symbol?.getName();
-  if (symbolName && KNOWN_FIXED_SYMBOL_KEYS.has(symbolName)) {
-    return symbolName;
-  }
-
-  return undefined;
-}
-
-function getKnownComputedKeyPathSegment(
-  expr: ts.Expression,
-  checker?: ts.TypeChecker,
-): string | undefined {
-  const keyName = getKnownFixedSymbolKeyName(expr, checker);
-  return keyName ? `$${keyName}` : undefined;
 }
 
 function getStaticPropertyKeyText(

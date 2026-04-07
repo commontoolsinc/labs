@@ -24,31 +24,17 @@ const removeItem = handler({
         items: {
             type: "array",
             items: {
-                $ref: "#/$defs/Item",
-                asCell: ["cell"]
+                type: "unknown",
+                asCell: ["opaque"]
             },
             asCell: ["cell"]
         },
         item: {
-            $ref: "#/$defs/Item",
-            asCell: ["cell"]
+            type: "unknown",
+            asCell: ["opaque"]
         }
     },
-    required: ["items", "item"],
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                id: {
-                    type: "number"
-                },
-                name: {
-                    type: "string"
-                }
-            },
-            required: ["id", "name"]
-        }
-    }
+    required: ["items", "item"]
 } as const satisfies __cfHelpers.JSONSchema, (_event, { items, item }) => {
     const currentItems = items.get();
     const index = currentItems.findIndex((el) => el.equals(item));

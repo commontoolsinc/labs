@@ -112,31 +112,26 @@ export default pattern((state) => {
                                 spots: {
                                     type: "array",
                                     items: {
-                                        $ref: "#/$defs/Spot"
+                                        type: "object",
+                                        properties: {
+                                            spotNumber: {
+                                                type: "string"
+                                            },
+                                            label: {
+                                                type: "string"
+                                            },
+                                            active: {
+                                                type: "boolean"
+                                            }
+                                        },
+                                        required: ["spotNumber", "active"]
                                     }
                                 }
                             },
                             required: ["spots"]
                         }
                     },
-                    required: ["state"],
-                    $defs: {
-                        Spot: {
-                            type: "object",
-                            properties: {
-                                active: {
-                                    type: "boolean"
-                                },
-                                spotNumber: {
-                                    type: "string"
-                                },
-                                label: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["active", "spotNumber"]
-                        }
-                    }
+                    required: ["state"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
