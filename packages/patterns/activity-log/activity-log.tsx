@@ -38,6 +38,7 @@ interface ActivityLogInput {
   mentioned?: Writable<Default<MentionablePiece[], []>>;
 }
 
+/** An #activity-log for recording structured agent events. */
 interface ActivityLogOutput {
   [NAME]: string;
   [UI]: VNode;
