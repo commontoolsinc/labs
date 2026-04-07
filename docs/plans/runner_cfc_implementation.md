@@ -100,6 +100,11 @@ and metadata updates are derived from `writes` only. If later rules need
 per-write provenance or exact attempt order, we can add dedicated write-attempt
 logging as a follow-on precision optimization.
 
+Phase-1 invariant: direct `tx.write*()` usage is internal-only. No-op attempted
+target coverage depends on higher-level diff paths performing
+`markReadAsPotentialWrite` reads before deciding whether to write. That
+assumption should be documented explicitly on the transaction write APIs.
+
 ### Prepare
 
 Prepare is the deterministic boundary check that runs after the user action or
@@ -235,15 +240,24 @@ Phase-1 merge rules:
 
 Phase-1 behavior:
 
-- compute the current effective schema at prepare time
-- merge it monotonically into the stored entity envelope when possible
-- persist the envelope hash in `schemaHash`
-- reject only when the current schema cannot be merged with the stored envelope
-  without weakening IFC obligations or invalidating previously valid data,
+- each write that carries schema context, typically from `Cell.*` operations,
+  contributes a candidate schema update for its target entity
+- if the target entity has no stored schema envelope yet, prepare seeds it from
+  the candidate schema
+- if the target entity already has a stored schema envelope, prepare attempts a
+  monotonic merge of the candidate schema into that envelope
+- if merge fails because the candidate would weaken IFC obligations or
+  invalidate previously valid data, prepare rejects and the transaction aborts,
   unless an explicit migration path is active
+- every merged envelope is canonicalized before hashing
+- if the canonical merged envelope hashes to the existing `schemaHash`, prepare
+  treats the schema update as a no-op
+- if the canonical merged envelope produces a new hash, prepare persists the
+  replacement `schemaHash` and associated metadata
 
-This keeps schema identity stable without pretending that all reads and writes
-share one exact selector schema.
+This keeps schema identity stable while making schema evolution a per-write
+entity update, rather than depending on whichever narrowed selector schema
+happened to be observed elsewhere in the attempt.
 
 ## Non-Goals
 
@@ -348,6 +362,10 @@ Tasks:
 - [ ] Surface tx `potentialWrites` as the phase-1 maybe-write target set
 - [ ] Produce a deterministic final-per-path `writes` set for phase 1
 - [ ] Preserve no-op attempted-target coverage through `potentialWrites`
+- [ ] Add JSDoc on internal `tx.write*` APIs explaining that phase-1 no-op
+      attempted-target coverage relies on higher-level diff paths using
+      `markReadAsPotentialWrite`; blind same-value direct writes are not
+      surfaced through `potentialWrites`
 - [ ] Keep scheduler metadata and verifier metadata distinct
 - [ ] Exclude only `internalVerifierRead` from the consumed-read set
 - [ ] Make the phase-1 prepare engine free to pessimistically treat all consumed
@@ -437,6 +455,9 @@ Tasks:
 
 - [ ] Build `prepareBoundaryCommit(tx, options)` as a pure, deterministic
       evaluator
+- [ ] Thread schema-bearing write context, typically from `Cell.*` mutations,
+      into prepare so each target entity attempts a schema-envelope merge for
+      that write
 - [ ] Implement a canonical merged-schema envelope operator for the supported
       subset
 - [ ] Ensure IFC keys never weaken under merge and never appear only inside a
@@ -462,6 +483,10 @@ Tasks:
       influence model over `potentialWrites ∪ writes`
 - [ ] Use `potentialWrites ∪ writes` for target-side enforcement and use
       `writes` only for persisted output metadata
+- [ ] If a target entity has no stored schema envelope, seed it from the first
+      canonical merged schema; if merge yields the existing canonical hash,
+      treat it as a no-op; if merge yields a new canonical hash, replace the
+      stored `schemaHash`; if merge fails, reject and abort the transaction
 - [ ] Reject on missing schema, missing metadata needed for a check, or any
       unsupported trust-sensitive claim
 
@@ -489,6 +514,9 @@ Tasks:
       outbox
 - [ ] Migrate stream sends, queued events, and other runner-managed side effects
       to the outbox
+- [ ] Add JSDoc on internal commit-callback / `onCommit` hooks explaining that
+      they are internal-only, may run after failed commits, and must not
+      perform external side effects; effectful work must use the outbox
 - [ ] Keep retries fresh: new tx, new prepare, new trust snapshot
 - [ ] Audit `onCommit` call sites and move effectful ones to the outbox
 
@@ -497,6 +525,7 @@ Acceptance:
 - [ ] Failed commit does not emit side effects
 - [ ] Retried handler emits side effects once, after the winning commit
 - [ ] Non-effectful commit callbacks used for diagnostics still work
+- [ ] Internal callback docs make the non-effectful restriction explicit
 
 ### 8. Implementation Identity and Trust
 
@@ -564,11 +593,14 @@ Primary files:
 
 - `packages/runner/src/builtins/fetch-data.ts`
 - `packages/runner/src/builtins/fetch-program.ts`
+- `packages/runner/src/builtins/stream-data.ts`
 - new files under `packages/runner/src/cfc/`
 
 Tasks:
 
 - [ ] Introduce a stable, immutable request snapshot for external sink calls
+- [ ] Include `streamData` alongside `fetchData` and `fetchProgram` in the
+      initial sink inventory and rollout gate
 - [ ] Move network side effects behind the transaction outbox
 - [ ] Verify sink-specific policy from prepared request labels before issuing the
       request
@@ -577,7 +609,8 @@ Tasks:
 
 Acceptance:
 
-- [ ] Failed prepare or failed commit never issues a network call
+- [ ] Failed prepare or failed commit never issues a network call from
+      `fetchData`, `fetchProgram`, or `streamData`
 - [ ] Retried attempts reuse the winning committed effect and do not double-send
 - [ ] Request release rules are evaluated from persisted labels, not ad hoc
       runtime state
@@ -690,7 +723,7 @@ Land the work in mergeable vertical slices:
 9. [ ] Stable implementation identity and trust snapshotting, then enable
        trust-sensitive rule enforcement
 10. [ ] Structural flow-precision claims for core built-ins
-11. [ ] Fetch and other external sink enforcement
+11. [ ] Fetch, `streamData`, and other external sink enforcement
 12. [ ] UI provenance and trusted-event path
 13. [ ] Direct CAS and parallel-path hardening
 
