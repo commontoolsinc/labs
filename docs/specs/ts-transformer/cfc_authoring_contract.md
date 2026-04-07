@@ -1,7 +1,6 @@
 # CFC Authoring Contract
 
-**Status:** Drafted from the `exp/cfc-impl-2` prototype for replay on current
-`main`
+**Status:** Draft contract
 **Scope:** `packages/api`, `packages/ts-transformers`,
 `packages/schema-generator`
 
@@ -11,17 +10,12 @@ here is how authored types and JSX lower into schema metadata and helper calls.
 
 ## Source Of Truth
 
-When this document conflicts with code, the current authoritative prototype
-sources are:
+This document is normative for the CFC-specific TypeScript authoring surface.
 
-- `packages/api/index.ts`
-- `packages/ts-transformers/src/ct-pipeline.ts`
-- `packages/ts-transformers/src/transformers/cfc-jsx.ts`
-- `packages/ts-transformers/src/transformers/schema-injection.ts`
-- `packages/ts-transformers/src/transformers/schema-generator.ts`
-- `packages/schema-generator/src/formatters/cfc-formatter.ts`
-- `packages/ts-transformers/test/cfc-authoring.test.ts`
-- `packages/schema-generator/test/schema/cfc-type.test.ts`
+Related contracts:
+
+- `docs/specs/ts-transformer/cfc_ui_helper_contract.md`
+- `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
 
 ## Goals
 
@@ -73,11 +67,10 @@ type CanonicalPointer<Path extends readonly string[]> = `/${string}`;
 
 ### Supported Alias Set
 
-The replayed implementation must keep the supported alias list synchronized
-across the public API, transformer diagnostics, and
-`packages/schema-generator/src/formatters/cfc-formatter.ts`.
+The implementation must keep the supported alias list synchronized across the
+public API, transformer diagnostics, and schema-generator formatter support.
 
-Current prototype alias set:
+Canonical alias set:
 
 - `Cfc`
 - `Classified`
@@ -85,6 +78,7 @@ Current prototype alias set:
 - `AddIntegrity`
 - `RequiresIntegrity`
 - `MaxConfidentiality`
+- `OpaqueInput`
 - `WriteAuthorizedBy`
 - `ExactCopy`
 - `ProjectionPath`
@@ -123,6 +117,36 @@ These aliases lower to direct `ifc` keys:
 - `SubsetOf<T, P>` -> `ifc.collection = { subsetOf: P }`
 - `PermutationOf<T, P>` -> `ifc.collection = { permutationOf: P }`
 
+### Opaque Inputs
+
+Opaque inputs are part of the CFC authoring surface even though they are not
+ordinary label-transition sugar.
+
+The canonical form is:
+
+```ts
+type OpaqueInput<
+  T,
+  Spec extends true | {
+    schema?: unknown;
+    allowPassThrough?: boolean;
+  } = true,
+> = Cfc<OpaqueRef<T>, { opaque: Spec }>;
+```
+
+Normative behavior:
+
+- `OpaqueRef<T>` supplies the handler-side reference/read restriction shape.
+- `OpaqueRef<T>` by itself does not emit `ifc.opaque`.
+- `Cfc<OpaqueRef<T>, { opaque: Spec }>` emits the base schema of `T` plus
+  `ifc.opaque = Spec`.
+- `Spec = true` means the field is opaque with default runtime handling.
+- `Spec = { schema, allowPassThrough? }` lowers that object verbatim into
+  `ifc.opaque`.
+- Because the emitted schema still describes `T`, opaque inputs remain
+  type-checkable for pass-through and schema validation, but they are not
+  authoring sugar for readable value access.
+
 ### Projection Helpers
 
 - `ProjectionPath<T, From, Path>` lowers to
@@ -158,13 +182,13 @@ Normative behavior:
 5. The schema-generator must preserve the identity through a marker payload,
    then rehydrate it back into emitted schema AST as `<binding> as any`.
 
-The marker format used in the prototype is:
+One valid marker shape is:
 
 ```ts
 { __ctWriterIdentityOf: <ts.EntityName> }
 ```
 
-That marker is an implementation detail, but the replay still needs an
+That marker is an implementation detail, but the implementation still needs an
 equivalent cross-stage identity channel.
 
 ## Pipeline Contract
@@ -199,6 +223,9 @@ Required capabilities:
 - substitute type parameters through alias expansion
 - evaluate literal, tuple, array, and type-literal payloads
 - preserve the base type when stripping the `Cfc` carrier intersection
+- preserve wrapper erasure rules for `OpaqueRef<T>` so `OpaqueInput<T, ...>`
+  lowers to the schema shape of `T` rather than inventing a separate opaque
+  runtime value shape
 
 If alias expansion cannot resolve back to a supported form, lowering must fall
 back to ordinary schema generation rather than inventing partial metadata.
@@ -223,10 +250,15 @@ Required failure modes:
   conditional or computed type programs are out of scope.
 - The supported alias set is closed by name. New sugar needs explicit formatter
   support.
+- `OpaqueInput<T, Spec>` only declares schema-level opacity. The compile-time
+  read restrictions on opaque values still come from the existing `OpaqueRef`
+  type/runtime contract.
 
 ## Acceptance Coverage
 
-The replay is not complete until these tests pass or equivalent coverage exists:
+The contract is not fully implemented until these tests pass or equivalent
+coverage exists:
 
 - `packages/ts-transformers/test/cfc-authoring.test.ts`
 - `packages/schema-generator/test/schema/cfc-type.test.ts`
+- equivalent coverage for `OpaqueInput<T, Spec>` lowering to `ifc.opaque`
