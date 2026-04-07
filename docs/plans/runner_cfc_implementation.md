@@ -100,14 +100,16 @@ attempt. It is derived from transaction inspection APIs and excludes
 verifier-internal reads. Scheduler-only metadata and CFC metadata must remain
 separate concerns.
 
-### Attempted Write
+### Canonical Write Set
 
-An attempted write is an ordered write observed before last-write-wins
-compaction. Boundary checking operates on attempted writes first and only
-derives a final-per-path view where a rule explicitly needs it.
+The ideal high-precision model records ordered attempted writes before
+last-write-wins compaction.
 
-Phase 1 uses a dedicated v2 extraction API sourced from transaction internals
-rather than `journal.activity()`.
+Phase 1 does not require that precision. It uses a deterministic final-per-path
+write set sourced from v2 transaction internals and may pessimistically treat
+all consumed reads as influencing all final writes. If later rules need
+per-write provenance or exact attempt order, we can add dedicated write-attempt
+logging as a follow-on precision optimization.
 
 ### Prepare
 
@@ -116,7 +118,7 @@ handler has produced its reads and writes but before commit succeeds.
 
 Prepare:
 
-- gathers consumed reads and attempted writes
+- gathers consumed reads and canonical writes
 - evaluates schema and policy obligations
 - computes output labels and metadata
 - records a digest of exactly what was checked
@@ -126,7 +128,7 @@ Prepare:
 The prepared digest is a stable hash of:
 
 - canonical consumed reads
-- canonical attempted writes
+- canonical writes
 - implementation identity
 - trust snapshot identity
 
@@ -136,24 +138,22 @@ Any change to that material invalidates preparation.
 
 Every trust-sensitive check uses an explicit implementation identity:
 
-- a stable, policy-facing code identity for code-defined modules and handlers
+- a stable, policy-facing code identity for verified compiled modules and
+  handlers
 - `Builtin(<name-or-ref>)` for runtime built-ins
-- an explicit trusted-host/test identity for the small set of locally trusted
-  host callbacks used outside verified bundle loads
 
-`verifiedLoadId` remains a runtime admission scope, not the policy-facing code
-identity. The boundary evaluator should reuse the verified-load registry path
-for execution provenance, while policy references resolve against a stable code
-identity derived from one of:
+`implementationRef` remains the runtime lookup key for executable functions, and
+`verifiedLoadId` remains the runtime admission scope. The boundary evaluator
+reuses the verified-load registry for execution provenance, while policy
+references resolve against a separate stable code identity derived from one of:
 
-- verified compiled code: bundle hash + source path + canonical source span (or
-  an equivalent canonical location within the verified bundle)
-- direct-eval closure-free code: hash of canonicalized module/function code
-- built-ins and trusted host/test helpers: canonical runtime-owned registry ids
+- verified compiled code: bundle identity + canonical binding locator within the
+  verified bundle
+- built-ins: canonical runtime-owned registry ids
 
-`implementationRef` should become or deterministically derive from that stable
-code identity so policies, runtime checks, and receipts all refer to the same
-thing.
+Phase 1 does not require stable policy identities for direct-eval or
+unsafe-host/test helpers. Those paths are treated as untrusted for
+trust-sensitive relaxations unless a later explicit stable-id path is added.
 
 ### Trust Snapshot
 
@@ -163,12 +163,14 @@ snapshot, not on ambient mutable state.
 
 ## Storage Model
 
-The runner needs an authoritative CFC metadata record alongside today's coarse
-label fact.
+For memory-v2, the runner needs an authoritative CFC metadata record embedded in
+the single entity document. Legacy v1 coarse label facts remain as compatibility
+behavior until parity work lands.
 
-### Side Record
+### Embedded Metadata
 
-Introduce a system-owned side record for each entity:
+Introduce a system-owned reserved sibling to `value` and `source` for each
+entity:
 
 ```ts
 type CfcMetadata = {
@@ -185,15 +187,25 @@ type CfcMetadata = {
     classification?: string[];
   };
 };
+
+type EntityDocumentWithCfc = {
+  value?: unknown;
+  source?: unknown;
+  cfc?: CfcMetadata;
+};
 ```
 
 Storage rules:
 
-- the side record is authoritative for boundary checks once present
-- the coarse `application/label+json` fact remains for compatibility with
-  current query/redaction behavior
-- normal `application/json` reads must never expose the side record
-- future query APIs may surface it as side data, but not inline in user docs
+- in memory-v2, the reserved `cfc` sibling is authoritative for boundary checks
+  once present
+- the v2 `cfc` sibling stores the authoritative label map, summary labels, and
+  `schemaHash` in the same document as `value` and `source`
+- ordinary `application/json` reads and materialized values must strip the
+  reserved `cfc` sibling
+- v1 may continue using `application/label+json` as legacy compatibility
+  behavior, but phase 1 does not block on reproducing that MIME-based shape in
+  v2
 
 ### Path Canonicalization
 
@@ -342,19 +354,20 @@ Primary files:
 
 Tasks:
 
-- [ ] Expose a dedicated v2 ordered write-attempt extraction API from
-      transaction internals
 - [ ] Build a canonical extractor over the v2 inspection APIs
-- [ ] Preserve attempted write order exactly
-- [ ] Preserve write no-op information when available
+- [ ] Produce a deterministic final-per-path write set for phase 1
+- [ ] Preserve write no-op information when cheaply available
 - [ ] Keep scheduler metadata and verifier metadata distinct
 - [ ] Exclude only `internalVerifierRead` from the consumed-read set
-- [ ] Keep a final-per-path view for rules that depend on post-compaction state
+- [ ] Make the phase-1 prepare engine free to pessimistically treat all consumed
+      reads as influencing all final writes
+- [ ] Defer exact ordered write-attempt logging to a follow-up precision slice if
+      later rules need it
 
 Acceptance:
 
 - [ ] Canonical path handling strips the `value` wrapper consistently
-- [ ] Attempted write order is stable across runs
+- [ ] Phase-1 canonical write extraction is deterministic across runs
 - [ ] Internal verifier reads remain visible for diagnostics but not policy
 - [ ] Final-per-path view is deterministic
 
@@ -389,25 +402,31 @@ Acceptance:
 
 Primary files:
 
-- `packages/runner/src/storage/cache.ts`
-- `packages/memory/space.ts`
-- `packages/memory/provider.ts`
+- `packages/runner/src/storage/v2.ts`
+- `packages/runner/src/storage/v2-document.ts`
+- `packages/memory/v2.ts`
 - `packages/runner/src/storage/interface.ts`
+- legacy follow-up: `packages/runner/src/storage/cache.ts`,
+  `packages/memory/space.ts`, `packages/memory/provider.ts`
 
 Tasks:
 
-- [ ] Persist the new CFC side record as system-owned metadata
-- [ ] Keep writing `application/label+json` as the coarse compatibility summary
-- [ ] Ensure normal user-doc reads do not expose the side record
+- [ ] Persist CFC metadata as a system-owned reserved sibling to `value` and
+      `source` in the v2 entity document
+- [ ] Store the authoritative label map, summary labels, and `schemaHash` in
+      that embedded metadata
+- [ ] Ensure normal user-doc reads do not expose the reserved `cfc` sibling
 - [ ] Make storage helpers able to read current CFC metadata efficiently during
       prepare
-- [ ] Treat phase 1 as v2-first; do not block the landing on v1 parity work
+- [ ] Keep v1 `application/label+json` compatibility as follow-up work; do not
+      block phase 1 on v1 parity
 
 Acceptance:
 
-- [ ] A successful prepared write persists both the side record and the coarse
-      summary label fact
-- [ ] Existing reads of `application/json` do not surface the side record
+- [ ] A successful prepared write persists embedded CFC metadata in the v2
+      document
+- [ ] Existing reads of `application/json` do not surface the reserved `cfc`
+      sibling
 - [ ] Stored envelope incompatibility rejects later writes unless migration is on
 
 ### 6. Prepare Engine
@@ -433,10 +452,14 @@ Tasks:
 - [ ] Implement `classification`, `integrity`, `addIntegrity`,
       `requiredIntegrity`, and `maxConfidentiality`
 - [ ] Implement `writeAuthorizedBy`, `exactCopyOf`, `projection`, and
-      collection-derived transition checks
+      collection-derived transition checks where they can be evaluated from
+      consumed reads plus final writes; otherwise fail closed or remain
+      conservative
 - [ ] Compute output label maps and the coarse summary classification
 - [ ] Persist only concrete evidence in stored labels; derived trust closure
       remains runtime-only
+- [ ] In phase 1, allow a conservative all-consumed-reads-to-all-final-writes
+      influence model
 - [ ] Reject on missing schema, missing metadata needed for a check, or any
       unsupported trust-sensitive claim
 
@@ -478,20 +501,24 @@ Acceptance:
 Primary files:
 
 - `packages/runner/src/runner.ts`
-- `packages/runner/src/scheduler.ts`
+- `packages/runner/src/builder/module.ts`
+- `packages/runner/src/builder/json-utils.ts`
+- `packages/runner/src/harness/executable-registry.ts`
 - new files under `packages/runner/src/cfc/`
 
 Tasks:
 
-- [ ] Define a stable policy-facing code identity separate from per-load
-      `verifiedLoadId`
-- [ ] Keep `verifiedLoadId` as the runtime admission scope and bind admitted
-      implementations to stable code identities through the verified registry
-- [ ] Derive compiled-code identity from verified bundle identity plus canonical
-      source location within the bundle
-- [ ] Derive direct-eval closure-free identity from canonicalized code hashes
-- [ ] Define canonical ids for built-ins and for the narrow test/trusted-host
-      cases that must bypass verified bundle loading
+- [ ] Define a stable policy-facing code identity separate from runtime
+      `implementationRef` and per-load `verifiedLoadId`
+- [ ] Keep `implementationRef` as the runtime lookup key and `verifiedLoadId` as
+      the runtime admission scope; resolve policy identities through the
+      verified registry and built-in registry
+- [ ] Derive verified compiled-code identity from verified bundle identity plus
+      canonical binding location within the bundle
+- [ ] Define canonical ids for built-ins
+- [ ] In phase 1, treat direct-eval and unsafe-host/test helpers as untrusted
+      for trust-sensitive relaxations unless a later explicit stable-id path is
+      added
 - [ ] Thread the resulting implementation identity through action and handler
       execution
 - [ ] Define a trust-snapshot provider interface that is deterministic and easy
@@ -501,8 +528,9 @@ Tasks:
 
 Acceptance:
 
-- [ ] Built-ins, verified compiled code, and direct-eval closure-free code
-      produce stable implementation identities
+- [ ] Built-ins and verified compiled code produce stable policy-facing
+      implementation identities
+- [ ] Unsupported identity classes fail closed for trust-sensitive checks
 - [ ] Changing the trust snapshot between prepare and commit invalidates prepare
 - [ ] Unknown implementation identity is treated as untrusted
 
@@ -612,7 +640,7 @@ The test matrix should be built in the same order as the implementation:
 - [ ] rollout-mode tests for `disabled`, `observe`, and enforcing modes
 - [ ] traversal tests for relevance detection
 - [ ] prepare-engine tests for input requirements and output transitions
-- [ ] storage tests for side-record persistence and non-exposure
+- [ ] storage tests for embedded-metadata persistence and non-exposure
 - [ ] scheduler tests for retry and outbox behavior
 - [ ] sink tests for commit-gated network execution and idempotency
 - [ ] UI tests for provenance-backed trusted event delivery
@@ -633,7 +661,10 @@ Every phase should land with tests before the next phase starts.
       `cfcDigestInvalidations`, `cfcOutboxFlushes`, and sink dedup hits
 - [ ] Keep sensitive values out of logs; log only rule ids, paths, and summary
       labels
-- [ ] Do not enable sink enforcement until outbox and retry tests are green
+- [ ] Treat step 8 below as the first safe enablement point for state-only
+      transactions
+- [ ] Do not enable enforcing modes for runtimes with external sinks until
+      outbox and retry tests are green
 - [ ] Do not enable direct CAS enforcement until parallel-path non-bypass tests
       are green
 
@@ -643,17 +674,22 @@ Land the work in mergeable vertical slices:
 
 1. [ ] Types, canonical path helpers, and digest helpers
 2. [ ] Transaction CFC state and rollout modes with observe-mode prepare
-3. [ ] V2 consumed-read and ordered write-attempt extraction APIs
+3. [ ] V2 consumed-read and compact final-write extraction APIs
 4. [ ] Relevance detection and merged-schema envelope implementation
-5. [ ] Side-record persistence plus coarse-label compatibility summary
+5. [ ] Embedded v2 CFC metadata persistence and non-exposure
 6. [ ] Baseline prepare engine for classification and integrity checks
 7. [ ] Scheduler integration and success-only outbox
-8. [ ] Enforcing commit gate once extraction/prepare slices are green
+8. [ ] Enforcing commit gate for state-only transactions once extraction/prepare
+       slices are green
 9. [ ] Stable implementation identity and trust snapshotting
 10. [ ] Structural flow-precision claims for core built-ins
 11. [ ] Fetch and other external sink enforcement
 12. [ ] UI provenance and trusted-event path
 13. [ ] Direct CAS and parallel-path hardening
+
+Step 8 is the first safe enablement point for transactions that do not issue
+external effects. Step 11 is the first safe enablement point for runtimes with
+external sinks.
 
 ## Done Means
 
@@ -662,10 +698,10 @@ This plan is complete when all of the following are true:
 - CFC-relevant transactions are prepared and verified before commit
 - authoritative CFC metadata is persisted for later reads and writes
 - current coarse label behavior still works for existing query and redaction
-  flows
+  flows, whether sourced from legacy v1 facts or embedded v2 summaries
 - external side effects are commit-gated and retry-safe
 - stable policy-facing code identities and runtime verified-load provenance refer
-  to the same admitted implementations
+  to the same admitted implementations for the supported identity classes
 - trust-sensitive relaxations are deterministic and fail closed
 - tests cover warm-runtime and fresh-runtime behavior
 - the feature can be enabled incrementally with clear observability
