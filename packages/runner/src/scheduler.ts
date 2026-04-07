@@ -1904,9 +1904,7 @@ export class Scheduler {
       }
     }
 
-    if (newDependencies.size > 0) {
-      this.reverseDependencies.set(action, newDependencies);
-    }
+    this.reverseDependencies.set(action, newDependencies);
 
     // Emit telemetry for dependency updates
     this.runtime.telemetry.submit({
@@ -1937,24 +1935,65 @@ export class Scheduler {
     reverse.add(writer);
   }
 
+  private pathMatchesWrite(
+    pathWithValuePrefix: readonly MemoryAddressPathComponent[],
+    writePath: readonly MemoryAddressPathComponent[],
+    options: { nonRecursive?: boolean } = {},
+  ): boolean {
+    const readPath = pathWithValuePrefix[0] === "value"
+      ? pathWithValuePrefix.slice(1)
+      : pathWithValuePrefix;
+    return options.nonRecursive
+      ? writePath.length <= readPath.length + 1 &&
+        arraysOverlap(writePath, readPath)
+      : arraysOverlap(writePath, readPath);
+  }
+
+  private collectReadersForWrite(write: IMemorySpaceAddress): Set<Action> {
+    const entity = `${write.space}/${write.id}` as SpaceAndURI;
+    const readers = new Set<Action>();
+
+    const recursiveReaders = this.triggers.get(entity);
+    if (recursiveReaders) {
+      for (const [action, paths] of recursiveReaders) {
+        if (paths.some((path) => this.pathMatchesWrite(path, write.path))) {
+          readers.add(action);
+        }
+      }
+    }
+
+    const nonRecursiveReaders = this.nonRecursiveTriggers.get(entity);
+    if (nonRecursiveReaders) {
+      for (const [action, paths] of nonRecursiveReaders) {
+        if (
+          paths.some((path) =>
+            this.pathMatchesWrite(path, write.path, { nonRecursive: true })
+          )
+        ) {
+          readers.add(action);
+        }
+      }
+    }
+
+    return readers;
+  }
+
   private backfillDependentsForNewWrites(
     writer: Action,
     writes: IMemorySpaceAddress[],
   ): void {
     if (writes.length === 0) return;
+    const readers = new Set<Action>();
+    for (const write of writes) {
+      for (const action of this.collectReadersForWrite(write)) {
+        readers.add(action);
+      }
+    }
+    readers.delete(writer);
 
-    const scanAction = (action: Action) => {
-      if (action === writer) return;
-      const log = this.dependencies.get(action);
-      if (!log?.reads?.length && !log?.shallowReads.length) return;
-      if (
-        !this.readsOverlapWrites(log.reads, log.shallowReads, writes)
-      ) return;
+    for (const action of readers) {
       this.registerDependentEdge(writer, action);
-    };
-
-    for (const effect of this.effects) scanAction(effect);
-    for (const computation of this.computations) scanAction(computation);
+    }
   }
 
   private pruneDependentsForCurrentWrites(
@@ -2365,8 +2404,6 @@ export class Scheduler {
         return cached;
       }
 
-      const log = this.dependencies.get(action);
-
       if (this.collectStack.has(action)) {
         const cycleResult = this.dirty.has(action) || workSet.has(action);
         memo.set(action, cycleResult);
@@ -2377,10 +2414,27 @@ export class Scheduler {
       addedToStack = true;
 
       let actionNeedsRun = this.dirty.has(action);
-
-      if (log) {
-        if (this.collectDirtyDependenciesForLog(log, workSet, memo)) {
-          actionNeedsRun = true;
+      const directWriters = this.reverseDependencies.get(action);
+      if (directWriters) {
+        for (const writer of directWriters) {
+          const writerNeedsRun = this.collectDirtyDependencies(
+            writer,
+            workSet,
+            memo,
+          );
+          if (writerNeedsRun) {
+            actionNeedsRun = true;
+            if (this.computations.has(writer)) {
+              workSet.add(writer);
+            }
+          }
+        }
+      } else {
+        const log = this.dependencies.get(action);
+        if (log) {
+          if (this.collectDirtyDependenciesForLog(log, workSet, memo)) {
+            actionNeedsRun = true;
+          }
         }
       }
 
@@ -3584,6 +3638,7 @@ export class Scheduler {
         this.dependencies,
         this.mightWrite,
         this.actionParent,
+        this.pullMode ? this.dependents : undefined,
       );
 
       logger.debug("schedule-execute", () => [
@@ -3905,6 +3960,7 @@ function topologicalSort(
   dependencies: WeakMap<Action, ReactivityLog>,
   mightWrite: WeakMap<Action, IMemorySpaceAddress[]>,
   actionParent?: WeakMap<Action, Action>,
+  dependents?: WeakMap<Action, Set<Action>>,
 ): Action[] {
   const graph = new Map<Action, Set<Action>>();
   const inDegree = new Map<Action, number>();
@@ -3915,34 +3971,49 @@ function topologicalSort(
     inDegree.set(action, 0);
   }
 
-  // Build the graph based on read/write dependencies
-  for (const actionA of actions) {
-    const log = dependencies.get(actionA);
-    if (!log) continue;
-    const writes = mightWrite.get(actionA) ?? [];
-    const graphA = graph.get(actionA)!;
-    for (const write of writes) {
-      for (const actionB of actions) {
-        if (actionA !== actionB && !graphA.has(actionB)) {
-          const logB = dependencies.get(actionB);
-          if (!logB) continue;
-          if (
-            logB.reads.some(
-              (addr) =>
-                addr.space === write.space &&
-                addr.id === write.id &&
-                arraysOverlap(write.path, addr.path),
-            ) ||
-            logB.shallowReads.some(
-              (addr) =>
-                addr.space === write.space &&
-                addr.id === write.id &&
-                write.path.length <= addr.path.length + 1 &&
-                arraysOverlap(write.path, addr.path),
-            )
-          ) {
-            graphA.add(actionB);
-            inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
+  // Build the graph based on read/write dependencies.
+  // In pull mode we maintain this incrementally in `dependents`, so we can
+  // avoid rebuilding the graph from scratch on every settle iteration.
+  if (dependents) {
+    for (const actionA of actions) {
+      const graphA = graph.get(actionA)!;
+      const actionDependents = dependents.get(actionA);
+      if (!actionDependents) continue;
+      for (const actionB of actionDependents) {
+        if (!actions.has(actionB) || graphA.has(actionB)) continue;
+        graphA.add(actionB);
+        inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
+      }
+    }
+  } else {
+    for (const actionA of actions) {
+      const log = dependencies.get(actionA);
+      if (!log) continue;
+      const writes = mightWrite.get(actionA) ?? [];
+      const graphA = graph.get(actionA)!;
+      for (const write of writes) {
+        for (const actionB of actions) {
+          if (actionA !== actionB && !graphA.has(actionB)) {
+            const logB = dependencies.get(actionB);
+            if (!logB) continue;
+            if (
+              logB.reads.some(
+                (addr) =>
+                  addr.space === write.space &&
+                  addr.id === write.id &&
+                  arraysOverlap(write.path, addr.path),
+              ) ||
+              logB.shallowReads.some(
+                (addr) =>
+                  addr.space === write.space &&
+                  addr.id === write.id &&
+                  write.path.length <= addr.path.length + 1 &&
+                  arraysOverlap(write.path, addr.path),
+              )
+            ) {
+              graphA.add(actionB);
+              inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
+            }
           }
         }
       }
