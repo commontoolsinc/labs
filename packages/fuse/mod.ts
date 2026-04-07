@@ -633,7 +633,15 @@ export async function main(argv: string[] = Deno.args) {
     try {
       if (writeTarget?.kind === "handler") {
         const text = new TextDecoder().decode(buffer);
-        const value = JSON.parse(text.trim());
+        const trimmed = text.trim();
+        let value: unknown;
+        try {
+          value = JSON.parse(trimmed);
+        } catch {
+          // Bare string — treat as string value so callers don't need
+          // to double-quote (e.g. `echo book > addItem.handler`).
+          value = trimmed;
+        }
         await bridge.sendToHandlerTarget(writeTarget.target, value);
         bridge.invalidateHandlerTarget(writeTarget.target);
         if (handle.version === flushVersion) {
