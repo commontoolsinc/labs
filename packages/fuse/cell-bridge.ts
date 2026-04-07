@@ -2270,7 +2270,7 @@ export class CellBridge {
     // reads when setting up reactive subscriptions.
     try {
       const nameTrackingCell = await piece.result.getCell();
-      const cancelRootSub = nameTrackingCell.sink((_newValue: unknown) => {
+      const cancelRootSub = nameTrackingCell.sink((newValue: unknown) => {
         setTimeout(() => {
           try {
             const state = this.spaces.get(spaceName);
@@ -2286,15 +2286,26 @@ export class CellBridge {
             }
             if (currentName === undefined) return;
 
-            const newRawName = piece.name() ?? piece.id;
+            // Read $NAME from the sink value directly — piece.name() may
+            // return a stale cached value that hasn't updated yet.
+            const sinkName = typeof newValue === "object" && newValue !== null
+              ? (newValue as Record<string, unknown>)["$NAME"]
+              : undefined;
+            const rawName = typeof sinkName === "string"
+              ? sinkName
+              : (piece.name() ?? piece.id);
             const normalizedRawName = resolveProjectedPieceName(
-              piece.name(),
+              rawName,
               piece.id,
             );
 
-            // Skip if the raw name hasn't changed.
+            this.debugLog(
+              `[${spaceName}] Rename check: current=${currentName} raw=${rawName} normalized=${normalizedRawName}`,
+            );
+
+            // Skip if the name hasn't changed.
             if (
-              newRawName === currentName ||
+              rawName === currentName ||
               normalizedRawName === currentName
             ) return;
 
