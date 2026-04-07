@@ -2179,11 +2179,31 @@ export class CellBridge {
    */
   private async subscribePiece(
     piece: PieceController,
-    _pieceIno: bigint,
+    pieceIno: bigint,
     pieceName: string,
     spaceName: string,
   ): Promise<Cancel[]> {
     const cancels: Cancel[] = [];
+
+    // Subscribe to input/result cell changes so the hydration cache is
+    // invalidated when external mutations arrive (background recomputes,
+    // remote writes, etc.). We don't eagerly rebuild the tree — just clear
+    // the hydrated flag so the next FUSE read triggers a fresh hydration.
+    for (const propName of ["input", "result"] as const) {
+      try {
+        const cell = await piece[propName].getCell();
+        const cancel = cell.sink(() => {
+          setTimeout(() => {
+            this.invalidateRootPropCache(pieceIno, propName);
+          }, 0);
+        });
+        cancels.push(cancel);
+      } catch (e) {
+        console.error(
+          `[${spaceName}] Could not subscribe to ${pieceName}.${propName}: ${e}`,
+        );
+      }
+    }
 
     // Subscribe to the result cell to detect [NAME] changes and rename the
     // piece directory in the FUSE tree accordingly.

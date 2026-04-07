@@ -187,8 +187,9 @@ export async function executeMountedCallableFile(
         }),
   });
 
-  // Auto-step: trigger reactive recomputation after handler execution
-  if (typeof resolved.piece?.getCell === "function") {
+  // Auto-step: trigger reactive recomputation after handler execution.
+  // Skip if --help was shown — no mutation occurred.
+  if (!result.helpText && typeof resolved.piece?.getCell === "function") {
     await resolved.piece.getCell().pull();
     await resolved.manager.synced();
   }
