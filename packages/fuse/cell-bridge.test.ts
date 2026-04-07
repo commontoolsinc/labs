@@ -680,14 +680,16 @@ Deno.test("CellBridge result hydration updates pieces.json summary from current 
   );
   assertEquals(piecesJson[0].summary, "before");
 
-  const pieceIno = tree.lookup(state.piecesIno, "Summary-Piece")!;
   resultCell.set({ summary: "after" });
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
-    .hydratePieceProp.call(bridge, pieceIno, "result");
+  // Wait for debounce (150ms) + rebuild
+  await new Promise((resolve) => setTimeout(resolve, 250));
 
   piecesJson = JSON.parse(getFileContent(tree, state.piecesIno, "pieces.json"));
   assertEquals(piecesJson[0].summary, "after");
+
+  // Cancel subscriptions to avoid timer leaks
+  const subs = state.pieceSubs.get("Summary-Piece");
+  if (subs) { for (const cancel of subs) cancel(); }
 });
 
 Deno.test("CellBridge.writeFsFile writes markdown frontmatter and body to FS paths", async () => {
@@ -914,74 +916,88 @@ Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", 
 // Group 5: subscribePiece — rename on cell change
 // ---------------------------------------------------------------------------
 
-Deno.test("CellBridge.subscribePiece renames directory when piece name changes", async () => {
-  const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
-  const state = buildTestSpace(bridge, "home", []);
+Deno.test({
+  name: "CellBridge.subscribePiece renames directory when piece name changes",
+  sanitizeOps: false,
+  fn: async () => {
+    const tree = new FsTree();
+    const bridge = new CellBridge(tree, "/tmp/ct-exec");
+    const state = buildTestSpace(bridge, "home", []);
 
-  // Mutable name — we'll change it before firing the sink
-  let pieceName = "Old Name";
+    // Mutable name — we'll change it before firing the sink
+    let pieceName = "Old Name";
 
-  const resultCell = new SinkableCell({});
+    const resultCell = new SinkableCell({});
 
-  const piece = {
-    id: "of:abc",
-    name: () => pieceName,
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
-    input: {
-      getCell: () => Promise.resolve(makeCell({}, undefined)),
-      get: () => Promise.resolve({}),
-    },
-    result: {
-      getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
-      get: () => Promise.resolve({}),
-    },
-  };
+    const piece = {
+      id: "of:abc",
+      name: () => pieceName,
+      getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+      input: {
+        getCell: () => Promise.resolve(makeCell({}, undefined)),
+        get: () => Promise.resolve({}),
+      },
+      result: {
+        getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+        get: () => Promise.resolve({}),
+      },
+    };
 
-  // First, add the piece to the space to set up the directory and state maps
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
-    .addPieceToSpace.bind(bridge);
-  await addPiece(state, piece, "home");
+    // First, add the piece to the space to set up the directory and state maps
+    const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+      .addPieceToSpace.bind(bridge);
+    await addPiece(state, piece, "home");
 
-  // Verify initial state
-  assertEquals(
-    tree.lookup(state.piecesIno, "Old-Name") !== undefined,
-    true,
-    "Old Name dir should exist initially",
-  );
-
-  // Now call subscribePiece separately to attach the rename sink
-  const subs = await (bridge as unknown as { subscribePiece: SubscribePiece })
-    .subscribePiece.call(
-      bridge,
-      piece,
-      tree.lookup(state.piecesIno, "Old-Name")!,
-      "Old-Name",
-      "home",
+    // Verify initial state
+    assertEquals(
+      tree.lookup(state.piecesIno, "Old-Name") !== undefined,
+      true,
+      "Old Name dir should exist initially",
     );
 
-  // Store updated subs
-  state.pieceSubs.set("Old-Name", subs);
+    // Cancel the addPieceToSpace subs before creating new ones
+    const addedSubs = state.pieceSubs.get("Old-Name");
+    if (addedSubs) { for (const cancel of addedSubs) cancel(); }
 
-  // Change the piece name before firing the sink
-  pieceName = "New Name";
+    // Now call subscribePiece separately to attach the rename sink
+    const subs = await (bridge as unknown as { subscribePiece: SubscribePiece })
+      .subscribePiece.call(
+        bridge,
+        piece,
+        tree.lookup(state.piecesIno, "Old-Name")!,
+        "Old-Name",
+        "home",
+      );
 
-  // Trigger the result cell sink — rename is deferred via setTimeout(0)
-  resultCell.set({});
+    // Store updated subs
+    state.pieceSubs.set("Old-Name", subs);
 
-  // Wait for the deferred rename to execute
-  await new Promise((r) => setTimeout(r, 10));
+    // Change the piece name before firing the sink
+    pieceName = "New Name";
 
-  assertEquals(
-    tree.lookup(state.piecesIno, "New-Name") !== undefined,
-    true,
-    "New Name dir should exist after rename",
-  );
-  assertEquals(
-    tree.lookup(state.piecesIno, "Old-Name"),
-    undefined,
-    "Old Name dir should be gone after rename",
-  );
+    // Trigger the result cell sink — rename is deferred via setTimeout(0)
+    resultCell.set({});
+
+    // Wait for the deferred rename to execute
+    await new Promise((r) => setTimeout(r, 10));
+
+    assertEquals(
+      tree.lookup(state.piecesIno, "New-Name") !== undefined,
+      true,
+      "New Name dir should exist after rename",
+    );
+    assertEquals(
+      tree.lookup(state.piecesIno, "Old-Name"),
+      undefined,
+      "Old Name dir should be gone after rename",
+    );
+
+    // Cancel all subscriptions (clears debounce timers)
+    for (const cancel of subs) cancel();
+    for (const [, pieceSubs] of state.pieceSubs) {
+      for (const cancel of pieceSubs) cancel();
+    }
+  },
 });
 
 Deno.test("CellBridge.addPieceToSpace normalizes projected piece directory names", async () => {
@@ -1054,52 +1070,66 @@ Deno.test("CellBridge.addPieceToSpace falls back to a normalized piece id for sy
   );
 });
 
-Deno.test("CellBridge.subscribePiece renames directories using normalized names", async () => {
-  const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
-  const state = buildTestSpace(bridge, "home", []);
+Deno.test({
+  name: "CellBridge.subscribePiece renames directories using normalized names",
+  sanitizeOps: false,
+  fn: async () => {
+    const tree = new FsTree();
+    const bridge = new CellBridge(tree, "/tmp/ct-exec");
+    const state = buildTestSpace(bridge, "home", []);
 
-  let pieceName = "Start Here";
-  const resultCell = new SinkableCell({});
+    let pieceName = "Start Here";
+    const resultCell = new SinkableCell({});
 
-  const piece = {
-    id: "of:abc",
-    name: () => pieceName,
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
-    input: {
-      getCell: () => Promise.resolve(makeCell({}, undefined)),
-      get: () => Promise.resolve({}),
-    },
-    result: {
-      getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
-      get: () => Promise.resolve({}),
-    },
-  };
+    const piece = {
+      id: "of:abc",
+      name: () => pieceName,
+      getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+      input: {
+        getCell: () => Promise.resolve(makeCell({}, undefined)),
+        get: () => Promise.resolve({}),
+      },
+      result: {
+        getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+        get: () => Promise.resolve({}),
+      },
+    };
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
-    .addPieceToSpace.bind(bridge);
-  await addPiece(state, piece, "home");
+    const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+      .addPieceToSpace.bind(bridge);
+    await addPiece(state, piece, "home");
 
-  const subs = await (bridge as unknown as { subscribePiece: SubscribePiece })
-    .subscribePiece.call(
-      bridge,
-      piece,
-      tree.lookup(state.piecesIno, "Start-Here")!,
-      "Start-Here",
-      "home",
+    // Cancel the addPieceToSpace subs before creating new ones
+    const addedSubs = state.pieceSubs.get("Start-Here");
+    if (addedSubs) { for (const cancel of addedSubs) cancel(); }
+
+    const subs = await (bridge as unknown as { subscribePiece: SubscribePiece })
+      .subscribePiece.call(
+        bridge,
+        piece,
+        tree.lookup(state.piecesIno, "Start-Here")!,
+        "Start-Here",
+        "home",
+      );
+
+    state.pieceSubs.set("Start-Here", subs);
+
+    pieceName = "Renamed 🚀 Piece";
+    resultCell.set({});
+    await new Promise((r) => setTimeout(r, 10));
+
+    assertEquals(
+      tree.lookup(state.piecesIno, "Renamed-Piece") !== undefined,
+      true,
     );
+    assertEquals(tree.lookup(state.piecesIno, "Start-Here"), undefined);
 
-  state.pieceSubs.set("Start-Here", subs);
-
-  pieceName = "Renamed 🚀 Piece";
-  resultCell.set({});
-  await new Promise((r) => setTimeout(r, 10));
-
-  assertEquals(
-    tree.lookup(state.piecesIno, "Renamed-Piece") !== undefined,
-    true,
-  );
-  assertEquals(tree.lookup(state.piecesIno, "Start-Here"), undefined);
+    // Cancel all subscriptions (clears debounce timers)
+    for (const cancel of subs) cancel();
+    for (const [, pieceSubs] of state.pieceSubs) {
+      for (const cancel of pieceSubs) cancel();
+    }
+  },
 });
 
 Deno.test("CellBridge.subscribePiece clears stale FS root entries when result switches to result/ tree", async () => {
@@ -1174,56 +1204,68 @@ Deno.test("CellBridge.subscribePiece clears stale FS root entries when result sw
     resultIno !== undefined ? getFileContent(tree, resultIno, "content") : "",
     "Now a regular result tree",
   );
+
+  // Cancel subscriptions to avoid timer leaks
+  const subs = state.pieceSubs.get("FS-Piece");
+  if (subs) { for (const cancel of subs) cancel(); }
 });
 
-Deno.test("CellBridge.status stays idle without eager content rebuild subscriptions", async () => {
-  const tree = new FsTree();
-  const bridge = new CellBridge(tree, "/tmp/ct-exec");
-  bridge.init({
-    apiUrl: "http://localhost:8000",
-    identity: "/tmp/test-identity.pem",
-  });
-  bridge.initStatus();
-  const state = buildTestSpace(bridge, "home", []);
+Deno.test({
+  name: "CellBridge.status tracks debounced rebuild metrics",
+  sanitizeOps: false,
+  fn: async () => {
+    const tree = new FsTree();
+    const bridge = new CellBridge(tree, "/tmp/ct-exec");
+    bridge.init({
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+    });
+    bridge.initStatus();
+    const state = buildTestSpace(bridge, "home", []);
 
-  const inputCell = new SinkableCell({});
-  const resultCell = new SinkableCell({ content: "Initial" });
+    const inputCell = new SinkableCell({});
+    const resultCell = new SinkableCell({ content: "Initial" });
 
-  const piece = {
-    id: "of:status-piece",
-    name: () => "Status Piece",
-    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
-    input: {
-      getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
-      get: () => Promise.resolve(inputCell.get()),
-    },
-    result: {
-      getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
-      get: () => Promise.resolve(resultCell.get()),
-    },
-  };
+    const piece = {
+      id: "of:status-piece",
+      name: () => "Status Piece",
+      getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+      input: {
+        getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
+        get: () => Promise.resolve(resultCell.get()),
+      },
+      result: {
+        getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+        get: () => Promise.resolve(resultCell.get()),
+      },
+    };
 
-  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
-    .addPieceToSpace.bind(bridge);
-  await addPiece(state, piece, "home");
+    const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+      .addPieceToSpace.bind(bridge);
+    await addPiece(state, piece, "home");
 
-  const pieceIno = tree.lookup(state.piecesIno, "Status-Piece")!;
-  assertEquals(tree.lookup(pieceIno, "result") !== undefined, true);
-  assertEquals(tree.getChildren(tree.lookup(pieceIno, "result")!).length, 0);
+    const pieceIno = tree.lookup(state.piecesIno, "Status-Piece")!;
+    assertEquals(tree.lookup(pieceIno, "result") !== undefined, true);
+    assertEquals(tree.getChildren(tree.lookup(pieceIno, "result")!).length, 0);
 
-  resultCell.set({ content: "Second" });
-  resultCell.set({ content: "Final" });
-  await new Promise((r) => setTimeout(r, 10));
+    resultCell.set({ content: "Second" });
+    resultCell.set({ content: "Final" });
+    // Wait for debounce (150ms) + rebuild
+    await new Promise((r) => setTimeout(r, 250));
 
-  const status = JSON.parse(getFileContent(tree, tree.rootIno, ".status"));
-  assertEquals(status.debug, false);
-  assertEquals(status.rebuilds.pending, 0);
-  assertEquals(status.rebuilds.scheduled, 0);
-  assertEquals(status.rebuilds.coalesced, 0);
-  assertEquals(status.rebuilds.completed, 0);
-  assertEquals(status.rebuilds.errors, 0);
-  assertEquals(status.rebuilds.maxPending, 0);
-  await new Promise((r) => setTimeout(r, 10));
+    const resultIno = tree.lookup(pieceIno, "result")!;
+    assertEquals(getFileContent(tree, resultIno, "content"), "Final");
+
+    const status = JSON.parse(getFileContent(tree, tree.rootIno, ".status"));
+    assertEquals(status.debug, false);
+    assertEquals(status.rebuilds.pending, 0);
+    assertEquals(status.rebuilds.completed >= 1, true);
+    assertEquals(status.rebuilds.errors, 0);
+
+    // Cancel subscriptions to avoid timer leaks
+    const subs = state.pieceSubs.get("Status-Piece");
+    if (subs) { for (const cancel of subs) cancel(); }
+  },
 });
 
 Deno.test("CellBridge.invalidateWritePath clears hydrated piece result cache", async () => {

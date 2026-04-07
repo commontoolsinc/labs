@@ -204,12 +204,23 @@ export async function main(argv: string[] = Deno.args) {
     ino: bigint,
     node: ReturnType<typeof tree.getNode>,
   ) {
+    // FUSE-T (macOS NFS translation) ignores notify_inval_entry and
+    // notify_inval_inode, so the only way to ensure reads see fresh data
+    // after writes is to keep cache timeouts short. Piece content inodes
+    // (under pieces/ and entities/) use 0 so every read hits our callbacks.
+    // Static inodes (root, space.json, .status) use 1s.
+    const isDynamic = bridge?.shouldPrepareDirectory(ino) ||
+      bridge?.shouldPrepareLookup(
+        tree.parents.get(ino) ?? 0n,
+        tree.getPath(ino).split("/").pop() ?? "",
+      );
+    const timeout = isDynamic ? 0 : 1.0;
     const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);
     writeEntryParam(entryBuf, {
       ino,
       attr: buildStat(node!, ino),
-      attrTimeout: 1.0,
-      entryTimeout: 1.0,
+      attrTimeout: timeout,
+      entryTimeout: timeout,
     });
     fuse.symbols.fuse_reply_entry(
       req,
@@ -318,10 +329,16 @@ export async function main(argv: string[] = Deno.args) {
       const statBuf = new ArrayBuffer(STAT_SIZE);
       writeStat(statBuf, buildStat(node, inode));
 
+      const parentIno = tree.parents.get(inode) ?? 0n;
+      const isDynamic = bridge?.shouldPrepareDirectory(inode) ||
+        bridge?.shouldPrepareLookup(
+          parentIno,
+          tree.getPath(inode).split("/").pop() ?? "",
+        );
       fuse.symbols.fuse_reply_attr(
         req,
         Deno.UnsafePointer.of(new Uint8Array(statBuf)),
-        1.0,
+        isDynamic ? 0 : 1.0,
       );
     },
   );
@@ -654,7 +671,11 @@ export async function main(argv: string[] = Deno.args) {
           value = trimmed;
         }
         await bridge.sendToHandlerTarget(writeTarget.target, value);
-        bridge.invalidateHandlerTarget(writeTarget.target);
+        // Don't invalidate here — sendToHandlerTarget waits for
+        // runtime.idle() + synced(), but the downstream reactive graph
+        // may not have settled yet. The cell.sink subscription in
+        // subscribePiece fires when the result cell actually updates,
+        // which triggers invalidateRootPropCache at the right time.
         if (handle.version === flushVersion) {
           handle.dirty = false;
           handle.truncatePending = false;

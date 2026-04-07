@@ -1131,6 +1131,18 @@ export class CellBridge {
     return handle.promise;
   }
 
+  /** Collect all inode IDs in a subtree (including the root). */
+  private collectDescendantInos(ino: bigint): bigint[] {
+    const result: bigint[] = [ino];
+    const node = this.tree.getNode(ino);
+    if (node?.kind === "dir") {
+      for (const [, childIno] of this.tree.getChildren(ino)) {
+        result.push(...this.collectDescendantInos(childIno));
+      }
+    }
+    return result;
+  }
+
   private invalidateRootPropCache(
     rootIno: bigint,
     propName: "input" | "result",
@@ -1141,12 +1153,19 @@ export class CellBridge {
     const key = `${rootIno}-${propName}`;
     this.hydrationEpochs.set(key, (this.hydrationEpochs.get(key) ?? 0) + 1);
     this.markPiecePropCleared(rootIno, propName);
+
+    // Collect all descendant inodes BEFORE clearing (tree.clear removes them).
+    // FUSE-T doesn't support notify_inval_entry, so we must invalidate each
+    // cached inode individually via notify_inval_inode.
+    const staleInos: bigint[] = [];
     const propIno = this.tree.lookup(rootIno, propName);
     if (propIno !== undefined) {
+      staleInos.push(...this.collectDescendantInos(propIno));
       this.tree.clear(propIno);
     }
     const jsonIno = this.tree.lookup(rootIno, `${propName}.json`);
     if (jsonIno !== undefined) {
+      staleInos.push(jsonIno);
       this.tree.clear(jsonIno);
     }
     this.ensurePiecePropStub(rootIno, propName);
@@ -1154,12 +1173,19 @@ export class CellBridge {
     if (propName === "result") {
       const fsEntries = this.fsProjectionEntries.get(rootIno);
       if (fsEntries) {
-        for (const name of fsEntries) invalidatedNames.add(name);
+        for (const name of fsEntries) {
+          invalidatedNames.add(name);
+          const fsIno = this.tree.lookup(rootIno, name);
+          if (fsIno !== undefined) {
+            staleInos.push(...this.collectDescendantInos(fsIno));
+          }
+        }
       }
       this.clearFsProjectionEntries(rootIno);
 
       const handlersIno = this.tree.lookup(rootIno, ".handlers");
       if (handlersIno !== undefined) {
+        staleInos.push(handlersIno);
         this.tree.clear(handlersIno);
       }
       invalidatedNames.add(".handlers");
@@ -1170,6 +1196,9 @@ export class CellBridge {
     }
     if (this.onInvalidateInode) {
       this.onInvalidateInode(rootIno);
+      for (const staleIno of staleInos) {
+        this.onInvalidateInode(staleIno);
+      }
     }
     this.updateStatus();
     return true;
@@ -2189,17 +2218,44 @@ export class CellBridge {
 
     // Subscribe to input/result cell changes so the hydration cache is
     // invalidated when external mutations arrive (background recomputes,
-    // remote writes, etc.). We don't eagerly rebuild the tree — just clear
-    // the hydrated flag so the next FUSE read triggers a fresh hydration.
+    // remote writes, etc.). The invalidation is debounced: the reactive
+    // graph may fire multiple intermediate updates before settling.
+    const resolveLink = this.makeLinkResolver(spaceName);
     for (const propName of ["input", "result"] as const) {
       try {
         const cell = await piece[propName].getCell();
-        const cancel = cell.sink(() => {
-          setTimeout(() => {
+        let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+        const cancel = cell.sink((newValue: unknown) => {
+          if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            debounceTimer = undefined;
             this.invalidateRootPropCache(pieceIno, propName);
-          }, 0);
+            // Eagerly rebuild using the value from the sink (which IS the
+            // latest cell value). Lazy re-hydration via piece.result.get()
+            // may return a stale cached snapshot.
+            this.rebuildPieceProp({
+              cell,
+              newValue,
+              pieceId: piece.id,
+              pieceIno,
+              pieceName: piece.name() || pieceName,
+              propName,
+              resolveLink,
+              spaceName,
+            }).catch((e) => {
+              console.error(
+                `[${spaceName}] Error rebuilding ${pieceName}/${propName}: ${e}`,
+              );
+            });
+          }, 150);
         });
-        cancels.push(cancel);
+        cancels.push(() => {
+          cancel();
+          if (debounceTimer !== undefined) {
+            clearTimeout(debounceTimer);
+            debounceTimer = undefined;
+          }
+        });
       } catch (e) {
         console.error(
           `[${spaceName}] Could not subscribe to ${pieceName}.${propName}: ${e}`,
