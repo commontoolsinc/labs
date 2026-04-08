@@ -35,13 +35,13 @@ important work can happen off the main thread.
    origin.
 2. Capture a Chrome performance trace for the interaction and inspect both
    `CrRendererMain` and the dedicated worker thread.
-3. If the worker dominates, use `commontools.rt` in the page console to reset
+3. If the worker dominates, use `commonfabric.rt` in the page console to reset
    logger baselines, replay the interaction, and inspect the deltas.
 4. Compare `scheduler/execute`, `scheduler/execute/settle`,
    `scheduler/execute/event`, `traverse`, `storage.cache`, and
    `worker-reconciler`.
 5. If you need to know exactly which storage change re-scheduled which action,
-   enable trigger tracing and inspect `commontools.rt.getTriggerTrace()`.
+   enable trigger tracing and inspect `commonfabric.rt.getTriggerTrace()`.
 6. If you need to know which actions actually ran during one interaction,
    enable exact action-run tracing and compare repeated runs in the same space.
 7. If the wave is still unclear, temporarily raise the
@@ -113,20 +113,20 @@ Use this rough rule of thumb:
 ## Console Workflow
 
 After the trace, keep the session live and inspect the worker through
-`commontools.rt` in the page console.
+`commonfabric.rt` in the page console.
 
 ### Establish A Baseline
 
 Inspect the available counters first:
 
 ```js
-await commontools.rt.getLoggerCounts()
+await commonfabric.rt.getLoggerCounts()
 ```
 
 Reset counts and timings just before replaying the interaction:
 
 ```js
-await commontools.rt.resetLoggerBaselines()
+await commonfabric.rt.resetLoggerBaselines()
 ```
 
 Replay one interaction, let it settle, then inspect counts again.
@@ -148,9 +148,9 @@ These are the most useful worker timing groups so far:
 Enable settle stats when logger timing is not enough:
 
 ```js
-await commontools.rt.setSettleStatsEnabled(true)
-await commontools.rt.getSettleStats()
-await commontools.rt.getSettleStatsHistory()
+await commonfabric.rt.setSettleStatsEnabled(true)
+await commonfabric.rt.getSettleStats()
+await commonfabric.rt.getSettleStatsHistory()
 ```
 
 `getSettleStats()` still returns only the **last** `execute()` call, but the
@@ -160,8 +160,8 @@ waves survive trailing empty settles.
 For most investigations, the history buffer is enough:
 
 ```js
-await commontools.rt.setSettleStatsEnabled(true)
-await commontools.rt.getSettleStatsHistory()
+await commonfabric.rt.setSettleStatsEnabled(true)
+await commonfabric.rt.getSettleStatsHistory()
 ```
 
 If you need live sampling while the interaction is still in progress, poll
@@ -171,7 +171,7 @@ If you need live sampling while the interaction is still in progress, poll
 globalThis.__settleSamples = []
 globalThis.__lastSettleSig = null
 globalThis.__settlePoll = setInterval(() => {
-  void commontools.rt.getSettleStats().then((stats) => {
+  void commonfabric.rt.getSettleStats().then((stats) => {
     const sig = JSON.stringify(stats)
     if (sig !== globalThis.__lastSettleSig) {
       globalThis.__lastSettleSig = sig
@@ -204,14 +204,14 @@ entries. Each entry records:
 Enable it just before the interaction:
 
 ```js
-await commontools.rt.setTriggerTraceEnabled(false)
-await commontools.rt.setTriggerTraceEnabled(true)
+await commonfabric.rt.setTriggerTraceEnabled(false)
+await commonfabric.rt.setTriggerTraceEnabled(true)
 ```
 
 Replay the interaction, let it settle, then inspect the raw entries:
 
 ```js
-const trace = await commontools.rt.getTriggerTrace()
+const trace = await commonfabric.rt.getTriggerTrace()
 trace.slice(-5)
 ```
 
@@ -219,7 +219,7 @@ If you want the shell to resolve the hottest changes for you, use the console
 helper instead of hand-writing grouping code:
 
 ```js
-await commontools.explainTriggerTrace({ rootOnly: true, limit: 8 })
+await commonfabric.explainTriggerTrace({ rootOnly: true, limit: 8 })
 ```
 
 That helper groups exact `space/entity/path` changes, counts direct schedules,
@@ -230,7 +230,7 @@ counts downstream scheduled effects, reads the changed cells back through
 To group repeated actions quickly:
 
 ```js
-const trace = await commontools.rt.getTriggerTrace()
+const trace = await commonfabric.rt.getTriggerTrace()
 const counts = new Map()
 
 for (const entry of trace) {
@@ -262,22 +262,22 @@ This is especially useful when:
 Reset the ring buffer just before the interaction:
 
 ```js
-await commontools.rt.setActionRunTraceEnabled(false)
-await commontools.rt.setActionRunTraceEnabled(true)
+await commonfabric.rt.setActionRunTraceEnabled(false)
+await commonfabric.rt.setActionRunTraceEnabled(true)
 ```
 
 Replay the interaction, wait for the worker to go idle, then inspect the trace:
 
 ```js
-await commontools.rt.idle()
-const trace = await commontools.rt.getActionRunTrace()
+await commonfabric.rt.idle()
+const trace = await commonfabric.rt.getActionRunTrace()
 trace.slice(-10)
 ```
 
 To group the exact runs by action id:
 
 ```js
-const trace = await commontools.rt.getActionRunTrace()
+const trace = await commonfabric.rt.getActionRunTrace()
 const counts = new Map()
 
 for (const entry of trace) {
@@ -333,8 +333,8 @@ still watched with `path: []`.
 Arm it just before the interaction:
 
 ```js
-await commontools.watchWrites({
-  space: commontools.space,
+await commonfabric.watchWrites({
+  space: commonfabric.space,
   path: [],
   match: "exact",
   label: "root writes in current space",
@@ -344,14 +344,14 @@ await commontools.watchWrites({
 Replay the interaction, let it settle, then inspect the captured stacks:
 
 ```js
-const trace = await commontools.getWriteStackTrace()
+const trace = await commonfabric.getWriteStackTrace()
 trace.slice(-5)
 ```
 
 For a known hot cell from trigger trace, narrow it to that exact entity:
 
 ```js
-await commontools.watchWrites({
+await commonfabric.watchWrites({
   space: "did:key:z6Mkm...",
   id: "of:baedrei...",
   path: [],
@@ -380,14 +380,14 @@ What to look for:
 If you want each match printed immediately, turn on the focused logger first:
 
 ```js
-await commontools.rt.setLoggerEnabled(true, "storage.write-trace")
-await commontools.rt.setLoggerLevel("warn", "storage.write-trace")
+await commonfabric.rt.setLoggerEnabled(true, "storage.write-trace")
+await commonfabric.rt.setLoggerLevel("warn", "storage.write-trace")
 ```
 
 Disable the watcher and clear the buffer with:
 
 ```js
-await commontools.watchWrites([])
+await commonfabric.watchWrites([])
 ```
 
 ### How To Interpret Logger Deltas
@@ -415,22 +415,22 @@ settle-loop work.
 Enable the focused trigger logger briefly:
 
 ```js
-await commontools.rt.setLoggerEnabled(true, "scheduler.trigger-flow")
-await commontools.rt.setLoggerLevel("debug", "scheduler.trigger-flow")
+await commonfabric.rt.setLoggerEnabled(true, "scheduler.trigger-flow")
+await commonfabric.rt.setLoggerLevel("debug", "scheduler.trigger-flow")
 ```
 
 After you capture enough detail, return it to a quieter level:
 
 ```js
-await commontools.rt.setLoggerLevel("warn", "scheduler.trigger-flow")
+await commonfabric.rt.setLoggerLevel("warn", "scheduler.trigger-flow")
 ```
 
 Enable the focused runner logger when you need to know which source action is
 calling back into `Runner.run()`:
 
 ```js
-await commontools.rt.setLoggerEnabled(true, "runner.trigger-flow")
-await commontools.rt.setLoggerLevel("debug", "runner.trigger-flow")
+await commonfabric.rt.setLoggerEnabled(true, "runner.trigger-flow")
+await commonfabric.rt.setLoggerLevel("debug", "runner.trigger-flow")
 ```
 
 This logger keys counts by source action id, so even without reading every log
@@ -442,8 +442,8 @@ causing nested pattern launches or is only acting as a broad reader over hot
 indexes:
 
 ```js
-await commontools.rt.setLoggerEnabled(true, "runner.wish-flow")
-await commontools.rt.setLoggerLevel("debug", "runner.wish-flow")
+await commonfabric.rt.setLoggerEnabled(true, "runner.wish-flow")
+await commonfabric.rt.setLoggerLevel("debug", "runner.wish-flow")
 ```
 
 Use it to answer these questions quickly:
@@ -457,8 +457,8 @@ Use it to answer these questions quickly:
 If you still need settle-loop internals, then raise the broader scheduler logger:
 
 ```js
-await commontools.rt.setLoggerEnabled(true, "scheduler")
-await commontools.rt.setLoggerLevel("debug", "scheduler")
+await commonfabric.rt.setLoggerEnabled(true, "scheduler")
+await commonfabric.rt.setLoggerLevel("debug", "scheduler")
 ```
 
 ## Disambiguate Async Raw Actions
@@ -554,8 +554,8 @@ Start with these locations when traces or logs point to worker churn:
 
 The timed diagnosis mismatch is now resolved:
 
-- `commontools.detectNonIdempotent(ms)` and
-  `commontools.rt.detectNonIdempotent(ms)` now run a real diagnosis window
+- `commonfabric.detectNonIdempotent(ms)` and
+  `commonfabric.rt.detectNonIdempotent(ms)` now run a real diagnosis window
 - debugger UI diagnosis duration selection now maps to the same path
 - results now include real `duration` and `busyTime`
 
@@ -695,12 +695,12 @@ Interpretation:
 ### Direct Settle-Stats Example
 
 After exposing settle stats over IPC, a second live measurement on note
-creation first used `commontools.rt.setSettleStatsEnabled(true)` plus a 25 ms
+creation first used `commonfabric.rt.setSettleStatsEnabled(true)` plus a 25 ms
 poller around the interaction. That showed that a single `getSettleStats()`
 read was not enough because trailing settles could overwrite the interesting
 wave.
 
-That led to `commontools.rt.getSettleStatsHistory()`, which now captures the
+That led to `commonfabric.rt.getSettleStatsHistory()`, which now captures the
 same interaction without polling.
 
 Captured non-empty settle waves for one `📝 New` interaction from an existing
@@ -745,7 +745,7 @@ Interpretation:
 
 ### Settle-History Example
 
-Using `commontools.rt.getSettleStatsHistory()` around the original home-page
+Using `commonfabric.rt.getSettleStatsHistory()` around the original home-page
 `Notes -> New Note` flow produced `6` history entries, `15` total settle
 iterations, `84` total action runs, and `875.3 ms` total recorded settle time.
 
@@ -906,9 +906,9 @@ more reliable than the Astral integration harness for cross-tab persistence.
 The measurement snippet was:
 
 ```js
-await commontools.rt.idle()
-const { timing } = await commontools.rt.getLoggerCounts()
-const graph = await commontools.rt.getGraphSnapshot()
+await commonfabric.rt.idle()
+const { timing } = await commonfabric.rt.getLoggerCounts()
+const graph = await commonfabric.rt.getGraphSnapshot()
 
 return {
   loadDurationMs: performance.now(),
@@ -987,8 +987,8 @@ all root writes in the current space while creating a note from an already-open
 note page:
 
 ```js
-await commontools.watchWrites({
-  space: commontools.space,
+await commonfabric.watchWrites({
+  space: commonfabric.space,
   path: [],
   match: "exact",
   label: "root writes in current space",
@@ -1063,7 +1063,7 @@ Working hypothesis:
 
 ### Timed Diagnosis Example
 
-Running `commontools.rt.detectNonIdempotent(3000)` during the same interaction
+Running `commonfabric.rt.detectNonIdempotent(3000)` during the same interaction
 returned:
 
 ```json

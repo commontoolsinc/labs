@@ -96,7 +96,7 @@ which linked entities to include.
 
 The traversal code in `packages/runner/src/traverse.ts` is **shared between
 client and server**. The v1 server (`space-schema.ts`) imports
-`SchemaObjectTraverser` from `@commontools/runner/traverse`, and the client
+`SchemaObjectTraverser` from `@commonfabric/runner/traverse`, and the client
 (`schema.ts`) uses the same code for validation and transformation. This ensures
 identical traversal behavior on both sides. The v2 implementation MUST preserve
 this shared-code property.

@@ -236,7 +236,7 @@ A callback is "direct" when it is:
 The following are allowed:
 
 ```typescript
-import { pattern, lift, handler } from "commontools";
+import { pattern, lift, handler } from "commonfabric";
 
 export const MyPattern = pattern<Input, Output>((props) => {
   return { value: props.value };
@@ -267,11 +267,11 @@ export const badLift = lift(makeCallback());
 export const badHandler = handler((() => (event, state) => state)());
 ```
 
-In canonical emitted form, trusted builder bindings should be normalized to a
-single shape such as:
+In canonical emitted form, trusted builder callbacks should be normalized and
+hardened to a single shape such as:
 
 ```javascript
-const myLift = __ct_builder("lift", function (input) {
+const myLift = __cfHardenFn(function (input) {
   return transform(input);
 });
 ```
@@ -299,7 +299,7 @@ const helper2 = (x: number): number => {
 
 These function objects are hardened immediately after definition. The verifier
 only needs to accept direct function forms here; they are not part of the
-`__ct_data(...)` plain-data bucket.
+`__cfHelpers.__cf_data(...)` plain-data bucket.
 
 #### 4.2.3 Verified Module-Safe Data
 
@@ -324,7 +324,7 @@ const LOOKUP = freezeVerifiedPlainData((() => {
 Canonical emitted form:
 
 ```javascript
-const LOOKUP = __ct_data((() => {
+const LOOKUP = __cfHelpers.__cf_data((() => {
   return {
     open: "Open",
     closed: "Closed",
@@ -333,7 +333,7 @@ const LOOKUP = __ct_data((() => {
 ```
 
 The verifier does not need to semantically interpret the body of a
-`__ct_data(...)` initializer. It only needs to recognize the wrapper boundary
+`__cfHelpers.__cf_data(...)` initializer. It only needs to recognize the wrapper boundary
 and confirm the call shape. The runtime helper then evaluates the initializer,
 validates the value that survives module load, and freezes the surviving inert
 snapshot.
@@ -354,7 +354,7 @@ stable SES contract. Pattern authors should call `safeDateNow()` and
 explicit narrow exceptions that yield plain data snapshots.
 
 Version 1 of the allowed domain is a deliberate subset of
-`@commontools/memory`'s `StorableValue`:
+`@commonfabric/memory`'s `StorableValue`:
 
 - `null`
 - `undefined`
@@ -396,7 +396,7 @@ The required security property is about the surviving exported graph, not about
 forbidding every transient effect that can happen while snapshotting it.
 Trusted graph construction during active builder execution is allowed as part of
 pattern assembly, and the current implementation may also trigger effects caused
-by proxy traps/getters during `__ct_data(...)` snapshotting. This is accepted in
+by proxy traps/getters during `__cfHelpers.__cf_data(...)` snapshotting. This is accepted in
 the current baseline, especially while ambient `fetch()` remains temporarily
 available. The exported value that survives module load must still be copied and
 inert.
@@ -406,7 +406,7 @@ The surviving value must have immutable collection semantics: mutators such as
 `set`, `add`, `delete`, and `clear` must not remain usable on the object that
 survives module load.
 
-`__ct_data(...)` validates the result that survives module load, not the full
+`__cfHelpers.__cf_data(...)` validates the result that survives module load, not the full
 semantics of the computation that produced it. This is acceptable under the
 current threat model because the sandboxing contract for this path is about the
 surviving copied value rather than forbidding all transient effects during
@@ -434,7 +434,7 @@ Import/export policy:
 
 #### 4.2.5 Disallowed Module-Scope Forms
 
-The following are rejected unless they are normalized into `__ct_data(...)`,
+The following are rejected unless they are normalized into `__cfHelpers.__cf_data(...)`,
 and the final escaping value passes module-safe-data validation:
 
 ```typescript
@@ -460,7 +460,7 @@ The compiler/transformer is not in the TCB. It may assist by:
 
 - inserting stable sentinel comments before each top-level item
 - rewriting trusted builders and data initializers into a small canonical
-  wrapper language such as `__ct_builder(...)` and `__ct_data(...)`
+  wrapper language such as `__cfHardenFn(...)` and `__cfHelpers.__cf_data(...)`
 - rewriting candidate plain-data initializers into
   `freezeVerifiedPlainData(...)`
 - hoisting inline callbacks to make direct-callback verification easier
@@ -839,23 +839,20 @@ The current implementation still forwards ambient `fetch` and its adjacent web
 request globals as a migration shim. That shim is transitional and should be
 removed once importer/auth flows are fully routed through runtime-managed
 capabilities. While the shim exists, direct `fetch()` may still run during
-authored module assembly or `__ct_data(...)` snapshotting, in addition to
+authored module assembly or `__cfHelpers.__cf_data(...)` snapshotting, in addition to
 deferred callback execution.
 
 #### 5.3.2 Trusted Runtime Modules via `runtimeDeps`
 
-Common Tools capabilities are supplied as trusted AMD runtime modules registered
+Common Fabric capabilities are supplied as trusted AMD runtime modules registered
 through the existing `runtimeDeps` bundle ABI. This is the primary way authored
 code receives builder and graph-construction capabilities.
 
-In v1, the trusted runtime module identifiers are:
+In the current implementation, the trusted runtime module identifiers are:
 
-- `commontools`
-- `commontools/schema`
+- `commonfabric`
+- `commonfabric/schema`
 - `turndown`
-- `@commontools/html`
-- `@commontools/builder`
-- `@commontools/runner`
 
 These runtime modules may export:
 
@@ -879,7 +876,7 @@ model, not during authored module evaluation. `patternTool(...)` is the main
 exception to the "usable during module load" shorthand here: it may be exported
 by trusted runtime modules, but it is only allowed inside verified pattern
 callbacks after the earlier pattern transforms. These imports are not valid
-from within `__ct_data(...)` initializers.
+from within `__cfHelpers.__cf_data(...)` initializers.
 
 Any shared value installed through `runtimeDeps` MUST be transitively hardened
 before Compartment evaluation begins. The shared export graph exposed by a
@@ -1283,7 +1280,7 @@ if (inputSourceMap) {
 #### 8.4.1 Shared Source-Map State
 
 Error mapping is synchronous and centered on
-`@commontools/js-compiler`'s `SourceMapParser`, but SES must **reuse** the same
+`@commonfabric/js-compiler`'s `SourceMapParser`, but SES must **reuse** the same
 runtime-owned source-map state shape that already exists in the current harness
 rather than introducing a second parallel `ErrorMapper` object model.
 
@@ -1734,9 +1731,9 @@ Examples:
 
 - insert stable sentinel comments before each top-level item
 - normalize trusted builders into canonical forms such as
-  `__ct_builder("lift", function ...)`
+  `__cfHardenFn(function ...)`
 - normalize data bindings into canonical forms such as
-  `__ct_data(expr)`
+  `__cfHelpers.__cf_data(expr)`
 - rewrite module-safe-data candidates into `freezeVerifiedPlainData(...)` within the
   canonical data wrapper
 - normalize export syntax to simple local bindings plus explicit export wiring
@@ -1995,7 +1992,7 @@ const trust = runtime.createUnsafeHostTrust({
   reason: "unit test fixture",
 });
 
-const { commontools } = createBuilder({
+const { commonfabric } = createBuilder({
   unsafeHostTrust: trust,
 });
 ```
@@ -2228,7 +2225,7 @@ const startTime = Date.now();  // Side effect at module scope
 
 **After:**
 ```typescript
-import { safeDateNow } from "commontools";
+import { safeDateNow } from "commonfabric";
 
 const getStartTime = lift(() => safeDateNow());
 ```
@@ -2318,7 +2315,7 @@ module surface in v1. Reintroducing them requires separate scoped work.
 2. **Direct `fetch()`**: A temporary compatibility shim currently exposes
    ambient `fetch()` and the adjacent web request globals it depends on inside
    SES compartments because existing importer/auth flows still rely on them.
-   This currently applies to authored module assembly, `__ct_data(...)`
+   This currently applies to authored module assembly, `__cfHelpers.__cf_data(...)`
    snapshotting, and lazy callback rehydration. It should be deprecated in
    favor of runtime-managed graph constructors such as `fetchData()` plus an
    explicit egress policy.

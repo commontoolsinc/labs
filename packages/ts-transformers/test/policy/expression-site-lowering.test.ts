@@ -1560,7 +1560,7 @@ const sharedPostClosureJsxRouteCases: JsxRouteCase[] = [
         interface IntrinsicElements {
           div: any;
           span: any;
-          "ct-vstack": any;
+          "cf-vstack": any;
         }
       }
 
@@ -1572,10 +1572,10 @@ const sharedPostClosureJsxRouteCases: JsxRouteCase[] = [
             ? <span>No events yet</span>
             : state.recentEvents.get() &&
               state.recentEvents.map((event: any) => (
-              <ct-vstack>
+              <cf-vstack>
                 <span>{event.label}</span>
                 {event.tags.map((tag: string) => <span>{tag}</span>)}
-              </ct-vstack>
+              </cf-vstack>
               ))}
         </div>
       ));

@@ -14,11 +14,11 @@ directory.
 
 ## Declaring a Projection
 
-Import `FS` and `FsProjection` from `commontools` and add `[FS]` to the
+Import `FS` and `FsProjection` from `commonfabric` and add `[FS]` to the
 pattern's return object:
 
 ```tsx
-import { FS, type FsProjection, NAME, pattern, UI } from "commontools";
+import { FS, type FsProjection, NAME, pattern, UI } from "commonfabric";
 
 const MyPattern = pattern<Input, Output>(({ title, content }) => {
   // ...
@@ -186,7 +186,7 @@ The `Note` pattern in `packages/patterns/notes/note.tsx` uses `[FS]`:
 ```tsx
 return {
   [NAME]: computed(() => `📝 ${title.get()}`),
-  [UI]: <ct-screen>...</ct-screen>,
+  [UI]: <cf-screen>...</cf-screen>,
   [FS]: {
     type: "text/markdown",
     frontmatter: { title },

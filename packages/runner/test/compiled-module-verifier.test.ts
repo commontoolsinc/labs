@@ -101,7 +101,7 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.default = (0, commonfabric_1.pattern)(() => {
       return {
-        ui: h("div", null, h("ct-screen", null, "Hello")),
+        ui: h("div", null, h("cf-screen", null, "Hello")),
       };
     });
   });
