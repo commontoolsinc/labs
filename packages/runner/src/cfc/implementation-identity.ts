@@ -6,9 +6,14 @@ export const resolvePolicyFacingImplementationIdentity = (
   options: { verifiedLoadId?: string } = {},
 ): ImplementationIdentity | undefined => {
   const debugName = (module as { debugName?: string }).debugName;
+  if (typeof debugName === "string" && debugName.startsWith("unsafe-host:")) {
+    return undefined;
+  }
   if (typeof debugName !== "string" || debugName.length === 0) {
-    if (typeof options.verifiedLoadId !== "string" ||
-      options.verifiedLoadId.length === 0) {
+    if (
+      typeof options.verifiedLoadId !== "string" ||
+      options.verifiedLoadId.length === 0
+    ) {
       return undefined;
     }
     return {

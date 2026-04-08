@@ -1708,8 +1708,10 @@ export class Runner {
         verifiedLoadId,
       );
 
-      const policyFacingIdentity =
-        resolvePolicyFacingImplementationIdentity(module, { verifiedLoadId });
+      const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
+        module,
+        { verifiedLoadId },
+      );
       if (policyFacingIdentity) {
         tx.setCfcImplementationIdentity(policyFacingIdentity);
       }
@@ -1879,8 +1881,10 @@ export class Runner {
       );
       (action as Action & { lastFrame?: Frame }).lastFrame = frame;
 
-      const policyFacingIdentity =
-        resolvePolicyFacingImplementationIdentity(module, { verifiedLoadId });
+      const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
+        module,
+        { verifiedLoadId },
+      );
       if (policyFacingIdentity) {
         tx.setCfcImplementationIdentity(policyFacingIdentity);
       }

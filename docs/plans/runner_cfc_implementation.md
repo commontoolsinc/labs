@@ -693,7 +693,7 @@ Tasks:
       memory-v2 commit/transport/storage surfaces beyond bare `codeCID` so the
       richer bundle/path/location/hash identity can be carried or rebound
       deterministically
-- [ ] In phase 1, treat direct-eval and unsafe-host/test helpers as untrusted
+- [x] In phase 1, treat direct-eval and unsafe-host/test helpers as untrusted
       for trust-sensitive relaxations unless a later explicit stable-id path is
       added
 - [ ] Thread the resulting implementation identity through action and handler
@@ -711,7 +711,7 @@ Acceptance:
 - [x] Built-ins produce stable policy-facing implementation identities
 - [x] Verified compiled user-code policy identities remain blocked until v2
       carries the richer bundle/path/location/hash identity surface
-- [ ] Unsupported identity classes fail closed for trust-sensitive checks
+- [x] Unsupported identity classes fail closed for trust-sensitive checks
 - [x] Changing the trust snapshot between prepare and commit invalidates prepare
 - [x] Unknown implementation identity is treated as untrusted
 

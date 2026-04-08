@@ -94,6 +94,45 @@ describe("CFC builtin implementation identity", () => {
     tx.abort("test-complete");
   });
 
+  it("leaves unsafe-host helpers untrusted for policy-facing identity", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v2",
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "observe",
+    });
+
+    const captured: Array<unknown> = [];
+    runtime.moduleRegistry.addModuleByRef(
+      "unsafe-host:0",
+      raw((inputsCell) => {
+        captured.push(inputsCell.tx?.getCfcState().implementationIdentity);
+        return () => undefined;
+      }),
+    );
+
+    const tx = runtime.edit();
+    const resultCell = runtime.getCell(
+      signer.did(),
+      "cfc-unsafe-host-identity",
+      undefined,
+      tx,
+    );
+    runtime.runner.run(
+      tx,
+      runtime.moduleRegistry.getModule("unsafe-host:0"),
+      {},
+      resultCell,
+    );
+
+    expect(captured[0]).toBeUndefined();
+    tx.abort("test-complete");
+  });
+
   it("treats verified compiled modules as unsupported until richer policy ids land", () => {
     const module = { type: "javascript" as const };
     expect(
