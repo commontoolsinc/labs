@@ -792,9 +792,6 @@ export class Replica {
     // remote.
     // this is the object with the of/the/cause nesting, then a SchemaPathSelector inside
     const schemaSelector = {};
-    // We'll assert that we need all the classifications we expect to need.
-    // If we don't actually have those, the server will reject our request.
-    const classifications = new Set<string>();
     // Patch to have a valid selector for each entry
     const defaultSelector = { path: [], schema: false };
     const schemaEntries: [BaseMemoryAddress, SchemaPathSelector][] = entries
@@ -830,10 +827,6 @@ export class Replica {
 
       // If we don't have a schema, use SchemaNone, which will only fetch the specified object
       setSelector(schemaSelector, address.id, address.type, "_", selector);
-      // Since we're accessing the entire document, we should base our
-      // classification on the fullSchema
-      const fullSchema = selector.schema ?? false;
-      ContextualFlowControl.joinSchema(classifications, fullSchema);
     }
 
     // We provided schema for the top level fact that we selected, but we
@@ -844,10 +837,6 @@ export class Replica {
       excludeSent: true,
     };
     if (Object.entries(schemaSelector).length > 0) {
-      if (classifications.size > 0) {
-        const lubClassification = this.cfc.lub(classifications);
-        queryArgs.classification = [lubClassification];
-      }
       // TODO(@ubik2) we're not actually handling the data from this
       // subscription properly. We get the data through the commit changes,
       // because the server knows we're watching, but we should be able
@@ -1947,7 +1936,6 @@ export class Provider implements IStorageProvider {
     Result<Unit, PushError>
   > {
     const { the, workspace } = this;
-    const LABEL_TYPE = "application/label+json" as const;
 
     // Collect facts so that we can derive desired state and a corresponding
     // transaction
@@ -1969,22 +1957,6 @@ export class Provider implements IStorageProvider {
           }));
         } else {
           facts.push(retract(current as Consumer.Assertion));
-        }
-      }
-      if (this.memoryVersion === "v1" && value.labels !== undefined) {
-        const currentLabel = workspace.get({ id: uri, type: LABEL_TYPE });
-        if (!deepEqual(currentLabel?.is, value.labels)) {
-          if (value.labels !== undefined) {
-            facts.push(assert({
-              the: LABEL_TYPE,
-              of: uri,
-              is: value.labels as FabricValue,
-              // If fact has no `cause` it is unclaimed fact.
-              cause: currentLabel?.cause ? currentLabel : null,
-            }));
-          } else {
-            facts.push(retract(currentLabel as Consumer.Assertion));
-          }
         }
       }
     }
@@ -2424,18 +2396,4 @@ export const getChanges = (
     }
   }
   return changes;
-};
-
-// Given an Assert statement with labels, return a Schema with the ifc tags
-const _generateSchemaFromLabels = (
-  change: Assert | Retract | Claim,
-): JSONSchema | undefined => {
-  const value = change?.is;
-  if (isRecord(value)) {
-    const labels = (value as { labels?: unknown }).labels;
-    if (labels !== undefined) {
-      return { ifc: labels } as JSONSchema;
-    }
-  }
-  return undefined;
 };

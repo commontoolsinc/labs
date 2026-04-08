@@ -555,7 +555,7 @@ Tasks:
       expose the reserved `cfc` sibling
 - [x] Make storage helpers able to read current CFC metadata and load
       canonical schemas from `cid:<schemaHash>` efficiently during prepare
-- [ ] Do not carry forward `application/label+json` or query-redaction
+- [x] Do not carry forward `application/label+json` or query-redaction
       compatibility behavior
 
 Acceptance:
