@@ -2057,27 +2057,37 @@ export function llmDialog(
           // Set up new request (abort existing ones just in case) by allocating
           // a new request Id and setting up a new abort controller.
           abortController?.abort("New request started");
-          abortController = new AbortController();
-          requestId = crypto.randomUUID();
+          abortController = undefined;
+          const nextRequestId = crypto.randomUUID();
+          requestId = nextRequestId;
           internal.withTx(tx).set({
-            requestId,
+            requestId: nextRequestId,
             lastActivity: Date.now(),
           });
 
-          // Start a new request. This will start an async operation that will
-          // outlive this handler call.
-          startRequest(
-            runtime,
-            parentCell.space,
-            cause,
-            inputs,
-            pending,
-            internal,
-            pinnedCells,
-            result,
-            requestId,
-            abortController.signal,
-          );
+          tx.enqueuePostCommitEffect({
+            id: `llmDialog:${nextRequestId}`,
+            kind: "llmDialog-start",
+            flush: () => {
+              if (requestId !== nextRequestId) {
+                return;
+              }
+
+              abortController = new AbortController();
+              startRequest(
+                runtime,
+                parentCell.space,
+                cause,
+                inputs,
+                pending,
+                internal,
+                pinnedCells,
+                result,
+                nextRequestId,
+                abortController.signal,
+              );
+            },
+          });
         },
       );
 
