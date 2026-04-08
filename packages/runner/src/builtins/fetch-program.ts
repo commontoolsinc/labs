@@ -5,6 +5,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { HttpProgramResolver } from "@commonfabric/js-compiler";
 import { resolveProgram, TARGET } from "@commonfabric/js-compiler/typescript";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { computeInputHash } from "./fetch-utils.ts";
 
 const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
@@ -200,7 +201,10 @@ export function fetchProgram(
       cellsInitialized = true;
     }
 
-    const { url } = inputsCell.getAsQueryResult([], tx);
+    const requestSnapshot = createFrozenRequestSnapshot(
+      inputsCell.getAsQueryResult([], tx),
+    );
+    const { url } = requestSnapshot;
     const inputHash = computeInputHash(tx, inputsCell);
 
     if (!url) {

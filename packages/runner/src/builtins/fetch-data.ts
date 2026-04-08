@@ -5,6 +5,7 @@ import { getPatternEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import {
   computeInputHashFromValue,
   internalSchema,
@@ -63,7 +64,7 @@ function snapshotFetchDataInputs(
         : body,
     }
     : undefined;
-  return { url: snapshot.url, mode, options };
+  return createFrozenRequestSnapshot({ url: snapshot.url, mode, options });
 }
 
 /**
