@@ -2,16 +2,26 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromBase64url } from "@commonfabric/utils/base64url";
 import { sha256 } from "@commonfabric/content-hash";
+import { sha256Deno } from "../src/sha256-deno.ts";
+import { sha256Wasm } from "../src/sha256-wasm.ts";
 import { FIXTURES } from "./fixtures.ts";
 
-describe("sha256()", () => {
-  let i = 1;
-  for (const { bytes, sha256: hashStr } of FIXTURES) {
-    const hashMsg = `${hashStr.slice(0, 8)}...`;
-    const hashBytes = fromBase64url(hashStr);
-    it(`produces expected byte-array hash #${i++}: \`${hashMsg}...\``, () => {
-      const got = sha256(bytes);
-      expect(got).toEqual(hashBytes);
-    });
-  }
-});
+const sha256Funcs = [
+  sha256,
+  sha256Deno,
+  sha256Wasm,
+] as const;
+
+for (const shaFunc of sha256Funcs) {
+  describe(`${shaFunc.name}()`, () => {
+    let i = 1;
+    for (const { bytes, sha256: hashStr } of FIXTURES) {
+      const hashMsg = `${hashStr.slice(0, 8)}...`;
+      const hashBytes = fromBase64url(hashStr);
+      it(`produces expected byte-array hash #${i++}: \`${hashMsg}...\``, () => {
+        const got = shaFunc(bytes);
+        expect(got).toEqual(hashBytes);
+      });
+    }
+  });
+}
