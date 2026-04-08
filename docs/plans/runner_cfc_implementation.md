@@ -595,7 +595,7 @@ Tasks:
       a required field requires a default
 - [x] Resolve input labels from stored CFC metadata and persisted
       `cid:<hash>`-backed schema documents; no coarse-label fallback
-- [ ] Implement `classification`, `integrity`, `addIntegrity`,
+- [x] Implement `classification`, `integrity`, `addIntegrity`,
       `requiredIntegrity`, and `maxConfidentiality`
 - [ ] Implement `writeAuthorizedBy`, `exactCopyOf`, `projection`, and
       collection-derived transition checks where they can be evaluated from

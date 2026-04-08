@@ -738,6 +738,13 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(persisted?.value).toEqual({ secret: "hello" });
       expect(persisted?.cfc?.schemaHash).toBeDefined();
       expect(persisted?.cfc?.labelMap?.entries.length).toBeGreaterThan(0);
+      expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
+        path: ["secret"],
+        label: {
+          classification: ["secret"],
+          integrity: ["trusted"],
+        },
+      });
 
       const schemaDoc = replica.getDocument(
         `cid:${persisted!.cfc!.schemaHash}`,
@@ -1080,6 +1087,85 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error?.message).toContain("requiredIntegrity");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects writes when maxConfidentiality is not satisfied by consumed input labels", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-max-conf-input",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        id: sourceId,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { secret: "seed" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { classification: ["secret"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-max-conf-input",
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string" },
+          },
+        },
+        tx,
+      );
+      expect(source.get()).toEqual({ secret: "seed" });
+      tx.markCfcRelevant("stored-input-metadata");
+
+      const output = runtime.getCell(
+        signer.did(),
+        "cfc-max-conf-output",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: { maxConfidentiality: ["internal"] },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      output.set({ value: "result" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("maxConfidentiality");
     } finally {
       await runtime.dispose();
       await storageManager.close();
