@@ -214,7 +214,7 @@ packages/
 
 ## CLI Integration
 
-The FUSE filesystem is accessed via the existing `ct` CLI:
+The FUSE filesystem is accessed via the existing `cf` CLI:
 
 ```bash
 cf fuse mount <mountpoint> [options]

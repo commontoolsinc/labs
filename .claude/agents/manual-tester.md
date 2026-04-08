@@ -29,7 +29,7 @@ You may also be told:
 
 Load these skills at the start of your workflow:
 
-1. `Skill("ct")` — for deploying, inspecting, and calling handlers
+1. `Skill("cf")` — for deploying, inspecting, and calling handlers
 2. `Skill("agent-browser")` — for browser-based UI testing
 
 Also read:

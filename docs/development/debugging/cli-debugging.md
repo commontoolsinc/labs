@@ -35,11 +35,11 @@ deno task cf piece get --piece ID totalSpent ...  # Now correct
 
 ## Inspect Transformed Output
 
-When the question is "what did the compiler emit?", use `ct check` with
+When the question is "what did the compiler emit?", use `cf check` with
 `--show-transformed` instead of reaching for ad hoc test harness code.
 
 ```bash
-deno task ct check ./packages/patterns/my-pattern.tsx --root $(pwd) --show-transformed
+deno task cf check ./packages/patterns/my-pattern.tsx --root $(pwd) --show-transformed
 ```
 
 This is the fastest way to inspect how `ts-transformers` rewrote:
@@ -52,7 +52,7 @@ This is the fastest way to inspect how `ts-transformers` rewrote:
 It also works on fixture inputs while debugging the compiler itself:
 
 ```bash
-deno task ct check \
+deno task cf check \
   packages/ts-transformers/test/fixtures/jsx-expressions/jsx-property-access.input.tsx \
   --root $(pwd) \
   --show-transformed

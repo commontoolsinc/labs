@@ -858,6 +858,9 @@ In the current implementation, the trusted runtime module identifiers are:
 - `commonfabric`
 - `commonfabric/schema`
 - `turndown`
+- `@commonfabric/html`
+- `@commonfabric/builder`
+- `@commonfabric/runner`
 
 These runtime modules may export:
 
@@ -1895,7 +1898,7 @@ module fallback.
 
 #### 3.3 Minimal globals plus trusted runtime modules (Priority: Medium)
 
-Keep ambient Compartment globals intentionally narrow and supply Common Tools
+Keep ambient Compartment globals intentionally narrow and supply Common Fabric
 capabilities through trusted runtime modules registered via `runtimeDeps`.
 Future reintroduction of time/network/randomness helpers for authored code
 remains a separate scoped decision.

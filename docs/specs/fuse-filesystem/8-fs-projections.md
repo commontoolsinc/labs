@@ -145,10 +145,10 @@ createNewNote.handler  void
 Each `.handler` and `.tool` file embeds the input schema as readable comments:
 
 ```sh
-#!/path/to/ct-exec exec
+#!/path/to/cf-exec exec
 # schema: {"type":"string"}
 # input: string
-exec '/path/to/ct-exec' exec "$0" "$@"
+exec '/path/to/cf-exec' exec "$0" "$@"
 ```
 
 Use `cat setTitle.handler` or `head setTitle.handler` to see the expected

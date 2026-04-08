@@ -138,8 +138,8 @@ home/pieces/todo-app/
         done          # file: false
       0.json          # {"text":"Buy milk","done":false}
     count             # file: 3
-    addItem.handler   # executable: invoke via ct exec or write JSON
-    search.tool       # executable: run via ct exec
+    addItem.handler   # executable: invoke via cf exec or write JSON
+    search.tool       # executable: run via cf exec
     $UI.json          # serialized VNode tree (not exploded)
   meta.json           # {"id":"of:ba4j...","patternName":"todo-app",...}
   .handlers           # hidden summary: one line per callable with type info

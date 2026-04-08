@@ -383,7 +383,7 @@ Load these references as needed for detailed guidance:
 2. **Include box-sizing reset** - Ensures consistent layout behavior
 3. **Use `attribute: false`** for objects/arrays/Cells - Prevents serialization
    errors
-4. **Prefix custom events with `ct-`** - Namespace convention
+4. **Prefix custom events with `cf-`** - Namespace convention
 5. **Export types separately** - Use `export type { ... }`
 6. **Clean up subscriptions** - Always unsubscribe in `disconnectedCallback()`
 7. **Use transactions for Cell mutations** - Never mutate cells directly
