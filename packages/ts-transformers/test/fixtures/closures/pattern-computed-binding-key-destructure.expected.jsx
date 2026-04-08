@@ -16,7 +16,7 @@ const key = "foo" as const;
 // Verifies: computed binding-name destructuring is lowered structurally
 //   ({ [key]: foo }) → const foo = __cf_pattern_input.key(key)
 export default pattern((__cf_pattern_input) => {
-    const foo = __cf_pattern_input.key("foo");
+    const foo = __cf_pattern_input.key(key);
     return <div>{foo}</div>;
 }, {
     type: "object",

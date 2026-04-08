@@ -94,9 +94,7 @@ export function getKnownComputedKeyExpression(
     return undefined;
   }
   if (keyInfo.kind === "literal") {
-    return typeof keyInfo.value === "number"
-      ? context.factory.createNumericLiteral(keyInfo.value)
-      : context.factory.createStringLiteral(keyInfo.value);
+    return cloneKeyExpression(expr, context.factory);
   }
   return context.cfHelpers.getHelperExpr(keyInfo.name);
 }

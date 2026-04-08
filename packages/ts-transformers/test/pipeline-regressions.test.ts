@@ -8,7 +8,7 @@ import { transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
 Deno.test(
-  "Pipeline regression: manual mapWithPattern canonicalizes fixed plain-capture keys",
+  "Pipeline regression: manual mapWithPattern preserves fixed plain-capture key evaluation",
   async () => {
     const source = `import { pattern, UI } from "commonfabric";
 const key = "small" as const;
@@ -39,9 +39,35 @@ const p = pattern<{ items: string[] }>((state) => ({
     assertEquals(computationDiagnostics.length, 0);
     assertStringIncludes(
       output,
-      "const fontSize = __cf_pattern_input.params.style.small;",
+      "const fontSize = __cf_pattern_input.params.style[key];",
     );
-    assert(!output.includes("__cf_pattern_input.params.style[key]"));
+    assert(!output.includes("__cf_pattern_input.params.style.small"));
+  },
+);
+
+Deno.test(
+  "Pipeline regression: opaque key lowering preserves literal-typed key evaluation",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commonfabric";
+declare function getKey(): "title";
+const p = pattern<{ item: { title: string } }>((state) => {
+  const { [getKey()]: title } = state.item;
+  return {
+    [UI]: <div>{title}</div>,
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(
+      output,
+      'const __cf_destructure_1 = state.key("item"), title = __cf_destructure_1.key(getKey());',
+    );
+    assert(!output.includes('title = __cf_destructure_1.key("title")'));
   },
 );
 

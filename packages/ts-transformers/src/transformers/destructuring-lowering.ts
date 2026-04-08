@@ -1,9 +1,9 @@
 import ts from "typescript";
-import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
 import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import {
   cloneKeyExpression,
+  getCommonFabricKeyName,
   getKnownComputedKeyExpression,
   isCommonFabricKeyExpression,
 } from "../utils/reactive-keys.ts";
@@ -152,6 +152,25 @@ export function getStaticDefaultTypeNode(
   return undefined;
 }
 
+function getEmitSafeComputedKeyText(
+  expression: ts.Expression,
+  context: TransformationContext,
+): string | undefined {
+  if (
+    ts.isStringLiteral(expression) ||
+    ts.isNumericLiteral(expression) ||
+    ts.isNoSubstitutionTemplateLiteral(expression)
+  ) {
+    return expression.text;
+  }
+
+  const commonFabricKeyName = getCommonFabricKeyName(
+    expression,
+    context.checker,
+  );
+  return commonFabricKeyName ? `$${commonFabricKeyName}` : undefined;
+}
+
 export function collectDestructureBindings(
   name: ts.BindingName,
   path: readonly PathSegment[],
@@ -258,10 +277,7 @@ export function collectDestructureBindings(
       if (isCommonFabricKeyExpression(computedKey, context, "SELF")) {
         directKeyExpression = context.cfHelpers.getHelperExpr("SELF");
       } else {
-        const staticKey = getPropertyNameText(
-          element.propertyName,
-          context.checker,
-        );
+        const staticKey = getEmitSafeComputedKeyText(computedKey, context);
         if (staticKey !== undefined) {
           key = staticKey;
         } else {
