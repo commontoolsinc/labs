@@ -849,7 +849,10 @@ function resolveDualSchemaBuilderTypes(
   },
 ): ResolvedDualSchemaBuilderTypes | undefined {
   let argumentTypeNode = options?.explicitArgumentTypeNode;
-  let argumentTypeValue = options?.explicitArgumentTypeValue;
+  let argumentTypeValue = options?.explicitArgumentTypeValue ??
+    (argumentTypeNode
+      ? getTypeFromTypeNodeWithFallback(argumentTypeNode, checker, typeRegistry)
+      : undefined);
 
   if (
     callback &&
@@ -950,11 +953,17 @@ function resolveDualSchemaBuilderTypes(
     inferred?.result ??
     createUnknownSchemaTypeNode(factory);
   const resultTypeValue = options?.explicitResultTypeValue ??
-    getTypeFromRegistryOrFallback(
-      resultTypeNode,
-      inferred?.resultType,
-      typeRegistry,
-    );
+    (options?.explicitResultTypeNode
+      ? getTypeFromTypeNodeWithFallback(
+        resultTypeNode,
+        checker,
+        typeRegistry,
+      )
+      : getTypeFromRegistryOrFallback(
+        resultTypeNode,
+        inferred?.resultType,
+        typeRegistry,
+      ));
 
   return {
     argumentTypeNode,

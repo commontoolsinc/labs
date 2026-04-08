@@ -200,7 +200,7 @@ to keep that boundary clear:
       transformer pipeline
 - [x] Ensure the pipeline preserves enough AST identity for schema-generator to
       rehydrate local binding references
-- [ ] Ensure `SchemaInjectionTransformer` preserves CFC-aware type identity in
+- [x] Ensure `SchemaInjectionTransformer` preserves CFC-aware type identity in
       generated `toSchema<...>()` calls
 - [x] Add guardrail tests so pipeline reordering fails loudly
 
