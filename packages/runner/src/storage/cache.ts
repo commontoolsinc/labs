@@ -46,8 +46,6 @@ import {
   parseLinkPrimitive,
 } from "../link-types.ts";
 import {
-  Assert,
-  Claim,
   getDefaultMemoryVersion,
   IRemoteStorageProviderSettings,
   IStorageManager,
@@ -61,7 +59,6 @@ import {
   OptStorageValue,
   PullError,
   PushError,
-  Retract,
   StorageValue,
   URI,
 } from "./interface.ts";

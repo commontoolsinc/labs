@@ -85,7 +85,7 @@ Deno.test("VDomRenderer - does not remove container when rootId is sentinel 0", 
 Deno.test("VDomRenderer - forwards trusted event provenance through delivery", async () => {
   const connection = new MockConnection();
   const mock = new MockDoc(
-    "<!DOCTYPE html><html><body><div id=\"root\"></div></body></html>",
+    '<!DOCTYPE html><html><body><div id="root"></div></body></html>',
   );
   const renderer = new VDomRenderer({
     runtimeClient: {} as any,

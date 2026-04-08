@@ -175,7 +175,9 @@ Deno.test("events - serializeEvent", async (t) => {
   });
 
   await t.step("captures trusted provenance", () => {
-    const event = new MockEvent("click", { isTrusted: true }) as unknown as Event;
+    const event = new MockEvent("click", {
+      isTrusted: true,
+    }) as unknown as Event;
     const serialized = serializeEvent(event);
     assertEquals(serialized.provenance, {
       origin: "dom",

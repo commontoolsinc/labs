@@ -126,32 +126,6 @@ const writeAuthorizedByReason = (
   return undefined;
 };
 
-const collectConsumedInputLabel = (
-  tx: IExtendedStorageTransaction,
-): IFCLabel => {
-  const reads = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
-    !isInternalVerifierRead(read.meta)
-  );
-  const labels = reads.map((read) =>
-    labelAtPath(
-      storedMetadataFor(tx, read.space, read.id, read.type),
-      canonicalizeLogicalPath(read.path),
-    )
-  ).filter((label): label is IFCLabel => label !== undefined);
-
-  return {
-    classification: mergeLabelValues(
-      ...labels.map((label) => label.classification),
-    ),
-    confidentiality: mergeLabelValues(
-      ...labels.map((label) => label.confidentiality),
-    ),
-    integrity: mergeLabelValues(
-      ...labels.map((label) => label.integrity),
-    ),
-  };
-};
-
 const storedMetadataFor = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
@@ -561,7 +535,6 @@ export const prepareBoundaryCommit = (
       toDeepFrozenSchema(mergedSchema, true) as JSONSchema,
       true,
     );
-    const consumedInputLabel = collectConsumedInputLabel(tx);
     const mergedSchemaEntries = walkIfcSchema(mergedSchema);
     const mergedSchemaEntryLabels = new Map<string, IFCLabel>(
       mergedSchemaEntries.map((entry) => [
@@ -583,13 +556,13 @@ export const prepareBoundaryCommit = (
         version: 1,
         entries: mergedSchemaEntries.map((entry) => ({
           path: entry.path,
-        label: derivePersistedLabel(
-          entry.schema,
-          entry.label,
-          mergedSchemaEntryLabels,
-        ),
-      })),
-    },
+          label: derivePersistedLabel(
+            entry.schema,
+            entry.label,
+            mergedSchemaEntryLabels,
+          ),
+        })),
+      },
     };
 
     tx.writeOrThrow({

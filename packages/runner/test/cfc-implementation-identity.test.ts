@@ -22,7 +22,7 @@ describe("CFC builtin implementation identity", () => {
     storageManager = undefined;
   });
 
-  it("stamps registered raw builtins with a stable builtin identity", async () => {
+  it("stamps registered raw builtins with a stable builtin identity", () => {
     storageManager = StorageManager.emulate({
       as: signer,
       memoryVersion: "v2",
@@ -79,7 +79,7 @@ describe("CFC builtin implementation identity", () => {
     const captured: Array<unknown> = [];
     runtime.moduleRegistry.addModuleByRef(
       "frame-builtin",
-      raw((inputsCell) => {
+      raw((_inputsCell) => {
         captured.push(getTopFrame()?.implementationIdentity);
         return () => undefined;
       }),
@@ -107,7 +107,7 @@ describe("CFC builtin implementation identity", () => {
     });
   });
 
-  it("leaves unregistered raw modules without a builtin identity", async () => {
+  it("leaves unregistered raw modules without a builtin identity", () => {
     storageManager = StorageManager.emulate({
       as: signer,
       memoryVersion: "v2",
@@ -138,7 +138,7 @@ describe("CFC builtin implementation identity", () => {
     tx.abort("test-complete");
   });
 
-  it("leaves unsafe-host helpers untrusted for policy-facing identity", async () => {
+  it("leaves unsafe-host helpers untrusted for policy-facing identity", () => {
     storageManager = StorageManager.emulate({
       as: signer,
       memoryVersion: "v2",

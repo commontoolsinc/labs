@@ -40,9 +40,9 @@ describe("Memory v1 label bridge cleanup", () => {
         claims: unknown[];
       }> = [];
       const originalCommit = provider.workspace.commit;
-      provider.workspace.commit = async (transaction) => {
+      provider.workspace.commit = (transaction) => {
         commitCalls.push(transaction);
-        return { ok: {} };
+        return Promise.resolve({ ok: {} });
       };
 
       const result = await provider.send([{

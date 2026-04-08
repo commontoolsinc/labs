@@ -82,7 +82,7 @@ describe("CFC flow precision claims", () => {
 
     const collectionPattern = pattern<{ values: number[] }>(({ values }) => {
       mappedRef = values.map((value: number) => value);
-      filteredRef = values.filter((value: number) => true);
+      filteredRef = values.filter((_value: number) => true);
       flattenedRef = values.flatMap((value: number) => [value]);
       reducedRef = values.reduce(
         (acc: number, value: number) => acc + value,

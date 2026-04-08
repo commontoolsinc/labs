@@ -7,8 +7,8 @@
 
 import type { JSONValue } from "@commonfabric/runtime-client";
 import {
-  getEventProvenance,
   type EventProvenance,
+  getEventProvenance,
 } from "../event-provenance.ts";
 
 /**

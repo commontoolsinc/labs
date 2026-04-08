@@ -2,8 +2,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
 import {
-  enqueueSinkRequestPostCommitEffect,
   createSinkRequestPolicyInput,
+  enqueueSinkRequestPostCommitEffect,
   verifySinkRequestRelease,
 } from "../src/cfc/sink-request.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -11,8 +11,6 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 const signer = await Identity.fromPassphrase("test cfc sink request policy");
-const space = signer.did();
-
 describe("CFC sink request policy", () => {
   it("accepts matching sink-request policy inputs and rejects mismatches", () => {
     const request = createFrozenRequestSnapshot({
