@@ -844,7 +844,7 @@ The test matrix should be built in the same order as the implementation:
 - [x] scheduler and runtime-owned direct-commit tests for retry and outbox
       behavior
 - [x] sink tests for commit-gated network execution and idempotency
-- [ ] UI tests for provenance-backed trusted event delivery
+- [x] UI tests for provenance-backed trusted event delivery
 - [ ] fresh-runtime restart tests for persisted metadata, schema hashes, trust
       snapshots, and sink results
 
