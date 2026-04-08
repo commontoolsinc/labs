@@ -29,7 +29,8 @@ const elementLocalFlowPrecisionClaim = {
 
 describe("CFC flow precision claims", () => {
   it("keeps untrusted collection precision claims conservative", () => {
-    expect(trustedFlowPrecisionSchemaForBuiltin(undefined, "map")).toBeUndefined();
+    expect(trustedFlowPrecisionSchemaForBuiltin(undefined, "map"))
+      .toBeUndefined();
     expect(
       trustedFlowPrecisionSchemaForBuiltin(
         { kind: "unsupported", className: "eval", reason: "test" },
@@ -83,7 +84,10 @@ describe("CFC flow precision claims", () => {
       mappedRef = values.map((value: number) => value);
       filteredRef = values.filter((value: number) => true);
       flattenedRef = values.flatMap((value: number) => [value]);
-      reducedRef = values.reduce((acc: number, value: number) => acc + value, 0);
+      reducedRef = values.reduce(
+        (acc: number, value: number) => acc + value,
+        0,
+      );
       return {
         mapped: mappedRef,
         filtered: filteredRef,
