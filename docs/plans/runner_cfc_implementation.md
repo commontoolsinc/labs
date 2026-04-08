@@ -708,7 +708,7 @@ Tasks:
 
 Acceptance:
 
-- [ ] Built-ins produce stable policy-facing implementation identities
+- [x] Built-ins produce stable policy-facing implementation identities
 - [ ] Verified compiled user-code policy identities remain blocked until v2
       carries the richer bundle/path/location/hash identity surface
 - [ ] Unsupported identity classes fail closed for trust-sensitive checks
