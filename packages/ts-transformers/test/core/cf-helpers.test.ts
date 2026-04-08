@@ -15,7 +15,7 @@ Deno.test("transformCfDirective injects helpers by default", () => {
 
   assertMatch(
     transformed,
-    /import \{ __ctHelpers as __cfHelpers \} from "commonfabric";/,
+    /^import \{ __cfHelpers \} from "commonfabric";/m,
   );
   assertMatch(transformed, /function h\(\.\.\.args: any\[\]\)/);
 });
@@ -32,7 +32,7 @@ Deno.test("transformCfDirective preserves legacy cts-enable behavior", () => {
   assertEquals(sourceUsesCfDirective(source), true);
   assertMatch(
     transformed,
-    /^import \{ __ctHelpers as __cfHelpers \} from "commonfabric";/m,
+    /^import \{ __cfHelpers \} from "commonfabric";/m,
   );
   assertNotMatch(transformed, /cts-enable/);
 });
@@ -47,6 +47,6 @@ Deno.test("transformCfDirective strips cf-disable-transform without helpers", ()
 
   assertEquals(sourceDisablesCfTransform(source), true);
   assertEquals(transformed.split("\n")[0], "");
-  assertNotMatch(transformed, /__ctHelpers as __cfHelpers/);
+  assertNotMatch(transformed, /import \{ __cfHelpers \} from "commonfabric";/);
   assertNotMatch(transformed, /cf-disable-transform/);
 });

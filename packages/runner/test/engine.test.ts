@@ -663,7 +663,7 @@ ${FACTORY_SHADOW_GUARDS}
     );
   });
 
-  it("compiles default export calls that evaluate to primitive snapshots through __ct_data", async () => {
+  it("compiles default export calls that evaluate to primitive snapshots through __cf_data", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
@@ -686,8 +686,7 @@ ${FACTORY_SHADOW_GUARDS}
     };
 
     const { jsScript, id } = await engine.compile(program);
-<<<<<<< HEAD
-    expect(jsScript.js).toContain("__cf_data)(");
+    expect(jsScript.js).toContain("__cfHelpers.__cf_data(");
 
     const { main } = await engine.evaluate(id, jsScript, program.files);
     expect(main?.default).toBe(25);
