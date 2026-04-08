@@ -1,6 +1,6 @@
 import { env, waitFor } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
-import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import "../src/globals.ts";
 import { Identity } from "@commonfabric/identity";
@@ -13,66 +13,20 @@ describe("shell piece tests", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  let pieceId: string;
-  let piece: PieceController;
-  let identity: Identity;
-  let cc: PiecesController;
-  let pieceSinkCancel: (() => void) | undefined;
-
-  beforeAll(async () => {
-    identity = await Identity.generate({ implementation: "noble" });
-    cc = await PiecesController.initialize({
+  it("can view and interact with a piece", async () => {
+    const page = shell.page();
+    const identity = await Identity.generate({ implementation: "noble" });
+    const cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
     });
-    const sourcePath = join(
-      import.meta.dirname!,
-      "..",
-      "..",
-      "patterns",
-      "counter",
-      "counter.tsx",
-    );
-    const program = await cc.manager().runtime.harness
-      .resolve(
-        new FileSystemProgramResolver(sourcePath),
-      );
-    piece = await cc.create(
-      program,
-      { start: true },
-    );
-    pieceId = piece.id;
-
-    const resultCell = cc.manager().getResult(piece.getCell());
-    pieceSinkCancel = resultCell.sink(() => {});
-
-    await waitFor(async () => (await piece.result.get(["value"])) === 0);
-    await waitFor(async () => {
-      const reloadedPiece = await cc.get(pieceId, true);
-      return (await reloadedPiece.result.get(["value"])) === 0;
-    });
-  });
-
-  afterAll(async () => {
-    pieceSinkCancel?.();
-    if (cc) await cc.dispose();
-  });
-
-  it("can view and interact with a piece", async () => {
-    const page = shell.page();
-    await shell.goto({
-      frontendUrl: FRONTEND_URL,
-      view: {
-        spaceName: SPACE_NAME,
-      },
-      identity,
-    });
-
+    let piece: PieceController | undefined;
+    let pieceSinkCancel: (() => void) | undefined;
     const logDebugSnapshot = async (label: string) => {
       console.log(label, {
         shellState: await shell.state(),
-        pieceValue: await piece.result.get(["value"]),
+        pieceValue: piece ? await piece.result.get(["value"]) : undefined,
         page: await page.evaluate(() => {
           const rootView = document.querySelector("x-root-view");
           const typedRootView = rootView as
@@ -139,68 +93,100 @@ describe("shell piece tests", () => {
     };
 
     try {
+      const sourcePath = join(
+        import.meta.dirname!,
+        "..",
+        "..",
+        "patterns",
+        "counter",
+        "counter.tsx",
+      );
+      const program = await cc.manager().runtime.harness
+        .resolve(
+          new FileSystemProgramResolver(sourcePath),
+        );
+      const currentPiece = await cc.create(
+        program,
+        { start: true },
+      );
+      piece = currentPiece;
+      const pieceId = currentPiece.id;
+
+      const resultCell = cc.manager().getResult(currentPiece.getCell());
+      pieceSinkCancel = resultCell.sink(() => {});
+
+      await waitFor(async () =>
+        (await currentPiece.result.get(["value"])) === 0
+      );
+      await waitFor(async () => {
+        const reloadedPiece = await cc.get(pieceId, true);
+        return (await reloadedPiece.result.get(["value"])) === 0;
+      });
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: {
+          spaceName: SPACE_NAME,
+        },
+        identity,
+      });
+
       await waitFor(async () => {
         return await page.evaluate(() => !!globalThis.commonfabric?.rt);
       });
-    } catch (error) {
-      await logDebugSnapshot("shell piece runtime debug");
-      throw error;
-    }
+      await page.evaluate(async (spaceName, pieceId) => {
+        await globalThis.app.setView({ spaceName, pieceId });
+      }, { args: [SPACE_NAME, pieceId] });
+      await shell.waitForState({
+        view: {
+          spaceName: SPACE_NAME,
+          pieceId,
+        },
+        identity,
+      });
 
-    await page.evaluate(async (spaceName, pieceId) => {
-      await globalThis.app.setView({ spaceName, pieceId });
-    }, { args: [SPACE_NAME, pieceId] });
-    await shell.waitForState({
-      view: {
-        spaceName: SPACE_NAME,
-        pieceId,
-      },
-      identity,
-    });
-
-    const waitForActivePattern = async () => {
-      await waitFor(async () => {
-        return await page.evaluate((expectedPieceId) => {
-          const rootView = document.querySelector("x-root-view");
-          const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
-            | {
-              _patterns?: {
-                value?: {
-                  activePattern?: {
-                    id(): string;
+      const waitForActivePattern = async () => {
+        await waitFor(async () => {
+          return await page.evaluate((expectedPieceId) => {
+            const rootView = document.querySelector("x-root-view");
+            const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
+              | {
+                _patterns?: {
+                  value?: {
+                    activePattern?: {
+                      id(): string;
+                    };
                   };
                 };
-              };
-            }
-            | null;
-          const activePattern = appView?._patterns?.value?.activePattern;
-          return activePattern?.id() === expectedPieceId;
-        }, { args: [pieceId] });
-      });
-    };
+              }
+              | null;
+            const activePattern = appView?._patterns?.value?.activePattern;
+            return activePattern?.id() === expectedPieceId;
+          }, { args: [pieceId] });
+        });
+      };
 
-    try {
       await waitForActivePattern();
-    } catch (error) {
-      await logDebugSnapshot("shell piece test debug");
-      throw error;
-    }
-    await waitFor(async () => (await piece.result.get(["value"])) === 0);
+      await waitFor(async () =>
+        (await currentPiece.result.get(["value"])) === 0
+      );
 
-    await clickPieceButton(page, "#counter-decrement");
-    try {
-      await waitFor(async () => (await piece.result.get(["value"])) === -1);
-    } catch (error) {
-      await logDebugSnapshot("shell piece decrement debug");
-      throw error;
-    }
+      await clickPieceButton(page, "#counter-decrement");
+      await waitFor(async () =>
+        (await currentPiece.result.get(["value"])) === -1
+      );
 
-    await clickPieceButton(page, "#counter-decrement");
-    try {
-      await waitFor(async () => (await piece.result.get(["value"])) === -2);
+      await clickPieceButton(page, "#counter-decrement");
+      await waitFor(async () =>
+        (await currentPiece.result.get(["value"])) === -2
+      );
     } catch (error) {
-      await logDebugSnapshot("shell piece decrement debug");
+      if (piece) {
+        await logDebugSnapshot("shell piece test debug");
+      }
       throw error;
+    } finally {
+      pieceSinkCancel?.();
+      await cc.dispose();
     }
   });
 });
