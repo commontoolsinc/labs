@@ -25,18 +25,22 @@ try {
  */
 class WasmHasher implements IncrementalHasher {
   #chunks: Uint8Array[] = [];
+
   update(data: Uint8Array) {
     // Copy to avoid aliasing shared scratch buffers.
     this.#chunks.push(new Uint8Array(data));
   }
+
   digest(): Uint8Array;
   digest(encoding: "base64url"): string;
   digest(encoding?: string): Uint8Array | string {
     const hasher = theHasher!;
     hasher.init();
+
     for (const chunk of this.#chunks) {
       hasher.update(chunk);
     }
+
     const result: Uint8Array = hasher.digest("binary");
 
     switch (encoding) {

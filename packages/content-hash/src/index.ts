@@ -10,14 +10,13 @@
  */
 
 import { isDeno } from "@commonfabric/utils/env";
-import { sha256 as nobleSha256 } from "merkle-reference";
-import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import type { IncrementalHasher, Sha256Fn } from "./interface.ts";
+import { createHasherNoble, sha256Noble } from "./sha256-noble.ts";
 import { canUseWasm, createHasherWasm, sha256Wasm } from "./sha256-wasm.ts";
 
 export type { IncrementalHasher, Sha256Fn } from "./interface.ts";
 
-let sha256Fn: Sha256Fn = nobleSha256;
+let sha256Fn: Sha256Fn;
 let createHasher: () => IncrementalHasher;
 let setupComplete: boolean = false;
 
@@ -40,45 +39,11 @@ if (!setupComplete && canUseWasm()) {
   setupComplete = true;
 }
 
-// Fallback on Noble if all the previous stuff failed.
+// Use Noble if none of the previous were successfully set up.
 if (!setupComplete) {
-  // Fallback: buffer chunks and hash all at once via noble.
-  class NobleHasher implements IncrementalHasher {
-    #chunks: Uint8Array[] = [];
-    update(data: Uint8Array) {
-      // Copy to avoid aliasing shared scratch buffers.
-      this.#chunks.push(new Uint8Array(data));
-    }
-    digest(): Uint8Array;
-    digest(encoding: "base64url"): string;
-    digest(encoding?: string): Uint8Array | string {
-      let totalLen = 0;
-      for (const c of this.#chunks) totalLen += c.length;
-      const buf = new Uint8Array(totalLen);
-      let offset = 0;
-      for (const c of this.#chunks) {
-        buf.set(c, offset);
-        offset += c.length;
-      }
-      const result = nobleSha256(buf);
-
-      switch (encoding) {
-        case "base64url": {
-          return toUnpaddedBase64url(result);
-        }
-        case undefined: {
-          return result;
-        }
-        default: {
-          throw new Error(`Unknown encoding: ${encoding}`);
-        }
-      }
-    }
-  }
-
-  createHasher = (): IncrementalHasher => {
-    return new NobleHasher();
-  };
+  sha256Fn = sha256Noble;
+  createHasher = createHasherNoble;
+  setupComplete = true;
 }
 
 /**
