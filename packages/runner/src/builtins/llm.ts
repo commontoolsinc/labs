@@ -441,7 +441,7 @@ export function llm(
               executeWithToolsLoop({
                 initialMessages:
                   (messages as unknown as readonly BuiltInLLMMessage[]) ??
-                  [],
+                    [],
                 llmParams,
                 toolCatalog: toolCatalog!,
                 updatePartial,

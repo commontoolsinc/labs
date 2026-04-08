@@ -46,8 +46,7 @@ const mergeSetLikeIfcArray = (
   switch (key) {
     case "requiredIntegrity":
     case "classification":
-    case "addIntegrity":
-    {
+    case "addIntegrity": {
       const existingArray = existing as readonly string[];
       const candidateArray = candidate as readonly string[];
       if (!arraySubsetOf(existingArray, candidateArray)) {
@@ -57,8 +56,7 @@ const mergeSetLikeIfcArray = (
     }
     case "integrity":
     case "maxConfidentiality":
-    case "writeAuthorizedBy":
-    {
+    case "writeAuthorizedBy": {
       const existingArray = existing as readonly string[];
       const candidateArray = candidate as readonly string[];
       if (!arraySubsetOf(candidateArray, existingArray)) {
@@ -98,7 +96,11 @@ const mergeIfc = (
   const candidateIfc = candidate as Record<string, unknown>;
   const merged: Record<string, unknown> = {};
   for (const key of IFC_KEYS) {
-    merged[key] = mergeSetLikeIfcArray(key, existingIfc[key], candidateIfc[key]);
+    merged[key] = mergeSetLikeIfcArray(
+      key,
+      existingIfc[key],
+      candidateIfc[key],
+    );
   }
   return merged as JSONSchemaObj["ifc"];
 };

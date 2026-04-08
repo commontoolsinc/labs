@@ -4,15 +4,17 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { createFrozenRequestSnapshot } from "./request-snapshot.ts";
 import type { WritePolicyInput } from "./types.ts";
 
-type SinkRequestPolicyInput = Extract<WritePolicyInput, { kind: "sink-request" }>;
+type SinkRequestPolicyInput = Extract<
+  WritePolicyInput,
+  { kind: "sink-request" }
+>;
 type SinkRequestPolicyState = {
   writePolicyInputs: readonly WritePolicyInput[];
 };
 
 const isSinkRequestPolicyInput = (
   input: WritePolicyInput,
-): input is SinkRequestPolicyInput =>
-  input.kind === "sink-request";
+): input is SinkRequestPolicyInput => input.kind === "sink-request";
 
 export function createSinkRequestPolicyInput(
   sink: string,

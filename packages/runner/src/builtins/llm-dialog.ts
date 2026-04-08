@@ -2073,7 +2073,9 @@ export function llmDialog(
             maxTokens: inputs.key("maxTokens").withTx(tx).get() ?? 4096,
             messageCount: inputs.key("messages").withTx(tx).get()?.length ?? 0,
             hasTools: Boolean(inputs.key("tools").withTx(tx).get()),
-            hasResultSchema: Boolean(inputs.key("resultSchema").withTx(tx).get()),
+            hasResultSchema: Boolean(
+              inputs.key("resultSchema").withTx(tx).get(),
+            ),
           });
 
           enqueueSinkRequestPostCommitEffect(

@@ -101,7 +101,9 @@ const writeAuthorizedByReason = (
   if (claim === undefined) {
     return undefined;
   }
-  if (!Array.isArray(claim) || !claim.every((entry) => typeof entry === "string")) {
+  if (
+    !Array.isArray(claim) || !claim.every((entry) => typeof entry === "string")
+  ) {
     return `unsupported trust-sensitive claim writeAuthorizedBy at /${
       path.join("/")
     }`;
