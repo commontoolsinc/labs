@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   addMockObjectResponse,
+  addMockResponse,
   clearMockResponses,
   enableMockMode,
 } from "@commonfabric/llm/client";
@@ -27,6 +28,7 @@ describe("generateObject outbox mechanism", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let dummyPattern: any;
   let generateObject: ReturnType<
     typeof createBuilder
   >["commonfabric"]["generateObject"];
@@ -42,6 +44,7 @@ describe("generateObject outbox mechanism", () => {
 
     const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, generateObject } = commonfabric);
+    dummyPattern = pattern(() => ({}), { type: "object" });
   });
 
   afterEach(async () => {
@@ -129,6 +132,103 @@ describe("generateObject outbox mechanism", () => {
       txPrototype.enqueuePostCommitEffect = originalTxEnqueue;
       wrapperPrototype.enqueuePostCommitEffect = originalWrapperEnqueue;
       LLMClient.prototype.generateObject = originalGenerateObject;
+    }
+  });
+
+  it("enqueues generateObject tool-calling work behind the post-commit outbox", async () => {
+    const prompt = "generate object tool outbox";
+    addMockResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(prompt)
+        ) && req.tools?.["presentResult"] !== undefined,
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call_presentResult_tool_outbox",
+            toolName: "presentResult",
+            input: {
+              title: "tool gated title",
+              description: "tool gated description",
+            },
+          },
+        ],
+        id: "mock-presentResult-tool-outbox",
+      },
+    );
+
+    const testPattern = pattern(() => {
+      return generateObject({
+        prompt,
+        schema: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            description: { type: "string" },
+          },
+          required: ["title"],
+        },
+        tools: {
+          dummy: {
+            description: "A dummy tool to force tool-calling path",
+            pattern: dummyPattern,
+          },
+        },
+      });
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "generateObject-tool-outbox-test",
+      testPattern.resultSchema,
+      tx,
+    );
+
+    const txPrototype = ExtendedStorageTransaction.prototype;
+    const wrapperPrototype = TransactionWrapper.prototype;
+    const originalTxEnqueue = txPrototype.enqueuePostCommitEffect;
+    const originalWrapperEnqueue = wrapperPrototype.enqueuePostCommitEffect;
+    const originalSendRequest = LLMClient.prototype.sendRequest;
+    const outboxEffects: Array<{ id: string; kind: string }> = [];
+    const sendRequestCalls: number[] = [];
+
+    txPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxEffects.push(args[0] as { id: string; kind: string });
+      return originalTxEnqueue.apply(this, args as never);
+    };
+    wrapperPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxEffects.push(args[0] as { id: string; kind: string });
+      return originalWrapperEnqueue.apply(this, args as never);
+    };
+    LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
+      sendRequestCalls.push(Date.now());
+      return await originalSendRequest.apply(this, args as never);
+    };
+
+    try {
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      expect(sendRequestCalls).toEqual([]);
+
+      tx.commit();
+
+      expect(sendRequestCalls).toEqual([]);
+
+      await waitForPendingToBecomeFalse(result);
+      await runtime.idle();
+
+      expect(outboxEffects.length).toBeGreaterThan(0);
+      expect(outboxEffects[0].kind).toBe("generateObject-start");
+      expect(sendRequestCalls.length).toBeGreaterThan(0);
+      expect(result.key("result").get()).toEqual({
+        title: "tool gated title",
+        description: "tool gated description",
+      });
+    } finally {
+      txPrototype.enqueuePostCommitEffect = originalTxEnqueue;
+      wrapperPrototype.enqueuePostCommitEffect = originalWrapperEnqueue;
+      LLMClient.prototype.sendRequest = originalSendRequest;
     }
   });
 });

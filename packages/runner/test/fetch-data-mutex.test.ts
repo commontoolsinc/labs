@@ -11,6 +11,7 @@ import {
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
 import { setPatternEnvironment } from "../src/env.ts";
+import { computeInputHashFromValue } from "../src/builtins/fetch-utils.ts";
 
 const signer = await Identity.fromPassphrase("test fetch-data mutex");
 const space = signer.did();
@@ -155,6 +156,54 @@ describe("fetch-data mutex mechanism", () => {
     } finally {
       txPrototype.commit = originalTxCommit;
       wrapperPrototype.commit = originalWrapperCommit;
+    }
+  });
+
+  it("uses a stable fetchData idempotency key for identical inputs", async () => {
+    const fetchData = byRef("fetchData");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchData({ url, mode: "json" }),
+    );
+
+    const txPrototype = ExtendedStorageTransaction.prototype;
+    const wrapperPrototype = TransactionWrapper.prototype;
+    const originalTxEnqueue = txPrototype.enqueuePostCommitEffect;
+    const originalWrapperEnqueue = wrapperPrototype.enqueuePostCommitEffect;
+    const outboxIds: string[] = [];
+
+    txPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxIds.push((args[0] as { id: string }).id);
+      return originalTxEnqueue.apply(this, args as never);
+    };
+    wrapperPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxIds.push((args[0] as { id: string }).id);
+      return originalWrapperEnqueue.apply(this, args as never);
+    };
+
+    try {
+      const resultCell = runtime.getCell(
+        space,
+        "fetch-idempotency-test",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {
+        url: "http://mock-test-server.local/api/idempotency",
+      }, resultCell);
+      tx.commit();
+      await result.pull();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const expectedHash = computeInputHashFromValue({
+        url: "http://mock-test-server.local/api/idempotency",
+        mode: "json",
+      });
+
+      expect(outboxIds.length).toBeGreaterThan(0);
+      expect(outboxIds[0]).toBe(`fetchData:${expectedHash}`);
+    } finally {
+      txPrototype.enqueuePostCommitEffect = originalTxEnqueue;
+      wrapperPrototype.enqueuePostCommitEffect = originalWrapperEnqueue;
     }
   });
 

@@ -240,7 +240,7 @@ export function fetchProgram(
     // State machine transitions
     if (state.type === "idle") {
       // Try to transition to fetching
-      const requestId = crypto.randomUUID();
+      const requestId = inputHash;
       cache.withTx(tx).update({
         [inputHash]: {
           inputHash,

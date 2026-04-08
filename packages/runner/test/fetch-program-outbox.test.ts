@@ -11,6 +11,7 @@ import {
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
 import { setPatternEnvironment } from "../src/env.ts";
+import { computeInputHashFromValue } from "../src/builtins/fetch-utils.ts";
 
 const signer = await Identity.fromPassphrase("test fetch-program outbox");
 const space = signer.did();
@@ -114,6 +115,53 @@ describe("fetch-program outbox mechanism", () => {
     } finally {
       txPrototype.commit = originalTxCommit;
       wrapperPrototype.commit = originalWrapperCommit;
+    }
+  });
+
+  it("uses a stable fetchProgram idempotency key for identical inputs", async () => {
+    const fetchProgram = byRef("fetchProgram");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchProgram({ url }),
+    );
+
+    const txPrototype = ExtendedStorageTransaction.prototype;
+    const wrapperPrototype = TransactionWrapper.prototype;
+    const originalTxEnqueue = txPrototype.enqueuePostCommitEffect;
+    const originalWrapperEnqueue = wrapperPrototype.enqueuePostCommitEffect;
+    const outboxIds: string[] = [];
+
+    txPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxIds.push((args[0] as { id: string }).id);
+      return originalTxEnqueue.apply(this, args as never);
+    };
+    wrapperPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxIds.push((args[0] as { id: string }).id);
+      return originalWrapperEnqueue.apply(this, args as never);
+    };
+
+    try {
+      const resultCell = runtime.getCell(
+        space,
+        "program-idempotency-test",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {
+        url: "http://mock-test-server.local/program-idempotency.ts",
+      }, resultCell);
+      tx.commit();
+      await result.pull();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const expectedHash = computeInputHashFromValue({
+        url: "http://mock-test-server.local/program-idempotency.ts",
+      });
+
+      expect(outboxIds.length).toBeGreaterThan(0);
+      expect(outboxIds[0]).toBe(`fetchProgram:${expectedHash}`);
+    } finally {
+      txPrototype.enqueuePostCommitEffect = originalTxEnqueue;
+      wrapperPrototype.enqueuePostCommitEffect = originalWrapperEnqueue;
     }
   });
 });

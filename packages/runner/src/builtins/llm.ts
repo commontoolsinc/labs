@@ -855,161 +855,163 @@ export function generateObject<T extends Record<string, unknown>>(
         ? () => false
         : () => thisRun !== currentRun;
 
-      const resultPromise = (async () => {
-        try {
-          const toolsCell = inputs.key("tools").asSchema({
-            type: "object",
-            additionalProperties: LLMToolSchema,
-          });
-          const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
-            toolsCell,
-          );
+      enqueuePostCommitLLMWork(
+        tx,
+        `generateObject:${hash}`,
+        "generateObject-start",
+        () => {
+          const resultPromise = (async () => {
+            try {
+              const toolsCell = inputs.key("tools").asSchema({
+                type: "object",
+                additionalProperties: LLMToolSchema,
+              });
+              const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
+                toolsCell,
+              );
 
-          // Add presentResult builtin tool
-          const toolCatalog = {
-            ...baseCatalog,
-            llmTools: {
-              ...baseCatalog.llmTools,
-              [llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME]: {
-                description:
-                  "Call this tool with the final structured result matching the required schema. This should be your last action.",
-                // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
-                // cloneSchemaMutable() before turning on modern data-model.
-                inputSchema: llmToolExecutionHelpers.prepareSchemaForLLM(
-                  JSON.parse(JSON.stringify(schema)),
-                ),
+              // Add presentResult builtin tool
+              const toolCatalog = {
+                ...baseCatalog,
+                llmTools: {
+                  ...baseCatalog.llmTools,
+                  [llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME]: {
+                    description:
+                      "Call this tool with the final structured result matching the required schema. This should be your last action.",
+                    // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
+                    // cloneSchemaMutable() before turning on modern data-model.
+                    inputSchema: llmToolExecutionHelpers.prepareSchemaForLLM(
+                      JSON.parse(JSON.stringify(schema)),
+                    ),
+                  },
+                },
+              };
+
+              // Execute with tools - capture presentResult when called
+              let finalResult: T | undefined;
+
+              // Custom execution loop for generateObject with presentResult extraction
+              const executeRecursive = async (
+                currentMessages: readonly BuiltInLLMMessage[],
+              ): Promise<void> => {
+                if (isRunCancelled()) return;
+
+                const requestParams: LLMRequest = {
+                  ...llmParams,
+                  messages: currentMessages,
+                  tools: toolCatalog.llmTools,
+                };
+
+                const llmResult = await client.sendRequest(
+                  requestParams,
+                  updatePartial,
+                );
+
+                if (isRunCancelled()) return;
+
+                const toolCallParts = llmToolExecutionHelpers
+                  .extractToolCallParts(llmResult.content);
+                const hasToolCalls = toolCallParts.length > 0;
+
+                if (hasToolCalls) {
+                  const assistantMessage = llmToolExecutionHelpers
+                    .buildAssistantMessage(
+                      llmResult.content,
+                      toolCallParts,
+                    );
+
+                  const toolResults = await llmToolExecutionHelpers
+                    .executeToolCalls(
+                      runtime,
+                      parentCell.space,
+                      toolCatalog,
+                      toolCallParts,
+                    );
+
+                  // Check if presentResult was called. Cellify from the raw
+                  // tool call input to get live Cell references (the tool result
+                  // itself is serialized with @link for the conversation).
+                  const presentResultPart = toolCallParts.find(
+                    (p) =>
+                      p.toolName ===
+                        llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME,
+                  );
+                  if (presentResultPart) {
+                    finalResult = llmToolExecutionHelpers.traverseAndCellify(
+                      runtime,
+                      parentCell.space,
+                      presentResultPart.input,
+                    ) as T;
+                  }
+
+                  const toolResultMessages = llmToolExecutionHelpers
+                    .createToolResultMessages(toolResults);
+
+                  const updatedMessages = [
+                    ...currentMessages,
+                    assistantMessage,
+                    ...toolResultMessages,
+                  ];
+
+                  // Continue if presentResult wasn't called yet
+                  if (!presentResultPart) {
+                    await executeRecursive(updatedMessages);
+                  }
+                } else {
+                  throw new Error(
+                    "LLM did not call presentResult tool with structured data",
+                  );
+                }
+              };
+
+              const doWork = async () => {
+                await executeRecursive(requestMessages);
+
+                if (finalResult === undefined) {
+                  throw new Error("presentResult was never called");
+                }
+
+                return finalResult;
+              };
+
+              const objectResult = queueName
+                ? await runtime.getOrCreateQueue(queueName).enqueue(doWork)
+                : await doWork();
+
+              if (isRunCancelled()) return;
+
+              await runtime.idle();
+
+              await runtime.editWithRetry((tx) => {
+                resultCell.key("pending").withTx(tx).set(false);
+                resultCell.key("result").withTx(tx).set(objectResult);
+                resultCell.key("error").withTx(tx).set(undefined);
+                resultCell.key("requestHash").withTx(tx).set(hash);
+              });
+            } finally {
+              cleanupPartial();
+            }
+          })();
+
+          resultPromise.catch((e) =>
+            handleLLMError(
+              e,
+              runtime,
+              resultCell.key("pending"),
+              resultCell.key("result"),
+              resultCell.key("error"),
+              resultCell.key("partial"),
+              resultCell.key("requestHash"),
+              hash,
+              queueName ? () => thisRun : () => currentRun,
+              thisRun,
+              () => {
+                previousCallHash = undefined;
               },
-            },
-          };
-
-          // Execute with tools - capture presentResult when called
-          let finalResult: T | undefined;
-
-          // Custom execution loop for generateObject with presentResult extraction
-          const executeRecursive = async (
-            currentMessages: readonly BuiltInLLMMessage[],
-          ): Promise<void> => {
-            if (isRunCancelled()) return;
-
-            const requestParams: LLMRequest = {
-              ...llmParams,
-              messages: currentMessages,
-              tools: toolCatalog.llmTools,
-            };
-
-            const llmResult = await client.sendRequest(
-              requestParams,
-              updatePartial,
-            );
-
-            if (isRunCancelled()) return;
-
-            const toolCallParts = llmToolExecutionHelpers.extractToolCallParts(
-              llmResult.content,
-            );
-            const hasToolCalls = toolCallParts.length > 0;
-
-            if (hasToolCalls) {
-              const assistantMessage = llmToolExecutionHelpers
-                .buildAssistantMessage(
-                  llmResult.content,
-                  toolCallParts,
-                );
-
-              const toolResults = await llmToolExecutionHelpers
-                .executeToolCalls(
-                  runtime,
-                  parentCell.space,
-                  toolCatalog,
-                  toolCallParts,
-                );
-
-              // Check if presentResult was called. Cellify from the raw
-              // tool call input to get live Cell references (the tool result
-              // itself is serialized with @link for the conversation).
-              const presentResultPart = toolCallParts.find(
-                (p) =>
-                  p.toolName ===
-                    llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME,
-              );
-              if (presentResultPart) {
-                finalResult = llmToolExecutionHelpers.traverseAndCellify(
-                  runtime,
-                  parentCell.space,
-                  presentResultPart.input,
-                ) as T;
-              }
-
-              const toolResultMessages = llmToolExecutionHelpers
-                .createToolResultMessages(toolResults);
-
-              const updatedMessages = [
-                ...currentMessages,
-                assistantMessage,
-                ...toolResultMessages,
-              ];
-
-              // Continue if presentResult wasn't called yet
-              if (!presentResultPart) {
-                await executeRecursive(updatedMessages);
-              }
-            } else {
-              throw new Error(
-                "LLM did not call presentResult tool with structured data",
-              );
-            }
-          };
-
-          const doWork = async () => {
-            await executeRecursive(requestMessages);
-
-            if (finalResult === undefined) {
-              throw new Error("presentResult was never called");
-            }
-
-            return finalResult;
-          };
-
-          if (queueName) {
-            return await runtime.getOrCreateQueue(queueName).enqueue(doWork);
-          } else {
-            return await doWork();
-          }
-        } finally {
-          cleanupPartial();
-        }
-      })();
-
-      resultPromise
-        .then(async (objectResult) => {
-          if (isRunCancelled()) return;
-
-          await runtime.idle();
-
-          await runtime.editWithRetry((tx) => {
-            resultCell.key("pending").withTx(tx).set(false);
-            resultCell.key("result").withTx(tx).set(objectResult);
-            resultCell.key("error").withTx(tx).set(undefined);
-            resultCell.key("requestHash").withTx(tx).set(hash);
-          });
-        })
-        .catch((e) =>
-          handleLLMError(
-            e,
-            runtime,
-            resultCell.key("pending"),
-            resultCell.key("result"),
-            resultCell.key("error"),
-            resultCell.key("partial"),
-            resultCell.key("requestHash"),
-            hash,
-            queueName ? () => thisRun : () => currentRun,
-            thisRun,
-            () => {
-              previousCallHash = undefined;
-            },
-          )
-        );
+            )
+          );
+        },
+      );
     } else {
       // Use direct generateObject path (no tools)
       const generateObjectParams: LLMGenerateObjectRequest = {

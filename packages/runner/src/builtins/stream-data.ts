@@ -3,6 +3,7 @@ import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 
 /**
@@ -105,7 +106,8 @@ export function streamData(
     errorWithLog.set(undefined);
 
     const thisRun = ++status.run;
-    const requestId = crypto.randomUUID();
+    const requestSnapshot = snapshotStreamDataInputs(inputsCell.withTx(tx));
+    const requestId = hashOf(requestSnapshot).toString();
 
     tx.enqueuePostCommitEffect({
       id: `streamData:${requestId}`,
@@ -235,13 +237,14 @@ function snapshotStreamDataInputs(
   const snapshot = cell.asSchema(streamDataInputSchema).get() ??
     ({} as StreamDataInputs);
   const body = snapshot.options?.body;
-  const options = snapshot.options
-    ? {
-      ...snapshot.options,
-      body: body !== undefined && typeof body !== "string"
-        ? JSON.stringify(body)
-        : body,
-    }
-    : undefined;
+  if (!snapshot.options) {
+    return createFrozenRequestSnapshot({ url: snapshot.url });
+  }
+  const options = {
+    ...snapshot.options,
+    body: body !== undefined && typeof body !== "string"
+      ? JSON.stringify(body)
+      : body,
+  };
   return createFrozenRequestSnapshot({ url: snapshot.url, options });
 }

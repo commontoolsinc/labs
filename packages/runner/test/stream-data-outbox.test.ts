@@ -10,6 +10,8 @@ import {
   ExtendedStorageTransaction,
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
 
 const signer = await Identity.fromPassphrase("test stream-data outbox");
 const space = signer.did();
@@ -115,6 +117,57 @@ describe("stream-data outbox mechanism", () => {
       expect(outboxEffects[0].kind).toBe("streamData-start");
       expect(fetchCalls.length).toBeGreaterThan(0);
       expect(fetchCalls[0].url).toContain("/stream");
+      await result.pull();
+    } finally {
+      txPrototype.enqueuePostCommitEffect = originalTxEnqueue;
+      wrapperPrototype.enqueuePostCommitEffect = originalWrapperEnqueue;
+    }
+  });
+
+  it("uses a stable streamData idempotency key for identical inputs", async () => {
+    const streamData = byRef("streamData");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => streamData({ url }),
+    );
+
+    const tx = runtime.edit();
+    const txPrototype = ExtendedStorageTransaction.prototype;
+    const wrapperPrototype = TransactionWrapper.prototype;
+    const originalTxEnqueue = txPrototype.enqueuePostCommitEffect;
+    const originalWrapperEnqueue = wrapperPrototype.enqueuePostCommitEffect;
+    const outboxIds: string[] = [];
+
+    txPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxIds.push((args[0] as { id: string }).id);
+      return originalTxEnqueue.apply(this, args as never);
+    };
+    wrapperPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxIds.push((args[0] as { id: string }).id);
+      return originalWrapperEnqueue.apply(this, args as never);
+    };
+
+    try {
+      const resultCell = runtime.getCell(
+        space,
+        "stream-idempotency-test",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {
+        url: "http://mock-test-server.local/stream-idempotency",
+      }, resultCell);
+      const commitPromise = tx.commit();
+      await commitPromise;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      const expectedHash = hashOf(
+        createFrozenRequestSnapshot({
+          url: "http://mock-test-server.local/stream-idempotency",
+        }),
+      ).toString();
+
+      expect(outboxIds.length).toBeGreaterThan(0);
+      expect(outboxIds[0]).toBe(`streamData:${expectedHash}`);
       await result.pull();
     } finally {
       txPrototype.enqueuePostCommitEffect = originalTxEnqueue;

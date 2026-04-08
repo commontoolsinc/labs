@@ -235,7 +235,7 @@ export function fetchData(
 
     // Start a new fetch if we don't have a result/error and aren't already fetching
     if (!hasValidResult && !hasError && !alreadyFetching) {
-      const newRequestId = crypto.randomUUID();
+      const newRequestId = inputHash;
       tx.enqueuePostCommitEffect({
         id: `fetchData:${newRequestId}`,
         kind: "fetchData-start",
