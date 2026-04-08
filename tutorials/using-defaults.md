@@ -247,16 +247,16 @@ export default pattern<TodoListState>((state) => {
 });
 ```
 
-**Lines 11-13** define the state with three todo items as the default.
+**Lines 10-12** define the state with three todo items as the default.
 
-**Line 28** receives `state` which has an `items` property that's already a
+**Line 27** receives `state` which has an `items` property that's already a
 `Cell<string[]>`.
 
-**Lines 33-36** use the `<cf-message-input>` component for input, which
+**Lines 32-35** use the `<cf-message-input>` component for input, which
 provides a text field with a submit button. The `oncf-send` event fires when
 the user submits.
 
-**Lines 39-41** use `.map()` to render each item in the list.
+**Lines 38-40** use `.map()` to render each item in the list.
 
 :::{dropdown} View complete code :animate: fade-in
 
