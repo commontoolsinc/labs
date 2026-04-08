@@ -3,7 +3,6 @@ import { getPropertyNameText } from "@commonfabric/schema-generator/property-nam
 import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import { uniquePaths } from "../utils/path-serialization.ts";
-import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import {
   type CapabilityParamDefault,
   type CapabilityParamSummary,
@@ -24,6 +23,15 @@ import {
 // ---------------------------------------------------------------------------
 
 export type CapabilitySummaryApplicationMode = "full" | "defaults_only";
+
+interface CapabilityShrinkPlan {
+  readonly retainedPaths: readonly (readonly string[])[];
+  readonly fullShapePaths: readonly (readonly string[])[];
+  readonly identityPaths: readonly (readonly string[])[];
+  readonly identityCellPaths: readonly (readonly string[])[];
+  readonly identityOnlyRoot: boolean;
+  readonly effectiveIdentityPaths: readonly (readonly string[])[];
+}
 
 /**
  * Properties on array-like types that don't require item-level data.
@@ -103,6 +111,131 @@ function countRepresentedRequestedHeads(
     if (represented.has(head)) count++;
   }
   return count;
+}
+
+function deriveCapabilityShrinkPlan(
+  paramSummary: CapabilityParamSummary,
+): CapabilityShrinkPlan {
+  const paths = uniquePaths([
+    ...paramSummary.readPaths,
+    ...paramSummary.writePaths,
+  ]);
+  const fullShapePaths = uniquePaths(paramSummary.fullShapePaths ?? []);
+  const identityPaths = uniquePaths(paramSummary.identityPaths ?? []);
+  const identityCellPaths = uniquePaths(paramSummary.identityCellPaths ?? []);
+  const retainedPaths = uniquePaths([...paths, ...identityPaths]);
+  const identityOnlyRoot = !!paramSummary.identityOnly &&
+    !paramSummary.wildcard &&
+    paths.length === 0;
+  const effectiveIdentityPaths = identityOnlyRoot &&
+      !identityPaths.some((path) => path.length === 0)
+    ? uniquePaths([[], ...identityPaths])
+    : identityPaths;
+
+  return {
+    retainedPaths,
+    fullShapePaths,
+    identityPaths,
+    identityCellPaths,
+    identityOnlyRoot,
+    effectiveIdentityPaths,
+  };
+}
+
+function shouldPreferNodeDrivenShrink(
+  nodeDriven: ts.TypeNode,
+  typeDriven: ts.TypeNode,
+  baseTypeNode: ts.TypeNode,
+  retainedPaths: readonly (readonly string[])[],
+  checker: ts.TypeChecker,
+): boolean {
+  const requestedHeads = getTopLevelRequestedHeads(retainedPaths);
+  const typeDrivenCoverage = countRepresentedRequestedHeads(
+    typeDriven,
+    requestedHeads,
+    checker,
+  );
+  const nodeDrivenCoverage = countRepresentedRequestedHeads(
+    nodeDriven,
+    requestedHeads,
+    checker,
+  );
+
+  return nodeDrivenCoverage > typeDrivenCoverage ||
+    (
+      nodeDriven !== baseTypeNode &&
+      containsAnyOrUnknownTypeNode(nodeDriven) &&
+      !containsAnyOrUnknownTypeNode(typeDriven)
+    );
+}
+
+function shouldPreferTypeDrivenShrink(
+  nodeDriven: ts.TypeNode,
+  typeDriven: ts.TypeNode,
+  baseTypeNode: ts.TypeNode,
+  retainedPaths: readonly (readonly string[])[],
+  checker: ts.TypeChecker,
+  hasDirectAccess: boolean,
+): boolean {
+  const requestedHeads = getTopLevelRequestedHeads(retainedPaths);
+  const typeDrivenCoverage = countRepresentedRequestedHeads(
+    typeDriven,
+    requestedHeads,
+    checker,
+  );
+  const nodeDrivenCoverage = countRepresentedRequestedHeads(
+    nodeDriven,
+    requestedHeads,
+    checker,
+  );
+
+  return (
+    nodeDriven === baseTypeNode &&
+    typeDriven !== baseTypeNode &&
+    !hasDirectAccess
+  ) ||
+    typeDrivenCoverage > nodeDrivenCoverage ||
+    (
+      containsAnyOrUnknownTypeNode(nodeDriven) &&
+      !containsAnyOrUnknownTypeNode(typeDriven)
+    );
+}
+
+function choosePreferredShrinkCandidate(
+  primaryStrategy: "type" | "node",
+  nodeDriven: ts.TypeNode | undefined,
+  typeDriven: ts.TypeNode | undefined,
+  baseTypeNode: ts.TypeNode,
+  retainedPaths: readonly (readonly string[])[],
+  checker: ts.TypeChecker,
+  hasDirectAccess: boolean,
+): ts.TypeNode | undefined {
+  if (primaryStrategy === "type") {
+    if (!typeDriven) return nodeDriven;
+    if (!nodeDriven) return typeDriven;
+    return shouldPreferNodeDrivenShrink(
+        nodeDriven,
+        typeDriven,
+        baseTypeNode,
+        retainedPaths,
+        checker,
+      )
+      ? nodeDriven
+      : typeDriven;
+  }
+
+  if (!nodeDriven) return typeDriven;
+  if (!typeDriven) return nodeDriven;
+  return shouldPreferTypeDrivenShrink(
+      nodeDriven,
+      typeDriven,
+      baseTypeNode,
+      retainedPaths,
+      checker,
+      hasDirectAccess,
+    )
+    ? typeDriven
+    : nodeDriven;
 }
 
 function typeIncludesUndefined(type: ts.Type): boolean {
@@ -185,10 +318,7 @@ function getRequestedPropertyNameText(
   name: ts.PropertyName,
   checker?: ts.TypeChecker,
 ): string | undefined {
-  return getPropertyNameText(name) ??
-    (ts.isComputedPropertyName(name)
-      ? getKnownComputedKeyPathSegment(name.expression, checker)
-      : undefined);
+  return getPropertyNameText(name, checker);
 }
 
 function isArrayShapeType(type: ts.Type, checker: ts.TypeChecker): boolean {
@@ -2186,21 +2316,15 @@ export function applyShrinkAndWrap(
   context?: TransformationContext,
   fnNode?: ts.Node,
 ): ts.TypeNode {
-  const paths = uniquePaths([
-    ...paramSummary.readPaths,
-    ...paramSummary.writePaths,
-  ]);
-  const fullShapePaths = uniquePaths(paramSummary.fullShapePaths ?? []);
-  const identityPaths = uniquePaths(paramSummary.identityPaths ?? []);
-  const identityCellPaths = uniquePaths(paramSummary.identityCellPaths ?? []);
-  const retainedPaths = uniquePaths([...paths, ...identityPaths]);
-  const identityOnlyRoot = !!paramSummary.identityOnly &&
-    !paramSummary.wildcard &&
-    paths.length === 0;
-  const effectiveIdentityPaths = identityOnlyRoot &&
-      !identityPaths.some((path) => path.length === 0)
-    ? uniquePaths([[], ...identityPaths])
-    : identityPaths;
+  const shrinkPlan = deriveCapabilityShrinkPlan(paramSummary);
+  const {
+    retainedPaths,
+    fullShapePaths,
+    identityPaths,
+    identityCellPaths,
+    identityOnlyRoot,
+    effectiveIdentityPaths,
+  } = shrinkPlan;
 
   if (mode === "defaults_only") {
     if (context && fnNode) {
@@ -2286,38 +2410,15 @@ export function applyShrinkAndWrap(
         context?.options.typeRegistry,
         fullShapePaths,
       );
-      shrunk = typeDriven ?? nodeDriven;
-      if (typeDriven && nodeDriven) {
-        const requestedHeads = getTopLevelRequestedHeads(retainedPaths);
-        const typeDrivenCoverage = countRepresentedRequestedHeads(
-          typeDriven,
-          requestedHeads,
-          checker,
-        );
-        const nodeDrivenCoverage = countRepresentedRequestedHeads(
-          nodeDriven,
-          requestedHeads,
-          checker,
-        );
-
-        if (nodeDrivenCoverage > typeDrivenCoverage) {
-          // Prefer node-driven shrinking when it preserves more of the
-          // requested top-level structure. This matters for synthetic wrapper
-          // members like `Cell<T>` where type-driven shrinking can otherwise
-          // drop the whole property while trying to descend into `T`.
-          shrunk = nodeDriven;
-        } else if (
-          nodeDriven !== baseTypeNode &&
-          containsAnyOrUnknownTypeNode(nodeDriven) &&
-          !containsAnyOrUnknownTypeNode(typeDriven)
-        ) {
-          // Prefer node-driven when it intentionally shrunk array items to
-          // `unknown` (e.g. Cell<Item[]> where only .length is accessed).
-          // Type-driven can't shrink through Cell wrappers since it operates
-          // on ts.Type which doesn't expose the Cell's inner type.
-          shrunk = nodeDriven;
-        }
-      }
+      shrunk = choosePreferredShrinkCandidate(
+        "type",
+        nodeDriven,
+        typeDriven,
+        baseTypeNode,
+        retainedPaths,
+        checker,
+        hasDirectAccess,
+      );
     } else {
       // Source-authored nodes preserve exact unions/aliases, but type-driven
       // shrinking can still produce a better result for arrays and inferred
@@ -2341,35 +2442,15 @@ export function applyShrinkAndWrap(
           fullShapePaths,
         )
         : undefined;
-      shrunk = nodeDriven ?? typeDriven;
-      if (nodeDriven && typeDriven) {
-        const requestedHeads = getTopLevelRequestedHeads(retainedPaths);
-        const typeDrivenCoverage = countRepresentedRequestedHeads(
-          typeDriven,
-          requestedHeads,
-          checker,
-        );
-        const nodeDrivenCoverage = countRepresentedRequestedHeads(
-          nodeDriven,
-          requestedHeads,
-          checker,
-        );
-
-        if (
-          nodeDriven === baseTypeNode &&
-          typeDriven !== baseTypeNode &&
-          !hasDirectAccess
-        ) {
-          shrunk = typeDriven;
-        } else if (typeDrivenCoverage > nodeDrivenCoverage) {
-          shrunk = typeDriven;
-        } else if (
-          containsAnyOrUnknownTypeNode(nodeDriven) &&
-          !containsAnyOrUnknownTypeNode(typeDriven)
-        ) {
-          shrunk = typeDriven;
-        }
-      }
+      shrunk = choosePreferredShrinkCandidate(
+        "node",
+        nodeDriven,
+        typeDriven,
+        baseTypeNode,
+        retainedPaths,
+        checker,
+        hasDirectAccess,
+      );
     }
     if (shrunk) {
       next = shrunk;

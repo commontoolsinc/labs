@@ -1,17 +1,40 @@
 import ts from "typescript";
 
-const COMMON_FABRIC_KEY_NAMES = new Set(["NAME", "UI", "SELF", "FS"]);
+const COMMON_FABRIC_HELPERS_IDENTIFIER = "__cfHelpers";
+const COMMON_FABRIC_KEY_NAMES = ["NAME", "UI", "SELF", "FS"] as const;
+const COMMON_FABRIC_KEY_NAME_SET = new Set<CommonFabricKeyName>(
+  COMMON_FABRIC_KEY_NAMES,
+);
 
-function getLiteralComputedKeyName(
+export type CommonFabricKeyName = typeof COMMON_FABRIC_KEY_NAMES[number];
+
+export type ComputedPropertyKeyInfo =
+  | {
+    kind: "literal";
+    text: string;
+    value: string | number;
+  }
+  | {
+    kind: "common-fabric";
+    text: `$${CommonFabricKeyName}`;
+    name: CommonFabricKeyName;
+  };
+
+export interface ComputedPropertyKeyResolutionOptions {
+  readonly commonFabricHelperIdentifier?: string;
+}
+
+function getLiteralComputedKeyValue(
   expr: ts.Expression,
   checker?: ts.TypeChecker,
-): string | undefined {
+): string | number | undefined {
   if (
-    ts.isStringLiteral(expr) ||
-    ts.isNumericLiteral(expr) ||
-    ts.isNoSubstitutionTemplateLiteral(expr)
+    ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)
   ) {
     return expr.text;
+  }
+  if (ts.isNumericLiteral(expr)) {
+    return Number(expr.text);
   }
   if (!checker) {
     return undefined;
@@ -22,35 +45,126 @@ function getLiteralComputedKeyName(
     return (type as ts.StringLiteralType).value;
   }
   if (type.flags & ts.TypeFlags.NumberLiteral) {
-    return String((type as ts.NumberLiteralType).value);
+    return (type as ts.NumberLiteralType).value;
   }
   return undefined;
 }
 
-function getCommonFabricComputedKeyName(
+function resolveAliasedSymbol(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): ts.Symbol | undefined {
+  if (!symbol) {
+    return undefined;
+  }
+  if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    return checker.getAliasedSymbol(symbol);
+  }
+  return symbol;
+}
+
+function isCommonFabricDeclarationSource(fileName: string): boolean {
+  const normalized = fileName.replace(/\\/g, "/");
+  return normalized.endsWith("/packages/api/index.ts") ||
+    normalized.includes("@commonfabric/api") ||
+    normalized.endsWith("commonfabric.d.ts");
+}
+
+function isUniqueSymbolKeySymbol(
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+): boolean {
+  const declaration = symbol.declarations?.[0];
+  if (!declaration) {
+    return false;
+  }
+  const type = checker.getTypeOfSymbolAtLocation(symbol, declaration);
+  return (type.flags & ts.TypeFlags.UniqueESSymbol) !== 0;
+}
+
+function resolveCommonFabricComputedKeyName(
   expr: ts.Expression,
   checker?: ts.TypeChecker,
-): string | undefined {
+  options: ComputedPropertyKeyResolutionOptions = {},
+): CommonFabricKeyName | undefined {
+  const helperIdentifier = options.commonFabricHelperIdentifier ??
+    COMMON_FABRIC_HELPERS_IDENTIFIER;
+
+  if (
+    ts.isPropertyAccessExpression(expr) &&
+    ts.isIdentifier(expr.expression) &&
+    expr.expression.text === helperIdentifier &&
+    COMMON_FABRIC_KEY_NAME_SET.has(expr.name.text as CommonFabricKeyName)
+  ) {
+    return expr.name.text as CommonFabricKeyName;
+  }
+
   if (!ts.isIdentifier(expr)) {
     return undefined;
   }
 
-  if (checker) {
-    let symbol = checker.getSymbolAtLocation(expr);
-    if (
-      symbol &&
-      (symbol.flags & ts.SymbolFlags.Alias) !== 0 &&
-      checker.getAliasedSymbol
-    ) {
-      symbol = checker.getAliasedSymbol(symbol);
-    }
-    const resolvedName = symbol?.getName();
-    if (resolvedName && COMMON_FABRIC_KEY_NAMES.has(resolvedName)) {
-      return `$${resolvedName}`;
-    }
+  if (!checker) {
+    return undefined;
   }
 
-  return COMMON_FABRIC_KEY_NAMES.has(expr.text) ? `$${expr.text}` : undefined;
+  const symbol = resolveAliasedSymbol(
+    checker.getSymbolAtLocation(expr),
+    checker,
+  );
+  const resolvedName = symbol?.getName() as CommonFabricKeyName | undefined;
+  if (!resolvedName || !COMMON_FABRIC_KEY_NAME_SET.has(resolvedName)) {
+    return undefined;
+  }
+
+  const declaration = symbol?.declarations?.[0];
+  if (!declaration) {
+    return undefined;
+  }
+
+  if (isCommonFabricDeclarationSource(declaration.getSourceFile().fileName)) {
+    return resolvedName;
+  }
+
+  return isUniqueSymbolKeySymbol(symbol, checker) ? resolvedName : undefined;
+}
+
+export function getComputedPropertyKeyInfo(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+  options: ComputedPropertyKeyResolutionOptions = {},
+): ComputedPropertyKeyInfo | undefined {
+  const literalValue = getLiteralComputedKeyValue(expr, checker);
+  if (literalValue !== undefined) {
+    return {
+      kind: "literal",
+      text: String(literalValue),
+      value: literalValue,
+    };
+  }
+
+  const commonFabricKeyName = resolveCommonFabricComputedKeyName(
+    expr,
+    checker,
+    options,
+  );
+  if (commonFabricKeyName) {
+    return {
+      kind: "common-fabric",
+      name: commonFabricKeyName,
+      text: `$${commonFabricKeyName}`,
+    };
+  }
+
+  return undefined;
+}
+
+export function getCommonFabricComputedKeyName(
+  expr: ts.Expression,
+  checker?: ts.TypeChecker,
+  options: ComputedPropertyKeyResolutionOptions = {},
+): CommonFabricKeyName | undefined {
+  const info = getComputedPropertyKeyInfo(expr, checker, options);
+  return info?.kind === "common-fabric" ? info.name : undefined;
 }
 
 /**
@@ -70,12 +184,7 @@ export function getPropertyNameText(
   }
 
   if (ts.isComputedPropertyName(name)) {
-    const expr = name.expression;
-    const literalKeyName = getLiteralComputedKeyName(expr, checker);
-    if (literalKeyName !== undefined) {
-      return literalKeyName;
-    }
-    return getCommonFabricComputedKeyName(expr, checker);
+    return getComputedPropertyKeyInfo(name.expression, checker)?.text;
   }
 
   return undefined;

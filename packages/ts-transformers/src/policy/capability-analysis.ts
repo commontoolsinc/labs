@@ -41,6 +41,17 @@ interface MutableCapabilityState {
   hasNonIdentityRootUse: boolean;
 }
 
+interface ObservedCapabilityUsage {
+  readonly readPaths: readonly (readonly string[])[];
+  readonly fullShapePaths: readonly (readonly string[])[];
+  readonly writePaths: readonly (readonly string[])[];
+  readonly passthrough: boolean;
+  readonly wildcard: boolean;
+  readonly identityOnly: boolean;
+  readonly identityPaths: readonly (readonly string[])[];
+  readonly identityCellPaths: readonly (readonly string[])[];
+}
+
 interface AccessPathInfo {
   readonly root: string;
   readonly path: readonly string[];
@@ -612,6 +623,64 @@ function toCapability(state: MutableCapabilityState): ReactiveCapability {
   if (hasReads) return "readonly";
   if (hasWrites) return "writeonly";
   return "opaque";
+}
+
+function normalizeObservedCapabilityUsage(
+  state: MutableCapabilityState,
+): ObservedCapabilityUsage {
+  const readPaths = Array.from(state.reads).map(decodePath);
+  const fullShapePaths = Array.from(state.fullShapeReads).map(decodePath);
+  const writePaths = Array.from(state.writes).map(decodePath);
+  const identityPaths = Array.from(state.rawIdentityPaths)
+    .map(decodePath)
+    .filter((identityPath) => {
+      if (state.wildcard) {
+        return false;
+      }
+      if (identityPath.length === 0 && state.hasNonIdentityRootUse) {
+        return false;
+      }
+      const overlapsNonIdentity = [
+        ...readPaths,
+        ...fullShapePaths,
+        ...writePaths,
+      ].some((path) =>
+        path.length >= identityPath.length &&
+        identityPath.every((segment, index) => path[index] === segment)
+      );
+      return !overlapsNonIdentity;
+    });
+  const keptIdentityPaths = new Set(identityPaths.map(encodePath));
+  const identityCellPaths = Array.from(state.rawIdentityCellPaths)
+    .filter((path) => keptIdentityPaths.has(path))
+    .map(decodePath);
+
+  return {
+    readPaths,
+    fullShapePaths,
+    writePaths,
+    passthrough: state.passthrough,
+    wildcard: state.wildcard,
+    identityOnly: identityPaths.some((path) => path.length === 0) &&
+      !state.hasNonIdentityUse &&
+      state.reads.size === 0 &&
+      state.writes.size === 0 &&
+      !state.wildcard,
+    identityPaths,
+    identityCellPaths,
+  };
+}
+
+function buildCapabilityParamSummary(
+  name: string,
+  state: MutableCapabilityState,
+): CapabilityParamSummary {
+  const observed = normalizeObservedCapabilityUsage(state);
+  return {
+    name,
+    capability: toCapability(state),
+    ...observed,
+  };
 }
 
 export function analyzeFunctionCapabilities(
@@ -1920,48 +1989,7 @@ export function analyzeFunctionCapabilities(
         : `${PARAMETER_SUMMARY_PREFIX}${index}`;
       const state = states.get(summaryName);
       if (!state) continue;
-      const readPaths = Array.from(state.reads).map(decodePath);
-      const fullShapePaths = Array.from(state.fullShapeReads).map(decodePath);
-      const writePaths = Array.from(state.writes).map(decodePath);
-      const identityPaths = Array.from(state.rawIdentityPaths)
-        .map(decodePath)
-        .filter((identityPath) => {
-          if (state.wildcard) {
-            return false;
-          }
-          if (identityPath.length === 0 && state.hasNonIdentityRootUse) {
-            return false;
-          }
-          const overlapsNonIdentity = [
-            ...readPaths,
-            ...fullShapePaths,
-            ...writePaths,
-          ].some((path) =>
-            path.length >= identityPath.length &&
-            identityPath.every((segment, index) => path[index] === segment)
-          );
-          return !overlapsNonIdentity;
-        });
-      const keptIdentityPaths = new Set(identityPaths.map(encodePath));
-      const identityCellPaths = Array.from(state.rawIdentityCellPaths)
-        .filter((path) => keptIdentityPaths.has(path))
-        .map(decodePath);
-      params.push({
-        name: summaryName,
-        capability: toCapability(state),
-        readPaths,
-        fullShapePaths,
-        writePaths,
-        passthrough: state.passthrough,
-        wildcard: state.wildcard,
-        identityOnly: identityPaths.some((path) => path.length === 0) &&
-          !state.hasNonIdentityUse &&
-          state.reads.size === 0 &&
-          state.writes.size === 0 &&
-          !state.wildcard,
-        identityPaths,
-        identityCellPaths,
-      });
+      params.push(buildCapabilityParamSummary(summaryName, state));
     }
 
     const result = { params };

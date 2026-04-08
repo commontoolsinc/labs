@@ -1,73 +1,22 @@
 import ts from "typescript";
+import {
+  type CommonFabricKeyName,
+  getCommonFabricComputedKeyName,
+  getComputedPropertyKeyInfo,
+} from "@commonfabric/schema-generator/property-name";
 
 import {
   CF_HELPERS_IDENTIFIER,
-  resolvesToCommonFabricSymbol,
   type TransformationContext,
 } from "../core/mod.ts";
-
-const COMMON_FABRIC_KEY_NAMES = ["NAME", "UI", "SELF", "FS"] as const;
-const COMMON_FABRIC_KEY_NAME_SET = new Set<CommonFabricKeyName>(
-  COMMON_FABRIC_KEY_NAMES,
-);
-
-export type CommonFabricKeyName = typeof COMMON_FABRIC_KEY_NAMES[number];
-
-function getLiteralComputedKeyValue(
-  expr: ts.Expression,
-  checker?: ts.TypeChecker,
-): string | number | undefined {
-  if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) {
-    return expr.text;
-  }
-  if (ts.isNumericLiteral(expr)) {
-    return Number(expr.text);
-  }
-  if (!checker) {
-    return undefined;
-  }
-
-  const type = checker.getTypeAtLocation(expr);
-  if (type.flags & ts.TypeFlags.StringLiteral) {
-    return (type as ts.StringLiteralType).value;
-  }
-  if (type.flags & ts.TypeFlags.NumberLiteral) {
-    return (type as ts.NumberLiteralType).value;
-  }
-  return undefined;
-}
 
 export function getCommonFabricKeyName(
   expr: ts.Expression,
   checker?: ts.TypeChecker,
 ): CommonFabricKeyName | undefined {
-  if (
-    ts.isPropertyAccessExpression(expr) &&
-    ts.isIdentifier(expr.expression) &&
-    expr.expression.text === CF_HELPERS_IDENTIFIER &&
-    COMMON_FABRIC_KEY_NAME_SET.has(expr.name.text as CommonFabricKeyName)
-  ) {
-    return expr.name.text as CommonFabricKeyName;
-  }
-
-  if (!ts.isIdentifier(expr)) {
-    return undefined;
-  }
-
-  if (checker) {
-    const symbol = checker.getSymbolAtLocation(expr);
-    for (const name of COMMON_FABRIC_KEY_NAMES) {
-      if (resolvesToCommonFabricSymbol(symbol, checker, name)) {
-        return name;
-      }
-    }
-  }
-
-  if (COMMON_FABRIC_KEY_NAME_SET.has(expr.text as CommonFabricKeyName)) {
-    return expr.text as CommonFabricKeyName;
-  }
-
-  return undefined;
+  return getCommonFabricComputedKeyName(expr, checker, {
+    commonFabricHelperIdentifier: CF_HELPERS_IDENTIFIER,
+  });
 }
 
 export function cloneKeyExpression(
@@ -129,29 +78,27 @@ export function getKnownComputedKeyPathSegment(
   expr: ts.Expression,
   checker?: ts.TypeChecker,
 ): string | undefined {
-  const literalValue = getLiteralComputedKeyValue(expr, checker);
-  if (literalValue !== undefined) {
-    return String(literalValue);
-  }
-  const keyName = getCommonFabricKeyName(expr, checker);
-  return keyName ? `$${keyName}` : undefined;
+  return getComputedPropertyKeyInfo(expr, checker, {
+    commonFabricHelperIdentifier: CF_HELPERS_IDENTIFIER,
+  })?.text;
 }
 
 export function getKnownComputedKeyExpression(
   expr: ts.Expression,
   context: TransformationContext,
 ): ts.Expression | undefined {
-  const literalValue = getLiteralComputedKeyValue(expr, context.checker);
-  if (literalValue !== undefined) {
-    return typeof literalValue === "number"
-      ? context.factory.createNumericLiteral(literalValue)
-      : context.factory.createStringLiteral(literalValue);
+  const keyInfo = getComputedPropertyKeyInfo(expr, context.checker, {
+    commonFabricHelperIdentifier: CF_HELPERS_IDENTIFIER,
+  });
+  if (!keyInfo) {
+    return undefined;
   }
-  const keyName = getCommonFabricKeyName(expr, context.checker);
-  if (keyName) {
-    return context.cfHelpers.getHelperExpr(keyName);
+  if (keyInfo.kind === "literal") {
+    return typeof keyInfo.value === "number"
+      ? context.factory.createNumericLiteral(keyInfo.value)
+      : context.factory.createStringLiteral(keyInfo.value);
   }
-  return undefined;
+  return context.cfHelpers.getHelperExpr(keyInfo.name);
 }
 
 export function isFallbackOperator(kind: ts.SyntaxKind): boolean {

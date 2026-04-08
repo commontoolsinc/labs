@@ -8,7 +8,7 @@ import { transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
 Deno.test(
-  "Pipeline regression: manual mapWithPattern preserves computed plain-capture keys",
+  "Pipeline regression: manual mapWithPattern canonicalizes fixed plain-capture keys",
   async () => {
     const source = `import { pattern, UI } from "commonfabric";
 const key = "small" as const;
@@ -39,8 +39,9 @@ const p = pattern<{ items: string[] }>((state) => ({
     assertEquals(computationDiagnostics.length, 0);
     assertStringIncludes(
       output,
-      "const fontSize = __cf_pattern_input.params.style[key];",
+      "const fontSize = __cf_pattern_input.params.style.small;",
     );
+    assert(!output.includes("__cf_pattern_input.params.style[key]"));
   },
 );
 
