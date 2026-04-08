@@ -754,15 +754,15 @@ Tasks:
 - [x] Include `streamData`, `llm`, `llmDialog`, `generateText`, and
       `generateObject` alongside `fetchData` and `fetchProgram` in the initial
       sink inventory and rollout gate
-- [ ] Move network side effects behind the transaction outbox
-- [ ] Verify sink-specific policy from the prepared request snapshot and
+- [x] Move network side effects behind the transaction outbox
+- [x] Verify sink-specific policy from the prepared request snapshot and
       committed CFC state before issuing the request
 - [ ] Add idempotency keys so retries do not reissue the same committed effect
-- [ ] Keep request authorization and request execution as separate steps
+- [x] Keep request authorization and request execution as separate steps
 
 Acceptance:
 
-- [ ] Failed prepare or failed commit never issues a network call from
+- [x] Failed prepare or failed commit never issues a network call from
       `fetchData`, `fetchProgram`, `streamData`, `llm`, `llmDialog`,
       `generateText`, or `generateObject`
 - [ ] Retried attempts reuse the winning committed effect and do not double-send

@@ -5,6 +5,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -109,10 +110,13 @@ export function streamData(
     const requestSnapshot = snapshotStreamDataInputs(inputsCell.withTx(tx));
     const requestId = hashOf(requestSnapshot).toString();
 
-    tx.enqueuePostCommitEffect({
-      id: `streamData:${requestId}`,
-      kind: "streamData-start",
-      flush: () => {
+    enqueueSinkRequestPostCommitEffect(
+      tx,
+      "streamData",
+      `streamData:${requestId}`,
+      requestSnapshot,
+      "streamData-start",
+      () => {
         if (thisRun !== status.run) {
           return;
         }
@@ -201,7 +205,7 @@ export function streamData(
             previousCall = "";
           });
       },
-    });
+    );
   };
 }
 

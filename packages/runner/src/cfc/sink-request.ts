@@ -1,0 +1,93 @@
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import type { FabricValue } from "@commonfabric/memory/interface";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { createFrozenRequestSnapshot } from "./request-snapshot.ts";
+import type { WritePolicyInput } from "./types.ts";
+
+type SinkRequestPolicyInput = Extract<WritePolicyInput, { kind: "sink-request" }>;
+type SinkRequestPolicyState = {
+  writePolicyInputs: readonly WritePolicyInput[];
+};
+
+const isSinkRequestPolicyInput = (
+  input: WritePolicyInput,
+): input is SinkRequestPolicyInput =>
+  input.kind === "sink-request";
+
+export function createSinkRequestPolicyInput(
+  sink: string,
+  effectId: string,
+  request: FabricValue,
+): SinkRequestPolicyInput {
+  return {
+    kind: "sink-request",
+    effectId,
+    sink,
+    request: createFrozenRequestSnapshot(request),
+  };
+}
+
+export function recordSinkRequestPolicyInput(
+  tx: Pick<IExtendedStorageTransaction, "recordCfcWritePolicyInput">,
+  sink: string,
+  effectId: string,
+  request: FabricValue,
+): void {
+  tx.recordCfcWritePolicyInput(
+    createSinkRequestPolicyInput(sink, effectId, request),
+  );
+}
+
+export function verifySinkRequestRelease(
+  tx: { getCfcState(): SinkRequestPolicyState },
+  sink: string,
+  effectId: string,
+  request: FabricValue,
+): string | undefined {
+  const match = tx.getCfcState().writePolicyInputs.find((input) =>
+    isSinkRequestPolicyInput(input) &&
+    input.sink === sink &&
+    input.effectId === effectId
+  ) as SinkRequestPolicyInput | undefined;
+
+  if (match === undefined) {
+    return `missing sink-request policy input for ${sink}`;
+  }
+
+  if (!deepEqual(match.request, request)) {
+    return `sink-request policy input mismatch for ${sink}`;
+  }
+
+  return undefined;
+}
+
+export function enqueueSinkRequestPostCommitEffect(
+  tx: Pick<
+    IExtendedStorageTransaction,
+    "enqueuePostCommitEffect" | "recordCfcWritePolicyInput"
+  >,
+  sink: string,
+  effectId: string,
+  request: FabricValue,
+  kind: string,
+  flush: (tx: IExtendedStorageTransaction) => void | Promise<void>,
+): void {
+  recordSinkRequestPolicyInput(tx, sink, effectId, request);
+  tx.enqueuePostCommitEffect({
+    id: effectId,
+    kind,
+    flush: async (committedTx) => {
+      const reason = verifySinkRequestRelease(
+        committedTx as { getCfcState(): SinkRequestPolicyState },
+        sink,
+        effectId,
+        request,
+      );
+      if (reason !== undefined) {
+        console.warn(`[CFC sink-request] ${reason}`);
+        return;
+      }
+      await flush(committedTx as IExtendedStorageTransaction);
+    },
+  });
+}

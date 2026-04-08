@@ -17,6 +17,7 @@ import {
 import type { Schema } from "@commonfabric/api/schema";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
@@ -281,17 +282,22 @@ function buildContextDocumentation(
 
 function enqueuePostCommitLLMWork(
   tx: IExtendedStorageTransaction,
+  sink: string,
   id: string,
   kind: string,
+  request: any,
   start: () => void,
 ): void {
-  tx.enqueuePostCommitEffect({
+  enqueueSinkRequestPostCommitEffect(
+    tx,
+    sink,
     id,
+    request,
     kind,
-    flush: () => {
+    () => {
       start();
     },
-  });
+  );
 }
 
 /**
@@ -412,74 +418,85 @@ export function llm(
         thisRun,
       );
 
-    // Build tool catalog if tools are present, then start execution
-    const resultPromise = (async () => {
-      try {
-        const toolsCell = inputs.key("tools").asSchema({
-          type: "object",
-          additionalProperties: LLMToolSchema,
-        });
-        const toolCatalog = toolsCell
-          ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
-          : undefined;
+    // Build tool catalog if tools are present, then start execution after the
+    // transaction commits.
+    enqueuePostCommitLLMWork(
+      tx,
+      "llm",
+      `llm:${hash}`,
+      "llm-start",
+      requestSnapshot,
+      () => {
+        const resultPromise = (async () => {
+          try {
+            const toolsCell = inputs.key("tools").asSchema({
+              type: "object",
+              additionalProperties: LLMToolSchema,
+            });
+            const toolCatalog = toolsCell
+              ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
+              : undefined;
 
-        const doWork = () =>
-          executeWithToolsLoop({
-            initialMessages:
-              (messages as unknown as readonly BuiltInLLMMessage[]) ?? [],
-            llmParams,
-            toolCatalog: toolCatalog!,
-            updatePartial,
-            runtime,
-            space: parentCell.space,
-            getCurrentRun: getRunForCancellation,
-            thisRun,
-            onComplete: async (llmResult) => {
-              // Skip if a newer request has already superseded this one.
-              if (hash !== previousCallHash) return;
+            const doWork = () =>
+              executeWithToolsLoop({
+                initialMessages:
+                  (messages as unknown as readonly BuiltInLLMMessage[]) ??
+                  [],
+                llmParams,
+                toolCatalog: toolCatalog!,
+                updatePartial,
+                runtime,
+                space: parentCell.space,
+                getCurrentRun: getRunForCancellation,
+                thisRun,
+                onComplete: async (llmResult) => {
+                  // Skip if a newer request has already superseded this one.
+                  if (hash !== previousCallHash) return;
 
-              await runtime.idle();
+                  await runtime.idle();
 
-              await runtime.editWithRetry((tx) => {
-                resultCell.key("pending").withTx(tx).set(false);
-                resultCell.key("result").withTx(tx).set(llmResult.content);
-                resultCell.key("error").withTx(tx).set(undefined);
-                resultCell.key("partial").withTx(tx).set(
-                  extractTextFromLLMResponse(llmResult),
-                );
-                resultCell.key("requestHash").withTx(tx).set(hash);
+                  await runtime.editWithRetry((tx) => {
+                    resultCell.key("pending").withTx(tx).set(false);
+                    resultCell.key("result").withTx(tx).set(llmResult.content);
+                    resultCell.key("error").withTx(tx).set(undefined);
+                    resultCell.key("partial").withTx(tx).set(
+                      extractTextFromLLMResponse(llmResult),
+                    );
+                    resultCell.key("requestHash").withTx(tx).set(hash);
+                  });
+                },
               });
+
+            if (queueName) {
+              await runtime.getOrCreateQueue(queueName).enqueue(doWork);
+            } else {
+              await doWork();
+            }
+          } finally {
+            cleanupPartial();
+          }
+        })();
+
+        resultPromise.catch((e) =>
+          handleLLMError(
+            e,
+            runtime,
+            resultCell.key("pending"),
+            resultCell.key("result"),
+            resultCell.key("error"),
+            resultCell.key("partial"),
+            resultCell.key("requestHash"),
+            hash,
+            getRunForCancellation,
+            thisRun,
+            () => {
+              // Only clear if this is still the current request; a newer request
+              // may have already set previousCallHash to its own hash.
+              if (hash === previousCallHash) previousCallHash = undefined;
             },
-          });
-
-        if (queueName) {
-          await runtime.getOrCreateQueue(queueName).enqueue(doWork);
-        } else {
-          await doWork();
-        }
-      } finally {
-        cleanupPartial();
-      }
-    })();
-
-    resultPromise.catch((e) =>
-      handleLLMError(
-        e,
-        runtime,
-        resultCell.key("pending"),
-        resultCell.key("result"),
-        resultCell.key("error"),
-        resultCell.key("partial"),
-        resultCell.key("requestHash"),
-        hash,
-        getRunForCancellation,
-        thisRun,
-        () => {
-          // Only clear if this is still the current request; a newer request
-          // may have already set previousCallHash to its own hash.
-          if (hash === previousCallHash) previousCallHash = undefined;
-        },
-      )
+          )
+        );
+      },
     );
   };
 }
@@ -629,8 +646,10 @@ export function generateText(
 
     enqueuePostCommitLLMWork(
       tx,
+      "generateText",
       `generateText:${hash}`,
       "generateText-start",
+      requestSnapshot,
       () => {
         const resultPromise = (async () => {
           try {
@@ -809,7 +828,10 @@ export function generateObject<T extends Record<string, unknown>>(
         cache: cache ?? true,
       };
 
-      const hash = hashOf({ ...llmParams, schema }).toString();
+      const requestSnapshot = createFrozenRequestSnapshot(
+        JSON.parse(JSON.stringify({ ...llmParams, schema })),
+      );
+      const hash = hashOf(requestSnapshot).toString();
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
         | undefined;
@@ -857,8 +879,10 @@ export function generateObject<T extends Record<string, unknown>>(
 
       enqueuePostCommitLLMWork(
         tx,
+        "generateObject",
         `generateObject:${hash}`,
         "generateObject-start",
+        requestSnapshot,
         () => {
           const resultPromise = (async () => {
             try {
@@ -1034,7 +1058,8 @@ export function generateObject<T extends Record<string, unknown>>(
       generateObjectParams.system = ((system ?? "") + contextDocs).trim() ||
         "You are a helpful assistant.";
 
-      const hash = hashOf(generateObjectParams).toString();
+      const requestSnapshot = createFrozenRequestSnapshot(generateObjectParams);
+      const hash = hashOf(requestSnapshot).toString();
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
         | undefined;
@@ -1076,8 +1101,10 @@ export function generateObject<T extends Record<string, unknown>>(
 
       enqueuePostCommitLLMWork(
         tx,
+        "generateObject",
         `generateObject:${hash}`,
         "generateObject-start",
+        requestSnapshot,
         () => {
           const doWork = () =>
             client.generateObject(

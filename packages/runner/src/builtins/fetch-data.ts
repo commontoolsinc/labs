@@ -6,6 +6,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
 import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import {
   computeInputHashFromValue,
   internalSchema,
@@ -236,10 +237,13 @@ export function fetchData(
     // Start a new fetch if we don't have a result/error and aren't already fetching
     if (!hasValidResult && !hasError && !alreadyFetching) {
       const newRequestId = inputHash;
-      tx.enqueuePostCommitEffect({
-        id: `fetchData:${newRequestId}`,
-        kind: "fetchData-start",
-        flush: () => {
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchData",
+        `fetchData:${newRequestId}`,
+        inputsSnapshot,
+        "fetchData-start",
+        () => {
           // Try to claim mutex - returns immediately if another tab is processing
           void tryClaimMutex(
             runtime,
@@ -307,7 +311,7 @@ export function fetchData(
             },
           );
         },
-      });
+      );
     }
   };
 }

@@ -6,6 +6,7 @@ import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
 import { HttpProgramResolver } from "@commonfabric/js-compiler";
 import { resolveProgram, TARGET } from "@commonfabric/js-compiler/typescript";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
 
 const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
@@ -248,10 +249,13 @@ export function fetchProgram(
         },
       });
 
-      tx.enqueuePostCommitEffect({
-        id: `fetchProgram:${requestId}`,
-        kind: "fetchProgram-start",
-        flush: () => {
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchProgram",
+        `fetchProgram:${requestId}`,
+        requestSnapshot,
+        "fetchProgram-start",
+        () => {
           // Start fetch asynchronously only after the transaction commits.
           myRequestId = requestId;
           abortController = new AbortController();
@@ -264,7 +268,7 @@ export function fetchProgram(
             abortController.signal,
           );
         },
-      });
+      );
     } else if (state.type === "fetching") {
       // Check for timeout
       const isTimedOut = Date.now() - state.startTime > PROGRAM_REQUEST_TIMEOUT;

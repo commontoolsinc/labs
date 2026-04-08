@@ -47,6 +47,8 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 
 // Avoid importing from @commonfabric/piece to prevent circular deps in tests
 
@@ -2065,10 +2067,22 @@ export function llmDialog(
             lastActivity: Date.now(),
           });
 
-          tx.enqueuePostCommitEffect({
-            id: `llmDialog:${nextRequestId}`,
-            kind: "llmDialog-start",
-            flush: () => {
+          const requestSnapshot = createFrozenRequestSnapshot({
+            requestId: nextRequestId,
+            model: inputs.key("model").withTx(tx).get() ?? DEFAULT_MODEL_NAME,
+            maxTokens: inputs.key("maxTokens").withTx(tx).get() ?? 4096,
+            messageCount: inputs.key("messages").withTx(tx).get()?.length ?? 0,
+            hasTools: Boolean(inputs.key("tools").withTx(tx).get()),
+            hasResultSchema: Boolean(inputs.key("resultSchema").withTx(tx).get()),
+          });
+
+          enqueueSinkRequestPostCommitEffect(
+            tx,
+            "llmDialog",
+            `llmDialog:${nextRequestId}`,
+            requestSnapshot,
+            "llmDialog-start",
+            () => {
               if (requestId !== nextRequestId) {
                 return;
               }
@@ -2087,7 +2101,7 @@ export function llmDialog(
                 abortController.signal,
               );
             },
-          });
+          );
         },
       );
 

@@ -24,6 +24,11 @@ export {
 } from "./canonical.ts";
 export { prepareBoundaryCommit } from "./prepare.ts";
 export {
+  createSinkRequestPolicyInput,
+  recordSinkRequestPolicyInput,
+  verifySinkRequestRelease,
+} from "./sink-request.ts";
+export {
   INITIAL_SINK_INVENTORY,
   INITIAL_SINK_ROLLOUT_GATE,
   isInitialSinkInventoryName,
