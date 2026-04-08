@@ -1,7 +1,9 @@
 {
   "properties": {
     "values": {
-      "asCell": true,
+      "asCell": [
+        "cell"
+      ],
       "items": {
         "type": "number"
       },

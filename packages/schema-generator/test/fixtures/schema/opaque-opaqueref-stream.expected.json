@@ -3,7 +3,9 @@
     "LLMState": {
       "properties": {
         "cancelGeneration": {
-          "asStream": true
+          "asCell": [
+            "stream"
+          ]
         },
         "error": {
           "type": "unknown"

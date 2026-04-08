@@ -136,13 +136,10 @@ export function schemaToTypeString(
     ? ["stream"]
     : [];
   if (asCellValue.length > 0) {
-    // The last entry in the asCellValue is the innermost
+    // Wrapper arrays are ordered outermost-first, so apply them from the end.
     let innerType = schemaToTypeString(restSchema, nextOpts);
-    for (let i = 0; i < asCellValue.length; i++) {
-      innerType = getWrappedTypeString(
-        asCellValue.slice(0, asCellValue.length - i),
-        innerType,
-      );
+    for (let i = asCellValue.length - 1; i >= 0; i--) {
+      innerType = getWrappedTypeString(asCellValue[i], innerType);
     }
     return innerType;
   }
@@ -234,23 +231,23 @@ export function schemaToTypeString(
 }
 
 function getWrappedTypeString(
-  asCell: AsCellType[],
+  wrapper: AsCellType,
   innerType: string,
 ): string {
-  if (ContextualFlowControl.asCellValueMatches(asCell, "cell")) {
-    innerType = `Cell<${innerType}>`;
-  } else if (ContextualFlowControl.asCellValueMatches(asCell, "readonly")) {
-    innerType = `ReadonlyCell<${innerType}>`;
-  } else if (ContextualFlowControl.asCellValueMatches(asCell, "writeonly")) {
-    innerType = `WriteonlyCell<${innerType}>`;
-  } else if (ContextualFlowControl.asCellValueMatches(asCell, "comparable")) {
-    innerType = `ComparableCell<${innerType}>`;
-  } else if (ContextualFlowControl.asCellValueMatches(asCell, "stream")) {
-    innerType = `(${innerType}) => void`;
-  } else if (ContextualFlowControl.asCellValueMatches(asCell, "opaque")) {
-    innerType = "Opaque";
-  } else {
-    innerType = "UnknownWrapper";
+  switch (wrapper) {
+    case "cell":
+      return `Cell<${innerType}>`;
+    case "readonly":
+      return `ReadonlyCell<${innerType}>`;
+    case "writeonly":
+      return `WriteonlyCell<${innerType}>`;
+    case "comparable":
+      return `ComparableCell<${innerType}>`;
+    case "stream":
+      return `(${innerType}) => void`;
+    case "opaque":
+      return "Opaque";
+    default:
+      return "UnknownWrapper";
   }
-  return innerType;
 }

@@ -125,7 +125,7 @@ export function getCellKind(
 function brandToWrapperKind(brand: CellBrand): CellWrapperKind | undefined {
   switch (brand) {
     case "opaque":
-      return "OpaqueRef";
+      return "OpaqueCell";
     case "stream":
       return "Stream";
     case "cell":
@@ -136,6 +136,28 @@ function brandToWrapperKind(brand: CellBrand): CellWrapperKind | undefined {
       return "ReadonlyCell";
     case "writeonly":
       return "WriteonlyCell";
+    default:
+      return undefined;
+  }
+}
+
+export function wrapperKindToBrand(
+  wrapperKind: CellWrapperKind,
+): CellBrand | undefined {
+  switch (wrapperKind) {
+    case "OpaqueCell":
+    case "OpaqueRef":
+      return "opaque";
+    case "Stream":
+      return "stream";
+    case "Cell":
+      return "cell";
+    case "ComparableCell":
+      return "comparable";
+    case "ReadonlyCell":
+      return "readonly";
+    case "WriteonlyCell":
+      return "writeonly";
     default:
       return undefined;
   }

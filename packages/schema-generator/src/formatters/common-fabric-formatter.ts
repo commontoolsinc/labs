@@ -4,9 +4,11 @@ import {
   getCellBrand,
   getCellWrapperInfo,
   isCellBrand,
+  wrapperKindToBrand,
 } from "../typescript/cell-brand.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import type {
+  AsCellType,
   JSONSchema,
   JSONSchemaMutable,
   JSONSchemaObjMutable,
@@ -95,14 +97,14 @@ export class CommonFabricFormatter implements TypeFormatter {
     // This prevents the UnionFormatter from creating an anyOf
     const opaqueUnionInfo = this.getOpaqueUnionInfo(type, context.typeChecker);
     if (opaqueUnionInfo) {
-      // Format the base type T and add asOpaque: true
+      // Format the base type T and add asCell: ["opaque"]
       const innerSchema = this.schemaGenerator.formatChildType(
         opaqueUnionInfo.baseType,
         context,
         undefined, // Don't pass typeNode since we're working with the unwrapped type
       );
 
-      return this.applyWrapperSemantics(innerSchema, "OpaqueRef");
+      return this.applyWrapperSemantics(innerSchema, "OpaqueCell");
     }
 
     // Check via typeNode for all wrapper types (handles both direct usage and aliases)
@@ -190,7 +192,14 @@ export class CommonFabricFormatter implements TypeFormatter {
     // If we detected a wrapper syntactically but the current type is wrapped in
     // additional layers (e.g., Opaque<OpaqueRef<...>>), recursively unwrap using
     // brand information until we reach the underlying wrapper.
-    const wrapperKinds: WrapperKind[] = ["OpaqueRef", "Cell", "Stream"];
+    const wrapperKinds: WrapperKind[] = [
+      "OpaqueCell",
+      "Cell",
+      "Stream",
+      "ReadonlyCell",
+      "WriteonlyCell",
+      "ComparableCell",
+    ];
     for (const kind of wrapperKinds) {
       const unwrappedType = this.recursivelyUnwrapOpaqueRef(
         type,
@@ -264,8 +273,10 @@ export class CommonFabricFormatter implements TypeFormatter {
       if (typeof innerSchema === "boolean") {
         return this.applyWrapperSemantics(innerSchema, "Stream");
       }
-      const { asCell: _drop, ...rest } = innerSchema as Record<string, unknown>;
-      return this.applyWrapperSemantics(rest as JSONSchemaObjMutable, "Stream");
+      return this.applyWrapperSemantics(
+        innerSchema as JSONSchemaObjMutable,
+        "Stream",
+      );
     }
 
     if (wrapperKind === "Cell") {
@@ -388,13 +399,15 @@ export class CommonFabricFormatter implements TypeFormatter {
       return innerSchema;
     }
 
-    // Stream<T>: do not reflect inner Cell-ness; only mark asStream
+    // Stream<T>: can also reflect inner Cell-ness
     if (wrapperKind === "Stream") {
       if (typeof innerSchema === "boolean") {
         return this.applyWrapperSemantics(innerSchema, "Stream");
       }
-      const { asCell: _drop, ...rest } = innerSchema as Record<string, unknown>;
-      return this.applyWrapperSemantics(rest as JSONSchemaObjMutable, "Stream");
+      return this.applyWrapperSemantics(
+        innerSchema as JSONSchemaObjMutable,
+        "Stream",
+      );
     }
 
     // Cell<T>: disallow Cell<Stream<T>> to avoid ambiguous semantics
@@ -572,7 +585,10 @@ export class CommonFabricFormatter implements TypeFormatter {
     checker: ts.TypeChecker,
   ): ts.Type | undefined {
     const wrapperInfo = getCellWrapperInfo(type, checker);
-    if (!wrapperInfo || wrapperInfo.kind !== "OpaqueRef") {
+    if (
+      !wrapperInfo ||
+      (wrapperInfo.kind !== "OpaqueRef" && wrapperInfo.kind !== "OpaqueCell")
+    ) {
       return undefined;
     }
 
@@ -915,15 +931,23 @@ export class CommonFabricFormatter implements TypeFormatter {
       return schema;
     }
 
-    const propertyName = wrapperKind === "Stream" ? "asStream" : "asCell";
+    const propertyValue = wrapperKindToBrand(wrapperKind);
+    // If we couldn't determine a valid wrapper brand, return the schema as-is
+    if (propertyValue === undefined) {
+      return schema;
+    }
 
     if (typeof schema === "boolean") {
       return schema === false
-        ? { [propertyName]: true, not: true }
-        : { [propertyName]: true };
+        ? { asCell: [propertyValue], not: true }
+        : { asCell: [propertyValue] };
     }
-
-    return { ...schema, [propertyName]: true };
+    if (schema.asCell === true) {
+      return { ...schema, asCell: [propertyValue, "cell"] };
+    } else if (schema.asCell) {
+      return { ...schema, asCell: [propertyValue, ...schema.asCell] };
+    }
+    return { ...schema, asCell: [propertyValue] };
   }
 
   /**

@@ -216,14 +216,14 @@ type WrapperList<T extends JSONSchema> = T extends { asCell: true }
 
 type StripWrappers<T extends JSONSchema> = Omit<T, "asCell" | "asStream">;
 
-type PopWrapper<T extends readonly AsCellType[]> = T extends
-  readonly [...infer Rest extends AsCellType[], infer _Last extends AsCellType]
+type ShiftWrapper<T extends readonly AsCellType[]> = T extends
+  readonly [infer _First extends AsCellType, ...infer Rest extends AsCellType[]]
   ? Rest
   : readonly [];
 
-type LastWrapper<T extends readonly AsCellType[]> = T extends
-  readonly [...infer _Rest extends AsCellType[], infer Last extends AsCellType]
-  ? Last
+type FirstWrapper<T extends readonly AsCellType[]> = T extends
+  readonly [infer First extends AsCellType, ...infer _Rest extends AsCellType[]]
+  ? First
   : T[number];
 
 type ReapplyWrappers<
@@ -249,9 +249,9 @@ type SchemaInner<
   : Depth extends 0 ? unknown
   : WrapperList<T> extends readonly [] ? SchemaCore<T, Root, Depth, WrapCells>
   : WrapCells extends true ? ApplyWrapper<
-      LastWrapper<WrapperList<T>>,
+      FirstWrapper<WrapperList<T>>,
       SchemaInner<
-        ReapplyWrappers<T, PopWrapper<WrapperList<T>>>,
+        ReapplyWrappers<T, ShiftWrapper<WrapperList<T>>>,
         Root,
         Depth,
         WrapCells

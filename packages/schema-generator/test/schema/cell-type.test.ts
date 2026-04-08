@@ -14,7 +14,7 @@ describe("Schema: Cell types", () => {
     const name = result.properties?.name as Record<string, unknown>;
     expect(name).toBeDefined();
     expect(name.type).toBe("string");
-    expect(name.asCell).toBe(true);
+    expect(name.asCell).toEqual(["cell"]);
     expect(result.required).toContain("name");
   });
 
@@ -32,7 +32,7 @@ describe("Schema: Cell types", () => {
     expect(usersItems?.type).toBe("object");
     const usersItemsProps = usersItems?.properties as any;
     expect(usersItemsProps?.id?.type).toBe("string");
-    expect(users.asCell).toBe(true);
+    expect(users.asCell).toEqual(["cell"]);
   });
 
   it("handles Stream<Cell<number>>", async () => {
@@ -45,9 +45,8 @@ describe("Schema: Cell types", () => {
     const prop = result.properties?.value as Record<string, unknown>;
     expect(prop).toBeDefined();
     expect(prop.type).toBe("number");
-    expect(prop.asStream).toBe(true);
-    // No asCell marker for inner Cell when wrapped in Stream
-    expect((prop as any).asCell).toBeUndefined();
+    expect(prop.asStream).toBeUndefined();
+    expect(prop.asCell).toEqual(["stream", "cell"]);
   });
 
   it("disallows Cell<Stream<T>> and suggests boxing", async () => {

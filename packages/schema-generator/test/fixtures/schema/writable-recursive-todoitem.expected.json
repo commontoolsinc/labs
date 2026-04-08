@@ -14,7 +14,9 @@
         },
         "items": {
           "$ref": "#/$defs/AnonymousType_1",
-          "asCell": true,
+          "asCell": [
+            "cell"
+          ],
           "default": []
         },
         "title": {

@@ -841,28 +841,25 @@ export class ContextualFlowControl {
         this.isTrueSchema(schema["not"]!));
   }
 
-  static asCellValueMatches(
-    asCellValue: AsCellType[],
-    asCellType: string,
-  ): boolean {
-    return (asCellValue.length > 0) && (asCellValue.at(-1) === asCellType);
-  }
-
+  // Checks the first (outermost) asCell tag to see if this is a cell
+  // Also handles the legacy boolean asCell
   static isAsCell(schema: JSONSchema | boolean): boolean {
     if (typeof schema === "boolean") return false;
     if (schema.asCell === true) {
       return true;
     }
-    return Array.isArray(schema.asCell) &&
-      ContextualFlowControl.asCellValueMatches(schema.asCell, "cell");
+    return Array.isArray(schema.asCell) && (schema.asCell.length > 0) &&
+      (schema.asCell[0] === "cell");
   }
 
+  // Checks the first (outermost) asCell tag to see if this is a stream
+  // Also handles the legacy asStream tag
   static isAsStream(schema: JSONSchema | boolean): boolean {
     if (typeof schema === "boolean") return false;
     if (schema.asStream === true) {
       return true;
     }
-    return Array.isArray(schema.asCell) &&
-      ContextualFlowControl.asCellValueMatches(schema.asCell, "stream");
+    return Array.isArray(schema.asCell) && (schema.asCell.length > 0) &&
+      (schema.asCell[0] === "stream");
   }
 }
