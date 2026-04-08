@@ -1625,9 +1625,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (!replica.commitNative) {
       throw new Error("memory v2 replica does not support commitNative()");
     }
+    const commitNative = replica.commitNative.bind(replica);
     const promise = withCommitTiming(
       ["commit", "commitNative"],
-      () => replica.commitNative(native!, this),
+      () => commitNative(native!, this),
     );
     this.#state = { status: "pending", promise };
     try {
