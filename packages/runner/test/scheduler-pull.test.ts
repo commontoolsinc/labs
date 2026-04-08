@@ -1075,6 +1075,64 @@ describe("handler dependency pulling", () => {
     expect(executionOrder).toEqual(["computed", "handler"]);
   });
 
+  it("does not prepare dependency-discovery reads in enforcing mode", async () => {
+    await runtime.dispose();
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      memoryVersion: "v2",
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    runtime.scheduler.enablePullMode();
+    tx = runtime.edit();
+
+    const labeledSource = runtime.getCell<number>(
+      space,
+      "handler-pull-labeled-source",
+      {
+        type: "number",
+        ifc: { classification: ["secret"] },
+      } as JSONSchema,
+      tx,
+    );
+    labeledSource.set(7);
+
+    const eventStream = runtime.getCell<number>(
+      space,
+      "handler-pull-labeled-events",
+      undefined,
+      tx,
+    );
+    eventStream.set(0);
+
+    await tx.commit();
+    tx = runtime.edit();
+    await labeledSource.pull();
+
+    let handlerRuns = 0;
+    const handler: EventHandler = (handlerTx, event: number) => {
+      handlerRuns++;
+      labeledSource.withTx(handlerTx).get();
+      void event;
+    };
+
+    const populateDependencies = (depTx: IExtendedStorageTransaction) => {
+      labeledSource.withTx(depTx).get();
+    };
+
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventStream.getAsNormalizedFullLink(),
+      populateDependencies,
+    );
+
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 5);
+    await runtime.idle();
+    await runtime.storageManager.synced();
+
+    expect(handlerRuns).toBe(1);
+  });
+
   it("should not pull dirty computations when handler reads a different path", async () => {
     const source = runtime.getCell<number>(
       space,

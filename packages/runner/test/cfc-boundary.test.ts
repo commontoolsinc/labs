@@ -144,6 +144,55 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("does not trigger CFC prepare for read-only inspection transactions", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-read-only-inspection",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        seed,
+      );
+      cell.set({ secret: "seed" });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.readTx();
+      const readCell = runtime.getCell(
+        signer.did(),
+        "cfc-read-only-inspection",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["secret"],
+        },
+        tx,
+      );
+      expect(readCell.get()).toEqual({ secret: "seed" });
+
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+      expect(tx.getCfcState().prepare.status).toBe("unprepared");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("allows relevant unprepared commits when enforcement is disabled", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

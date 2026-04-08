@@ -519,7 +519,7 @@ Tasks:
       obligations even if no read happened first
 - [x] Treat attempted no-op writes as relevant when they appear in
       `potentialWrites` for a path carrying CFC obligations
-- [ ] Ensure dependency-discovery transactions and other non-committing
+- [x] Ensure dependency-discovery transactions and other non-committing
       inspection transactions do not trigger prepare
 - [ ] Audit helper reads that should be tagged `internalVerifierRead`
 
@@ -531,7 +531,7 @@ Acceptance:
       relevant
 - [x] Attempting a no-op write to a path with stored or schema-derived CFC
       metadata still marks it relevant
-- [ ] Dependency-collection transactions remain unaffected
+- [x] Dependency-collection transactions remain unaffected
 
 ### 5. Metadata and Schema Persistence
 

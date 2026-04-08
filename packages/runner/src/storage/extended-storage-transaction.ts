@@ -432,50 +432,51 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   async commit(): Promise<Result<Unit, CommitError>> {
-    if (this.isReadOnly()) {
-      return Promise.reject(
-        createReadOnlyTransactionError("commit()", this.readOnlySource),
-      );
+    const readOnly = this.isReadOnly();
+    if (readOnly) {
+      this.tx.clearReadOnly?.();
     }
-    if (
-      this.cfcState.relevant &&
-      this.cfcState.enforcementMode === "observe" &&
-      this.cfcState.prepare.status === "unprepared"
-    ) {
-      this.prepareCfc();
-    }
-    if (
-      this.cfcState.relevant &&
-      this.cfcState.enforcementMode !== "disabled" &&
-      this.cfcState.enforcementMode !== "observe" &&
-      this.cfcState.prepare.status !== "prepared"
-    ) {
-      const detail = this.cfcState.prepare.status === "invalidated"
-        ? `: ${this.cfcState.prepare.reasons[0]}`
-        : "";
-      return {
-        error: {
-          name: "StorageTransactionAborted",
-          message:
-            `CFC enforcement rejected commit: relevant transaction was not prepared${detail}`,
-          reason: new Error("cfc-relevant-transaction-not-prepared"),
-        },
-      };
-    }
+    if (!readOnly) {
+      if (
+        this.cfcState.relevant &&
+        this.cfcState.enforcementMode === "observe" &&
+        this.cfcState.prepare.status === "unprepared"
+      ) {
+        this.prepareCfc();
+      }
+      if (
+        this.cfcState.relevant &&
+        this.cfcState.enforcementMode !== "disabled" &&
+        this.cfcState.enforcementMode !== "observe" &&
+        this.cfcState.prepare.status !== "prepared"
+      ) {
+        const detail = this.cfcState.prepare.status === "invalidated"
+          ? `: ${this.cfcState.prepare.reasons[0]}`
+          : "";
+        return {
+          error: {
+            name: "StorageTransactionAborted",
+            message:
+              `CFC enforcement rejected commit: relevant transaction was not prepared${detail}`,
+            reason: new Error("cfc-relevant-transaction-not-prepared"),
+          },
+        };
+      }
 
-    if (this.cfcState.prepare.status === "prepared") {
-      const currentDigest = preparedDigestFor(this.buildPreparedDigestInput());
-      if (currentDigest !== this.cfcState.prepare.digest) {
-        this.invalidateCfc("prepared-digest-mismatch");
-        if (this.cfcState.enforcementMode !== "observe") {
-          return {
-            error: {
-              name: "StorageTransactionAborted",
-              message:
-                "CFC enforcement rejected commit: prepared digest changed",
-              reason: new Error("cfc-prepared-digest-mismatch"),
-            },
-          };
+      if (this.cfcState.prepare.status === "prepared") {
+        const currentDigest = preparedDigestFor(this.buildPreparedDigestInput());
+        if (currentDigest !== this.cfcState.prepare.digest) {
+          this.invalidateCfc("prepared-digest-mismatch");
+          if (this.cfcState.enforcementMode !== "observe") {
+            return {
+              error: {
+                name: "StorageTransactionAborted",
+                message:
+                  "CFC enforcement rejected commit: prepared digest changed",
+                reason: new Error("cfc-prepared-digest-mismatch"),
+              },
+            };
+          }
         }
       }
     }
@@ -505,7 +506,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     });
 
     const result = await promise;
-    if (result.ok) {
+    if (result.ok && !readOnly) {
       for (const effect of this.cfcState.outbox) {
         await effect.flush(this);
       }

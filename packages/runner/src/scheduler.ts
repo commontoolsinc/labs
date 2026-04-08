@@ -3496,7 +3496,6 @@ export class Scheduler {
       ) {
         this.scheduleEventQueueWake(queuedEvent.notBefore);
       } else {
-<<<<<<< HEAD
         delete queuedEvent.notBefore;
 
         const { action, handler, event: eventValue, retriesLeft, onCommit } =
@@ -3508,9 +3507,11 @@ export class Scheduler {
         if (this.pullMode && handler.populateDependencies) {
           // Get the handler's dependencies (read-only, just capturing what will be read)
           const depTx = this.runtime.edit();
+          depTx.setReadOnly?.("scheduler.populateDependencies()");
           handler.populateDependencies(depTx, eventValue);
           const deps = txToReactivityLog(depTx);
-          // Commit even though we only read - the tx has no writes so this is safe
+          // Commit the read-only inspection tx as a no-op so dependency discovery
+          // does not participate in CFC prepare or commit gating.
           depTx.commit();
 
           const dirtyDeps = new Set<Action>();
