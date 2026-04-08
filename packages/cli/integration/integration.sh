@@ -30,44 +30,18 @@ replace () {
   fi
 }
 
-if [ -n "${CF_CLI_INTEGRATION_USE_LOCAL:-}" ] || [ -n "${CT_CLI_INTEGRATION_USE_LOCAL:-}" ]; then
- ct_impl() {
-   deno task ct "$@"
- }
-
+if [ -n "${CF_CLI_INTEGRATION_USE_LOCAL:-}" ]; then
  cf_impl() {
    deno task cli "$@"
  }
 else
- ct_impl() {
-   command ct "$@"
- }
-
  cf_impl() {
    command cf "$@"
  }
- ct() {
-   deno task ct "$@"
- }
 fi
 
-ct() {
-  if [ -z "$CT_CLI_INTEGRATION_TIMINGS" ]; then
-    ct_impl "$@"
-    return $?
-  fi
-
-  local start_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
-  ct_impl "$@"
-  local status=$?
-  local end_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
-  local elapsed_ms=$((end_ms - start_ms))
-  >&2 echo "[cf-timing] ${elapsed_ms}ms :: ct $*"
-  return $status
-}
-
 cf() {
-  if [ -z "$CT_CLI_INTEGRATION_TIMINGS" ]; then
+  if [ -z "$CF_CLI_INTEGRATION_TIMINGS" ]; then
     cf_impl "$@"
     return $?
   fi
@@ -289,10 +263,10 @@ fi
 
 # Call increment handler on piece2 — since its value is linked to piece1's
 # output cell, this should update piece1's value too
-ct piece call $SPACE_ARGS --piece $PIECE_ID2 increment '{}'
+cf piece call $SPACE_ARGS --piece $PIECE_ID2 increment '{}'
 
 # Verify piece1's value is now 11 (was 10, incremented via piece2's handler)
-RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID value)
+RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID value)
 if [ "$RESULT" != "11" ]; then
   error "After calling increment on piece2, piece1's value should be 11, got: $RESULT"
 fi
@@ -333,9 +307,9 @@ if [ "$RESULT" != "42" ]; then
 fi
 
 # Call increment on piece3 and verify the invented piece's value updates
-ct piece call $SPACE_ARGS --piece $PIECE_ID3 increment '{}'
+cf piece call $SPACE_ARGS --piece $PIECE_ID3 increment '{}'
 
-RESULT=$(ct piece get $SPACE_ARGS --piece $INVENTED_ID value)
+RESULT=$(cf piece get $SPACE_ARGS --piece $INVENTED_ID value)
 if [ "$RESULT" != "43" ]; then
   error "After calling increment on piece3, invented piece's value should be 43, got: $RESULT"
 fi

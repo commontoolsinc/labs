@@ -17,7 +17,7 @@ import {
 } from "../lib/exec.ts";
 import { writeMountState } from "../lib/fuse.ts";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
-import { cf, withEnv } from "./utils.ts";
+import { cf } from "./utils.ts";
 
 function makeSpec(
   callableKind: "handler" | "tool",
@@ -535,24 +535,6 @@ describe("renderExecHelp", () => {
     expect(help).toContain(
       "Alternatively, write JSON to this file to invoke the handler.",
     );
-  });
-
-  it("renders ct exec help when the compatibility alias is active", async () => {
-    await withEnv("CF_CLI_NAME", "ct", () => {
-      const help = renderExecHelp(
-        "/tmp/search.tool",
-        makeSpec("tool", {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-          },
-          required: ["query"],
-        }),
-      );
-
-      expect(help).toContain("ct exec /tmp/search.tool [run] --query <string>");
-      expect(help).not.toContain("cf exec /tmp/search.tool [run]");
-    });
   });
 
   it("mentions explicit invoke for handlers whose inputs are all optional", () => {

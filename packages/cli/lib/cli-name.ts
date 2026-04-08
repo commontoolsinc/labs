@@ -2,11 +2,8 @@ import { basename } from "@std/path";
 
 function normalizeCliName(
   name: string | undefined | null,
-): "cf" | "ct" | undefined {
+): "cf" | undefined {
   const normalized = name?.trim().toLowerCase();
-  if (normalized === "ct" || normalized === "ct.exe") {
-    return "ct";
-  }
   if (normalized === "cf" || normalized === "cf.exe") {
     return "cf";
   }
@@ -15,7 +12,7 @@ function normalizeCliName(
 
 export function cliName(
   options: { envName?: string | undefined; execPath?: string | undefined } = {},
-): "cf" | "ct" {
+): "cf" {
   const envName = normalizeCliName(
     options.envName ?? Deno.env.get("CF_CLI_NAME"),
   );
