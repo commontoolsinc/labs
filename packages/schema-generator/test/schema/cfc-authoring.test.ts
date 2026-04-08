@@ -66,4 +66,26 @@ describe("Schema: CFC authoring aliases", () => {
       path: "/nested/path",
     });
   });
+
+  it("expands nested aliases before lowering canonical Cfc metadata", async () => {
+    const code = `
+      type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
+      type Classified<T, X extends readonly string[]> = Cfc<T, { classification: X }>;
+      type SecretText<T> = Classified<T, readonly ["secret"]>;
+
+      interface SchemaRoot {
+        secret: SecretText<{ value: string }>;
+      }
+    `;
+
+    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    const secret = schema.properties?.secret as any;
+    expect(secret.type).toBe("object");
+    expect(secret.properties?.value?.type).toBe("string");
+    expect(secret.ifc?.classification).toEqual(["secret"]);
+  });
 });

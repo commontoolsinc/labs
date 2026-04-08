@@ -174,9 +174,9 @@ to keep that boundary clear:
 
 ### 3. Implement Schema Lowering In `schema-generator`
 
-- [ ] Expand nested aliases recursively before deciding whether a type is
+- [x] Expand nested aliases recursively before deciding whether a type is
       CFC-aware
-- [ ] Substitute type parameters through alias expansion
+- [x] Substitute type parameters through alias expansion
 - [x] Evaluate literal-like metadata payloads and merge the result into
       `schema.ifc`
 - [x] Preserve the base schema of `T` when stripping the `Cfc<T, Meta>`

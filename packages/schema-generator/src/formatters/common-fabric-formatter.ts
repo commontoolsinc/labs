@@ -25,6 +25,10 @@ import { CFC_CANONICAL_ALIAS_NAMES } from "@commonfabric/api/cfc";
 
 type WrapperKind = CellWrapperKind;
 const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
+type ResolvedCfcAlias = {
+  readonly aliasName: string;
+  readonly aliasArgs: readonly ts.Type[];
+};
 
 /**
  * Formatter for Common Fabric-specific types (Cell<T>, Stream<T>, OpaqueRef<T>, Default<T,V>)
@@ -44,6 +48,10 @@ export class CommonFabricFormatter implements TypeFormatter {
   supportsType(type: ts.Type, context: GenerationContext): boolean {
     const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
     if (aliasName && CFC_ALIAS_NAMES.has(aliasName)) {
+      return true;
+    }
+
+    if (this.resolveCfcAliasInstantiation(type as TypeWithInternals, context)) {
       return true;
     }
 
@@ -90,10 +98,12 @@ export class CommonFabricFormatter implements TypeFormatter {
   ): JSONSchemaMutable {
     const n = context.typeNode;
     const aliasType = type as TypeWithInternals;
-    const aliasName = aliasType.aliasSymbol?.name;
-
-    if (aliasName && CFC_ALIAS_NAMES.has(aliasName)) {
-      return this.formatCfcAlias(aliasType, context, aliasName);
+    const resolvedCfcAlias = this.resolveCfcAliasInstantiation(
+      aliasType,
+      context,
+    );
+    if (resolvedCfcAlias) {
+      return this.formatResolvedCfcAlias(resolvedCfcAlias, context);
     }
 
     // Handle wrapper unions first (before Opaque<T> union check)
@@ -724,6 +734,138 @@ export class CommonFabricFormatter implements TypeFormatter {
     return this.mergeIfcMetadata(baseSchema, ifc);
   }
 
+  private formatResolvedCfcAlias(
+    resolved: ResolvedCfcAlias,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    const baseType = resolved.aliasArgs[0];
+    if (!baseType) {
+      throw new Error(`${resolved.aliasName}<T> requires type argument`);
+    }
+
+    const baseSchema = this.schemaGenerator.formatChildType(
+      baseType,
+      context,
+      undefined,
+    );
+
+    const ifc = this.buildIfcMetadataForAlias(
+      resolved.aliasName,
+      resolved.aliasArgs,
+      context,
+    );
+    if (ifc === undefined) {
+      return baseSchema;
+    }
+
+    return this.mergeIfcMetadata(baseSchema, ifc);
+  }
+
+  private resolveCfcAliasInstantiation(
+    typeWithAlias: TypeWithInternals,
+    context: GenerationContext,
+  ): ResolvedCfcAlias | undefined {
+    const aliasName = typeWithAlias.aliasSymbol?.name;
+    if (!aliasName) {
+      return undefined;
+    }
+    const aliasArgs = typeWithAlias.aliasTypeArguments ?? [];
+    if (CFC_ALIAS_NAMES.has(aliasName)) {
+      return { aliasName, aliasArgs };
+    }
+
+    const aliasSymbol = typeWithAlias.aliasSymbol;
+    const aliasDeclaration = aliasSymbol?.declarations?.find(
+      (decl): decl is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(decl),
+    );
+    if (!aliasDeclaration) {
+      return undefined;
+    }
+
+    return this.resolveCfcAliasFromDeclaration(
+      aliasDeclaration,
+      aliasArgs,
+      context,
+      new Set([aliasName]),
+    );
+  }
+
+  private resolveCfcAliasFromDeclaration(
+    aliasDeclaration: ts.TypeAliasDeclaration,
+    aliasArgs: readonly ts.Type[],
+    context: GenerationContext,
+    visited: Set<string>,
+  ): ResolvedCfcAlias | undefined {
+    const aliasName = aliasDeclaration.name.text;
+    if (CFC_ALIAS_NAMES.has(aliasName)) {
+      return { aliasName, aliasArgs };
+    }
+
+    const aliased = aliasDeclaration.type;
+    if (!ts.isTypeReferenceNode(aliased) || !ts.isIdentifier(aliased.typeName)) {
+      return undefined;
+    }
+
+    const targetName = aliased.typeName.text;
+    if (visited.has(targetName)) {
+      return undefined;
+    }
+
+    const symbol = context.typeChecker.getSymbolAtLocation(aliased.typeName);
+    const targetDeclaration = symbol?.declarations?.find(
+      (decl): decl is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(decl),
+    );
+    if (!targetDeclaration) {
+      return undefined;
+    }
+
+    const paramMap = new Map<string, ts.Type>();
+    for (let i = 0; i < (aliasDeclaration.typeParameters?.length ?? 0); i++) {
+      const paramName = aliasDeclaration.typeParameters?.[i]?.name.text;
+      const actualArg = aliasArgs[i];
+      if (paramName && actualArg) {
+        paramMap.set(paramName, actualArg);
+      }
+    }
+
+    const resolvedArgs: ts.Type[] = [];
+    for (const argNode of aliased.typeArguments ?? []) {
+      resolvedArgs.push(this.resolveTypeNodeToType(argNode, context, paramMap));
+    }
+
+    visited.add(aliasName);
+    return this.resolveCfcAliasFromDeclaration(
+      targetDeclaration,
+      resolvedArgs,
+      context,
+      visited,
+    );
+  }
+
+  private resolveTypeNodeToType(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+    paramMap: ReadonlyMap<string, ts.Type>,
+  ): ts.Type {
+    if (ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
+      const mapped = paramMap.get(typeNode.typeName.text);
+      if (mapped) {
+        return mapped;
+      }
+    }
+
+    const fromRegistry = context.typeRegistry?.get(typeNode);
+    if (fromRegistry) {
+      return fromRegistry;
+    }
+
+    try {
+      return context.typeChecker.getTypeFromTypeNode(typeNode);
+    } catch {
+      return context.typeChecker.getAnyType();
+    }
+  }
+
   private buildIfcMetadataForAlias(
     aliasName: string,
     aliasArgs: readonly ts.Type[],
@@ -980,6 +1122,16 @@ export class CommonFabricFormatter implements TypeFormatter {
         (typeText.startsWith("'") && typeText.endsWith("'")))
     ) {
       return typeText.slice(1, -1);
+    }
+
+    if (context.typeChecker.isTupleType(type)) {
+      const tupleType = type as ts.TypeReference;
+      const elements = context.typeChecker.getTypeArguments(tupleType);
+      if (elements.length > 0) {
+        return elements.map((element) =>
+          this.extractLiteralLikeValue(element, undefined, context)
+        );
+      }
     }
 
     const objectFlags =
