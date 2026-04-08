@@ -10,13 +10,14 @@ describe("createHasher()", () => {
     for (const { bytes, sha256: hashStr } of FIXTURES) {
       const hashMsg = `${hashStr.slice(0, 8)}...`;
       const hashBytes = fromBase64url(hashStr);
-      it(`produces expected string hash #${i++}: \`${hashMsg}...\``, () => {
+      const testId = i++;
+      it(`produces expected string hash #${testId}: \`${hashMsg}...\``, () => {
         const hasher = createHasher();
         hasher.update(bytes);
         const got = hasher.digest("base64url");
         expect(got).toBe(hashStr);
       });
-      it(`produces expected byte-array hash #${i++}: \`${hashMsg}...\``, () => {
+      it(`produces expected byte-array hash #${testId}}: \`${hashMsg}...\``, () => {
         const hasher = createHasher();
         hasher.update(bytes);
         const got = hasher.digest();
