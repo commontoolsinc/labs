@@ -1868,6 +1868,9 @@ function createExecHarness(options: {
     synced: async () => {},
     runtime: {
       [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
+      storageManager: {
+        synced: async () => {},
+      },
       edit: () => ({
         commit: async () => {},
       }),

@@ -579,7 +579,9 @@ function createPieceCallableHarness(options: {
 
   const state = { value: options.toolResult };
   const resultCell = {
+    schema: options.pattern?.resultSchema,
     get: () => state.value,
+    pull: () => Promise.resolve(state.value),
     key: (_key: string) => resultCell,
     asSchemaFromLinks: () => resultCell,
   };
@@ -614,6 +616,9 @@ function createPieceCallableHarness(options: {
     synced: async () => {},
     runtime: {
       [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
+      storageManager: {
+        synced: async () => {},
+      },
       edit: () => ({
         commit: async () => {},
       }),

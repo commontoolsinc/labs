@@ -260,11 +260,12 @@ export async function executeResolvedCallable(
     await tx.commit();
     await resolved.manager.runtime.idle();
     await resolved.manager.synced();
+    const waitForResult = deps.waitForResult ?? defaultWaitForResult;
+    const timeoutMs = deps.timeoutMs ?? 5000;
 
-    outputValue = await (deps.waitForResult ?? defaultWaitForResult)(
-      resultCell,
-      deps.timeoutMs ?? 5000,
-    );
+    await waitForResult(resultCell, timeoutMs);
+    await resolved.manager.runtime.storageManager.synced();
+    outputValue = await waitForResult(resultCell, timeoutMs);
   } finally {
     cancelSink?.();
   }
