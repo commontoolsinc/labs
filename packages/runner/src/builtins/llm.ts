@@ -1068,51 +1068,58 @@ export function generateObject<T extends Record<string, unknown>>(
       partialWithLog.set(undefined);
       pendingWithLog.set(true);
 
-      const doWork = () =>
-        client.generateObject(
-          generateObjectParams,
-        ) as Promise<{
-          object: T;
-        }>;
-
-      const resultPromise = queueName
-        ? runtime.getOrCreateQueue(queueName).enqueue(doWork)
-        : doWork();
-
       const isRunCancelled = queueName
         ? () => false
         : () => thisRun !== currentRun;
 
-      resultPromise
-        .then(async (response) => {
-          if (isRunCancelled()) return;
+      enqueuePostCommitLLMWork(
+        tx,
+        `generateObject:${hash}`,
+        "generateObject-start",
+        () => {
+          const doWork = () =>
+            client.generateObject(
+              generateObjectParams,
+            ) as Promise<{
+              object: T;
+            }>;
 
-          await runtime.idle();
+          const resultPromise = queueName
+            ? runtime.getOrCreateQueue(queueName).enqueue(doWork)
+            : doWork();
 
-          await runtime.editWithRetry((tx) => {
-            resultCell.key("pending").withTx(tx).set(false);
-            resultCell.key("result").withTx(tx).set(response.object);
-            resultCell.key("error").withTx(tx).set(undefined);
-            resultCell.key("requestHash").withTx(tx).set(hash);
-          });
-        })
-        .catch((e) =>
-          handleLLMError(
-            e,
-            runtime,
-            resultCell.key("pending"),
-            resultCell.key("result"),
-            resultCell.key("error"),
-            resultCell.key("partial"),
-            resultCell.key("requestHash"),
-            hash,
-            queueName ? () => thisRun : () => currentRun,
-            thisRun,
-            () => {
-              previousCallHash = undefined;
-            },
-          )
-        );
+          resultPromise
+            .then(async (response) => {
+              if (isRunCancelled()) return;
+
+              await runtime.idle();
+
+              await runtime.editWithRetry((tx) => {
+                resultCell.key("pending").withTx(tx).set(false);
+                resultCell.key("result").withTx(tx).set(response.object);
+                resultCell.key("error").withTx(tx).set(undefined);
+                resultCell.key("requestHash").withTx(tx).set(hash);
+              });
+            })
+            .catch((e) =>
+              handleLLMError(
+                e,
+                runtime,
+                resultCell.key("pending"),
+                resultCell.key("result"),
+                resultCell.key("error"),
+                resultCell.key("partial"),
+                resultCell.key("requestHash"),
+                hash,
+                queueName ? () => thisRun : () => currentRun,
+                thisRun,
+                () => {
+                  previousCallHash = undefined;
+                },
+              )
+            );
+        },
+      );
     }
   };
 }

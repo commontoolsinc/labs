@@ -1,0 +1,149 @@
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  addMockObjectResponse,
+  clearMockResponses,
+  enableMockMode,
+} from "@commonfabric/llm/client";
+import { LLMClient } from "@commonfabric/llm";
+import { createBuilder } from "../src/builder/factory.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  ExtendedStorageTransaction,
+  TransactionWrapper,
+} from "../src/storage/extended-storage-transaction.ts";
+
+const signer = await Identity.fromPassphrase("test generate-object outbox");
+const space = signer.did();
+
+enableMockMode();
+
+describe("generateObject outbox mechanism", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let generateObject: ReturnType<
+    typeof createBuilder
+  >["commonfabric"]["generateObject"];
+
+  beforeEach(() => {
+    clearMockResponses();
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+
+    const { commonfabric } = createTrustedBuilder(runtime);
+    ({ pattern, generateObject } = commonfabric);
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime.idle();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("enqueues generateObject work behind the post-commit outbox", async () => {
+    const prompt = "generate object outbox";
+    addMockObjectResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(prompt)
+        ),
+      {
+        object: {
+          title: "gated title",
+          description: "gated description",
+        },
+        id: "mock-generate-object-outbox",
+      },
+    );
+
+    const testPattern = pattern(() => {
+      return generateObject({
+        prompt,
+        schema: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            description: { type: "string" },
+          },
+          required: ["title"],
+        },
+      });
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "generateObject-outbox-test",
+      testPattern.resultSchema,
+      tx,
+    );
+
+    const txPrototype = ExtendedStorageTransaction.prototype;
+    const wrapperPrototype = TransactionWrapper.prototype;
+    const originalTxEnqueue = txPrototype.enqueuePostCommitEffect;
+    const originalWrapperEnqueue = wrapperPrototype.enqueuePostCommitEffect;
+    const originalGenerateObject = LLMClient.prototype.generateObject;
+    const outboxEffects: Array<{ id: string; kind: string }> = [];
+    const generateObjectCalls: number[] = [];
+
+    txPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxEffects.push(args[0] as { id: string; kind: string });
+      return originalTxEnqueue.apply(this, args as never);
+    };
+    wrapperPrototype.enqueuePostCommitEffect = function (...args) {
+      outboxEffects.push(args[0] as { id: string; kind: string });
+      return originalWrapperEnqueue.apply(this, args as never);
+    };
+    LLMClient.prototype.generateObject = async function (...args: unknown[]) {
+      generateObjectCalls.push(Date.now());
+      return await originalGenerateObject.apply(this, args as never);
+    };
+
+    try {
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      tx.commit();
+
+      expect(generateObjectCalls).toEqual([]);
+
+      await waitForPendingToBecomeFalse(result);
+      await runtime.idle();
+
+      expect(outboxEffects.length).toBeGreaterThan(0);
+      expect(outboxEffects[0].kind).toBe("generateObject-start");
+      expect(generateObjectCalls.length).toBeGreaterThan(0);
+      expect(result.key("result").get()).toEqual({
+        title: "gated title",
+        description: "gated description",
+      });
+    } finally {
+      txPrototype.enqueuePostCommitEffect = originalTxEnqueue;
+      wrapperPrototype.enqueuePostCommitEffect = originalWrapperEnqueue;
+      LLMClient.prototype.generateObject = originalGenerateObject;
+    }
+  });
+});
+
+function waitForPendingToBecomeFalse(result: any) {
+  return new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("Timeout waiting for pending to become false"));
+    }, 5000);
+    const cancel = result.sink((value: any) => {
+      if (value?.pending === false) {
+        clearTimeout(timeout);
+        cancel();
+        resolve();
+      }
+    });
+  });
+}
