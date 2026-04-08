@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { isRecord } from "@commonfabric/utils/types";
 import {
   type CellWrapperKind,
   getCellBrand,
@@ -22,6 +23,20 @@ import {
 } from "../type-utils.ts";
 
 type WrapperKind = CellWrapperKind;
+const CFC_ALIAS_NAMES = new Set([
+  "Cfc",
+  "Classified",
+  "Integrity",
+  "AddIntegrity",
+  "RequiresIntegrity",
+  "MaxConfidentiality",
+  "OpaqueInput",
+  "ExactCopy",
+  "LengthPreservedFrom",
+  "FilteredFrom",
+  "SubsetOf",
+  "PermutationOf",
+]);
 
 /**
  * Formatter for Common Fabric-specific types (Cell<T>, Stream<T>, OpaqueRef<T>, Default<T,V>)
@@ -39,6 +54,11 @@ export class CommonFabricFormatter implements TypeFormatter {
   }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
+    const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
+    if (aliasName && CFC_ALIAS_NAMES.has(aliasName)) {
+      return true;
+    }
+
     // Check via typeNode for Default (erased at type-level)
     const wrapperViaNode = detectWrapperViaNode(
       context.typeNode,
@@ -81,6 +101,12 @@ export class CommonFabricFormatter implements TypeFormatter {
     context: GenerationContext,
   ): JSONSchemaMutable {
     const n = context.typeNode;
+    const aliasType = type as TypeWithInternals;
+    const aliasName = aliasType.aliasSymbol?.name;
+
+    if (aliasName && CFC_ALIAS_NAMES.has(aliasName)) {
+      return this.formatCfcAlias(aliasType, context, aliasName);
+    }
 
     // Handle wrapper unions first (before Opaque<T> union check)
     // This catches cases like OpaqueRef<T> | undefined and processes them
@@ -678,6 +704,230 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     return valueSchema;
+  }
+
+  private formatCfcAlias(
+    typeWithAlias: TypeWithInternals,
+    context: GenerationContext,
+    aliasName: string,
+  ): JSONSchemaMutable {
+    const aliasArgs = typeWithAlias.aliasTypeArguments ?? [];
+    const baseType = aliasArgs[0];
+    if (!baseType) {
+      throw new Error(`${aliasName}<T> requires type argument`);
+    }
+
+    const baseTypeNode = this.getAliasTypeArgumentNode(context.typeNode, 0);
+    const baseSchema = this.schemaGenerator.formatChildType(
+      baseType,
+      context,
+      baseTypeNode,
+    );
+
+    const ifc = this.buildIfcMetadataForAlias(
+      aliasName,
+      aliasArgs,
+      context,
+    );
+    if (ifc === undefined) {
+      return baseSchema;
+    }
+
+    return this.mergeIfcMetadata(baseSchema, ifc);
+  }
+
+  private buildIfcMetadataForAlias(
+    aliasName: string,
+    aliasArgs: readonly ts.Type[],
+    context: GenerationContext,
+  ): Record<string, unknown> | undefined {
+    const readValue = (index: number): unknown => {
+      return this.extractLiteralLikeValue(
+        aliasArgs[index],
+        this.getAliasTypeArgumentNode(context.typeNode, index),
+        context,
+      );
+    };
+
+    switch (aliasName) {
+      case "Cfc": {
+        const payload = readValue(1);
+        return isRecord(payload) ? { ...payload } : undefined;
+      }
+      case "Classified":
+        return { classification: readValue(1) };
+      case "Integrity":
+        return { integrity: readValue(1) };
+      case "AddIntegrity":
+        return { addIntegrity: readValue(1) };
+      case "RequiresIntegrity":
+        return { requiredIntegrity: readValue(1) };
+      case "MaxConfidentiality":
+        return { maxConfidentiality: readValue(1) };
+      case "ExactCopy":
+        return { exactCopyOf: readValue(1) };
+      case "OpaqueInput":
+        return {
+          opaque: aliasArgs.length > 1 ? readValue(1) : true,
+        };
+      case "LengthPreservedFrom":
+        return {
+          collection: {
+            sourceCollection: readValue(1),
+            lengthPreserved: true,
+          },
+        };
+      case "FilteredFrom":
+        return {
+          collection: {
+            filteredFrom: readValue(1),
+          },
+        };
+      case "SubsetOf":
+        return {
+          collection: {
+            subsetOf: readValue(1),
+          },
+        };
+      case "PermutationOf":
+        return {
+          collection: {
+            permutationOf: readValue(1),
+          },
+        };
+      default:
+        return undefined;
+    }
+  }
+
+  private getAliasTypeArgumentNode(
+    typeNode: ts.TypeNode | undefined,
+    index: number,
+  ): ts.TypeNode | undefined {
+    if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
+      return undefined;
+    }
+    return typeNode.typeArguments?.[index];
+  }
+
+  private mergeIfcMetadata(
+    schema: JSONSchemaMutable,
+    ifc: Record<string, unknown>,
+  ): JSONSchemaMutable {
+    if (typeof schema === "boolean") {
+      return schema === false ? { not: true, ifc } : { ifc };
+    }
+
+    const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
+    return {
+      ...schema,
+      ifc: {
+        ...existingIfc,
+        ...ifc,
+      },
+    };
+  }
+
+  private extractLiteralLikeValue(
+    type: ts.Type | undefined,
+    typeNode: ts.TypeNode | undefined,
+    context: GenerationContext,
+  ): unknown {
+    if (!typeNode && !type) {
+      return undefined;
+    }
+
+    if (typeNode) {
+      if (ts.isParenthesizedTypeNode(typeNode)) {
+        return this.extractLiteralLikeValue(type, typeNode.type, context);
+      }
+      if (ts.isTypeOperatorNode(typeNode)) {
+        return this.extractLiteralLikeValue(type, typeNode.type, context);
+      }
+      if (ts.isLiteralTypeNode(typeNode)) {
+        const literal = typeNode.literal;
+        if (ts.isStringLiteral(literal)) return literal.text;
+        if (ts.isNumericLiteral(literal)) return Number(literal.text);
+        if (literal.kind === ts.SyntaxKind.TrueKeyword) return true;
+        if (literal.kind === ts.SyntaxKind.FalseKeyword) return false;
+        if (literal.kind === ts.SyntaxKind.NullKeyword) return null;
+      }
+      if (ts.isTupleTypeNode(typeNode)) {
+        return typeNode.elements.map((element) =>
+          this.extractLiteralLikeValue(undefined, element, context)
+        );
+      }
+      if (ts.isTypeLiteralNode(typeNode)) {
+        const obj: Record<string, unknown> = {};
+        for (const member of typeNode.members) {
+          if (ts.isPropertySignature(member) && member.name && member.type) {
+            const propName = getPropertyNameText(member.name);
+            if (!propName) continue;
+            obj[propName] = this.extractLiteralLikeValue(
+              undefined,
+              member.type,
+              context,
+            );
+          }
+        }
+        return obj;
+      }
+      if (typeNode.kind === ts.SyntaxKind.TrueKeyword) return true;
+      if (typeNode.kind === ts.SyntaxKind.FalseKeyword) return false;
+      if (typeNode.kind === ts.SyntaxKind.NullKeyword) return null;
+      if (typeNode.kind === ts.SyntaxKind.UndefinedKeyword) return undefined;
+    }
+
+    if (!type) {
+      return undefined;
+    }
+
+    if (type.flags & ts.TypeFlags.StringLiteral) {
+      return (type as ts.StringLiteralType).value;
+    }
+    if (type.flags & ts.TypeFlags.NumberLiteral) {
+      return (type as ts.NumberLiteralType).value;
+    }
+    if (type.flags & ts.TypeFlags.BooleanLiteral) {
+      return (type as { intrinsicName?: string }).intrinsicName === "true";
+    }
+    if (type.flags & ts.TypeFlags.Null) {
+      return null;
+    }
+    if (type.flags & ts.TypeFlags.Undefined) {
+      return undefined;
+    }
+
+    const typeText = context.typeChecker.typeToString(type);
+    if (
+      typeText.length >= 2 &&
+      ((typeText.startsWith('"') && typeText.endsWith('"')) ||
+        (typeText.startsWith("'") && typeText.endsWith("'")))
+    ) {
+      return typeText.slice(1, -1);
+    }
+
+    if ((type.flags & ts.TypeFlags.Object) !== 0) {
+      const properties = context.typeChecker.getPropertiesOfType(type);
+      if (properties.length > 0) {
+        const obj: Record<string, unknown> = {};
+        for (const property of properties) {
+          const propType = context.typeChecker.getTypeOfSymbolAtLocation(
+            property,
+            property.valueDeclaration ?? property.declarations?.[0] ??
+              context.typeNode ?? ({} as ts.Node),
+          );
+          obj[property.getName()] = this.extractLiteralLikeValue(
+            propType,
+            undefined,
+            context,
+          );
+        }
+        return obj;
+      }
+    }
+
+    return undefined;
   }
 
   private extractDefaultValueFromNode(

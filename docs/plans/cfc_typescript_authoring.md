@@ -177,13 +177,13 @@ to keep that boundary clear:
 - [ ] Expand nested aliases recursively before deciding whether a type is
       CFC-aware
 - [ ] Substitute type parameters through alias expansion
-- [ ] Evaluate literal-like metadata payloads and merge the result into
+- [x] Evaluate literal-like metadata payloads and merge the result into
       `schema.ifc`
-- [ ] Preserve the base schema of `T` when stripping the `Cfc<T, Meta>`
+- [x] Preserve the base schema of `T` when stripping the `Cfc<T, Meta>`
       carrier
 - [ ] Lower `ProjectionPath`, `ProjectionOf`, and `Projection` to canonical
       JSON Pointer metadata
-- [ ] Lower `OpaqueInput<T, Spec>` to the schema of `T` plus `ifc.opaque`
+- [x] Lower `OpaqueInput<T, Spec>` to the schema of `T` plus `ifc.opaque`
 - [ ] Preserve `WriteAuthorizedBy` binding identity through a cross-stage
       marker that can be rehydrated during schema emission
 - [ ] Fall back to ordinary schema generation when unsupported alias expansion
