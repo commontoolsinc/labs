@@ -2,64 +2,9 @@ import { env, waitFor } from "@commonfabric/integration";
 import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
 import { ShellIntegration } from "../../integration/shell-utils.ts";
-import type { Page } from "@commonfabric/integration";
+import { clickPierce, pierce } from "./shadow-dom.ts";
 
 const { FRONTEND_URL } = env;
-
-function pierce(page: Page, selector: string, timeout?: number) {
-  return page.waitForSelector(selector, {
-    strategy: "pierce",
-    ...(timeout != null ? { timeout } : {}),
-  });
-}
-
-async function clickPierce(page: Page, selector: string): Promise<void> {
-  await waitFor(async () => {
-    try {
-      const handle = await pierce(page, selector, 500);
-      return await handle.evaluate((el: Element) => {
-        const button = el.shadowRoot?.querySelector("button");
-        if (button instanceof HTMLButtonElement) {
-          return !button.disabled;
-        }
-        return el instanceof HTMLElement;
-      });
-    } catch {
-      return false;
-    }
-  });
-
-  await page.evaluate((targetSelector: string) => {
-    function findInShadow(
-      root: Document | ShadowRoot,
-      selector: string,
-    ): Element | null {
-      const direct = root.querySelector(selector);
-      if (direct) return direct;
-
-      for (const el of root.querySelectorAll("*")) {
-        if (el.shadowRoot) {
-          const nested = findInShadow(el.shadowRoot, selector);
-          if (nested) return nested;
-        }
-      }
-
-      return null;
-    }
-
-    const host = findInShadow(document, targetSelector);
-    if (!(host instanceof HTMLElement)) {
-      throw new Error(`Could not find clickable element for ${targetSelector}`);
-    }
-
-    const target = host.shadowRoot?.querySelector("button") ?? host;
-    if (!(target instanceof HTMLElement)) {
-      throw new Error(`Could not resolve click target for ${targetSelector}`);
-    }
-
-    target.click();
-  }, { args: [selector] });
-}
 
 // Tests the manual logging in via passphrase.
 // Other tests should use the `shell.login(identity)`
