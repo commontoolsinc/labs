@@ -521,7 +521,7 @@ Tasks:
       `potentialWrites` for a path carrying CFC obligations
 - [x] Ensure dependency-discovery transactions and other non-committing
       inspection transactions do not trigger prepare
-- [ ] Audit helper reads that should be tagged `internalVerifierRead`
+- [x] Audit helper reads that should be tagged `internalVerifierRead`
 
 Acceptance:
 

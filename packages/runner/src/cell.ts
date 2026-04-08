@@ -59,6 +59,7 @@ import {
   ignoreReadForScheduling,
   txToReactivityLog,
 } from "./scheduler.ts";
+import { internalVerifierRead } from "./storage/reactivity-log.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import {
   processDefaultValue,
@@ -1380,6 +1381,9 @@ export class CellImpl<T extends FabricValue>
     if (!this.synced) this.sync(); // No await, just kicking this off
     let sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
       { ...this.link, path: ["source"] },
+      {
+        meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+      },
     ) as string | undefined;
     if (!sourceCellId) return undefined;
     if (isRecord(sourceCellId)) {

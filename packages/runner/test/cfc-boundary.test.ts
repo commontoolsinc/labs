@@ -1221,6 +1221,102 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("does not let helper source-cell reads affect the prepared digest", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const setupTx = runtime.edit();
+      setupTx.setCfcEnforcementMode("enforce-explicit");
+      const sourceCell = runtime.getCell(
+        signer.did(),
+        "internal-verifier-source",
+        {
+          type: "object",
+          properties: {
+            foo: { type: "number" },
+          },
+        },
+        setupTx,
+      );
+      sourceCell.set({ foo: 1 });
+
+      const targetCell = runtime.getCell(
+        signer.did(),
+        "internal-verifier-target",
+        {
+          type: "object",
+          properties: {
+            bar: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["bar"],
+        },
+        setupTx,
+      );
+      targetCell.set({ bar: "seed" });
+      targetCell.setSourceCell(sourceCell);
+      setupTx.prepareCfc();
+      expect((await setupTx.commit()).ok).toBeDefined();
+
+      const tx1 = runtime.edit();
+      tx1.setCfcEnforcementMode("enforce-explicit");
+      const plainTarget1 = runtime.getCell(
+        signer.did(),
+        "internal-verifier-target",
+        {
+          type: "object",
+          properties: {
+            bar: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["bar"],
+        },
+        tx1,
+      );
+      plainTarget1.set({ bar: "updated" });
+      tx1.prepareCfc();
+      const prepared1 = tx1.getCfcState().prepare;
+      const digest1 = prepared1.status === "prepared"
+        ? prepared1.digest
+        : undefined;
+
+      const tx2 = runtime.edit();
+      tx2.setCfcEnforcementMode("enforce-explicit");
+      const plainTarget2 = runtime.getCell(
+        signer.did(),
+        "internal-verifier-target",
+        {
+          type: "object",
+          properties: {
+            bar: {
+              type: "string",
+              ifc: { classification: ["secret"] },
+            },
+          },
+          required: ["bar"],
+        },
+        tx2,
+      );
+      expect(plainTarget2.getSourceCell()).toBeDefined();
+      plainTarget2.set({ bar: "updated" });
+      tx2.prepareCfc();
+      const prepared2 = tx2.getCfcState().prepare;
+      const digest2 = prepared2.status === "prepared"
+        ? prepared2.digest
+        : undefined;
+
+      expect(digest1).toBeDefined();
+      expect(digest2).toBeDefined();
+      expect(digest2).toBe(digest1);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("propagates consumed labels and addIntegrity into persisted output metadata", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

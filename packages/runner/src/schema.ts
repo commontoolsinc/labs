@@ -33,6 +33,7 @@ import {
   SchemaObjectTraverser,
 } from "@commonfabric/runner/traverse";
 import { ignoreReadForScheduling } from "./scheduler.ts";
+import { internalVerifierRead } from "./storage/reactivity-log.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -541,7 +542,9 @@ export function validateAndTransform(
   };
   // Get the full value without telling the scheduler. The traverse method will
   // notify the scheduler for shallow reads as they occur.
-  const value = tx.readOrThrow(address, { meta: ignoreReadForScheduling });
+  const value = tx.readOrThrow(address, {
+    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+  });
   const doc = { address, value: value };
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
