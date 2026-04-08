@@ -3,12 +3,14 @@ import { expect } from "@std/expect";
 import { fromBase64url } from "@commonfabric/utils/base64url";
 import { createHasher } from "@commonfabric/content-hash";
 import { createHasherDeno } from "../src/sha256-deno.ts";
+import { createHasherNoble } from "../src/sha256-noble.ts";
 import { createHasherWasm } from "../src/sha256-wasm.ts";
 import { FIXTURES } from "./fixtures.ts";
 
 const createFuncs = [
   createHasher,
   createHasherDeno,
+  createHasherNoble,
   createHasherWasm,
 ] as const;
 

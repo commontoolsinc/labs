@@ -3,12 +3,14 @@ import { expect } from "@std/expect";
 import { fromBase64url } from "@commonfabric/utils/base64url";
 import { sha256 } from "@commonfabric/content-hash";
 import { sha256Deno } from "../src/sha256-deno.ts";
+import { sha256Noble } from "../src/sha256-noble.ts";
 import { sha256Wasm } from "../src/sha256-wasm.ts";
 import { FIXTURES } from "./fixtures.ts";
 
 const sha256Funcs = [
   sha256,
   sha256Deno,
+  sha256Noble,
   sha256Wasm,
 ] as const;
 
