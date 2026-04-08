@@ -5,16 +5,15 @@
 interface NumbersHashTuple {
   numbers: readonly number[];
   sha256: string;
-};
+}
 
 export interface ContentHashTuple extends NumbersHashTuple {
   bytes: Uint8Array;
-};
+}
 
-const BIG_TEXT_FILE =
-  Deno.readTextFileSync(
-    new URL("fixture-frank.txt", import.meta.url).pathname,
-  );
+const BIG_TEXT_FILE = Deno.readTextFileSync(
+  new URL("fixture-frank.txt", import.meta.url).pathname,
+);
 
 const NUMBERS_FIXTURES: readonly NumbersHashTuple[] = [
   {
@@ -94,7 +93,7 @@ const NUMBERS_FIXTURES: readonly NumbersHashTuple[] = [
     sha256: "n6_r803mJ88PloqDmCorxjQ0a2eTfD9TWfMxp0wvS8g",
   },
   {
-    numbers: [...BIG_TEXT_FILE].map(c => c.charCodeAt(0)),
+    numbers: [...BIG_TEXT_FILE].map((c) => c.charCodeAt(0)),
     sha256: "YXDqseQm9n0pXjTFlvopfttK2yLpUQQDs1llL7rst1A",
   },
 ] as const;
@@ -106,4 +105,6 @@ export const FIXTURES: readonly ContentHashTuple[] = Object.freeze(
         bytes: new Uint8Array(one.numbers),
         ...one,
       };
-    }));
+    },
+  ),
+);
